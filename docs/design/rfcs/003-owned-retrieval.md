@@ -60,6 +60,12 @@ Default:
 - Postgres for canonical storage
 - SQLite support for local mode where feasible
 
+Local-mode contract:
+
+- local and single-user mode may use a degraded but still product-owned retrieval path
+- SQLite mode must not silently fall back to “no owned retrieval”
+- Postgres is required for team and production-grade retrieval
+
 ### Vector Layer
 
 Default:
@@ -69,6 +75,12 @@ Default:
 
 Do not introduce a separate vector database in v1 unless measured product workloads prove Postgres-first retrieval insufficient.
 
+SQLite local mode:
+
+- no HNSW requirement
+- use a small-scale owned vector path suitable for local use
+- acceptable implementations include brute-force or another simple local ANN strategy
+
 ### Lexical Layer
 
 Default:
@@ -77,6 +89,11 @@ Default:
 - metadata filtering in the product store
 
 This is sufficient to build initial hybrid retrieval without operationally splitting the stack.
+
+SQLite local mode should provide:
+
+- FTS-backed lexical retrieval where feasible
+- otherwise a documented degraded lexical path
 
 ## Retrieval Pipeline
 
@@ -188,6 +205,22 @@ During migration:
 For v1 product claims:
 
 - Cairn should not require Bedrock KB for its main knowledge product story
+
+## Local Mode Expectations
+
+Local mode is supported for:
+
+- development
+- personal use
+- small-scale evaluation
+
+Local mode is not the performance target for:
+
+- large corpora
+- team concurrency
+- heavy graph-assisted retrieval
+
+The product should document this explicitly so SQLite support does not imply full production parity.
 
 ## Non-Goals
 

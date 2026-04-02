@@ -320,12 +320,50 @@ These are not the core product and should live as runtime data:
 ## Rewrite Principles
 
 1. Do not translate Go packages line by line.
-2. Freeze external behavior before implementation.
+2. Freeze an explicit compatibility contract and break matrix before implementation.
 3. Prefer explicit state machines over implicit mutation.
 4. Keep plugins out of process and language-neutral.
 5. Treat current Go code as a reference implementation and fixture source.
 6. Product-owned retrieval, graphs, and evals must replace convenience dependencies.
 7. Preserve room for refinement at every phase boundary.
+
+## Compatibility and Break Policy
+
+The rewrite must not preserve current behavior blindly.
+
+Before implementation starts, every externally visible surface must be placed in one of three buckets:
+
+- preserve
+  - runtime semantics that are core to the product wedge
+  - task/checkpoint/approval/mailbox concepts
+  - essential API and SSE concepts worth carrying forward
+- intentionally break
+  - personal-agent-specific assumptions
+  - single-user overlays leaking into product behavior
+  - accidental route shapes or state models that conflict with the team product boundary
+- transitional
+  - surfaces retained temporarily to simplify migration, with a documented replacement path
+
+Examples of preserve:
+
+- durable runs and tasks
+- approvals
+- checkpoints
+- replay-friendly eventing
+- subagent execution semantics
+
+Examples of intentionally break:
+
+- APIs or UI assumptions that treat profile data as product logic
+- single-operator defaults exposed as architectural assumptions
+- personal environment conventions baked into runtime behavior
+
+Examples of transitional:
+
+- glide-mq as an execution substrate
+- selected HTTP/SSE compatibility wrappers around existing frontend expectations
+
+Phase 0 must produce a written compatibility and break matrix. No worker should infer this ad hoc.
 
 ## What Exists Today
 
@@ -691,11 +729,14 @@ Output:
 - tool invocation schema
 - memory and graph entity schema
 - golden fixtures harvested from current Go behavior
+- compatibility and break matrix
+- glide-mq ownership boundary memo
+- tenancy baseline schema decision
 
 Definition of done:
 
 - no major semantic changes without RFC
-- all later phases reference frozen contracts
+- all later phases reference frozen contracts or explicit planned breaks
 
 Refinement checkpoint:
 
@@ -709,11 +750,14 @@ Build:
 - `cairn-store`
 - `cairn-runtime`
 - initial `cairn-api`
+- tenant/workspace/project model
+- ownership and scoping model for runtime entities
 
 Definition of done:
 
 - sessions, tasks, approvals, checkpoints, mailbox, and recovery work end-to-end
 - HTTP/SSE compatibility shell exists
+- all core entities have tenant/workspace/project ownership semantics where applicable
 
 Refinement checkpoint:
 
@@ -746,6 +790,7 @@ Build:
 Definition of done:
 
 - Bedrock KB no longer required for core product retrieval
+- local-mode retrieval contract is implemented and documented
 
 Refinement checkpoint:
 
@@ -802,7 +847,6 @@ Definition of done:
 
 Build:
 
-- tenant/workspace model
 - defaults/profile separation
 - operator UX read models
 - import/export
@@ -837,6 +881,7 @@ Owns:
 - commands/events
 - state machines
 - policy types
+- tenancy and ownership primitives
 
 ### Worker 3: Persistence and Projections
 
@@ -847,6 +892,7 @@ Owns:
 - repos
 - event log
 - read models
+- tenant/workspace/project scoping
 
 ### Worker 4: Runtime Core
 
@@ -858,6 +904,7 @@ Owns:
 - checkpoints
 - mailbox
 - recovery
+- Rust-owned durable mailbox and recovery source of truth
 
 ### Worker 5: Tools, Sandbox, Plugins
 
@@ -981,6 +1028,32 @@ These should be decided by short RFCs, not by drift during implementation.
 12. onboarding and starter-template strategy
 
 Initial RFC drafts live in [`docs/design/rfcs/`](./rfcs/README.md).
+
+## glide-mq Boundary Decision
+
+For the Rust rewrite, glide-mq is not the durable source of truth for:
+
+- mailbox state
+- checkpoints
+- task state
+- recovery state
+- approval state
+
+Those must live in the Rust-owned store and event model.
+
+glide-mq may remain temporarily as:
+
+- an execution queue substrate
+- a fanout/stream transport
+- a compatibility bridge for selected async workflows
+
+If glide-mq is used in v1 runtime paths, it should be treated as:
+
+- transport
+- queueing infrastructure
+- optional acceleration
+
+and not as the canonical owner of product runtime state.
 
 ## Acceptance Criteria for Sellable v1
 

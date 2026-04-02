@@ -110,6 +110,37 @@ These should be runtime data, not product logic:
 - routing targets
 - user-specific thresholds and policies
 
+## Compatibility Policy
+
+The Rust rewrite should preserve product-defining semantics, not every current surface.
+
+Before implementation, every inherited surface must be tagged as:
+
+- preserved
+- intentionally broken
+- transitional
+
+Preserve:
+
+- durable runtime concepts
+- approvals
+- checkpoints
+- mailbox coordination
+- replay and operator visibility
+
+Intentionally break:
+
+- personal-agent assumptions that leak into product behavior
+- single-operator conventions baked into APIs or state models
+- overlay-specific behavior that conflicts with a team platform
+
+Transitional:
+
+- selected compatibility routes
+- glide-mq-backed execution paths that remain temporarily for migration
+
+The product boundary is only real if the break policy is explicit.
+
 ## Deployment Stance
 
 Default stance:

@@ -167,6 +167,13 @@ Mailbox messages should be durable runtime records with:
 
 Mailbox is part of coordination, not just chat decoration.
 
+Canonical ownership rule:
+
+- mailbox durability belongs to the Rust runtime store
+- any queue or sidecar transport is non-canonical
+
+If glide-mq or another queue substrate is used, it may transport mailbox events but must not own mailbox truth.
+
 ## Tool Event Model
 
 Every tool call should emit structured runtime facts:
@@ -192,6 +199,21 @@ HTTP APIs should submit commands or query projections.
 SSE should expose runtime facts and projection updates, not ad-hoc UI-only events.
 
 This gives the frontend and external operators one consistent model.
+
+## Sidecar Boundary
+
+The runtime may use glide-mq or another queue substrate during migration, but:
+
+- command acceptance
+- durable events
+- runtime truth
+- checkpoints
+- mailbox state
+- recovery state
+
+must be owned by the Rust runtime and store.
+
+Queue infrastructure may remain for async dispatch or streaming, but not as the canonical source of runtime truth.
 
 ## What Not To Do
 

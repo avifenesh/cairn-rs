@@ -9,6 +9,14 @@ Purpose: convert the rewrite plan into concrete architecture decisions that para
 2. [RFC 002 - Runtime and Event Model](./002-runtime-event-model.md)
 3. [RFC 003 - Owned Retrieval Replacing Bedrock KB](./003-owned-retrieval.md)
 4. [RFC 004 - Graph and Eval Matrix Model](./004-graph-eval-matrix.md)
+5. [RFC 005 - Task, Session, Checkpoint Lifecycle](./005-task-session-checkpoint-lifecycle.md) - stub
+6. [RFC 006 - Prompt Registry and Release Model](./006-prompt-registry-release-model.md) - stub
+7. [RFC 007 - Plugin Protocol and Transport](./007-plugin-protocol-transport.md) - stub
+8. [RFC 008 - Tenant, Workspace, Profile Separation](./008-tenant-workspace-profile.md) - stub
+9. [RFC 009 - Provider Abstraction and Gateway Non-Goals](./009-provider-abstraction.md) - stub
+10. [RFC 010 - Operator Control Plane IA](./010-operator-control-plane-ia.md) - stub
+11. [RFC 011 - Deployment Shape](./011-deployment-shape.md) - stub
+12. [RFC 012 - Onboarding and Starter Templates](./012-onboarding-starter-templates.md) - stub
 
 ## How To Use These RFCs
 

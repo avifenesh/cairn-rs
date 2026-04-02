@@ -101,6 +101,8 @@ Initial matrices should include:
 - skill health / intervention matrix
 - guardrail/policy outcome matrix
 
+All matrix rows and graph entities that represent owned product resources must carry tenant/workspace/project scope where applicable.
+
 ### Prompt Registry
 
 Prompts must become first-class assets with:
