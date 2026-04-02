@@ -32,6 +32,7 @@ A session is the long-lived conversational or operational context.
 A run is a single execution attempt inside a session.
 
 - a run belongs to one session
+- a run may reference `parent_run_id` when spawned from another run
 - a run may create tasks, approvals, tool invocations, and checkpoints
 - a run is the primary execution unit for replay and runtime inspection
 
@@ -77,7 +78,10 @@ Session outcome is derived by these rules:
 4. else if the latest root run ended `completed` or `canceled`, the session is `completed`
 5. else the session remains `open` until explicitly reconciled
 
-`root run` means a run that is not a child run of another run in the same session lineage.
+`root run` means a run in the session with no `parent_run_id`.
+
+Child runs created in child sessions do not directly derive the parent session outcome.
+They affect the parent only through the parent run/task transition that records dependency success or failure.
 
 This prevents child-run failures from silently overriding the parent session outcome while still allowing the parent run to fail explicitly when child work fails.
 
@@ -301,9 +305,8 @@ Focus on a clean runtime model for agent execution.
 
 ## Open Questions
 
-1. Should every subagent always create both a child task and a child run immediately, or can run creation be deferred until claim time?
-2. Do we need explicit `timed_out` terminal states in v1, or should timeout collapse into `failed` plus reason?
-3. Which pause/resume triggers must exist in v1 beyond human approval and explicit resume-after?
+1. Do we need explicit `timed_out` terminal states in v1, or should timeout collapse into `failed` plus reason?
+2. Which pause/resume triggers must exist in v1 beyond human approval and explicit resume-after?
 
 ## Decision
 

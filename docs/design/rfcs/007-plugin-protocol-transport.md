@@ -109,6 +109,55 @@ Every plugin must declare:
 
 The manifest is loaded by the host before process spawn.
 
+### Canonical Manifest Shape
+
+The v1 manifest must be JSON and must support this shape:
+
+```json
+{
+  "id": "com.example.git-tools",
+  "name": "Git Tools",
+  "version": "0.1.0",
+  "command": ["plugin-binary", "--serve"],
+  "capabilities": [
+    {
+      "type": "tool_provider",
+      "tools": ["git.status", "git.diff"]
+    }
+  ],
+  "permissions": [
+    "fs.read",
+    "fs.write",
+    "process.exec"
+  ],
+  "limits": {
+    "maxConcurrency": 4,
+    "defaultTimeoutMs": 30000
+  }
+}
+```
+
+Required top-level fields:
+
+- `id`
+- `name`
+- `version`
+- `command`
+- `capabilities`
+
+Optional but strongly recommended:
+
+- `permissions`
+- `limits`
+- `description`
+- `homepage`
+
+The manifest must be strict enough that the host can validate:
+
+- what the plugin claims to do
+- what it may access
+- how it should be supervised
+
 ## Lifecycle
 
 ### 1. Discover
@@ -168,6 +217,212 @@ Host sends `shutdown`, then terminates if the plugin fails to exit gracefully.
 - `event.emit`
 
 Plugins do not directly mutate core state. They return data to the host, which persists canonical truth.
+
+## Canonical Wire Shapes
+
+These are minimum required method bodies for v1. Workers may add optional fields, but must not remove or rename these fields without amending this RFC.
+
+### `initialize`
+
+Host request:
+
+```json
+{
+  "protocolVersion": "1.0",
+  "host": { "name": "cairn", "version": "0.1.0" }
+}
+```
+
+Plugin response:
+
+```json
+{
+  "protocolVersion": "1.0",
+  "plugin": { "id": "com.example.git-tools", "name": "Git Tools", "version": "0.1.0" },
+  "capabilities": [
+    { "type": "tool_provider", "tools": ["git.status", "git.diff"] }
+  ],
+  "limits": { "maxConcurrency": 4, "defaultTimeoutMs": 30000 }
+}
+```
+
+### `tools.list`
+
+Plugin response:
+
+```json
+{
+  "tools": [
+    {
+      "name": "git.status",
+      "description": "Return repo status",
+      "inputSchema": { "type": "object" },
+      "permissions": ["fs.read", "process.exec"]
+    }
+  ]
+}
+```
+
+### `tools.invoke`
+
+Host request:
+
+```json
+{
+  "invocationId": "inv_123",
+  "toolName": "git.status",
+  "input": {},
+  "scope": { "tenantId": "t1", "workspaceId": "w1", "projectId": "p1" },
+  "actor": { "operatorId": "u1" },
+  "runtime": { "sessionId": "s1", "runId": "r1", "taskId": "t1" },
+  "grants": ["fs.read", "process.exec"]
+}
+```
+
+Plugin response:
+
+```json
+{
+  "status": "success",
+  "output": { "text": "clean" },
+  "events": []
+}
+```
+
+### `signals.poll`
+
+Host request:
+
+```json
+{
+  "invocationId": "inv_123",
+  "source": { "kind": "rss", "id": "source_1" },
+  "scope": { "tenantId": "t1", "workspaceId": "w1", "projectId": "p1" },
+  "cursor": "opaque-cursor"
+}
+```
+
+Plugin response:
+
+```json
+{
+  "status": "success",
+  "events": [],
+  "cursor": "next-cursor"
+}
+```
+
+### `channels.deliver`
+
+Host request:
+
+```json
+{
+  "invocationId": "inv_123",
+  "channel": { "kind": "telegram", "id": "chan_1" },
+  "message": { "subject": "Build failed", "body": "..." },
+  "recipients": [{ "id": "user_1" }],
+  "scope": { "tenantId": "t1", "workspaceId": "w1", "projectId": "p1" }
+}
+```
+
+Plugin response:
+
+```json
+{
+  "status": "success",
+  "deliveryIds": ["delivery_1"]
+}
+```
+
+### `hooks.post_turn`
+
+Host request:
+
+```json
+{
+  "invocationId": "inv_123",
+  "scope": { "tenantId": "t1", "workspaceId": "w1", "projectId": "p1" },
+  "runtime": { "sessionId": "s1", "runId": "r1", "taskId": "t1" },
+  "turn": { "input": {}, "output": {}, "toolCalls": [] }
+}
+```
+
+Plugin response:
+
+```json
+{
+  "status": "success",
+  "findings": [],
+  "patches": []
+}
+```
+
+### `policy.evaluate`
+
+Host request:
+
+```json
+{
+  "invocationId": "inv_123",
+  "scope": { "tenantId": "t1", "workspaceId": "w1", "projectId": "p1" },
+  "actor": { "operatorId": "u1" },
+  "action": { "kind": "tool.invoke", "name": "git.status" },
+  "context": {}
+}
+```
+
+Plugin response:
+
+```json
+{
+  "decision": "allow",
+  "reasons": [],
+  "appliedPolicies": []
+}
+```
+
+### `eval.score`
+
+Host request:
+
+```json
+{
+  "invocationId": "inv_123",
+  "scope": { "tenantId": "t1", "workspaceId": "w1", "projectId": "p1" },
+  "target": { "kind": "prompt_release", "id": "pr_1" },
+  "dataset": { "id": "ds_1" },
+  "samples": []
+}
+```
+
+Plugin response:
+
+```json
+{
+  "status": "success",
+  "scores": [],
+  "summary": {}
+}
+```
+
+### `cancel`
+
+Host request:
+
+```json
+{
+  "invocationId": "inv_123"
+}
+```
+
+Plugin response:
+
+```json
+{
+  "status": "canceled"
+}
+```
 
 ## Isolation Model
 
