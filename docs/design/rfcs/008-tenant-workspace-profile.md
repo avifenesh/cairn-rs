@@ -201,6 +201,21 @@ That means:
 
 This keeps the default authoring experience aligned with team ownership while preserving tenant scope for real cross-workspace reuse.
 
+### Centrally Governed Prompt Categories
+
+In v1, the following prompt categories should default to tenant scope when they are governed centrally for multiple workspaces:
+
+- safety-critical system prompts
+- centrally mandated compliance or policy prompts
+- tenant-wide routing or escalation prompts used across multiple workspaces
+
+This is an exception to the workspace-first authoring rule, not a replacement for it.
+
+If a prompt asset is:
+
+- primarily team-owned and team-operated, default it to workspace scope
+- centrally governed and intended for reuse across workspaces, default it to tenant scope
+
 ## Legacy File Mapping
 
 The current personal overlay files should map into the new model as follows:
@@ -352,7 +367,7 @@ Focus on a clean tenant/workspace/project model that works for technical teams.
 
 ## Open Questions
 
-1. Should some centrally governed prompt categories such as safety-critical system prompts default to tenant scope even in otherwise workspace-first authoring flows?
+1. Should tenant-scoped centrally governed prompt libraries in v1 support mandatory inheritance into workspace defaults, or remain opt-in at workspace/project adoption time?
 
 ## Decision
 
