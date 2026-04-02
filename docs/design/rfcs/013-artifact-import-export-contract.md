@@ -338,6 +338,24 @@ If content is too large or not naturally inline text:
 - the bundle may carry a structured external content reference in `content`
 - that reference must still participate in provenance and conflict handling
 
+The canonical external-reference form is:
+
+- `content.kind = external_ref`
+- `content.ref_type`
+- `content.uri`
+- `content.media_type` where known
+- `content.sha256` where known
+- `content.bytes` where known
+
+Rules:
+
+- `ref_type` in v1 may be `file`, `object_store`, or `url`
+- `uri` identifies the external content location or retrieval handle
+- `sha256` is the canonical integrity field when external content is referenced
+- `bytes` is advisory size metadata only
+- external references must still preserve the same artifact identity, provenance, and reconciliation semantics as inline content
+- import must not silently dereference remote content outside the operator-approved import flow
+
 V1 does not require binary-perfect embedding of every possible source type inside the first structured bundle format.
 
 ### Materialization Rule
