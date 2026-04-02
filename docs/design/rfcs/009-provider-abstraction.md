@@ -196,8 +196,30 @@ Required fields:
 - timeout budgets
 - structured output preference
 - provider-specific safe tuning fields explicitly normalized by the adapter
+- required capabilities
+- disabled optional capabilities
 
 Bindings are what evals and runtime route decisions should point to. They are the canonical unit for "which provider/model path did we use?"
+
+### Provider Policy Baseline
+
+Provider policy baselines are inherited configuration objects above the project layer.
+
+They may exist at:
+
+- tenant scope
+- workspace scope
+
+They define:
+
+- allowed provider adapters
+- preferred provider connections
+- default bindings by operation kind where allowed
+- budget or quota guardrails where defined elsewhere
+- capability restrictions
+- policy-level retry and timeout ceilings
+
+Baselines are not runtime truth objects. They constrain and seed project route policy.
 
 ### Route Policy
 
@@ -209,6 +231,47 @@ Route policy is project-scoped and determines:
 - which policy constraints can veto a route
 
 Route policy is product-owned configuration, not hidden runtime code.
+
+### Route Attempt
+
+A route attempt is the durable record of one candidate considered during runtime resolution.
+
+Required fields:
+
+- `route_attempt_id`
+- `project_id`
+- `operation_kind`
+- `provider_binding_id`
+- `route_selector_context`
+- `attempt_index`
+- `decision`
+- `decision_reason`
+- `created_at`
+
+`decision` in v1:
+
+- `selected`
+- `vetoed`
+- `failed`
+- `skipped`
+
+### Route Decision
+
+A route decision is the summarized runtime outcome for one provider dispatch.
+
+Required fields:
+
+- `route_decision_id`
+- `project_id`
+- `operation_kind`
+- `selected_provider_binding_id`
+- `selector_context`
+- `attempt_count`
+- `fallback_used`
+- `final_status`
+- `created_at`
+
+Route decisions link the runtime event stream to evals, graph, and operator explanation surfaces.
 
 ## Capability Model
 
@@ -235,6 +298,32 @@ Reranker bindings may declare:
 
 The runtime may request required capabilities, but it must not assume every provider supports every feature.
 
+### Capability Ownership
+
+Capability ownership is split across three layers:
+
+- provider adapter
+  - defines the canonical capability vocabulary and normalization rules for that provider family
+- provider connection
+  - records endpoint-specific availability and health-related capability constraints
+- provider binding
+  - defines which capabilities are required, preferred, disabled, or safe to use for this project/runtime path
+
+This keeps capability truth from drifting between vendor adapters, endpoint observations, and project intent.
+
+### Effective Capability Set
+
+The effective capability set for a runtime call is computed from:
+
+1. adapter-declared capability vocabulary
+2. connection-declared availability
+3. binding-required and binding-disabled capability rules
+4. route-policy restrictions
+
+The runtime may only dispatch a call when the effective capability set satisfies the request requirements.
+
+This computation must be inspectable through the operator control plane.
+
 ## Scope Rules
 
 Provider ownership must follow RFC 008.
@@ -252,6 +341,7 @@ Tenant-scoped provider data includes:
 Workspace-scoped provider data includes:
 
 - workspace-visible provider connections
+- workspace provider policy baselines
 - workspace default routing preferences where allowed
 
 ### Project Scope
@@ -261,10 +351,43 @@ Project-scoped provider data includes:
 - provider bindings
 - route policies
 - route overrides
+- route attempts
+- route decisions
 - provider-related eval outputs
-- provider route decisions recorded during runtime
 
 This keeps runtime truth at the project level while still allowing credential and endpoint reuse.
+
+## Canonical Inheritance Model
+
+Provider routing and policy inheritance must be explicit product state.
+
+V1 must not rely on implicit environment inheritance or hidden in-process defaults once a project exists.
+
+### Inheritance Layers
+
+The canonical inheritance chain is:
+
+1. tenant provider policy baseline
+2. workspace provider policy baseline
+3. project route policy
+4. explicit runtime override, when allowed by project policy
+
+Each lower layer may narrow or override the previous layer, but it may not silently expand disallowed provider access.
+
+### Effective Route Policy
+
+For runtime use, Cairn should materialize an effective route policy read model per project and operation kind.
+
+That read model must resolve:
+
+- default binding
+- selector-aware overrides
+- fallback chain
+- capability restrictions
+- timeout and retry ceilings
+- whether explicit runtime override is allowed
+
+Workers should build against the effective route policy view rather than recomputing inheritance ad hoc in multiple places.
 
 ## Routing Model
 
@@ -281,6 +404,8 @@ Provider route resolution in v1 may use:
 
 ### Resolution Order
 
+Resolution first computes the effective route policy from the inheritance model above.
+
 For a given operation kind, routing resolves in this order:
 
 1. explicit runtime override if allowed by project policy
@@ -288,11 +413,11 @@ For a given operation kind, routing resolves in this order:
 3. project route policy override for `routing_slot`
 4. project route policy override for `task_type`
 5. project route policy override for `agent_type`
-6. project default binding for the operation kind
-7. workspace default if the project has no explicit binding
-8. tenant default if workspace has none
+6. effective project default binding for the operation kind
 
-This keeps provider routing aligned with prompt release selector precedence from RFC 006 while still supporting project-level defaults.
+Workspace and tenant defaults participate only through the effective route policy inheritance model above. Runtime resolution should not re-implement inheritance as a second algorithm.
+
+This keeps provider routing aligned with prompt release selector precedence from RFC 006 while still supporting inherited defaults.
 
 ### Route Selection Unit
 
@@ -311,6 +436,8 @@ Before dispatch, route policy may veto a candidate for reasons such as:
 - safety mode restriction
 
 If vetoed, the runtime may continue to the next candidate in the fallback chain if one exists.
+
+Every veto must be written as a route-attempt record with a concrete `decision_reason`. Vetoes must not exist only in ephemeral logs.
 
 ## Fallback Model
 
@@ -385,6 +512,12 @@ Minimum recorded fields per provider call:
 - `error_class` where applicable
 
 These records are product telemetry, not optional debug logs.
+
+Provider-call telemetry complements but does not replace route attempts and route decisions:
+
+- route attempts explain candidate selection and veto
+- route decisions explain the chosen binding and fallback path
+- provider calls explain execution outcome and cost
 
 ## Eval and Graph Linkage
 
