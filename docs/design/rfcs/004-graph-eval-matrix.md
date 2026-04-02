@@ -130,6 +130,101 @@ Each matrix in v1 must have:
 
 Matrices are product state backed by stable schemas, not ad hoc UI calculations.
 
+### Canonical Matrix Row Grain
+
+V1 defines the canonical row grain for each initial matrix category as follows.
+
+#### Prompt Comparison Matrix
+
+Canonical subject:
+
+- `prompt_release`
+
+Canonical row grain:
+
+- one row per evaluated `prompt_release_id` x `provider_binding_id` x effective selector context
+
+Effective selector context in v1 must resolve to one of:
+
+- `project_default`
+- `agent_type`
+- `task_type`
+- `routing_slot`
+
+This aligns the matrix with RFC 006, where runtime behavior is governed by project-scoped prompt releases with explicit selector targets.
+
+#### Provider Routing Matrix
+
+Canonical subject:
+
+- `route_decision`
+
+Canonical row grain:
+
+- one row per `route_decision_id`
+
+Supporting drill-down records may expose:
+
+- linked `route_attempt` rows
+- linked `provider_call` rows
+
+But the operator-facing matrix row must summarize one logical routed request, not one attempted candidate and not one low-level call in isolation.
+
+This aligns the matrix with RFC 009, where one logical request creates one `route_decision` and may contain many attempts and zero or more provider calls.
+
+#### Permission Matrix
+
+Canonical subject:
+
+- permission decision family
+
+Canonical row grain:
+
+- one row per effective permission policy outcome for `mode x capability x scope`
+
+#### Memory Source Quality Matrix
+
+Canonical subject:
+
+- memory source or source document family
+
+Canonical row grain:
+
+- one row per `source_id` or equivalent canonical memory-source unit within scope
+
+#### Skill Health / Intervention Matrix
+
+Canonical subject:
+
+- skill
+
+Canonical row grain:
+
+- one row per `skill_id` within scope
+
+#### Guardrail / Policy Outcome Matrix
+
+Canonical subject:
+
+- policy or guardrail rule
+
+Canonical row grain:
+
+- one row per policy-rule outcome slice within scope and comparison window
+
+### Matrix Scope Rule
+
+Unless a matrix category explicitly says otherwise:
+
+- runtime-facing comparison matrices are project-scoped in v1
+- tenant/workspace views are aggregate read models built over project-scoped or library-scoped canonical rows
+
+For v1 specifically:
+
+- prompt comparison rows are project-scoped because prompt releases are project-scoped
+- provider routing rows are project-scoped because route decisions are project-scoped runtime facts
+- permission and policy matrices may aggregate across project rows, but must preserve the canonical underlying scope of each row
+
 ### Prompt Registry
 
 Prompts must become first-class assets with:
