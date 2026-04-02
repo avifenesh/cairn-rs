@@ -20,38 +20,38 @@ This document is intentionally based on the current local Cairn frontend contrac
 
 ## HTTP Route Catalog
 
-| Method | Route | Classification | Minimum contract relied on by current UI |
-|---|---|---|---|
-| `GET` | `/health` | Preserve | `{ ok: boolean }` |
-| `GET` | `/v1/dashboard` | Preserve | dashboard payload used by overview |
-| `GET` | `/v1/feed` | Preserve | `{ items, hasMore }` |
-| `POST` | `/v1/feed/:id/read` | Preserve | `{ ok }` |
-| `POST` | `/v1/feed/read-all` | Preserve | `{ changed }` |
-| `GET` | `/v1/tasks` | Preserve | `{ items, hasMore }` |
-| `POST` | `/v1/tasks/:id/cancel` | Preserve | `{ ok }` |
-| `GET` | `/v1/approvals` | Preserve | `{ items, hasMore }` |
-| `POST` | `/v1/approvals/:id/approve` | Preserve | `{ ok }` |
-| `POST` | `/v1/approvals/:id/deny` | Preserve | `{ ok }` |
-| `GET` | `/v1/assistant/sessions` | Preserve | `{ items }` |
-| `GET` | `/v1/assistant/sessions/:sessionId` | Preserve | `{ items }` chat messages |
-| `POST` | `/v1/assistant/message` | Preserve | request `{ message, mode?, sessionId? }`, response `{ taskId }` |
-| `POST` | `/v1/assistant/voice` | Transitional | multipart upload, returns `{ taskId, transcript }` |
-| `GET` | `/v1/memories` | Preserve | `{ items, hasMore }` |
-| `GET` | `/v1/memories/search` | Preserve | `{ items }` |
-| `POST` | `/v1/memories` | Preserve | create memory body `{ content, category }` |
-| `POST` | `/v1/memories/:id/accept` | Preserve | `{ ok }` |
-| `POST` | `/v1/memories/:id/reject` | Preserve | `{ ok }` |
-| `GET` | `/v1/fleet` | Transitional | `{ agents, summary }` |
-| `GET` | `/v1/skills` | Preserve | `{ items, summary, currentlyActive? }` |
-| `GET` | `/v1/soul` | Transitional | current singleton asset wrapper |
-| `PUT` | `/v1/soul` | Transitional | request `{ content }`, response `{ ok, sha }` |
-| `GET` | `/v1/soul/history` | Transitional | `{ items }` |
-| `GET` | `/v1/soul/patches` | Transitional | `{ items }` |
-| `GET` | `/v1/costs` | Preserve | cost summary payload |
-| `GET` | `/v1/metrics` | Preserve | metrics read model |
-| `GET` | `/v1/status` | Preserve | runtime/system status |
-| `POST` | `/v1/poll/run` | Preserve | `{ ok }` |
-| `GET` | `/v1/stream` | Preserve | SSE stream with `token` and `lastEventId` support |
+| Method | Route | Query/body detail used by current UI | Classification | Minimum contract relied on by current UI |
+|---|---|---|---|---|
+| `GET` | `/health` | none | Preserve | `{ ok: boolean }` |
+| `GET` | `/v1/dashboard` | query: `limit?`, `source?` | Preserve | dashboard payload used by overview |
+| `GET` | `/v1/feed` | query: `limit?`, `before?`, `source?`, `unread?` | Preserve | `{ items, hasMore }` |
+| `POST` | `/v1/feed/:id/read` | path param `id` | Preserve | `{ ok }` |
+| `POST` | `/v1/feed/read-all` | none | Preserve | `{ changed }` |
+| `GET` | `/v1/tasks` | query: `status?`, `type?` | Preserve | `{ items, hasMore }` |
+| `POST` | `/v1/tasks/:id/cancel` | path param `id` | Preserve | `{ ok }` |
+| `GET` | `/v1/approvals` | query: `status?` | Preserve | `{ items, hasMore }` |
+| `POST` | `/v1/approvals/:id/approve` | path param `id` | Preserve | `{ ok }` |
+| `POST` | `/v1/approvals/:id/deny` | path param `id` | Preserve | `{ ok }` |
+| `GET` | `/v1/assistant/sessions` | none | Preserve | `{ items }` |
+| `GET` | `/v1/assistant/sessions/:sessionId` | path param `sessionId` | Preserve | `{ items }` chat messages |
+| `POST` | `/v1/assistant/message` | body: `{ message, mode?, sessionId? }` | Preserve | response `{ taskId }` |
+| `POST` | `/v1/assistant/voice` | multipart body: `audio`, optional `mode`, optional `sessionId` | Transitional | returns `{ taskId, transcript }` |
+| `GET` | `/v1/memories` | query: `status?`, `category?` | Preserve | `{ items, hasMore }` |
+| `GET` | `/v1/memories/search` | query: required `q`, query: `limit` | Preserve | `{ items }` |
+| `POST` | `/v1/memories` | body: `{ content, category }` | Preserve | create memory response object |
+| `POST` | `/v1/memories/:id/accept` | path param `id` | Preserve | `{ ok }` |
+| `POST` | `/v1/memories/:id/reject` | path param `id` | Preserve | `{ ok }` |
+| `GET` | `/v1/fleet` | none | Transitional | `{ agents, summary }` |
+| `GET` | `/v1/skills` | none | Preserve | `{ items, summary, currentlyActive? }` |
+| `GET` | `/v1/soul` | none | Transitional | current singleton asset wrapper |
+| `PUT` | `/v1/soul` | body: `{ content }` | Transitional | response `{ ok, sha }` |
+| `GET` | `/v1/soul/history` | none | Transitional | `{ items }` |
+| `GET` | `/v1/soul/patches` | none | Transitional | `{ items }` |
+| `GET` | `/v1/costs` | none | Preserve | cost summary payload |
+| `GET` | `/v1/metrics` | none | Preserve | metrics read model |
+| `GET` | `/v1/status` | none | Preserve | runtime/system status |
+| `POST` | `/v1/poll/run` | none | Preserve | `{ ok }` |
+| `GET` | `/v1/stream` | query: `token?`, `lastEventId?` | Preserve | SSE stream with replay support |
 
 ## SSE Event Catalog
 
@@ -100,3 +100,28 @@ Current UI-referenced event names from `/v1/stream`:
   - `assistant_delta`
   - `assistant_end`
   - `agent_progress`
+
+## Minimum Phase 0 Fixture Set
+
+Phase 0 should not be considered complete until fixtures exist for:
+
+- `GET /v1/feed?limit=20&unread=true`
+- `GET /v1/tasks?status=running&type=agent`
+- `GET /v1/approvals?status=pending`
+- `GET /v1/memories/search?q=test&limit=10`
+- `POST /v1/assistant/message` with and without `sessionId`
+- `GET /v1/stream?lastEventId=<id>` replay behavior
+
+And SSE payload fixtures for:
+
+- `ready`
+- `feed_update`
+- `poll_completed`
+- `task_update`
+- `approval_required`
+- `assistant_delta`
+- `assistant_end`
+- `assistant_reasoning`
+- `assistant_tool_call`
+- `memory_proposed`
+- `agent_progress`

@@ -92,6 +92,68 @@ An HTTP or gRPC bridge may be added later, but it must speak the same protocol m
 
 That bridge is an adapter, not the canonical protocol definition.
 
+## JSON-RPC Envelope Rules
+
+Every protocol message must use a standard JSON-RPC 2.0 envelope.
+
+### Request Envelope
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_123",
+  "method": "tools.invoke",
+  "params": {}
+}
+```
+
+Rules:
+
+- `jsonrpc` must be `"2.0"`
+- `id` must be a host-generated string for request/response correlation
+- `method` must be one of the canonical method names in this RFC
+- `params` must be an object
+
+### Success Response Envelope
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_123",
+  "result": {}
+}
+```
+
+### Error Response Envelope
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_123",
+  "error": {
+    "code": -32000,
+    "message": "timeout",
+    "data": {
+      "status": "timeout"
+    }
+  }
+}
+```
+
+### Host-Readable Notifications
+
+Plugins may emit notifications with:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "progress.update",
+  "params": {}
+}
+```
+
+Notifications must not mutate canonical host state directly.
+
 ## Plugin Manifest
 
 Every plugin must declare:
@@ -224,7 +286,7 @@ These are minimum required method bodies for v1. Workers may add optional fields
 
 ### `initialize`
 
-Host request:
+Host request `params`:
 
 ```json
 {
@@ -233,7 +295,7 @@ Host request:
 }
 ```
 
-Plugin response:
+Plugin success `result`:
 
 ```json
 {
@@ -248,7 +310,7 @@ Plugin response:
 
 ### `tools.list`
 
-Plugin response:
+Plugin success `result`:
 
 ```json
 {
@@ -265,7 +327,7 @@ Plugin response:
 
 ### `tools.invoke`
 
-Host request:
+Host request `params`:
 
 ```json
 {
@@ -279,7 +341,7 @@ Host request:
 }
 ```
 
-Plugin response:
+Plugin success `result`:
 
 ```json
 {
@@ -291,7 +353,7 @@ Plugin response:
 
 ### `signals.poll`
 
-Host request:
+Host request `params`:
 
 ```json
 {
@@ -302,7 +364,7 @@ Host request:
 }
 ```
 
-Plugin response:
+Plugin success `result`:
 
 ```json
 {
@@ -314,7 +376,7 @@ Plugin response:
 
 ### `channels.deliver`
 
-Host request:
+Host request `params`:
 
 ```json
 {
@@ -326,7 +388,7 @@ Host request:
 }
 ```
 
-Plugin response:
+Plugin success `result`:
 
 ```json
 {
@@ -337,7 +399,7 @@ Plugin response:
 
 ### `hooks.post_turn`
 
-Host request:
+Host request `params`:
 
 ```json
 {
@@ -348,7 +410,7 @@ Host request:
 }
 ```
 
-Plugin response:
+Plugin success `result`:
 
 ```json
 {
@@ -360,7 +422,7 @@ Plugin response:
 
 ### `policy.evaluate`
 
-Host request:
+Host request `params`:
 
 ```json
 {
@@ -372,7 +434,7 @@ Host request:
 }
 ```
 
-Plugin response:
+Plugin success `result`:
 
 ```json
 {
@@ -384,7 +446,7 @@ Plugin response:
 
 ### `eval.score`
 
-Host request:
+Host request `params`:
 
 ```json
 {
@@ -396,7 +458,7 @@ Host request:
 }
 ```
 
-Plugin response:
+Plugin success `result`:
 
 ```json
 {
@@ -408,7 +470,7 @@ Plugin response:
 
 ### `cancel`
 
-Host request:
+Host request `params`:
 
 ```json
 {
@@ -416,7 +478,7 @@ Host request:
 }
 ```
 
-Plugin response:
+Plugin success `result`:
 
 ```json
 {
@@ -506,6 +568,86 @@ Required outcomes:
 The host, not the plugin, classifies whether retries are allowed in the runtime.
 
 Protocol violations may disable the plugin until operator intervention.
+
+## Canonical Inner Schema Rules
+
+To keep workers from inventing incompatible body shapes, these inner object rules apply across methods:
+
+### Capability Objects
+
+Capability objects must include:
+
+- `type`
+
+And may include one of:
+
+- `tools`
+- `signals`
+- `channels`
+- `hooks`
+- `policies`
+- `scorers`
+
+### Scope Object
+
+The `scope` object must always use:
+
+- `tenantId`
+- `workspaceId`
+- `projectId`
+
+`workspaceId` and `projectId` may be omitted only when the capability truly operates above that scope.
+
+### Runtime Linkage Object
+
+When runtime linkage is present, it must use:
+
+- `sessionId`
+- `runId`
+- `taskId`
+
+### Event Array Shapes
+
+Any `events` array returned by plugins must contain structured objects with:
+
+- `type`
+- `payload`
+
+Optional:
+
+- `timestamp`
+- `externalId`
+
+### Scores Array Shapes
+
+Any `scores` array returned by eval plugins must contain structured objects with:
+
+- `metric`
+- `value`
+
+Optional:
+
+- `label`
+- `reason`
+- `sampleId`
+
+### Delivery Result Shapes
+
+Any delivery result must use:
+
+- `deliveryIds` as an array of opaque strings
+
+Optional:
+
+- `warnings`
+
+### Policy Decision Shapes
+
+Policy decisions must use:
+
+- `decision` with one of `allow`, `deny`, `review`
+- `reasons` as an array of strings
+- `appliedPolicies` as an array
 
 ## Concurrency Rules
 
