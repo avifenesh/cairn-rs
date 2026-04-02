@@ -136,6 +136,25 @@ Supported `kind` values in v1:
 - `task_type`
 - `routing_slot`
 
+### Selector Justification
+
+`project_default` exists to provide the baseline release when no narrower runtime context applies.
+
+`agent_type` exists because teams often need one prompt behavior for a role such as planner, coder, or critic across many tasks.
+
+`task_type` exists because some prompt choices are driven by workflow intent rather than the broad agent role.
+
+`routing_slot` exists for deliberate runtime indirection such as:
+
+- fallback chains
+- explicit slot-based prompt routing
+- controlled side-by-side runtime wiring where the slot name is part of the runtime contract
+
+V1 keeps both `task_type` and `routing_slot` because they solve different sources of specificity:
+
+- `task_type` is semantic workflow targeting
+- `routing_slot` is explicit runtime wiring
+
 Examples:
 
 ```json
@@ -225,6 +244,24 @@ There is never more than one `active` release for the same:
 - `prompt_asset_id`
 - `rollout_target`
 
+### Rollout Model In V1
+
+V1 rollout is explicit activation by selector target.
+
+That means:
+
+- a release becomes live only when activated for a concrete `rollout_target`
+- there is no percentage-based traffic splitting in v1
+- there is no automatic weighted prompt experimentation in the runtime path in v1
+
+If operators want side-by-side comparison in v1, they do it through:
+
+- separate eval runs
+- separate releases on distinct selectors
+- explicit promotion or rollback decisions
+
+This keeps runtime resolution deterministic and keeps evaluation separate from live traffic routing complexity.
+
 ## Target Resolution Rules
 
 Prompt release selection must be deterministic.
@@ -310,6 +347,36 @@ That shortcut is still represented through the same canonical lifecycle:
 - the release moves directly from `draft` to `approved`
 - no separate approval field is introduced
 - the approving actor and reason still appear in release actions
+
+### Default Approval Policy In V1
+
+V1 defines one hard default approval stance:
+
+- any release that will become eligible for runtime activation must require approval
+
+This means the default project policy is:
+
+- `draft -> proposed` for human review
+- `proposed -> approved` or `proposed -> rejected`
+- `approved -> active` by explicit activation
+
+Projects may relax this only through an explicit project policy that allows trusted direct approval from `draft -> approved`.
+
+Even when that shortcut is enabled:
+
+- it must be explicit project configuration
+- the approving actor must still be recorded
+- release actions must still show that approval occurred
+
+V1 must not support silent auto-promotion from `draft` to `active`.
+
+### Approval Policy Scope
+
+Approval policy is project-scoped in v1.
+
+Tenant or workspace defaults may seed the project policy, but runtime enforcement happens against the effective project policy.
+
+This keeps rollout governance aligned with the project-scoped nature of prompt releases.
 
 ### Activation
 
@@ -443,9 +510,7 @@ For v1, do not optimize for:
 
 ## Open Questions
 
-1. Do we need percentage rollout or can v1 stop at explicit release activation per target?
-2. Are `task_type` and `routing_slot` both justified in v1, or should one be deferred?
-3. Which approval policies should be hard defaults versus project-configurable rules?
+1. Should tenant/workspace policy be able to forbid the `draft -> approved` shortcut entirely for some regulated projects in v1?
 
 ## Decision
 
@@ -458,3 +523,6 @@ Proceed assuming:
 - selector precedence is deterministic
 - rollback always re-activates a prior approved release
 - prompt/eval/graph linkage is required product state, not optional observability
+- rollout in v1 is explicit selector-based activation, not percentage traffic splitting
+- both `task_type` and `routing_slot` are first-class selector kinds in v1
+- approval is required by default before a release becomes activation-eligible, with only explicit project policy allowing `draft -> approved`
