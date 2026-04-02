@@ -15,7 +15,7 @@ Purpose: convert the rewrite plan into concrete architecture decisions that para
 8. [RFC 008 - Tenant, Workspace, Profile Separation](./008-tenant-workspace-profile.md)
 9. [RFC 009 - Provider Abstraction and Gateway Non-Goals](./009-provider-abstraction.md)
 10. [RFC 010 - Operator Control Plane IA](./010-operator-control-plane-ia.md)
-11. [RFC 011 - Deployment Shape](./011-deployment-shape.md) - stub
+11. [RFC 011 - Deployment Shape](./011-deployment-shape.md)
 12. [RFC 012 - Onboarding and Starter Templates](./012-onboarding-starter-templates.md) - stub
 
 ## How To Use These RFCs
