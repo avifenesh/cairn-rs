@@ -223,10 +223,11 @@ This prevents starter content from behaving like hidden global state.
 
 #### Prompts
 
-- shipped starter prompt assets and versions may exist at system scope as product defaults
-- if a team chooses a starter template, any prompt assets that are expected to become customer-managed library content must be copied into tenant or workspace scope
+- shipped starter prompt definitions may exist at system scope as product defaults
+- those shipped starter prompt definitions are template material only, not customer prompt assets by themselves
+- if a team chooses a starter template, any prompt content that is expected to become customer-managed library content must be materialized into tenant or workspace prompt assets and prompt versions
 - any prompt used at runtime must be represented through project-scoped prompt releases per RFC 006
-- shipped system prompt assets must not be mutated in place by customer actions
+- shipped system prompt definitions must not be mutated in place by customer actions
 
 #### Policies
 
@@ -287,6 +288,21 @@ V1 prompt import must support:
 - mapping imported prompts into tenant or workspace libraries
 - optionally creating project releases from imported versions
 
+Prompt import must use one canonical reconciliation rule:
+
+- imported prompt identities are matched first by explicit import identifier where present
+- otherwise by scoped logical name plus content hash
+- repeated import of the same logical prompt/version into the same scope must be idempotent
+- changed content must create a new prompt version rather than mutating an existing version
+- if the same logical prompt name conflicts with different content and no explicit replace action is chosen, the import must surface a conflict rather than silently overwrite
+
+Import provenance must record:
+
+- import source
+- import timestamp
+- originating bundle or file reference where available
+- which tenant/workspace prompt assets and versions were created or reused
+
 ### Document and Knowledge Import
 
 V1 knowledge import must support:
@@ -297,6 +313,13 @@ V1 knowledge import must support:
 
 The onboarding flow must expose how imported knowledge becomes searchable and inspectable.
 
+Document and knowledge import must use one canonical reconciliation rule:
+
+- repeated import of the same source into the same target scope should be idempotent where source identity and content hash match
+- changed content must create a new ingest/update event and preserve provenance to the prior import where applicable
+- deduplication may collapse duplicate chunks for retrieval efficiency, but the product must preserve document-level provenance for each import action
+- conflicts in target scope, source identity, or metadata ownership must be surfaced explicitly rather than silently merged
+
 ### Memory Import
 
 V1 does not need arbitrary raw memory import from every prior system.
@@ -306,6 +329,14 @@ It should support:
 - curated knowledge pack import
 - project corpus seeding
 - explicit operator review of imported content where needed
+
+Curated knowledge-pack import must also preserve canonical provenance:
+
+- source bundle identity
+- import actor
+- target project or corpus
+- imported object set
+- whether each object was created, reused, skipped, or conflicted
 
 ## Installer and Bootstrap Contract
 
