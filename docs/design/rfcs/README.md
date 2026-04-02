@@ -17,6 +17,7 @@ Purpose: convert the rewrite plan into concrete architecture decisions that para
 10. [RFC 010 - Operator Control Plane IA](./010-operator-control-plane-ia.md)
 11. [RFC 011 - Deployment Shape](./011-deployment-shape.md)
 12. [RFC 012 - Onboarding and Starter Templates](./012-onboarding-starter-templates.md)
+13. [RFC 013 - Artifact Import/Export Contract](./013-artifact-import-export-contract.md)
 
 ## How To Use These RFCs
 
