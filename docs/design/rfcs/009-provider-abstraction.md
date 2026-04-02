@@ -214,12 +214,46 @@ They define:
 
 - allowed provider adapters
 - preferred provider connections
-- default bindings by operation kind where allowed
+- default route templates by operation kind where allowed
 - budget or quota guardrails where defined elsewhere
 - capability restrictions
 - policy-level retry and timeout ceilings
 
 Baselines are not runtime truth objects. They constrain and seed project route policy.
+
+### Provider Route Template
+
+A provider route template is the canonical higher-scope representation for an inherited default or selector-specific route before it becomes project runtime truth.
+
+Templates may exist at:
+
+- tenant scope
+- workspace scope
+
+Required fields:
+
+- `provider_route_template_id`
+- `scope`
+- `operation_kind`
+- `provider_connection_id`
+- `provider_model_id`
+- `template_name`
+- `template_settings`
+- `created_at`
+- `updated_at`
+
+Templates may also declare:
+
+- required capabilities
+- disabled optional capabilities
+- timeout ceilings
+- retry ceilings
+
+Templates are allowed to refer to tenant- or workspace-scoped provider connections.
+
+Templates must not directly reference project-scoped provider bindings.
+
+Project-scoped runtime truth is always expressed through provider bindings, not inherited templates.
 
 ### Route Policy
 
@@ -239,6 +273,7 @@ A route attempt is the durable record of one candidate considered during runtime
 Required fields:
 
 - `route_attempt_id`
+- `route_decision_id`
 - `project_id`
 - `operation_kind`
 - `provider_binding_id`
@@ -264,14 +299,50 @@ Required fields:
 - `route_decision_id`
 - `project_id`
 - `operation_kind`
-- `selected_provider_binding_id`
+- `selected_provider_binding_id` when a route is selected
+- `selected_route_attempt_id` when a route is selected
 - `selector_context`
 - `attempt_count`
 - `fallback_used`
 - `final_status`
 - `created_at`
 
+`final_status` in v1:
+
+- `selected`
+- `failed_after_dispatch`
+- `no_viable_route`
+- `cancelled`
+
 Route decisions link the runtime event stream to evals, graph, and operator explanation surfaces.
+
+### Provider Call
+
+A provider call is the execution record for the actual provider dispatch made after route resolution.
+
+Required fields:
+
+- `provider_call_id`
+- `route_decision_id`
+- `route_attempt_id`
+- `project_id`
+- `operation_kind`
+- `provider_binding_id`
+- `provider_connection_id`
+- `provider_adapter`
+- `provider_model_id`
+- `started_at`
+- `finished_at`
+- `latency_ms`
+- `status`
+- `input_tokens` where applicable
+- `output_tokens` where applicable
+- `cost`
+- `error_class` where applicable
+
+Every executed provider call must belong to exactly one route decision and exactly one selected route attempt.
+
+Skipped and vetoed route attempts must not create provider-call records.
 
 ## Capability Model
 
@@ -335,6 +406,7 @@ Tenant-scoped provider data includes:
 - provider credentials
 - tenant-wide provider connections
 - tenant-wide provider policy baselines
+- tenant-scoped provider route templates
 
 ### Workspace Scope
 
@@ -342,7 +414,7 @@ Workspace-scoped provider data includes:
 
 - workspace-visible provider connections
 - workspace provider policy baselines
-- workspace default routing preferences where allowed
+- workspace-scoped provider route templates
 
 ### Project Scope
 
@@ -353,6 +425,7 @@ Project-scoped provider data includes:
 - route overrides
 - route attempts
 - route decisions
+- provider calls
 - provider-related eval outputs
 
 This keeps runtime truth at the project level while still allowing credential and endpoint reuse.
@@ -386,6 +459,19 @@ That read model must resolve:
 - capability restrictions
 - timeout and retry ceilings
 - whether explicit runtime override is allowed
+
+### Materialization Rule
+
+Higher-scope defaults must not be used directly at runtime as if they were project bindings.
+
+The canonical flow is:
+
+1. tenant and workspace baselines point to route templates
+2. project route policy inherits or overrides those templates
+3. the effective route policy materializes project-scoped provider bindings from the resolved templates
+4. runtime resolution selects only among project-scoped provider bindings
+
+This keeps higher-scope policy inheritance compatible with RFC 008 while preserving project-scoped runtime truth.
 
 Workers should build against the effective route policy view rather than recomputing inheritance ad hoc in multiple places.
 
@@ -493,6 +579,8 @@ Every provider call must emit durable product state sufficient to answer:
 Minimum recorded fields per provider call:
 
 - `provider_call_id`
+- `route_decision_id`
+- `route_attempt_id`
 - `project_id`
 - `operation_kind`
 - `provider_binding_id`
@@ -518,6 +606,24 @@ Provider-call telemetry complements but does not replace route attempts and rout
 - route attempts explain candidate selection and veto
 - route decisions explain the chosen binding and fallback path
 - provider calls explain execution outcome and cost
+
+### Canonical Linkage
+
+One runtime dispatch must be explainable through this chain:
+
+- one `route_decision`
+- one or more `route_attempt` rows linked by `route_decision_id`
+- zero or one `provider_call` rows linked to the selected route attempt
+
+Rules:
+
+- every route attempt belongs to exactly one route decision
+- every route decision may have many route attempts
+- every executed provider call belongs to exactly one selected route attempt
+- a route decision with final status `selected` or `failed_after_dispatch` must have one provider call
+- a route decision resolved entirely by veto or skip must have no provider call
+
+This linkage is canonical for graph, eval, audit, and operator explanation work.
 
 ## Eval and Graph Linkage
 
