@@ -40,6 +40,23 @@ That promise is only credible if operators can:
 
 ## Minimum V1 Views
 
+### Visual Fidelity Rule
+
+V1 does not require every operator surface to be deeply visual, but it does require every named surface to be product-usable.
+
+The canonical v1 rule is:
+
+- table/detail-first is acceptable where the workflow is primarily operational
+- explicitly visual views are required where the product promise depends on relationship or provenance understanding
+
+In v1 specifically:
+
+- `overview`, `runs`, `approvals`, `prompts`, `evals`, `policies`, `sources and channels`, and `settings` may ship as strong table/detail views first
+- `memory` must include result/provenance inspection views, but may remain largely table/detail with targeted explanation panels
+- `graph` must include a genuinely visual relationship view in v1, not only raw tables
+
+This keeps the control plane credible without forcing every area into bespoke visual polish on day one.
+
 ### 1. Overview
 
 Purpose:
@@ -172,6 +189,48 @@ Operator can:
 - understand effective scope and reason
 - identify misconfiguration
 
+## Bulk Action Rule
+
+V1 bulk actions are required only where they materially reduce operator toil in core workflows.
+
+Required bulk actions in v1:
+
+- approvals: approve, deny, or defer multiple compatible approval items
+- sources/channels: retry or pause/resume multiple failing or degraded sources where the action semantics are safe
+- prompts: archive or label multiple releases/versions where no activation-state conflict exists
+
+Explicitly not required as bulk actions in v1:
+
+- bulk rollback of prompt releases
+- bulk retry/resume of arbitrary runs
+- bulk policy rewrites across unrelated scopes
+
+Where bulk actions exist, the UI must show:
+
+- scope of effect
+- affected item count
+- whether conflicts or ineligible items were skipped
+
+This keeps v1 operable without turning the first release into an admin automation suite.
+
+## Visibility Scope Rule
+
+The canonical v1 operator-visibility stance is:
+
+- project-scoped operation is first-class
+- workspace-level visibility is first-class for aggregation and drill-down
+- tenant-level visibility exists primarily for settings, policy inheritance, credential/provider administration, and roll-up health
+
+Cross-workspace operational control is not a primary v1 workflow.
+
+That means:
+
+- operators can aggregate across projects inside a workspace
+- tenant/workspace surfaces may summarize project health and counts
+- most actionable workflow views should drill into one project context before allowing state-changing actions
+
+This keeps the first release aligned with RFC 008 scoping and reduces accidental cross-project blast radius.
+
 ## Navigation Rule
 
 The control plane should be product-first, not subsystem-first.
@@ -194,9 +253,7 @@ Focus on the minimum workflows that make the product operable.
 
 ## Open Questions
 
-1. Which of these surfaces must be fully visual in v1 versus acceptable as table/detail views first?
-2. Which workflows must support bulk actions in v1?
-3. How much multi-project and cross-workspace visibility is needed in the initial operator UX?
+1. Should tenant-level roll-up views in v1 be read-only except for settings/policy administration, or should some operational bulk actions also exist there?
 
 ## Decision
 
@@ -204,3 +261,6 @@ Proceed assuming:
 
 - the v1 control plane must include the minimum views and workflows listed above
 - subsystem work should be shaped by these operator workflows, not only by backend elegance
+- `graph` is the only surface that requires a genuinely visual relationship view in v1; the rest may be table/detail-first where appropriate
+- bulk actions are required only for approvals, selected source/channel operations, and safe prompt housekeeping actions
+- project-scoped and workspace-aggregated visibility are first-class; most operational mutations happen within an explicit project context
