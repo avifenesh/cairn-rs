@@ -322,12 +322,56 @@ A `knowledge_document` artifact entry must use this payload shape:
 - `chunk_hints` where available
 - `retrieval_hints` where available
 
+`source_type` in v1 must use one of these canonical values:
+
+- `text_plain`
+- `text_markdown`
+- `text_html`
+- `json_structured`
+- `external_ref`
+
 Rules:
 
 - `knowledge_pack_logical_id` must point to the logical identity of the corresponding `knowledge_pack` artifact
+- `source_type` describes the canonical portable representation used in the bundle, not every possible source parser format from the originating system
 - `content` is the portable document body or portable structured representation, not a pointer to live runtime state
 - `chunk_hints` and `retrieval_hints` are advisory inputs to ingest, not a substitute for owned ingestion and retrieval processing
 - document-level provenance must remain visible even if chunk-level dedup occurs during import
+
+### Canonical Inline Content Forms
+
+If `source_type` is inline rather than external, `content` must use one of these canonical forms:
+
+- `text_plain`
+  - `content.kind = inline_text`
+  - `content.text`
+- `text_markdown`
+  - `content.kind = inline_text`
+  - `content.text`
+- `text_html`
+  - `content.kind = inline_text`
+  - `content.text`
+- `json_structured`
+  - `content.kind = inline_json`
+  - `content.value`
+
+Rules:
+
+- `inline_text` is the canonical v1 form for portable textual bodies
+- `inline_json` is the canonical v1 form for portable structured document content
+- exporters must normalize source-specific representations into one of these inline forms or into the canonical external-reference form below
+- bundle producers must not invent additional inline content kinds in v1
+
+### Source-Type Normalization Rule
+
+The portable bundle contract is stricter than the full ingest/parser surface.
+
+If an originating document type does not map cleanly to one of the canonical v1 `source_type` values:
+
+- the exporter must normalize it into one of the canonical inline forms, or
+- export it as `source_type = external_ref` using the canonical external-reference form
+
+This keeps the portable artifact contract stable even while the retrieval system evolves to support more document parsers over time.
 
 ### Binary and External Content Rule
 
@@ -349,6 +393,7 @@ The canonical external-reference form is:
 
 Rules:
 
+- when `content.kind = external_ref`, `source_type` must be `external_ref`
 - `ref_type` in v1 may be `file`, `object_store`, or `url`
 - `uri` identifies the external content location or retrieval handle
 - `sha256` is the canonical integrity field when external content is referenced
