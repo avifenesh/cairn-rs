@@ -595,13 +595,22 @@ Every plugin execution in v1 must run under the minimum host-managed isolation f
 - out-of-process supervision
 - explicit permission grants
 - bounded environment inheritance
-- bounded filesystem scope
-- bounded network scope
+- no direct access to product persistence handles or raw secret stores
 - host-enforced timeout and cancellation
 - host-enforced resource limits
-- no direct access to product persistence handles or raw secret stores
 
 This floor is mandatory in all deployment modes.
+
+### Isolation Guarantees By Execution Class
+
+The product distinguishes between:
+
+- protocol- and host-level restriction
+- OS- or sandbox-level confinement
+
+Both execution classes must satisfy the mandatory isolation floor.
+
+Only `sandboxed_process` is required to provide enforced OS-level confinement for filesystem and network access.
 
 ### Execution Classes
 
@@ -613,7 +622,9 @@ V1 has two canonical execution classes:
 `supervised_process` means:
 
 - plugin runs as a supervised child process
-- isolation comes from process boundary, permission model, scope restrictions, and host-managed limits
+- isolation comes from process boundary, permission model, scoped inputs, allowlisted environment, and host-managed limits
+- the host must not pass ambient credentials, unrestricted working directories, or unrestricted service handles into the process
+- filesystem and network scope are policy-bounded by what the host provides and what the plugin is invoked with, but not guaranteed by an additional OS-level sandbox boundary
 - suitable for local development and trusted deployment-local plugins when policy allows
 
 `sandboxed_process` means:
@@ -635,6 +646,16 @@ When `sandboxed_process` is used, the sandbox must provide all of the following:
 
 The product contract defines these required properties even if the exact sandbox backend differs by deployment.
 
+### Filesystem and Network Guarantee Boundary
+
+In v1:
+
+- `supervised_process` may use scoped paths, scoped credentials, and invocation policy to limit what the plugin can practically do
+- `supervised_process` does not claim enforced OS-level filesystem or network isolation
+- `sandboxed_process` is the only execution class that satisfies enforced filesystem/network confinement requirements
+
+Any plugin that requires enforced confinement rather than trust-plus-policy must run as `sandboxed_process`.
+
 ### Deployment Mode Expectations
 
 In local mode:
@@ -647,6 +668,7 @@ In self-hosted team mode:
 - the product must support policy-enforced `sandboxed_process` execution
 - customer-installed plugins and plugins granted high-risk capabilities should default to `sandboxed_process`
 - `supervised_process` may still be allowed for explicitly trusted plugins if operator policy permits it
+- policies that require enforced filesystem or network confinement must select `sandboxed_process`
 
 ### Canonical Backend Stance
 
@@ -842,3 +864,4 @@ Proceed assuming:
 - the minimum host-managed isolation floor is mandatory in all modes
 - local mode may default to `supervised_process`
 - self-hosted team mode must support policy-enforced `sandboxed_process` execution
+- only `sandboxed_process` provides enforced filesystem/network confinement in v1
