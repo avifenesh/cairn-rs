@@ -67,6 +67,20 @@ Rules:
 - sessions do not use `paused`; pause belongs to runs/tasks
 - session state is derived from run outcomes plus explicit close/archive actions
 
+### Session Outcome Derivation
+
+Session outcome is derived by these rules:
+
+1. if the session is explicitly archived, state is `archived`
+2. else if any run in the session is non-terminal, state remains `open`
+3. else if the latest root run ended `failed`, the session is `failed`
+4. else if the latest root run ended `completed` or `canceled`, the session is `completed`
+5. else the session remains `open` until explicitly reconciled
+
+`root run` means a run that is not a child run of another run in the same session lineage.
+
+This prevents child-run failures from silently overriding the parent session outcome while still allowing the parent run to fail explicitly when child work fails.
+
 ### Run States
 
 - `pending`
@@ -204,6 +218,31 @@ Required linkage fields:
 - child_task_id
 - child_session_id
 - child_run_id if created immediately
+
+### Child Run Timing
+
+Child run creation is not eager by default.
+
+Canonical rule:
+
+- subagent spawn synchronously creates:
+  - child task
+  - child session
+- child run is created when the child task transitions from `leased` to `running`
+
+Why:
+
+- task ownership is the schedulable truth
+- child run should represent actual execution, not merely intent
+- this keeps recovery and replay aligned with real work start
+
+Allowed exception:
+
+- inline or foreground execution paths may create the child run immediately if the runtime also transitions the child task into execution in the same command flow
+
+Even in that case, the conceptual rule still holds:
+
+- child run creation coincides with actual execution start
 
 ## Synchronous vs Background Transitions
 

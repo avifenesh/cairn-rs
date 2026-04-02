@@ -104,6 +104,32 @@ Use project for:
 
 Projects should be where operators feel they “run a thing.”
 
+### Runtime Asset Rule
+
+All runtime-owned execution assets must be project-scoped in v1.
+
+This includes:
+
+- sessions
+- runs
+- tasks
+- approvals
+- checkpoints
+- mailbox messages
+- tool invocation records
+- project graph slices
+- project eval runs
+- project retrieval corpora and chunk projections
+
+Workspace scope may own shared inputs, defaults, and policy sets, but not live execution truth.
+
+Put differently:
+
+- workspaces own shared configuration and team-level defaults
+- projects own execution, memory, graph, prompt release, and eval reality
+
+This resolves the remaining workspace-vs-project ambiguity for parallel workers.
+
 ## Operator Profile Model
 
 Operator profile data is not product core logic and not project runtime state.
@@ -291,9 +317,8 @@ Focus on a clean tenant/workspace/project model that works for technical teams.
 
 ## Open Questions
 
-1. Should projects be mandatory for all runtime assets, or can some runtime assets live directly under a workspace?
-2. Which prompt libraries should be tenant-wide versus workspace-local by default?
-3. Which profile preferences are safe as operator-local overrides versus policy-controlled values?
+1. Which prompt libraries should be tenant-wide versus workspace-local by default?
+2. Which profile preferences are safe as operator-local overrides versus policy-controlled values?
 
 ## Decision
 
@@ -302,4 +327,5 @@ Proceed with:
 - mandatory system / tenant / workspace / project distinction in architecture
 - operator profile modeled separately from runtime assets
 - layered defaults with explicit override order
+- project-scoped ownership for all runtime execution assets
 - Phase 1 tenancy-aware schema for all core runtime, retrieval, graph, and eval entities

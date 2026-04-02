@@ -1032,6 +1032,7 @@ Initial RFC drafts live in [`docs/design/rfcs/`](./rfcs/README.md).
 Supporting decision tables:
 
 - [`COMPATIBILITY_BREAK_MATRIX.md`](./COMPATIBILITY_BREAK_MATRIX.md)
+- [`COMPATIBILITY_ROUTE_SSE_CATALOG.md`](./COMPATIBILITY_ROUTE_SSE_CATALOG.md)
 - [`GLIDEMQ_RESIDUAL_SCOPE.md`](./GLIDEMQ_RESIDUAL_SCOPE.md)
 
 ## glide-mq Boundary Decision

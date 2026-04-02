@@ -9,10 +9,10 @@ Purpose: convert the rewrite plan into concrete architecture decisions that para
 2. [RFC 002 - Runtime and Event Model](./002-runtime-event-model.md)
 3. [RFC 003 - Owned Retrieval Replacing Bedrock KB](./003-owned-retrieval.md)
 4. [RFC 004 - Graph and Eval Matrix Model](./004-graph-eval-matrix.md)
-5. [RFC 005 - Task, Session, Checkpoint Lifecycle](./005-task-session-checkpoint-lifecycle.md) - stub
+5. [RFC 005 - Task, Session, Checkpoint Lifecycle](./005-task-session-checkpoint-lifecycle.md)
 6. [RFC 006 - Prompt Registry and Release Model](./006-prompt-registry-release-model.md) - stub
-7. [RFC 007 - Plugin Protocol and Transport](./007-plugin-protocol-transport.md) - stub
-8. [RFC 008 - Tenant, Workspace, Profile Separation](./008-tenant-workspace-profile.md) - stub
+7. [RFC 007 - Plugin Protocol and Transport](./007-plugin-protocol-transport.md)
+8. [RFC 008 - Tenant, Workspace, Profile Separation](./008-tenant-workspace-profile.md)
 9. [RFC 009 - Provider Abstraction and Gateway Non-Goals](./009-provider-abstraction.md) - stub
 10. [RFC 010 - Operator Control Plane IA](./010-operator-control-plane-ia.md)
 11. [RFC 011 - Deployment Shape](./011-deployment-shape.md) - stub
@@ -24,6 +24,7 @@ Purpose: convert the rewrite plan into concrete architecture decisions that para
 - Resolve open questions before large implementation branches diverge.
 - When an RFC changes, update the rewrite plan and any dependent RFCs.
 - Prefer tightening scope over adding parallel half-systems.
+- Use the compatibility docs under `docs/design/` as required companion inputs for runtime/API migration work.
 
 ## Decision Sequence
 
