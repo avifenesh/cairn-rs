@@ -154,6 +154,83 @@ Plugins may emit notifications with:
 
 Notifications must not mutate canonical host state directly.
 
+### Canonical Plugin -> Host Notification Bodies
+
+#### `log.emit`
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "log.emit",
+  "params": {
+    "level": "info",
+    "message": "cloned repository",
+    "invocationId": "inv_123"
+  }
+}
+```
+
+Required `params` fields:
+
+- `level`
+- `message`
+- `invocationId`
+
+Optional:
+
+- `fields`
+- `timestamp`
+
+#### `progress.update`
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "progress.update",
+  "params": {
+    "invocationId": "inv_123",
+    "message": "processed 5 of 10 items",
+    "percent": 50
+  }
+}
+```
+
+Required `params` fields:
+
+- `invocationId`
+- `message`
+
+Optional:
+
+- `percent`
+- `stage`
+- `etaMs`
+
+#### `event.emit`
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "event.emit",
+  "params": {
+    "invocationId": "inv_123",
+    "type": "signal.item_discovered",
+    "payload": {}
+  }
+}
+```
+
+Required `params` fields:
+
+- `invocationId`
+- `type`
+- `payload`
+
+Optional:
+
+- `externalId`
+- `timestamp`
+
 ## Plugin Manifest
 
 Every plugin must declare:

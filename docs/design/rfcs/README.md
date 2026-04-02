@@ -10,7 +10,7 @@ Purpose: convert the rewrite plan into concrete architecture decisions that para
 3. [RFC 003 - Owned Retrieval Replacing Bedrock KB](./003-owned-retrieval.md)
 4. [RFC 004 - Graph and Eval Matrix Model](./004-graph-eval-matrix.md)
 5. [RFC 005 - Task, Session, Checkpoint Lifecycle](./005-task-session-checkpoint-lifecycle.md)
-6. [RFC 006 - Prompt Registry and Release Model](./006-prompt-registry-release-model.md) - stub
+6. [RFC 006 - Prompt Registry and Release Model](./006-prompt-registry-release-model.md)
 7. [RFC 007 - Plugin Protocol and Transport](./007-plugin-protocol-transport.md)
 8. [RFC 008 - Tenant, Workspace, Profile Separation](./008-tenant-workspace-profile.md)
 9. [RFC 009 - Provider Abstraction and Gateway Non-Goals](./009-provider-abstraction.md) - stub
