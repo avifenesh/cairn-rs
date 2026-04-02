@@ -81,6 +81,19 @@ The graph must support:
 - support graph-assisted retrieval expansion
 - expose dependencies between prompts, skills, tools, and outcomes
 
+### V1 Graph Queries To Optimize
+
+V1 does not need arbitrary graph analytics, but it does need first-class support for these query families:
+
+- execution trace for a session, run, or task
+- subagent/task dependency path and rollback or resume lineage
+- prompt provenance for a runtime outcome
+- retrieval provenance from answer -> chunk -> document -> source
+- tool and policy involvement for a runtime decision
+- eval-to-asset lineage for prompt releases, provider routes, and retrieval policies
+
+These query families are the optimization target for v1 graph read models and APIs.
+
 ## Graph Storage Strategy
 
 Initial decision:
@@ -106,6 +119,17 @@ Initial matrices should include:
 
 All matrix rows and graph entities that represent owned product resources must carry tenant/workspace/project scope where applicable.
 
+### Matrix Ownership Rule
+
+Each matrix in v1 must have:
+
+- a canonical subject type
+- a canonical row grain
+- a canonical metric set
+- a canonical scope model
+
+Matrices are product state backed by stable schemas, not ad hoc UI calculations.
+
 ### Prompt Registry
 
 Prompts must become first-class assets with:
@@ -128,6 +152,30 @@ An eval run should include:
 - cost
 - version linkage
 - output artifacts
+
+### Built-In vs Plugin-Defined Metrics
+
+V1 distinguishes between:
+
+- built-in canonical metrics
+- plugin-defined supplemental metrics
+
+Built-in canonical metrics must exist wherever applicable for:
+
+- task success or outcome status
+- latency
+- cost
+- policy outcome
+- retrieval quality signals
+- prompt or route comparison summaries
+
+Plugin-defined metrics may add domain-specific measurements, but they must:
+
+- declare metric names and value types explicitly
+- attach to a canonical eval run
+- not replace the built-in core metrics required for operator comparison
+
+This keeps the product comparable out of the box while still allowing extension.
 
 ## Product Surfaces
 
@@ -152,12 +200,46 @@ These systems should reinforce one another:
 
 This should not be two isolated subsystems.
 
+### Prompt Rollout Alignment
+
+Prompt rollout flexibility in v1 is defined by RFC 006.
+
+For graph and matrix purposes, assume:
+
+- rollout is explicit selector-based activation
+- no percentage rollout in v1
+- no weighted live prompt traffic splitting in v1
+
+Graph and eval surfaces should therefore compare:
+
+- releases across explicit selectors
+- releases across eval runs
+- releases before and after promotion or rollback
+
+They do not need to model live percentage traffic allocation in v1.
+
 ## Initial Implementation Rules
 
 - every important runtime entity must be graph-linkable
 - every prompt release and eval run must be recorded as durable product state
 - every matrix must have a stable backing schema, not just derived UI logic
 - graph and matrix outputs must be accessible through API and UI
+- matrix configuration must be bounded by product-defined subjects, scopes, and metrics
+
+### Operator Configurability Rule
+
+Operators may configure in v1:
+
+- which built-in matrix views are enabled for a project or workspace
+- threshold and highlight policies for built-in metrics
+- which supplemental plugin-defined metrics are visible or eligible in specific views
+- comparison windows and grouping dimensions where the backing schema supports them
+
+Operators may not define in v1:
+
+- arbitrary new matrix subject types in the core product
+- arbitrary new join logic between graph and eval systems
+- matrices whose semantics are known only to one plugin without canonical eval-run linkage
 
 ## Non-Goals
 
@@ -172,10 +254,8 @@ Focus on product explanations, provenance, and decision-quality loops.
 
 ## Open Questions
 
-1. Which graph queries matter enough to optimize in v1?
-2. How flexible do prompt rollouts need to be in the first release?
-3. Which eval metrics should be built in versus plugin-defined?
-4. How much of matrix construction should be operator-configurable in v1?
+1. Should v1 expose graph traversal as a general query API, or only through product-shaped read endpoints for the optimized query families?
+2. Which built-in retrieval quality metrics should be mandatory in the first sellable release versus added after early operator feedback?
 
 ## Decision
 
@@ -184,3 +264,6 @@ Proceed with:
 - graph as a first-class product-owned model implemented in the main store first
 - prompt registry and eval matrices as first-class product systems
 - APIs and UI surfaces that make provenance and evaluation inspectable
+- the optimized v1 graph query families defined above
+- built-in canonical metrics plus supplemental plugin-defined metrics
+- bounded operator configurability over product-defined matrices rather than arbitrary matrix construction
