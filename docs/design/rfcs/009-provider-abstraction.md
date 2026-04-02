@@ -292,13 +292,23 @@ Required fields:
 
 ### Route Decision
 
-A route decision is the summarized runtime outcome for one provider dispatch.
+A route decision is the summarized runtime outcome for one logical provider-routed request for one operation kind.
+
+There is exactly one route decision per logical runtime request for one operation kind.
+
+That one decision may contain:
+
+- many route attempts
+- zero or more dispatched provider calls
+
+This means post-dispatch fallback remains part of one logical decision rather than creating a second decision object per dispatched candidate.
 
 Required fields:
 
 - `route_decision_id`
 - `project_id`
 - `operation_kind`
+- `terminal_route_attempt_id` when at least one candidate reached dispatch
 - `selected_provider_binding_id` when a route is selected
 - `selected_route_attempt_id` when a route is selected
 - `selector_context`
@@ -340,7 +350,7 @@ Required fields:
 - `cost`
 - `error_class` where applicable
 
-Every executed provider call must belong to exactly one route decision and exactly one selected route attempt.
+Every executed provider call must belong to exactly one route decision and exactly one dispatched route attempt.
 
 Skipped and vetoed route attempts must not create provider-call records.
 
@@ -545,6 +555,22 @@ Fallback may be triggered by:
 
 Fallback must not be triggered silently for semantic dissatisfaction in v1. That belongs to evals, policy, or orchestrator behavior, not hidden provider routing.
 
+### Post-Dispatch Fallback Representation
+
+Post-dispatch fallback is represented inside one route decision.
+
+The canonical model is:
+
+- one logical runtime request creates one `route_decision`
+- every considered candidate becomes a `route_attempt`
+- every dispatched candidate creates one `provider_call`
+- if a dispatched candidate fails and the policy allows fallback, the next candidate becomes another `route_attempt` and may produce another `provider_call`
+- the route decision closes only when one candidate succeeds, the runtime is cancelled, or no viable candidates remain
+
+V1 must not create a new route decision object for each dispatched fallback candidate.
+
+This keeps runtime, graph, eval, API, and UI workers aligned on one operator-visible story per logical request.
+
 ### Operation Boundaries
 
 Fallback is operation-specific.
@@ -613,15 +639,19 @@ One runtime dispatch must be explainable through this chain:
 
 - one `route_decision`
 - one or more `route_attempt` rows linked by `route_decision_id`
-- zero or one `provider_call` rows linked to the selected route attempt
+- zero or more `provider_call` rows linked to dispatched route attempts
 
 Rules:
 
 - every route attempt belongs to exactly one route decision
 - every route decision may have many route attempts
-- every executed provider call belongs to exactly one selected route attempt
-- a route decision with final status `selected` or `failed_after_dispatch` must have one provider call
+- every executed provider call belongs to exactly one route attempt whose decision is `selected` or `failed`
+- a dispatched route attempt must have exactly one provider call
+- a route decision with final status `selected` or `failed_after_dispatch` must have at least one provider call
 - a route decision resolved entirely by veto or skip must have no provider call
+- if `final_status=selected`, `selected_route_attempt_id` and `selected_provider_binding_id` are required
+- if `final_status=failed_after_dispatch`, `terminal_route_attempt_id` is required and `selected_route_attempt_id` must be null
+- if `final_status=no_viable_route`, all route attempts must be `vetoed` or `skipped`
 
 This linkage is canonical for graph, eval, audit, and operator explanation work.
 
