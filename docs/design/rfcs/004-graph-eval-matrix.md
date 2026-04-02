@@ -109,7 +109,7 @@ Prompts must become first-class assets with:
 
 - versions
 - release tags
-- approval state
+- release lifecycle state
 - rollout target
 - rollback linkage
 - associated evaluation history

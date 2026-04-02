@@ -110,7 +110,6 @@ Required fields:
 - `release_tag`
 - `state`
 - `rollout_target`
-- `approval_state`
 - `created_at`
 - `created_by`
 
@@ -120,16 +119,40 @@ Required fields:
 - `proposed`
 - `approved`
 - `active`
-- `rolled_back`
-- `replaced`
+- `rejected`
 - `archived`
 
-`rollout_target` in v1:
+`rollout_target` in v1 is a structured selector, not a loose label.
+
+It must contain:
+
+- `kind`
+- `selector`
+
+Supported `kind` values in v1:
 
 - `project_default`
 - `agent_type`
 - `task_type`
 - `routing_slot`
+
+Examples:
+
+```json
+{ "kind": "project_default", "selector": {} }
+```
+
+```json
+{ "kind": "agent_type", "selector": { "agentType": "planner" } }
+```
+
+```json
+{ "kind": "task_type", "selector": { "taskType": "review" } }
+```
+
+```json
+{ "kind": "routing_slot", "selector": { "slot": "fallback_1" } }
+```
 
 ### Prompt Release Action
 
@@ -145,6 +168,93 @@ Every rollout, approval, activation, rollback, or archive operation must emit a 
 - `created_at`
 - optional `from_release_id`
 - optional `to_release_id`
+
+## Canonical Release Lifecycle
+
+There is one canonical lifecycle field: `state`.
+
+V1 must not introduce a second orthogonal `approval_state` field.
+
+Approval is represented by the release entering either:
+
+- `approved`
+- `rejected`
+
+This avoids split-brain semantics between lifecycle and approval.
+
+### State Meanings
+
+- `draft`
+  - release object exists but is not yet awaiting operator decision
+- `proposed`
+  - release is ready for operator review and not deployable yet
+- `approved`
+  - release is approved for activation but not currently active
+- `active`
+  - release is the live release for its selector
+- `rejected`
+  - release was reviewed and rejected for activation
+- `archived`
+  - release is retained only for history
+
+### Allowed Transitions
+
+- `draft -> proposed`
+- `draft -> archived`
+- `proposed -> approved`
+- `proposed -> rejected`
+- `proposed -> archived`
+- `approved -> active`
+- `approved -> archived`
+- `active -> approved`
+- `active -> archived`
+- `rejected -> archived`
+
+### Activation Rule
+
+Activating a release:
+
+- moves the selected release to `active`
+- moves any currently active release for the same project/selector/prompt-asset tuple back to `approved`
+- emits a release action recording the replacement
+
+There is never more than one `active` release for the same:
+
+- `project_id`
+- `prompt_asset_id`
+- `rollout_target`
+
+## Target Resolution Rules
+
+Prompt release selection must be deterministic.
+
+### Selector Precedence
+
+When multiple active releases could match a runtime context, precedence is:
+
+1. `routing_slot`
+2. `task_type`
+3. `agent_type`
+4. `project_default`
+
+This means the most specific matching selector wins.
+
+### Uniqueness Rule
+
+For a given project, prompt asset, and selector, there may be at most one active release.
+
+This removes tie-breaking ambiguity at runtime.
+
+### Runtime Resolution Inputs
+
+Runtime prompt resolution may use:
+
+- project ID
+- agent type
+- task type
+- routing slot
+
+If a more specific selector is absent, the runtime falls back by precedence order until a matching active release is found.
 
 ## Scope Rules
 
@@ -192,29 +302,32 @@ Approval is required before a prompt release may become `active` when:
 - the release replaces an existing active release
 - the project policy requires approval for prompt changes
 
-For v1, assume approval is required for all non-draft releases unless the project policy explicitly allows auto-activation.
+For v1, assume approval is required for all releases that leave `draft`, unless the project policy explicitly allows `draft -> approved` without review.
 
 ### Activation
 
-Only one active prompt release may exist per:
+Activation is only valid from `approved`.
 
-- project
-- rollout target
-- prompt asset
-
-Activating a new release automatically marks the previous active release for the same tuple as `replaced`.
+Only one active prompt release may exist per project/prompt asset/selector tuple.
 
 ### Rollback
 
 Rollback must not mutate old releases.
 
-Rollback creates a new release action and re-activates a prior approved release or creates a rollback release that points at the prior prompt version.
+Rollback has one canonical v1 behavior:
+
+- it re-activates a previously approved release for the same project/prompt asset/selector tuple
+- it emits a release action with `action_type=rollback` and explicit `from_release_id` / `to_release_id`
+
+Rollback does not create a synthetic new release object in v1.
 
 Required rollback properties:
 
 - auditable actor and reason
 - explicit linkage to the replaced release
 - no loss of historical state
+
+If the target prior version does not already have an approved release for that selector, operators must create and approve a normal release first.
 
 ## Runtime Binding Rules
 
@@ -305,8 +418,9 @@ These do not all need bespoke visual polish in v1, but the read models must exis
 
 - prompt versions are immutable
 - prompt releases are the project-scoped deployable unit
-- one active release per project/rollout-target/prompt-asset tuple
+- one active release per project/selector/prompt-asset tuple
 - rollback is an explicit action, not hidden mutation
+- rollback re-activates a prior approved release; it does not create a new release object in v1
 - runtime usage must record prompt release linkage when applicable
 - evals and graph must link directly to prompt objects
 
@@ -323,7 +437,7 @@ For v1, do not optimize for:
 ## Open Questions
 
 1. Do we need percentage rollout or can v1 stop at explicit release activation per target?
-2. Which rollout targets beyond `project_default` and `agent_type` are truly needed in v1?
+2. Are `task_type` and `routing_slot` both justified in v1, or should one be deferred?
 3. Which approval policies should be hard defaults versus project-configurable rules?
 
 ## Decision
@@ -333,6 +447,7 @@ Proceed assuming:
 - prompt assets and versions are scoped library objects
 - prompt releases are project-scoped deployable bindings
 - versions are immutable
-- releases are auditable and approval-aware
-- rollback is explicit and durable
+- release approval is represented in the canonical lifecycle state machine
+- selector precedence is deterministic
+- rollback always re-activates a prior approved release
 - prompt/eval/graph linkage is required product state, not optional observability
