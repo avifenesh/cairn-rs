@@ -67,6 +67,26 @@ V1 structured bundle import/export covers:
 
 These are the only first-class structured bundle families in v1.
 
+### Physical Format Rule
+
+V1 uses one canonical physical structured bundle format:
+
+- one JSON document
+- one canonical bundle envelope
+- one `bundle_type` discriminator
+- one `artifacts` array carrying typed artifact entries
+
+This means prompt-library bundles and curated-knowledge-pack bundles are sibling bundle types inside one physical format family, not two unrelated physical formats.
+
+Operators and workers should be able to reason about:
+
+- one parser
+- one validator
+- one provenance envelope
+- one import/export service contract
+
+Variation belongs in typed bundle and artifact contents, not in separate physical file formats.
+
 ### Direct File Import
 
 Direct document/file import remains supported for onboarding and knowledge ingest, but it is not itself the canonical portable bundle format.
@@ -103,6 +123,16 @@ Required top-level fields:
 - project where applicable
 
 `provenance` must include enough metadata to explain where the bundle came from and how it was produced.
+
+### Canonical Serialization
+
+V1 canonical serialization is:
+
+- UTF-8 JSON
+- one top-level bundle object
+- stable field names as defined by this RFC
+
+Compression, archive wrapping, or signed envelope layers may be added later, but they are not the canonical v1 format.
 
 ## Canonical Identity and Provenance Envelope
 
@@ -400,9 +430,8 @@ The goal is a safe, inspectable, portable artifact contract for the highest-valu
 
 ## Open Questions
 
-1. Should prompt libraries and curated knowledge packs share one physical JSON bundle format with typed artifacts, or use separate top-level bundle formats under one service contract?
-2. How much chunk-level data should be portable in curated knowledge packs versus re-derived at import time?
-3. Do we need signed bundle integrity metadata in v1, or is content hashing sufficient initially?
+1. How much chunk-level data should be portable in curated knowledge packs versus re-derived at import time?
+2. Do we need signed bundle integrity metadata in v1, or is content hashing sufficient initially?
 
 ## Decision
 
@@ -410,5 +439,6 @@ Proceed assuming:
 
 - v1 gets a dedicated import/export contract
 - prompt libraries and curated knowledge packs are the first-class structured bundle families
+- one physical JSON bundle format is canonical in v1
 - one canonical bundle envelope, provenance model, and reconciliation model is required
 - import/export remains separate from full runtime-state backup and restore
