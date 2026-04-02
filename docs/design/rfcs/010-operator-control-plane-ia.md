@@ -231,6 +231,26 @@ That means:
 
 This keeps the first release aligned with RFC 008 scoping and reduces accidental cross-project blast radius.
 
+### Tenant Roll-Up Mutability Rule
+
+In v1, tenant-level roll-up views are read-only for operational workflow actions.
+
+Allowed tenant-level mutations in v1 are limited to:
+
+- settings administration
+- policy-baseline administration
+- credential and provider administration
+- workspace or project provisioning actions where those belong in-product
+
+Tenant-level roll-up views must not be the place for:
+
+- bulk run retry or resume
+- bulk prompt rollout or rollback
+- bulk source/channel operational intervention across unrelated projects
+- other broad operational mutations that bypass explicit project context
+
+This keeps tenant scope aligned to administration and governance rather than becoming a high-blast-radius operations surface in the first release.
+
 ## Navigation Rule
 
 The control plane should be product-first, not subsystem-first.
@@ -253,7 +273,7 @@ Focus on the minimum workflows that make the product operable.
 
 ## Open Questions
 
-1. Should tenant-level roll-up views in v1 be read-only except for settings/policy administration, or should some operational bulk actions also exist there?
+1. Should workspace-level aggregated views in v1 allow a limited set of bulk operational actions across projects when all affected items share the same workspace policy boundary?
 
 ## Decision
 
@@ -264,3 +284,4 @@ Proceed assuming:
 - `graph` is the only surface that requires a genuinely visual relationship view in v1; the rest may be table/detail-first where appropriate
 - bulk actions are required only for approvals, selected source/channel operations, and safe prompt housekeeping actions
 - project-scoped and workspace-aggregated visibility are first-class; most operational mutations happen within an explicit project context
+- tenant-level roll-up views are read-only for operational actions in v1, except for settings, policy, credential/provider, and provisioning administration
