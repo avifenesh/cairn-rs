@@ -1029,6 +1029,11 @@ These should be decided by short RFCs, not by drift during implementation.
 
 Initial RFC drafts live in [`docs/design/rfcs/`](./rfcs/README.md).
 
+Supporting decision tables:
+
+- [`COMPATIBILITY_BREAK_MATRIX.md`](./COMPATIBILITY_BREAK_MATRIX.md)
+- [`GLIDEMQ_RESIDUAL_SCOPE.md`](./GLIDEMQ_RESIDUAL_SCOPE.md)
+
 ## glide-mq Boundary Decision
 
 For the Rust rewrite, glide-mq is not the durable source of truth for:
