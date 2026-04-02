@@ -121,6 +121,17 @@ Required projections:
 - graph edges for execution and provenance
 - evaluation scorecards
 
+### Projection Classes
+
+V1 distinguishes between:
+
+- synchronous operational projections
+- asynchronous derived projections
+
+Synchronous operational projections are the read models the runtime needs in order to make correct next decisions.
+
+Asynchronous derived projections are rebuildable views for analysis, graphing, search, and operator experience.
+
 ## Persistence Rules
 
 - commands are accepted through service boundaries
@@ -133,6 +144,46 @@ This implies:
 - append-only event log for critical facts
 - state tables for efficient operational reads
 - idempotency keys for externally triggered commands
+
+### Canonical Event-History Classes
+
+V1 uses two durability classes:
+
+- `full_history`
+- `current_state_plus_audit`
+
+`full_history` means:
+
+- every accepted event for the entity is retained in the canonical event log
+- entity state may be reconstructed from event history plus snapshots if later introduced
+- replay and timeline views are product features, not best-effort logging
+
+`current_state_plus_audit` means:
+
+- the canonical store keeps durable current state
+- important transitions still emit durable audit events
+- replay does not require reconstructing the entity solely from a complete append-only entity history
+
+### Entity Classification
+
+The following entities are `full_history` in v1:
+
+- session
+- run
+- task
+- approval request
+- checkpoint
+- mailbox message
+- tool invocation
+
+The following entities are `current_state_plus_audit` in v1:
+
+- signal event
+- memory ingest job
+- prompt release
+- evaluation run
+
+This keeps the runtime spine fully replayable while allowing adjacent subsystems with their own RFCs to keep a simpler canonical state model where full entity-event history is not required for correctness.
 
 ## Ordering and Concurrency
 
@@ -153,6 +204,34 @@ Requirements:
 - resume from explicit checkpoint state
 - incomplete run recovery
 - replay-friendly linking between checkpoints, tasks, and runs
+
+### Replay Support In V1
+
+V1 replay support means:
+
+- the system can reconstruct `full_history` entities from durable event history
+- synchronous projections may be rebuilt from the canonical event log
+- asynchronous derived projections must be rebuildable from canonical runtime state and events
+- operator surfaces may replay runtime facts and timelines from durable history
+- SSE consumers may resume from durable event positions within the retained replay window
+
+V1 replay support does not require:
+
+- whole-deployment time travel rollback
+- arbitrary historical reconstruction for every non-runtime subsystem
+- infinite retention for every derived event feed
+
+### Retention Rule
+
+For `full_history` entities in v1:
+
+- canonical runtime event history is retained for the life of the deployment unless an explicit product retention policy later says otherwise
+- replayability must not depend on transient broker retention or UI caches
+
+For SSE/event-feed replay in v1:
+
+- the product must support a durable replay window sufficient for client resume and operator inspection
+- the replay window may be implemented as a retained subset or cursorable view over canonical event history
 
 ## Mailbox Model
 
@@ -200,6 +279,23 @@ SSE should expose runtime facts and projection updates, not ad-hoc UI-only event
 
 This gives the frontend and external operators one consistent model.
 
+### Projection Timing Rules
+
+The following must be synchronous with command/event commit in v1:
+
+- entity version advancement
+- current-state tables for session, run, task, approval request, checkpoint, mailbox message, and tool invocation
+- any read model required to validate the next command against canonical runtime state
+
+The following may be asynchronously materialized in v1:
+
+- graph edges for execution and provenance
+- evaluation scorecards and aggregate analytics
+- broader signal feeds and cross-cutting operator digests
+- search-oriented or reporting-oriented denormalizations
+
+If an operator or API surface needs strict read-after-write correctness for workflow control, it must read from canonical state or synchronous projections, not from asynchronous derived views.
+
 ## Sidecar Boundary
 
 The runtime may use glide-mq or another queue substrate during migration, but:
@@ -215,6 +311,19 @@ must be owned by the Rust runtime and store.
 
 Queue infrastructure may remain for async dispatch or streaming, but not as the canonical source of runtime truth.
 
+### External Worker Rule
+
+V1 supports external execution workers, but not external canonical command processors.
+
+That means:
+
+- canonical command validation and event persistence remain owned by the Rust runtime
+- external workers may claim leased tasks, perform work, emit progress/heartbeats, and report outcomes through runtime-owned APIs
+- external workers must not write canonical runtime events directly
+- any sidecar, queue, or worker substrate remains transport/execution infrastructure, not a second source of truth
+
+This keeps external execution possible without splitting the event model across multiple authorities.
+
 ## What Not To Do
 
 Do not:
@@ -226,13 +335,18 @@ Do not:
 
 ## Open Questions
 
-1. Which entities need full event history, and which only need durable current state plus audit events?
-2. How much event replay should the product support in v1?
-3. Which projections should be synchronous versus asynchronously materialized?
-4. Should command handling be in-process only in v1, or should it already support external workers cleanly?
+1. Should v1 expose full event-history export for `full_history` entities directly, or rely on projections plus the canonical event log internally?
+2. Should the SSE replay window be bounded only by retention policy, or should v1 define a smaller operational replay SLA for client resume?
 
 ## Decision
 
 Implement the runtime around explicit commands, durable events, and projections.
 
 Do not require pure event sourcing everywhere, but do require replayable, inspectable state transitions for all critical runtime entities.
+
+Proceed assuming:
+
+- the runtime spine uses the `full_history` vs `current_state_plus_audit` split defined above
+- replay in v1 covers canonical runtime entities and rebuildable projections, not whole-system time travel
+- synchronous projections are reserved for correctness-critical runtime state
+- external workers may execute and report work, but canonical command handling and event persistence remain Rust-runtime-owned
