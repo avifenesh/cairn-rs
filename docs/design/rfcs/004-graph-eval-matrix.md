@@ -94,6 +94,18 @@ V1 does not need arbitrary graph analytics, but it does need first-class support
 
 These query families are the optimization target for v1 graph read models and APIs.
 
+### Graph Query Surface In V1
+
+V1 exposes graph capabilities primarily through product-shaped read endpoints for the optimized query families above.
+
+This means:
+
+- operators and product APIs query named graph views aligned to product workflows
+- the core v1 contract does not require a fully general graph traversal API
+- internal graph storage and read models may still support richer traversal internally where needed
+
+If a more general traversal API appears in v1, it is additive and non-canonical. Workers must not assume one exists for core product flows.
+
 ## Graph Storage Strategy
 
 Initial decision:
@@ -272,6 +284,18 @@ Plugin-defined metrics may add domain-specific measurements, but they must:
 
 This keeps the product comparable out of the box while still allowing extension.
 
+### Mandatory Retrieval-Quality Metrics In V1
+
+For retrieval-oriented evals and matrices, the first sellable release must include built-in metrics for:
+
+- hit-at-k style retrieval success
+- citation or evidence coverage where the workflow expects cited answers
+- source diversity or corroboration signal
+- retrieval latency
+- retrieval cost where provider-backed embedding or reranking contributes cost
+
+Where a workflow does not use citations or explicit evidence packaging, the product may omit citation-specific reporting for that run, but it must still preserve the canonical metric vocabulary and mark non-applicable metrics explicitly.
+
 ## Product Surfaces
 
 The operator should be able to answer:
@@ -349,8 +373,7 @@ Focus on product explanations, provenance, and decision-quality loops.
 
 ## Open Questions
 
-1. Should v1 expose graph traversal as a general query API, or only through product-shaped read endpoints for the optimized query families?
-2. Which built-in retrieval quality metrics should be mandatory in the first sellable release versus added after early operator feedback?
+1. Should v1 add a non-canonical advanced graph traversal API for internal/admin use, or defer that entirely until after the first sellable release?
 
 ## Decision
 
