@@ -206,6 +206,29 @@ The architecture must leave room for:
 
 But v1 must not require a hosted identity control plane operated by Cairn.
 
+### Minimum Auth Integrations For The First Sellable Release
+
+The first sellable self-hosted release must support:
+
+- built-in local auth for bootstrap and break-glass administration
+- OIDC-based SSO for team mode
+- scoped API or service tokens for automation
+
+OIDC is the required external identity integration in v1.
+
+SAML, LDAP, and SCIM may be added later, but they are not required to make the first sellable self-hosted release coherent.
+
+### Auth Usage Rules
+
+The canonical v1 auth stance is:
+
+- local mode may use built-in local auth as the primary sign-in method
+- self-hosted team mode should recommend OIDC as the primary team sign-in path
+- built-in local auth remains available in team mode for bootstrap and controlled break-glass use
+- service and automation access must use explicit scoped tokens rather than human session reuse
+
+This keeps the first release deployable without overcommitting to every enterprise federation protocol on day one.
+
 ### Authorization Model
 
 Permissions and policy evaluation remain in-product and scope-aware regardless of deployment mode.
@@ -230,6 +253,63 @@ This includes:
 - Cairn may store encrypted credential metadata and references in-product
 - Cairn must not require vendor-hosted secret custody to operate
 - later hybrid or managed offerings may introduce alternative custody models, but those must be optional and additive
+
+### Credential Encryption Requirement
+
+Persisted credentials in self-hosted team mode must be encrypted at the application layer before storage.
+
+This requirement applies to:
+
+- provider credentials
+- channel credentials
+- source connection credentials
+- webhook secrets
+- any other persisted secret material used by the product
+
+V1 self-hosted team mode must not store these secrets in plaintext in Postgres.
+
+### Canonical Key Management Model
+
+The canonical v1 model is deployment-controlled envelope encryption.
+
+Required properties:
+
+- one configured active key-encryption-key source for the deployment
+- key version metadata stored with encrypted secrets
+- support for re-encrypting stored secrets under a newer key version
+- no Cairn-operated key escrow requirement
+
+The active key-encryption-key source in v1 may be:
+
+- an operator-supplied key from environment, file, or secret mount
+- a deployment-local encryption service integration added later
+
+V1 must not require a hosted external key-management dependency operated by Cairn.
+
+### Local Mode Key Behavior
+
+Local mode may use a product-generated local encryption key for convenience if the operator does not supply one.
+
+That local key must still be treated as deployment state, not as a hardcoded product secret.
+
+### Team Mode Key Behavior
+
+Self-hosted team mode requires an explicit operator-controlled encryption key configuration before persisted credential features are considered production-ready.
+
+If no valid key-encryption-key source is configured in team mode:
+
+- the product should fail closed for persisted credential operations, or
+- block completion of the production bootstrap path until the key source is configured
+
+### Rotation and Recovery Expectations
+
+V1 does not need a full enterprise key-management suite, but it must support:
+
+- key version tracking
+- explicit rotation
+- rewrap or re-encrypt flow for stored secrets
+
+This keeps the deployment contract compatible with later Vault/KMS/HSM integrations without making them required on day one.
 
 ## Plugin Boundary Implications
 
@@ -290,6 +370,9 @@ The control plane must let operators inspect and manage:
 - poller/scheduler health
 - channel delivery health
 - credential metadata and scope
+- auth provider status
+- key-management configuration status
+- secret re-encryption or rotation status where applicable
 
 These surfaces must work in both first-class modes, even if local mode is simpler.
 
@@ -358,8 +441,6 @@ The goal is a deployable, operable self-hosted control plane first.
 ## Open Questions
 
 1. Should v1 team mode support a one-binary all-in-one production deployment officially, or only as a convenience path?
-2. How much built-in credential encryption/key management should be mandatory in self-hosted team mode versus deployment-configurable?
-3. Which auth integrations are mandatory in the first sellable self-hosted release?
 
 ## Decision
 
@@ -370,3 +451,5 @@ Proceed assuming:
 - hybrid remains architecture-compatible but not a first-class supported operating model in v1
 - managed multi-customer control plane is out of scope for v1
 - plugins, secrets, providers, channels, and runtime execution stay inside the customer deployment boundary in first-class modes
+- self-hosted team mode requires operator-controlled credential encryption at rest
+- OIDC plus built-in local auth and scoped service tokens form the minimum auth stack for the first sellable self-hosted release
