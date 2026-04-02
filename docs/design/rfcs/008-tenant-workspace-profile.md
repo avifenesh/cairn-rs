@@ -216,6 +216,18 @@ If a prompt asset is:
 - primarily team-owned and team-operated, default it to workspace scope
 - centrally governed and intended for reuse across workspaces, default it to tenant scope
 
+### Adoption Rule For Centrally Governed Prompt Libraries
+
+In v1, tenant-scoped centrally governed prompt libraries are opt-in at workspace/project adoption time.
+
+That means:
+
+- tenant-scoped governed prompt assets may be visible and selectable to authorized workspace/project operators
+- they do not silently become effective workspace defaults just because they exist at tenant scope
+- adoption into workspace defaults or project runtime usage must be an explicit operator action
+
+This keeps centrally governed prompts powerful without turning tenant scope into an implicit override channel for every workspace.
+
 ## Legacy File Mapping
 
 The current personal overlay files should map into the new model as follows:
@@ -367,7 +379,7 @@ Focus on a clean tenant/workspace/project model that works for technical teams.
 
 ## Open Questions
 
-1. Should tenant-scoped centrally governed prompt libraries in v1 support mandatory inheritance into workspace defaults, or remain opt-in at workspace/project adoption time?
+1. Should some categories of tenant-scoped centrally governed prompt assets in v1 be marked non-optional for regulated workspaces through explicit policy, or should all adoption remain operator-driven?
 
 ## Decision
 
@@ -380,3 +392,4 @@ Proceed with:
 - Phase 1 tenancy-aware schema for all core runtime, retrieval, graph, and eval entities
 - workspace-scoped prompt libraries as the default authoring layer, with tenant scope reserved for centrally governed or cross-workspace libraries
 - operator-local preferences limited to ergonomic and presentation-level behavior, not canonical runtime or policy outcomes
+- tenant-scoped centrally governed prompt libraries are opt-in for workspace/project adoption in v1, not silently inherited as defaults
