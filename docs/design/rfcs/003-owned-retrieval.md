@@ -97,6 +97,18 @@ SQLite local mode should provide:
 
 ## Retrieval Pipeline
 
+### Service Shape In V1
+
+V1 uses one canonical retrieval service shape:
+
+- retrieval command handling and query execution run in-process with the main Cairn runtime/API roles
+- heavier ingest, parse, chunk, embed, and reindex work may execute asynchronously as runtime-owned jobs
+- those async jobs still report through runtime-owned command/event surfaces rather than acting as an independent retrieval authority
+
+V1 does not require a separately deployed retrieval worker service in order to claim owned retrieval.
+
+This keeps deployment shape aligned with RFC 011 while still allowing background ingest and reindex work.
+
 ### Ingest
 
 Every ingestable asset should pass through:
@@ -109,6 +121,20 @@ Every ingestable asset should pass through:
 - deduplication
 - embedding generation
 - index update
+
+### Supported Document Types For The First Sellable Release
+
+The first sellable release must support these canonical source types for owned retrieval ingest:
+
+- plain text
+- Markdown
+- HTML
+- structured JSON documents
+- curated knowledge-pack imports defined by RFC 013
+
+The first sellable release may additionally support extracted text from common office or PDF sources where a stable parser pipeline is available, but those formats are additive rather than required for the v1 product claim.
+
+V1 must normalize supported source types into portable owned retrieval documents with explicit provenance rather than keeping parser-specific opaque blobs as the main retrieval unit.
 
 ### Chunk Model
 
@@ -166,6 +192,48 @@ The retrieval system should explicitly score on:
 - recency of use, where appropriate
 
 These must be inspectable. Hidden heuristics are not enough.
+
+### Configurability Rule
+
+V1 splits scoring into:
+
+- canonical scoring dimensions
+- operator-tunable scoring policy
+
+Canonical scoring dimensions are fixed by the product contract and must remain present in every compliant retrieval implementation:
+
+- base semantic relevance
+- lexical relevance
+- freshness decay
+- staleness penalties
+- source credibility
+- corroboration
+- graph proximity
+- recency of use where enabled
+
+Operator-tunable scoring policy in v1 may control:
+
+- per-project or per-workspace weight presets
+- enable/disable of optional dimensions such as recency-of-use
+- freshness and staleness decay parameters within bounded ranges
+- retrieval mode selection defaults such as lexical-only, vector-only, or hybrid-first
+- reranker enablement where configured
+
+Operator-tunable scoring policy in v1 must not allow:
+
+- removal of required provenance and inspectability
+- arbitrary custom scoring code in the core runtime
+- hidden provider-specific heuristics that cannot be surfaced in diagnostics
+
+### Retrieval Diagnostics Requirement
+
+For every retrieval request in v1, the product must be able to expose:
+
+- the retrieval mode used
+- the candidate-generation stages used
+- the scoring dimensions that materially contributed
+- the effective scoring policy or preset applied
+- the reranker path used where applicable
 
 ## Deep Search
 
@@ -236,9 +304,7 @@ Focus on product-owned, inspectable retrieval for agent workloads.
 ## Open Questions
 
 1. How much lexical sophistication is needed beyond Postgres full-text for v1?
-2. Do we need a separate retrieval worker service in v1, or is an in-process service sufficient?
-3. Which document types must be supported in the first sellable release?
-4. How much of retrieval scoring should be configurable by operators in v1?
+2. Should extracted text from PDF/office sources be part of the first sellable release, or remain an additive parser package until parser quality is proven?
 
 ## Decision
 
@@ -249,5 +315,8 @@ Proceed with a Postgres-first owned retrieval stack using:
 - `pgvector` + HNSW
 - hybrid lexical + vector retrieval
 - operator-visible scoring and reranking
+- in-process canonical retrieval services with runtime-owned background ingest jobs
+- the supported v1 document-type floor defined above
+- fixed scoring dimensions with bounded operator-tunable scoring policy
 
 Bedrock KB becomes optional and transitional, not foundational.
