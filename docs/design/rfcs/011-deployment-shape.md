@@ -296,10 +296,18 @@ That local key must still be treated as deployment state, not as a hardcoded pro
 
 Self-hosted team mode requires an explicit operator-controlled encryption key configuration before persisted credential features are considered production-ready.
 
-If no valid key-encryption-key source is configured in team mode:
+If no valid key-encryption-key source is configured in team mode, the canonical v1 behavior is fail closed.
 
-- the product should fail closed for persisted credential operations, or
-- block completion of the production bootstrap path until the key source is configured
+That means:
+
+- persisted credential operations must be unavailable
+- production bootstrap must remain incomplete until a valid key-encryption-key source is configured
+
+For avoidance of doubt, this applies to:
+
+- credential create/update/import operations
+- credential decrypt/use operations that rely on persisted secret material
+- secret rotation or re-encryption operations
 
 ### Rotation and Recovery Expectations
 
@@ -453,3 +461,4 @@ Proceed assuming:
 - plugins, secrets, providers, channels, and runtime execution stay inside the customer deployment boundary in first-class modes
 - self-hosted team mode requires operator-controlled credential encryption at rest
 - OIDC plus built-in local auth and scoped service tokens form the minimum auth stack for the first sellable self-hosted release
+- self-hosted team mode without a valid configured key-encryption-key source must fail closed for persisted credential features and cannot complete production bootstrap
