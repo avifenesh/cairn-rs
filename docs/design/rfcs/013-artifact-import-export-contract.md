@@ -177,6 +177,28 @@ Operators must be able to answer:
 - which bundle introduced it
 - whether it was copied, reused, updated, skipped, or conflicted on import
 
+## Canonical Artifact Entry Shape
+
+Every entry in the `artifacts` array must use one canonical typed shape:
+
+- shared identity/provenance envelope fields from this RFC
+- one `payload` object whose schema is determined by `artifact_kind`
+
+Required entry fields:
+
+- `artifact_kind`
+- `artifact_logical_id`
+- `artifact_display_name`
+- `origin_scope`
+- `origin_artifact_id` where available
+- `content_hash`
+- `source_bundle_id`
+- `origin_timestamp`
+- `metadata`
+- `payload`
+
+The outer entry shape must stay consistent across bundle types. Variation belongs inside the typed `payload`.
+
 ## Prompt Library Bundle
 
 ### Contents
@@ -191,6 +213,57 @@ A `prompt_library_bundle` may contain:
 V1 prompt bundles must not directly carry live project-scoped prompt releases as portable authoritative runtime state.
 
 Project releases are deployment-local runtime choices per RFC 006.
+
+### Canonical Prompt Artifact Kinds
+
+V1 prompt-library bundles may contain these artifact kinds:
+
+- `prompt_asset`
+- `prompt_version`
+
+They may also carry non-canonical advisory records such as release recommendations, but those must not replace the canonical artifact kinds above.
+
+### Canonical `prompt_asset` Entry Payload
+
+A `prompt_asset` artifact entry must use this payload shape:
+
+- `name`
+- `kind`
+- `status`
+- `library_scope_hint`
+- `metadata`
+
+Rules:
+
+- `name` and `kind` must align with RFC 006 prompt-asset semantics
+- `library_scope_hint` may be `tenant` or `workspace`
+- this payload defines portable library identity, not deployment-local runtime release state
+
+### Canonical `prompt_version` Entry Payload
+
+A `prompt_version` artifact entry must use this payload shape:
+
+- `prompt_asset_logical_id`
+- `version_number`
+- `format`
+- `content`
+- `metadata`
+
+Rules:
+
+- `prompt_asset_logical_id` must point to the logical identity of the corresponding `prompt_asset` artifact
+- `version_number` is portable version ordering inside the bundle lineage, not a license to mutate an existing version in place
+- `content_hash` on the outer artifact entry remains the canonical integrity and dedup key
+- project release data must not be embedded here as if it were portable authoritative runtime state
+
+### Prompt Advisory Payloads
+
+Bundles may optionally include non-canonical prompt advisory payloads such as:
+
+- `release_recommendation`
+- `import_target_hint`
+
+These must be clearly typed as advisory and must not be treated as runtime truth on import.
 
 ### Materialization Rule
 
@@ -215,6 +288,57 @@ A `curated_knowledge_pack_bundle` may contain:
 - optional retrieval hints
 
 V1 knowledge-pack bundles are for curated knowledge import/export, not arbitrary full raw datastore export.
+
+### Canonical Curated Knowledge Artifact Kinds
+
+V1 curated-knowledge-pack bundles may contain these artifact kinds:
+
+- `knowledge_pack`
+- `knowledge_document`
+
+### Canonical `knowledge_pack` Entry Payload
+
+A `knowledge_pack` artifact entry must use this payload shape:
+
+- `name`
+- `description`
+- `target_scope_hint`
+- `metadata`
+
+Rules:
+
+- `target_scope_hint` may indicate the intended project or corpus style, but it is advisory and must not override explicit import target selection
+- this payload defines the portable curated pack identity, not the final ingested runtime state
+
+### Canonical `knowledge_document` Entry Payload
+
+A `knowledge_document` artifact entry must use this payload shape:
+
+- `knowledge_pack_logical_id`
+- `document_name`
+- `source_type`
+- `content`
+- `metadata`
+- `chunk_hints` where available
+- `retrieval_hints` where available
+
+Rules:
+
+- `knowledge_pack_logical_id` must point to the logical identity of the corresponding `knowledge_pack` artifact
+- `content` is the portable document body or portable structured representation, not a pointer to live runtime state
+- `chunk_hints` and `retrieval_hints` are advisory inputs to ingest, not a substitute for owned ingestion and retrieval processing
+- document-level provenance must remain visible even if chunk-level dedup occurs during import
+
+### Binary and External Content Rule
+
+V1 canonical bundle entries should prefer portable UTF-8 JSON-safe content representations.
+
+If content is too large or not naturally inline text:
+
+- the bundle may carry a structured external content reference in `content`
+- that reference must still participate in provenance and conflict handling
+
+V1 does not require binary-perfect embedding of every possible source type inside the first structured bundle format.
 
 ### Materialization Rule
 
