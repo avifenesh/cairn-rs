@@ -204,6 +204,56 @@ These must be created, selected, imported, or edited by the customer:
 
 The bootstrap flow must make this distinction clear.
 
+### Canonical Materialization Rule
+
+Shipped starter templates and shipped starter assets are system-scoped defaults.
+
+They must not become live customer runtime state by reference alone.
+
+The canonical rule in v1 is:
+
+1. the product ships immutable system-scoped starter definitions
+2. template selection records which starter template was chosen
+3. bootstrap materializes customer-scoped state from that template into tenant, workspace, or project scope as appropriate
+4. runtime and operator workflows operate on the materialized customer-scoped objects, not on the shipped system template objects
+
+This prevents starter content from behaving like hidden global state.
+
+### Materialization Rules By Asset Type
+
+#### Prompts
+
+- shipped starter prompt assets and versions may exist at system scope as product defaults
+- if a team chooses a starter template, any prompt assets that are expected to become customer-managed library content must be copied into tenant or workspace scope
+- any prompt used at runtime must be represented through project-scoped prompt releases per RFC 006
+- shipped system prompt assets must not be mutated in place by customer actions
+
+#### Policies
+
+- shipped starter policies are system-scoped defaults
+- effective policies used by a project must be materialized into workspace or project scope before enforcement
+- customer edits must apply to the materialized scoped policy objects, not the shipped system defaults
+
+#### Skills and Starter Packs
+
+- shipped starter skill packs may remain system-scoped installable defaults
+- project or workspace activation must be recorded as customer-scoped product state
+- if a team customizes a shipped skill pack beyond activation settings, the customized result must become tenant/workspace/project-owned state rather than mutating the shipped default
+
+#### Dashboards and Operator Views
+
+- shipped starter views may remain system-scoped templates
+- workspace or project enablement must still be recorded explicitly
+- customized operator views must become customer-scoped state
+
+### Upgrade Rule
+
+Later product upgrades may ship improved starter defaults.
+
+Those upgrades must not silently rewrite previously materialized customer-scoped prompt, policy, skill, or view state.
+
+Applying updated starter content after bootstrap must be an explicit operator action.
+
 ## Bootstrap Objects
 
 The bootstrap flow must create a minimal but real product state.
@@ -220,6 +270,12 @@ Minimum objects created during setup:
 - starter policy set required by the chosen template
 
 Bootstrap must not rely on hidden global singletons outside the scoped model from RFC 008.
+
+Bootstrap must also persist starter provenance so the operator can answer:
+
+- which starter template this project began from
+- which materialized objects came from that template
+- whether those objects still match the original shipped defaults or have diverged
 
 ## Import Paths
 
@@ -252,6 +308,45 @@ It should support:
 - explicit operator review of imported content where needed
 
 ## Installer and Bootstrap Contract
+
+### Canonical Bootstrap Operation
+
+V1 may expose bootstrap through:
+
+- CLI
+- UI wizard
+- API
+
+But those surfaces must all drive one canonical bootstrap operation and one canonical bootstrap data model.
+
+Workers should not invent separate semantics for:
+
+- CLI-first bootstrap
+- UI-first bootstrap
+- API-first bootstrap
+
+### Idempotence Rule
+
+Bootstrap must be idempotent with respect to its target scope and template selection.
+
+Running bootstrap twice against the same target with the same requested configuration must:
+
+- reuse the same tenant/workspace/project where appropriate
+- avoid duplicating starter assets and releases unnecessarily
+- report what already exists versus what was newly materialized
+
+If the operator wants a second project or a second independent starter instantiation, that must be an explicit create-new action, not an accidental side effect of rerunning bootstrap.
+
+### Canonical Import Contract
+
+V1 import may have multiple entry surfaces, but it should use one canonical import service model.
+
+At minimum, the import model should support:
+
+- structured bundle import for prompts and curated knowledge packs
+- direct file/document import for knowledge sources
+
+The same canonical import rules must apply regardless of whether the operator starts import from CLI, API, or control-plane UI.
 
 ### Local Mode
 
