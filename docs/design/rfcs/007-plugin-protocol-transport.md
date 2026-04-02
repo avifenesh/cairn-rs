@@ -575,6 +575,9 @@ Required controls:
 - max concurrency per plugin
 - host-enforced cancellation
 - crash containment
+- allowlisted inherited environment only
+- explicit working directory or workspace root assignment
+- host-managed CPU/memory/process/file-descriptor limits
 
 Plugins must not have implicit access to:
 
@@ -584,6 +587,78 @@ Plugins must not have implicit access to:
 - unrestricted shell
 
 Those are granted only through explicit capability and invocation context.
+
+### Mandatory Isolation Floor
+
+Every plugin execution in v1 must run under the minimum host-managed isolation floor:
+
+- out-of-process supervision
+- explicit permission grants
+- bounded environment inheritance
+- bounded filesystem scope
+- bounded network scope
+- host-enforced timeout and cancellation
+- host-enforced resource limits
+- no direct access to product persistence handles or raw secret stores
+
+This floor is mandatory in all deployment modes.
+
+### Execution Classes
+
+V1 has two canonical execution classes:
+
+- `supervised_process`
+- `sandboxed_process`
+
+`supervised_process` means:
+
+- plugin runs as a supervised child process
+- isolation comes from process boundary, permission model, scope restrictions, and host-managed limits
+- suitable for local development and trusted deployment-local plugins when policy allows
+
+`sandboxed_process` means:
+
+- plugin runs under an additional host-managed sandbox boundary beyond simple child-process supervision
+- filesystem, network, and privilege exposure are constrained by that sandbox boundary as well as by protocol permissions
+- required for higher-risk plugin deployments in self-hosted team mode
+
+### Canonical V1 Sandboxed Process Requirements
+
+When `sandboxed_process` is used, the sandbox must provide all of the following:
+
+- separate runtime boundary from the main Cairn host process
+- read-only root filesystem by default, with only explicitly granted writable scratch or mounted paths
+- network disabled by default, with only explicitly granted egress capability
+- no ambient privilege escalation
+- reduced kernel or host API exposure through a seccomp-equivalent or stronger syscall restriction model
+- host-enforced resource controls for CPU, memory, process count, and file descriptors
+
+The product contract defines these required properties even if the exact sandbox backend differs by deployment.
+
+### Deployment Mode Expectations
+
+In local mode:
+
+- `supervised_process` is sufficient as the default
+- `sandboxed_process` is optional but supported where available
+
+In self-hosted team mode:
+
+- the product must support policy-enforced `sandboxed_process` execution
+- customer-installed plugins and plugins granted high-risk capabilities should default to `sandboxed_process`
+- `supervised_process` may still be allowed for explicitly trusted plugins if operator policy permits it
+
+### Canonical Backend Stance
+
+V1 defines a sandbox contract, not a single mandatory sandbox technology.
+
+For the first sellable self-hosted release:
+
+- the product must document and support at least one concrete `sandboxed_process` backend
+- that backend may be a rootless OCI/container-style runner or another deployment-local sandbox runtime
+- stronger backends such as gVisor-compatible runtimes are additive, not required for baseline product coherence
+
+This keeps the product contract stable while avoiding premature commitment to one isolation stack for every deployment.
 
 ## Permission Model
 
@@ -755,7 +830,6 @@ For v1, do not optimize for:
 
 1. Should the first bridge after stdio be HTTP or gRPC?
 2. Which plugin categories need streaming responses beyond progress events in v1?
-3. How much host-managed sandboxing should be mandatory versus deployment-configurable?
 
 ## Decision
 
@@ -765,3 +839,6 @@ Proceed assuming:
 - plugins are out-of-process and supervised
 - the host owns persistence, policy, retries, and canonical state
 - plugin contracts must be explicit enough for tools, signals, channels, and eval workers to build against one surface
+- the minimum host-managed isolation floor is mandatory in all modes
+- local mode may default to `supervised_process`
+- self-hosted team mode must support policy-enforced `sandboxed_process` execution
