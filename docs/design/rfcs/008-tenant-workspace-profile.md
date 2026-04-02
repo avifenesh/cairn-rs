@@ -145,6 +145,27 @@ Examples:
 
 This replaces the current informal mixing of profile and runtime concerns.
 
+### Operator-Local Preference Rule
+
+Operator-local preferences in v1 are limited to ergonomic or presentation-level behavior that must not silently change canonical project/runtime outcomes.
+
+Safe operator-local preferences in v1 include:
+
+- notification delivery preferences
+- UI display preferences
+- personal view/layout preferences
+- non-canonical comparison or filter presets
+
+Not safe as operator-local overrides in v1:
+
+- effective prompt release selection
+- effective policy/guardrail enforcement
+- provider routing decisions
+- project runtime permission grants
+- canonical source or channel behavior
+
+Those must remain controlled by system, tenant, workspace, or project-scoped product policy.
+
 ## Defaults Model
 
 Defaults are layered and overrideable.
@@ -165,6 +186,20 @@ This rule must apply consistently to:
 - source settings
 - tool permission presets
 - starter skills
+
+### Default Prompt-Library Placement Rule
+
+V1 uses this canonical default:
+
+- workspace-scoped prompt libraries are the default authoring and sharing layer for day-to-day team prompt work
+- tenant-scoped prompt libraries are reserved for broadly shared or centrally governed prompt assets
+
+That means:
+
+- new prompt assets created through normal project/team workflows should default to workspace scope
+- tenant scope should be used when the prompt library is intentionally shared across multiple workspaces or governed centrally
+
+This keeps the default authoring experience aligned with team ownership while preserving tenant scope for real cross-workspace reuse.
 
 ## Legacy File Mapping
 
@@ -317,8 +352,7 @@ Focus on a clean tenant/workspace/project model that works for technical teams.
 
 ## Open Questions
 
-1. Which prompt libraries should be tenant-wide versus workspace-local by default?
-2. Which profile preferences are safe as operator-local overrides versus policy-controlled values?
+1. Should some centrally governed prompt categories such as safety-critical system prompts default to tenant scope even in otherwise workspace-first authoring flows?
 
 ## Decision
 
@@ -329,3 +363,5 @@ Proceed with:
 - layered defaults with explicit override order
 - project-scoped ownership for all runtime execution assets
 - Phase 1 tenancy-aware schema for all core runtime, retrieval, graph, and eval entities
+- workspace-scoped prompt libraries as the default authoring layer, with tenant scope reserved for centrally governed or cross-workspace libraries
+- operator-local preferences limited to ergonomic and presentation-level behavior, not canonical runtime or policy outcomes
