@@ -13,7 +13,7 @@ Purpose: convert the rewrite plan into concrete architecture decisions that para
 6. [RFC 006 - Prompt Registry and Release Model](./006-prompt-registry-release-model.md)
 7. [RFC 007 - Plugin Protocol and Transport](./007-plugin-protocol-transport.md)
 8. [RFC 008 - Tenant, Workspace, Profile Separation](./008-tenant-workspace-profile.md)
-9. [RFC 009 - Provider Abstraction and Gateway Non-Goals](./009-provider-abstraction.md) - stub
+9. [RFC 009 - Provider Abstraction and Gateway Non-Goals](./009-provider-abstraction.md)
 10. [RFC 010 - Operator Control Plane IA](./010-operator-control-plane-ia.md)
 11. [RFC 011 - Deployment Shape](./011-deployment-shape.md) - stub
 12. [RFC 012 - Onboarding and Starter Templates](./012-onboarding-starter-templates.md) - stub
