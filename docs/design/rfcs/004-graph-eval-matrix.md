@@ -43,7 +43,8 @@ Initial graph node categories:
 - document
 - chunk
 - source
-- prompt
+- prompt_asset
+- prompt_version
 - prompt release
 - eval run
 - skill
@@ -64,6 +65,8 @@ Initial edge categories:
 - derived_from
 - embedded_as
 - evaluated_by
+- released_as
+- rolled_back_to
 - routed_to
 - used_prompt
 - used_tool

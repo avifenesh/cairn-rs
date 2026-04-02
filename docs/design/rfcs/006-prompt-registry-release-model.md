@@ -200,6 +200,7 @@ This avoids split-brain semantics between lifecycle and approval.
 ### Allowed Transitions
 
 - `draft -> proposed`
+- `draft -> approved`
 - `draft -> archived`
 - `proposed -> approved`
 - `proposed -> rejected`
@@ -303,6 +304,12 @@ Approval is required before a prompt release may become `active` when:
 - the project policy requires approval for prompt changes
 
 For v1, assume approval is required for all releases that leave `draft`, unless the project policy explicitly allows `draft -> approved` without review.
+
+That shortcut is still represented through the same canonical lifecycle:
+
+- the release moves directly from `draft` to `approved`
+- no separate approval field is introduced
+- the approving actor and reason still appear in release actions
 
 ### Activation
 
