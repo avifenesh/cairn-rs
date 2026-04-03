@@ -199,6 +199,27 @@ This should be the first paid step-up because it:
 - avoids forcing managed cloud to become the first monetization path
 - creates a clear enterprise boundary without requiring a second product architecture
 
+### First Paid Package Boundary
+
+The first paid governance/compliance package should be intentionally narrow.
+
+Included in the first paid step-up:
+
+- advanced audit export and governance reporting
+- compliance-oriented policy packs
+- approval hardening for regulated or higher-control workflows
+
+Deferred to later paid phases in the same commercial family:
+
+- stronger artifact trust and verification layers
+- broader enterprise identity lifecycle administration beyond the v1 auth floor
+- managed upgrade/support envelopes
+
+This keeps the first commercial boundary legible:
+
+- the first paid package is about governance and control-plane accountability
+- deeper trust-chain features and broader enterprise administration follow later if demand proves real
+
 Examples of likely later paid capability families:
 
 - stricter compliance-oriented policy packs
@@ -244,6 +265,10 @@ The first entitlement surfaces that deserve dedicated operator workflows after v
 
 These remain operational and administrative surfaces, not purchasing flows.
 
+The first post-v1 entitlement workflows should remain inspection-oriented.
+
+Entitlement mutation or provisioning workflows do not need rich self-serve product UX in the first post-v1 phase; support-assisted or configuration-backed administration is sufficient until operator demand proves that deeper in-product administration is worth the added surface area.
+
 Not required in v1:
 
 - in-product purchasing flows
@@ -275,8 +300,7 @@ That means:
 ## Open Questions
 
 1. What evidence should trigger promotion of managed cloud or hybrid from later motion to first-class commercial offer?
-2. How much of the governance/compliance package should be bundled together in the first paid step-up versus phased across later releases?
-3. Which entitlement operator workflows should move from status/inspection into stronger administrative tooling in the first post-v1 release?
+2. What operator or buyer signals should justify promoting richer entitlement administration beyond inspection/audit surfaces?
 
 ## Decision
 
@@ -289,3 +313,4 @@ Proceed assuming:
 - managed cloud and hybrid are later business motions on the same product model
 - v1 commercial UX includes entitlement/license visibility and gated capability awareness, not billing workflows
 - the first paid expansion after the initial self-hosted release should be a governance/compliance package rather than a managed-cloud-first upsell
+- the first paid governance/compliance package is intentionally narrow: audit/governance reporting plus compliance policy and approval hardening first, broader trust-chain and enterprise-admin layers later
