@@ -128,6 +128,20 @@ Small deployments may run all roles together.
 
 Team/production deployments should be able to split roles across processes or instances without changing product semantics.
 
+### One-Binary Production Stance
+
+In v1, one-binary all-in-one execution remains a supported convenience path for evaluation and small deployments.
+
+It is not the canonical self-hosted team-mode production shape.
+
+The first-class team-mode support stance is:
+
+- one product binary
+- separable roles
+- support for splitting those roles across processes or instances as deployment scale and operational needs require
+
+This keeps packaging simple without implying that the smallest topology is the recommended production operating model for teams.
+
 ### Canonical Shared Dependencies
 
 Local mode:
@@ -448,7 +462,7 @@ The goal is a deployable, operable self-hosted control plane first.
 
 ## Open Questions
 
-1. Should v1 team mode support a one-binary all-in-one production deployment officially, or only as a convenience path?
+1. Should a later release promote one or more precomposed deployment profiles beyond the basic “single binary with separable roles” stance for common team topologies?
 
 ## Decision
 
@@ -462,3 +476,4 @@ Proceed assuming:
 - self-hosted team mode requires operator-controlled credential encryption at rest
 - OIDC plus built-in local auth and scoped service tokens form the minimum auth stack for the first sellable self-hosted release
 - self-hosted team mode without a valid configured key-encryption-key source must fail closed for persisted credential features and cannot complete production bootstrap
+- one-binary all-in-one execution is a supported convenience path, not the canonical team-mode production recommendation
