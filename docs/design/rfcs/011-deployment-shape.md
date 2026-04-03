@@ -460,9 +460,13 @@ For v1, do not optimize for:
 
 The goal is a deployable, operable self-hosted control plane first.
 
-## Open Questions
+## Precomposed Deployment Profiles
 
-1. Should a later release promote one or more precomposed deployment profiles beyond the basic “single binary with separable roles” stance for common team topologies?
+V1 does not require first-class precomposed deployment profiles beyond the base stance of one product binary with separable roles.
+
+Operators may still receive reference manifests, example topologies, and deployment guidance, but those do not become separate canonical deployment modes.
+
+A later release may promote selected reference topologies into first-class deployment profiles if operator usage and support experience justify that step.
 
 ## Decision
 
@@ -477,3 +481,4 @@ Proceed assuming:
 - OIDC plus built-in local auth and scoped service tokens form the minimum auth stack for the first sellable self-hosted release
 - self-hosted team mode without a valid configured key-encryption-key source must fail closed for persisted credential features and cannot complete production bootstrap
 - one-binary all-in-one execution is a supported convenience path, not the canonical team-mode production recommendation
+- precomposed deployment profiles are deferred beyond v1; the first-class contract is one product binary with separable roles plus reference deployment guidance
