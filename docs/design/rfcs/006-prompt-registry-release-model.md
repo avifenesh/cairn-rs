@@ -388,6 +388,14 @@ When that stricter policy is in effect:
 
 This keeps governance hardening explicit without introducing a second approval model.
 
+In v1, this stricter rule should be exposed as a simple policy preset rather than a lower-level advanced flag surface.
+
+That means:
+
+- operators can select a regulated-project approval preset
+- the preset forbids the `draft -> approved` shortcut
+- lower-level flag composition for this rule is deferred until a later governance/policy refinement pass
+
 ### Activation
 
 Activation is only valid from `approved`.
@@ -520,7 +528,7 @@ For v1, do not optimize for:
 
 ## Open Questions
 
-1. Should v1 expose the regulated-project no-shortcut rule as a simple policy preset only, or also as a lower-level policy flag for advanced operators?
+1. Should a later governance release expose the regulated-project no-shortcut rule as a lower-level policy flag after the simple preset has proven sufficient?
 
 ## Decision
 
@@ -537,3 +545,4 @@ Proceed assuming:
 - both `task_type` and `routing_slot` are first-class selector kinds in v1
 - approval is required by default before a release becomes activation-eligible, with only explicit project policy allowing `draft -> approved`
 - tenant/workspace policy may explicitly forbid the `draft -> approved` shortcut for regulated projects without changing the canonical lifecycle model
+- the regulated-project no-shortcut rule is exposed in v1 as a simple policy preset, not a lower-level advanced flag surface
