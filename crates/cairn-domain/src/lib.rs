@@ -1,5 +1,6 @@
 //! Shared domain contracts for Cairn runtime, storage, and product services.
 
+pub mod commercial;
 pub mod commands;
 pub mod credentials;
 pub mod defaults;
@@ -19,6 +20,7 @@ pub mod tenancy;
 pub mod tool_invocation;
 pub mod workers;
 
+pub use commercial::*;
 pub use commands::*;
 pub use credentials::*;
 pub use defaults::*;
