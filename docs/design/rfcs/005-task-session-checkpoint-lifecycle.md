@@ -104,6 +104,14 @@ Rules:
 - a run enters `waiting_dependency` when blocked on subagent or task completion
 - `completed`, `failed`, and `canceled` are terminal
 
+Timeouts in v1 do not introduce a separate terminal run state.
+
+If a run times out:
+
+- terminal state is `failed`
+- terminal reason or failure class must record `timed_out`
+- runtime events and operator surfaces must preserve timeout as a first-class failure reason even though it is not a separate state bucket
+
 ### Task States
 
 - `queued`
@@ -125,6 +133,14 @@ Rules:
 - `running` means execution has actually begun
 - `retryable_failed` is non-terminal and may return to `queued`
 - `failed`, `completed`, `canceled`, and `dead_lettered` are terminal
+
+Timeouts in v1 do not introduce a separate terminal task state.
+
+If a task times out:
+
+- terminal state is `failed` or `retryable_failed` depending on retry policy
+- terminal reason or failure class must record `timed_out`
+- timeout handling must remain explicit in events and operator surfaces even though the state machine does not add a separate `timed_out` bucket
 
 ### Checkpoint States
 
@@ -182,6 +198,29 @@ Rules:
 - pausing a run does not destroy its checkpoints
 - pausing a task preserves task identity and ownership linkage
 - explicit resume transitions back to `pending`, `queued`, or `running` depending on entity and cause
+
+### Canonical V1 Pause/Resume Triggers
+
+Pause in v1 is an explicit runtime state distinct from `waiting_approval` and `waiting_dependency`.
+
+Required pause-capable triggers in v1:
+
+- explicit operator pause
+- explicit runtime/tool/requested suspension
+- policy-driven hold that is modeled as pause rather than approval or cancellation
+
+Required resume triggers in v1:
+
+- explicit operator resume
+- `resume_after` timer expiry
+- explicit runtime signal or event matched to the paused entity
+
+Not modeled as pause/resume triggers in v1:
+
+- approval resolution, which uses `waiting_approval`
+- dependency completion, which uses `waiting_dependency`
+
+This keeps pause/resume semantics narrow and prevents the paused state from becoming a catch-all for every blocked condition.
 
 ## Recovery Rules
 
@@ -305,8 +344,7 @@ Focus on a clean runtime model for agent execution.
 
 ## Open Questions
 
-1. Do we need explicit `timed_out` terminal states in v1, or should timeout collapse into `failed` plus reason?
-2. Which pause/resume triggers must exist in v1 beyond human approval and explicit resume-after?
+1. Should v1 distinguish timeout reason classes more finely for operator surfaces, such as lease timeout vs execution timeout, without changing the canonical state machine?
 
 ## Decision
 
@@ -318,3 +356,5 @@ Proceed with:
 - checkpoints as immutable recovery records
 - explicit subagent linkage through child task and child session records
 - Rust-owned leases, heartbeats, recovery, and checkpoint truth
+- timeout is modeled through terminal reason/failure classification rather than a separate `timed_out` state
+- pause/resume in v1 is limited to explicit pause/suspend semantics, explicit operator resume, `resume_after`, and explicit runtime signals
