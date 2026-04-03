@@ -16,6 +16,7 @@ pub mod checkpoint;
 pub mod mailbox;
 pub mod run;
 pub mod session;
+pub mod signal;
 pub mod task;
 pub mod tool_invocation;
 
@@ -24,6 +25,7 @@ pub use checkpoint::*;
 pub use mailbox::*;
 pub use run::*;
 pub use session::*;
+pub use signal::*;
 pub use task::*;
 pub use tool_invocation::*;
 

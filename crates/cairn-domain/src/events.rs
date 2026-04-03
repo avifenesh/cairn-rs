@@ -1,6 +1,7 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, EventId, MailboxMessageId, RunId, SessionId, TaskId, ToolInvocationId,
+    ApprovalId, CheckpointId, EventId, MailboxMessageId, RunId, SessionId, SignalId, TaskId,
+    ToolInvocationId,
 };
 use crate::lifecycle::{CheckpointDisposition, FailureClass, RunState, SessionState, TaskState};
 use crate::policy::{ApprovalDecision, ApprovalRequirement, ExecutionClass};
@@ -98,6 +99,7 @@ pub enum RuntimeEvent {
     ToolInvocationStarted(ToolInvocationStarted),
     ToolInvocationCompleted(ToolInvocationCompleted),
     ToolInvocationFailed(ToolInvocationFailed),
+    SignalIngested(SignalIngested),
     ExternalWorkerReported(ExternalWorkerReported),
     SubagentSpawned(SubagentSpawned),
     RecoveryAttempted(RecoveryAttempted),
@@ -123,6 +125,7 @@ impl RuntimeEvent {
             RuntimeEvent::ToolInvocationStarted(event) => &event.project,
             RuntimeEvent::ToolInvocationCompleted(event) => &event.project,
             RuntimeEvent::ToolInvocationFailed(event) => &event.project,
+            RuntimeEvent::SignalIngested(event) => &event.project,
             RuntimeEvent::ExternalWorkerReported(event) => &event.report.project,
             RuntimeEvent::SubagentSpawned(event) => &event.project,
             RuntimeEvent::RecoveryAttempted(event) => &event.project,
@@ -181,6 +184,9 @@ impl RuntimeEvent {
             }
             RuntimeEvent::ToolInvocationFailed(event) => Some(RuntimeEntityRef::ToolInvocation {
                 invocation_id: event.invocation_id.clone(),
+            }),
+            RuntimeEvent::SignalIngested(event) => Some(RuntimeEntityRef::Signal {
+                signal_id: event.signal_id.clone(),
             }),
             RuntimeEvent::ExternalWorkerReported(event) => Some(RuntimeEntityRef::Task {
                 task_id: event.report.task_id.clone(),
@@ -374,6 +380,15 @@ pub struct RecoveryAttempted {
     pub run_id: Option<RunId>,
     pub task_id: Option<TaskId>,
     pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalIngested {
+    pub project: ProjectKey,
+    pub signal_id: SignalId,
+    pub source: String,
+    pub payload: serde_json::Value,
+    pub timestamp_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

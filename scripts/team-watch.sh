@@ -31,17 +31,19 @@ inject() {
       local brief
       brief="$(tr '\n' ' ' < "$brief_file" | sed 's/  */ /g; s/# //g; s/## //g')"
       echo "[watch:$AGENT] sending role brief"
-      tmux send-keys -t "$PANE" "$brief" Enter
+      tmux send-keys -t "$PANE" -l "$brief"
+      tmux send-keys -t "$PANE" Enter
       sleep 2
     fi
   fi
 
   echo "[watch:$AGENT] injecting from=$from"
-  tmux send-keys -t "$PANE" "Message from ${from}: ${body}" Enter
+  tmux send-keys -t "$PANE" -l "Message from ${from}: ${body}"
+  tmux send-keys -t "$PANE" Enter
 }
 
-# ── inotifywait (instant) ────────────────────────────────────────────────────
-if command -v inotifywait &>/dev/null; then
+# ── inotifywait (instant) — skip on /mnt/ (WSL Windows FS doesn't support inotify)
+if command -v inotifywait &>/dev/null && [[ "$INBOX" != /mnt/* ]]; then
   echo "[watch:$AGENT] ready (inotifywait)"
   inotifywait -m -q -e close_write,moved_to --format '%f' "$INBOX" |
   while IFS= read -r fname; do

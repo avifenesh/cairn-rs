@@ -31,6 +31,7 @@ struct State {
     checkpoints: HashMap<String, CheckpointRecord>,
     mailbox_messages: HashMap<String, MailboxRecord>,
     tool_invocations: HashMap<String, ToolInvocationRecord>,
+    signals: HashMap<String, cairn_domain::SignalRecord>,
 }
 
 pub struct InMemoryStore {
@@ -50,6 +51,7 @@ impl InMemoryStore {
                 checkpoints: HashMap::new(),
                 mailbox_messages: HashMap::new(),
                 tool_invocations: HashMap::new(),
+                signals: HashMap::new(),
             }),
         }
     }
@@ -237,6 +239,18 @@ impl InMemoryStore {
                         .expect("tool invocation failed event should preserve valid terminal transition");
                 }
             }
+            RuntimeEvent::SignalIngested(e) => {
+                state.signals.insert(
+                    e.signal_id.as_str().to_owned(),
+                    cairn_domain::SignalRecord {
+                        id: e.signal_id.clone(),
+                        project: e.project.clone(),
+                        source: e.source.clone(),
+                        payload: e.payload.clone(),
+                        timestamp_ms: e.timestamp_ms,
+                    },
+                );
+            }
             // Audit/linkage events that don't update core projections.
             RuntimeEvent::CheckpointRestored(_)
             | RuntimeEvent::ExternalWorkerReported(_)
@@ -353,6 +367,7 @@ fn event_matches_entity(event: &RuntimeEvent, entity: &EntityRef) -> bool {
         (RuntimeEvent::ToolInvocationFailed(e), EntityRef::ToolInvocation(id)) => {
             e.invocation_id == *id
         }
+        (RuntimeEvent::SignalIngested(e), EntityRef::Signal(id)) => e.signal_id == *id,
         _ => false,
     }
 }
@@ -671,6 +686,37 @@ impl ToolInvocationReadModel for InMemoryStore {
             .collect();
         results.sort_by_key(|record| record.requested_at_ms);
         Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- SignalReadModel --
+
+#[async_trait]
+impl SignalReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        signal_id: &cairn_domain::SignalId,
+    ) -> Result<Option<cairn_domain::SignalRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.signals.get(signal_id.as_str()).cloned())
+    }
+
+    async fn list_by_project(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::SignalRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<cairn_domain::SignalRecord> = state
+            .signals
+            .values()
+            .filter(|s| s.project == *project)
+            .cloned()
+            .collect();
+        results.sort_by_key(|s| s.timestamp_ms);
+        let results = results.into_iter().skip(offset).take(limit).collect();
+        Ok(results)
     }
 }
 

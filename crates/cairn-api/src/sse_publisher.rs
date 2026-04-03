@@ -26,7 +26,9 @@ pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
         | RuntimeEvent::ToolInvocationFailed(_) => Some(SseEventName::AssistantToolCall),
         RuntimeEvent::ExternalWorkerReported(_) => Some(SseEventName::AgentProgress),
         RuntimeEvent::SubagentSpawned(_) => Some(SseEventName::AgentProgress),
-        RuntimeEvent::RecoveryAttempted(_) | RuntimeEvent::RecoveryCompleted(_) => None,
+        RuntimeEvent::RecoveryAttempted(_)
+        | RuntimeEvent::RecoveryCompleted(_)
+        | RuntimeEvent::SignalIngested(_) => None,
     }
 }
 

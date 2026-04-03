@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
 ## Current RFC: 002 — Runtime and Event Model
-## Current Phase: types and traits (Phase 2)
+## Current Phase: implementation (Phase 3)
 
 ## RFC Status
 
@@ -65,23 +65,23 @@
 
 RFC 002 lists "signal event" as a core runtime entity with `current_state_plus_audit` durability. No signal support exists:
 
-- [ ] `SignalId` in ids.rs
-- [ ] Signal domain types (e.g., SignalRecord or signal payload struct)
-- [ ] `IngestSignal` command variant in RuntimeCommand
-- [ ] `SignalIngested` event variant in RuntimeEvent
-- [ ] `RuntimeEntityKind::Signal` and `RuntimeEntityRef::Signal` in errors.rs
-- [ ] `EntityRef::Signal` in cairn-store event_log.rs
-- [ ] Signal projection: `SignalReadModel` trait + `SignalRecord` struct in cairn-store
-- [ ] Signal projection in InMemoryStore
-- [ ] Signal feed read model queries
+- [x] `SignalId` in ids.rs
+- [x] Signal domain types (SignalRecord in signal.rs)
+- [x] `IngestSignal` command variant in RuntimeCommand
+- [x] `SignalIngested` event variant in RuntimeEvent
+- [x] `RuntimeEntityKind::Signal` and `RuntimeEntityRef::Signal` in errors.rs
+- [x] `EntityRef::Signal` in cairn-store event_log.rs
+- [x] Signal projection: `SignalReadModel` trait + `SignalRecord` struct in cairn-store
+- [ ] Signal projection impl in InMemoryStore (trait exists, impl deferred to Phase 3a)
+- [ ] Signal feed read model query impls (trait exists, impl deferred to Phase 3a)
 
 #### 2. Missing command variants for terminal operations — MINOR
 
 RFC 002 says "commands are intent records." Currently, complete/fail/cancel for runs and tasks go through service methods but are not represented as RuntimeCommand variants. The service emits the correct events, but there's an asymmetry: PauseRun/PauseTask/ResumeRun/ResumeTask are command variants, but CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask are not.
 
-- [ ] `CompleteRun`, `FailRun`, `CancelRun` command variants
-- [ ] `CompleteTask`, `FailTask`, `CancelTask` command variants
-- [ ] `AppendUserMessage` command variant (RFC 002 example)
+- [x] `CompleteRun`, `FailRun`, `CancelRun` command variants
+- [x] `CompleteTask`, `FailTask`, `CancelTask` command variants
+- [x] `AppendUserMessage` command variant (RFC 002 example)
 
 #### 3. Deferred to other RFCs (not RFC 002 gaps)
 
@@ -102,3 +102,4 @@ These `current_state_plus_audit` entities are classified in RFC 002 but implemen
 
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
+- [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants

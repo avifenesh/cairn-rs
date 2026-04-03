@@ -59,6 +59,15 @@ while [ "$iteration" -lt "$MAX_ITERATIONS" ]; do
   output=$(cat "$PROMPT_FILE" | claude $CLAUDE_FLAGS 2>&1) || true
   echo "$output" > "$LOG_FILE"
 
+  # Bail if output is too short (model didn't actually do work)
+  OUTPUT_LEN=$(echo "$output" | wc -c)
+  if [[ "$OUTPUT_LEN" -lt 100 ]]; then
+    echo "WARNING: output too short ($OUTPUT_LEN chars) — model may not have processed the prompt"
+    echo "$output"
+    echo ""
+    continue
+  fi
+
   # Check completion signal
   if echo "$output" | grep -q '<promise>COMPLETE</promise>'; then
     echo ""

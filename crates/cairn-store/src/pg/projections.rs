@@ -291,7 +291,8 @@ impl PgSyncProjection {
             RuntimeEvent::ExternalWorkerReported(_)
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
-            | RuntimeEvent::RecoveryCompleted(_) => {}
+            | RuntimeEvent::RecoveryCompleted(_)
+            | RuntimeEvent::SignalIngested(_) => {}
         }
 
         Ok(())
