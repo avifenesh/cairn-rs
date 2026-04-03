@@ -134,6 +134,16 @@ V1 canonical serialization is:
 
 Compression, archive wrapping, or signed envelope layers may be added later, but they are not the canonical v1 format.
 
+### Integrity Rule In V1
+
+Content hashing is the canonical integrity mechanism in v1.
+
+That means:
+
+- bundle-level and artifact-level integrity rely on the canonical identity and hash fields defined by this RFC
+- signed bundle envelopes are not required for the first sellable release
+- stronger trust layers may be added later as additive envelope features without changing the core bundle model
+
 ## Canonical Identity and Provenance Envelope
 
 Every artifact inside a bundle must carry one canonical identity/provenance envelope.
@@ -337,6 +347,19 @@ Rules:
 - `content` is the portable document body or portable structured representation, not a pointer to live runtime state
 - `chunk_hints` and `retrieval_hints` are advisory inputs to ingest, not a substitute for owned ingestion and retrieval processing
 - document-level provenance must remain visible even if chunk-level dedup occurs during import
+
+### Chunk Portability Rule In V1
+
+In v1, chunk-level data in curated knowledge packs is portable only as advisory hints, not as canonical retrieval state.
+
+That means:
+
+- bundles may carry `chunk_hints` and retrieval-oriented hints
+- import may use those hints to improve ingest consistency
+- the receiving system still owns final chunking, deduplication, and retrieval indexing decisions
+- imported knowledge must remain valid even if chunk boundaries are re-derived during import
+
+This keeps portable bundles stable across product versions without turning chunk layout into a long-term compatibility surface.
 
 ### Canonical Inline Content Forms
 
@@ -617,8 +640,7 @@ The goal is a safe, inspectable, portable artifact contract for the highest-valu
 
 ## Open Questions
 
-1. How much chunk-level data should be portable in curated knowledge packs versus re-derived at import time?
-2. Do we need signed bundle integrity metadata in v1, or is content hashing sufficient initially?
+1. Which later trust and verification features, if any, should be layered on top of the v1 hash-based integrity model?
 
 ## Decision
 
@@ -629,3 +651,5 @@ Proceed assuming:
 - one physical JSON bundle format is canonical in v1
 - one canonical bundle envelope, provenance model, and reconciliation model is required
 - import/export remains separate from full runtime-state backup and restore
+- chunk-level bundle data is advisory and re-derivable rather than canonical retrieval state
+- content hashing is the canonical v1 integrity mechanism; signed bundle envelopes are additive later features
