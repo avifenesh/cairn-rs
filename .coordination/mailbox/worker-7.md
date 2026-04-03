@@ -21,6 +21,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Packed next cut: 1. keep agent/evals in support mode while the workspace is green, 2. if Worker 8 touches release/scorecard reads or assistant streaming composition, add the smallest downstream contract guard, 3. otherwise avoid widening rollout, policy, or scorecard scope.
 - 2026-04-03 | Manager -> Worker 7 | Clarification: no blanket rerun. Re-engage only if Worker 8 changes assistant streaming composition or a release/scorecard API seam and a real mismatch appears. Otherwise stay in narrow support mode. If you do touch code, finish with explicit `--proof` or `--blocker`, not generic notes like `verified`, `no drift`, or `all tests green`.
 - 2026-04-03 | Manager -> Worker 7 | Validation complete: `cargo test -p cairn-evals -p cairn-agent` passed, including the new graph/API seam proof.
 - 2026-04-03 | Manager -> Worker 7 | Follow-on handwritten direction if the seam reopens: 1. pair with Worker 8 on one API-facing read seam that consumes release/scorecard/graph data directly, 2. add one guard that `StreamingOutput` still matches preserved assistant SSE families after the API layer consumes it, 3. once both are green, stay in narrow agent/evals support mode only.

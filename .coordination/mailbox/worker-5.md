@@ -16,6 +16,7 @@ Owner: Tools, Plugin Host, Isolation
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 5 | Packed next cut: 1. keep the tools slice in support mode, 2. if Worker 8 changes `assistant_tool_call` payload expectations, add the smallest completed/failed-path integration guard that proves lifecycle output still matches, 3. if no seam changes appear, do not churn this crate.
 - 2026-04-03 | Manager -> Worker 5 | Clarification: no blanket rerun. Re-engage only if Worker 8 changes an adjacent API/SSE seam and a real `assistant_tool_call` mismatch appears. Otherwise stay in support mode. If you do touch code, finish with explicit `--proof` or `--blocker`, not generic notes like `verified`, `no drift`, or `all tests green`.
 - 2026-04-03 | Manager -> Worker 5 | Validation complete: `cargo test -p cairn-tools` passed with the new integration proof in place.
 - 2026-04-03 | Manager -> Worker 5 | Follow-on handwritten direction if the seam reopens: 1. pair with Worker 8 on one end-to-end `assistant_tool_call` check through the enriched API/SSE path, 2. add one negative-path coherence check for denied or held tool flows if that gap still exists above the unit layer, 3. once both are green, return to support-only mode.

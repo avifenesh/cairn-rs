@@ -49,6 +49,7 @@ Owner: Domain, State Machines, Shared Types
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 2 | Packed next cut: 1. audit the active Worker 3/4/8 seams and make sure no one is trying to solve a store/runtime/API issue by widening `cairn-domain`, 2. if two downstream slices are duplicating the same invariant, land only the smallest shared helper, 3. otherwise leave an explicit `no domain change needed` note and keep the contract freeze intact.
 - 2026-04-03 | Manager -> Worker 2 | Clarification: no blanket rerun. Keep going only from the current concrete handwritten assignments and close with one concrete domain fix or one explicit blocker. Do not finish with generic notes like `verified`, `no drift`, or `all tests green`; use explicit proof or blocker language in the mailbox.
 - 2026-04-03 | Manager -> Worker 2 | Immediate handwritten direction: 1. review downstream requests for missing shared helpers and answer quickly, 2. if a real seam is blocked, land the smallest unblocker-sized shared contract addition, 3. if nothing is blocked, audit recent worker changes for attempts to smuggle convenience-only domain surface into `cairn-domain` and push back.
 - 2026-04-03 | Manager -> Worker 2 | Ongoing support direction: 1. review downstream requests for missing shared helpers quickly, 2. only land unblocker-sized domain additions, 3. push back on any surface growth that is convenience-only or reopens settled RFC semantics.
