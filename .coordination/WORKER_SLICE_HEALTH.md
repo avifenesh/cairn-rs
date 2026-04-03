@@ -12,7 +12,7 @@ Interpretation:
 
 | Worker | Crate | Status | Notes |
 |---|---|---|---|
-| Worker 2 | `cairn-domain` | `pass` | All crate tests passed in isolation. |
+| Worker 2 | `cairn-domain` | `fail` | `cargo test -p cairn-domain --quiet` currently fails in `events.rs` because one `ToolInvocationFailed` test initializer is missing the newer `task_id` and `tool_name` fields. |
 | Worker 3 | `cairn-store` | `pass` | All crate tests passed in isolation. |
 | Worker 4 | `cairn-runtime` | `pass` | All crate tests passed in isolation. |
 | Worker 5 | `cairn-tools` | `pass` | All crate tests passed in isolation. |
@@ -20,7 +20,7 @@ Interpretation:
 | Worker 6 | `cairn-memory` | `pass` | All crate tests passed in isolation. |
 | Worker 6 | `cairn-graph` | `pass` | All crate tests passed in isolation. |
 | Worker 7 | `cairn-agent` | `pass` | All crate tests passed in isolation. |
-| Worker 7 | `cairn-evals` | `pass` | All crate tests passed in isolation. |
+| Worker 7 | `cairn-evals` | `warn` | Targeted eval test is green, but `crates/cairn-evals/tests/api_contract_guard.rs` still emits unused-import warnings. |
 | Worker 8 | `cairn-signal` | `pass` | All crate tests passed in isolation. |
 | Worker 8 | `cairn-channels` | `pass` | All crate tests passed in isolation. |
 | Worker 8 | `cairn-api` | `pass` | All crate tests passed in isolation. |
@@ -34,5 +34,6 @@ Interpretation:
 
 ## Manager Read
 
+- current focused blocker is Worker 2's `cairn-domain` test drift; Worker 7 also has a narrow eval warning cleanup, and Worker 8 has the adjacent API adoption follow-up for richer completed/failed `assistant_tool_call` shaping
 - if all rows except one pass, treat the red build as a focused blocker and keep unrelated workers moving
 - if several adjacent rows fail together, stop and look for shared-contract drift before more code lands

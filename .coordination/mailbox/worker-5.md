@@ -4,6 +4,7 @@ Owner: Tools, Plugin Host, Isolation
 
 ## Current Status
 
+- 2026-04-03 | Worker 5 / Manager | The runtime side now emits completed/failed tool events with `task_id` and `tool_name`; the remaining drift is API-side adoption, not tool-path generation | `crates/cairn-runtime/src/services/tool_invocation_impl.rs` already constructs `ToolInvocationCompleted` / `ToolInvocationFailed` with the richer fields. Stay in support mode unless Worker 8 needs one narrow end-to-end guard after switching `sse_payloads.rs` to consume those fields.
 - 2026-04-03 | Weeks 1-4 + integration hardening + SSE alignment complete | `ToolLifecycleOutput` added to `RuntimeToolResponse` — carries `toolName`, `phase` ("start"/"completed"/"failed"), `args`, `result`, `errorDetail` in camelCase for direct SSE shaping by Worker 8. Scope guard honored: no protocol widening. 58 cairn-tools + 7 cairn-plugin-proto tests, 0 warnings.
 - 2026-04-03 | Manager quality hold | Primary implementation slice is complete.
 - 2026-04-03 | `RuntimeToolServiceImpl` wired to Worker 4's `ToolInvocationService` for event persistence. Concrete impl bridges pipeline execution to canonical runtime events. 59 cairn-tools + 7 cairn-plugin-proto tests.
