@@ -228,6 +228,10 @@ That means:
 
 This keeps centrally governed prompts powerful without turning tenant scope into an implicit override channel for every workspace.
 
+V1 does not require mandatory adoption of tenant-scoped centrally governed prompt libraries for regulated workspaces.
+
+If stricter governance is needed later, it should arrive as an explicit policy-hardening feature rather than as an implicit change to the v1 defaults model.
+
 ## Legacy File Mapping
 
 The current personal overlay files should map into the new model as follows:
@@ -379,7 +383,7 @@ Focus on a clean tenant/workspace/project model that works for technical teams.
 
 ## Open Questions
 
-1. Should some categories of tenant-scoped centrally governed prompt assets in v1 be marked non-optional for regulated workspaces through explicit policy, or should all adoption remain operator-driven?
+1. Should a later governance RFC introduce mandatory adoption semantics for regulated workspaces as an explicit policy-hardening feature?
 
 ## Decision
 
@@ -393,3 +397,4 @@ Proceed with:
 - workspace-scoped prompt libraries as the default authoring layer, with tenant scope reserved for centrally governed or cross-workspace libraries
 - operator-local preferences limited to ergonomic and presentation-level behavior, not canonical runtime or policy outcomes
 - tenant-scoped centrally governed prompt libraries are opt-in for workspace/project adoption in v1, not silently inherited as defaults
+- mandatory regulated-workspace adoption is deferred beyond the v1 default scoping contract unless a later governance RFC adds it explicitly
