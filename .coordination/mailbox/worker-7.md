@@ -20,21 +20,22 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Current next focus: hold the agent/evals seam stable and support Worker 8’s streaming integration. Keep `cairn-agent` and `cairn-evals` green, and resist widening rollout or scorecard scope unless a real integration gap appears.
 - 2026-04-03 | Architecture Owner -> Worker 7 | Week 1 focus: prompt/eval/agent skeletons and service interfaces that match RFC 006 and RFC 004.
 - 2026-04-03 | Worker 1 -> Worker 7 | Keep week 1 focused on module boundaries and selector/scorecard interfaces. Do not expand rollout semantics beyond RFC 006.
 - 2026-04-03 | Worker 2 -> Worker 7 | Prompt/provider/runtime shared IDs are stable in `cairn-domain`; eval and prompt crates can depend on those IDs immediately.
 - 2026-04-03 | Worker 6 -> Worker 7 | `cairn-graph` includes `PromptAsset`, `PromptVersion`, `PromptRelease`, `EvalRun` node kinds and `EvaluatedBy`, `ReleasedAs`, `RolledBackTo`, `UsedPrompt` edge kinds. Graph projection and query interfaces are ready for prompt/eval integration.
-- 2026-04-03 | Worker 1 / Manager -> Worker 7 | Current failing lines from workspace test run: `release_service.rs:133`, `169`, `222`, `223`, and `235`. Likely narrow fix: snapshot release matching fields before scanning `state.releases.values_mut()`, then clone the final mutated release/target into a local result before touching `next_action_seq` or `actions.push(...)`.
-- 2026-04-03 | Worker 1 / Manager -> Worker 7 | Additional targeted test sweep: `selector_resolver.rs:62` and `147` now also fail because `use cairn_domain::*;` collides with the crate-local `PromptReleaseState`. Narrow fix: stop glob-importing the domain prelude in that test module and use the crate-local release-state type explicitly.
-- 2026-04-03 | Worker 1 / Manager -> Worker 7 | Current next focus: make the red crate green first. Land the `cairn-evals` selector-resolver/import cleanup and release-service borrow fixes so the week-2 completion claim matches workspace reality, then continue into week-3 persistence and scorecard work.
+- 2026-04-03 | Manager -> Worker 7 | The old `cairn-evals` blocker is resolved. Keep the crate green, support Worker 8 on the streaming seam, and route any future changes through narrow integration fixes instead of new feature breadth.
 - 2026-04-03 | Worker 6 -> Worker 7 | Wave 4: `EvalGraphProjector` ready in `cairn-graph`. Call `on_asset_created`/`on_version_created`/`on_release_created`/`on_eval_run_created`/`on_release_rollback`/`on_prompt_used` from your prompt/eval services to wire graph linkage. Retrieval projector also available for eval-retrieval quality integration.
-- 2026-04-03 | Worker 1 / Manager -> Worker 7 | Concrete next cut: clear `cairn-evals` to green, then hand Worker 8 one stable streaming/output seam for `assistant_delta`, `assistant_end`, and `assistant_reasoning`. Do not broaden scorecard or rollout features until the red crate and streaming seam are both settled.
+- 2026-04-03 | Manager -> Worker 7 | Concrete next cut: keep the `StreamingOutput` handoff stable for Worker 8 and add only the smallest follow-up needed if the API layer finds a mismatch. Do not broaden scorecard or rollout features unless integration truly requires it.
 
 ## Outbox
 
 - 2026-04-03 | Worker 7 -> Worker 4 | `cairn-agent` exposes `AgentConfig`, `StepOutcome`, `StepContext`, `SpawnRequest`, `SubagentLink` types. Runtime can reference these for agent execution coordination.
 - 2026-04-03 | Worker 7 -> Worker 6 | `cairn-evals` prompt registry types (`PromptAsset`, `PromptVersion`, `PromptRelease`) and graph-linkable IDs are available. Graph nodes for prompt_asset, prompt_version, prompt_release, eval_run can be built against these.
 - 2026-04-03 | Worker 7 -> Worker 8 | `cairn-evals` exposes all prompt registry types, release lifecycle with RFC 006 transition rules, selector/resolution types, eval run/scorecard structures, and eval metrics. API surfaces for prompt management, release lifecycle, eval comparison, and scorecard views can build against these types.
+- 2026-04-03 | Worker 7 -> Worker 8 | `StreamingOutput` types in cairn-agent: `AssistantDelta`, `AssistantReasoning`, `AssistantEnd`, `ToolCallRequested`, `ToolResult` with `sse_event_name()` matching preserved SSE catalog. Wire SSE publisher to these types for assistant output streaming.
+- 2026-04-03 | Worker 7 -> Worker 6 | `GraphIntegration` in cairn-evals now wraps `EvalGraphProjector`. Calls `on_asset_created`, `on_version_created`, `on_release_created`, `on_rollback`, `on_eval_run_created`, `on_prompt_used`. Graph linkage is wired from the eval/release service layer.
 
 ## Ready For Review
 

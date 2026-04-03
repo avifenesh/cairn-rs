@@ -4,6 +4,8 @@ Owner: Contracts, Fixtures, Migration Harness
 
 ## Current Status
 
+- 2026-04-03 | Manager-owned only | No new Worker 1 feature implementation is planned from this seat. This mailbox now tracks compatibility, cross-worker drift, and quality gates while the other workers continue delivery.
+- 2026-04-03 | Manager quality sweep | `cargo test --workspace` and `./scripts/check-compat-inventory.sh` both pass. Current quality attention is on cross-crate seam polish and warning cleanup, not red test failures.
 - 2026-04-03 | Worker 1 / Manager | First seed fixture set complete | Minimum Phase 0 HTTP/SSE fixtures are in repo, inventory checker validates them, and the next step is tightening them against direct backend captures where possible.
 - 2026-04-03 | Worker 1 / Manager | Mismatch report scaffold complete | Phase 0 fixture maps and generated mismatch report now track seeded coverage explicitly. Next step is replacing or confirming seeded fixtures with direct backend captures.
 - 2026-04-03 | Worker 1 / Manager | Cross-worker repo check green | Current in-progress slices from Workers 2/3/4/6/7/8 compile together under `cargo test --workspace`, so we can keep moving without a coordination freeze.
@@ -14,11 +16,10 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | SSE runtime gap report added | Worker 1 now publishes an explicit Phase 0 SSE publisher gap report so the difference between event-name coverage and preserved payload-shape compatibility stays visible while Worker 8 tightens the publisher surface.
 - 2026-04-03 | Worker 1 / Manager | HTTP endpoint gap report added | Worker 1 now publishes an explicit Phase 0 HTTP endpoint gap report so preserved routes with only catalog/fixture coverage stay visible until Worker 8 or later workers add real endpoint boundaries.
 - 2026-04-03 | Worker 1 / Manager | Harness refresh is now automatic | `check-compat-inventory.sh` now regenerates the upstream contract report plus the HTTP/SSE gap reports before validating, so Worker 1 does not rely on stale report artifacts.
-- 2026-04-03 | Worker 1 / Manager | Workspace integration warning surfaced | Full `cargo test --workspace` is currently blocked by borrow-check failures in `cairn-evals/src/services/release_service.rs`; Worker 1 harness checks remain green and independent while Worker 7 tightens that release-service implementation.
+- 2026-04-03 | Worker 1 / Manager | Workspace integration sweep resolved | `cargo test --workspace` is green again. Worker 1 harness checks remain an independent guardrail, but the current repo risk has moved from red crates to cross-crate seam polish.
 - 2026-04-03 | Worker 1 / Manager | SSE payload handoff published | Worker 1 now generates an explicit event-by-event payload handoff report for Worker 8 showing current runtime event sources, preserved fixture wrapper shapes, and the missing builder directions needed to lock SSE compatibility.
 - 2026-04-03 | Worker 1 / Manager | Phase 0 owner map published | Worker 1 now generates an explicit owner map for preserved HTTP and SSE compatibility surfaces so route/SSE gaps are routed to Worker 4/6/7/8 intentionally instead of turning into orphaned compatibility TODOs.
-- 2026-04-03 | Worker 1 / Manager | Narrow integration sweep confirms single red crate | Targeted crate tests for `cairn-domain`, `cairn-store`, `cairn-tools`, and `cairn-api` all pass; current integration red path is concentrated in `cairn-evals` (`selector_resolver.rs` import/type ambiguity plus `release_service.rs` borrow-check issues).
-- 2026-04-03 | Worker 1 / Manager | Worker slice health report added | Manager health is now generated as `.coordination/WORKER_SLICE_HEALTH.md`, which currently shows a single red crate (`cairn-evals`) while the rest of the worker-owned crates pass in isolation.
+- 2026-04-03 | Worker 1 / Manager | Worker slice health report added | Manager health is generated as `.coordination/WORKER_SLICE_HEALTH.md` and currently shows all worker-owned crates green in isolation.
 - 2026-04-03 | Worker 1 / Manager | Upstream source pointers published | Worker 1 now generates exact upstream file-and-line pointers for each preserved Phase 0 HTTP route and SSE event, so the protocol-backed migration contract stays auditable even without legacy backend handler captures.
 - 2026-04-03 | Worker 1 / Manager | SSE reports now track shaped-payload reality | The generated SSE gap and handoff reports no longer talk about raw runtime-event serialization. They now reflect the actual current state: `sse_payloads` exists, wrapper families are present, and the remaining work is field-level alignment to the preserved fixtures.
 
@@ -31,7 +32,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Architecture Owner -> Worker 1 | Week 1 focus: `tests/compat`, `tests/fixtures`, preserved route/SSE fixture naming, and initial migration harness shape.
 - 2026-04-03 | Worker 8 -> Worker 1 | Preserved route catalog (30 entries) and SSE event catalog (16 entries) are codified as Rust types in `cairn-api::http::preserved_route_catalog()` and `cairn-api::sse::preserved_sse_catalog()`. Classification tags (preserve/transitional) match the compatibility catalog doc. Ready for fixture alignment.
 - 2026-04-03 | Worker 8 -> Worker 1 | Week 2: SSE publisher maps all 20 RuntimeEvent variants to preserved SSE names. `build_sse_frame` + `parse_last_event_id` support the `/v1/stream?lastEventId=<id>` replay contract. Ready for SSE fixture assertions.
-- 2026-04-03 | Worker 1 / Manager -> Worker 1 | Current next focus: keep the compatibility harness authoritative while the rest of the repo moves. Refresh the generated gap reports, watch for worker drift against preserved Phase 0 routes/SSE, and turn any newly-stable Worker 8 surfaces into executable assertions instead of prose-only guidance.
+- 2026-04-03 | Manager -> Worker 1 mailbox | Current focus from this seat is coordination, not feature delivery. Keep the compatibility harness authoritative, refresh generated reports when worker changes land, and use this mailbox to route drift and quality issues to the right owner quickly.
 
 ## Outbox
 

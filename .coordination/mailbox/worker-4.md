@@ -19,6 +19,7 @@ Owner: Runtime Spine
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 4 | Current next focus: keep runtime seams stable while API catches up. Protect `ToolInvocationService` and `ExternalWorkerService`, and add narrow integration coverage if Worker 8 exposes any seam drift during API wiring.
 - 2026-04-03 | Architecture Owner -> Worker 4 | Week 1 focus: runtime crate skeleton only. Keep deeper handler semantics behind stable Worker 2/3 interfaces.
 - 2026-04-03 | Worker 1 -> Worker 4 | Hold at service-boundary level until Worker 2 and Worker 3 publish stable shared contracts. Do not lock mailbox or recovery semantics ad hoc.
 - 2026-04-03 | Worker 2 -> Worker 4 | Session/run/task/checkpoint lifecycle enums and pause/resume/failure helpers are ready to consume from `cairn-domain`.
@@ -39,6 +40,8 @@ Owner: Runtime Spine
 - 2026-04-03 | Worker 4 -> Worker 8 | `cairn-runtime` exposes service boundary traits for all runtime entities. API layer can accept commands through these service interfaces and query state via the cairn-store read-model traits.
 - 2026-04-03 | Worker 4 -> Worker 5 | `cairn-runtime` TaskService includes claim/heartbeat/start lifecycle. Tool invocations flow through the runtime's task and run management before hitting ToolHost.
 - 2026-04-03 | Worker 4 -> Worker 6 | `cairn-runtime` RecoveryService exposes recovery sweep and stale-dependency resolution. Graph projections should consume runtime events emitted during recovery.
+- 2026-04-03 | Worker 4 -> Worker 5 | `ToolInvocationService` trait now in cairn-runtime: `record_start`, `record_completed`, `record_failed`. Wires `assistant_tool_call` through ToolInvocationStarted/Completed/Failed events. Use this instead of writing events directly.
+- 2026-04-03 | Worker 4 -> Worker 8 | `ExternalWorkerService` trait now in cairn-runtime: validates reports against task state, emits ExternalWorkerReported + TaskStateChanged events atomically. API layer should route external worker webhooks through this seam.
 
 ## Ready For Review
 

@@ -13,7 +13,9 @@ Owner: Memory, Retrieval, Graph
 - 2026-04-03 | Week 4 assigned | Complete first owned retrieval flow for supported document floor, expose graph-backed provenance for runtime/operator use.
 - 2026-04-03 | Worker 6 / Manager | Week 4 complete | In-memory e2e retrieval, `GraphProvenanceService`. 37 tests passing.
 - 2026-04-03 | Wave 3 gate work | SQLite local-mode retrieval: `SqliteDocumentStore` + `SqliteRetrievalService` (FTS5). `InMemoryDiagnostics` (source quality tracking, index status). FTS5 virtual table + sync triggers in SQLite schema. `sqlite` feature flag for cairn-memory. 39 tests passing across all 3 crates.
-- 2026-04-03 | **Wave 3 gate met** | Owned retrieval replaces Bedrock KB (all v1 doc types, Postgres FTS + SQLite FTS5 + in-memory). Local-mode degraded path works (SQLite). Graph-backed provenance queryable (execution + retrieval + chains).
+- 2026-04-03 | **Wave 3 gate met** | Owned retrieval replaces Bedrock KB. Local-mode works. Graph provenance queryable.
+- 2026-04-03 | Wave 4 support | `EvalGraphProjector` (prompt asset/version/release/eval_run graph linkage), `RetrievalGraphProjector` (source/document/chunk provenance), `GraphAwareIngestPipeline` (auto-projects to graph on ingest).
+- 2026-04-03 | API integration | `MemoryApiImpl` implements Worker 8's `MemoryEndpoints` trait — search delegates to `RetrievalService`, CRUD for memory items. 52 tests passing (48 default + 4 sqlite).
 
 ## Blocked By
 
@@ -21,6 +23,7 @@ Owner: Memory, Retrieval, Graph
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 6 | Current next focus: finish the API-facing memory/provenance seam with Worker 8. Prioritize wiring `MemoryApiImpl<R>` into the HTTP boundary cleanly and keep provenance/feed reads backed by real service calls, not placeholders.
 - 2026-04-03 | Architecture Owner -> Worker 6 | Week 1 focus: memory and graph service skeletons with storage-facing interfaces, not deep implementation.
 - 2026-04-03 | Worker 1 -> Worker 6 | Align ingest/query/graph storage assumptions with Worker 3 before hardening persistence paths. Treat RFC 013 import shape as fixed input.
 - 2026-04-03 | Worker 3 -> Worker 6 | `cairn-store` event-log and projection boundaries are available. Graph persistence should use store interfaces as the write-side contract for durable state.

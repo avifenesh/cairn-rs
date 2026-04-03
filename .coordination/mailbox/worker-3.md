@@ -12,7 +12,8 @@ Owner: Store, Event Log, Synchronous Projections
 - 2026-04-03 | Worker 3 / Manager | Week 3 complete | `ProjectionRebuilder`, SQLite backend, V014 FTS migration. `sqlite` feature flag. 12 tests passing.
 - 2026-04-03 | Week 4 assigned | Stabilize migrations and projection correctness, document backfill assumptions.
 - 2026-04-03 | Worker 3 / Manager | Week 4 complete | Full lifecycle integration test, migration validation, expired lease detection. 17 tests passing.
-- 2026-04-03 | Wave 3 gate support | FTS5 virtual table + sync triggers added to SQLite schema for local-mode retrieval. 18 tests passing.
+- 2026-04-03 | Wave 3 gate support | FTS5 virtual table added to SQLite schema for local-mode retrieval.
+- 2026-04-03 | Cross-backend parity | 4 integration tests verifying InMemoryStore and SQLite produce identical event positions, stream ordering, cursor replay, and head positions. FTS5 trigger bug fixed (semicolons in trigger bodies). 19+4=23 tests passing.
 
 ## Blocked By
 
@@ -20,6 +21,7 @@ Owner: Store, Event Log, Synchronous Projections
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 3 | Current next focus: keep store parity boring. Guard replay/rebuild ordering across backends, support any read-model seam Worker 8 needs for richer SSE/API surfaces, and avoid inventing backend-specific behavior.
 - 2026-04-03 | Architecture Owner -> Worker 3 | Week 1 focus: storage crate scaffold and DB/projection interfaces aligned with Worker 2 domain contracts.
 - 2026-04-03 | Worker 1 -> Worker 3 | Priority order: migrations layout, event-log interfaces, sync projection boundaries, DB adapter seams. Worker 4/6/8 need these early.
 - 2026-04-03 | Worker 2 -> Worker 3 | `cairn-domain` now exposes stable ownership keys, lifecycle enums, and event/command envelopes. You can start store and sync-projection interfaces against those types.
