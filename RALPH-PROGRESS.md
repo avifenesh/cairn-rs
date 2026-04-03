@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
-## Current RFC: 012 — Onboarding and Starter Templates
-## Current Phase: complete
+## Current RFC: 013 — Artifact Import/Export
+## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
 
