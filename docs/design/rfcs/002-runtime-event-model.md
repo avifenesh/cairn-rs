@@ -237,13 +237,14 @@ For SSE/event-feed replay in v1:
 
 V1 defines one operational replay expectation for SSE consumers:
 
-- durable replay for client resume must be available for at least a documented short-term operational window
+- durable replay for client resume must be available for at least 72 hours
 
 The canonical v1 contract is:
 
 - the product exposes a replayable event position or cursor
-- reconnecting clients may request resume within the documented replay window
+- reconnecting clients may request resume within the documented replay window of at least 72 hours
 - operators may inspect recent runtime event streams from that same replayable window
+- deployments may retain a longer replay window, but 72 hours is the minimum first-sellable floor
 
 V1 does not require the SSE feed itself to expose the full retained lifetime of canonical runtime history.
 
@@ -361,10 +362,6 @@ Do not:
 - make replay depend on unstructured logs
 - conflate internal transient messages with durable state changes
 
-## Open Questions
-
-1. What concrete minimum replay window should the first sellable release document for SSE resume and recent operator inspection?
-
 ## Decision
 
 Implement the runtime around explicit commands, durable events, and projections.
@@ -379,3 +376,4 @@ Proceed assuming:
 - external workers may execute and report work, but canonical command handling and event persistence remain Rust-runtime-owned
 - product-facing history access in v1 is read-model-first rather than raw event-export-first
 - SSE replay in v1 uses a documented operational replay window rather than implying infinite history on the live stream
+- the minimum documented SSE replay window for the first sellable release is 72 hours
