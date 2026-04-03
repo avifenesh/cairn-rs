@@ -201,6 +201,7 @@ mod tests {
     fn runtime_tool_request_construction() {
         let req = RuntimeToolRequest {
             invocation_id: ToolInvocationId::new("inv_1"),
+            plugin_id: None,
             project: ProjectKey::new("t", "w", "p"),
             session_id: Some(SessionId::new("sess_1")),
             run_id: Some(RunId::new("run_1")),

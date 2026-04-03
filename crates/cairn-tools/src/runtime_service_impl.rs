@@ -312,6 +312,7 @@ mod tests {
         );
 
         let request = RuntimeToolRequest {
+            plugin_id: None,
             invocation_id: ToolInvocationId::new("inv_e2e"),
             project: ProjectKey::new("t", "w", "p"),
             session_id: None,
@@ -380,6 +381,7 @@ mod tests {
         );
 
         let request = RuntimeToolRequest {
+            plugin_id: None,
             invocation_id: ToolInvocationId::new("inv_denied"),
             project: ProjectKey::new("t", "w", "p"),
             session_id: None,
@@ -421,6 +423,7 @@ mod tests {
         );
 
         let request = RuntimeToolRequest {
+            plugin_id: None,
             invocation_id: ToolInvocationId::new("inv_sse"),
             project: ProjectKey::new("t", "w", "p"),
             session_id: None,
@@ -487,6 +490,7 @@ mod tests {
         );
 
         let request = RuntimeToolRequest {
+            plugin_id: None,
             invocation_id: ToolInvocationId::new("inv_held"),
             project: ProjectKey::new("t", "w", "p"),
             session_id: None,
@@ -573,6 +577,7 @@ mod tests {
             RuntimeToolServiceImpl::new(Arc::new(MockGate), Arc::new(MockHost), recorder.clone());
 
         let request = RuntimeToolRequest {
+            plugin_id: None,
             invocation_id: ToolInvocationId::new("inv_linked"),
             project: ProjectKey::new("t", "w", "p"),
             session_id: Some(cairn_domain::SessionId::new("sess_linked")),

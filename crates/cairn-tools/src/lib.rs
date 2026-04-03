@@ -9,6 +9,8 @@ pub mod permission_events;
 pub mod permissions;
 pub mod pipeline;
 pub mod plugin_bridge;
+pub mod plugin_executor;
+pub mod plugin_host;
 pub mod plugins;
 pub mod registry;
 pub mod runtime_service;
@@ -34,6 +36,7 @@ pub use plugin_bridge::{
     build_hooks_post_turn_request, build_initialize_request, build_policy_evaluate_request,
     build_signals_poll_request, build_tools_invoke_request, invoke_result_to_outcome,
 };
+pub use plugin_host::{PluginHostError, StdioPluginHost};
 pub use plugins::{PluginCapability, PluginHost, PluginLimits, PluginManifest, PluginState};
 pub use registry::{InMemoryPluginRegistry, PluginRegistry, RegistryError};
 pub use runtime_service::{
