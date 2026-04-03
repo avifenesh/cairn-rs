@@ -316,7 +316,9 @@ pub struct CancelResult {
     pub status: String,
 }
 
-/// `log.emit` notification params per RFC 007.
+// --- Plugin -> Host notification payloads (RFC 007) ---
+
+/// Typed payload for `log.emit` notifications.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogEmitParams {
     pub level: String,
@@ -326,10 +328,10 @@ pub struct LogEmitParams {
     #[serde(default)]
     pub fields: Option<serde_json::Value>,
     #[serde(default)]
-    pub timestamp: Option<u64>,
+    pub timestamp: Option<String>,
 }
 
-/// `progress.update` notification params per RFC 007.
+/// Typed payload for `progress.update` notifications.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProgressUpdateParams {
     #[serde(rename = "invocationId")]
@@ -343,7 +345,7 @@ pub struct ProgressUpdateParams {
     pub eta_ms: Option<u64>,
 }
 
-/// `event.emit` notification params per RFC 007.
+/// Typed payload for `event.emit` notifications.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventEmitParams {
     #[serde(rename = "invocationId")]
@@ -354,7 +356,44 @@ pub struct EventEmitParams {
     #[serde(rename = "externalId", default)]
     pub external_id: Option<String>,
     #[serde(default)]
-    pub timestamp: Option<u64>,
+    pub timestamp: Option<String>,
+}
+
+/// Typed wrapper for all plugin -> host notifications.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PluginNotification {
+    LogEmit(LogEmitParams),
+    ProgressUpdate(ProgressUpdateParams),
+    EventEmit(EventEmitParams),
+}
+
+impl PluginNotification {
+    /// Parse a raw JsonRpcNotification into a typed PluginNotification.
+    pub fn from_raw(notification: &JsonRpcNotification) -> Option<Self> {
+        match notification.method.as_str() {
+            notifications::LOG_EMIT => serde_json::from_value(notification.params.clone())
+                .ok()
+                .map(PluginNotification::LogEmit),
+            notifications::PROGRESS_UPDATE => {
+                serde_json::from_value(notification.params.clone())
+                    .ok()
+                    .map(PluginNotification::ProgressUpdate)
+            }
+            notifications::EVENT_EMIT => serde_json::from_value(notification.params.clone())
+                .ok()
+                .map(PluginNotification::EventEmit),
+            _ => None,
+        }
+    }
+
+    /// Get the invocation ID from any notification variant.
+    pub fn invocation_id(&self) -> &str {
+        match self {
+            PluginNotification::LogEmit(p) => &p.invocation_id,
+            PluginNotification::ProgressUpdate(p) => &p.invocation_id,
+            PluginNotification::EventEmit(p) => &p.invocation_id,
+        }
+    }
 }
 
 #[cfg(test)]

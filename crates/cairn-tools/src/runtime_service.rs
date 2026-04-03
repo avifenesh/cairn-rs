@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RuntimeToolRequest {
     pub invocation_id: ToolInvocationId,
+    pub plugin_id: Option<String>,
     pub project: ProjectKey,
     pub session_id: Option<SessionId>,
     pub run_id: Option<RunId>,

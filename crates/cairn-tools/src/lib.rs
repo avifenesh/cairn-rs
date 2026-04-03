@@ -10,6 +10,7 @@ pub mod permissions;
 pub mod pipeline;
 pub mod plugin_bridge;
 pub mod plugins;
+pub mod registry;
 pub mod runtime_service;
 pub mod runtime_service_impl;
 pub mod sandboxed_process;
@@ -29,9 +30,12 @@ pub use pipeline::{
     build_plugin_pipeline_request, run_builtin_pipeline, PipelineOutcome, PipelineResult,
 };
 pub use plugin_bridge::{
-    build_initialize_request, build_tools_invoke_request, invoke_result_to_outcome,
+    build_cancel_request, build_channels_deliver_request, build_eval_score_request,
+    build_hooks_post_turn_request, build_initialize_request, build_policy_evaluate_request,
+    build_signals_poll_request, build_tools_invoke_request, invoke_result_to_outcome,
 };
 pub use plugins::{PluginCapability, PluginHost, PluginLimits, PluginManifest, PluginState};
+pub use registry::{InMemoryPluginRegistry, PluginRegistry, RegistryError};
 pub use runtime_service::{
     RuntimeToolOutcome, RuntimeToolRequest, RuntimeToolResponse, RuntimeToolService,
     ToolLifecycleOutput,

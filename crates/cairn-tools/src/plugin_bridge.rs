@@ -46,11 +46,7 @@ pub fn build_tools_invoke_request(
         invocation_id: invocation_id.to_owned(),
         tool_name: tool_name.to_owned(),
         input,
-        scope: ScopeWire {
-            tenant_id: project.tenant_id.to_string(),
-            workspace_id: Some(project.workspace_id.to_string()),
-            project_id: Some(project.project_id.to_string()),
-        },
+        scope: project_to_scope(project),
         actor: None,
         runtime: None,
         grants: grants.to_vec(),
@@ -73,6 +69,134 @@ pub fn invoke_result_to_outcome(result: &ToolsInvokeResult) -> ToolOutcome {
         other => ToolOutcome::PermanentFailure {
             reason: format!("plugin returned status: {other}"),
         },
+    }
+}
+
+/// Builds a `signals.poll` JSON-RPC request.
+pub fn build_signals_poll_request(
+    request_id: &str,
+    invocation_id: &str,
+    source: serde_json::Value,
+    project: &ProjectKey,
+    cursor: Option<String>,
+) -> JsonRpcRequest {
+    let params = SignalsPollParams {
+        invocation_id: invocation_id.to_owned(),
+        source,
+        scope: project_to_scope(project),
+        cursor,
+    };
+    JsonRpcRequest::new(
+        request_id,
+        methods::SIGNALS_POLL,
+        serde_json::to_value(&params).unwrap_or_default(),
+    )
+}
+
+/// Builds a `channels.deliver` JSON-RPC request.
+pub fn build_channels_deliver_request(
+    request_id: &str,
+    invocation_id: &str,
+    channel: serde_json::Value,
+    message: serde_json::Value,
+    recipients: Vec<serde_json::Value>,
+    project: &ProjectKey,
+) -> JsonRpcRequest {
+    let params = ChannelsDeliverParams {
+        invocation_id: invocation_id.to_owned(),
+        channel,
+        message,
+        recipients,
+        scope: project_to_scope(project),
+    };
+    JsonRpcRequest::new(
+        request_id,
+        methods::CHANNELS_DELIVER,
+        serde_json::to_value(&params).unwrap_or_default(),
+    )
+}
+
+/// Builds a `hooks.post_turn` JSON-RPC request.
+pub fn build_hooks_post_turn_request(
+    request_id: &str,
+    invocation_id: &str,
+    project: &ProjectKey,
+    turn: serde_json::Value,
+) -> JsonRpcRequest {
+    let params = HooksPostTurnParams {
+        invocation_id: invocation_id.to_owned(),
+        scope: project_to_scope(project),
+        runtime: None,
+        turn,
+    };
+    JsonRpcRequest::new(
+        request_id,
+        methods::HOOKS_POST_TURN,
+        serde_json::to_value(&params).unwrap_or_default(),
+    )
+}
+
+/// Builds a `policy.evaluate` JSON-RPC request.
+pub fn build_policy_evaluate_request(
+    request_id: &str,
+    invocation_id: &str,
+    project: &ProjectKey,
+    action: serde_json::Value,
+    context: serde_json::Value,
+) -> JsonRpcRequest {
+    let params = PolicyEvaluateParams {
+        invocation_id: invocation_id.to_owned(),
+        scope: project_to_scope(project),
+        actor: None,
+        action,
+        context,
+    };
+    JsonRpcRequest::new(
+        request_id,
+        methods::POLICY_EVALUATE,
+        serde_json::to_value(&params).unwrap_or_default(),
+    )
+}
+
+/// Builds an `eval.score` JSON-RPC request.
+pub fn build_eval_score_request(
+    request_id: &str,
+    invocation_id: &str,
+    project: &ProjectKey,
+    target: serde_json::Value,
+    samples: Vec<serde_json::Value>,
+) -> JsonRpcRequest {
+    let params = EvalScoreParams {
+        invocation_id: invocation_id.to_owned(),
+        scope: project_to_scope(project),
+        target,
+        dataset: None,
+        samples,
+    };
+    JsonRpcRequest::new(
+        request_id,
+        methods::EVAL_SCORE,
+        serde_json::to_value(&params).unwrap_or_default(),
+    )
+}
+
+/// Builds a `cancel` JSON-RPC request.
+pub fn build_cancel_request(request_id: &str, invocation_id: &str) -> JsonRpcRequest {
+    let params = CancelParams {
+        invocation_id: invocation_id.to_owned(),
+    };
+    JsonRpcRequest::new(
+        request_id,
+        methods::CANCEL,
+        serde_json::to_value(&params).unwrap_or_default(),
+    )
+}
+
+fn project_to_scope(project: &ProjectKey) -> ScopeWire {
+    ScopeWire {
+        tenant_id: project.tenant_id.to_string(),
+        workspace_id: Some(project.workspace_id.to_string()),
+        project_id: Some(project.project_id.to_string()),
     }
 }
 
