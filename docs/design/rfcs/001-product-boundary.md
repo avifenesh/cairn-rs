@@ -146,8 +146,9 @@ The product boundary is only real if the break policy is explicit.
 Default stance:
 
 - self-hosted first
-- hybrid-friendly
-- hosted-control-plane remains a later option, not a prerequisite for architecture
+- local mode and self-hosted team mode are first-class in v1
+- hybrid remains architecture-compatible but is not a first-class supported operating model in v1
+- hosted or managed control plane remains a later option, not a prerequisite for architecture
 
 This means the product must work well when deployed by a technical team in their own environment.
 
@@ -169,6 +170,25 @@ The product boundary is correct if:
 - runtime, memory, graph, and evals reinforce one another
 - operators can control and inspect the system without founder mediation
 
+## Minimum Operator Product Shape
+
+The first release must include a real operator control plane, not just backend APIs.
+
+At minimum, the product shape includes:
+
+- overview
+- runs
+- approvals
+- memory
+- graph
+- prompts
+- evals
+- policies
+- sources and channels
+- settings
+
+These surfaces may be table/detail-first except where relationship visualization is required to make the product legible.
+
 ## Non-Goals
 
 For v1, do not aim to be:
@@ -181,10 +201,9 @@ For v1, do not aim to be:
 
 ## Open Questions
 
-1. How far should hybrid hosted control-plane support shape v1 architecture?
-2. Which enterprise features should remain explicitly out of scope for v1?
-3. How much multi-tenancy is required in v1 versus workspace/project isolation only?
-4. Which operator workflows must exist in the first release, and which can remain CLI/API-only?
+1. Which enterprise features should remain explicitly out of scope for the first sellable self-hosted release?
+2. Should a later release introduce a first-class hybrid control-plane mode once the self-hosted operating model is proven?
+3. Which post-v1 deployment and governance features merit promotion from architecture-compatible to first-class?
 
 ## Decision
 
@@ -193,3 +212,7 @@ Proceed with the rewrite assuming:
 - Cairn is a self-hostable control plane for production agents
 - product core excludes personal profile content
 - product value comes from coherent runtime + memory + graph + eval + operator control
+- local mode and self-hosted team mode are first-class in v1
+- hybrid is architecture-compatible but not a first-class supported v1 operating mode
+- tenant/workspace/project scoping is required in architecture even when deployments run effectively single-tenant
+- the first release includes the minimum operator control-plane views and workflows defined by RFC 010
