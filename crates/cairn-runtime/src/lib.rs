@@ -8,6 +8,7 @@ pub mod approvals;
 pub mod checkpoints;
 pub mod enrichment;
 pub mod error;
+pub mod eval_runs;
 pub mod ingest_jobs;
 pub mod mailbox;
 pub mod recovery;
@@ -27,11 +28,12 @@ pub use error::RuntimeError;
 pub use mailbox::MailboxService;
 pub use recovery::{RecoveryAction, RecoveryService, RecoverySummary};
 pub use runs::RunService;
+pub use eval_runs::EvalRunService;
 pub use ingest_jobs::IngestJobService;
 pub use services::{
-    ApprovalServiceImpl, CheckpointServiceImpl, ExternalWorkerService, ExternalWorkerServiceImpl,
-    IngestJobServiceImpl, MailboxServiceImpl, RecoveryServiceImpl, RunServiceImpl,
-    SessionServiceImpl, SignalServiceImpl, TaskServiceImpl, ToolInvocationService,
+    ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl, ExternalWorkerService,
+    ExternalWorkerServiceImpl, IngestJobServiceImpl, MailboxServiceImpl, RecoveryServiceImpl,
+    RunServiceImpl, SessionServiceImpl, SignalServiceImpl, TaskServiceImpl, ToolInvocationService,
     ToolInvocationServiceImpl,
 };
 pub use sessions::SessionService;

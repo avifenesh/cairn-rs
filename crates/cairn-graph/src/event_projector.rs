@@ -291,9 +291,27 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
             | RuntimeEvent::UserMessageAppended(_)
-            | RuntimeEvent::IngestJobCompleted(_)
-            | RuntimeEvent::EvalRunStarted(_)
-            | RuntimeEvent::EvalRunCompleted(_) => {}
+            | RuntimeEvent::IngestJobCompleted(_) => {}
+
+            RuntimeEvent::EvalRunStarted(e) => {
+                self.add_node(e.eval_run_id.as_str(), NodeKind::EvalRun, Some(&e.project), ts)
+                    .await?;
+                nodes += 1;
+            }
+
+            RuntimeEvent::EvalRunCompleted(e) => {
+                // EvaluatedBy edge: eval run -> subject being evaluated.
+                if let Some(ref subject_id) = e.subject_node_id {
+                    self.add_edge(
+                        e.eval_run_id.as_str(),
+                        subject_id,
+                        EdgeKind::EvaluatedBy,
+                        ts,
+                    )
+                    .await?;
+                    edges += 1;
+                }
+            }
         }
 
         Ok((nodes, edges))

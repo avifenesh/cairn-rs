@@ -13,6 +13,7 @@
 
 pub mod approval;
 pub mod checkpoint;
+pub mod eval_run;
 pub mod ingest_job;
 pub mod mailbox;
 pub mod run;
@@ -23,6 +24,7 @@ pub mod tool_invocation;
 
 pub use approval::*;
 pub use checkpoint::*;
+pub use eval_run::*;
 pub use ingest_job::*;
 pub use mailbox::*;
 pub use run::*;

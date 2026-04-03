@@ -14,6 +14,7 @@ pub mod deep_search_impl;
 pub mod diagnostics;
 pub mod diagnostics_impl;
 pub mod feed_impl;
+pub mod graph_expansion;
 pub mod graph_ingest;
 pub mod in_memory;
 pub mod ingest;

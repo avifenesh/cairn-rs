@@ -10,6 +10,7 @@
 pub mod eval_projector;
 pub mod event_projector;
 pub mod graph_provenance;
+pub mod in_memory;
 #[cfg(feature = "postgres")]
 pub mod pg;
 pub mod projections;

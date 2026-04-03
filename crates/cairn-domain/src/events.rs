@@ -464,6 +464,8 @@ pub struct EvalRunCompleted {
     pub eval_run_id: EvalRunId,
     pub success: bool,
     pub error_message: Option<String>,
+    /// Node ID of the subject being evaluated (e.g. prompt_release_id).
+    pub subject_node_id: Option<String>,
     pub completed_at: u64,
 }
 

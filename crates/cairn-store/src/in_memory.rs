@@ -33,6 +33,7 @@ struct State {
     tool_invocations: HashMap<String, ToolInvocationRecord>,
     signals: HashMap<String, cairn_domain::SignalRecord>,
     ingest_jobs: HashMap<String, cairn_domain::IngestJobRecord>,
+    eval_runs: HashMap<String, crate::projections::EvalRunRecord>,
 }
 
 pub struct InMemoryStore {
@@ -54,6 +55,7 @@ impl InMemoryStore {
                 tool_invocations: HashMap::new(),
                 signals: HashMap::new(),
                 ingest_jobs: HashMap::new(),
+                eval_runs: HashMap::new(),
             }),
         }
     }
@@ -286,7 +288,28 @@ impl InMemoryStore {
                     rec.updated_at = e.completed_at;
                 }
             }
-            RuntimeEvent::EvalRunStarted(_) | RuntimeEvent::EvalRunCompleted(_) => {}
+            RuntimeEvent::EvalRunStarted(e) => {
+                state.eval_runs.insert(
+                    e.eval_run_id.as_str().to_owned(),
+                    crate::projections::EvalRunRecord {
+                        eval_run_id: e.eval_run_id.clone(),
+                        project: e.project.clone(),
+                        subject_kind: e.subject_kind.clone(),
+                        evaluator_type: e.evaluator_type.clone(),
+                        success: None,
+                        error_message: None,
+                        started_at: e.started_at,
+                        completed_at: None,
+                    },
+                );
+            }
+            RuntimeEvent::EvalRunCompleted(e) => {
+                if let Some(rec) = state.eval_runs.get_mut(e.eval_run_id.as_str()) {
+                    rec.success = Some(e.success);
+                    rec.error_message = e.error_message.clone();
+                    rec.completed_at = Some(e.completed_at);
+                }
+            }
         }
     }
 }
@@ -781,6 +804,37 @@ impl IngestJobReadModel for InMemoryStore {
             .cloned()
             .collect();
         results.sort_by_key(|j| j.created_at);
+        let results = results.into_iter().skip(offset).take(limit).collect();
+        Ok(results)
+    }
+}
+
+// -- EvalRunReadModel --
+
+#[async_trait]
+impl EvalRunReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        eval_run_id: &cairn_domain::EvalRunId,
+    ) -> Result<Option<crate::projections::EvalRunRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.eval_runs.get(eval_run_id.as_str()).cloned())
+    }
+
+    async fn list_by_project(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::EvalRunRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<crate::projections::EvalRunRecord> = state
+            .eval_runs
+            .values()
+            .filter(|r| r.project == *project)
+            .cloned()
+            .collect();
+        results.sort_by_key(|r| r.started_at);
         let results = results.into_iter().skip(offset).take(limit).collect();
         Ok(results)
     }

@@ -5,6 +5,7 @@
 
 pub mod approval_impl;
 pub mod checkpoint_impl;
+pub mod eval_run_impl;
 pub mod event_helpers;
 pub mod external_worker_impl;
 pub mod ingest_job_impl;
@@ -18,6 +19,7 @@ pub mod tool_invocation_impl;
 
 pub use approval_impl::ApprovalServiceImpl;
 pub use checkpoint_impl::CheckpointServiceImpl;
+pub use eval_run_impl::EvalRunServiceImpl;
 pub use external_worker_impl::{parse_outcome, ExternalWorkerService, ExternalWorkerServiceImpl};
 pub use ingest_job_impl::IngestJobServiceImpl;
 pub use mailbox_impl::MailboxServiceImpl;
