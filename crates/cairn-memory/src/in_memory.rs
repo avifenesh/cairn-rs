@@ -176,7 +176,7 @@ impl RetrievalService for InMemoryRetrieval {
         let policy = query.scoring_policy.as_ref().cloned().unwrap_or_default();
         let now = retrieval::now_ms();
 
-        let mut scoring_dims = vec!["lexical_relevance".to_owned()];
+        let mut scoring_dims: Vec<String> = Vec::new();
 
         let mut results: Vec<RetrievalResult> = scored
             .into_iter()
@@ -211,6 +211,9 @@ impl RetrievalService for InMemoryRetrieval {
             .collect();
 
         // Track all dimensions that materially contributed across results.
+        if results.iter().any(|r| r.breakdown.lexical_relevance != 0.0) {
+            scoring_dims.push("lexical_relevance".to_owned());
+        }
         if results.iter().any(|r| r.breakdown.semantic_relevance != 0.0) {
             scoring_dims.push("semantic_relevance".to_owned());
         }
@@ -252,14 +255,14 @@ impl RetrievalService for InMemoryRetrieval {
         };
 
         let elapsed = start.elapsed().as_millis() as u64;
+        let results_returned = results.len();
 
         Ok(RetrievalResponse {
-            results: results.clone(),
             diagnostics: RetrievalDiagnostics {
                 mode_used: effective_mode,
                 reranker_used: query.reranker,
                 candidates_generated,
-                results_returned: results.len(),
+                results_returned,
                 latency_ms: elapsed,
                 stages_used: stages,
                 scoring_dimensions_used: scoring_dims,
@@ -270,6 +273,7 @@ impl RetrievalService for InMemoryRetrieval {
                     if policy.recency_enabled { "on" } else { "off" },
                 )),
             },
+            results,
         })
     }
 }
