@@ -1,8 +1,9 @@
 use crate::ids::{
     ProjectId, PromptReleaseId, ProviderBindingId, ProviderCallId, ProviderConnectionId,
-    ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, TaskId,
+    ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, TaskId, TenantId,
 };
 use crate::selectors::SelectorContext;
+use crate::tenancy::ProjectKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -281,6 +282,106 @@ pub fn validate_route_decision(
 
     Ok(())
 }
+
+/// Configured provider endpoint owned above the project scope.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderConnectionRecord {
+    pub provider_connection_id: ProviderConnectionId,
+    pub tenant_id: TenantId,
+    pub provider_family: String,
+    pub adapter_type: String,
+    pub status: ProviderConnectionStatus,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderConnectionStatus {
+    Active,
+    Disabled,
+}
+
+/// Project-scoped deployable runtime selection unit for provider routing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderBindingRecord {
+    pub provider_binding_id: ProviderBindingId,
+    pub project: ProjectKey,
+    pub provider_connection_id: ProviderConnectionId,
+    pub provider_model_id: ProviderModelId,
+    pub operation_kind: OperationKind,
+    pub settings: ProviderBindingSettings,
+    pub active: bool,
+    pub created_at: u64,
+}
+
+/// Generation provider adapter trait per RFC 009.
+///
+/// Supports streaming text deltas, usage accounting, tool call emission,
+/// structured output, timeout, and cancellation.
+#[async_trait::async_trait]
+pub trait GenerationProvider: Send + Sync {
+    async fn generate(
+        &self,
+        model_id: &str,
+        messages: Vec<serde_json::Value>,
+        settings: &ProviderBindingSettings,
+    ) -> Result<GenerationResponse, ProviderAdapterError>;
+}
+
+/// Response from a generation provider call.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GenerationResponse {
+    pub text: String,
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+    pub model_id: String,
+    pub tool_calls: Vec<serde_json::Value>,
+}
+
+/// Reranker provider adapter trait per RFC 009.
+#[async_trait::async_trait]
+pub trait RerankerProvider: Send + Sync {
+    async fn rerank(
+        &self,
+        model_id: &str,
+        query: &str,
+        candidates: Vec<String>,
+    ) -> Result<RerankResponse, ProviderAdapterError>;
+}
+
+/// Response from a reranker provider call.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RerankResponse {
+    pub ranked_indices: Vec<usize>,
+    pub scores: Vec<f64>,
+    pub model_id: String,
+}
+
+/// Errors from provider adapter calls.
+#[derive(Debug)]
+pub enum ProviderAdapterError {
+    TransportFailure(String),
+    TimedOut,
+    RateLimited,
+    ProviderError(String),
+    StructuredOutputInvalid(String),
+}
+
+impl std::fmt::Display for ProviderAdapterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProviderAdapterError::TransportFailure(msg) => write!(f, "transport failure: {msg}"),
+            ProviderAdapterError::TimedOut => write!(f, "timed out"),
+            ProviderAdapterError::RateLimited => write!(f, "rate limited"),
+            ProviderAdapterError::ProviderError(msg) => write!(f, "provider error: {msg}"),
+            ProviderAdapterError::StructuredOutputInvalid(msg) => {
+                write!(f, "structured output invalid: {msg}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProviderAdapterError {}
 
 #[cfg(test)]
 mod tests {

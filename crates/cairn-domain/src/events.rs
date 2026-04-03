@@ -1,7 +1,8 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
     ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, PromptAssetId,
-    PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, TenantId,
+    PromptReleaseId, PromptVersionId, ProviderBindingId, ProviderCallId, ProviderConnectionId,
+    ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, SessionId, SignalId, TaskId, TenantId,
     ToolInvocationId, WorkspaceId,
 };
 use crate::lifecycle::{
@@ -120,6 +121,8 @@ pub enum RuntimeEvent {
     TenantCreated(TenantCreated),
     WorkspaceCreated(WorkspaceCreated),
     ProjectCreated(ProjectCreated),
+    RouteDecisionMade(RouteDecisionMade),
+    ProviderCallCompleted(ProviderCallCompleted),
 }
 
 impl RuntimeEvent {
@@ -158,6 +161,8 @@ impl RuntimeEvent {
             RuntimeEvent::TenantCreated(event) => &event.project,
             RuntimeEvent::WorkspaceCreated(event) => &event.project,
             RuntimeEvent::ProjectCreated(event) => &event.project,
+            RuntimeEvent::RouteDecisionMade(event) => &event.project,
+            RuntimeEvent::ProviderCallCompleted(event) => &event.project,
         }
     }
 
@@ -274,6 +279,8 @@ impl RuntimeEvent {
             RuntimeEvent::TenantCreated(_) => None,
             RuntimeEvent::WorkspaceCreated(_) => None,
             RuntimeEvent::ProjectCreated(_) => None,
+            RuntimeEvent::RouteDecisionMade(_) => None,
+            RuntimeEvent::ProviderCallCompleted(_) => None,
         }
     }
 }
@@ -570,6 +577,36 @@ pub struct ProjectCreated {
     pub project: ProjectKey,
     pub name: String,
     pub created_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteDecisionMade {
+    pub project: ProjectKey,
+    pub route_decision_id: RouteDecisionId,
+    pub operation_kind: crate::providers::OperationKind,
+    pub selected_provider_binding_id: Option<ProviderBindingId>,
+    pub final_status: crate::providers::RouteDecisionStatus,
+    pub attempt_count: u16,
+    pub fallback_used: bool,
+    pub decided_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderCallCompleted {
+    pub project: ProjectKey,
+    pub provider_call_id: ProviderCallId,
+    pub route_decision_id: RouteDecisionId,
+    pub route_attempt_id: RouteAttemptId,
+    pub provider_binding_id: ProviderBindingId,
+    pub provider_connection_id: ProviderConnectionId,
+    pub provider_model_id: ProviderModelId,
+    pub operation_kind: crate::providers::OperationKind,
+    pub status: crate::providers::ProviderCallStatus,
+    pub latency_ms: Option<u64>,
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+    pub cost_micros: Option<u64>,
+    pub completed_at: u64,
 }
 
 #[cfg(test)]

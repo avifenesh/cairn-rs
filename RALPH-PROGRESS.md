@@ -15,7 +15,7 @@
 | 006 | Prompt Registry and Release | DONE |
 | 007 | Plugin Protocol and Transport | DONE |
 | 008 | Tenant/Workspace/Profile | DONE |
-| 009 | Provider Abstraction | pending |
+| 009 | Provider Abstraction | IN PROGRESS |
 | 010 | Operator Control Plane | pending |
 | 011 | Deployment Shape | pending |
 | 012 | Onboarding and Starter Templates | pending |
@@ -670,6 +670,39 @@ RFC 008 says every API request operates in explicit scope context.
 4. **Phase 4 — Tests**: tests + cross-review
 5. **Phase 5 — Mark complete**
 
+## RFC 009 — Gap Analysis
+
+### What exists
+
+**cairn-domain providers.rs** (comprehensive routing types):
+- OperationKind (Generate/Embed/Rerank), ProviderCapability (9 variants), ProviderBindingSettings
+- RouteAttemptRecord, RouteDecisionRecord, ProviderCallRecord with full RFC 009 fields
+- RouteAttemptDecision, RouteDecisionStatus, RouteDecisionReason, ProviderCallStatus, ProviderCallErrorClass
+- RouteDecisionRecord.validate() with linkage validation
+- Typed IDs: ProviderBindingId, ProviderConnectionId, ProviderCallId, ProviderModelId, RouteAttemptId, RouteDecisionId
+
+**cairn-domain credentials.rs**: CredentialRecord (tenant-scoped, encrypted_value, provider_adapter)
+
+### Gaps
+
+1. No ProviderConnectionRecord/ProviderBindingRecord — [ ] Add connection and binding entity types
+2. No provider adapter trait — [ ] Add GenerationProvider/EmbeddingProvider/RerankerProvider traits
+3. No route policy type — [ ] Add RoutePolicyRecord with fallback chain
+4. No route resolver service — [ ] Add RouteResolverService trait
+5. No store projections — [ ] Add RouteDecisionReadModel, ProviderCallReadModel
+6. No RuntimeCommand/Event for routing — [ ] Add RouteDecisionMade, ProviderCallCompleted events
+7. No provider call execution — [ ] Add dispatch to provider endpoints
+8. No capability check service — [ ] Add effective capability set computation
+9. No cost accounting — [ ] Add cost aggregation service
+10. No provider route template type — [ ] Add ProviderRouteTemplateRecord
+
+### Phase plan
+
+1. **Phase 2 — Types**: ProviderConnectionRecord, ProviderBindingRecord, routing events, route policy
+2. **Phase 3 — Impl**: store projections, InMemoryStore impls, RouteResolverService
+3. **Phase 4 — Tests + review**
+4. **Phase 5 — Mark complete**
+
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
 - [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants
@@ -707,3 +740,5 @@ RFC 008 says every API request operates in explicit scope context.
 - [x] RFC 007: Phase 4 cross-review — duplicate registration guard in StdioPluginHost
 - [x] RFC 007: Phase 5 — marked complete, all 10 gaps resolved
 - [x] RFC 008: Phase 1 gap analysis — 10 gaps across entity records, CRUD services, operator profile, credentials, defaults layering, membership, permissions, lifecycle events
+- [x] RFC 008: Phase 2+3 — entity records, CRUD services, store projections, defaults layering, credentials
+- [x] RFC 008: Phase 5 — marked complete

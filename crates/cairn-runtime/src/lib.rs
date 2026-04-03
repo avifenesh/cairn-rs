@@ -16,6 +16,7 @@ pub mod prompt_assets;
 pub mod prompt_releases;
 pub mod prompt_versions;
 pub mod recovery;
+pub mod routing;
 pub mod runs;
 pub mod services;
 pub mod sessions;
@@ -46,9 +47,10 @@ pub use services::{
     PromptVersionServiceImpl, RecoveryServiceImpl,
     RunServiceImpl, SessionServiceImpl, SignalServiceImpl, TaskServiceImpl,
     TenantServiceImpl, ToolInvocationService, ToolInvocationServiceImpl,
-    WorkspaceServiceImpl,
+    SimpleRouteResolver, WorkspaceServiceImpl,
 };
 pub use projects::ProjectService;
+pub use routing::RouteResolverService;
 pub use sessions::SessionService;
 pub use signals::SignalService;
 pub use tasks::TaskService;

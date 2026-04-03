@@ -15,6 +15,7 @@ pub mod prompt_asset_impl;
 pub mod prompt_release_impl;
 pub mod prompt_version_impl;
 pub mod recovery_impl;
+pub mod route_resolver_impl;
 pub mod run_impl;
 pub mod session_impl;
 pub mod signal_impl;
