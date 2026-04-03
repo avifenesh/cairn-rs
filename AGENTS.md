@@ -11,7 +11,7 @@ Do not treat this repo as an open-ended playground.
 When there is ambiguity, resolve in this order:
 
 1. the relevant RFCs under [`docs/design/rfcs`](./docs/design/rfcs)
-2. [`docs/design/EIGHT_WORKER_EXECUTION_PLAN.md`](./docs/design/EIGHT_WORKER_EXECUTION_PLAN.md)
+2. [`docs/design/MANAGER_THREE_WORKER_REPLAN.md`](./docs/design/MANAGER_THREE_WORKER_REPLAN.md)
 3. compatibility docs under [`docs/design`](./docs/design)
 4. the current Go implementation in [`../cairn`](../cairn) only where preserved behavior or fixtures need to be checked
 
@@ -41,19 +41,19 @@ If the docs disagree, fix the docs before inventing local behavior.
 
 ## Worker Coordination Rules
 
-- each worker should primarily edit their owned surfaces from the execution plan
-- before substantial work, update your worker mailbox file with current focus and blockers
+- active coordination is manager + 3 workers, as described in [`docs/design/MANAGER_THREE_WORKER_REPLAN.md`](./docs/design/MANAGER_THREE_WORKER_REPLAN.md)
+- use the active mailbox files under [`.coordination/mailbox`](./.coordination/mailbox), not the older `worker-1.md` through `worker-8.md` history files
+- before substantial work, update your active mailbox file with current focus and blockers
 - when you need another worker, leave a concise note in their mailbox file
 - when a dependency lands, acknowledge it in your mailbox and update your next merge target
 - if a change crosses worker boundaries, note the affected RFC and the reason in the mailbox entry
 
 Use:
 
-- [`docs/design/EIGHT_WORKER_EXECUTION_PLAN.md`](./docs/design/EIGHT_WORKER_EXECUTION_PLAN.md)
+- [`docs/design/MANAGER_THREE_WORKER_REPLAN.md`](./docs/design/MANAGER_THREE_WORKER_REPLAN.md)
 - [`docs/design/MILESTONE_BOARD_WEEKS_1_4.md`](./docs/design/MILESTONE_BOARD_WEEKS_1_4.md)
 - [`docs/design/REPO_SCAFFOLDING_TASKS.md`](./docs/design/REPO_SCAFFOLDING_TASKS.md)
 - [`.coordination/mailbox`](./.coordination/mailbox)
-- [`.coordination/queue`](./.coordination/queue)
 
 ## Coordination Conventions
 
@@ -62,7 +62,7 @@ Use:
 - reference RFCs and files directly
 - prefer "blocked by", "needs from", and "ready for review" language over long narrative updates
 - mailbox files are the active coordination system
-- queue automation is paused; do not rely on listener, busywait, or auto-claim flows
+- queue automation is archived; do not rely on listener, busywait, or auto-claim flows
 - if a cut is complete, leave either concrete proof or a concrete blocker, not a generic completion note
 
 ## When To Stop And Escalate
@@ -87,6 +87,7 @@ Stop and update the docs first if:
 ## Reference Docs
 
 - [Rewrite Plan](./docs/design/RUST_PRODUCT_REWRITE_PLAN.md)
+- [Manager + 3 Worker Replan](./docs/design/MANAGER_THREE_WORKER_REPLAN.md)
 - [8-Worker Execution Plan](./docs/design/EIGHT_WORKER_EXECUTION_PLAN.md)
 - [Milestone Board Weeks 1-4](./docs/design/MILESTONE_BOARD_WEEKS_1_4.md)
 - [Repo Scaffolding Tasks](./docs/design/REPO_SCAFFOLDING_TASKS.md)

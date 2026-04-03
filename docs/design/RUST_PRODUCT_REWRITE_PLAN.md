@@ -6,6 +6,7 @@ Audience: product owner, architecture lead, parallel coding agents
 
 Companion execution artifact:
 
+- [`MANAGER_THREE_WORKER_REPLAN.md`](./MANAGER_THREE_WORKER_REPLAN.md)
 - [`EIGHT_WORKER_EXECUTION_PLAN.md`](./EIGHT_WORKER_EXECUTION_PLAN.md)
 
 ## Purpose

@@ -1,6 +1,6 @@
 # Coordination
 
-This directory is the lightweight coordination layer for parallel workers.
+This directory is the lightweight coordination layer for the active manager + 3 worker model.
 
 Use it for:
 
@@ -8,7 +8,7 @@ Use it for:
 - dependency requests
 - review handoffs
 - short operational notes
-- manager-written next-task direction in mailbox files
+- manager-written workstream direction in mailbox files
 
 Do not use it for:
 
@@ -23,7 +23,7 @@ Canonical design decisions still belong in the RFCs.
 - [`mailbox`](./mailbox)
 - [`queue`](./queue)
 
-Queue automation is currently paused.
+Queue automation is archived.
 
 - do not treat the queue bus as authoritative
 - do not wait on listener or busywait automation
@@ -32,7 +32,7 @@ Queue automation is currently paused.
 
 ## Usage Rule
 
-Each worker owns their own mailbox file and should:
+Each active workstream owns its mailbox file and should:
 
 - update `Current Status` before major work starts
 - update `Blocked By` when waiting on another worker
@@ -41,9 +41,9 @@ Each worker owns their own mailbox file and should:
 
 Active coordination rule:
 
-- manager writes the next concrete cut directly into the worker mailbox
+- manager writes the next concrete cut directly into the active mailbox
 - workers update mailbox status/blockers/review handoffs directly
 - mailboxes are the canonical status and dependency story
 - if a worker finishes a cut, they should leave either concrete proof or a concrete blocker in the mailbox, not a generic completion note
 
-The queue bus is paused and should not be used for current execution pacing.
+The queue bus is archived and should not be used for current execution pacing.

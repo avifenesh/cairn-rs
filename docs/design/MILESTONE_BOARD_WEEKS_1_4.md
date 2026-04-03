@@ -1,10 +1,11 @@
 # Cairn Rust Rewrite: Milestone Board Weeks 1-4
 
-Status: execution draft  
+Status: historical milestone board for the original 8-worker execution pass
 Audience: architecture owner, release integrator, 8 parallel workers  
 Companion docs:
 
 - [`EIGHT_WORKER_EXECUTION_PLAN.md`](./EIGHT_WORKER_EXECUTION_PLAN.md)
+- [`MANAGER_THREE_WORKER_REPLAN.md`](./MANAGER_THREE_WORKER_REPLAN.md)
 - [`REPO_SCAFFOLDING_TASKS.md`](./REPO_SCAFFOLDING_TASKS.md)
 
 ## Purpose

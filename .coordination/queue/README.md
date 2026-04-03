@@ -1,10 +1,10 @@
 # Queue Bus
 
-This directory is the lightweight task queue and notification bus for worker coordination.
+This directory is historical task-queue and notification-bus material from the earlier 8-worker coordination experiment.
 
 ## Current Status
 
-Queue automation is currently paused.
+Queue automation is archived.
 
 - do not use the queue bus as the active task system
 - do not rely on listeners, busywait refill, or auto-claim behavior

@@ -1,6 +1,13 @@
 # Worker Mailbox Protocol
 
-There is one mailbox file per worker:
+Active mailbox files:
+
+- `manager.md`
+- `worker-surface.md`
+- `worker-core.md`
+- `worker-knowledge.md`
+
+Historical mailbox files:
 
 - `worker-1.md` through `worker-8.md`
 
@@ -24,8 +31,8 @@ There is one mailbox file per worker:
 
 Mailbox-first coordination is the active system right now.
 
-- manager writes the next concrete cut directly into each worker mailbox
-- workers report current status, blockers, handoffs, and ready-for-review notes in the mailbox
+- manager writes the next concrete cut directly into each active mailbox
+- workers report current status, blockers, handoffs, and ready-for-review notes in the active mailbox
 - do not rely on queue listeners, busywait refill, or auto-claim behavior for current execution
 
 Completion rule:
@@ -33,7 +40,7 @@ Completion rule:
 - every finished cut should leave either concrete proof or a concrete blocker in the mailbox
 - generic completion notes are not enough
 
-The queue bus in [`../queue`](../queue) is paused and kept only as reference for a later redesign.
+The queue bus in [`../queue`](../queue) is archived and kept only as reference for a later redesign.
 
 ## Suggested Entry Format
 

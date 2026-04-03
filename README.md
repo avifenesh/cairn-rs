@@ -21,6 +21,7 @@ Use this repo for:
 ## Current Docs
 
 - [Rust Product Rewrite Plan](./docs/design/RUST_PRODUCT_REWRITE_PLAN.md)
+- [Manager + 3 Worker Replan](./docs/design/MANAGER_THREE_WORKER_REPLAN.md)
 - [8-Worker Execution Plan](./docs/design/EIGHT_WORKER_EXECUTION_PLAN.md)
 - [Milestone Board Weeks 1-4](./docs/design/MILESTONE_BOARD_WEEKS_1_4.md)
 - [Repo Scaffolding Tasks](./docs/design/REPO_SCAFFOLDING_TASKS.md)
@@ -30,6 +31,8 @@ Use this repo for:
 
 - [AGENTS.md](./AGENTS.md)
 - [Mailbox](./.coordination/mailbox)
+
+Active coordination is now manager + 3 workers. The older 8-worker plan and mailbox files are kept as execution history.
 
 ## Code Layout
 

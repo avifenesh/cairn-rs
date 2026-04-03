@@ -1,6 +1,6 @@
 # Cairn Rust Rewrite: 8-Worker Execution Plan
 
-Status: execution draft  
+Status: historical execution plan; superseded for active coordination by [`MANAGER_THREE_WORKER_REPLAN.md`](./MANAGER_THREE_WORKER_REPLAN.md)
 Audience: product owner, architecture lead, parallel implementation workers  
 Depends on: RFC 001 through RFC 014, `RUST_PRODUCT_REWRITE_PLAN.md`
 
