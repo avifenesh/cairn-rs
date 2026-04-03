@@ -1,6 +1,6 @@
 use crate::ids::{
-    ApprovalId, CheckpointId, IngestJobId, MailboxMessageId, RunId, SessionId, SignalId, TaskId,
-    ToolInvocationId,
+    ApprovalId, CheckpointId, EvalRunId, IngestJobId, MailboxMessageId, RunId, SessionId, SignalId,
+    TaskId, ToolInvocationId,
 };
 use crate::tenancy::OwnershipKey;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ pub enum RuntimeEntityKind {
     Signal,
     ToolInvocation,
     IngestJob,
+    EvalRun,
 }
 
 /// Shared runtime entity identifier envelope for API/runtime/store error reporting.

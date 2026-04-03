@@ -10,7 +10,7 @@
 | 001 | Product Boundary and Non-Goals | scope-only, no code needed |
 | 002 | Runtime and Event Model | DONE |
 | 003 | Owned Retrieval | DONE |
-| 004 | Graph and Eval Matrix | pending |
+| 004 | Graph and Eval Matrix | IN PROGRESS |
 | 005 | Task/Session/Checkpoint Lifecycle | pending |
 | 006 | Prompt Registry and Release | pending |
 | 007 | Plugin Protocol and Transport | pending |
@@ -228,6 +228,101 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 6. **Phase 4 — Tests**: Full pipeline tests
 7. **Phase 5 — Mark complete**
 
+## RFC 004 — Gap Analysis
+
+### What exists
+
+**cairn-graph** has:
+- NodeKind enum: 16 variants (Session, Run, Task, Approval, Checkpoint, MailboxMessage, ToolInvocation, Memory, Document, Chunk, Source, PromptAsset, PromptVersion, PromptRelease, EvalRun, Skill, ChannelTarget)
+- EdgeKind enum: 16 variants (Triggered, Spawned, DependedOn, ApprovedBy, ResumedFrom, SentTo, ReadFrom, Cited, DerivedFrom, EmbeddedAs, EvaluatedBy, ReleasedAs, RolledBackTo, RoutedTo, UsedPrompt, UsedTool)
+- GraphProjection trait (add_node, add_edge, node_exists)
+- EventProjector + RetrievalGraphProjector + EvalGraphProjector
+- 6 GraphQuery variants (ExecutionTrace, DependencyPath, PromptProvenance, RetrievalProvenance, DecisionInvolvement, EvalLineage)
+- GraphQueryService trait + PgGraphStore impl
+- ProvenanceService trait + GraphProvenanceService impl
+- GraphExpansionHook + NoOp
+
+**cairn-evals** has:
+- EvalRun + EvalRunStatus + EvalSubjectKind
+- Scorecard + ScorecardEntry
+- MatrixCategory enum: 6 variants (PromptComparison, ProviderRouting, Permission, MemorySourceQuality, SkillHealth, GuardrailPolicyOutcome)
+- PromptComparisonRow with full fields
+- EvalMetrics: 10 built-in canonical metrics
+- PluginMetric + MetricValueType + MetricValue types
+- EvalRunService (in-memory), GraphIntegration service
+- 504 tests passing
+
+### Gaps
+
+#### Graph gaps
+
+1. ApprovedBy edge not projected — EventProjector doesn't emit ApprovedBy edge on ApprovalResolved
+- [ ] Add ApprovedBy edge projection in EventProjector
+
+2. Memory/Skill/ChannelTarget nodes never created — NodeKind variants exist but no projector creates them
+- [ ] Wire Memory/Skill/ChannelTarget node creation in relevant projectors
+
+3. Signal/IngestJob events not projected to graph — EventProjector has no-op arms for these
+- [ ] Add Signal node projection on SignalIngested
+- [ ] Add IngestJob node projection on IngestJobStarted/IngestJobCompleted
+
+4. No per-variant graph query dispatch — GraphQueryService::query exists but no impl dispatches on GraphQuery variants
+- [ ] Implement ExecutionTrace, DependencyPath, PromptProvenance, RetrievalProvenance, DecisionInvolvement, EvalLineage queries
+
+5. No InMemory GraphQueryService — only PgGraphStore implements GraphQueryService
+- [ ] Add InMemoryGraphStore implementing GraphProjection + GraphQueryService
+
+6. No concrete GraphExpansionHook — only NoOp exists
+- [ ] Implement a concrete graph expansion hook for deep search
+
+7. Provenance chain skeleton — GraphProvenanceService::provenance_chain returns empty chain
+- [ ] Implement provenance chain traversal
+
+8. No project scope on GraphNode — GraphNode has node_id, kind, created_at but no project field
+- [ ] Add project: Option<ProjectKey> to GraphNode
+
+#### Eval gaps
+
+9. No RuntimeCommand/Event for eval lifecycle — evals don't flow through event log
+- [ ] Add StartEvalRun/CompleteEvalRun command variants
+- [ ] Add EvalRunStarted/EvalRunCompleted event variants
+
+10. EvalRunService in-memory only — not backed by event log or store
+- [ ] Make EvalRunService event-sourced via store
+
+11. Scorecard not persisted — types exist but no storage or query service
+- [ ] Add scorecard storage and query service
+
+12. 5 of 6 matrix row types missing — only PromptComparisonRow exists
+- [ ] Add ProviderRoutingRow, PermissionRow, MemorySourceQualityRow, SkillHealthRow, GuardrailPolicyRow
+
+13. No matrix storage/query service — matrix types have no backing store
+- [ ] Add MatrixReadModel trait + storage
+
+14. No output_artifacts or DatasetSource struct — EvalRun references dataset_source as Option<String>
+- [ ] Add DatasetSource struct and output_artifacts field
+
+15. Graph-eval integration manual not event-driven — GraphIntegration methods must be called explicitly
+- [ ] Wire graph-eval integration through event projector
+
+16. No graph edges from eval -> outcomes — no edges connecting eval runs to the outcomes they measured
+- [ ] Add EvaluatedBy edges from eval projector
+
+17. on_prompt_used untyped string — GraphIntegration::on_prompt_used takes bare strings
+- [ ] Use typed PromptReleaseId/RunId
+
+18. No operator matrix threshold config — no types for operator-configurable threshold/highlight policies
+- [ ] Add MatrixThresholdPolicy type
+
+### Phase plan
+
+1. **Phase 2 — Types**: eval domain types (commands/events, matrix row types, DatasetSource), graph node project scope
+2. **Phase 3a — Impl**: graph projection fixes (ApprovedBy, Signal, IngestJob, Memory nodes), InMemory GraphQueryService
+3. **Phase 3b — Impl**: eval persistence (event-sourced EvalRunService, scorecard store, matrix store)
+4. **Phase 3c — Impl**: graph-eval wiring (event-driven integration, provenance chain, concrete GraphExpansionHook)
+5. **Phase 4 — Tests**: tests + cross-review
+6. **Phase 5 — Mark complete**
+
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
 - [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants
@@ -242,3 +337,4 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 - [x] RFC 003: Phase 3d impl — IngestJobReadModel trait + InMemoryStore projection, IngestJobService trait + impl in cairn-runtime
 - [x] RFC 003: Phase 4 tests — full pipeline tests, ingest job lifecycle, scoring, reranking, diagnostics coverage
 - [x] RFC 003: Phase 5 — marked complete, all 12 gaps resolved
+- [x] RFC 004: Phase 1 gap analysis — 18 gaps identified across graph projections, query dispatch, provenance, eval lifecycle, matrix storage, graph-eval integration
