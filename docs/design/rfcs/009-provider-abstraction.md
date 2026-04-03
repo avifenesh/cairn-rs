@@ -201,6 +201,18 @@ Required fields:
 
 Bindings are what evals and runtime route decisions should point to. They are the canonical unit for "which provider/model path did we use?"
 
+### Binding Settings Normalization Rule
+
+In v1, `settings` is for normalized product-facing tuning only.
+
+That means:
+
+- adapters may expose provider-specific tuning only after mapping it into a stable normalized field with clear semantics
+- bindings must not become opaque bags of arbitrary provider-native flags
+- if a provider feature cannot be expressed through a stable normalized field in v1, it should remain unsupported rather than leaking raw provider shape into the product contract
+
+This keeps provider bindings comparable across evals, route policy, and operator surfaces.
+
 ### Provider Policy Baseline
 
 Provider policy baselines are inherited configuration objects above the project layer.
@@ -746,8 +758,7 @@ The goal is product-owned routing for agent workloads, not gateway maximalism.
 ## Open Questions
 
 1. Should v1 include speech recognition and synthesis under the same provider framework, or keep them outside the core provider abstraction?
-2. Do we need provider-binding-level quotas in v1, or are project and tenant budget controls sufficient initially?
-3. How much provider-specific tuning should be normalized into `settings` before the abstraction becomes too leaky?
+2. Should a later release add provider-binding-level quotas after project and tenant budget controls have proven insufficient?
 
 ## Decision
 
@@ -759,3 +770,5 @@ Proceed with:
 - explicit selector-aware routing and fallback chains
 - durable provider-call telemetry feeding eval and graph systems
 - explicit non-goal of becoming a general AI gateway
+- v1 relies on project and tenant budget controls rather than provider-binding-level quotas
+- provider binding `settings` are limited to normalized product-facing tuning, not arbitrary provider-native flag bags
