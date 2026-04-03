@@ -225,6 +225,66 @@ pub struct ImportReportEntry {
     pub created_object_id: Option<String>,
 }
 
+// --- Prompt Payloads ---
+
+/// Payload for a `prompt_asset` artifact entry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PromptAssetPayload {
+    pub name: String,
+    pub kind: String,
+    pub status: String,
+    pub library_scope_hint: Option<String>,
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+/// Payload for a `prompt_version` artifact entry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PromptVersionPayload {
+    pub prompt_asset_logical_id: String,
+    pub version_number: u32,
+    pub format: String,
+    pub content: String,
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+// --- Import/Export Service Traits ---
+
+/// Import service boundary per RFC 013.
+///
+/// Phases: validate -> plan -> apply -> report.
+#[async_trait::async_trait]
+pub trait ImportService: Send + Sync {
+    type Error: std::fmt::Debug;
+
+    /// Validate a bundle without mutating state.
+    async fn validate(&self, bundle: &BundleEnvelope) -> Result<(), Self::Error>;
+
+    /// Produce an import plan (preview) without mutating state.
+    async fn plan(
+        &self,
+        bundle: &BundleEnvelope,
+        target_scope: &SourceScope,
+    ) -> Result<ImportPlan, Self::Error>;
+
+    /// Apply an import plan and materialize product state.
+    async fn apply(&self, plan: &ImportPlan, bundle: &BundleEnvelope)
+        -> Result<ImportReport, Self::Error>;
+}
+
+/// Export service boundary per RFC 013.
+#[async_trait::async_trait]
+pub trait ExportService: Send + Sync {
+    type Error: std::fmt::Debug;
+
+    /// Export selected artifacts into a canonical bundle.
+    async fn export(
+        &self,
+        bundle_name: &str,
+        bundle_type: BundleType,
+        source_scope: &SourceScope,
+    ) -> Result<BundleEnvelope, Self::Error>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

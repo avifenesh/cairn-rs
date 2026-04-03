@@ -20,7 +20,7 @@
 | 011 | Deployment Shape | DONE |
 | 012 | Onboarding and Starter Templates | DONE |
 | 013 | Artifact Import/Export | pending |
-| 014 | Commercial Packaging | pending |
+| 014 | Commercial Packaging | IN PROGRESS |
 
 ## RFC 002 — Gap Analysis
 
@@ -730,6 +730,31 @@ RFC 008 says every API request operates in explicit scope context.
 2. **Phase 3 — Impl**: template registry, materialization service, prompt import service
 3. **Phase 4 — Tests + review**
 4. **Phase 5 — Mark complete**
+
+## RFC 014 — Gap Analysis
+
+### What exists
+
+Nothing. No entitlement, license, feature gating, or commercial packaging types in any crate.
+
+### Gaps
+
+1. No ProductTier type — [ ] Add ProductTier enum (LocalEval/TeamSelfHosted/EnterpriseSelfHosted)
+2. No Entitlement type — [ ] Add Entitlement enum (DeploymentTier/GovernanceCompliance/AdvancedAdmin)
+3. No EntitlementSet — [ ] Add EntitlementSet with active entitlements and inspection
+4. No FeatureGate — [ ] Add FeatureGate trait for checking entitlement-gated capabilities
+5. No LicenseRecord — [ ] Add LicenseRecord with tenant-scoped license state
+6. No entitlement status API — [ ] Add EntitlementStatusEndpoint
+7. No feature rollout flags — [ ] Add FeatureFlag type (Preview/GA/Gated)
+8. No capability-to-entitlement mapping — [ ] Add capability→entitlement mapping
+9. No entitlement change audit — [ ] Add EntitlementChangeRecord for audit
+10. No degradation model — [ ] Add graceful degradation on entitlement absence
+
+### Phase plan
+
+1. **Phase 2 — Types**: ProductTier, Entitlement, EntitlementSet, LicenseRecord, FeatureFlag, FeatureGate
+2. **Phase 3 — Impl**: entitlement checking, capability mapping, feature gating
+3. **Phase 5 — Mark complete**
 
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
