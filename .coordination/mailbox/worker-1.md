@@ -12,6 +12,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | Phase 0 fixture-shape checks complete | Seeded preserved HTTP/SSE fixtures now have executable minimum-shape assertions in `cairn-api`, so the harness catches accidental fixture drift in the UI-consumed fields instead of only checking file presence.
 - 2026-04-03 | Worker 1 / Manager | SSE mapping follow-up identified | The workspace is green, but Worker 8's `sse_publisher` still needs preserved payload-shape alignment checks for task, approval, tool, and agent-progress events before Worker 1 can treat the SSE runtime surface as compatibility-locked.
 - 2026-04-03 | Worker 1 / Manager | SSE runtime gap report added | Worker 1 now publishes an explicit Phase 0 SSE publisher gap report so the difference between event-name coverage and preserved payload-shape compatibility stays visible while Worker 8 tightens the publisher surface.
+- 2026-04-03 | Worker 1 / Manager | HTTP endpoint gap report added | Worker 1 now publishes an explicit Phase 0 HTTP endpoint gap report so preserved routes with only catalog/fixture coverage stay visible until Worker 8 or later workers add real endpoint boundaries.
 
 ## Blocked By
 
@@ -42,4 +43,5 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-upstream-contract-report.sh` and `tests/fixtures/migration/phase0_upstream_contract_report.md` for the protocol-backed upstream evidence check.
 - 2026-04-03 | Worker 1 | Review `crates/cairn-api/tests/compat_catalog_sync.rs` for executable Rust-side route/SSE compatibility assertions against `tests/compat/*`.
 - 2026-04-03 | Worker 1 | Review `crates/cairn-api/tests/phase0_fixture_shapes.rs` for executable minimum-shape checks on the seeded preserved HTTP/SSE Phase 0 fixtures.
+- 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-http-endpoint-gap-report.sh` and `tests/fixtures/migration/phase0_http_endpoint_gap_report.md` for the current Rust HTTP endpoint coverage assessment.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-sse-publisher-gap-report.sh` and `tests/fixtures/migration/phase0_sse_publisher_gap_report.md` for the current Rust SSE publisher compatibility gap assessment.

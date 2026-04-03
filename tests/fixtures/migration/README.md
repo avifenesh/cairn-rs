@@ -12,4 +12,5 @@ Current key artifact:
 
 - `phase0_mismatch_report.md`
 - `phase0_upstream_contract_report.md`
+- `phase0_http_endpoint_gap_report.md`
 - `phase0_sse_publisher_gap_report.md`
