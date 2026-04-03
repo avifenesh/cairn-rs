@@ -18,6 +18,7 @@ Purpose: convert the rewrite plan into concrete architecture decisions that para
 11. [RFC 011 - Deployment Shape](./011-deployment-shape.md)
 12. [RFC 012 - Onboarding and Starter Templates](./012-onboarding-starter-templates.md)
 13. [RFC 013 - Artifact Import/Export Contract](./013-artifact-import-export-contract.md)
+14. [RFC 014 - Commercial Packaging and Entitlements](./014-commercial-packaging-and-entitlements.md)
 
 ## How To Use These RFCs
 
