@@ -34,6 +34,9 @@ Use it for short-lived execution pacing:
 ## Main Scripts
 
 - `scripts/coordination/init-queue.sh`
+- `scripts/coordination/start-listeners.sh`
+- `scripts/coordination/stop-listeners.sh`
+- `scripts/coordination/listener-status.sh`
 - `scripts/coordination/queue-worker-tasks.sh`
 - `scripts/coordination/show-worker-queue.sh`
 - `scripts/coordination/worker-claim-next.sh`
@@ -46,6 +49,7 @@ Use it for short-lived execution pacing:
 Manager:
 
 ```bash
+./scripts/coordination/start-listeners.sh --all
 ./scripts/coordination/queue-worker-tasks.sh worker-8 \
   "Extend composed app coverage to one feed path" \
   "Harden assistant_end SSE assembled text"
@@ -62,5 +66,6 @@ Worker:
 Manager monitor:
 
 ```bash
-./scripts/coordination/manager-listen.sh
+./scripts/coordination/listener-status.sh
+tail -f .coordination/queue/state/listeners/logs/manager.log
 ```

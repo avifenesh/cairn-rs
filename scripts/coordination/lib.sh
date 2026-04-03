@@ -6,6 +6,9 @@ QUEUE_ROOT="${COORD_QUEUE_ROOT:-$ROOT/.coordination/queue}"
 TASK_ROOT="$QUEUE_ROOT/tasks"
 EVENT_ROOT="$QUEUE_ROOT/events"
 STATE_ROOT="$QUEUE_ROOT/state"
+LISTENER_ROOT="$STATE_ROOT/listeners"
+LISTENER_PID_ROOT="$LISTENER_ROOT/pids"
+LISTENER_LOG_ROOT="$LISTENER_ROOT/logs"
 
 normalize_worker() {
   local raw="${1:-}"
@@ -20,7 +23,7 @@ normalize_worker() {
 }
 
 ensure_queue_layout() {
-  mkdir -p "$TASK_ROOT" "$EVENT_ROOT" "$STATE_ROOT"
+  mkdir -p "$TASK_ROOT" "$EVENT_ROOT" "$STATE_ROOT" "$LISTENER_PID_ROOT" "$LISTENER_LOG_ROOT"
   local n
   for n in 1 2 3 4 5 6 7 8; do
     mkdir -p \
@@ -160,6 +163,35 @@ list_tasks_table() {
 listener_state_file() {
   local name="$1"
   printf '%s\n' "$STATE_ROOT/${name}.state"
+}
+
+listener_pid_file() {
+  local name="$1"
+  printf '%s\n' "$LISTENER_PID_ROOT/${name}.pid"
+}
+
+listener_log_file() {
+  local name="$1"
+  printf '%s\n' "$LISTENER_LOG_ROOT/${name}.log"
+}
+
+listener_is_running() {
+  local name="$1"
+  local pid_file pid
+  pid_file="$(listener_pid_file "$name")"
+  [[ -f "$pid_file" ]] || return 1
+  pid="$(cat "$pid_file")"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" >/dev/null 2>&1
+}
+
+remove_stale_listener_pid() {
+  local name="$1"
+  local pid_file
+  pid_file="$(listener_pid_file "$name")"
+  if [[ -f "$pid_file" ]] && ! listener_is_running "$name"; then
+    rm -f "$pid_file"
+  fi
 }
 
 read_last_seen_event() {
