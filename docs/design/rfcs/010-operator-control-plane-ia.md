@@ -235,13 +235,13 @@ This keeps the first release aligned with RFC 008 scoping and reduces accidental
 
 In v1, workspace-aggregated views are primarily for roll-up, filtering, and drill-down.
 
-They may support non-destructive bulk organization actions where semantics are uniform, but they must not become the default place for broad cross-project operational mutation.
+They may support non-destructive organization or navigation actions where semantics are uniform, but they must not become the place for cross-project operational mutation.
 
 That means:
 
 - operators may review and compare items across projects inside one workspace
-- bulk operational actions that materially change runtime state should still require entering an explicit project context
-- if a workspace-level bulk action exists in v1, it must be limited to actions whose policy boundary, effect semantics, and rollback story are uniform across all affected items
+- bulk operational actions that materially change runtime state require entering an explicit project context
+- workspace-level views may still support filtering, grouping, export, and navigation actions that do not mutate runtime state
 
 This keeps workspace scope safer than a global admin console while still allowing useful aggregation.
 
@@ -287,7 +287,7 @@ Focus on the minimum workflows that make the product operable.
 
 ## Open Questions
 
-1. Should v1 allow any workspace-level cross-project bulk operational actions at all, or defer all state-changing bulk actions to explicit project context?
+1. Should a later release introduce narrowly bounded workspace-level bulk operational actions for specific uniform workflows, or should project-context mutation remain the long-term rule?
 
 ## Decision
 
@@ -299,4 +299,4 @@ Proceed assuming:
 - bulk actions are required only for approvals, selected source/channel operations, and safe prompt housekeeping actions
 - project-scoped and workspace-aggregated visibility are first-class; most operational mutations happen within an explicit project context
 - tenant-level roll-up views are read-only for operational actions in v1, except for settings, policy, credential/provider, and provisioning administration
-- workspace-aggregated views are for roll-up and drill-down first; cross-project operational bulk actions are deferred by default unless a later pass defines a tightly bounded exception
+- workspace-aggregated views are for roll-up and drill-down first; v1 does not allow cross-project operational bulk actions
