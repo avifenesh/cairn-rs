@@ -18,6 +18,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | SSE payload handoff published | Worker 1 now generates an explicit event-by-event payload handoff report for Worker 8 showing current runtime event sources, preserved fixture wrapper shapes, and the missing builder directions needed to lock SSE compatibility.
 - 2026-04-03 | Worker 1 / Manager | Phase 0 owner map published | Worker 1 now generates an explicit owner map for preserved HTTP and SSE compatibility surfaces so route/SSE gaps are routed to Worker 4/6/7/8 intentionally instead of turning into orphaned compatibility TODOs.
 - 2026-04-03 | Worker 1 / Manager | Narrow integration sweep confirms single red crate | Targeted crate tests for `cairn-domain`, `cairn-store`, `cairn-tools`, and `cairn-api` all pass; current integration red path is concentrated in `cairn-evals` (`selector_resolver.rs` import/type ambiguity plus `release_service.rs` borrow-check issues).
+- 2026-04-03 | Worker 1 / Manager | Worker slice health report added | Manager health is now generated as `.coordination/WORKER_SLICE_HEALTH.md`, which currently shows a single red crate (`cairn-evals`) while the rest of the worker-owned crates pass in isolation.
 
 ## Blocked By
 
@@ -52,3 +53,4 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-sse-publisher-gap-report.sh` and `tests/fixtures/migration/phase0_sse_publisher_gap_report.md` for the current Rust SSE publisher compatibility gap assessment.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-sse-payload-handoff.sh` and `tests/fixtures/migration/phase0_sse_payload_handoff.md` for the concrete event-to-payload builder handoff Worker 8 can use to align SSE frames with preserved frontend shapes.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-owner-map.sh` and `tests/fixtures/migration/phase0_owner_map.md` for the current cross-worker ownership routing of preserved Phase 0 HTTP/SSE compatibility surfaces.
+- 2026-04-03 | Worker 1 | Review `scripts/generate-worker-slice-health-report.sh` and `.coordination/WORKER_SLICE_HEALTH.md` for the current manager view of per-worker crate health.
