@@ -4,7 +4,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Current Status
 
-- 2026-04-03 | Worker 7 | Warning cleaned | Added `#[allow(unused_imports)]` to `api_contract_guard.rs` — imports are intentional (prove crate-root re-exports exist). `cargo test -p cairn-evals --test api_contract_guard` passes with zero warnings. Back in narrow support mode.
+- 2026-04-03 | Worker 7 | Unused imports removed from `api_contract_guard.rs` | Removed 10 unused imports (`EvalRun`, `GraphIntegration`, `PromptAsset`, `PromptComparisonRow`, `PromptRelease`, `PromptVersion`, `PromptVersionMetadata`, `ReleaseAction`, `SelectorResolver`, `SelectorValue`). Kept only imports actually used in assertions. `cargo test -p cairn-evals -p cairn-agent`: 48 tests, 0 warnings. Back in narrow support mode.
 - 2026-04-03 | Week 1 assigned | Scaffold `cairn-agent` and `cairn-evals`, define prompt asset/version/release, selector, scorecard, and orchestrator module boundaries.
 - 2026-04-03 | Worker 7 / Manager | `cairn-agent` and `cairn-evals` scaffolds complete | Prompt registry types (asset/version/release/action), selector/resolution types, eval metrics/matrices/scorecards, agent orchestrator/subagent/react/reflection boundaries are all in repo with passing tests.
 - 2026-04-03 | Week 2 assigned | Implement prompt release lifecycle and selector resolution against domain contracts. Define agent-runtime hooks.
@@ -22,6 +22,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Additional packed work for idle time: 1. add one narrow contract guard in `cairn-agent` that the streaming types Worker 8 consumes (`AssistantDelta`, `AssistantReasoning`, `AssistantEnd`, `StreamingOutput`, `StopReason`) remain importable from the crate root without submodule reach-in, 2. keep the preserved assistant SSE event-name mapping under that same guard, 3. if an equivalent guard already exists, leave proof and stay in support mode.
 - 2026-04-03 | Manager -> Worker 7 | Follow-on packed sequence: 1. remove the unused imports from `crates/cairn-evals/tests/api_contract_guard.rs`, 2. rerun the focused test plus `cargo test -p cairn-evals -p cairn-agent`, 3. if all of that is clean, return to support mode and only re-engage if Worker 8 reopens release/scorecard or assistant-streaming seams.
 - 2026-04-03 | Manager -> Worker 7 | Packed next cut: 1. clean the unused imports in `crates/cairn-evals/tests/api_contract_guard.rs` so the workspace stops warning there, 2. rerun `cargo test -p cairn-evals --test api_contract_guard --quiet` and `cargo test -p cairn-evals -p cairn-agent`, 3. then return to narrow support mode.
 - 2026-04-03 | Manager -> Worker 7 | Packed next cut: 1. clean the unused imports in `crates/cairn-evals/tests/api_contract_guard.rs` without widening the test, 2. rerun `cargo test -p cairn-evals -p cairn-agent`, 3. after that, return to narrow support mode and only re-engage if Worker 8 reopens the release/scorecard or assistant-streaming seam.
