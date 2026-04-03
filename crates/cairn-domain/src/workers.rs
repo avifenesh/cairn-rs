@@ -117,6 +117,7 @@ mod tests {
             reason: PauseReason {
                 kind: PauseReasonKind::RuntimeSuspension,
                 detail: Some("waiting for capacity".to_owned()),
+                resume_after_ms: None,
             },
         };
 

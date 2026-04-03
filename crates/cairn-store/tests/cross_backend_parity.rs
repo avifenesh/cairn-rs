@@ -49,6 +49,8 @@ mod sqlite_parity {
             run_id: RunId::new(run_id),
             transition: StateTransition { from: None, to },
             failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
         }))
     }
 
@@ -295,6 +297,8 @@ mod sqlite_parity {
                     to: TaskState::Completed,
                 },
                 failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
             },
         ))])
         .await
@@ -309,6 +313,8 @@ mod sqlite_parity {
                     to: TaskState::Failed,
                 },
                 failure_class: Some(FailureClass::ExecutionError),
+                pause_reason: None,
+                resume_trigger: None,
             },
         ))])
         .await
@@ -757,6 +763,8 @@ mod sqlite_parity {
                         to: TaskState::Completed,
                     },
                     failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 },
             ))])
             .await
@@ -869,6 +877,8 @@ mod sqlite_parity {
                     to: TaskState::Completed,
                 },
                 failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
             })),
             // Approval.
             make_envelope(RuntimeEvent::ApprovalRequested(ApprovalRequested {

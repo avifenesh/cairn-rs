@@ -480,6 +480,8 @@ mod tests {
                     to: RunState::Running,
                 },
                 failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
             },
         ))];
 

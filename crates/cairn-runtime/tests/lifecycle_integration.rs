@@ -307,7 +307,7 @@ async fn full_session_run_task_lifecycle() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(session.state, SessionState::Open); // still open (derivation happens at query time)
+    assert_eq!(session.state, SessionState::Completed); // auto-derived after root run completes
 
     let run = run_svc.get(&RunId::new("run_1")).await.unwrap().unwrap();
     assert_eq!(run.state, RunState::Completed);

@@ -666,6 +666,8 @@ impl RunRow {
                 .as_deref()
                 .map(parse_string_enum::<FailureClass>)
                 .transpose()?,
+            pause_reason: None,
+            resume_trigger: None,
             version: self.version as u64,
             created_at: self.created_at as u64,
             updated_at: self.updated_at as u64,
@@ -708,6 +710,9 @@ impl TaskRow {
             lease_expires_at: self.lease_expires_at.map(|value| value as u64),
             title: None,
             description: None,
+            pause_reason: None,
+            resume_trigger: None,
+            retry_count: 0,
             version: self.version as u64,
             created_at: self.created_at as u64,
             updated_at: self.updated_at as u64,
@@ -773,6 +778,7 @@ impl CheckpointRow {
             project,
             run_id: RunId::new(self.run_id),
             disposition: parse_string_enum::<CheckpointDisposition>(&self.disposition)?,
+            data: None,
             version: self.version as u64,
             created_at: self.created_at as u64,
         })

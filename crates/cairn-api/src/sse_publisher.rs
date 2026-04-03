@@ -149,6 +149,8 @@ mod tests {
                 to: TaskState::Completed,
             },
             failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
         });
         assert_eq!(
             map_event_to_sse_name(&event),
@@ -213,6 +215,9 @@ mod tests {
             parent_task_id: None,
             state: TaskState::Running,
             failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+            retry_count: 0,
             lease_owner: None,
             lease_expires_at: None,
             title: Some("Draft weekly digest".to_owned()),

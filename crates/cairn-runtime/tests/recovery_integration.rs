@@ -156,6 +156,8 @@ async fn resolve_stale_dependency_resumes_when_children_terminal() {
                     to: RunState::WaitingDependency,
                 },
                 failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
             }),
         }])
         .await

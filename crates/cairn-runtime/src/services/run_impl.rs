@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{RunReadModel, RunRecord};
+use cairn_store::projections::{RunReadModel, RunRecord, SessionReadModel};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
+use super::session_impl::derive_and_update_session;
 use crate::error::RuntimeError;
 use crate::runs::RunService;
 
@@ -19,7 +20,7 @@ impl<S> RunServiceImpl<S> {
     }
 }
 
-impl<S: EventLog + RunReadModel + 'static> RunServiceImpl<S> {
+impl<S: EventLog + RunReadModel + SessionReadModel + 'static> RunServiceImpl<S> {
     async fn get_run(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
         RunReadModel::get(self.store.as_ref(), run_id)
             .await?
@@ -65,7 +66,7 @@ impl<S: EventLog + RunReadModel + 'static> RunServiceImpl<S> {
 #[async_trait]
 impl<S> RunService for RunServiceImpl<S>
 where
-    S: EventLog + RunReadModel + 'static,
+    S: EventLog + RunReadModel + SessionReadModel + 'static,
 {
     async fn start(
         &self,
@@ -112,7 +113,9 @@ where
     }
 
     async fn complete(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        self.transition_run(run_id, RunState::Completed, None).await
+        let run = self.transition_run(run_id, RunState::Completed, None).await?;
+        derive_and_update_session(self.store.as_ref(), &run.session_id).await?;
+        Ok(run)
     }
 
     async fn fail(
@@ -120,12 +123,15 @@ where
         run_id: &RunId,
         failure_class: FailureClass,
     ) -> Result<RunRecord, RuntimeError> {
-        self.transition_run(run_id, RunState::Failed, Some(failure_class))
-            .await
+        let run = self.transition_run(run_id, RunState::Failed, Some(failure_class)).await?;
+        derive_and_update_session(self.store.as_ref(), &run.session_id).await?;
+        Ok(run)
     }
 
     async fn cancel(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        self.transition_run(run_id, RunState::Canceled, None).await
+        let run = self.transition_run(run_id, RunState::Canceled, None).await?;
+        derive_and_update_session(self.store.as_ref(), &run.session_id).await?;
+        Ok(run)
     }
 
     async fn pause(&self, run_id: &RunId, reason: PauseReason) -> Result<RunRecord, RuntimeError> {
@@ -189,5 +195,137 @@ where
 
         self.store.append(&[event]).await?;
         self.get_run(run_id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use cairn_domain::*;
+    use cairn_store::projections::SessionReadModel;
+    use cairn_store::InMemoryStore;
+
+    use super::super::session_impl::SessionServiceImpl;
+    use super::RunServiceImpl;
+    use crate::runs::RunService;
+    use crate::sessions::SessionService;
+
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
+
+    #[tokio::test]
+    async fn session_derives_completed_when_run_completes() {
+        let store = Arc::new(InMemoryStore::new());
+        let session_svc = SessionServiceImpl::new(store.clone());
+        let run_svc = RunServiceImpl::new(store.clone());
+
+        session_svc
+            .create(&project(), SessionId::new("sess_1"))
+            .await
+            .unwrap();
+
+        run_svc
+            .start(&project(), &SessionId::new("sess_1"), RunId::new("run_1"), None)
+            .await
+            .unwrap();
+
+        // Transition through Running before completing.
+        run_svc
+            .transition_run(&RunId::new("run_1"), RunState::Running, None)
+            .await
+            .unwrap();
+        run_svc.complete(&RunId::new("run_1")).await.unwrap();
+
+        let session = SessionReadModel::get(store.as_ref(), &SessionId::new("sess_1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.state, SessionState::Completed);
+    }
+
+    #[tokio::test]
+    async fn session_derives_failed_when_run_fails() {
+        let store = Arc::new(InMemoryStore::new());
+        let session_svc = SessionServiceImpl::new(store.clone());
+        let run_svc = RunServiceImpl::new(store.clone());
+
+        session_svc
+            .create(&project(), SessionId::new("sess_2"))
+            .await
+            .unwrap();
+
+        run_svc
+            .start(&project(), &SessionId::new("sess_2"), RunId::new("run_2"), None)
+            .await
+            .unwrap();
+
+        run_svc
+            .fail(&RunId::new("run_2"), FailureClass::ExecutionError)
+            .await
+            .unwrap();
+
+        let session = SessionReadModel::get(store.as_ref(), &SessionId::new("sess_2"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.state, SessionState::Failed);
+    }
+
+    #[tokio::test]
+    async fn session_stays_open_with_non_terminal_runs() {
+        let store = Arc::new(InMemoryStore::new());
+        let session_svc = SessionServiceImpl::new(store.clone());
+        let run_svc = RunServiceImpl::new(store.clone());
+
+        session_svc
+            .create(&project(), SessionId::new("sess_3"))
+            .await
+            .unwrap();
+
+        run_svc
+            .start(&project(), &SessionId::new("sess_3"), RunId::new("run_a"), None)
+            .await
+            .unwrap();
+        run_svc
+            .start(&project(), &SessionId::new("sess_3"), RunId::new("run_b"), None)
+            .await
+            .unwrap();
+
+        run_svc
+            .transition_run(&RunId::new("run_a"), RunState::Running, None)
+            .await
+            .unwrap();
+        run_svc.complete(&RunId::new("run_a")).await.unwrap();
+
+        let session = SessionReadModel::get(store.as_ref(), &SessionId::new("sess_3"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.state, SessionState::Open);
+    }
+
+    #[tokio::test]
+    async fn duplicate_run_start_returns_conflict() {
+        let store = Arc::new(InMemoryStore::new());
+        let run_svc = RunServiceImpl::new(store.clone());
+        let session_svc = SessionServiceImpl::new(store.clone());
+
+        session_svc
+            .create(&project(), SessionId::new("sess_4"))
+            .await
+            .unwrap();
+
+        run_svc
+            .start(&project(), &SessionId::new("sess_4"), RunId::new("dup"), None)
+            .await
+            .unwrap();
+
+        let result = run_svc
+            .start(&project(), &SessionId::new("sess_4"), RunId::new("dup"), None)
+            .await;
+
+        assert!(result.is_err());
     }
 }

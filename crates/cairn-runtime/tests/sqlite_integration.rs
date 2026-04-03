@@ -377,6 +377,8 @@ async fn sqlite_resolve_stale_dependencies_e2e() {
                     to: RunState::WaitingDependency,
                 },
                 failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
             }),
         }])
         .await

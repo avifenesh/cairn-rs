@@ -992,6 +992,8 @@ mod tests {
                         to: RunState::Completed,
                     },
                     failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 })),
             ])
             .await
@@ -1039,6 +1041,8 @@ mod tests {
                         to: TaskState::Leased,
                     },
                     failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 })),
             ])
             .await
@@ -1555,6 +1559,8 @@ mod tests {
                             to: TaskState::Leased,
                         },
                         failure_class: None,
+                        pause_reason: None,
+                        resume_trigger: None,
                     },
                 ))])
                 .await
