@@ -14,7 +14,7 @@
 | 005 | Task/Session/Checkpoint Lifecycle | DONE |
 | 006 | Prompt Registry and Release | DONE |
 | 007 | Plugin Protocol and Transport | DONE |
-| 008 | Tenant/Workspace/Profile | pending |
+| 008 | Tenant/Workspace/Profile | IN PROGRESS |
 | 009 | Provider Abstraction | pending |
 | 010 | Operator Control Plane | pending |
 | 011 | Deployment Shape | pending |
@@ -584,6 +584,92 @@ cancel method defined in proto but no host-side cancel for in-flight invocations
 4. **Phase 4 — Tests**: tests + cross-review
 5. **Phase 5 — Mark complete**
 
+## RFC 008 — Gap Analysis
+
+### What exists
+
+**cairn-domain tenancy.rs** (solid foundation):
+- Scope enum: System/Tenant/Workspace/Project with includes() hierarchy
+- TenantKey, WorkspaceKey, ProjectKey: typed scope keys
+- OwnershipKey enum: System/Tenant/Workspace/Project variants
+- OperatorProfileKey: tenant-scoped (tenant_id + operator_id)
+- All runtime entities carry ProjectKey universally
+- All store read models filter by ProjectKey
+- GraphNode has project: Option<ProjectKey>
+- cairn-memory chunks/retrieval carry ProjectKey
+- cairn-evals: PromptAsset has tenant/workspace scope, releases are project-scoped
+
+### Gaps
+
+#### 1. No TenantRecord/WorkspaceRecord/ProjectRecord — MISSING
+
+Only scope keys exist. No durable entity types for tenants, workspaces, or projects.
+
+- [ ] Add TenantRecord, WorkspaceRecord, ProjectRecord structs
+
+#### 2. No CRUD services — MISSING
+
+No TenantService, WorkspaceService, or ProjectService for lifecycle management.
+
+- [ ] Add tenant/workspace/project CRUD services
+
+#### 3. No OperatorProfile record or service — MISSING
+
+OperatorProfileKey exists but no profile struct with preferences, no CRUD.
+
+- [ ] Add OperatorProfile struct with preferences
+- [ ] Add OperatorProfileService
+
+#### 4. No credential model — MISSING
+
+RFC 008 says tenant-scoped credentials for providers/channels. Nothing exists.
+
+- [ ] Add CredentialRecord and CredentialService
+
+#### 5. No defaults layering service — MISSING
+
+RFC 008 defines system→tenant→workspace→project→operator-local precedence.
+
+- [ ] Add DefaultsResolver with layered precedence
+
+#### 6. No workspace membership model — MISSING
+
+RFC 008 says workspace-scoped team membership and roles.
+
+- [ ] Add WorkspaceMembership type and service
+
+#### 7. No role-based permissions — MISSING
+
+RFC 008 says permissions evaluated against actor+tenant+workspace+project+capability.
+
+- [ ] Add multi-scope permission evaluator
+
+#### 8. No lifecycle commands/events — MISSING
+
+No RuntimeCommand/Event for tenant/workspace/project creation.
+
+- [ ] Add TenantCreated, WorkspaceCreated, ProjectCreated events
+
+#### 9. No store projections — MISSING
+
+No read model traits for tenant/workspace/project entities.
+
+- [ ] Add TenantReadModel, WorkspaceReadModel, ProjectReadModel
+
+#### 10. No API scope context enforcement — MISSING
+
+RFC 008 says every API request operates in explicit scope context.
+
+- [ ] Add scope context extraction and enforcement
+
+### Phase plan
+
+1. **Phase 2 — Types**: entity records (TenantRecord/WorkspaceRecord/ProjectRecord/OperatorProfile), lifecycle commands/events, credential model
+2. **Phase 3a — Impl**: store projections + CRUD services (tenant, workspace, project, profile)
+3. **Phase 3b — Impl**: defaults layering, credential service, workspace membership
+4. **Phase 4 — Tests**: tests + cross-review
+5. **Phase 5 — Mark complete**
+
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
 - [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants
@@ -620,3 +706,4 @@ cancel method defined in proto but no host-side cancel for in-flight invocations
 - [x] RFC 007: Phase 3 impl — StdioPluginHost, PolicyPermissionGate, plugin execution pipeline (ConcurrencyTracker, execute_plugin_tool), notification parsing
 - [x] RFC 007: Phase 4 cross-review — duplicate registration guard in StdioPluginHost
 - [x] RFC 007: Phase 5 — marked complete, all 10 gaps resolved
+- [x] RFC 008: Phase 1 gap analysis — 10 gaps across entity records, CRUD services, operator profile, credentials, defaults layering, membership, permissions, lifecycle events

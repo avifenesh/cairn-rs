@@ -48,6 +48,7 @@ define_id!(ChannelId);
 define_id!(CheckpointId);
 define_id!(ChunkId);
 define_id!(CommandId);
+define_id!(CredentialId);
 define_id!(EvalRunId);
 define_id!(EventId);
 define_id!(IngestJobId);

@@ -140,9 +140,27 @@ impl From<ProjectKey> for OwnershipKey {
     }
 }
 
+/// Workspace role for access control (RFC 008).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceRole {
+    Owner,
+    Admin,
+    Member,
+    Viewer,
+}
+
+/// Workspace membership linking an operator to a workspace with a role.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceMembership {
+    pub workspace_id: WorkspaceId,
+    pub operator_id: OperatorId,
+    pub role: WorkspaceRole,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{OwnershipKey, ProjectKey, Scope, TenantKey, WorkspaceKey};
+    use super::{OwnershipKey, ProjectKey, Scope, TenantKey, WorkspaceKey, WorkspaceRole};
 
     #[test]
     fn scope_hierarchy_matches_rfc_order() {
