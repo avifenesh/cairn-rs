@@ -1,6 +1,6 @@
 # Ralph Loop Progress
 
-## Current RFC: 009 — Provider Abstraction
+## Current RFC: 010 — Operator Control Plane
 ## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
@@ -15,7 +15,7 @@
 | 006 | Prompt Registry and Release | DONE |
 | 007 | Plugin Protocol and Transport | DONE |
 | 008 | Tenant/Workspace/Profile | DONE |
-| 009 | Provider Abstraction | IN PROGRESS |
+| 009 | Provider Abstraction | DONE |
 | 010 | Operator Control Plane | pending |
 | 011 | Deployment Shape | pending |
 | 012 | Onboarding and Starter Templates | pending |
@@ -742,3 +742,6 @@ RFC 008 says every API request operates in explicit scope context.
 - [x] RFC 008: Phase 1 gap analysis — 10 gaps across entity records, CRUD services, operator profile, credentials, defaults layering, membership, permissions, lifecycle events
 - [x] RFC 008: Phase 2+3 — entity records, CRUD services, store projections, defaults layering, credentials
 - [x] RFC 008: Phase 5 — marked complete
+- [x] RFC 009: Phase 1 gap analysis — 10 gaps across provider records, routing events, store projections, route resolver
+- [x] RFC 009: Phase 2+3 — ProviderConnectionRecord, ProviderBindingRecord, RouteDecisionMade/ProviderCallCompleted events, RouteDecisionReadModel/ProviderCallReadModel + InMemoryStore impls, RouteResolverService trait
+- [x] RFC 009: Phase 5 — marked complete
