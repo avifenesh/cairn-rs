@@ -49,6 +49,7 @@ Canonical listener posture:
 - `scripts/coordination/show-worker-queue.sh`
 - `scripts/coordination/worker-claim-next.sh`
 - `scripts/coordination/worker-complete-task.sh`
+- `scripts/coordination/requeue-extra-claims.sh`
 - `scripts/coordination/worker-listen.sh`
 - `scripts/coordination/manager-listen.sh`
 
@@ -92,10 +93,12 @@ Behavior:
 
 - queuing a task emits a worker-facing `queued` event
 - claiming a task removes it from `pending/` and moves it to `claimed/`
+- `worker-claim-next.sh` now refuses to claim a second task while the worker already has one in `claimed/`, unless `--force` is used
 - if that claim drains `pending/`, manager gets `queue_empty` immediately
 - completing a task now requires at least one concrete `--proof` or `--blocker`
 - generic notes like `done`, `no drift`, or `all tests green` are rejected
 - completed or blocked tasks move from `claimed/` to `done/`
+- `requeue-extra-claims.sh` can move extra claimed tasks back to `pending/` if a worker shell accidentally over-claims
 
 Manager monitor:
 

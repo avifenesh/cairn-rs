@@ -6,11 +6,12 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  worker-claim-next.sh worker-4 [--by NAME]
+  worker-claim-next.sh worker-4 [--by NAME] [--force]
 EOF
 }
 
 claimed_by=""
+force=0
 
 if [[ $# -lt 1 ]]; then
   usage >&2
@@ -26,6 +27,10 @@ while [[ $# -gt 0 ]]; do
       claimed_by="${2:-}"
       shift 2
       ;;
+    --force)
+      force=1
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -38,6 +43,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 ensure_queue_layout
+if [[ "$force" != "1" && "$(claimed_count "$worker")" != "0" ]]; then
+  echo "$worker already has a claimed task; complete or block it before claiming another" >&2
+  print_worker_queue_snapshot "$worker"
+  exit 1
+fi
+
 task="$(oldest_pending_task "$worker")"
 if [[ -z "$task" ]]; then
   emit_event "manager" "queue_empty" "$worker" "-" "no pending task" "worker attempted claim with empty queue"
