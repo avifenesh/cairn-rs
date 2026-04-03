@@ -61,8 +61,9 @@ Use:
 - keep notes short and operational
 - reference RFCs and files directly
 - prefer "blocked by", "needs from", and "ready for review" language over long narrative updates
-- use the queue bus for short active-task pacing, not for durable project truth
-- queue multiple follow-on tasks when possible so workers can keep moving without waiting for a fresh manager pass
+- mailbox files are the active coordination system
+- queue automation is paused; do not rely on listener, busywait, or auto-claim flows
+- if a cut is complete, leave either concrete proof or a concrete blocker, not a generic completion note
 
 ## When To Stop And Escalate
 

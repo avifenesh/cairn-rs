@@ -8,7 +8,7 @@ Use it for:
 - dependency requests
 - review handoffs
 - short operational notes
-- active task queueing and refill notifications via the queue bus
+- manager-written next-task direction in mailbox files
 
 Do not use it for:
 
@@ -23,6 +23,13 @@ Canonical design decisions still belong in the RFCs.
 - [`mailbox`](./mailbox)
 - [`queue`](./queue)
 
+Queue automation is currently paused.
+
+- do not treat the queue bus as authoritative
+- do not wait on listener or busywait automation
+- use mailbox updates as the active coordination system
+- keep the queue scripts only as reference for a later redesign
+
 ## Usage Rule
 
 Each worker owns their own mailbox file and should:
@@ -32,13 +39,11 @@ Each worker owns their own mailbox file and should:
 - append notes to `Outbox` when asking another worker for something
 - append notes to another worker's `Inbox` when sending a dependency or handoff
 
-Manager and workers can also use the queue bus for short active-task pacing:
+Active coordination rule:
 
-- manager queues multiple follow-on tasks at once
-- workers claim and complete queued tasks
-- background listeners print notifications so queue changes do not rely on manual polling
-- the canonical listener posture is one long-lived manager shell plus one long-lived shell per worker listener
-- `start-listeners.sh` is only a convenience helper for local use, not the default coordination contract
-- queue tasks are not considered complete unless workers record concrete proof or a concrete blocker through `worker-complete-task.sh`
+- manager writes the next concrete cut directly into the worker mailbox
+- workers update mailbox status/blockers/review handoffs directly
+- mailboxes are the canonical status and dependency story
+- if a worker finishes a cut, they should leave either concrete proof or a concrete blocker in the mailbox, not a generic completion note
 
-The queue bus is an execution assist, not the durable narrative layer. Mailboxes still carry the canonical status and dependency story.
+The queue bus is paused and should not be used for current execution pacing.

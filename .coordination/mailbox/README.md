@@ -20,25 +20,20 @@ There is one mailbox file per worker:
 - reference RFCs, files, or PRs directly when possible
 - move stale or resolved items into a short "resolved inline" note instead of letting files grow indefinitely
 
-## Queue Bus
+## Current Coordination Mode
 
-For active pacing, use the queue bus in [`../queue`](../queue) with:
+Mailbox-first coordination is the active system right now.
 
-- `scripts/coordination/queue-worker-tasks.sh`
-- `scripts/coordination/worker-claim-next.sh`
-- `scripts/coordination/worker-complete-task.sh`
-- `scripts/coordination/worker-listen.sh`
-- `scripts/coordination/manager-listen.sh`
-- `scripts/coordination/audit-completions.sh`
-- dedicated long-lived shells for manager and worker listeners as the canonical operating mode
+- manager writes the next concrete cut directly into each worker mailbox
+- workers report current status, blockers, handoffs, and ready-for-review notes in the mailbox
+- do not rely on queue listeners, busywait refill, or auto-claim behavior for current execution
 
-Queue completion rule:
+Completion rule:
 
-- a worker must complete a queued task with at least one concrete `--proof` or one concrete `--blocker`
+- every finished cut should leave either concrete proof or a concrete blocker in the mailbox
 - generic completion notes are not enough
-- manager can audit recent suspicious completions with `audit-completions.sh`
 
-Mailboxes remain the durable coordination record. The queue bus is only for short-lived active task handoff and refill.
+The queue bus in [`../queue`](../queue) is paused and kept only as reference for a later redesign.
 
 ## Suggested Entry Format
 

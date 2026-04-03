@@ -2,19 +2,28 @@
 
 This directory is the lightweight task queue and notification bus for worker coordination.
 
+## Current Status
+
+Queue automation is currently paused.
+
+- do not use the queue bus as the active task system
+- do not rely on listeners, busywait refill, or auto-claim behavior
+- use the mailbox files in [`../mailbox`](../mailbox) as the current coordination system
+- keep these scripts and files only as reference for a later redesign
+
 It does not replace:
 
 - RFCs
 - mailbox files
 - canonical product decisions
 
-Use it for short-lived execution pacing:
+It was intended for short-lived execution pacing:
 
 - manager queues follow-on tasks for workers
 - workers claim and complete queued tasks
 - listeners print notifications so workers and manager do not have to poll manually
 
-Canonical listener posture:
+Former listener posture:
 
 - run `manager-listen.sh` from a dedicated long-lived manager shell
 - run each `worker-listen.sh worker-<n>` from that worker's own long-lived shell
@@ -53,7 +62,7 @@ Canonical listener posture:
 - `scripts/coordination/worker-listen.sh`
 - `scripts/coordination/manager-listen.sh`
 
-## Typical Flow
+## Historical Flow
 
 Manager:
 
@@ -89,7 +98,7 @@ nohup ./scripts/coordination/worker-listen.sh worker-8 --interval 2 \
   >> .coordination/queue/state/listeners/logs/worker-8.log 2>&1 &
 ```
 
-Behavior:
+Historical behavior:
 
 - queuing a task emits a worker-facing `queued` event
 - claiming a task removes it from `pending/` and moves it to `claimed/`
@@ -100,7 +109,7 @@ Behavior:
 - completed or blocked tasks move from `claimed/` to `done/`
 - `requeue-extra-claims.sh` can move extra claimed tasks back to `pending/` if a worker shell accidentally over-claims
 
-Manager monitor:
+Historical manager monitor:
 
 ```bash
 ./scripts/coordination/listener-status.sh
@@ -108,4 +117,4 @@ tail -f .coordination/queue/state/listeners/logs/manager.log
 ./scripts/coordination/audit-completions.sh --limit 20
 ```
 
-`start-listeners.sh` / `stop-listeners.sh` remain available for local convenience, but the durable operational contract is still per-role long-lived listener shells plus manual claim/complete actions.
+These scripts remain in the repo as reference material for a future replacement, but they are not part of the active coordination contract.
