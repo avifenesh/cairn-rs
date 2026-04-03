@@ -1,0 +1,28 @@
+[workspace]
+members = [
+    "crates/cairn-domain",
+    "crates/cairn-store",
+    "crates/cairn-runtime",
+    "crates/cairn-tools",
+    "crates/cairn-memory",
+    "crates/cairn-graph",
+    "crates/cairn-agent",
+    "crates/cairn-evals",
+    "crates/cairn-signal",
+    "crates/cairn-channels",
+    "crates/cairn-api",
+    "crates/cairn-plugin-proto",
+    "crates/cairn-app",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+publish = false
+rust-version = "1.78"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+

@@ -16,7 +16,7 @@ Use this repo for:
 - rewrite planning
 - RFCs
 - architecture decisions
-- future Rust workspace scaffolding
+- Rust workspace implementation
 
 ## Current Docs
 
@@ -30,6 +30,25 @@ Use this repo for:
 
 - [AGENTS.md](./AGENTS.md)
 - [Mailbox](./.coordination/mailbox)
+
+## Code Layout
+
+- [`crates/cairn-domain`](./crates/cairn-domain)
+- [`crates/cairn-store`](./crates/cairn-store)
+- [`crates/cairn-runtime`](./crates/cairn-runtime)
+- [`crates/cairn-tools`](./crates/cairn-tools)
+- [`crates/cairn-memory`](./crates/cairn-memory)
+- [`crates/cairn-graph`](./crates/cairn-graph)
+- [`crates/cairn-agent`](./crates/cairn-agent)
+- [`crates/cairn-evals`](./crates/cairn-evals)
+- [`crates/cairn-signal`](./crates/cairn-signal)
+- [`crates/cairn-channels`](./crates/cairn-channels)
+- [`crates/cairn-api`](./crates/cairn-api)
+- [`crates/cairn-plugin-proto`](./crates/cairn-plugin-proto)
+- [`crates/cairn-app`](./crates/cairn-app)
+- [`tests/compat`](./tests/compat)
+- [`tests/fixtures`](./tests/fixtures)
+- [`scripts`](./scripts)
 
 ## Relationship to Cairn
 

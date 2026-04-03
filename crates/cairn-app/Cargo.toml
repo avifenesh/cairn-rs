@@ -1,0 +1,11 @@
+[package]
+name = "cairn-app"
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+publish = false
+
+[[bin]]
+name = "cairn-app"
+path = "src/main.rs"
+

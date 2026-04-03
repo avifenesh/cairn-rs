@@ -4,15 +4,15 @@ Owner: Runtime Spine
 
 ## Current Status
 
-- 2026-04-03 | Not started
+- 2026-04-03 | Week 1 assigned | Scaffold `cairn-runtime` service boundaries for sessions, runs, tasks, approvals, checkpoints, mailbox, and recovery.
 
 ## Blocked By
 
-- none
+- 2026-04-03 | Waiting on Worker 2 base domain contracts and Worker 3 store interfaces before runtime handlers go deeper than skeleton boundaries.
 
 ## Inbox
 
-- none
+- 2026-04-03 | Architecture Owner -> Worker 4 | Week 1 focus: runtime crate skeleton only. Keep deeper handler semantics behind stable Worker 2/3 interfaces.
 
 ## Outbox
 
