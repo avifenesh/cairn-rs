@@ -80,9 +80,26 @@ impl PolicyVerdict {
     }
 }
 
+/// Approval mode for prompt release governance (RFC 006).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    /// Releases require explicit review before activation.
+    RequiresReview,
+    /// Releases can go directly from draft to active.
+    DraftToActive,
+}
+
+/// Project-scoped approval policy for prompt release governance.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalPolicy {
+    pub project_id: crate::ids::ProjectId,
+    pub mode: ApprovalMode,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ApprovalRequirement, PolicyEffect, PolicyVerdict};
+    use super::{ApprovalMode, ApprovalRequirement, PolicyEffect, PolicyVerdict};
 
     #[test]
     fn hold_verdict_implies_approval_requirement() {

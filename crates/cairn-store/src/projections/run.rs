@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use cairn_domain::{FailureClass, PauseReason, ProjectKey, ResumeTrigger, RunId, RunState, SessionId};
+use cairn_domain::{
+    FailureClass, PauseReason, ProjectKey, PromptReleaseId, ResumeTrigger, RunId, RunState,
+    SessionId,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::error::StoreError;

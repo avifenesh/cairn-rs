@@ -12,7 +12,7 @@
 | 003 | Owned Retrieval | DONE |
 | 004 | Graph and Eval Matrix | DONE |
 | 005 | Task/Session/Checkpoint Lifecycle | DONE |
-| 006 | Prompt Registry and Release | pending |
+| 006 | Prompt Registry and Release | IN PROGRESS |
 | 007 | Plugin Protocol and Transport | pending |
 | 008 | Tenant/Workspace/Profile | pending |
 | 009 | Provider Abstraction | pending |
@@ -408,6 +408,99 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 5. **Phase 4 — Tests**: tests + cross-review
 6. **Phase 5 — Mark complete**
 
+## RFC 006 — Gap Analysis
+
+### What exists
+
+**cairn-evals** has comprehensive in-memory types and services:
+- PromptAsset (kind: System/UserTemplate/ToolPrompt/Critic/Router, status: Active/Deprecated/Archived)
+- PromptVersion (immutable, content, format: PlainText/Mustache/Jinja2, content_hash, metadata)
+- PromptRelease (project-scoped, 6-state lifecycle: Draft/Proposed/Approved/Active/Rejected/Archived, rollout_target)
+- ReleaseAction (7 action types, actor, reason, from/to release linkage)
+- SelectorKind (ProjectDefault/AgentType/TaskType/RoutingSlot) with precedence
+- SelectorResolver with deterministic resolution
+- PromptReleaseService: in-memory with lifecycle validation, activation uniqueness, rollback
+- EvalRunService: in-memory with scorecard building
+- GraphIntegration: wraps EvalGraphProjector for prompt/eval graph nodes and edges
+
+**cairn-domain** has: PromptReleaseState, PromptReleaseRecord, PromptReleaseKey, can_transition_prompt_release() with governance presets
+
+**cairn-graph** has: NodeKind variants (PromptAsset/PromptVersion/PromptRelease/EvalRun), EdgeKind variants (DerivedFrom/ReleasedAs/UsedPrompt/EvaluatedBy/RolledBackTo), EvalGraphProjector
+
+### Gaps
+
+#### 1. No RuntimeCommand/Event for prompt lifecycle — MISSING
+
+Prompt create/transition/activate/rollback don't flow through the event log.
+
+- [ ] Add CreatePromptAsset, CreatePromptVersion, CreatePromptRelease commands
+- [ ] Add PromptAssetCreated, PromptVersionCreated, PromptReleaseCreated, PromptReleaseStateChanged events
+
+#### 2. No store-backed persistence — ALL IN-MEMORY
+
+PromptReleaseService and EvalRunService use HashMap/Vec, not event-sourced.
+
+- [ ] Event-source prompt asset/version/release through cairn-store EventLog
+- [ ] Wire InMemoryStore projections for prompt entities
+
+#### 3. No PromptAssetService or PromptVersionService — MISSING
+
+Only PromptReleaseService exists. No service for creating/managing assets and versions.
+
+- [ ] Add PromptAssetService (create, get, list, deprecate)
+- [ ] Add PromptVersionService (create, get, list_by_asset)
+
+#### 4. No read model traits in cairn-store — MISSING
+
+No PromptAssetReadModel, PromptVersionReadModel, or PromptReleaseReadModel.
+
+- [ ] Add read model traits + InMemoryStore impls
+
+#### 5. No release action persistence — MISSING
+
+ReleaseAction type exists but actions not stored durably. No audit trail query service.
+
+- [ ] Persist release actions through events
+- [ ] Add release action query service
+
+#### 6. No runtime prompt binding on runs/tasks — MISSING
+
+RFC 006 says runs/tasks/tool_invocations must record prompt_release_id. No such fields exist.
+
+- [ ] Add prompt_release_id fields to RunRecord/TaskRecord/ToolInvocationRecord
+
+#### 7. No approval integration — MISSING
+
+PromptReleaseState has Proposed/Approved/Rejected but no connection to runtime ApprovalService.
+
+- [ ] Wire release approval through the runtime approval model
+
+#### 8. No approval policy type — MISSING
+
+RFC 006 defines approval policy (default requires review, project can relax). No ApprovalPolicy type.
+
+- [ ] Add PromptApprovalPolicy type (Standard/Regulated presets)
+
+#### 9. GraphIntegration uses untyped strings — MINOR
+
+on_prompt_used takes bare &str parameters instead of typed IDs.
+
+- [ ] Use typed PromptReleaseId/RunId
+
+#### 10. No operator read models — MISSING
+
+RFC 006 requires prompt asset list/detail, version history, release list/detail, comparison, approval queue.
+
+- [ ] Add operator-facing read model endpoints
+
+### Phase plan
+
+1. **Phase 2 — Types**: commands/events for prompt lifecycle, read model traits, approval policy type
+2. **Phase 3a — Impl**: event-sourced asset/version/release services, InMemoryStore projections
+3. **Phase 3b — Impl**: runtime prompt binding, approval integration, release action persistence
+4. **Phase 4 — Tests**: tests + cross-review
+5. **Phase 5 — Mark complete**
+
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
 - [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants
@@ -434,3 +527,4 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 - [x] RFC 005: Phase 3a impl — session auto-derivation (derive_and_update_session wired to run complete/fail/cancel), duplicate run start guard, pause/resume metadata carried through events
 - [x] RFC 005: Phase 3+4 — checkpoint restore, recovery hardening, cross-review
 - [x] RFC 005: Phase 5 — marked complete
+- [x] RFC 006: Phase 1 gap analysis — 10 gaps across prompt lifecycle events, persistence, read models, approval integration, runtime binding

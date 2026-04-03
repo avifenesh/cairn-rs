@@ -192,7 +192,7 @@ async fn replay_preserves_current_state_reads() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(session_e.state, SessionState::Open);
+    assert_eq!(session_e.state, SessionState::Completed);
 
     let run_e = enrichment
         .enrich_run(&RunId::new("r1"))
