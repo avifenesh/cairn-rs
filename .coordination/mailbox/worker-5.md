@@ -18,6 +18,7 @@ Owner: Tools, Plugin Host, Isolation
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 5 | Additional packed work for idle time: 1. add one narrow integration guard proving `RuntimeToolServiceImpl` completed/failed builtin paths keep `task_id`, `tool_name`, and lifecycle result/error detail coherent together, 2. make sure the emitted runtime event and returned `ToolLifecycleOutput` agree on the same tool identity, 3. if that holds, return to support mode and do not widen protocol or plugin scope.
 - 2026-04-03 | Manager -> Worker 5 | Packed next cut: 1. keep the tools slice in support mode, 2. if Worker 8 changes `assistant_tool_call` payload expectations, add the smallest completed/failed-path integration guard that proves lifecycle output still matches, 3. if no seam changes appear, do not churn this crate.
 - 2026-04-03 | Manager -> Worker 5 | Clarification: no blanket rerun. Re-engage only if Worker 8 changes an adjacent API/SSE seam and a real `assistant_tool_call` mismatch appears. Otherwise stay in support mode. If you do touch code, finish with explicit `--proof` or `--blocker`, not generic notes like `verified`, `no drift`, or `all tests green`.
 - 2026-04-03 | Manager -> Worker 5 | Validation complete: `cargo test -p cairn-tools` passed with the new integration proof in place.

@@ -4,7 +4,8 @@ Owner: Memory, Retrieval, Graph
 
 ## Current Status
 
-- 2026-04-03 | Worker 6 | Retrieval-mode contract guards added: `vector_only_mode_is_rejected` (VectorOnly returns explicit error naming the mode) + `hybrid_mode_reports_lexical_fallback` (Hybrid reports LexicalOnly in diagnostics, not Hybrid). Both InMemoryRetrieval and PgRetrievalService now report `effective_mode` in diagnostics. Files: `src/in_memory.rs`, `src/pg/retrieval.rs`. 30 memory unit tests pass. BLOCKER for item 3: `memory_proposed` ownership decision needs product owner — cannot resolve from this seat.
+- 2026-04-03 | Worker 6 | `memory_proposed` ownership resolved: Worker 6 owns the emission trigger. `MemoryApiImpl::create()` now calls `proposal_hook.on_proposed(&item)` after creating a Proposed memory. `MemoryProposalHook` trait added — Worker 8 implements it to call `build_memory_proposed_frame`. `NoOpProposalHook` for tests. Wire via `MemoryApiImpl::new(retrieval).with_proposal_hook(box_hook)`. File: `crates/cairn-memory/src/api_impl.rs`. 30 tests pass.
+- 2026-04-03 | Worker 6 | Retrieval-mode contract guards added: `vector_only_mode_is_rejected` + `hybrid_mode_reports_lexical_fallback`. Both backends report `effective_mode` in diagnostics. Files: `src/in_memory.rs`, `src/pg/retrieval.rs`.
 - 2026-04-03 | Worker 6 / Manager | `submit_pack()` and the old feed-warning cleanup are no longer the active story.
 - 2026-04-03 | Worker 6 | All three manager-directed fixes landed:
   - `submit_pack()`: parses RFC 013 bundle JSON, extracts knowledge_document artifacts, ingests through pipeline. Test: `tests/bundle_roundtrip.rs::submit_pack_ingests_knowledge_documents`. File: `crates/cairn-memory/src/pipeline.rs`.
@@ -30,6 +31,7 @@ Owner: Memory, Retrieval, Graph
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 6 | Additional packed work for idle time: 1. write down the narrowest `memory_proposed` owner recommendation you can defend from the current code boundaries (`cairn-memory` publisher vs runtime event), 2. if you choose the memory-service path, identify the exact service method/hook that should emit it, 3. if no clear owner emerges, leave one crisp blocker note that Worker 8 and the architecture owner can decide without another broad memory pass.
 - 2026-04-03 | Manager -> Worker 6 | Follow-on packed sequence: 1. keep `submit_pack()` closed, 2. add or tighten one focused retrieval-mode guard proving the real backend path still rejects `VectorOnly` and reports `Hybrid -> LexicalOnly` honestly, 3. then pair with Worker 8 on the smallest `memory_proposed` owner proposal and leave a precise blocker if we still need an explicit product call.
 - 2026-04-03 | Manager -> Worker 6 | Packed next cut: 1. keep `submit_pack()` closed and do not reopen it, 2. tighten the retrieval-mode contract with one focused guard proving `VectorOnly` rejection and `Hybrid -> LexicalOnly` diagnostics stay explicit in the real backend path, 3. then pair with Worker 8 on the smallest real `memory_proposed` ownership decision and leave a precise blocker if the product owner is still undecided.
 - 2026-04-03 | Manager -> Worker 6 | Packed next cut: 1. clean the current `signal_feed_integration.rs` warning, 2. make `PgRetrievalService` mode behavior honest by either tightening diagnostics/contracts around lexical fallback or rejecting ambiguous hybrid claims more explicitly, 3. if that lands cleanly, pair with Worker 8 on the smallest `memory_proposed` ownership decision and leave a blocker if ownership still needs product clarification.
