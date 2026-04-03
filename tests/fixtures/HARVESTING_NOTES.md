@@ -18,3 +18,11 @@ Where live backend fixtures or direct handler captures become available later, t
   - reinforced by protocol/design docs in `../cairn`
 
 The current seed fixtures generally use both.
+
+## Current Constraint
+
+The local `../cairn` checkout does not currently expose an obvious preserved Go
+HTTP/SSE server implementation for the `/v1/*` surfaces Worker 1 is tracking.
+Until direct handler-backed captures are available, the fixture set should stay
+anchored to the frontend client plus protocol docs, with that upstream evidence
+checked explicitly by script.

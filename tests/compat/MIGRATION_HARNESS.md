@@ -56,3 +56,20 @@ Examples:
 - executable inventory checker in `scripts/check-compat-inventory.sh`
 - first harvested fixtures for the minimum Phase 0 set
 - generated `tests/fixtures/migration/phase0_mismatch_report.md`
+- generated `tests/fixtures/migration/phase0_upstream_contract_report.md`
+
+## Current Worker 1 Constraint
+
+The local `../cairn` checkout currently provides preserved-route and SSE evidence
+primarily through:
+
+- frontend API usage in `frontend/src/lib/api/client.ts`
+- frontend SSE usage in `frontend/src/lib/stores/sse.svelte.ts`
+- protocol docs in `docs/design/FRONTEND_AGENT_BRIEF.md`
+- protocol tables in `docs/design/pieces/09-server-protocols.md`
+
+Worker 1 should prefer direct backend captures when they exist, but should not
+block Phase 0 waiting for them. Until a concrete legacy server surface is
+available locally, the compatibility harness treats the frontend + protocol docs
+as the preserved upstream contract and validates against those sources
+explicitly.

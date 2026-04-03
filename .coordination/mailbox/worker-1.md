@@ -6,6 +6,8 @@ Owner: Contracts, Fixtures, Migration Harness
 
 - 2026-04-03 | Worker 1 / Manager | First seed fixture set complete | Minimum Phase 0 HTTP/SSE fixtures are in repo, inventory checker validates them, and the next step is tightening them against direct backend captures where possible.
 - 2026-04-03 | Worker 1 / Manager | Mismatch report scaffold complete | Phase 0 fixture maps and generated mismatch report now track seeded coverage explicitly. Next step is replacing or confirming seeded fixtures with direct backend captures.
+- 2026-04-03 | Worker 1 / Manager | Cross-worker repo check green | Current in-progress slices from Workers 2/3/4/6/7/8 compile together under `cargo test --workspace`, so we can keep moving without a coordination freeze.
+- 2026-04-03 | Worker 1 / Manager | Local upstream is protocol-backed, not handler-backed | The local `../cairn` checkout exposes preserved API/SSE evidence through frontend code and protocol docs, but no concrete legacy server handler surface was found for direct capture. Worker 1 is validating against that upstream contract explicitly instead of stalling.
 
 ## Blocked By
 
@@ -31,3 +33,4 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 | Review `tests/compat/*`, `tests/fixtures/*`, and `scripts/check-compat-inventory.sh` for phase-0 compatibility harness baseline.
 - 2026-04-03 | Worker 1 | Review first seed fixture set under `tests/fixtures/http` and `tests/fixtures/sse`; provenance is documented in `tests/fixtures/HARVESTING_NOTES.md`.
 - 2026-04-03 | Worker 1 | Review `tests/fixtures/migration/phase0_mismatch_report.md` plus `tests/compat/phase0_*_fixture_map.tsv` for explicit seeded-coverage status.
+- 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-upstream-contract-report.sh` and `tests/fixtures/migration/phase0_upstream_contract_report.md` for the protocol-backed upstream evidence check.
