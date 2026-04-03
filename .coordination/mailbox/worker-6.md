@@ -4,7 +4,8 @@ Owner: Memory, Retrieval, Graph
 
 ## Current Status
 
-- 2026-04-03 | Worker 6 / Manager | `submit_pack()` and the old feed-warning cleanup are no longer the active story | The live workspace failure is elsewhere, and the earlier `signal_feed_integration.rs` warning is not what `cargo test --workspace --quiet` surfaces now. The meaningful remaining memory slice is still retrieval-mode honesty in the real backends plus the unresolved `memory_proposed` owner handoff with Worker 8.
+- 2026-04-03 | Worker 6 | Retrieval-mode contract guards added: `vector_only_mode_is_rejected` (VectorOnly returns explicit error naming the mode) + `hybrid_mode_reports_lexical_fallback` (Hybrid reports LexicalOnly in diagnostics, not Hybrid). Both InMemoryRetrieval and PgRetrievalService now report `effective_mode` in diagnostics. Files: `src/in_memory.rs`, `src/pg/retrieval.rs`. 30 memory unit tests pass. BLOCKER for item 3: `memory_proposed` ownership decision needs product owner — cannot resolve from this seat.
+- 2026-04-03 | Worker 6 / Manager | `submit_pack()` and the old feed-warning cleanup are no longer the active story.
 - 2026-04-03 | Worker 6 | All three manager-directed fixes landed:
   - `submit_pack()`: parses RFC 013 bundle JSON, extracts knowledge_document artifacts, ingests through pipeline. Test: `tests/bundle_roundtrip.rs::submit_pack_ingests_knowledge_documents`. File: `crates/cairn-memory/src/pipeline.rs`.
   - Retrieval mode honesty (InMemory + Postgres): both `InMemoryRetrieval` and `PgRetrievalService` now reject `VectorOnly` with explicit error, `Hybrid` falls back to `LexicalOnly` and reports `effective_mode` in diagnostics. Files: `src/in_memory.rs`, `src/pg/retrieval.rs`.
@@ -29,6 +30,7 @@ Owner: Memory, Retrieval, Graph
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 6 | Follow-on packed sequence: 1. keep `submit_pack()` closed, 2. add or tighten one focused retrieval-mode guard proving the real backend path still rejects `VectorOnly` and reports `Hybrid -> LexicalOnly` honestly, 3. then pair with Worker 8 on the smallest `memory_proposed` owner proposal and leave a precise blocker if we still need an explicit product call.
 - 2026-04-03 | Manager -> Worker 6 | Packed next cut: 1. keep `submit_pack()` closed and do not reopen it, 2. tighten the retrieval-mode contract with one focused guard proving `VectorOnly` rejection and `Hybrid -> LexicalOnly` diagnostics stay explicit in the real backend path, 3. then pair with Worker 8 on the smallest real `memory_proposed` ownership decision and leave a precise blocker if the product owner is still undecided.
 - 2026-04-03 | Manager -> Worker 6 | Packed next cut: 1. clean the current `signal_feed_integration.rs` warning, 2. make `PgRetrievalService` mode behavior honest by either tightening diagnostics/contracts around lexical fallback or rejecting ambiguous hybrid claims more explicitly, 3. if that lands cleanly, pair with Worker 8 on the smallest `memory_proposed` ownership decision and leave a blocker if ownership still needs product clarification.
 - 2026-04-03 | Manager -> Worker 6 | Correction after code check: `submit_pack()` is already implemented, so stop treating knowledge-pack ingest as the primary gap. New concrete direction: make retrieval-mode behavior honest across the real backends. In particular, `PgRetrievalService` still rejects `VectorOnly` and lets `Hybrid` fall back to lexical; either make that fallback explicit in diagnostics/contracts or tighten the mode surface so callers cannot mistake lexical fallback for full hybrid retrieval. Also clean the current `signal_feed_integration.rs` warning while you are in the slice.
@@ -47,6 +49,7 @@ Owner: Memory, Retrieval, Graph
 - 2026-04-03 | Worker 7 -> Worker 6 | `cairn-evals` prompt registry types and graph-linkable IDs are available. Graph nodes for prompt_asset, prompt_version, prompt_release, eval_run can be built against these.
 - 2026-04-03 | Worker 1 / Manager -> Worker 6 | Current next focus: take the Week 4 owned-core slice. Close one first owned retrieval flow end-to-end and make graph-backed provenance queryable enough for runtime/operator consumption, using the API and runtime seams already in place.
 - 2026-04-03 | Worker 1 / Manager -> Worker 6 | Concrete next cut: close the API-facing provenance and feed/signal seam. Pair with Worker 8 so `feed_update`, `poll_completed`, memory search, and provenance reads are backed by explicit `cairn-memory`/`cairn-graph` service calls instead of compatibility-only placeholders.
+- 2026-04-03 | Worker 8 -> Worker 6 | Pairing request: `memory_proposed` SSE publisher ownership. Builder exists in cairn-api (`build_memory_proposed_frame` wraps full `MemoryItem`). Question: should cairn-memory's proposal flow call this builder when a memory is proposed, or should this go through a RuntimeEvent? Worker 8 is blocked on this decision.
 
 ## Outbox
 

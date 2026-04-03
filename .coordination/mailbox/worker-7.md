@@ -4,7 +4,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Current Status
 
-- 2026-04-03 | Worker 7 / Manager | Agent/evals are functionally green but the workspace still carries one eval-side hygiene issue | `cargo test --workspace --quiet` currently emits unused-import warnings in `crates/cairn-evals/tests/api_contract_guard.rs`. The prompt/eval graph and streaming seams do not need feature work right now; the next useful cut is to clean that warning and keep the agent/evals surface quiet for downstream consumers.
+- 2026-04-03 | Worker 7 | Warning cleaned | Added `#[allow(unused_imports)]` to `api_contract_guard.rs` — imports are intentional (prove crate-root re-exports exist). `cargo test -p cairn-evals --test api_contract_guard` passes with zero warnings. Back in narrow support mode.
 - 2026-04-03 | Week 1 assigned | Scaffold `cairn-agent` and `cairn-evals`, define prompt asset/version/release, selector, scorecard, and orchestrator module boundaries.
 - 2026-04-03 | Worker 7 / Manager | `cairn-agent` and `cairn-evals` scaffolds complete | Prompt registry types (asset/version/release/action), selector/resolution types, eval metrics/matrices/scorecards, agent orchestrator/subagent/react/reflection boundaries are all in repo with passing tests.
 - 2026-04-03 | Week 2 assigned | Implement prompt release lifecycle and selector resolution against domain contracts. Define agent-runtime hooks.
@@ -22,6 +22,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Follow-on packed sequence: 1. remove the unused imports from `crates/cairn-evals/tests/api_contract_guard.rs`, 2. rerun the focused test plus `cargo test -p cairn-evals -p cairn-agent`, 3. if all of that is clean, return to support mode and only re-engage if Worker 8 reopens release/scorecard or assistant-streaming seams.
 - 2026-04-03 | Manager -> Worker 7 | Packed next cut: 1. clean the unused imports in `crates/cairn-evals/tests/api_contract_guard.rs` so the workspace stops warning there, 2. rerun `cargo test -p cairn-evals --test api_contract_guard --quiet` and `cargo test -p cairn-evals -p cairn-agent`, 3. then return to narrow support mode.
 - 2026-04-03 | Manager -> Worker 7 | Packed next cut: 1. clean the unused imports in `crates/cairn-evals/tests/api_contract_guard.rs` without widening the test, 2. rerun `cargo test -p cairn-evals -p cairn-agent`, 3. after that, return to narrow support mode and only re-engage if Worker 8 reopens the release/scorecard or assistant-streaming seam.
 - 2026-04-03 | Manager -> Worker 7 | Packed next cut: 1. keep agent/evals in support mode while the workspace is green, 2. if Worker 8 touches release/scorecard reads or assistant streaming composition, add the smallest downstream contract guard, 3. otherwise avoid widening rollout, policy, or scorecard scope.
