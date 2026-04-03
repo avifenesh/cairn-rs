@@ -21,6 +21,13 @@ require_dir() {
   fi
 }
 
+cargo_test_clean_env() {
+  (
+    cd "$ROOT"
+    env -u LD_LIBRARY_PATH CARGO_TARGET_DIR="$ROOT/target" cargo test "$@"
+  )
+}
+
 require_file "$COMPAT_DIR/http_routes.tsv"
 require_file "$COMPAT_DIR/sse_events.tsv"
 require_file "$COMPAT_DIR/phase0_required_http.txt"
@@ -74,6 +81,7 @@ require_file "$FIXTURE_DIR/HARVESTING_NOTES.md"
 require_file "$FIXTURE_DIR/migration/README.md"
 require_file "$FIXTURE_DIR/migration/phase0_mismatch_report.md"
 require_file "$FIXTURE_DIR/migration/phase0_upstream_contract_report.md"
+require_file "$FIXTURE_DIR/migration/phase0_sse_publisher_gap_report.md"
 require_file "$FIXTURE_DIR/http/GET__v1_feed__limit20_unread_true.json"
 require_file "$FIXTURE_DIR/http/GET__v1_tasks__status_running_type_agent.json"
 require_file "$FIXTURE_DIR/http/GET__v1_approvals__status_pending.json"
@@ -93,7 +101,7 @@ require_file "$FIXTURE_DIR/sse/assistant_tool_call__start.json"
 require_file "$FIXTURE_DIR/sse/memory_proposed__proposal.json"
 require_file "$FIXTURE_DIR/sse/agent_progress__message.json"
 
-cargo test -p cairn-api --test compat_catalog_sync --manifest-path "$ROOT/Cargo.toml"
-cargo test -p cairn-api --test phase0_fixture_shapes --manifest-path "$ROOT/Cargo.toml"
+cargo_test_clean_env -p cairn-api --test compat_catalog_sync --manifest-path "$ROOT/Cargo.toml"
+cargo_test_clean_env -p cairn-api --test phase0_fixture_shapes --manifest-path "$ROOT/Cargo.toml"
 
 echo "compatibility inventory looks structurally valid"
