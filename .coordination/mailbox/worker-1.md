@@ -13,6 +13,8 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | SSE mapping follow-up identified | The workspace is green, but Worker 8's `sse_publisher` still needs preserved payload-shape alignment checks for task, approval, tool, and agent-progress events before Worker 1 can treat the SSE runtime surface as compatibility-locked.
 - 2026-04-03 | Worker 1 / Manager | SSE runtime gap report added | Worker 1 now publishes an explicit Phase 0 SSE publisher gap report so the difference between event-name coverage and preserved payload-shape compatibility stays visible while Worker 8 tightens the publisher surface.
 - 2026-04-03 | Worker 1 / Manager | HTTP endpoint gap report added | Worker 1 now publishes an explicit Phase 0 HTTP endpoint gap report so preserved routes with only catalog/fixture coverage stay visible until Worker 8 or later workers add real endpoint boundaries.
+- 2026-04-03 | Worker 1 / Manager | Harness refresh is now automatic | `check-compat-inventory.sh` now regenerates the upstream contract report plus the HTTP/SSE gap reports before validating, so Worker 1 does not rely on stale report artifacts.
+- 2026-04-03 | Worker 1 / Manager | Workspace integration warning surfaced | Full `cargo test --workspace` is currently blocked by borrow-check failures in `cairn-evals/src/services/release_service.rs`; Worker 1 harness checks remain green and independent while Worker 7 tightens that release-service implementation.
 
 ## Blocked By
 

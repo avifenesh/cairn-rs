@@ -28,6 +28,15 @@ cargo_test_clean_env() {
   )
 }
 
+run_report_generator() {
+  local script="$1"
+  if [[ ! -f "$script" ]]; then
+    echo "missing report generator: $script" >&2
+    exit 1
+  fi
+  bash "$script"
+}
+
 require_file "$COMPAT_DIR/http_routes.tsv"
 require_file "$COMPAT_DIR/sse_events.tsv"
 require_file "$COMPAT_DIR/phase0_required_http.txt"
@@ -38,6 +47,10 @@ require_file "$COMPAT_DIR/MIGRATION_HARNESS.md"
 require_dir "$FIXTURE_DIR/http"
 require_dir "$FIXTURE_DIR/sse"
 require_dir "$FIXTURE_DIR/migration"
+
+run_report_generator "$ROOT/scripts/generate-phase0-upstream-contract-report.sh"
+run_report_generator "$ROOT/scripts/generate-phase0-http-endpoint-gap-report.sh"
+run_report_generator "$ROOT/scripts/generate-phase0-sse-publisher-gap-report.sh"
 
 awk -F '\t' 'NR == 1 { next } NF != 5 { exit 1 }' "$COMPAT_DIR/http_routes.tsv" || {
   echo "http_routes.tsv must contain 5 tab-separated columns on every data row" >&2
