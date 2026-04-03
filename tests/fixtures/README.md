@@ -7,4 +7,4 @@ Use it for:
 - golden runtime behavior fixtures
 - preserved SSE payload fixtures
 - migration comparison inputs
-
+- executable minimum-shape compatibility checks via `cairn-api` integration tests

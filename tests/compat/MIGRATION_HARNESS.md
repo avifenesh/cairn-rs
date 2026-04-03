@@ -55,6 +55,7 @@ Examples:
 - fixture directory layout
 - executable inventory checker in `scripts/check-compat-inventory.sh`
 - executable Rust-side API catalog sync test in `crates/cairn-api/tests/compat_catalog_sync.rs`
+- executable Phase 0 fixture-shape test in `crates/cairn-api/tests/phase0_fixture_shapes.rs`
 - first harvested fixtures for the minimum Phase 0 set
 - generated `tests/fixtures/migration/phase0_mismatch_report.md`
 - generated `tests/fixtures/migration/phase0_upstream_contract_report.md`
