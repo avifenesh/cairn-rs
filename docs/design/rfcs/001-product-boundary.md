@@ -154,12 +154,65 @@ This means the product must work well when deployed by a technical team in their
 
 ## Packaging Direction
 
-Not fully decided yet, but architecture should leave room for:
+V1 packaging should be explicit:
 
-- open core
-- paid enterprise/operator features
-- optional managed or hybrid deployment
+- one codebase
+- one product binary
+- first-class local mode and self-hosted team mode
+- optional paid entitlements on top of the same product artifact
+
+This means Cairn does not ship separate "community" and "enterprise" binaries in v1.
+
+Commercial differentiation should come from:
+
+- signed entitlements or license material
 - support and service layers
+- deployment assistance and enterprise readiness
+- later managed or hybrid operating models
+
+### Commercialization Direction
+
+The v1 business posture is:
+
+- self-hosted-first, not SaaS-first
+- one product model across local, self-hosted, and later managed offerings
+- commercial packaging layered onto the same product semantics rather than a separate hosted-only architecture
+
+Local mode is the evaluation and development path.
+
+Self-hosted team mode is the first sellable operating model.
+
+Managed cloud and hybrid may arrive later, but they should build on the same control-plane and entitlement model rather than forcing a second product architecture.
+
+### Entitlement Model
+
+Paid features should be activated through product-defined entitlements, not through hidden configuration forks.
+
+The v1 contract is:
+
+- paid and unpaid deployments use the same core product artifact
+- entitlements are deployment- or tenant-level product inputs
+- entitlements gate named product capabilities, not ad-hoc vendor-specific behavior
+- disabling or expiring an entitlement must fail predictably and must not corrupt canonical product state
+
+### First Sellable Self-Hosted Scope
+
+The first sellable self-hosted release should stand on its own without requiring Cairn-operated cloud services.
+
+That release includes:
+
+- the self-hosted team-mode architecture defined in RFC 011
+- the operator control-plane floor defined in RFC 010
+- the runtime, retrieval, graph, eval, prompt, and import/export capabilities defined in the downstream RFC set
+- product-defined auth, credential protection, and deployment guidance sufficient for a supportable team deployment
+
+That release does not require:
+
+- a managed multi-customer control plane
+- first-class hybrid control-plane operation
+- in-product billing or metering surfaces
+- marketplace monetization
+- a separate enterprise binary or architecture fork
 
 ## Product Success Criteria
 
@@ -201,9 +254,9 @@ For v1, do not aim to be:
 
 ## Open Questions
 
-1. Which enterprise features should remain explicitly out of scope for the first sellable self-hosted release?
-2. Should a later release introduce a first-class hybrid control-plane mode once the self-hosted operating model is proven?
-3. Which post-v1 deployment and governance features merit promotion from architecture-compatible to first-class?
+1. Which commercial governance/compliance capabilities should be the first paid expansions after the initial self-hosted release proves out?
+2. When should managed cloud or hybrid move from architecture-compatible to first-class go-to-market motions?
+3. Which entitlement surfaces deserve first-class operator UX in the early post-v1 period?
 
 ## Decision
 
@@ -216,3 +269,6 @@ Proceed with the rewrite assuming:
 - hybrid is architecture-compatible but not a first-class supported v1 operating mode
 - tenant/workspace/project scoping is required in architecture even when deployments run effectively single-tenant
 - the first release includes the minimum operator control-plane views and workflows defined by RFC 010
+- v1 uses one product binary and one core product model across local and self-hosted modes
+- paid differentiation in v1 comes from entitlements and supportable deployment/commercial packaging, not a separate architecture fork
+- managed cloud and hybrid remain later business motions, not prerequisites for the first sellable product
