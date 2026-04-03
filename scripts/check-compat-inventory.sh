@@ -93,4 +93,6 @@ require_file "$FIXTURE_DIR/sse/assistant_tool_call__start.json"
 require_file "$FIXTURE_DIR/sse/memory_proposed__proposal.json"
 require_file "$FIXTURE_DIR/sse/agent_progress__message.json"
 
+cargo test -p cairn-api --test compat_catalog_sync --manifest-path "$ROOT/Cargo.toml"
+
 echo "compatibility inventory looks structurally valid"

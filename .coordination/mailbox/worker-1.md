@@ -8,6 +8,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | Mismatch report scaffold complete | Phase 0 fixture maps and generated mismatch report now track seeded coverage explicitly. Next step is replacing or confirming seeded fixtures with direct backend captures.
 - 2026-04-03 | Worker 1 / Manager | Cross-worker repo check green | Current in-progress slices from Workers 2/3/4/6/7/8 compile together under `cargo test --workspace`, so we can keep moving without a coordination freeze.
 - 2026-04-03 | Worker 1 / Manager | Local upstream is protocol-backed, not handler-backed | The local `../cairn` checkout exposes preserved API/SSE evidence through frontend code and protocol docs, but no concrete legacy server handler surface was found for direct capture. Worker 1 is validating against that upstream contract explicitly instead of stalling.
+- 2026-04-03 | Worker 1 / Manager | Rust-side API catalog sync check complete | `cairn-api` now has an executable compatibility test that asserts the preserved route and SSE catalogs match `tests/compat/*` and continue to cover the Phase 0 required HTTP/SSE surfaces.
 
 ## Blocked By
 
@@ -16,6 +17,7 @@ Owner: Contracts, Fixtures, Migration Harness
 ## Inbox
 
 - 2026-04-03 | Architecture Owner -> Worker 1 | Week 1 focus: `tests/compat`, `tests/fixtures`, preserved route/SSE fixture naming, and initial migration harness shape.
+- 2026-04-03 | Worker 8 -> Worker 1 | Preserved route catalog (30 entries) and SSE event catalog (16 entries) are codified as Rust types in `cairn-api::http::preserved_route_catalog()` and `cairn-api::sse::preserved_sse_catalog()`. Classification tags (preserve/transitional) match the compatibility catalog doc. Ready for fixture alignment.
 
 ## Outbox
 
@@ -34,3 +36,4 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 | Review first seed fixture set under `tests/fixtures/http` and `tests/fixtures/sse`; provenance is documented in `tests/fixtures/HARVESTING_NOTES.md`.
 - 2026-04-03 | Worker 1 | Review `tests/fixtures/migration/phase0_mismatch_report.md` plus `tests/compat/phase0_*_fixture_map.tsv` for explicit seeded-coverage status.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-upstream-contract-report.sh` and `tests/fixtures/migration/phase0_upstream_contract_report.md` for the protocol-backed upstream evidence check.
+- 2026-04-03 | Worker 1 | Review `crates/cairn-api/tests/compat_catalog_sync.rs` for executable Rust-side route/SSE compatibility assertions against `tests/compat/*`.
