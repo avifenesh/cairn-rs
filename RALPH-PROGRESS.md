@@ -1,14 +1,14 @@
 # Ralph Loop Progress
 
-## Current RFC: 002 — Runtime and Event Model
-## Current Phase: mark complete (Phase 5)
+## Current RFC: 003 — Owned Retrieval
+## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
 
 | RFC | Title | Status |
 |-----|-------|--------|
 | 001 | Product Boundary and Non-Goals | scope-only, no code needed |
-| 002 | Runtime and Event Model | IN PROGRESS |
+| 002 | Runtime and Event Model | DONE |
 | 003 | Owned Retrieval | pending |
 | 004 | Graph and Eval Matrix | pending |
 | 005 | Task/Session/Checkpoint Lifecycle | pending |
@@ -105,3 +105,4 @@ These `current_state_plus_audit` entities are classified in RFC 002 but implemen
 - [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants
 - [x] RFC 002: Phase 3 implementation — Signal projection in InMemoryStore, signal feed read model queries, EntityRef::Signal in pg/sqlite event_log
 - [x] RFC 002: Phase 4 tests — UserMessageAppended event variant, signal lifecycle tests, command/event coverage tests
+- [x] RFC 002: Phase 5 — marked complete, all gaps resolved
