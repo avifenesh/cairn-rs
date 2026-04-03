@@ -1,0 +1,31 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "request": {
+    "method": "GET",
+    "path": "/v1/feed",
+    "query": {
+      "limit": "20",
+      "unread": "true"
+    }
+  },
+  "response": {
+    "items": [
+      {
+        "id": 101,
+        "source": "slack",
+        "kind": "message",
+        "title": "Build pipeline needs approval",
+        "body": "Deploy is waiting on approval from ops.",
+        "url": "https://example.test/slack/101",
+        "author": "ops-bot",
+        "avatarUrl": "https://example.test/avatar/ops-bot.png",
+        "repoFullName": "avife/cairn",
+        "isRead": false,
+        "isArchived": false,
+        "groupKey": "slack:deploy",
+        "createdAt": "2026-04-03T09:30:00Z"
+      }
+    ],
+    "hasMore": true
+  }
+}

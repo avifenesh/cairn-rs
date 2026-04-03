@@ -1,0 +1,9 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "event": "assistant_reasoning",
+  "payload": {
+    "taskId": "task_assistant_001",
+    "round": 1,
+    "thought": "I should inspect the current approvals and running tasks before summarizing blockers."
+  }
+}

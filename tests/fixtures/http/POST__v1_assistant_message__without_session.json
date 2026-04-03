@@ -1,0 +1,14 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "request": {
+    "method": "POST",
+    "path": "/v1/assistant/message",
+    "body": {
+      "message": "Start a new work session.",
+      "mode": "work"
+    }
+  },
+  "response": {
+    "taskId": "task_assistant_002"
+  }
+}

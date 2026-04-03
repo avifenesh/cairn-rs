@@ -1,0 +1,12 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "event": "assistant_tool_call",
+  "payload": {
+    "taskId": "task_assistant_001",
+    "toolName": "list_approvals",
+    "phase": "start",
+    "args": {
+      "status": "pending"
+    }
+  }
+}

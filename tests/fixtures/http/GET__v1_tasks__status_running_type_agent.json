@@ -1,0 +1,26 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "request": {
+    "method": "GET",
+    "path": "/v1/tasks",
+    "query": {
+      "status": "running",
+      "type": "agent"
+    }
+  },
+  "response": {
+    "items": [
+      {
+        "id": "task_001",
+        "type": "agent",
+        "status": "running",
+        "title": "Draft weekly digest",
+        "description": "Collect updates and prepare digest for review.",
+        "progress": 42,
+        "createdAt": "2026-04-03T09:00:00Z",
+        "updatedAt": "2026-04-03T09:32:00Z"
+      }
+    ],
+    "hasMore": false
+  }
+}

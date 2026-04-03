@@ -1,0 +1,8 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "event": "poll_completed",
+  "payload": {
+    "source": "slack",
+    "newCount": 3
+  }
+}

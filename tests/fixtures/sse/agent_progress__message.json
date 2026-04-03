@@ -1,0 +1,8 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "event": "agent_progress",
+  "payload": {
+    "agentId": "agent_001",
+    "message": "Waiting for approval before continuing deployment workflow."
+  }
+}

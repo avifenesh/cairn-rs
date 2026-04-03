@@ -1,0 +1,22 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "request": {
+    "method": "GET",
+    "path": "/v1/stream",
+    "query": {
+      "lastEventId": "evt_1000"
+    }
+  },
+  "response_contract": {
+    "transport": "sse",
+    "replay_window_behavior": "resume_from_durable_position_within_window",
+    "expected_first_event_names": [
+      "ready",
+      "task_update"
+    ],
+    "notes": [
+      "The stream accepts a replay cursor via lastEventId.",
+      "The frontend relies on replayable SSE resume rather than a fresh connection only."
+    ]
+  }
+}

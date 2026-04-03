@@ -1,0 +1,24 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "request": {
+    "method": "GET",
+    "path": "/v1/memories/search",
+    "query": {
+      "q": "test",
+      "limit": "10"
+    }
+  },
+  "response": {
+    "items": [
+      {
+        "id": "memory_001",
+        "category": "project",
+        "status": "accepted",
+        "content": "The weekly digest should summarize blocked deploys first.",
+        "source": "ops-notes",
+        "confidence": 0.92,
+        "createdAt": "2026-04-02T15:00:00Z"
+      }
+    ]
+  }
+}

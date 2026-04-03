@@ -1,0 +1,16 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "event": "task_update",
+  "payload": {
+    "task": {
+      "id": "task_001",
+      "type": "agent",
+      "status": "running",
+      "title": "Draft weekly digest",
+      "description": "Collect updates and prepare digest for review.",
+      "progress": 42,
+      "createdAt": "2026-04-03T09:00:00Z",
+      "updatedAt": "2026-04-03T09:32:00Z"
+    }
+  }
+}

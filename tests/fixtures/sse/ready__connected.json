@@ -1,0 +1,7 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "event": "ready",
+  "payload": {
+    "clientId": "client_001"
+  }
+}

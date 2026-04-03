@@ -1,0 +1,15 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "request": {
+    "method": "POST",
+    "path": "/v1/assistant/message",
+    "body": {
+      "message": "Summarize the deploy blockers.",
+      "mode": "work",
+      "sessionId": "session_001"
+    }
+  },
+  "response": {
+    "taskId": "task_assistant_001"
+  }
+}

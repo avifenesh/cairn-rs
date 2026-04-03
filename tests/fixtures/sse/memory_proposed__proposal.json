@@ -1,0 +1,15 @@
+{
+  "provenance": ["frontend_contract", "protocol_doc"],
+  "event": "memory_proposed",
+  "payload": {
+    "memory": {
+      "id": "memory_002",
+      "category": "project",
+      "status": "proposed",
+      "content": "Ops approvals should be summarized first in the weekly digest.",
+      "source": "assistant",
+      "confidence": 0.81,
+      "createdAt": "2026-04-03T09:40:00Z"
+    }
+  }
+}

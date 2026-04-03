@@ -4,7 +4,7 @@ Owner: Contracts, Fixtures, Migration Harness
 
 ## Current Status
 
-- 2026-04-03 | Worker 1 / Manager | Inventory + harness layout complete | Executable compatibility inventory, fixture directory layout, and migration harness structure are in repo. Next step is harvesting first golden fixtures.
+- 2026-04-03 | Worker 1 / Manager | First seed fixture set complete | Minimum Phase 0 HTTP/SSE fixtures are in repo, inventory checker validates them, and the next step is tightening them against direct backend captures where possible.
 
 ## Blocked By
 
@@ -28,3 +28,4 @@ Owner: Contracts, Fixtures, Migration Harness
 ## Ready For Review
 
 - 2026-04-03 | Worker 1 | Review `tests/compat/*`, `tests/fixtures/*`, and `scripts/check-compat-inventory.sh` for phase-0 compatibility harness baseline.
+- 2026-04-03 | Worker 1 | Review first seed fixture set under `tests/fixtures/http` and `tests/fixtures/sse`; provenance is documented in `tests/fixtures/HARVESTING_NOTES.md`.
