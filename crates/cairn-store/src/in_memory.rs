@@ -32,6 +32,7 @@ struct State {
     mailbox_messages: HashMap<String, MailboxRecord>,
     tool_invocations: HashMap<String, ToolInvocationRecord>,
     signals: HashMap<String, cairn_domain::SignalRecord>,
+    ingest_jobs: HashMap<String, cairn_domain::IngestJobRecord>,
 }
 
 pub struct InMemoryStore {
@@ -52,6 +53,7 @@ impl InMemoryStore {
                 mailbox_messages: HashMap::new(),
                 tool_invocations: HashMap::new(),
                 signals: HashMap::new(),
+                ingest_jobs: HashMap::new(),
             }),
         }
     }
@@ -257,9 +259,33 @@ impl InMemoryStore {
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::UserMessageAppended(_)
-            | RuntimeEvent::IngestJobStarted(_)
-            | RuntimeEvent::IngestJobCompleted(_) => {}
+            | RuntimeEvent::UserMessageAppended(_) => {}
+            RuntimeEvent::IngestJobStarted(e) => {
+                state.ingest_jobs.insert(
+                    e.job_id.as_str().to_owned(),
+                    cairn_domain::IngestJobRecord {
+                        id: e.job_id.clone(),
+                        project: e.project.clone(),
+                        source_id: e.source_id.clone(),
+                        document_count: e.document_count,
+                        state: cairn_domain::IngestJobState::Processing,
+                        error_message: None,
+                        created_at: e.started_at,
+                        updated_at: e.started_at,
+                    },
+                );
+            }
+            RuntimeEvent::IngestJobCompleted(e) => {
+                if let Some(rec) = state.ingest_jobs.get_mut(e.job_id.as_str()) {
+                    rec.state = if e.success {
+                        cairn_domain::IngestJobState::Completed
+                    } else {
+                        cairn_domain::IngestJobState::Failed
+                    };
+                    rec.error_message = e.error_message.clone();
+                    rec.updated_at = e.completed_at;
+                }
+            }
         }
     }
 }
@@ -719,6 +745,37 @@ impl SignalReadModel for InMemoryStore {
             .cloned()
             .collect();
         results.sort_by_key(|s| s.timestamp_ms);
+        let results = results.into_iter().skip(offset).take(limit).collect();
+        Ok(results)
+    }
+}
+
+// -- IngestJobReadModel --
+
+#[async_trait]
+impl IngestJobReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        job_id: &cairn_domain::IngestJobId,
+    ) -> Result<Option<cairn_domain::IngestJobRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.ingest_jobs.get(job_id.as_str()).cloned())
+    }
+
+    async fn list_by_project(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::IngestJobRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<cairn_domain::IngestJobRecord> = state
+            .ingest_jobs
+            .values()
+            .filter(|j| j.project == *project)
+            .cloned()
+            .collect();
+        results.sort_by_key(|j| j.created_at);
         let results = results.into_iter().skip(offset).take(limit).collect();
         Ok(results)
     }

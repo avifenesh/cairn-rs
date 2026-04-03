@@ -30,6 +30,27 @@ impl Default for QualityGateConfig {
     }
 }
 
+/// Graph expansion hook for deep search (RFC 003).
+///
+/// After each retrieval hop, the hook receives the current query and results
+/// and returns additional query strings derived from graph relationships
+/// (e.g. related entities, linked concepts). These are appended to the
+/// decomposer's output for the next hop.
+#[async_trait]
+pub trait GraphExpansionHook: Send + Sync {
+    async fn expand(&self, query: &str, results: &[RetrievalResult]) -> Vec<String>;
+}
+
+/// No-op graph expansion that returns no additional queries.
+pub struct NoOpGraphExpansion;
+
+#[async_trait]
+impl GraphExpansionHook for NoOpGraphExpansion {
+    async fn expand(&self, _query: &str, _results: &[RetrievalResult]) -> Vec<String> {
+        vec![]
+    }
+}
+
 /// Query decomposer that generates sub-queries for each hop.
 pub trait QueryDecomposer: Send + Sync {
     fn decompose(&self, query: &str, hop: u32, prior_results: &[RetrievalResult]) -> String;
@@ -68,26 +89,38 @@ impl QueryDecomposer for KeywordDecomposer {
 }
 
 /// Iterative deep search that chains retrieval hops.
-pub struct IterativeDeepSearch<R: RetrievalService, D: QueryDecomposer> {
+pub struct IterativeDeepSearch<R: RetrievalService, D: QueryDecomposer, G: GraphExpansionHook = NoOpGraphExpansion> {
     retrieval: R,
     decomposer: D,
     quality_gate: QualityGateConfig,
+    graph_hook: G,
 }
 
-impl<R: RetrievalService> IterativeDeepSearch<R, KeywordDecomposer> {
+impl<R: RetrievalService> IterativeDeepSearch<R, KeywordDecomposer, NoOpGraphExpansion> {
     pub fn new(retrieval: R) -> Self {
         Self {
             retrieval,
             decomposer: KeywordDecomposer,
             quality_gate: QualityGateConfig::default(),
+            graph_hook: NoOpGraphExpansion,
         }
     }
 }
 
-impl<R: RetrievalService, D: QueryDecomposer> IterativeDeepSearch<R, D> {
+impl<R: RetrievalService, D: QueryDecomposer, G: GraphExpansionHook> IterativeDeepSearch<R, D, G> {
     pub fn with_quality_gate(mut self, config: QualityGateConfig) -> Self {
         self.quality_gate = config;
         self
+    }
+
+    /// Set a graph expansion hook for graph-assisted retrieval.
+    pub fn with_graph_hook<G2: GraphExpansionHook>(self, hook: G2) -> IterativeDeepSearch<R, D, G2> {
+        IterativeDeepSearch {
+            retrieval: self.retrieval,
+            decomposer: self.decomposer,
+            quality_gate: self.quality_gate,
+            graph_hook: hook,
+        }
     }
 
     fn check_quality(&self, results: &[RetrievalResult]) -> HopOutcome {
@@ -109,8 +142,8 @@ impl<R: RetrievalService, D: QueryDecomposer> IterativeDeepSearch<R, D> {
 }
 
 #[async_trait]
-impl<R: RetrievalService + 'static, D: QueryDecomposer + 'static> DeepSearchService
-    for IterativeDeepSearch<R, D>
+impl<R: RetrievalService + 'static, D: QueryDecomposer + 'static, G: GraphExpansionHook + 'static>
+    DeepSearchService for IterativeDeepSearch<R, D, G>
 {
     async fn search(
         &self,
@@ -120,13 +153,20 @@ impl<R: RetrievalService + 'static, D: QueryDecomposer + 'static> DeepSearchServ
         let mut hops: Vec<DeepSearchHop> = Vec::new();
         let mut all_results: Vec<RetrievalResult> = Vec::new();
         let mut seen_chunk_ids: HashSet<cairn_domain::ChunkId> = HashSet::new();
+        let mut graph_expansions: Vec<String> = Vec::new();
 
         for hop_number in 0..request.max_hops {
             let hop_start = Instant::now();
 
-            let sub_query =
+            let mut sub_query =
                 self.decomposer
                     .decompose(&request.query_text, hop_number, &all_results);
+
+            // Append graph expansion terms from prior hop.
+            if !graph_expansions.is_empty() {
+                sub_query = format!("{} {}", sub_query, graph_expansions.join(" "));
+                graph_expansions.clear();
+            }
 
             let response = self
                 .retrieval
@@ -160,6 +200,14 @@ impl<R: RetrievalService + 'static, D: QueryDecomposer + 'static> DeepSearchServ
             });
 
             all_results.extend(new_results);
+
+            // Graph expansion: get additional queries from graph relationships.
+            if outcome == HopOutcome::NeedsExpansion {
+                graph_expansions = self
+                    .graph_hook
+                    .expand(&request.query_text, &all_results)
+                    .await;
+            }
 
             match outcome {
                 HopOutcome::Sufficient | HopOutcome::Exhausted => break,
@@ -316,5 +364,44 @@ mod tests {
         assert_eq!(response.hops.len(), 1);
         assert_eq!(response.hops[0].outcome, HopOutcome::Exhausted);
         assert!(response.merged_results.is_empty());
+    }
+
+    struct MockGraphExpansion;
+
+    #[async_trait]
+    impl GraphExpansionHook for MockGraphExpansion {
+        async fn expand(&self, _query: &str, _results: &[RetrievalResult]) -> Vec<String> {
+            vec!["concurrency".to_owned()]
+        }
+    }
+
+    #[tokio::test]
+    async fn graph_hook_expands_queries_across_hops() {
+        let retrieval = setup_retrieval().await;
+        let search = IterativeDeepSearch::new(retrieval)
+            .with_graph_hook(MockGraphExpansion)
+            .with_quality_gate(QualityGateConfig {
+                min_score_threshold: 0.99,
+                min_results: 100,
+            });
+
+        let response = search
+            .search(DeepSearchRequest {
+                project: ProjectKey::new("t", "w", "p"),
+                query_text: "ownership".to_owned(),
+                max_hops: 3,
+                per_hop_limit: 10,
+                mode: RetrievalMode::LexicalOnly,
+            })
+            .await
+            .unwrap();
+
+        assert!(response.hops.len() > 1);
+        let later_hop = &response.hops[1];
+        assert!(
+            later_hop.sub_query.contains("concurrency"),
+            "graph hook term missing from hop 1 sub_query: {}",
+            later_hop.sub_query
+        );
     }
 }

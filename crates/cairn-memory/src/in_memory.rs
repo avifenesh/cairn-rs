@@ -210,11 +210,27 @@ impl RetrievalService for InMemoryRetrieval {
             })
             .collect();
 
+        // Track all dimensions that materially contributed across results.
+        if results.iter().any(|r| r.breakdown.semantic_relevance != 0.0) {
+            scoring_dims.push("semantic_relevance".to_owned());
+        }
         if results.iter().any(|r| r.breakdown.freshness != 0.0) {
             scoring_dims.push("freshness".to_owned());
         }
         if results.iter().any(|r| r.breakdown.staleness_penalty != 0.0) {
             scoring_dims.push("staleness_penalty".to_owned());
+        }
+        if results.iter().any(|r| r.breakdown.source_credibility != 0.0) {
+            scoring_dims.push("source_credibility".to_owned());
+        }
+        if results.iter().any(|r| r.breakdown.corroboration != 0.0) {
+            scoring_dims.push("corroboration".to_owned());
+        }
+        if results.iter().any(|r| r.breakdown.graph_proximity != 0.0) {
+            scoring_dims.push("graph_proximity".to_owned());
+        }
+        if results.iter().any(|r| r.breakdown.recency_of_use.unwrap_or(0.0) != 0.0) {
+            scoring_dims.push("recency_of_use".to_owned());
         }
 
         // Re-sort by final weighted score.
@@ -247,7 +263,12 @@ impl RetrievalService for InMemoryRetrieval {
                 latency_ms: elapsed,
                 stages_used: stages,
                 scoring_dimensions_used: scoring_dims,
-                effective_policy: None,
+                effective_policy: Some(format!(
+                    "freshness_decay={}d staleness_threshold={}d recency={}",
+                    policy.freshness_decay_days,
+                    policy.staleness_threshold_days,
+                    if policy.recency_enabled { "on" } else { "off" },
+                )),
             },
         })
     }
@@ -530,5 +551,80 @@ mod tests {
             filtered.results[0].chunk.document_id,
             KnowledgeDocumentId::new("doc_plain")
         );
+    }
+
+    /// Verify retrieval diagnostics are fully populated per RFC 003.
+    #[tokio::test]
+    async fn diagnostics_fully_populated() {
+        use crate::retrieval::CandidateStage;
+
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let chunker = ParagraphChunker { max_chunk_size: 500 };
+        let pipeline = IngestPipeline::new(store.clone(), chunker);
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_diag"),
+                source_id: SourceId::new("src"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Diagnostics test content for retrieval.".to_owned(),
+            })
+            .await
+            .unwrap();
+
+        let retrieval = InMemoryRetrieval::new(store);
+
+        let response = retrieval
+            .query(RetrievalQuery {
+                project: ProjectKey::new("t", "w", "p"),
+                query_text: "diagnostics retrieval".to_owned(),
+                mode: RetrievalMode::LexicalOnly,
+                reranker: RerankerStrategy::None,
+                limit: 5,
+                metadata_filters: vec![],
+                scoring_policy: None,
+            })
+            .await
+            .unwrap();
+
+        let diag = &response.diagnostics;
+
+        // Mode and reranker reported.
+        assert_eq!(diag.mode_used, RetrievalMode::LexicalOnly);
+        assert_eq!(diag.reranker_used, RerankerStrategy::None);
+
+        // Candidate-generation stages present.
+        assert!(!diag.stages_used.is_empty());
+        assert!(diag.stages_used.contains(&CandidateStage::Lexical));
+
+        // Scoring dimensions that contributed are listed.
+        assert!(
+            diag.scoring_dimensions_used.contains(&"lexical_relevance".to_owned()),
+            "lexical_relevance must always be listed"
+        );
+        assert!(
+            diag.scoring_dimensions_used.contains(&"freshness".to_owned()),
+            "freshness should be listed for recently-created chunks"
+        );
+
+        // Effective policy is described.
+        let policy_str = diag.effective_policy.as_ref().expect("effective_policy should be Some");
+        assert!(policy_str.contains("freshness_decay"));
+        assert!(policy_str.contains("staleness_threshold"));
+        assert!(policy_str.contains("recency="));
+
+        // Counts are sane.
+        assert!(diag.candidates_generated > 0);
+        assert!(diag.results_returned > 0);
+        assert!(diag.results_returned <= diag.candidates_generated);
+        assert!(diag.latency_ms < 5000); // sanity: shouldn't take 5s
+
+        // Per-result scoring breakdown is populated.
+        for result in &response.results {
+            assert!(result.breakdown.lexical_relevance > 0.0);
+            assert!(result.breakdown.freshness > 0.0);
+            assert!(result.score > 0.0);
+        }
     }
 }
