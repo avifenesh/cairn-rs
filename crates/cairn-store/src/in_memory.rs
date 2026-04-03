@@ -282,7 +282,7 @@ impl InMemoryStore {
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::UserMessageAppended(_)
+            | RuntimeEvent::UserMessageAppended(_) => {}
             RuntimeEvent::PromptAssetCreated(e) => {
                 state.prompt_assets.insert(
                     e.prompt_asset_id.as_str().to_owned(),
@@ -914,6 +914,114 @@ impl EvalRunReadModel for InMemoryStore {
         results.sort_by_key(|r| r.started_at);
         let results = results.into_iter().skip(offset).take(limit).collect();
         Ok(results)
+    }
+}
+
+// -- PromptAssetReadModel --
+
+#[async_trait]
+impl PromptAssetReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        id: &cairn_domain::PromptAssetId,
+    ) -> Result<Option<crate::projections::PromptAssetRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.prompt_assets.get(id.as_str()).cloned())
+    }
+
+    async fn list_by_project(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::PromptAssetRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<crate::projections::PromptAssetRecord> = state
+            .prompt_assets
+            .values()
+            .filter(|a| a.project == *project)
+            .cloned()
+            .collect();
+        results.sort_by_key(|a| a.created_at);
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- PromptVersionReadModel --
+
+#[async_trait]
+impl PromptVersionReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        id: &cairn_domain::PromptVersionId,
+    ) -> Result<Option<crate::projections::PromptVersionRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.prompt_versions.get(id.as_str()).cloned())
+    }
+
+    async fn list_by_asset(
+        &self,
+        asset_id: &cairn_domain::PromptAssetId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::PromptVersionRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<crate::projections::PromptVersionRecord> = state
+            .prompt_versions
+            .values()
+            .filter(|v| v.prompt_asset_id == *asset_id)
+            .cloned()
+            .collect();
+        results.sort_by_key(|v| v.created_at);
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- PromptReleaseReadModel --
+
+#[async_trait]
+impl PromptReleaseReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        id: &cairn_domain::PromptReleaseId,
+    ) -> Result<Option<crate::projections::PromptReleaseRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.prompt_releases.get(id.as_str()).cloned())
+    }
+
+    async fn list_by_project(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::PromptReleaseRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<crate::projections::PromptReleaseRecord> = state
+            .prompt_releases
+            .values()
+            .filter(|r| r.project == *project)
+            .cloned()
+            .collect();
+        results.sort_by_key(|r| r.created_at);
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+
+    async fn active_for_selector(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        prompt_asset_id: &cairn_domain::PromptAssetId,
+        _selector: &str,
+    ) -> Result<Option<crate::projections::PromptReleaseRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state
+            .prompt_releases
+            .values()
+            .find(|r| {
+                r.project == *project
+                    && r.prompt_asset_id == *prompt_asset_id
+                    && r.state == "active"
+            })
+            .cloned())
     }
 }
 

@@ -11,6 +11,9 @@ pub mod error;
 pub mod eval_runs;
 pub mod ingest_jobs;
 pub mod mailbox;
+pub mod prompt_assets;
+pub mod prompt_releases;
+pub mod prompt_versions;
 pub mod recovery;
 pub mod runs;
 pub mod services;
@@ -30,9 +33,14 @@ pub use recovery::{RecoveryAction, RecoveryService, RecoverySummary};
 pub use runs::RunService;
 pub use eval_runs::EvalRunService;
 pub use ingest_jobs::IngestJobService;
+pub use prompt_assets::PromptAssetService;
+pub use prompt_releases::PromptReleaseService;
+pub use prompt_versions::PromptVersionService;
 pub use services::{
     ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl, ExternalWorkerService,
-    ExternalWorkerServiceImpl, IngestJobServiceImpl, MailboxServiceImpl, RecoveryServiceImpl,
+    ExternalWorkerServiceImpl, IngestJobServiceImpl, MailboxServiceImpl,
+    PromptAssetServiceImpl, PromptReleaseServiceImpl, PromptVersionServiceImpl,
+    RecoveryServiceImpl,
     RunServiceImpl, SessionServiceImpl, SignalServiceImpl, TaskServiceImpl, ToolInvocationService,
     ToolInvocationServiceImpl,
 };
