@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
-## Current RFC: 013 — Artifact Import/Export
-## Current Phase: gap analysis (Phase 1)
+## Current RFC: 012 — Onboarding and Starter Templates
+## Current Phase: complete
 
 ## RFC Status
 
@@ -17,7 +17,7 @@
 | 008 | Tenant/Workspace/Profile | DONE |
 | 009 | Provider Abstraction | DONE |
 | 010 | Operator Control Plane | DONE |
-| 011 | Deployment Shape | pending |
+| 011 | Deployment Shape | DONE |
 | 012 | Onboarding and Starter Templates | DONE |
 | 013 | Artifact Import/Export | pending |
 | 014 | Commercial Packaging | pending |
