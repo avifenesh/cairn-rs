@@ -14,6 +14,12 @@ Use it for short-lived execution pacing:
 - workers claim and complete queued tasks
 - listeners print notifications so workers and manager do not have to poll manually
 
+Canonical listener posture:
+
+- run `manager-listen.sh` from a dedicated long-lived manager shell
+- run each `worker-listen.sh worker-<n>` from that worker's own long-lived shell
+- treat `start-listeners.sh` as a local convenience helper, not the default control-shell flow
+
 ## Layout
 
 - `tasks/worker-<n>/pending`
@@ -51,7 +57,7 @@ Use it for short-lived execution pacing:
 Manager:
 
 ```bash
-./scripts/coordination/start-listeners.sh --all
+./scripts/coordination/manager-listen.sh --interval 2
 ./scripts/coordination/queue-worker-tasks.sh worker-8 \
   "Extend composed app coverage to one feed path" \
   "Harden assistant_end SSE assembled text"
@@ -60,9 +66,26 @@ Manager:
 Worker:
 
 ```bash
-./scripts/coordination/worker-listen.sh worker-8
+./scripts/coordination/worker-listen.sh worker-8 --interval 2
 ./scripts/coordination/worker-claim-next.sh worker-8
-./scripts/coordination/worker-complete-task.sh worker-8 <task-id> --note "done in cairn-api tests"
+./scripts/coordination/worker-complete-task.sh worker-8 <task-id> \
+  --proof "patched crates/cairn-api/src/feed.rs" \
+  --proof "cargo test -p cairn-api --test http_boundary_alignment"
+```
+
+If a task cannot be completed yet, workers must finish it as blocked with a concrete blocker:
+
+```bash
+./scripts/coordination/worker-complete-task.sh worker-8 <task-id> \
+  --blocker "missing runtime-owned memory_proposed publisher seam in cairn-api/src/sse_publisher.rs" \
+  --note "needs owner decision from Worker 6 or Worker 8"
+```
+
+If you want a detached local listener from an already long-lived shell:
+
+```bash
+nohup ./scripts/coordination/worker-listen.sh worker-8 --interval 2 \
+  >> .coordination/queue/state/listeners/logs/worker-8.log 2>&1 &
 ```
 
 Behavior:
@@ -70,11 +93,16 @@ Behavior:
 - queuing a task emits a worker-facing `queued` event
 - claiming a task removes it from `pending/` and moves it to `claimed/`
 - if that claim drains `pending/`, manager gets `queue_empty` immediately
-- completing a task moves it from `claimed/` to `done/`
+- completing a task now requires at least one concrete `--proof` or `--blocker`
+- generic notes like `done`, `no drift`, or `all tests green` are rejected
+- completed or blocked tasks move from `claimed/` to `done/`
 
 Manager monitor:
 
 ```bash
 ./scripts/coordination/listener-status.sh
 tail -f .coordination/queue/state/listeners/logs/manager.log
+./scripts/coordination/audit-completions.sh --limit 20
 ```
+
+`start-listeners.sh` / `stop-listeners.sh` remain available for local convenience, but the durable operational contract is still per-role long-lived listener shells plus manual claim/complete actions.
