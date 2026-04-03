@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/tests/fixtures/migration/phase0_http_endpoint_gap_report.md"
 REQ_FILE="$ROOT/tests/compat/phase0_required_http.txt"
 ENDPOINTS_FILE="$ROOT/crates/cairn-api/src/endpoints.rs"
+FEED_FILE="$ROOT/crates/cairn-api/src/feed.rs"
+MEMORY_FILE="$ROOT/crates/cairn-api/src/memory_api.rs"
+ASSISTANT_FILE="$ROOT/crates/cairn-api/src/assistant.rs"
 SSE_PUBLISHER_FILE="$ROOT/crates/cairn-api/src/sse_publisher.rs"
 
 require_file() {
@@ -17,6 +20,9 @@ require_file() {
 
 require_file "$REQ_FILE"
 require_file "$ENDPOINTS_FILE"
+require_file "$FEED_FILE"
+require_file "$MEMORY_FILE"
+require_file "$ASSISTANT_FILE"
 require_file "$SSE_PUBLISHER_FILE"
 
 status_for_requirement() {
@@ -27,11 +33,17 @@ status_for_requirement() {
     "GET /v1/approvals?status=pending")
       printf 'read_endpoint_trait_present'
       ;;
+    "GET /v1/feed?limit=20&unread=true")
+      printf 'dedicated_endpoint_trait_present'
+      ;;
+    "GET /v1/memories/search?q=test&limit=10")
+      printf 'dedicated_endpoint_trait_present'
+      ;;
+    "POST /v1/assistant/message body={message,mode?,sessionId?}"|"POST /v1/assistant/message body={message,mode?}")
+      printf 'dedicated_endpoint_trait_present'
+      ;;
     "GET /v1/stream?lastEventId=<id>")
       printf 'stream_publisher_present_followup_remaining'
-      ;;
-    "GET /v1/feed?limit=20&unread=true"|"GET /v1/memories/search?q=test&limit=10"|"POST /v1/assistant/message body={message,mode?,sessionId?}"|"POST /v1/assistant/message body={message,mode?}")
-      printf 'no_explicit_api_boundary_yet'
       ;;
     *)
       printf 'unclassified'
@@ -51,16 +63,16 @@ notes_for_requirement() {
       printf '`SsePublisher`, `build_sse_frame`, and `parse_last_event_id` exist, but preserved SSE payload-shape alignment is still an explicit follow-up.'
       ;;
     "GET /v1/feed?limit=20&unread=true")
-      printf 'Preserved route and fixture exist, but no dedicated Rust-side feed endpoint/service boundary is visible yet in `endpoints.rs`.'
+      printf '`FeedEndpoints::list` plus read-marking boundaries exist in `feed.rs`, so the preserved feed route family now has an explicit Rust-side API seam.'
       ;;
     "GET /v1/memories/search?q=test&limit=10")
-      printf 'Preserved route and fixture exist, but no dedicated Rust-side memory search endpoint/service boundary is visible yet in `endpoints.rs`.'
+      printf '`MemoryEndpoints::search` exists in `memory_api.rs`, so the preserved memory search route now has an explicit Rust-side API seam.'
       ;;
     "POST /v1/assistant/message body={message,mode?,sessionId?}")
-      printf 'Preserved mutation route and fixture exist, but no explicit Rust-side assistant message command boundary is visible yet in `endpoints.rs`.'
+      printf '`AssistantEndpoints::send_message` exists in `assistant.rs`, so the preserved assistant-message mutation now has an explicit Rust-side command boundary.'
       ;;
     "POST /v1/assistant/message body={message,mode?}")
-      printf 'Preserved mutation route and fixture exist, but no explicit Rust-side assistant message command boundary is visible yet in `endpoints.rs`.'
+      printf '`AssistantEndpoints::send_message` exists in `assistant.rs`, so the preserved assistant-message mutation now has an explicit Rust-side command boundary.'
       ;;
     *)
       printf 'No note recorded.'
@@ -73,14 +85,11 @@ next_step_for_requirement() {
     "GET /v1/tasks?status=running&type=agent"|"GET /v1/approvals?status=pending")
       printf 'keep_contract_stable'
       ;;
+    "GET /v1/feed?limit=20&unread=true"|"GET /v1/memories/search?q=test&limit=10"|"POST /v1/assistant/message body={message,mode?,sessionId?}"|"POST /v1/assistant/message body={message,mode?}")
+      printf 'keep_contract_stable'
+      ;;
     "GET /v1/stream?lastEventId=<id>")
       printf 'align_sse_payload_shape'
-      ;;
-    "GET /v1/feed?limit=20&unread=true"|"GET /v1/memories/search?q=test&limit=10")
-      printf 'define_read_service_boundary'
-      ;;
-    "POST /v1/assistant/message body={message,mode?,sessionId?}"|"POST /v1/assistant/message body={message,mode?}")
-      printf 'define_mutation_command_boundary'
       ;;
     *)
       printf 'classify'
@@ -98,6 +107,7 @@ next_step_for_requirement() {
   printf -- '- Worker 1 should use this report to keep API-surface drift visible while Worker 8 expands product endpoints intentionally\n\n'
   printf 'Interpretation:\n\n'
   printf -- '- `read_endpoint_trait_present`: a Rust-side read endpoint/service seam already exists for the preserved route family\n'
+  printf -- '- `dedicated_endpoint_trait_present`: a dedicated preserved-route endpoint or mutation trait exists outside the generic runtime read boundary\n'
   printf -- '- `stream_publisher_present_followup_remaining`: the stream surface exists, but compatibility work remains before it is locked\n'
   printf -- '- `no_explicit_api_boundary_yet`: preserved route exists in the catalog and fixtures, but no dedicated Rust-side endpoint/mutation seam is visible yet\n\n'
 

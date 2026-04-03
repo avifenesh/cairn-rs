@@ -12,6 +12,7 @@ Current reading:
 Interpretation:
 
 - `read_endpoint_trait_present`: a Rust-side read endpoint/service seam already exists for the preserved route family
+- `dedicated_endpoint_trait_present`: a dedicated preserved-route endpoint or mutation trait exists outside the generic runtime read boundary
 - `stream_publisher_present_followup_remaining`: the stream surface exists, but compatibility work remains before it is locked
 - `no_explicit_api_boundary_yet`: preserved route exists in the catalog and fixtures, but no dedicated Rust-side endpoint/mutation seam is visible yet
 
@@ -19,10 +20,10 @@ Interpretation:
 
 | Requirement | Current Status | Notes | Next Step |
 |---|---|---|---|
-| `GET /v1/feed?limit=20&unread=true` | `no_explicit_api_boundary_yet` | Preserved route and fixture exist, but no dedicated Rust-side feed endpoint/service boundary is visible yet in `endpoints.rs`. | `define_read_service_boundary` |
+| `GET /v1/feed?limit=20&unread=true` | `dedicated_endpoint_trait_present` | `FeedEndpoints::list` plus read-marking boundaries exist in `feed.rs`, so the preserved feed route family now has an explicit Rust-side API seam. | `keep_contract_stable` |
 | `GET /v1/tasks?status=running&type=agent` | `read_endpoint_trait_present` | `RuntimeReadEndpoints::list_tasks` exists and already uses the shared `ListQuery` boundary. | `keep_contract_stable` |
 | `GET /v1/approvals?status=pending` | `read_endpoint_trait_present` | `RuntimeReadEndpoints::list_approvals` exists and already uses the shared `ListQuery` boundary. | `keep_contract_stable` |
-| `GET /v1/memories/search?q=test&limit=10` | `no_explicit_api_boundary_yet` | Preserved route and fixture exist, but no dedicated Rust-side memory search endpoint/service boundary is visible yet in `endpoints.rs`. | `define_read_service_boundary` |
-| `POST /v1/assistant/message body={message,mode?,sessionId?}` | `no_explicit_api_boundary_yet` | Preserved mutation route and fixture exist, but no explicit Rust-side assistant message command boundary is visible yet in `endpoints.rs`. | `define_mutation_command_boundary` |
-| `POST /v1/assistant/message body={message,mode?}` | `no_explicit_api_boundary_yet` | Preserved mutation route and fixture exist, but no explicit Rust-side assistant message command boundary is visible yet in `endpoints.rs`. | `define_mutation_command_boundary` |
+| `GET /v1/memories/search?q=test&limit=10` | `dedicated_endpoint_trait_present` | `MemoryEndpoints::search` exists in `memory_api.rs`, so the preserved memory search route now has an explicit Rust-side API seam. | `keep_contract_stable` |
+| `POST /v1/assistant/message body={message,mode?,sessionId?}` | `dedicated_endpoint_trait_present` | `AssistantEndpoints::send_message` exists in `assistant.rs`, so the preserved assistant-message mutation now has an explicit Rust-side command boundary. | `keep_contract_stable` |
+| `POST /v1/assistant/message body={message,mode?}` | `dedicated_endpoint_trait_present` | `AssistantEndpoints::send_message` exists in `assistant.rs`, so the preserved assistant-message mutation now has an explicit Rust-side command boundary. | `keep_contract_stable` |
 | `GET /v1/stream?lastEventId=<id>` | `stream_publisher_present_followup_remaining` | `SsePublisher`, `build_sse_frame`, and `parse_last_event_id` exist, but preserved SSE payload-shape alignment is still an explicit follow-up. | `align_sse_payload_shape` |
