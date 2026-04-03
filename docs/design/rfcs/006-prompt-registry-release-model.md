@@ -378,6 +378,16 @@ Tenant or workspace defaults may seed the project policy, but runtime enforcemen
 
 This keeps rollout governance aligned with the project-scoped nature of prompt releases.
 
+Tenant or workspace policy may also forbid the `draft -> approved` shortcut for regulated projects in v1.
+
+When that stricter policy is in effect:
+
+- `draft -> approved` is not allowed for the affected project
+- releases must pass through `draft -> proposed -> approved`
+- the canonical lifecycle model does not change; only the allowed transition set becomes stricter for that project
+
+This keeps governance hardening explicit without introducing a second approval model.
+
 ### Activation
 
 Activation is only valid from `approved`.
@@ -510,7 +520,7 @@ For v1, do not optimize for:
 
 ## Open Questions
 
-1. Should tenant/workspace policy be able to forbid the `draft -> approved` shortcut entirely for some regulated projects in v1?
+1. Should v1 expose the regulated-project no-shortcut rule as a simple policy preset only, or also as a lower-level policy flag for advanced operators?
 
 ## Decision
 
@@ -526,3 +536,4 @@ Proceed assuming:
 - rollout in v1 is explicit selector-based activation, not percentage traffic splitting
 - both `task_type` and `routing_slot` are first-class selector kinds in v1
 - approval is required by default before a release becomes activation-eligible, with only explicit project policy allowing `draft -> approved`
+- tenant/workspace policy may explicitly forbid the `draft -> approved` shortcut for regulated projects without changing the canonical lifecycle model
