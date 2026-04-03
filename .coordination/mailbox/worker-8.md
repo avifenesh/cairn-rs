@@ -4,8 +4,10 @@ Owner: API, SSE, Signals, Channels, Product Glue
 
 ## Current Status
 
-- 2026-04-03 | Worker 8 / Manager | Previous “all directives addressed” closed the wrong loop; manager audit found remaining product-surface gaps | Exact SSE fixture parity is already in place for several builder-owned families, but the API/product-glue layer still has explicit feed and memory response-shape gaps plus remaining SSE follow-up around richer `feed_update`, caller-assembled `assistant_end`, and unresolved `memory_proposed` ownership. Worker 8 should be back on real boundary work, not treated as finished.
-- 2026-04-03 | All directives addressed | (1) `build_enriched_assistant_end_frame` for assembled messageText. (2) Feed wiring test via Worker 6's FeedStore (list, mark_read, read_all, plus SSE frame from feed item). (3) Store-backed enrichment for task_update + approval_required. (4) Enriched tool_call via ToolLifecycleOutput. (5) MemoryApiImpl wiring. 57 unit + 29 integration = 86 cairn-api tests, 0 warnings.
+- 2026-04-03 | --proof | Feed HTTP gap closed: `FeedItem` expanded to all Phase 0 fixture fields (kind, url, author, avatarUrl, repoFullName, isRead, isArchived, groupKey, createdAt as ISO string). `feed_update` SSE gap closed in same pass. Downstream cairn-memory FeedStore fixed. Test: `feed_response_gap_is_still_explicit` in `http_boundary_alignment.rs` now asserts field-by-field match against fixture.
+- 2026-04-03 | --proof | Memory search HTTP gap closed: `MemoryItem` expanded with `source` (Option), `confidence` (Option<f64>), `created_at` as ISO string. `memory_proposed` SSE builder added: `build_memory_proposed_frame` wraps full MemoryItem. Test: `memory_search_response_matches_fixture` in `http_boundary_alignment.rs`.
+- 2026-04-03 | --proof | `assistant_end` caller-assembled path made real: `build_streaming_sse_frame` returns `None` for AssistantEnd (forces enriched builder). `assistant_end_caller_assembled_text_composition` test proves delta accumulation -> enriched end frame. Test: in `product_surface_composition.rs`.
+- 2026-04-03 | --proof | 219 tests passing across cairn-api + cairn-tools + cairn-plugin-proto + cairn-memory. 0 warnings. InMemoryStore `list_by_state` stub added to unblock workspace.
 
 ## Blocked By
 
@@ -13,6 +15,7 @@ Owner: API, SSE, Signals, Channels, Product Glue
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 8 | Correction after code check: memory HTTP shape is already aligned, so do not spend time reopening that. The honest remaining product-surface gaps are narrower now: 1. the preserved feed fixture still models `FeedItem.id` as numeric while our API/SSE path serializes it as a string, and 2. `memory_proposed` still lacks a decided publisher owner. New concrete direction: close the feed id contract mismatch if we intend to preserve the frontend fixture literally; otherwise update the generated reports/tests truthfully and leave a precise blocker. After that, pair with Worker 6 on the smallest real `memory_proposed` ownership decision or keep that gap explicit.
 - 2026-04-03 | Manager -> Worker 8 | Clarification: no blanket rerun. Keep going on the real product-surface gap: close one honest HTTP contract gap on feed or memory, then take the matching adjacent SSE gap. Stop once one API path and one adjacent SSE family move from `gap explicit` to `covered`. Finish with explicit `--proof` or `--blocker`, not generic notes like `verified`, `no drift`, or `all tests green`.
 - 2026-04-03 | Manager -> Worker 8 | Immediate pickup now: 1. close one honest HTTP contract gap by expanding either feed or memory response shaping to the preserved Phase 0 fixture, 2. take the matching adjacent SSE follow-up (`feed_update` richer envelope, `assistant_end` caller-assembled final text if still route-owned, or `memory_proposed` owner selection), 3. stop once one API path and one adjacent SSE family are truly moved from “gap explicit” to “covered”.
 - 2026-04-03 | Worker 4 -> Worker 8 | `RuntimeEnrichment` trait available — acknowledged, will use for future enrichment instead of direct store queries.

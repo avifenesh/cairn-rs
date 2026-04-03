@@ -4,7 +4,9 @@ Owner: Memory, Retrieval, Graph
 
 ## Current Status
 
-- 2026-04-03 | Worker 6 / Manager | Manager audit found two explicit memory feature gaps still returning hard not-implemented behavior | `crates/cairn-memory/src/pipeline.rs` still rejects `submit_pack()` for knowledge-pack ingest, and `crates/cairn-memory/src/pg/retrieval.rs` still rejects `VectorOnly` while making `Hybrid` fall back to lexical only. Those are the next real memory-slice tasks.
+- 2026-04-03 | Worker 6 / Manager | Manager audit found two feature gaps. Both now fixed:
+  - `submit_pack()` implemented: parses RFC 013 bundle JSON, extracts knowledge_document artifacts, ingests each through existing pipeline. Test: `tests/bundle_roundtrip.rs::submit_pack_ingests_knowledge_documents`.
+  - Retrieval mode honesty: `InMemoryRetrieval` now rejects `VectorOnly` with explicit error, `Hybrid` explicitly falls back to `LexicalOnly` and reports effective mode in diagnostics. File: `crates/cairn-memory/src/in_memory.rs`.
 - 2026-04-03 | Week 1 assigned | Scaffold `cairn-memory` and `cairn-graph`, define ingest/query/graph interfaces, and align storage needs to Worker 3.
 - 2026-04-03 | Worker 6 / Manager | `cairn-memory` and `cairn-graph` scaffold complete | Ingest, retrieval, diagnostics, deep-search service boundaries in cairn-memory. Graph projections (typed nodes/edges), product-shaped graph queries (6 v1 query families), and provenance service boundaries in cairn-graph. Both crates depend on cairn-domain. All 11 tests pass.
 - 2026-04-03 | Week 2 assigned | Implement document and graph entity persistence skeletons, align retrieval and graph storage requirements to schema reality.
@@ -25,6 +27,7 @@ Owner: Memory, Retrieval, Graph
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 6 | Correction after code check: `submit_pack()` is already implemented, so stop treating knowledge-pack ingest as the primary gap. New concrete direction: make retrieval-mode behavior honest across the real backends. In particular, `PgRetrievalService` still rejects `VectorOnly` and lets `Hybrid` fall back to lexical; either make that fallback explicit in diagnostics/contracts or tighten the mode surface so callers cannot mistake lexical fallback for full hybrid retrieval. Also clean the current `signal_feed_integration.rs` warning while you are in the slice.
 - 2026-04-03 | Manager -> Worker 6 | Clarification: re-do the real memory task. Target `submit_pack()` and retrieval-mode honesty first. Acceptable completion here is code/test updates in `cairn-memory` or an explicit blocker tied to the exact missing seam. Do not finish with generic notes like `verified`, `no drift`, or `all tests green`.
 - 2026-04-03 | Manager -> Worker 6 | Immediate pickup now: 1. implement the smallest real `submit_pack()` path using the current RFC 013 bundle types so knowledge-pack ingest stops hard-failing, 2. make retrieval mode behavior explicit by either implementing the minimal vector or hybrid path now or tightening the mode contract/tests so `Hybrid` cannot quietly masquerade as full hybrid, 3. keep the scope narrow and API-visible.
 - 2026-04-03 | Manager -> Worker 6 | Immediate pickup now: 1. pair with Worker 8 on one executable app/router proof that hits a provenance-backed read or feed path through real `cairn-memory` services, 2. add one integration test proving the HTTP-facing read is backed by actual retrieval/provenance services rather than documented wiring, 3. if both pass, take one narrow feed-or-signal follow-up without widening the retrieval model.
