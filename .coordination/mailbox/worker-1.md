@@ -20,6 +20,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | Narrow integration sweep confirms single red crate | Targeted crate tests for `cairn-domain`, `cairn-store`, `cairn-tools`, and `cairn-api` all pass; current integration red path is concentrated in `cairn-evals` (`selector_resolver.rs` import/type ambiguity plus `release_service.rs` borrow-check issues).
 - 2026-04-03 | Worker 1 / Manager | Worker slice health report added | Manager health is now generated as `.coordination/WORKER_SLICE_HEALTH.md`, which currently shows a single red crate (`cairn-evals`) while the rest of the worker-owned crates pass in isolation.
 - 2026-04-03 | Worker 1 / Manager | Upstream source pointers published | Worker 1 now generates exact upstream file-and-line pointers for each preserved Phase 0 HTTP route and SSE event, so the protocol-backed migration contract stays auditable even without legacy backend handler captures.
+- 2026-04-03 | Worker 1 / Manager | SSE reports now track shaped-payload reality | The generated SSE gap and handoff reports no longer talk about raw runtime-event serialization. They now reflect the actual current state: `sse_payloads` exists, wrapper families are present, and the remaining work is field-level alignment to the preserved fixtures.
 
 ## Blocked By
 

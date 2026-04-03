@@ -17,8 +17,8 @@ require_file() {
 require_file "$REQ_FILE"
 require_file "$PUBLISHER_FILE"
 
-if ! grep -Fq 'serde_json::to_value(&stored.envelope.payload)' "$PUBLISHER_FILE"; then
-  echo "expected raw runtime-event serialization path not found in sse_publisher.rs" >&2
+if ! grep -Fq 'crate::sse_payloads::shape_event_payload(&stored.envelope.payload)' "$PUBLISHER_FILE"; then
+  echo "expected shaped payload path not found in sse_publisher.rs" >&2
   exit 1
 fi
 
@@ -28,7 +28,7 @@ status_for_event() {
       printf 'supported_via_ready_frame'
       ;;
     task_update|approval_required|assistant_tool_call|agent_progress)
-      printf 'mapped_name_only_raw_payload_followup'
+      printf 'mapped_with_shaped_payload_followup_remaining'
       ;;
     feed_update|poll_completed|assistant_delta|assistant_end|assistant_reasoning|memory_proposed)
       printf 'no_runtime_publisher_mapping_yet'
@@ -45,16 +45,16 @@ notes_for_event() {
       printf '`build_ready_frame()` covers connection bootstrap with `{ clientId }`.'
       ;;
     task_update)
-      printf 'Name is mapped, but current publisher serializes raw `RuntimeEvent` payload instead of preserved `{ task }` wrapper.'
+      printf 'Name is mapped and payload shaping exists, but current `sse_payloads` output is still narrower than the preserved fixture contract (`taskId/state/eventType` instead of the fuller `{ task: { id, type, status, title, description, progress, createdAt, updatedAt } }` shape).'
       ;;
     approval_required)
-      printf 'Name is mapped, but current publisher serializes raw `ApprovalRequested` payload instead of preserved `{ approval }` wrapper.'
+      printf 'Name is mapped and payload shaping exists, but current `sse_payloads` output only carries `approvalId/runId/taskId` instead of the fuller preserved `{ approval: { id, type, status, title, description, context, createdAt } }` shape.'
       ;;
     assistant_tool_call)
-      printf 'Name is mapped, but current publisher serializes raw tool invocation events instead of preserved `{ taskId, toolName, phase, args?, result? }` shape.'
+      printf 'Name is mapped and payload shaping exists, but current `sse_payloads` output still needs preserved-field alignment across phases (for example completed/failed events currently collapse toward invocation identifiers instead of preserving the frontend tool-call envelope consistently).'
       ;;
     agent_progress)
-      printf 'Name is mapped, but current publisher serializes raw worker/subagent events instead of preserved `{ agentId, message }` shape.'
+      printf 'Name is mapped and payload shaping exists, but current builder still needs frontend-contract tightening for subagent/runtime progress semantics beyond the minimal `{ agentId, message }` fields.'
       ;;
     feed_update)
       printf 'Required by preserved frontend SSE contract; no runtime publisher mapping is visible yet in `sse_publisher.rs`.'
@@ -86,7 +86,7 @@ next_step_for_event() {
       printf 'keep'
       ;;
     task_update|approval_required|assistant_tool_call|agent_progress)
-      printf 'align_payload_shape_to_preserved_fixture'
+      printf 'expand_shaped_payload_to_preserved_fixture'
       ;;
     feed_update|poll_completed|assistant_delta|assistant_end|assistant_reasoning|memory_proposed)
       printf 'decide_runtime_or_non_runtime_publisher_owner'
@@ -107,7 +107,7 @@ next_step_for_event() {
   printf -- '- Worker 1 should use this report to keep payload-shape drift visible while Worker 8 tightens the SSE publisher\n\n'
   printf 'Interpretation:\n\n'
   printf -- '- `supported_via_ready_frame`: already covered by a dedicated publisher path\n'
-  printf -- '- `mapped_name_only_raw_payload_followup`: event name is present, but current frame data still reflects raw runtime-event serialization instead of the preserved frontend payload shape\n'
+  printf -- '- `mapped_with_shaped_payload_followup_remaining`: event name is present and the publisher now uses `sse_payloads`, but the emitted field set still needs alignment with the preserved frontend fixture contract\n'
   printf -- '- `no_runtime_publisher_mapping_yet`: preserved SSE event exists in the frontend contract, but no equivalent runtime-publisher mapping is visible yet in the current Rust source\n\n'
 
   printf '## Phase 0 SSE Status\n\n'

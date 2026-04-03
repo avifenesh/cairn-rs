@@ -60,6 +60,7 @@ Examples:
 - first harvested fixtures for the minimum Phase 0 set
 - generated `tests/fixtures/migration/phase0_mismatch_report.md`
 - generated `tests/fixtures/migration/phase0_upstream_contract_report.md`
+- generated `tests/fixtures/migration/phase0_upstream_source_pointers.md`
 - generated `tests/fixtures/migration/phase0_http_endpoint_gap_report.md`
 - generated `tests/fixtures/migration/phase0_sse_publisher_gap_report.md`
 - generated `tests/fixtures/migration/phase0_sse_payload_handoff.md`

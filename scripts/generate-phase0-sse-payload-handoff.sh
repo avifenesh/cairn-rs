@@ -118,16 +118,16 @@ builder_direction_for_event() {
       printf '`keep_existing_ready_builder`'
       ;;
     task_update)
-      printf '`add_build_task_update_payload(&RuntimeEvent)`'
+      printf '`expand_existing_task_update_shaper_fields`'
       ;;
     approval_required)
-      printf '`add_build_approval_required_payload(&RuntimeEvent)`'
+      printf '`expand_existing_approval_required_shaper_fields`'
       ;;
     assistant_tool_call)
-      printf '`add_build_assistant_tool_call_payload(&RuntimeEvent)`'
+      printf '`expand_existing_assistant_tool_call_shaper_fields`'
       ;;
     agent_progress)
-      printf '`add_build_agent_progress_payload(&RuntimeEvent)`'
+      printf '`tighten_existing_agent_progress_shaper_fields`'
       ;;
     feed_update)
       printf '`decide_non_runtime_or_signal_owner_then_add_builder`'
@@ -159,7 +159,7 @@ status_for_event() {
       printf '`covered`'
       ;;
     task_update|approval_required|assistant_tool_call|agent_progress)
-      printf '`mapped_name_but_payload_builder_missing`'
+      printf '`shaped_builder_present_fixture_alignment_remaining`'
       ;;
     feed_update|poll_completed|assistant_delta|assistant_end|assistant_reasoning|memory_proposed)
       printf '`owner_and_builder_missing`'
@@ -175,9 +175,9 @@ status_for_event() {
   printf 'Status: generated  \n'
   printf 'Purpose: give Worker 8 a concrete event-by-event handoff from current runtime publisher inputs to the preserved SSE payload shapes Worker 1 is guarding.\n\n'
   printf 'Current implementation note:\n\n'
-  printf -- '- `cairn-api/src/sse_publisher.rs` still serializes `stored.envelope.payload` directly via `serde_json::to_value(&stored.envelope.payload)` for mapped runtime events.\n'
-  printf -- '- that is enough for event-name coverage, but not enough for preserved frontend payload compatibility.\n'
-  printf -- '- this report makes the missing payload-builder work explicit without requiring Worker 1 to edit Worker 8 ownership code.\n\n'
+  printf -- '- `cairn-api/src/sse_publisher.rs` now routes mapped runtime events through `crate::sse_payloads::shape_event_payload(&stored.envelope.payload)`.\n'
+  printf -- '- that is a real compatibility step forward: event names and wrapper families now exist for the mapped runtime surfaces.\n'
+  printf -- '- the remaining work is field-level alignment with the preserved frontend fixtures, not raw-event serialization removal.\n\n'
   printf '## Event Handoff Table\n\n'
   printf '| Event | Current Runtime Source | Expected Preserved Payload Shape | Current Status | Suggested Builder Direction |\n'
   printf '|---|---|---|---|---|\n'
