@@ -60,7 +60,9 @@ id_now() {
 }
 
 task_summary() {
-  sed -n 's/^Summary: //p' "$1" | head -n 1
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  sed -n 's/^Summary: //p' "$file" 2>/dev/null | head -n 1 || true
 }
 
 task_id_from_path() {
@@ -70,7 +72,8 @@ task_id_from_path() {
 event_field() {
   local key="$1"
   local file="$2"
-  sed -n "s/^${key}: //p" "$file" | head -n 1
+  [[ -f "$file" ]] || return 0
+  sed -n "s/^${key}: //p" "$file" 2>/dev/null | head -n 1 || true
 }
 
 write_task_file() {
