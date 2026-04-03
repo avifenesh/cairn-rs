@@ -53,5 +53,8 @@ if [[ -n "$claimed_by" ]]; then
 fi
 mv "$task" "$(worker_task_dir "$worker")/claimed/${task_id}.task"
 emit_event "manager" "claimed" "$worker" "$task_id" "$summary" "${claimed_by:-worker} claimed task"
+if [[ "$(pending_count "$worker")" == "0" ]]; then
+  emit_event "manager" "queue_empty" "$worker" "-" "pending queue empty" "refill suggested after claim"
+fi
 printf 'claimed %s %s\n' "$task_id" "$summary"
 print_worker_queue_snapshot "$worker"

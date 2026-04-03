@@ -30,6 +30,8 @@ Use it for short-lived execution pacing:
 - manager can queue multiple follow-on tasks at once
 - workers should claim the next task before they go idle
 - worker claim and completion scripts emit manager-facing events so refill can happen quickly
+- if a worker claims the last pending task, manager gets `queue_empty` immediately
+- if a worker completes work and nothing is pending, manager gets `queue_empty` again
 
 ## Main Scripts
 
@@ -62,6 +64,13 @@ Worker:
 ./scripts/coordination/worker-claim-next.sh worker-8
 ./scripts/coordination/worker-complete-task.sh worker-8 <task-id> --note "done in cairn-api tests"
 ```
+
+Behavior:
+
+- queuing a task emits a worker-facing `queued` event
+- claiming a task removes it from `pending/` and moves it to `claimed/`
+- if that claim drains `pending/`, manager gets `queue_empty` immediately
+- completing a task moves it from `claimed/` to `done/`
 
 Manager monitor:
 
