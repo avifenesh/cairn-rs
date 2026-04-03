@@ -13,7 +13,7 @@
 | 004 | Graph and Eval Matrix | DONE |
 | 005 | Task/Session/Checkpoint Lifecycle | DONE |
 | 006 | Prompt Registry and Release | DONE |
-| 007 | Plugin Protocol and Transport | pending |
+| 007 | Plugin Protocol and Transport | IN PROGRESS |
 | 008 | Tenant/Workspace/Profile | pending |
 | 009 | Provider Abstraction | pending |
 | 010 | Operator Control Plane | pending |
@@ -501,6 +501,89 @@ RFC 006 requires prompt asset list/detail, version history, release list/detail,
 4. **Phase 4 — Tests**: tests + cross-review
 5. **Phase 5 — Mark complete**
 
+## RFC 007 — Gap Analysis
+
+### What exists
+
+**cairn-plugin-proto**: Full JSON-RPC 2.0 wire types (Request/Response/Error/Notification), InitializeParams/Result, ToolsInvokeParams/Result, ToolsListResult, ToolDescriptorWire, ScopeWire, ActorWire, RuntimeLinkageWire, CapabilityFamily, InvocationStatus, PluginManifestWire. Method constants for all 11 RPC methods.
+
+**cairn-tools**: PluginManifest (id/name/version/command/capabilities/permissions/limits/execution_class), PluginCapability (6 families), PluginState (7 states), PluginHost trait, Permission (6 types), DeclaredPermissions, InvocationGrants, PermissionCheckResult, PermissionGate trait, ExecutionClass configs (SupervisedProcess/SandboxedProcess), PluginProcess (stdio transport with spawn/send/recv/kill), plugin_bridge (initialize/shutdown/tools_list/tools_invoke builders), RuntimeToolService trait + impl, InvocationService trait, pipeline functions.
+
+**cairn-domain**: ToolInvocationState, ToolInvocationRecord, ToolInvocationTarget, ExecutionClass.
+**cairn-store**: ToolInvocationReadModel.
+**cairn-runtime**: ToolInvocationService trait + impl.
+
+### Gaps
+
+#### 1. No concrete PluginHost impl — MISSING
+
+PluginHost trait exists but no concrete host that manages spawn/handshake/shutdown lifecycle.
+
+- [ ] Implement StdioPluginHost with lifecycle management
+
+#### 2. No concrete PermissionGate impl — MISSING
+
+PermissionGate trait exists but no policy-backed concrete checker.
+
+- [ ] Implement PolicyBackedPermissionGate
+
+#### 3. No SupervisedBoundary/SandboxedBoundary impls — STUB ONLY
+
+Config types exist but no actual process isolation enforcement.
+
+- [ ] Implement SupervisedBoundary (env restriction, working dir scope)
+- [ ] Implement SandboxedBoundary stub (document concrete backend requirements)
+
+#### 4. Missing 6/11 RPC builders — INCOMPLETE
+
+Only initialize/shutdown/tools_list/tools_invoke/health_check are bridged. Missing: signals.poll, channels.deliver, hooks.post_turn, policy.evaluate, eval.score, cancel.
+
+- [ ] Add bridge functions for remaining 6 RPC methods
+
+#### 5. No notification handler — MISSING
+
+log.emit/progress.update/event.emit defined in proto but no host-side handler.
+
+- [ ] Add NotificationHandler trait + impl for log/progress/event notifications
+
+#### 6. No end-to-end plugin execution — MISSING
+
+No wiring from PluginHost→transport→invoke→result pipeline.
+
+- [ ] Wire full plugin invocation pipeline: discover → spawn → handshake → invoke → shutdown
+
+#### 7. No concurrency enforcement — MISSING
+
+PluginLimits.max_concurrency declared but not enforced by host.
+
+- [ ] Add semaphore-based concurrency limiter per plugin
+
+#### 8. No health check — MISSING
+
+health.check method defined, bridge exists, but no periodic health monitor or restart logic.
+
+- [ ] Add health check loop + restart-on-failure
+
+#### 9. No plugin registry — MISSING
+
+Manifests loaded but no durable registry or list-installed-plugins query.
+
+- [ ] Add PluginRegistry with discover-from-directory and list_plugins
+
+#### 10. No cancel dispatcher — MISSING
+
+cancel method defined in proto but no host-side cancel for in-flight invocations.
+
+- [ ] Add cancellation token propagation to in-flight invocations
+
+### Phase plan
+
+1. **Phase 2 — Types**: missing RPC builders (signals.poll, channels.deliver, hooks.post_turn, policy.evaluate, eval.score, cancel), notification handler types
+2. **Phase 3a — Impl**: concrete PluginHost (StdioPluginHost), concrete PermissionGate, plugin registry
+3. **Phase 3b — Impl**: end-to-end plugin execution pipeline, concurrency enforcement, cancel dispatcher
+4. **Phase 4 — Tests**: tests + cross-review
+5. **Phase 5 — Mark complete**
+
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
 - [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants
@@ -532,3 +615,4 @@ RFC 006 requires prompt asset list/detail, version history, release list/detail,
 - [x] RFC 006: Phase 3a impl — InMemoryStore prompt projections, PromptAssetService/PromptVersionService/PromptReleaseService traits + impls, event-sourced persistence
 - [x] RFC 006: Phase 3b+4 — approval policy enforcement, graph wiring, cross-review
 - [x] RFC 006: Phase 5 — marked complete
+- [x] RFC 007: Phase 1 gap analysis — 10 gaps across PluginHost impl, PermissionGate, RPC builders, notification handling, plugin execution pipeline, concurrency, registry

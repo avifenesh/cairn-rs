@@ -11,9 +11,13 @@ pub mod wire;
 pub use capabilities::{CapabilityFamily, InvocationStatus};
 pub use manifest::{CapabilityWire, LimitsWire, PluginManifestWire};
 pub use wire::{
-    ActorWire, HostInfo, InitializeParams, InitializeResult, JsonRpcError, JsonRpcErrorBody,
-    JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, PluginInfo, RuntimeLinkageWire,
-    ScopeWire, ToolDescriptorWire, ToolsInvokeParams, ToolsInvokeResult, ToolsListResult,
+    ActorWire, CancelParams, CancelResult, ChannelsDeliverParams, ChannelsDeliverResult,
+    EvalScoreParams, EvalScoreResult, EventEmitParams, HooksPostTurnParams, HooksPostTurnResult,
+    HostInfo, InitializeParams, InitializeResult, JsonRpcError, JsonRpcErrorBody,
+    JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, LogEmitParams, PluginInfo,
+    PolicyEvaluateParams, PolicyEvaluateResult, ProgressUpdateParams, RuntimeLinkageWire,
+    ScopeWire, SignalsPollParams, SignalsPollResult, ToolDescriptorWire, ToolsInvokeParams,
+    ToolsInvokeResult, ToolsListResult,
 };
 
 #[cfg(test)]

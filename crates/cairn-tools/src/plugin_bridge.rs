@@ -1,7 +1,8 @@
 use cairn_domain::tenancy::ProjectKey;
 use cairn_plugin_proto::wire::{
-    methods, HostInfo, InitializeParams, JsonRpcRequest, ScopeWire, ToolsInvokeParams,
-    ToolsInvokeResult,
+    methods, CancelParams, ChannelsDeliverParams, EvalScoreParams, HooksPostTurnParams, HostInfo,
+    InitializeParams, JsonRpcRequest, PolicyEvaluateParams, ScopeWire, SignalsPollParams,
+    ToolsInvokeParams, ToolsInvokeResult,
 };
 
 use crate::builtin::ToolOutcome;

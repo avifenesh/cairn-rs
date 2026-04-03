@@ -193,6 +193,170 @@ pub struct ToolDescriptorWire {
     pub permissions: Vec<String>,
 }
 
+/// `signals.poll` request params per RFC 007.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalsPollParams {
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    pub source: serde_json::Value,
+    pub scope: ScopeWire,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// `signals.poll` success result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalsPollResult {
+    pub status: String,
+    #[serde(default)]
+    pub events: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// `channels.deliver` request params per RFC 007.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelsDeliverParams {
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    pub channel: serde_json::Value,
+    pub message: serde_json::Value,
+    #[serde(default)]
+    pub recipients: Vec<serde_json::Value>,
+    pub scope: ScopeWire,
+}
+
+/// `channels.deliver` success result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelsDeliverResult {
+    pub status: String,
+    #[serde(rename = "deliveryIds", default)]
+    pub delivery_ids: Vec<String>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+/// `hooks.post_turn` request params per RFC 007.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HooksPostTurnParams {
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    pub scope: ScopeWire,
+    #[serde(default)]
+    pub runtime: Option<RuntimeLinkageWire>,
+    pub turn: serde_json::Value,
+}
+
+/// `hooks.post_turn` success result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HooksPostTurnResult {
+    pub status: String,
+    #[serde(default)]
+    pub findings: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub patches: Vec<serde_json::Value>,
+}
+
+/// `policy.evaluate` request params per RFC 007.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyEvaluateParams {
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    pub scope: ScopeWire,
+    #[serde(default)]
+    pub actor: Option<ActorWire>,
+    pub action: serde_json::Value,
+    #[serde(default)]
+    pub context: serde_json::Value,
+}
+
+/// `policy.evaluate` success result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyEvaluateResult {
+    pub decision: String,
+    #[serde(default)]
+    pub reasons: Vec<String>,
+    #[serde(rename = "appliedPolicies", default)]
+    pub applied_policies: Vec<serde_json::Value>,
+}
+
+/// `eval.score` request params per RFC 007.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvalScoreParams {
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    pub scope: ScopeWire,
+    pub target: serde_json::Value,
+    #[serde(default)]
+    pub dataset: Option<serde_json::Value>,
+    #[serde(default)]
+    pub samples: Vec<serde_json::Value>,
+}
+
+/// `eval.score` success result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvalScoreResult {
+    pub status: String,
+    #[serde(default)]
+    pub scores: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub summary: serde_json::Value,
+}
+
+/// `cancel` request params per RFC 007.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelParams {
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+}
+
+/// `cancel` success result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelResult {
+    pub status: String,
+}
+
+/// `log.emit` notification params per RFC 007.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogEmitParams {
+    pub level: String,
+    pub message: String,
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    #[serde(default)]
+    pub fields: Option<serde_json::Value>,
+    #[serde(default)]
+    pub timestamp: Option<u64>,
+}
+
+/// `progress.update` notification params per RFC 007.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProgressUpdateParams {
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    pub message: String,
+    #[serde(default)]
+    pub percent: Option<u32>,
+    #[serde(default)]
+    pub stage: Option<String>,
+    #[serde(rename = "etaMs", default)]
+    pub eta_ms: Option<u64>,
+}
+
+/// `event.emit` notification params per RFC 007.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventEmitParams {
+    #[serde(rename = "invocationId")]
+    pub invocation_id: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub payload: serde_json::Value,
+    #[serde(rename = "externalId", default)]
+    pub external_id: Option<String>,
+    #[serde(default)]
+    pub timestamp: Option<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
