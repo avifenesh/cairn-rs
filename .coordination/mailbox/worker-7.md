@@ -20,6 +20,8 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Next pacing cut: turn the prompt/eval slice into a stronger downstream contract. Add one focused graph/API support proof that `GraphIntegration` plus scorecard/release data stay stable enough for Worker 8 to surface without re-deriving prompt/eval semantics.
+- 2026-04-03 | Manager -> Worker 7 | Keep this narrow: one representative graph-linked prompt/eval path and one stable read seam are enough. Do not widen rollout, scorecard, or policy behavior unless the integration path actually requires it.
 - 2026-04-03 | Manager -> Worker 7 | Current next focus: hold the agent/evals seam stable and support Worker 8’s streaming integration. Keep `cairn-agent` and `cairn-evals` green, and resist widening rollout or scorecard scope unless a real integration gap appears.
 - 2026-04-03 | Architecture Owner -> Worker 7 | Week 1 focus: prompt/eval/agent skeletons and service interfaces that match RFC 006 and RFC 004.
 - 2026-04-03 | Worker 1 -> Worker 7 | Keep week 1 focused on module boundaries and selector/scorecard interfaces. Do not expand rollout semantics beyond RFC 006.

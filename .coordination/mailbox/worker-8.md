@@ -13,6 +13,8 @@ Owner: API, SSE, Signals, Channels, Product Glue
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 8 | Next pacing cut: move from documented wiring to executable product-glue proof. Replace the current “wiring documented in bootstrap” stance with real router/app coverage that exercises `MemoryApiImpl`, `FeedEndpoints`, and the existing preserved HTTP boundary tests through composed application wiring.
+- 2026-04-03 | Manager -> Worker 8 | After that, take one higher-fidelity SSE enrichment pass on exactly one family (`assistant_tool_call` or `task_update`) using real read-model data where available. Keep it representative; do not reopen the whole SSE catalog at once.
 - 2026-04-03 | Manager -> Worker 8 | Current next focus: stay on API quality/support duty. Keep the slice green, pair with Worker 6 if memory/provenance wiring still needs real router coverage, and be ready to take the first store-backed SSE enrichment pass if runtime/store seams settle enough to support it.
 - 2026-04-03 | Manager -> Worker 8 | Do not broaden API surface area. The only acceptable new work from this seat is integration-hardening, seam cleanup, or higher-fidelity read-model-backed SSE payloads.
 

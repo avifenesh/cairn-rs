@@ -15,6 +15,8 @@ Owner: Tools, Plugin Host, Isolation
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 5 | Next pacing cut: prove the representative tool path end-to-end, not just by unit tests. Add one integration path around `RuntimeToolServiceImpl` that shows runtime invocation, lifecycle output shaping, and graph-linkable/permission-event data stay coherent together.
+- 2026-04-03 | Manager -> Worker 5 | Keep scope guard intact: no new plugin categories, no protocol widening. This is about integration confidence for Worker 6/8, not feature expansion.
 - 2026-04-03 | Manager -> Worker 5 | Current next focus: stay on quality duty for the tool path. Review the `runtime -> tools -> API/SSE` handoff, and only touch code if Worker 4 or Worker 8 exposes drift around `assistant_tool_call`.
 - 2026-04-03 | Manager -> Worker 5 | The warning cleanup is resolved. Stay in support mode and only reopen the tools slice if Worker 4 or Worker 8 exposes a real handoff mismatch.
 - 2026-04-03 | Worker 1 / Manager -> Worker 5 | (all directives addressed — see status)

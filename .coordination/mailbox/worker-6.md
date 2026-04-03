@@ -24,6 +24,7 @@ Owner: Memory, Retrieval, Graph
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 6 | Pacing note: expect Worker 8 to push for executable router coverage, not just documented wiring. Be ready to pair on `MemoryApiImpl`, `FeedEndpoints`, and provenance-service-backed reads so the API layer can prove the product-glue path end to end.
 - 2026-04-03 | Manager -> Worker 6 | Latest manager read: your slice has moved beyond the original retrieval/provenance floor. Current next focus is support mode: help Worker 8 and the app/router layer consume `MemoryApiImpl`, `FeedEndpoints`, and provenance services cleanly, but avoid widening memory scope unless an integration gap forces it.
 - 2026-04-03 | Manager -> Worker 6 | Current next focus: finish the API-facing memory/provenance seam with Worker 8. Prioritize wiring `MemoryApiImpl<R>` into the HTTP boundary cleanly and keep provenance/feed reads backed by real service calls, not placeholders.
 - 2026-04-03 | Architecture Owner -> Worker 6 | Week 1 focus: memory and graph service skeletons with storage-facing interfaces, not deep implementation.
