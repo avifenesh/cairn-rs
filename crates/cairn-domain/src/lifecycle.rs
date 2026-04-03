@@ -67,6 +67,8 @@ pub enum FailureClass {
 pub struct PauseReason {
     pub kind: PauseReasonKind,
     pub detail: Option<String>,
+    /// Optional timestamp (unix ms) after which the entity should auto-resume.
+    pub resume_after_ms: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

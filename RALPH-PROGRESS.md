@@ -11,7 +11,7 @@
 | 002 | Runtime and Event Model | DONE |
 | 003 | Owned Retrieval | DONE |
 | 004 | Graph and Eval Matrix | DONE |
-| 005 | Task/Session/Checkpoint Lifecycle | pending |
+| 005 | Task/Session/Checkpoint Lifecycle | IN PROGRESS |
 | 006 | Prompt Registry and Release | pending |
 | 007 | Plugin Protocol and Transport | pending |
 | 008 | Tenant/Workspace/Profile | pending |
@@ -323,6 +323,91 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 5. **Phase 4 — Tests**: tests + cross-review
 6. **Phase 5 — Mark complete**
 
+## RFC 005 — Gap Analysis
+
+### What exists
+
+**cairn-domain lifecycle.rs**: SessionState (4), RunState (8), TaskState (11) with full transition tables. CheckpointDisposition (Latest/Superseded). FailureClass (7 variants). PauseReason + PauseReasonKind (4). ResumeTrigger (3). RunResumeTarget/TaskResumeTarget. derive_session_state() implements RFC 005 rules. Full test coverage.
+
+**cairn-runtime**: RecoveryService trait + impl (expired leases, interrupted runs, stale dependencies). RunService (start/complete/fail/cancel/pause/resume). TaskService (submit/claim/heartbeat/complete/fail/cancel/pause/resume). CheckpointService (save/get/latest_for_run/restore). SessionService (create/get/list). All emit events through EventLog.
+
+### Gaps
+
+#### Session gaps
+
+1. No auto session derivation trigger — derive_session_state() exists but nothing calls it when runs complete
+- [ ] Auto-derive session state on run terminal transition
+
+2. No session complete/fail methods — SessionService has create/get/list but no explicit complete/fail/archive
+- [ ] Add complete/fail/archive methods to SessionService
+
+#### Run gaps
+
+3. Pause reason discarded — RunServiceImpl::pause takes _reason (unused), never recorded in events
+- [ ] Record PauseReason in RunStateChanged or dedicated RunPaused event
+
+4. Resume trigger discarded — RunServiceImpl::resume takes _trigger (unused), not recorded
+- [ ] Record ResumeTrigger in events
+
+5. No pause_reason/resume_trigger on RunRecord — projection doesn't track last pause reason or resume trigger
+- [ ] Add pause_reason and last_resume_trigger fields to RunRecord
+
+6. No resume_after timer — ResumeTrigger::ResumeAfterTimer exists but no scheduling mechanism
+- [ ] Add resume_after_ms field, timer-based resume (deferred to runtime scheduler)
+
+7. No duplicate start guard — RunService::start doesn't check if run already exists
+- [ ] Add existence check before creating run
+
+#### Task gaps
+
+8. No waiting_approval/waiting_dependency service methods — TaskState has these states but no service methods to enter them
+- [ ] Add enter_waiting_approval/enter_waiting_dependency to TaskService
+
+9. No dead_letter service method — DeadLettered state exists, recovery can dead-letter, but no explicit TaskService::dead_letter()
+- [ ] Add dead_letter method to TaskService
+
+10. No retry count on TaskRecord — recovery heuristic for retry vs dead-letter is fragile
+- [ ] Add retry_count field to TaskRecord, increment on RetryableFailed
+
+11. No leased→running validation — ClaimTask moves to Leased but no validation that running must follow leased
+- [ ] Add state guard in task start/transition
+
+#### Checkpoint gaps
+
+12. No supersede in checkpoint service — saving new Latest doesn't mark previous as Superseded
+- [ ] Auto-supersede previous Latest when saving new checkpoint
+
+13. No restore method wired — CheckpointService::restore exists but doesn't emit CheckpointRestored event properly
+- [ ] Wire restore to emit CheckpointRestored + RunStateChanged
+
+14. No checkpoint data/payload field — CheckpointRecord has no payload/data field for actual checkpoint content
+- [ ] Add checkpoint_data or payload field
+
+#### Recovery gaps
+
+15. Stale dependencies stub — resolve_stale_dependencies works but incomplete: doesn't check child failure propagation
+- [ ] Propagate child failure to parent (fail parent if child failed)
+
+16. No CheckpointRestored emission in recovery — recover_interrupted_runs returns action but doesn't emit restore event
+- [ ] Emit CheckpointRestored event in recovery
+
+17. Fragile retry heuristic — retry vs dead-letter based on failure_class pattern matching, not retry count
+- [ ] Use retry_count for retry/dead-letter decision
+
+#### Cross-cutting gaps
+
+18. No resume_after_ms on PauseRun/PauseTask commands — RFC 005 says pause accepts optional resume-after timestamp
+- [ ] Add resume_after_ms: Option<u64> to PauseRun and PauseTask commands
+
+### Phase plan
+
+1. **Phase 2 — Types**: pause_reason/resume_trigger on records, retry_count on TaskRecord, resume_after_ms on commands, checkpoint payload field
+2. **Phase 3a — Impl**: session auto-derivation, session complete/fail/archive, run duplicate start guard
+3. **Phase 3b — Impl**: task waiting states, dead_letter method, leased→running validation
+4. **Phase 3c — Impl**: checkpoint supersede + restore wiring, recovery fixes (CheckpointRestored emission, retry count, child failure propagation)
+5. **Phase 4 — Tests**: tests + cross-review
+6. **Phase 5 — Mark complete**
+
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
 - [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants
@@ -344,3 +429,4 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 - [x] RFC 004: Phase 3c impl — EvalRunStarted/Completed graph projection (EvalRun node + EvaluatedBy edge), GraphBackedExpansion hook for deep search, provenance chain verified
 - [x] RFC 004: Phase 4 cross-review — BFS edge dedup fix, eval projection tests, EvalRunCompleted subject_node_id field
 - [x] RFC 004: Phase 5 — marked complete, all 18 gaps resolved
+- [x] RFC 005: Phase 1 gap analysis — 18 gaps across session derivation, pause/resume tracking, task lifecycle, checkpoint restore, recovery fixes
