@@ -11,7 +11,8 @@ Owner: Runtime Spine
 - 2026-04-03 | Week 3 assigned | Implement recovery, timeout classification, pause/resume semantics, and external-worker reporting on top of the runtime spine.
 - 2026-04-03 | Worker 4 / Manager | Week 3 complete | All 7 service impls done: ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RecoveryServiceImpl (expired-lease sweep with retryable/dead-letter). 23 runtime tests (6 unit + 10 lifecycle + 7 week3) all passing.
 - 2026-04-03 | Week 4 assigned | Drive end-to-end runtime slice from command through replay/recovery. Close blocking lifecycle or mailbox defects.
-- 2026-04-03 | Worker 4 / Manager | Week 4 complete | End-to-end integration: full session→run→task→approval→checkpoint→mailbox→complete slice with event stream replay verification. Subagent spawn with parent/child linkage across sessions and runs. Recovery audit trail test proving RecoveryAttempted/Completed events appear in stream. 26 runtime tests (6 unit + 10 lifecycle + 7 week3 + 3 week4 e2e) all passing.
+- 2026-04-03 | Worker 4 / Manager | Week 4 complete | End-to-end integration: full session→run→task→approval→checkpoint→mailbox→complete slice with event stream replay verification. Subagent spawn with parent/child linkage across sessions and runs. Recovery audit trail test proving RecoveryAttempted/Completed events appear in stream. 26 runtime tests all passing.
+- 2026-04-03 | Worker 4 / Manager | SQLite backend proof complete | 3 SQLite-backed integration tests (lifecycle, tool invocation seam, external worker seam) prove runtime services work against real SQLite via SqliteAdapter + SqliteEventLog + SqliteSyncProjection. Also adapted InMemoryStore for Worker 3's new title/description fields on TaskRecord and ApprovalRecord. 32 runtime tests + 6 seam protection tests all passing.
 
 ## Blocked By
 
@@ -19,6 +20,8 @@ Owner: Runtime Spine
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 4 | Validation complete: `cargo test -p cairn-runtime --tests` passed, including the new SQLite integration slice.
+- 2026-04-03 | Manager -> Worker 4 | Next queue after SQLite proof: 1. pair with Worker 8 on one store-backed API/SSE seam that consumes the validated runtime path, 2. add one replay/regression guard proving tool/external-worker events preserve the same current-state reads after rebuild, 3. once both are green, stay on runtime seam-watch duty only.
 - 2026-04-03 | Manager -> Worker 4 | Immediate pickup order for idle time: 1. add one SQLite-backed integration test covering `ToolInvocationService` from request through persisted read-model state, 2. extend the same durable path to `ExternalWorkerService` and verify replay/current-state reads stay coherent, 3. publish the exact runtime seam Worker 8 should consume for store-backed SSE/API enrichment and stop there.
 - 2026-04-03 | Manager -> Worker 4 | Continuous queue: 1. land one SQLite-backed durable runtime proof for `ToolInvocationService`, 2. extend that same path to `ExternalWorkerService` plus replay/current-state reads, 3. if both hold, publish the exact stable seam Worker 8 should trust for store-backed API/SSE enrichment and stop before adding runtime breadth.
 - 2026-04-03 | Manager -> Worker 4 | Next pacing cut: move from seam definition to durable-backend proof. Take one SQLite-backed runtime integration slice that exercises `ToolInvocationService`, `ExternalWorkerService`, replay/current-state reads, and proves the runtime seam holds without the in-memory store.
@@ -46,7 +49,9 @@ Owner: Runtime Spine
 - 2026-04-03 | Worker 4 -> Worker 6 | `cairn-runtime` RecoveryService exposes recovery sweep and stale-dependency resolution. Graph projections should consume runtime events emitted during recovery.
 - 2026-04-03 | Worker 4 -> Worker 5 | `ToolInvocationService` trait now in cairn-runtime: `record_start`, `record_completed`, `record_failed`. Wires `assistant_tool_call` through ToolInvocationStarted/Completed/Failed events. Use this instead of writing events directly.
 - 2026-04-03 | Worker 4 -> Worker 8 | `ExternalWorkerService` trait now in cairn-runtime: validates reports against task state, emits ExternalWorkerReported + TaskStateChanged events atomically. API layer should route external worker webhooks through this seam.
+- 2026-04-03 | Worker 4 -> Worker 8 | `RuntimeEnrichment` trait + `StoreBackedEnrichment<S>` now in cairn-runtime. Provides enrich_task/approval/run/session/checkpoint with title/description/state. This is the stable seam for store-backed SSE/API enrichment.
 
 ## Ready For Review
 
 - 2026-04-03 | Worker 4 | Review `crates/cairn-runtime/*` for Week 1 runtime scaffold: service traits for sessions, runs, tasks, approvals, checkpoints, mailbox, and recovery.
+- 2026-04-03 | Worker 4 | Review `tests/sqlite_integration.rs`; manager validation: `cargo test -p cairn-runtime --tests` passed.

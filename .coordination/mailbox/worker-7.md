@@ -13,6 +13,7 @@ Owner: Agent Runtime, Prompts, Evals
 - 2026-04-03 | Week 4 assigned | Complete first prompt release + eval + agent execution slice. Make scorecards queryable.
 - 2026-04-03 | Worker 7 / Manager | Week 4 complete | Full prompt-as-product integration: create releases → activate with selector → resolve at runtime → run evals → build scorecard → promote based on results → rollback with audit. Multi-selector precedence test (agent_type overrides project_default). 27 cairn-evals tests (25 unit + 2 integration) + 11 cairn-agent tests passing.
 - 2026-04-03 | Worker 7 / Manager | Integration blocker cleared | `cargo test -p cairn-evals` is green again. The next meaningful dependency handoff is the assistant streaming/output seam Worker 8 needs for `assistant_delta`, `assistant_end`, and `assistant_reasoning`.
+- 2026-04-03 | Worker 7 / Manager | Graph+scorecard API seam proof complete | Integration test exercises full graph-linked prompt/eval lifecycle: asset→version→release→eval→scorecard→promotion→resolution→UsedPrompt edge. Proves Worker 8 can read release state, scorecard entries, selector resolution, and graph topology directly without re-deriving. 28 cairn-evals tests (25 unit + 3 integration) + 13 cairn-agent tests all passing.
 
 ## Blocked By
 
@@ -20,6 +21,8 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Validation complete: `cargo test -p cairn-evals -p cairn-agent` passed, including the new graph/API seam proof.
+- 2026-04-03 | Manager -> Worker 7 | Next queue after the graph seam proof: 1. pair with Worker 8 on one API-facing read seam that consumes release/scorecard/graph data directly, 2. add one guard that `StreamingOutput` still matches preserved assistant SSE families after the API layer consumes it, 3. once both are green, stay in narrow agent/evals support mode only.
 - 2026-04-03 | Manager -> Worker 7 | Immediate pickup order for idle time: 1. add one proof that `GraphIntegration` plus prompt-release/eval-run data is stable enough for API consumption without re-deriving semantics, 2. keep the `StreamingOutput` seam under test for Worker 8’s preserved assistant SSE families, 3. if API still finds a mismatch, land the smallest integration fix and stop.
 - 2026-04-03 | Manager -> Worker 7 | Continuous queue: 1. prove one graph-linked prompt/eval path is stable enough for API consumption, 2. keep the `StreamingOutput` seam stable for Worker 8, 3. if API finds a mismatch, land the smallest integration fix only and do not widen rollout or scorecard behavior.
 - 2026-04-03 | Manager -> Worker 7 | Next pacing cut: turn the prompt/eval slice into a stronger downstream contract. Add one focused graph/API support proof that `GraphIntegration` plus scorecard/release data stay stable enough for Worker 8 to surface without re-deriving prompt/eval semantics.
@@ -45,3 +48,4 @@ Owner: Agent Runtime, Prompts, Evals
 
 - 2026-04-03 | Worker 7 | Review `crates/cairn-agent/*` for Week 1 agent scaffold: orchestrator, react loop, subagent linkage, and reflection boundaries.
 - 2026-04-03 | Worker 7 | Review `crates/cairn-evals/*` for Week 1 evals scaffold: prompt registry (assets/versions/releases/actions), selectors, eval matrices, scorecards.
+- 2026-04-03 | Worker 7 | Review `tests/graph_scorecard_seam.rs`; manager validation: `cargo test -p cairn-evals -p cairn-agent` passed.

@@ -13,7 +13,7 @@ Owner: Store, Event Log, Synchronous Projections
 - 2026-04-03 | Week 4 assigned | Stabilize migrations and projection correctness, document backfill assumptions.
 - 2026-04-03 | Worker 3 / Manager | Week 4 complete | Full lifecycle integration test, migration validation, expired lease detection. 17 tests passing.
 - 2026-04-03 | Wave 3 gate support | FTS5 virtual table added to SQLite schema for local-mode retrieval.
-- 2026-04-03 | Cross-backend parity | 4 integration tests verifying InMemoryStore and SQLite produce identical event positions, stream ordering, cursor replay, and head positions. FTS5 trigger bug fixed (semicolons in trigger bodies). 19+4=23 tests passing.
+- 2026-04-03 | Cross-backend parity | 7 integration tests: event positions, stream ordering, cursor replay, head positions, deterministic list ordering, run ordering, and task/approval projection replay. InMemoryStore list queries now sort by (created_at, id). title/description added to TaskRecord/ApprovalRecord (V015). BACKFILL_ASSUMPTIONS.md published. 19+7=26 tests passing.
 
 ## Blocked By
 
@@ -21,6 +21,8 @@ Owner: Store, Event Log, Synchronous Projections
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 3 | Immediate pickup now: 1. add one parity test that rebuilds from the event log after tool/external-worker events and proves `task`, `approval`, and `tool_invocation` current-state rows match between InMemory and SQLite, 2. add one deterministic list-ordering test for the exact read surface Worker 8 is most likely to consume next, 3. if both pass, update `BACKFILL_ASSUMPTIONS.md` with the assumptions API/SSE consumers must not violate.
+- 2026-04-03 | Manager -> Worker 3 | Follow-on queue after that: 1. add the smallest extra read-model coverage Worker 4/8 asks for, 2. keep replay/rebuild ordering boring across backends, 3. do not widen store behavior beyond parity/backfill work.
 - 2026-04-03 | Manager -> Worker 3 | Immediate pickup order for idle time: 1. add one parity test proving replay/rebuild produces the same current-state rows for `task`, `approval`, and `tool_invocation` across InMemory and SQLite, 2. add one deterministic ordering/query test for the read-model surface Worker 8 is most likely to consume, 3. if both are green, write down any backfill/migration assumption that API/SSE consumers must not violate.
 - 2026-04-03 | Manager -> Worker 3 | Continuous queue: 1. extend cross-backend parity around replay/rebuild ordering and deterministic query ordering, 2. add the smallest additional read-model coverage Worker 4/8 needs for richer API/SSE surfaces, 3. if idle after that, tighten migration/backfill assumptions instead of widening store behavior.
 - 2026-04-03 | Manager -> Worker 3 | Current next focus: keep store parity boring. Guard replay/rebuild ordering across backends, support any read-model seam Worker 8 needs for richer SSE/API surfaces, and avoid inventing backend-specific behavior.

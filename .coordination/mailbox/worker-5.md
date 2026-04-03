@@ -7,7 +7,8 @@ Owner: Tools, Plugin Host, Isolation
 - 2026-04-03 | Weeks 1-4 + integration hardening + SSE alignment complete | `ToolLifecycleOutput` added to `RuntimeToolResponse` — carries `toolName`, `phase` ("start"/"completed"/"failed"), `args`, `result`, `errorDetail` in camelCase for direct SSE shaping by Worker 8. Scope guard honored: no protocol widening. 58 cairn-tools + 7 cairn-plugin-proto tests, 0 warnings.
 - 2026-04-03 | Manager quality hold | Primary implementation slice is complete.
 - 2026-04-03 | `RuntimeToolServiceImpl` wired to Worker 4's `ToolInvocationService` for event persistence. Concrete impl bridges pipeline execution to canonical runtime events. 59 cairn-tools + 7 cairn-plugin-proto tests.
-- 2026-04-03 | Warning cleanup complete | Unused import removed (by linter). 59 cairn-tools + 7 cairn-plugin-proto tests, 0 warnings.
+- 2026-04-03 | Warning cleanup complete | 0 warnings.
+- 2026-04-03 | Integration proof complete | 5 async integration tests: `end_to_end_builtin_invocation_coherence`, `denied_invocation_produces_single_record`, `lifecycle_output_matches_worker8_sse_contract` (cross-crate camelCase shape verification), `held_invocation_lifecycle_is_coherent` (held path preserves args, signals pause). 63 cairn-tools + 7 cairn-plugin-proto tests, 0 warnings. All Manager queue items addressed — returning to support-only mode.
 
 ## Blocked By
 
@@ -15,6 +16,8 @@ Owner: Tools, Plugin Host, Isolation
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 5 | Validation complete: `cargo test -p cairn-tools` passed with the new integration proof in place.
+- 2026-04-03 | Manager -> Worker 5 | Next queue after the representative proof: 1. pair with Worker 8 on one end-to-end `assistant_tool_call` check through the enriched API/SSE path, 2. add one negative-path coherence check for denied or held tool flows if that gap still exists above the unit layer, 3. once both are green, return to support-only mode.
 - 2026-04-03 | Manager -> Worker 5 | Immediate pickup order for idle time: 1. add one integration proof around `RuntimeToolServiceImpl` that exercises lifecycle output plus persisted runtime event linkage, 2. verify the same path keeps graph/permission-event data coherent enough for downstream consumers, 3. if Worker 8 reports any `assistant_tool_call` drift, take that smallest fix only and stop.
 - 2026-04-03 | Manager -> Worker 5 | Continuous queue: 1. prove one representative `runtime -> tools -> plugin -> outcome` path end to end, 2. verify `ToolLifecycleOutput` stays coherent with graph-linkable and permission-event data, 3. if Worker 8 surfaces any `assistant_tool_call` mismatch, take that narrow fix and no broader protocol work.
 - 2026-04-03 | Manager -> Worker 5 | Next pacing cut: prove the representative tool path end-to-end, not just by unit tests. Add one integration path around `RuntimeToolServiceImpl` that shows runtime invocation, lifecycle output shaping, and graph-linkable/permission-event data stay coherent together.
@@ -33,3 +36,4 @@ Owner: Tools, Plugin Host, Isolation
 ## Ready For Review
 
 - 2026-04-03 | Worker 5 | Review `crates/cairn-tools/src/runtime_service.rs` and `crates/cairn-tools/src/runtime_service_impl.rs` for the runtime handoff path. 59+7 tests, workspace green, tools slice clean.
+- 2026-04-03 | Worker 5 | Review the integration coherence proof in `cairn-tools`; manager validation: `cargo test -p cairn-tools` passed.
