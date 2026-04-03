@@ -35,6 +35,7 @@ pub use prompt_asset_impl::PromptAssetServiceImpl;
 pub use prompt_release_impl::PromptReleaseServiceImpl;
 pub use prompt_version_impl::PromptVersionServiceImpl;
 pub use recovery_impl::RecoveryServiceImpl;
+pub use route_resolver_impl::SimpleRouteResolver;
 pub use run_impl::RunServiceImpl;
 pub use session_impl::SessionServiceImpl;
 pub use signal_impl::SignalServiceImpl;

@@ -40,6 +40,8 @@ struct State {
     tenants: HashMap<String, cairn_domain::org::TenantRecord>,
     workspaces: HashMap<String, cairn_domain::org::WorkspaceRecord>,
     projects: HashMap<String, cairn_domain::org::ProjectRecord>,
+    route_decisions: HashMap<String, cairn_domain::providers::RouteDecisionRecord>,
+    provider_calls: HashMap<String, cairn_domain::providers::ProviderCallRecord>,
 }
 
 pub struct InMemoryStore {
@@ -65,6 +67,8 @@ impl InMemoryStore {
                 prompt_assets: HashMap::new(),
                 prompt_versions: HashMap::new(),
                 prompt_releases: HashMap::new(),
+                route_decisions: HashMap::new(),
+                provider_calls: HashMap::new(),
                 tenants: HashMap::new(),
                 workspaces: HashMap::new(),
                 projects: HashMap::new(),
@@ -289,6 +293,49 @@ impl InMemoryStore {
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
             | RuntimeEvent::UserMessageAppended(_) => {}
+            RuntimeEvent::RouteDecisionMade(e) => {
+                state.route_decisions.insert(
+                    e.route_decision_id.as_str().to_owned(),
+                    cairn_domain::providers::RouteDecisionRecord {
+                        route_decision_id: e.route_decision_id.clone(),
+                        project_id: e.project.project_id.clone(),
+                        operation_kind: e.operation_kind,
+                        terminal_route_attempt_id: None,
+                        selected_provider_binding_id: e.selected_provider_binding_id.clone(),
+                        selected_route_attempt_id: None,
+                        selector_context: cairn_domain::selectors::SelectorContext::default(),
+                        attempt_count: e.attempt_count,
+                        fallback_used: e.fallback_used,
+                        final_status: e.final_status,
+                    },
+                );
+            }
+            RuntimeEvent::ProviderCallCompleted(e) => {
+                state.provider_calls.insert(
+                    e.provider_call_id.as_str().to_owned(),
+                    cairn_domain::providers::ProviderCallRecord {
+                        provider_call_id: e.provider_call_id.clone(),
+                        route_decision_id: e.route_decision_id.clone(),
+                        route_attempt_id: e.route_attempt_id.clone(),
+                        project_id: e.project.project_id.clone(),
+                        operation_kind: e.operation_kind,
+                        provider_binding_id: e.provider_binding_id.clone(),
+                        provider_connection_id: e.provider_connection_id.clone(),
+                        provider_adapter: String::new(),
+                        provider_model_id: e.provider_model_id.clone(),
+                        task_id: None,
+                        run_id: None,
+                        prompt_release_id: None,
+                        fallback_position: 0,
+                        status: e.status,
+                        latency_ms: e.latency_ms,
+                        input_tokens: e.input_tokens,
+                        output_tokens: e.output_tokens,
+                        cost_micros: e.cost_micros,
+                        error_class: None,
+                    },
+                );
+            }
             RuntimeEvent::TenantCreated(e) => {
                 state.tenants.insert(
                     e.tenant_id.as_str().to_owned(),
@@ -1149,6 +1196,65 @@ impl ProjectReadModel for InMemoryStore {
             .collect();
         results.sort_by_key(|p| p.created_at);
         Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- RouteDecisionReadModel --
+
+#[async_trait]
+impl RouteDecisionReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        decision_id: &cairn_domain::RouteDecisionId,
+    ) -> Result<Option<cairn_domain::providers::RouteDecisionRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.route_decisions.get(decision_id.as_str()).cloned())
+    }
+
+    async fn list_by_project(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::providers::RouteDecisionRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state
+            .route_decisions
+            .values()
+            .filter(|d| d.project_id == project.project_id)
+            .cloned()
+            .collect();
+        results.sort_by_key(|d| d.route_decision_id.to_string());
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- ProviderCallReadModel --
+
+#[async_trait]
+impl ProviderCallReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        call_id: &cairn_domain::ProviderCallId,
+    ) -> Result<Option<cairn_domain::providers::ProviderCallRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.provider_calls.get(call_id.as_str()).cloned())
+    }
+
+    async fn list_by_decision(
+        &self,
+        decision_id: &cairn_domain::RouteDecisionId,
+        limit: usize,
+    ) -> Result<Vec<cairn_domain::providers::ProviderCallRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let results: Vec<_> = state
+            .provider_calls
+            .values()
+            .filter(|c| c.route_decision_id == *decision_id)
+            .cloned()
+            .take(limit)
+            .collect();
+        Ok(results)
     }
 }
 

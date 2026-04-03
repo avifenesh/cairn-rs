@@ -298,7 +298,9 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::PromptReleaseTransitioned(_)
             | RuntimeEvent::TenantCreated(_)
             | RuntimeEvent::WorkspaceCreated(_)
-            | RuntimeEvent::ProjectCreated(_) => {}
+            | RuntimeEvent::ProjectCreated(_)
+            | RuntimeEvent::RouteDecisionMade(_)
+            | RuntimeEvent::ProviderCallCompleted(_) => {}
 
             RuntimeEvent::EvalRunStarted(e) => {
                 self.add_node(e.eval_run_id.as_str(), NodeKind::EvalRun, Some(&e.project), ts)

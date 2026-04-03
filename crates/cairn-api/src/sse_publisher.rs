@@ -40,7 +40,9 @@ pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
         | RuntimeEvent::PromptReleaseTransitioned(_)
         | RuntimeEvent::TenantCreated(_)
         | RuntimeEvent::WorkspaceCreated(_)
-        | RuntimeEvent::ProjectCreated(_) => None,
+        | RuntimeEvent::ProjectCreated(_)
+        | RuntimeEvent::RouteDecisionMade(_)
+        | RuntimeEvent::ProviderCallCompleted(_) => None,
     }
 }
 
