@@ -1,6 +1,6 @@
 # Ralph Loop Progress
 
-## Current RFC: 007 — Plugin Protocol and Transport
+## Current RFC: 008 — Tenant/Workspace/Profile
 ## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
@@ -13,7 +13,7 @@
 | 004 | Graph and Eval Matrix | DONE |
 | 005 | Task/Session/Checkpoint Lifecycle | DONE |
 | 006 | Prompt Registry and Release | DONE |
-| 007 | Plugin Protocol and Transport | IN PROGRESS |
+| 007 | Plugin Protocol and Transport | DONE |
 | 008 | Tenant/Workspace/Profile | pending |
 | 009 | Provider Abstraction | pending |
 | 010 | Operator Control Plane | pending |
@@ -616,3 +616,7 @@ cancel method defined in proto but no host-side cancel for in-flight invocations
 - [x] RFC 006: Phase 3b+4 — approval policy enforcement, graph wiring, cross-review
 - [x] RFC 006: Phase 5 — marked complete
 - [x] RFC 007: Phase 1 gap analysis — 10 gaps across PluginHost impl, PermissionGate, RPC builders, notification handling, plugin execution pipeline, concurrency, registry
+- [x] RFC 007: Phase 2 types — missing RPC builders, notification types, plugin registry
+- [x] RFC 007: Phase 3 impl — StdioPluginHost, PolicyPermissionGate, plugin execution pipeline (ConcurrencyTracker, execute_plugin_tool), notification parsing
+- [x] RFC 007: Phase 4 cross-review — duplicate registration guard in StdioPluginHost
+- [x] RFC 007: Phase 5 — marked complete, all 10 gaps resolved

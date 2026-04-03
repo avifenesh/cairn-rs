@@ -292,6 +292,12 @@ impl StdioPluginHost {
     /// Register a manifest and set the plugin to Discovered state.
     pub fn register(&mut self, manifest: PluginManifest) -> Result<(), PluginHostError> {
         self.discover(&manifest)?;
+        if self.plugins.contains_key(&manifest.id) {
+            return Err(PluginHostError::HandshakeFailed(format!(
+                "plugin already registered: {}",
+                manifest.id
+            )));
+        }
         let id = manifest.id.clone();
         self.plugins.insert(
             id,
