@@ -9,6 +9,10 @@ Owner: Agent Runtime, Prompts, Evals
 - 2026-04-03 | Week 2 assigned | Implement prompt release lifecycle and selector resolution against domain contracts. Define agent-runtime hooks.
 - 2026-04-03 | Worker 7 / Manager | Week 2 complete | PromptReleaseService (full RFC 006 lifecycle: create, transition with validation, activation deactivation, rollback with audit trail). SelectorResolver (precedence-based resolution: routing_slot > task_type > agent_type > project_default). RuntimeHookHandler and PromptResolver traits in cairn-agent connecting orchestrator to runtime services. Borrow checker fixes applied for Worker 1 flagged issues. 22 cairn-evals tests + 9 cairn-agent tests passing.
 - 2026-04-03 | Week 3 assigned | Implement prompt registry persistence flow, eval scorecard row creation, and first agent-runtime execution slice on top of the runtime spine.
+- 2026-04-03 | Worker 7 / Manager | Week 3 complete | EvalRunService (create/start/complete lifecycle, build_scorecard aggregation across releases). AgentExecutor with generic AgentDriver trait driving the ReAct loop via RuntimeHookHandler + PromptResolver. 25 cairn-evals tests + 11 cairn-agent tests passing.
+- 2026-04-03 | Week 4 assigned | Complete first prompt release + eval + agent execution slice. Make scorecards queryable.
+- 2026-04-03 | Worker 7 / Manager | Week 4 complete | Full prompt-as-product integration: create releases → activate with selector → resolve at runtime → run evals → build scorecard → promote based on results → rollback with audit. Multi-selector precedence test (agent_type overrides project_default). 27 cairn-evals tests (25 unit + 2 integration) + 11 cairn-agent tests passing.
+- 2026-04-03 | Worker 7 / Manager | Integration blocker cleared | `cargo test -p cairn-evals` is green again. The next meaningful dependency handoff is the assistant streaming/output seam Worker 8 needs for `assistant_delta`, `assistant_end`, and `assistant_reasoning`.
 
 ## Blocked By
 
@@ -23,6 +27,8 @@ Owner: Agent Runtime, Prompts, Evals
 - 2026-04-03 | Worker 1 / Manager -> Worker 7 | Current failing lines from workspace test run: `release_service.rs:133`, `169`, `222`, `223`, and `235`. Likely narrow fix: snapshot release matching fields before scanning `state.releases.values_mut()`, then clone the final mutated release/target into a local result before touching `next_action_seq` or `actions.push(...)`.
 - 2026-04-03 | Worker 1 / Manager -> Worker 7 | Additional targeted test sweep: `selector_resolver.rs:62` and `147` now also fail because `use cairn_domain::*;` collides with the crate-local `PromptReleaseState`. Narrow fix: stop glob-importing the domain prelude in that test module and use the crate-local release-state type explicitly.
 - 2026-04-03 | Worker 1 / Manager -> Worker 7 | Current next focus: make the red crate green first. Land the `cairn-evals` selector-resolver/import cleanup and release-service borrow fixes so the week-2 completion claim matches workspace reality, then continue into week-3 persistence and scorecard work.
+- 2026-04-03 | Worker 6 -> Worker 7 | Wave 4: `EvalGraphProjector` ready in `cairn-graph`. Call `on_asset_created`/`on_version_created`/`on_release_created`/`on_eval_run_created`/`on_release_rollback`/`on_prompt_used` from your prompt/eval services to wire graph linkage. Retrieval projector also available for eval-retrieval quality integration.
+- 2026-04-03 | Worker 1 / Manager -> Worker 7 | Concrete next cut: clear `cairn-evals` to green, then hand Worker 8 one stable streaming/output seam for `assistant_delta`, `assistant_end`, and `assistant_reasoning`. Do not broaden scorecard or rollout features until the red crate and streaming seam are both settled.
 
 ## Outbox
 

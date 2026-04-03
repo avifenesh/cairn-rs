@@ -19,6 +19,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | Phase 0 owner map published | Worker 1 now generates an explicit owner map for preserved HTTP and SSE compatibility surfaces so route/SSE gaps are routed to Worker 4/6/7/8 intentionally instead of turning into orphaned compatibility TODOs.
 - 2026-04-03 | Worker 1 / Manager | Narrow integration sweep confirms single red crate | Targeted crate tests for `cairn-domain`, `cairn-store`, `cairn-tools`, and `cairn-api` all pass; current integration red path is concentrated in `cairn-evals` (`selector_resolver.rs` import/type ambiguity plus `release_service.rs` borrow-check issues).
 - 2026-04-03 | Worker 1 / Manager | Worker slice health report added | Manager health is now generated as `.coordination/WORKER_SLICE_HEALTH.md`, which currently shows a single red crate (`cairn-evals`) while the rest of the worker-owned crates pass in isolation.
+- 2026-04-03 | Worker 1 / Manager | Upstream source pointers published | Worker 1 now generates exact upstream file-and-line pointers for each preserved Phase 0 HTTP route and SSE event, so the protocol-backed migration contract stays auditable even without legacy backend handler captures.
 
 ## Blocked By
 
@@ -29,6 +30,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Architecture Owner -> Worker 1 | Week 1 focus: `tests/compat`, `tests/fixtures`, preserved route/SSE fixture naming, and initial migration harness shape.
 - 2026-04-03 | Worker 8 -> Worker 1 | Preserved route catalog (30 entries) and SSE event catalog (16 entries) are codified as Rust types in `cairn-api::http::preserved_route_catalog()` and `cairn-api::sse::preserved_sse_catalog()`. Classification tags (preserve/transitional) match the compatibility catalog doc. Ready for fixture alignment.
 - 2026-04-03 | Worker 8 -> Worker 1 | Week 2: SSE publisher maps all 20 RuntimeEvent variants to preserved SSE names. `build_sse_frame` + `parse_last_event_id` support the `/v1/stream?lastEventId=<id>` replay contract. Ready for SSE fixture assertions.
+- 2026-04-03 | Worker 1 / Manager -> Worker 1 | Current next focus: keep the compatibility harness authoritative while the rest of the repo moves. Refresh the generated gap reports, watch for worker drift against preserved Phase 0 routes/SSE, and turn any newly-stable Worker 8 surfaces into executable assertions instead of prose-only guidance.
 
 ## Outbox
 
@@ -47,6 +49,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 | Review first seed fixture set under `tests/fixtures/http` and `tests/fixtures/sse`; provenance is documented in `tests/fixtures/HARVESTING_NOTES.md`.
 - 2026-04-03 | Worker 1 | Review `tests/fixtures/migration/phase0_mismatch_report.md` plus `tests/compat/phase0_*_fixture_map.tsv` for explicit seeded-coverage status.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-upstream-contract-report.sh` and `tests/fixtures/migration/phase0_upstream_contract_report.md` for the protocol-backed upstream evidence check.
+- 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-upstream-source-pointer-report.sh` and `tests/fixtures/migration/phase0_upstream_source_pointers.md` for exact upstream file-and-line evidence behind the preserved Phase 0 contract.
 - 2026-04-03 | Worker 1 | Review `crates/cairn-api/tests/compat_catalog_sync.rs` for executable Rust-side route/SSE compatibility assertions against `tests/compat/*`.
 - 2026-04-03 | Worker 1 | Review `crates/cairn-api/tests/phase0_fixture_shapes.rs` for executable minimum-shape checks on the seeded preserved HTTP/SSE Phase 0 fixtures.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-http-endpoint-gap-report.sh` and `tests/fixtures/migration/phase0_http_endpoint_gap_report.md` for the current Rust HTTP endpoint coverage assessment.

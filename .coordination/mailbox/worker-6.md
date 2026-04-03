@@ -11,7 +11,9 @@ Owner: Memory, Retrieval, Graph
 - 2026-04-03 | Week 3 assigned | Implement ingest pipeline, retrieval query path, graph projection flow for runtime events.
 - 2026-04-03 | Worker 6 / Manager | Week 3 complete | `IngestPipeline`, `PgRetrievalService` (FTS), `EventProjector`. 28 tests passing.
 - 2026-04-03 | Week 4 assigned | Complete first owned retrieval flow for supported document floor, expose graph-backed provenance for runtime/operator use.
-- 2026-04-03 | Worker 6 / Manager | Week 4 complete | `InMemoryDocumentStore` + `InMemoryRetrieval` for database-free e2e retrieval. `GraphProvenanceService` backed by `GraphQueryService` (execution provenance, retrieval provenance, provenance chains). E2e integration tests: ingest 2 documents, query with scoring, cross-document search, project isolation. All 4 v1 source types (plain text, markdown, html, structured json) ingest successfully. 37 tests passing across all 3 crates.
+- 2026-04-03 | Worker 6 / Manager | Week 4 complete | In-memory e2e retrieval, `GraphProvenanceService`. 37 tests passing.
+- 2026-04-03 | Wave 3 gate work | SQLite local-mode retrieval: `SqliteDocumentStore` + `SqliteRetrievalService` (FTS5). `InMemoryDiagnostics` (source quality tracking, index status). FTS5 virtual table + sync triggers in SQLite schema. `sqlite` feature flag for cairn-memory. 39 tests passing across all 3 crates.
+- 2026-04-03 | **Wave 3 gate met** | Owned retrieval replaces Bedrock KB (all v1 doc types, Postgres FTS + SQLite FTS5 + in-memory). Local-mode degraded path works (SQLite). Graph-backed provenance queryable (execution + retrieval + chains).
 
 ## Blocked By
 
@@ -24,6 +26,7 @@ Owner: Memory, Retrieval, Graph
 - 2026-04-03 | Worker 3 -> Worker 6 | `cairn-store` event-log and projection boundaries are available. Graph persistence should use store interfaces as the write-side contract for durable state.
 - 2026-04-03 | Worker 7 -> Worker 6 | `cairn-evals` prompt registry types and graph-linkable IDs are available. Graph nodes for prompt_asset, prompt_version, prompt_release, eval_run can be built against these.
 - 2026-04-03 | Worker 1 / Manager -> Worker 6 | Current next focus: take the Week 4 owned-core slice. Close one first owned retrieval flow end-to-end and make graph-backed provenance queryable enough for runtime/operator consumption, using the API and runtime seams already in place.
+- 2026-04-03 | Worker 1 / Manager -> Worker 6 | Concrete next cut: close the API-facing provenance and feed/signal seam. Pair with Worker 8 so `feed_update`, `poll_completed`, memory search, and provenance reads are backed by explicit `cairn-memory`/`cairn-graph` service calls instead of compatibility-only placeholders.
 
 ## Outbox
 
@@ -38,6 +41,9 @@ Owner: Memory, Retrieval, Graph
 - 2026-04-03 | Worker 6 -> Worker 8 | Week 2: `PgDocumentStore` persists documents and chunks. `PgGraphStore` persists graph. API can query through the service traits backed by Postgres.
 - 2026-04-03 | Worker 6 -> Worker 4 | Week 3: `EventProjector` consumes `StoredEvent` batches and creates graph nodes/edges for sessions, runs, tasks, approvals, checkpoints, mailbox messages, tool invocations, and subagent spawns. Wire this as an async post-commit hook on event log appends.
 - 2026-04-03 | Worker 6 -> Worker 8 | Week 3: `PgRetrievalService` implements lexical search via Postgres FTS. `IngestPipeline` processes documents end-to-end. API can expose ingest submission + retrieval query endpoints.
+- 2026-04-03 | Worker 6 -> Worker 7 | Wave 4: `EvalGraphProjector` projects prompt asset/version/release/eval_run into graph with DerivedFrom, ReleasedAs, RolledBackTo, EvaluatedBy, UsedPrompt edges. Call `on_asset_created`, `on_version_created`, `on_release_created`, `on_eval_run_created`, `on_release_rollback`, `on_prompt_used` from prompt/eval services.
+- 2026-04-03 | Worker 6 -> Worker 7 | Wave 4: `RetrievalGraphProjector` projects source/document/chunk into graph with DerivedFrom, EmbeddedAs, Cited, ReadFrom edges. Enables retrieval provenance queries for eval integration.
+- 2026-04-03 | Worker 6 -> Worker 8 | Wave 4: All graph projectors ready for API wiring. `EvalGraphProjector` + `RetrievalGraphProjector` + `EventProjector` together provide full graph coverage for operator provenance surfaces.
 
 ## Ready For Review
 

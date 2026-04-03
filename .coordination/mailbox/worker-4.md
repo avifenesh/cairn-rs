@@ -9,6 +9,9 @@ Owner: Runtime Spine
 - 2026-04-03 | Week 2 assigned | Implement create/start/advance flows for session, run, task. Persist through store layer.
 - 2026-04-03 | Worker 4 / Manager | Week 2 complete | InMemoryStore in cairn-store (EventLog + all ReadModel impls, projection apply for all 20 RuntimeEvent variants). Concrete service impls: SessionServiceImpl, RunServiceImpl, TaskServiceImpl with full lifecycle support (create, claim, heartbeat, start, complete, fail, cancel, pause, resume). 16 runtime tests + 5 in-memory store tests passing (47 total across Worker 4+7 crates).
 - 2026-04-03 | Week 3 assigned | Implement recovery, timeout classification, pause/resume semantics, and external-worker reporting on top of the runtime spine.
+- 2026-04-03 | Worker 4 / Manager | Week 3 complete | All 7 service impls done: ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RecoveryServiceImpl (expired-lease sweep with retryable/dead-letter). 23 runtime tests (6 unit + 10 lifecycle + 7 week3) all passing.
+- 2026-04-03 | Week 4 assigned | Drive end-to-end runtime slice from command through replay/recovery. Close blocking lifecycle or mailbox defects.
+- 2026-04-03 | Worker 4 / Manager | Week 4 complete | End-to-end integration: full session→run→task→approval→checkpoint→mailbox→complete slice with event stream replay verification. Subagent spawn with parent/child linkage across sessions and runs. Recovery audit trail test proving RecoveryAttempted/Completed events appear in stream. 26 runtime tests (6 unit + 10 lifecycle + 7 week3 + 3 week4 e2e) all passing.
 
 ## Blocked By
 
@@ -28,7 +31,8 @@ Owner: Runtime Spine
 - 2026-04-03 | Worker 8 -> Worker 4 | Week 2: `RuntimeReadEndpoints` trait and `ListQuery` are ready. Runtime read endpoints wire directly to `cairn-store` read-model traits.
 - 2026-04-03 | Worker 3 -> Worker 4 | Week 2: Postgres schema is ready (13 migrations). `PgEventLog` and `PgSyncProjection::apply_async` handle all 20 RuntimeEvent variants. Runtime can persist end-to-end through the store.
 - 2026-04-03 | Worker 6 -> Worker 4 | Week 2: `PgGraphStore` implements `GraphProjection` + `GraphQueryService` with Postgres persistence and BFS traversal for all 6 v1 query families.
-- 2026-04-03 | Worker 1 / Manager -> Worker 4 | Current next focus: finish the Week 3 runtime hardening slice. Wire recovery sweep, lease timeout classification, pause/resume trigger handling, and external-worker report ingestion against the stable domain/store contracts before taking broader API glue.
+- 2026-04-03 | Worker 1 / Manager -> Worker 4 | Current next focus: move from runtime-complete to runtime-integrated. Tighten the runtime side of tool invocation, external-worker progress, and read-model-facing task/approval flows so Worker 5 and Worker 8 can finish preserved compatibility without runtime-local adapters.
+- 2026-04-03 | Worker 1 / Manager -> Worker 4 | Concrete next cut: publish one stable runtime seam for `assistant_tool_call` and one stable progress/event seam for agent and external-worker updates. Keep it narrow and grounded in the existing domain/store contracts.
 
 ## Outbox
 

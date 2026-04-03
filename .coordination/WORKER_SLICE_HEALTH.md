@@ -20,7 +20,7 @@ Interpretation:
 | Worker 6 | `cairn-memory` | `pass` | All crate tests passed in isolation. |
 | Worker 6 | `cairn-graph` | `pass` | All crate tests passed in isolation. |
 | Worker 7 | `cairn-agent` | `pass` | All crate tests passed in isolation. |
-| Worker 7 | `cairn-evals` | `fail` | Selector resolver has `PromptReleaseState` import/type ambiguity; release service also has borrow-check failures. |
+| Worker 7 | `cairn-evals` | `pass` | All crate tests passed in isolation. |
 | Worker 8 | `cairn-signal` | `pass` | All crate tests passed in isolation. |
 | Worker 8 | `cairn-channels` | `pass` | All crate tests passed in isolation. |
 | Worker 8 | `cairn-api` | `pass` | All crate tests passed in isolation. |
@@ -28,5 +28,6 @@ Interpretation:
 
 ## Manager Read
 
-- if all rows except one pass, treat the red build as a focused blocker and keep unrelated workers moving
-- if several adjacent rows fail together, stop and look for shared-contract drift before more code lands
+- all worker-owned crates are currently green in isolation
+- treat the next likely blockers as cross-crate seam issues, not crate-local test breakage
+- current highest-value integration handoff is Worker 7 -> Worker 8 for the assistant streaming/output seam

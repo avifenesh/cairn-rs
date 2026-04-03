@@ -11,7 +11,8 @@ Owner: Store, Event Log, Synchronous Projections
 - 2026-04-03 | Week 3 assigned | Implement replay/rebuild support for projections, add SQLite local-mode support.
 - 2026-04-03 | Worker 3 / Manager | Week 3 complete | `ProjectionRebuilder`, SQLite backend, V014 FTS migration. `sqlite` feature flag. 12 tests passing.
 - 2026-04-03 | Week 4 assigned | Stabilize migrations and projection correctness, document backfill assumptions.
-- 2026-04-03 | Worker 3 / Manager | Week 4 complete | Full lifecycle integration test (13-event sequence covering session/run/task/approval/checkpoint/mailbox with lease, supersession, and recovery detection). Migration validation tests (ordering, non-empty SQL, DDL presence for all 14 migrations). Expired lease detection test for recovery sweeps. 17 tests passing.
+- 2026-04-03 | Worker 3 / Manager | Week 4 complete | Full lifecycle integration test, migration validation, expired lease detection. 17 tests passing.
+- 2026-04-03 | Wave 3 gate support | FTS5 virtual table + sync triggers added to SQLite schema for local-mode retrieval. 18 tests passing.
 
 ## Blocked By
 
@@ -23,6 +24,7 @@ Owner: Store, Event Log, Synchronous Projections
 - 2026-04-03 | Worker 1 -> Worker 3 | Priority order: migrations layout, event-log interfaces, sync projection boundaries, DB adapter seams. Worker 4/6/8 need these early.
 - 2026-04-03 | Worker 2 -> Worker 3 | `cairn-domain` now exposes stable ownership keys, lifecycle enums, and event/command envelopes. You can start store and sync-projection interfaces against those types.
 - 2026-04-03 | Worker 1 / Manager -> Worker 3 | Current next focus: take the Week 4 store hardening pass. Stabilize projection rebuild correctness across Postgres/SQLite, document any backfill assumptions, and tighten migration-check tooling without widening the store surface.
+- 2026-04-03 | Worker 1 / Manager -> Worker 3 | Concrete next cut: make replay and rebuild boring. Tighten cross-backend parity around projection rebuilds, event replay ordering, and migration validation so Worker 4/6/8 can depend on the store without backend-specific conditionals or fixture drift.
 
 ## Outbox
 
