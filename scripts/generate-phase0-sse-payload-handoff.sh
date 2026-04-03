@@ -170,6 +170,41 @@ status_for_event() {
   esac
 }
 
+exact_followup_for_event() {
+  case "$1" in
+    ready)
+      printf '`none`'
+      ;;
+    task_update)
+      printf '`populate task.type/title/description/progress/createdAt/updatedAt from runtime-owned task metadata or read model`'
+      ;;
+    approval_required)
+      printf '`populate approval.type/title/description/context/createdAt from approval requirement + read-model context`'
+      ;;
+    assistant_tool_call)
+      printf '`preserve args on start, then add stable completed/failed payload semantics for taskId/result/error detail instead of collapsing to invocation id`'
+      ;;
+    agent_progress)
+      printf '`keep minimal agentId/message shape, but replace placeholder subagent text with stable runtime/agent progress semantics`'
+      ;;
+    feed_update)
+      printf '`wire feed publisher to feed/signal aggregation source that can emit full item payloads`'
+      ;;
+    poll_completed)
+      printf '`wire signal/source polling completion path to emit source + newCount through the explicit publisher seam`'
+      ;;
+    assistant_delta|assistant_end|assistant_reasoning)
+      printf '`wait for Worker 7 streaming/output seam, then add explicit publisher builder for the preserved payload family`'
+      ;;
+    memory_proposed)
+      printf '`decide whether this is a memory-service publisher or proposal workflow publisher, then emit the full memory envelope`'
+      ;;
+    *)
+      printf '`classify`'
+      ;;
+  esac
+}
+
 {
   printf '# Phase 0 SSE Payload Handoff\n\n'
   printf 'Status: generated  \n'
@@ -179,8 +214,8 @@ status_for_event() {
   printf -- '- that is a real compatibility step forward: event names and wrapper families now exist for the mapped runtime surfaces.\n'
   printf -- '- the remaining work is field-level alignment with the preserved frontend fixtures, not raw-event serialization removal.\n\n'
   printf '## Event Handoff Table\n\n'
-  printf '| Event | Current Runtime Source | Expected Preserved Payload Shape | Current Status | Suggested Builder Direction |\n'
-  printf '|---|---|---|---|---|\n'
+  printf '| Event | Current Runtime Source | Expected Preserved Payload Shape | Current Status | Suggested Builder Direction | Exact Follow-up |\n'
+  printf '|---|---|---|---|---|---|\n'
   for event_name in \
     ready \
     task_update \
@@ -193,12 +228,13 @@ status_for_event() {
     assistant_end \
     assistant_reasoning \
     memory_proposed; do
-    printf '| `%s` | %s | %s | %s | %s |\n' \
+    printf '| `%s` | %s | %s | %s | %s | %s |\n' \
       "$event_name" \
       "$(runtime_source_for_event "$event_name")" \
       "$(expected_payload_shape_for_event "$event_name")" \
       "$(status_for_event "$event_name")" \
-      "$(builder_direction_for_event "$event_name")"
+      "$(builder_direction_for_event "$event_name")" \
+      "$(exact_followup_for_event "$event_name")"
   done
 } > "$OUT"
 
