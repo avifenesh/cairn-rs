@@ -231,6 +231,20 @@ That means:
 
 This keeps the first release aligned with RFC 008 scoping and reduces accidental cross-project blast radius.
 
+### Workspace Aggregate Mutability Rule
+
+In v1, workspace-aggregated views are primarily for roll-up, filtering, and drill-down.
+
+They may support non-destructive bulk organization actions where semantics are uniform, but they must not become the default place for broad cross-project operational mutation.
+
+That means:
+
+- operators may review and compare items across projects inside one workspace
+- bulk operational actions that materially change runtime state should still require entering an explicit project context
+- if a workspace-level bulk action exists in v1, it must be limited to actions whose policy boundary, effect semantics, and rollback story are uniform across all affected items
+
+This keeps workspace scope safer than a global admin console while still allowing useful aggregation.
+
 ### Tenant Roll-Up Mutability Rule
 
 In v1, tenant-level roll-up views are read-only for operational workflow actions.
@@ -273,7 +287,7 @@ Focus on the minimum workflows that make the product operable.
 
 ## Open Questions
 
-1. Should workspace-level aggregated views in v1 allow a limited set of bulk operational actions across projects when all affected items share the same workspace policy boundary?
+1. Should v1 allow any workspace-level cross-project bulk operational actions at all, or defer all state-changing bulk actions to explicit project context?
 
 ## Decision
 
@@ -285,3 +299,4 @@ Proceed assuming:
 - bulk actions are required only for approvals, selected source/channel operations, and safe prompt housekeeping actions
 - project-scoped and workspace-aggregated visibility are first-class; most operational mutations happen within an explicit project context
 - tenant-level roll-up views are read-only for operational actions in v1, except for settings, policy, credential/provider, and provisioning administration
+- workspace-aggregated views are for roll-up and drill-down first; cross-project operational bulk actions are deferred by default unless a later pass defines a tightly bounded exception
