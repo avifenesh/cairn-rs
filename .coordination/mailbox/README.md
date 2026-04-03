@@ -20,6 +20,18 @@ There is one mailbox file per worker:
 - reference RFCs, files, or PRs directly when possible
 - move stale or resolved items into a short "resolved inline" note instead of letting files grow indefinitely
 
+## Queue Bus
+
+For active pacing, use the queue bus in [`../queue`](../queue) with:
+
+- `scripts/coordination/queue-worker-tasks.sh`
+- `scripts/coordination/worker-claim-next.sh`
+- `scripts/coordination/worker-complete-task.sh`
+- `scripts/coordination/worker-listen.sh`
+- `scripts/coordination/manager-listen.sh`
+
+Mailboxes remain the durable coordination record. The queue bus is only for short-lived active task handoff and refill.
+
 ## Suggested Entry Format
 
 `2026-04-03 | Worker 4 -> Worker 3 | Need sync projection shape for mailbox records before recovery patch lands.`

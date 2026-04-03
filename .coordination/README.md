@@ -8,6 +8,7 @@ Use it for:
 - dependency requests
 - review handoffs
 - short operational notes
+- active task queueing and refill notifications via the queue bus
 
 Do not use it for:
 
@@ -20,6 +21,7 @@ Canonical design decisions still belong in the RFCs.
 ## Structure
 
 - [`mailbox`](./mailbox)
+- [`queue`](./queue)
 
 ## Usage Rule
 
@@ -29,3 +31,11 @@ Each worker owns their own mailbox file and should:
 - update `Blocked By` when waiting on another worker
 - append notes to `Outbox` when asking another worker for something
 - append notes to another worker's `Inbox` when sending a dependency or handoff
+
+Manager and workers can also use the queue bus for short active-task pacing:
+
+- manager queues multiple follow-on tasks at once
+- workers claim and complete queued tasks
+- background listeners print notifications so queue changes do not rely on manual polling
+
+The queue bus is an execution assist, not the durable narrative layer. Mailboxes still carry the canonical status and dependency story.

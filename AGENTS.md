@@ -53,6 +53,7 @@ Use:
 - [`docs/design/MILESTONE_BOARD_WEEKS_1_4.md`](./docs/design/MILESTONE_BOARD_WEEKS_1_4.md)
 - [`docs/design/REPO_SCAFFOLDING_TASKS.md`](./docs/design/REPO_SCAFFOLDING_TASKS.md)
 - [`.coordination/mailbox`](./.coordination/mailbox)
+- [`.coordination/queue`](./.coordination/queue)
 
 ## Coordination Conventions
 
@@ -60,6 +61,8 @@ Use:
 - keep notes short and operational
 - reference RFCs and files directly
 - prefer "blocked by", "needs from", and "ready for review" language over long narrative updates
+- use the queue bus for short active-task pacing, not for durable project truth
+- queue multiple follow-on tasks when possible so workers can keep moving without waiting for a fresh manager pass
 
 ## When To Stop And Escalate
 
