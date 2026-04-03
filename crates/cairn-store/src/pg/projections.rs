@@ -297,7 +297,11 @@ impl PgSyncProjection {
             | RuntimeEvent::IngestJobStarted(_)
             | RuntimeEvent::IngestJobCompleted(_)
             | RuntimeEvent::EvalRunStarted(_)
-            | RuntimeEvent::EvalRunCompleted(_) => {}
+            | RuntimeEvent::EvalRunCompleted(_)
+            | RuntimeEvent::PromptAssetCreated(_)
+            | RuntimeEvent::PromptVersionCreated(_)
+            | RuntimeEvent::PromptReleaseCreated(_)
+            | RuntimeEvent::PromptReleaseTransitioned(_) => {}
         }
 
         Ok(())

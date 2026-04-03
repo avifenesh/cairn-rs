@@ -205,5 +205,8 @@ fn entity_ref_filter(entity: &EntityRef) -> (&'static str, String) {
         EntityRef::Signal(id) => ("signal_id", id.to_string()),
         EntityRef::IngestJob(id) => ("job_id", id.to_string()),
         EntityRef::EvalRun(id) => ("eval_run_id", id.to_string()),
+        EntityRef::PromptAsset(id) => ("prompt_asset_id", id.to_string()),
+        EntityRef::PromptVersion(id) => ("prompt_version_id", id.to_string()),
+        EntityRef::PromptRelease(id) => ("prompt_release_id", id.to_string()),
     }
 }

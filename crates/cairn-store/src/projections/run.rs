@@ -15,6 +15,7 @@ pub struct RunRecord {
     pub parent_run_id: Option<RunId>,
     pub project: ProjectKey,
     pub state: RunState,
+    pub prompt_release_id: Option<PromptReleaseId>,
     pub failure_class: Option<FailureClass>,
     pub pause_reason: Option<PauseReason>,
     pub resume_trigger: Option<ResumeTrigger>,

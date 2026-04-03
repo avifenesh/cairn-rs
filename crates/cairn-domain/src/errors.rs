@@ -1,6 +1,6 @@
 use crate::ids::{
-    ApprovalId, CheckpointId, EvalRunId, IngestJobId, MailboxMessageId, RunId, SessionId, SignalId,
-    TaskId, ToolInvocationId,
+    ApprovalId, CheckpointId, EvalRunId, IngestJobId, MailboxMessageId, PromptAssetId,
+    PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, ToolInvocationId,
 };
 use crate::tenancy::OwnershipKey;
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,9 @@ pub enum RuntimeEntityKind {
     ToolInvocation,
     IngestJob,
     EvalRun,
+    PromptAsset,
+    PromptVersion,
+    PromptRelease,
 }
 
 /// Shared runtime entity identifier envelope for API/runtime/store error reporting.
@@ -35,6 +38,9 @@ pub enum RuntimeEntityRef {
     ToolInvocation { invocation_id: ToolInvocationId },
     IngestJob { job_id: IngestJobId },
     EvalRun { eval_run_id: EvalRunId },
+    PromptAsset { prompt_asset_id: PromptAssetId },
+    PromptVersion { prompt_version_id: PromptVersionId },
+    PromptRelease { prompt_release_id: PromptReleaseId },
 }
 
 impl RuntimeEntityRef {
@@ -50,6 +56,9 @@ impl RuntimeEntityRef {
             RuntimeEntityRef::ToolInvocation { .. } => RuntimeEntityKind::ToolInvocation,
             RuntimeEntityRef::IngestJob { .. } => RuntimeEntityKind::IngestJob,
             RuntimeEntityRef::EvalRun { .. } => RuntimeEntityKind::EvalRun,
+            RuntimeEntityRef::PromptAsset { .. } => RuntimeEntityKind::PromptAsset,
+            RuntimeEntityRef::PromptVersion { .. } => RuntimeEntityKind::PromptVersion,
+            RuntimeEntityRef::PromptRelease { .. } => RuntimeEntityKind::PromptRelease,
         }
     }
 }

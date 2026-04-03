@@ -583,6 +583,7 @@ impl ToolInvocationRow {
             target: serde_json::from_str(&self.target)
                 .map_err(|e| StoreError::Serialization(e.to_string()))?,
             execution_class: parse_string_enum(&self.execution_class)?,
+            prompt_release_id: None,
             state: parse_string_enum(&self.state)?,
             version: self.version as u64,
             requested_at_ms: self.requested_at_ms as u64,
@@ -661,6 +662,7 @@ impl RunRow {
             parent_run_id: self.parent_run_id.map(RunId::new),
             project,
             state: parse_string_enum::<RunState>(&self.state)?,
+            prompt_release_id: None,
             failure_class: self
                 .failure_class
                 .as_deref()

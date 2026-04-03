@@ -1,7 +1,7 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, CommandId, EvalRunId, IngestJobId, MailboxMessageId, RunId, SessionId,
-    SignalId, TaskId, ToolInvocationId,
+    ApprovalId, CheckpointId, CommandId, EvalRunId, IngestJobId, MailboxMessageId, PromptAssetId,
+    PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, ToolInvocationId,
 };
 use crate::lifecycle::{FailureClass, PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget};
 use crate::policy::{ApprovalDecision, ExecutionClass};
@@ -107,6 +107,10 @@ pub enum RuntimeCommand {
     CompleteIngestJob(CompleteIngestJob),
     StartEvalRun(StartEvalRun),
     CompleteEvalRun(CompleteEvalRun),
+    CreatePromptAsset(CreatePromptAsset),
+    CreatePromptVersion(CreatePromptVersion),
+    CreatePromptRelease(CreatePromptRelease),
+    TransitionPromptRelease(TransitionPromptRelease),
 }
 
 impl RuntimeCommand {
@@ -143,6 +147,10 @@ impl RuntimeCommand {
             RuntimeCommand::CompleteIngestJob(command) => &command.project,
             RuntimeCommand::StartEvalRun(command) => &command.project,
             RuntimeCommand::CompleteEvalRun(command) => &command.project,
+            RuntimeCommand::CreatePromptAsset(command) => &command.project,
+            RuntimeCommand::CreatePromptVersion(command) => &command.project,
+            RuntimeCommand::CreatePromptRelease(command) => &command.project,
+            RuntimeCommand::TransitionPromptRelease(command) => &command.project,
         }
     }
 
@@ -254,6 +262,26 @@ impl RuntimeCommand {
             RuntimeCommand::CompleteEvalRun(command) => Some(RuntimeEntityRef::EvalRun {
                 eval_run_id: command.eval_run_id.clone(),
             }),
+            RuntimeCommand::CreatePromptAsset(command) => {
+                Some(RuntimeEntityRef::PromptAsset {
+                    prompt_asset_id: command.prompt_asset_id.clone(),
+                })
+            }
+            RuntimeCommand::CreatePromptVersion(command) => {
+                Some(RuntimeEntityRef::PromptVersion {
+                    prompt_version_id: command.prompt_version_id.clone(),
+                })
+            }
+            RuntimeCommand::CreatePromptRelease(command) => {
+                Some(RuntimeEntityRef::PromptRelease {
+                    prompt_release_id: command.prompt_release_id.clone(),
+                })
+            }
+            RuntimeCommand::TransitionPromptRelease(command) => {
+                Some(RuntimeEntityRef::PromptRelease {
+                    prompt_release_id: command.prompt_release_id.clone(),
+                })
+            }
         }
     }
 }
@@ -500,6 +528,38 @@ pub struct CompleteEvalRun {
     pub eval_run_id: EvalRunId,
     pub success: bool,
     pub error_message: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatePromptAsset {
+    pub project: ProjectKey,
+    pub prompt_asset_id: PromptAssetId,
+    pub name: String,
+    pub kind: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatePromptVersion {
+    pub project: ProjectKey,
+    pub prompt_version_id: PromptVersionId,
+    pub prompt_asset_id: PromptAssetId,
+    pub content: String,
+    pub content_hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatePromptRelease {
+    pub project: ProjectKey,
+    pub prompt_release_id: PromptReleaseId,
+    pub prompt_asset_id: PromptAssetId,
+    pub prompt_version_id: PromptVersionId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransitionPromptRelease {
+    pub project: ProjectKey,
+    pub prompt_release_id: PromptReleaseId,
+    pub to_state: String,
 }
 
 #[cfg(test)]

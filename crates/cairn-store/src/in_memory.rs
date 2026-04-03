@@ -92,6 +92,7 @@ impl InMemoryStore {
                         parent_run_id: e.parent_run_id.clone(),
                         project: e.project.clone(),
                         state: RunState::Pending,
+                        prompt_release_id: e.prompt_release_id.clone(),
                         failure_class: None,
                         pause_reason: None,
                         resume_trigger: None,
@@ -120,6 +121,7 @@ impl InMemoryStore {
                         parent_run_id: e.parent_run_id.clone(),
                         parent_task_id: e.parent_task_id.clone(),
                         state: TaskState::Queued,
+                        prompt_release_id: e.prompt_release_id.clone(),
                         failure_class: None,
                         pause_reason: None,
                         resume_trigger: None,
@@ -274,7 +276,11 @@ impl InMemoryStore {
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::UserMessageAppended(_) => {}
+            | RuntimeEvent::UserMessageAppended(_)
+            | RuntimeEvent::PromptAssetCreated(_)
+            | RuntimeEvent::PromptVersionCreated(_)
+            | RuntimeEvent::PromptReleaseCreated(_)
+            | RuntimeEvent::PromptReleaseTransitioned(_) => {}
             RuntimeEvent::IngestJobStarted(e) => {
                 state.ingest_jobs.insert(
                     e.job_id.as_str().to_owned(),
@@ -439,6 +445,18 @@ fn event_matches_entity(event: &RuntimeEvent, entity: &EntityRef) -> bool {
         (RuntimeEvent::IngestJobCompleted(e), EntityRef::IngestJob(id)) => e.job_id == *id,
         (RuntimeEvent::EvalRunStarted(e), EntityRef::EvalRun(id)) => e.eval_run_id == *id,
         (RuntimeEvent::EvalRunCompleted(e), EntityRef::EvalRun(id)) => e.eval_run_id == *id,
+        (RuntimeEvent::PromptAssetCreated(e), EntityRef::PromptAsset(id)) => {
+            e.prompt_asset_id == *id
+        }
+        (RuntimeEvent::PromptVersionCreated(e), EntityRef::PromptVersion(id)) => {
+            e.prompt_version_id == *id
+        }
+        (RuntimeEvent::PromptReleaseCreated(e), EntityRef::PromptRelease(id)) => {
+            e.prompt_release_id == *id
+        }
+        (RuntimeEvent::PromptReleaseTransitioned(e), EntityRef::PromptRelease(id)) => {
+            e.prompt_release_id == *id
+        }
         _ => false,
     }
 }

@@ -33,7 +33,11 @@ pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
         | RuntimeEvent::IngestJobStarted(_)
         | RuntimeEvent::IngestJobCompleted(_)
         | RuntimeEvent::EvalRunStarted(_)
-        | RuntimeEvent::EvalRunCompleted(_) => None,
+        | RuntimeEvent::EvalRunCompleted(_)
+        | RuntimeEvent::PromptAssetCreated(_)
+        | RuntimeEvent::PromptVersionCreated(_)
+        | RuntimeEvent::PromptReleaseCreated(_)
+        | RuntimeEvent::PromptReleaseTransitioned(_) => None,
     }
 }
 

@@ -291,7 +291,11 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
             | RuntimeEvent::UserMessageAppended(_)
-            | RuntimeEvent::IngestJobCompleted(_) => {}
+            | RuntimeEvent::IngestJobCompleted(_)
+            | RuntimeEvent::PromptAssetCreated(_)
+            | RuntimeEvent::PromptVersionCreated(_)
+            | RuntimeEvent::PromptReleaseCreated(_)
+            | RuntimeEvent::PromptReleaseTransitioned(_) => {}
 
             RuntimeEvent::EvalRunStarted(e) => {
                 self.add_node(e.eval_run_id.as_str(), NodeKind::EvalRun, Some(&e.project), ts)

@@ -79,6 +79,7 @@ where
             task_id: task_id.clone(),
             parent_run_id,
             parent_task_id,
+            prompt_release_id: None,
         }));
 
         self.store.append(&[event]).await?;

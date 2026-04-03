@@ -1,7 +1,7 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, RunId, SessionId,
-    SignalId, TaskId, ToolInvocationId,
+    ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, PromptAssetId,
+    PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, ToolInvocationId,
 };
 use crate::lifecycle::{
     CheckpointDisposition, FailureClass, PauseReason, ResumeTrigger, RunState, SessionState,
@@ -112,6 +112,10 @@ pub enum RuntimeEvent {
     IngestJobCompleted(IngestJobCompleted),
     EvalRunStarted(EvalRunStarted),
     EvalRunCompleted(EvalRunCompleted),
+    PromptAssetCreated(PromptAssetCreated),
+    PromptVersionCreated(PromptVersionCreated),
+    PromptReleaseCreated(PromptReleaseCreated),
+    PromptReleaseTransitioned(PromptReleaseTransitioned),
 }
 
 impl RuntimeEvent {
@@ -143,6 +147,10 @@ impl RuntimeEvent {
             RuntimeEvent::IngestJobCompleted(event) => &event.project,
             RuntimeEvent::EvalRunStarted(event) => &event.project,
             RuntimeEvent::EvalRunCompleted(event) => &event.project,
+            RuntimeEvent::PromptAssetCreated(event) => &event.project,
+            RuntimeEvent::PromptVersionCreated(event) => &event.project,
+            RuntimeEvent::PromptReleaseCreated(event) => &event.project,
+            RuntimeEvent::PromptReleaseTransitioned(event) => &event.project,
         }
     }
 
@@ -242,6 +250,20 @@ impl RuntimeEvent {
             RuntimeEvent::EvalRunCompleted(event) => Some(RuntimeEntityRef::EvalRun {
                 eval_run_id: event.eval_run_id.clone(),
             }),
+            RuntimeEvent::PromptAssetCreated(event) => Some(RuntimeEntityRef::PromptAsset {
+                prompt_asset_id: event.prompt_asset_id.clone(),
+            }),
+            RuntimeEvent::PromptVersionCreated(event) => Some(RuntimeEntityRef::PromptVersion {
+                prompt_version_id: event.prompt_version_id.clone(),
+            }),
+            RuntimeEvent::PromptReleaseCreated(event) => Some(RuntimeEntityRef::PromptRelease {
+                prompt_release_id: event.prompt_release_id.clone(),
+            }),
+            RuntimeEvent::PromptReleaseTransitioned(event) => {
+                Some(RuntimeEntityRef::PromptRelease {
+                    prompt_release_id: event.prompt_release_id.clone(),
+                })
+            }
         }
     }
 }
@@ -271,6 +293,7 @@ pub struct RunCreated {
     pub session_id: SessionId,
     pub run_id: RunId,
     pub parent_run_id: Option<RunId>,
+    pub prompt_release_id: Option<crate::ids::PromptReleaseId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -289,6 +312,7 @@ pub struct TaskCreated {
     pub task_id: TaskId,
     pub parent_run_id: Option<RunId>,
     pub parent_task_id: Option<TaskId>,
+    pub prompt_release_id: Option<crate::ids::PromptReleaseId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -367,6 +391,7 @@ pub struct ToolInvocationStarted {
     pub task_id: Option<TaskId>,
     pub target: ToolInvocationTarget,
     pub execution_class: ExecutionClass,
+    pub prompt_release_id: Option<crate::ids::PromptReleaseId>,
     pub requested_at_ms: u64,
     pub started_at_ms: u64,
 }
@@ -477,6 +502,42 @@ pub struct EvalRunCompleted {
     pub completed_at: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptAssetCreated {
+    pub project: ProjectKey,
+    pub prompt_asset_id: PromptAssetId,
+    pub name: String,
+    pub kind: String,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptVersionCreated {
+    pub project: ProjectKey,
+    pub prompt_version_id: PromptVersionId,
+    pub prompt_asset_id: PromptAssetId,
+    pub content_hash: String,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptReleaseCreated {
+    pub project: ProjectKey,
+    pub prompt_release_id: PromptReleaseId,
+    pub prompt_asset_id: PromptAssetId,
+    pub prompt_version_id: PromptVersionId,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptReleaseTransitioned {
+    pub project: ProjectKey,
+    pub prompt_release_id: PromptReleaseId,
+    pub from_state: String,
+    pub to_state: String,
+    pub transitioned_at: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -548,6 +609,7 @@ mod tests {
                     tool_name: "git.status".to_owned(),
                 },
                 execution_class: ExecutionClass::SandboxedProcess,
+                prompt_release_id: None,
                 requested_at_ms: 10,
                 started_at_ms: 11,
             }),
@@ -617,6 +679,7 @@ mod tests {
             task_id: TaskId::new("task_9"),
             parent_run_id: None,
             parent_task_id: None,
+            prompt_release_id: None,
         });
         let approval_event = RuntimeEvent::ApprovalRequested(ApprovalRequested {
             project: project.clone(),

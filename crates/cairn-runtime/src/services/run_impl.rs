@@ -90,6 +90,7 @@ where
             session_id: session_id.clone(),
             run_id: run_id.clone(),
             parent_run_id,
+            prompt_release_id: None,
         }));
 
         self.store.append(&[event]).await?;

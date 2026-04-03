@@ -93,6 +93,7 @@ where
             task_id,
             target,
             execution_class,
+            prompt_release_id: None,
             requested_at_ms: now,
             started_at_ms: now,
         }));
