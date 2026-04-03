@@ -164,6 +164,16 @@ Should include:
 
 These templates should be enough to show the product shape without requiring dozens of starter packs.
 
+### Mandatory Starter Template Floor In V1
+
+The first sellable release must ship at least these three starter template categories:
+
+- Knowledge Assistant
+- Approval-Gated Worker
+- Multi-Step Operator Workflow
+
+Additional starter templates may be added later, but v1 must not ship fewer than this floor if it wants to claim a coherent onboarding path to first value.
+
 ## Starter Asset Types
 
 Starter templates may include:
@@ -356,6 +366,15 @@ Workers should not invent separate semantics for:
 - UI-first bootstrap
 - API-first bootstrap
 
+### V1 Onboarding Entry Surface Rule
+
+V1 uses one canonical onboarding model with different entry surfaces by operating mode:
+
+- local quickstart may be CLI-assisted first, as long as it drives the canonical bootstrap operation and hands the operator into the control plane for first-value inspection
+- self-hosted team bootstrap should be UI-first once the deployment is reachable, with CLI/API support for automation and non-interactive setup
+
+This means v1 does not require “UI-only onboarding,” but it also does not allow the team-mode product story to remain effectively CLI-only.
+
 ### Idempotence Rule
 
 Bootstrap must be idempotent with respect to its target scope and template selection.
@@ -378,6 +397,13 @@ At minimum, the import model should support:
 - direct file/document import for knowledge sources
 
 The same canonical import rules must apply regardless of whether the operator starts import from CLI, API, or control-plane UI.
+
+Prompt import and document import should therefore share one canonical import service model in v1, even if the entry UX differs:
+
+- structured bundle import for prompt libraries and curated knowledge packs
+- direct file/document import routed through the same canonical reconciliation and provenance model
+
+This keeps onboarding and import behavior aligned across UI, CLI, and API surfaces.
 
 ### Local Mode
 
@@ -455,9 +481,8 @@ The goal is a small, opinionated path to first value.
 
 ## Open Questions
 
-1. Which starter templates are mandatory in the first sellable release, and which can be deferred?
-2. How much of onboarding should be UI-first versus CLI-assisted in v1?
-3. Should prompt import and document import use one shared artifact import pipeline or separate paths in v1?
+1. Which additional starter templates, if any, should be promoted into the default distribution after the first sellable release proves the initial template floor?
+2. Should a later release make self-hosted team onboarding more fully UI-driven once the canonical bootstrap model has proven stable?
 
 ## Decision
 
@@ -467,3 +492,6 @@ Proceed assuming:
 - v1 must ship a small, opinionated starter-template set
 - onboarding must reach a real first-value workflow, not only installation success
 - shipped defaults remain distinct from customer-owned runtime data
+- v1 must ship the three mandatory starter template categories defined above
+- local quickstart may be CLI-assisted, but self-hosted team onboarding must be product-visible and UI-first once reachable
+- prompt import and document import share one canonical import service model even when their entry surfaces differ
