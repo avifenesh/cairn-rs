@@ -32,6 +32,7 @@ Owner: Domain, State Machines, Shared Types
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 2 | Immediate pickup order for idle time: 1. review downstream requests for missing shared helpers and answer quickly, 2. if a real seam is blocked, land the smallest unblocker-sized shared contract addition, 3. if nothing is blocked, audit recent worker changes for attempts to smuggle convenience-only domain surface into `cairn-domain` and push back.
 - 2026-04-03 | Manager -> Worker 2 | Continuous support queue: 1. review downstream requests for missing shared helpers quickly, 2. only land unblocker-sized domain additions, 3. push back on any surface growth that is convenience-only or reopens settled RFC semantics.
 - 2026-04-03 | Manager -> Worker 2 | Latest manager read: the domain/store parity expansion is paying off. Current next focus remains contract-freeze support only. Review downstream integration requests quickly, but do not broaden `cairn-domain` unless a concrete seam is blocked.
 - 2026-04-03 | Architecture Owner -> Worker 2 | Week 1 focus: domain crate scaffold and base shared contracts that all other workers will depend on.
