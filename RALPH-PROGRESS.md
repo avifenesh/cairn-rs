@@ -1,6 +1,6 @@
 # Ralph Loop Progress
 
-## Current RFC: 008 — Tenant/Workspace/Profile
+## Current RFC: 009 — Provider Abstraction
 ## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
@@ -14,7 +14,7 @@
 | 005 | Task/Session/Checkpoint Lifecycle | DONE |
 | 006 | Prompt Registry and Release | DONE |
 | 007 | Plugin Protocol and Transport | DONE |
-| 008 | Tenant/Workspace/Profile | IN PROGRESS |
+| 008 | Tenant/Workspace/Profile | DONE |
 | 009 | Provider Abstraction | pending |
 | 010 | Operator Control Plane | pending |
 | 011 | Deployment Shape | pending |
