@@ -24,11 +24,16 @@ Interpretation:
 | Worker 8 | `cairn-signal` | `pass` | All crate tests passed in isolation. |
 | Worker 8 | `cairn-channels` | `pass` | All crate tests passed in isolation. |
 | Worker 8 | `cairn-api` | `pass` | All crate tests passed in isolation. |
+
+## Manager Notes
+
+- Targeted quality checks this sweep: `cargo check -p cairn-agent`, `cargo test -p cairn-runtime --test seam_protection`, and `./scripts/check-compat-inventory.sh`.
+- `cairn-agent` and the runtime seam test both pass when run directly.
+- The compatibility script still exits green while printing `cairn-agent -> cairn_evals` compile errors during its cargo test subcommands. Treat that as a manager-owned harness follow-up until proven otherwise; it is not currently a confirmed crate-level blocker.
+- Worker pacing is now queue-based: every worker should have a current cut plus at least one explicit next cut in the mailbox so idle time turns into narrow integration work instead of scope drift.
 | Worker 8 | `cairn-app` | `pass` | All crate tests passed in isolation. |
 
 ## Manager Read
 
-- all worker-owned crates are currently green in isolation, and `cargo test --workspace` is green too
-- the current manager focus is seam polish and warning cleanup, not red test recovery
-- no warning-level defect is currently surfaced by the latest targeted sweep (`cargo check -p cairn-tools` is clean)
-- highest-value remaining integration seam is API/product glue polish across Worker 5, Worker 6, and Worker 8
+- if all rows except one pass, treat the red build as a focused blocker and keep unrelated workers moving
+- if several adjacent rows fail together, stop and look for shared-contract drift before more code lands

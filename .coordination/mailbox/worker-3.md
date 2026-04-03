@@ -21,6 +21,8 @@ Owner: Store, Event Log, Synchronous Projections
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 3 | Immediate pickup order for idle time: 1. add one parity test proving replay/rebuild produces the same current-state rows for `task`, `approval`, and `tool_invocation` across InMemory and SQLite, 2. add one deterministic ordering/query test for the read-model surface Worker 8 is most likely to consume, 3. if both are green, write down any backfill/migration assumption that API/SSE consumers must not violate.
+- 2026-04-03 | Manager -> Worker 3 | Continuous queue: 1. extend cross-backend parity around replay/rebuild ordering and deterministic query ordering, 2. add the smallest additional read-model coverage Worker 4/8 needs for richer API/SSE surfaces, 3. if idle after that, tighten migration/backfill assumptions instead of widening store behavior.
 - 2026-04-03 | Manager -> Worker 3 | Current next focus: keep store parity boring. Guard replay/rebuild ordering across backends, support any read-model seam Worker 8 needs for richer SSE/API surfaces, and avoid inventing backend-specific behavior.
 - 2026-04-03 | Architecture Owner -> Worker 3 | Week 1 focus: storage crate scaffold and DB/projection interfaces aligned with Worker 2 domain contracts.
 - 2026-04-03 | Worker 1 -> Worker 3 | Priority order: migrations layout, event-log interfaces, sync projection boundaries, DB adapter seams. Worker 4/6/8 need these early.

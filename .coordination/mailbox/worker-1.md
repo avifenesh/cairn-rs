@@ -4,6 +4,8 @@ Owner: Contracts, Fixtures, Migration Harness
 
 ## Current Status
 
+- 2026-04-03 | Worker 1 / Manager | Compatibility harness verified clean in isolation | `./scripts/check-compat-inventory.sh` now runs cleanly on its own after the latest report refresh. The earlier `cairn_evals` lookup noise was a concurrent cargo artifact during overlapping manager sweeps, not a persistent compatibility-harness failure.
+- 2026-04-03 | Worker 1 / Manager | SSE publisher gap report refreshed to current builder reality | The generated report now recognizes dedicated feed/poll/assistant-streaming builders instead of treating those families as unmapped. Remaining explicit SSE follow-up is narrowed to runtime-shaped payload enrichment for `task_update` / `approval_required` / `assistant_tool_call` / `agent_progress`, assembled final text for `assistant_end`, and owner selection for `memory_proposed`.
 - 2026-04-03 | Manager-owned only | No new Worker 1 feature implementation is planned from this seat. This mailbox now tracks compatibility, cross-worker drift, and quality gates while the other workers continue delivery.
 - 2026-04-03 | Manager quality sweep | `cargo test --workspace` and `./scripts/check-compat-inventory.sh` both pass. Current quality attention is on cross-crate seam polish and warning cleanup, not red test failures.
 - 2026-04-03 | Worker 1 / Manager | First seed fixture set complete | Minimum Phase 0 HTTP/SSE fixtures are in repo, inventory checker validates them, and the next step is tightening them against direct backend captures where possible.
@@ -22,7 +24,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | Worker slice health report added | Manager health is generated as `.coordination/WORKER_SLICE_HEALTH.md` and currently shows all worker-owned crates green in isolation.
 - 2026-04-03 | Worker 1 / Manager | Upstream source pointers published | Worker 1 now generates exact upstream file-and-line pointers for each preserved Phase 0 HTTP route and SSE event, so the protocol-backed migration contract stays auditable even without legacy backend handler captures.
 - 2026-04-03 | Worker 1 / Manager | SSE reports now track shaped-payload reality | The generated SSE gap and handoff reports no longer talk about raw runtime-event serialization. They now reflect the actual current state: `sse_payloads` exists, wrapper families are present, and the remaining work is field-level alignment to the preserved fixtures.
-- 2026-04-03 | Worker 1 / Manager | Compatibility and workspace sweeps refreshed after latest integration cuts | `./scripts/check-compat-inventory.sh`, `./scripts/generate-worker-slice-health-report.sh`, `cargo test --workspace`, and the latest targeted `cargo check -p cairn-tools` all pass cleanly. No current repo-level compatibility, integration, or warning-level blocker is surfaced by the Worker 1 manager sweep.
+- 2026-04-03 | Worker 1 / Manager | Compatibility and workspace sweeps refreshed after latest integration cuts | `./scripts/check-compat-inventory.sh`, `./scripts/generate-worker-slice-health-report.sh`, `cargo test --workspace`, and targeted API/SSE checks all pass cleanly. The last repo-level warning in `cairn-memory` was removed during the latest manager sweep, so no current compatibility, integration, or warning-level blocker is surfaced from the Worker 1 seat.
 
 ## Blocked By
 
@@ -30,6 +32,7 @@ Owner: Contracts, Fixtures, Migration Harness
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 1 mailbox | Continuous manager queue: 1. keep `phase0_*` reports and owner mapping refreshed after worker landings, 2. investigate why `./scripts/check-compat-inventory.sh` prints `cairn-agent -> cairn_evals` compile errors while still exiting green, and route it cleanly if it is a real dependency issue, 3. keep compatibility drift visible without reopening feature work from this seat.
 - 2026-04-03 | Architecture Owner -> Worker 1 | Week 1 focus: `tests/compat`, `tests/fixtures`, preserved route/SSE fixture naming, and initial migration harness shape.
 - 2026-04-03 | Worker 8 -> Worker 1 | Preserved route catalog (30 entries) and SSE event catalog (16 entries) are codified as Rust types in `cairn-api::http::preserved_route_catalog()` and `cairn-api::sse::preserved_sse_catalog()`. Classification tags (preserve/transitional) match the compatibility catalog doc. Ready for fixture alignment.
 - 2026-04-03 | Worker 8 -> Worker 1 | Week 2: SSE publisher maps all 20 RuntimeEvent variants to preserved SSE names. `build_sse_frame` + `parse_last_event_id` support the `/v1/stream?lastEventId=<id>` replay contract. Ready for SSE fixture assertions.

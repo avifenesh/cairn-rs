@@ -19,6 +19,7 @@ Owner: Runtime Spine
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 4 | Continuous queue: 1. land one SQLite-backed durable runtime proof for `ToolInvocationService`, 2. extend that same path to `ExternalWorkerService` plus replay/current-state reads, 3. if both hold, publish the exact stable seam Worker 8 should trust for store-backed API/SSE enrichment and stop before adding runtime breadth.
 - 2026-04-03 | Manager -> Worker 4 | Next pacing cut: move from seam definition to durable-backend proof. Take one SQLite-backed runtime integration slice that exercises `ToolInvocationService`, `ExternalWorkerService`, replay/current-state reads, and proves the runtime seam holds without the in-memory store.
 - 2026-04-03 | Manager -> Worker 4 | Keep scope narrow: this is not new runtime breadth. Land one representative durable integration test path that Worker 8 can trust when enriching API/SSE surfaces from real store-backed reads.
 - 2026-04-03 | Manager -> Worker 4 | Current next focus: keep runtime seams stable while API catches up. Protect `ToolInvocationService` and `ExternalWorkerService`, and add narrow integration coverage if Worker 8 exposes any seam drift during API wiring.

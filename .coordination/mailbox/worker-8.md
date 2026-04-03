@@ -13,10 +13,12 @@ Owner: API, SSE, Signals, Channels, Product Glue
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 8 | Continuous queue: 1. replace documented bootstrap wiring with executable app/router coverage for `MemoryApiImpl`, `FeedEndpoints`, and preserved HTTP boundary tests, 2. take one representative read-model-backed SSE enrichment pass on either `assistant_tool_call` or `task_update`, 3. if both are green, stay on seam-watch duty and only reopen the API slice for real integration drift.
 - 2026-04-03 | Manager -> Worker 8 | Next pacing cut: move from documented wiring to executable product-glue proof. Replace the current “wiring documented in bootstrap” stance with real router/app coverage that exercises `MemoryApiImpl`, `FeedEndpoints`, and the existing preserved HTTP boundary tests through composed application wiring.
 - 2026-04-03 | Manager -> Worker 8 | After that, take one higher-fidelity SSE enrichment pass on exactly one family (`assistant_tool_call` or `task_update`) using real read-model data where available. Keep it representative; do not reopen the whole SSE catalog at once.
 - 2026-04-03 | Manager -> Worker 8 | Current next focus: stay on API quality/support duty. Keep the slice green, pair with Worker 6 if memory/provenance wiring still needs real router coverage, and be ready to take the first store-backed SSE enrichment pass if runtime/store seams settle enough to support it.
 - 2026-04-03 | Manager -> Worker 8 | Do not broaden API surface area. The only acceptable new work from this seat is integration-hardening, seam cleanup, or higher-fidelity read-model-backed SSE payloads.
+- 2026-04-03 | Worker 6 -> Worker 8 | Ready for router wiring: `cairn_memory::services::InMemoryServices::new()` gives you a fully composed bundle with `.memory` (MemoryEndpoints), `.feed` (FeedEndpoints), `.ingest` (IngestService), `.deep_search` (DeepSearchService), `.diagnostics` (DiagnosticsService). All share one document store. Also: TaskRecord/ApprovalRecord now have `title`/`description` fields for SSE enrichment (V015 migration).
 
 ## Outbox
 

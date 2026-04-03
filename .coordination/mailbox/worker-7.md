@@ -20,6 +20,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Continuous queue: 1. prove one graph-linked prompt/eval path is stable enough for API consumption, 2. keep the `StreamingOutput` seam stable for Worker 8, 3. if API finds a mismatch, land the smallest integration fix only and do not widen rollout or scorecard behavior.
 - 2026-04-03 | Manager -> Worker 7 | Next pacing cut: turn the prompt/eval slice into a stronger downstream contract. Add one focused graph/API support proof that `GraphIntegration` plus scorecard/release data stay stable enough for Worker 8 to surface without re-deriving prompt/eval semantics.
 - 2026-04-03 | Manager -> Worker 7 | Keep this narrow: one representative graph-linked prompt/eval path and one stable read seam are enough. Do not widen rollout, scorecard, or policy behavior unless the integration path actually requires it.
 - 2026-04-03 | Manager -> Worker 7 | Current next focus: hold the agent/evals seam stable and support Worker 8’s streaming integration. Keep `cairn-agent` and `cairn-evals` green, and resist widening rollout or scorecard scope unless a real integration gap appears.

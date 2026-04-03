@@ -4,6 +4,7 @@ Owner: Domain, State Machines, Shared Types
 
 ## Current Status
 
+- 2026-04-03 | Worker 2 / Manager | Contract freeze still holds after backend parity sweep | Durable backend parity is now green across the full current-state read-model set. The remaining interrupted-run recovery placeholder in `cairn-runtime` is blocked by missing cross-project run/session enumeration, not by missing Worker 2 domain or store shared contracts, so no further shared-surface expansion is justified from this seat right now.
 - 2026-04-03 | Week 1 assigned | Scaffold `cairn-domain` and lock base IDs, commands, events, tenancy, lifecycle, and policy module boundaries.
 - 2026-04-03 | Worker 2 / Manager | `cairn-domain` scaffold complete | Stable ID newtypes, tenancy keys, lifecycle enums/helpers, policy verdict types, runtime command/event envelopes including lease/subagent/recovery/checkpoint-restore shapes, prompt rollout selectors/release lifecycle, and provider routing records are in repo with passing crate tests.
 - 2026-04-03 | Week 2 assigned | Lock the minimal runtime-critical shared contract set needed by Workers 3, 4, and 5. Publish one review-ready cut, then stop expanding surface area.
@@ -31,6 +32,7 @@ Owner: Domain, State Machines, Shared Types
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 2 | Continuous support queue: 1. review downstream requests for missing shared helpers quickly, 2. only land unblocker-sized domain additions, 3. push back on any surface growth that is convenience-only or reopens settled RFC semantics.
 - 2026-04-03 | Manager -> Worker 2 | Latest manager read: the domain/store parity expansion is paying off. Current next focus remains contract-freeze support only. Review downstream integration requests quickly, but do not broaden `cairn-domain` unless a concrete seam is blocked.
 - 2026-04-03 | Architecture Owner -> Worker 2 | Week 1 focus: domain crate scaffold and base shared contracts that all other workers will depend on.
 - 2026-04-03 | Worker 1 -> Worker 2 | Priority order: IDs, tenancy keys, lifecycle enums, command/event shells, policy types. Publish stable boundaries before adding depth.
