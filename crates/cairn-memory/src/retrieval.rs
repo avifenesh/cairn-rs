@@ -220,6 +220,10 @@ pub fn compute_final_score(breakdown: &ScoringBreakdown, weights: &ScoringWeight
     if let Some(recency) = breakdown.recency_of_use {
         score += recency * weights.recency_weight;
     }
+    // Guard against NaN from malformed weights/scores — treat as zero.
+    if score.is_nan() {
+        return 0.0;
+    }
     score.max(0.0)
 }
 
@@ -397,5 +401,42 @@ mod tests {
 
         let score = compute_final_score(&breakdown, &weights);
         assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn compute_final_score_nan_weights_return_zero() {
+        let breakdown = ScoringBreakdown {
+            lexical_relevance: 1.0,
+            ..ScoringBreakdown::default()
+        };
+        let weights = ScoringWeights {
+            lexical_weight: f64::NAN,
+            ..ScoringWeights::default()
+        };
+        assert_eq!(compute_final_score(&breakdown, &weights), 0.0);
+    }
+
+    #[test]
+    fn freshness_score_future_created_at_returns_1() {
+        // created_at is in the future relative to now — no decay.
+        assert_eq!(freshness_score(2_000_000, 1_000_000, 30.0), 1.0);
+    }
+
+    #[test]
+    fn freshness_score_huge_age_returns_near_zero() {
+        // u64::MAX - 0 as age: should not panic, just return ~0.
+        let score = freshness_score(0, u64::MAX, 30.0);
+        assert!(score >= 0.0 && score.is_finite(), "got {score}");
+    }
+
+    #[test]
+    fn staleness_penalty_negative_threshold_returns_zero() {
+        assert_eq!(staleness_penalty(None, 0, 1_000_000, -10.0), 0.0);
+    }
+
+    #[test]
+    fn staleness_penalty_future_reference_returns_zero() {
+        // updated_at is in the future relative to now.
+        assert_eq!(staleness_penalty(Some(2_000_000), 0, 1_000_000, 90.0), 0.0);
     }
 }

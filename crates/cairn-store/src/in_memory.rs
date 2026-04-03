@@ -398,6 +398,8 @@ fn event_matches_entity(event: &RuntimeEvent, entity: &EntityRef) -> bool {
         }
         (RuntimeEvent::SignalIngested(e), EntityRef::Signal(id)) => e.signal_id == *id,
         (RuntimeEvent::UserMessageAppended(e), EntityRef::Run(id)) => e.run_id == *id,
+        (RuntimeEvent::IngestJobStarted(e), EntityRef::IngestJob(id)) => e.job_id == *id,
+        (RuntimeEvent::IngestJobCompleted(e), EntityRef::IngestJob(id)) => e.job_id == *id,
         _ => false,
     }
 }

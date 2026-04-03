@@ -15,11 +15,11 @@ PROMPTS="$REPO_ROOT/.coordination/prompts"
 mkdir -p "$INBOX" "$(dirname "$INIT_FLAG")"
 
 type_text() {
-  # Type text into pane character-by-character using send-keys -l
-  # Then send Enter separately
+  # Send text literally, wait for TUI to process, then press Enter
   local pane="$1"
   local text="$2"
   tmux send-keys -t "$pane" -l "$text"
+  sleep 0.5
   tmux send-keys -t "$pane" Enter
 }
 

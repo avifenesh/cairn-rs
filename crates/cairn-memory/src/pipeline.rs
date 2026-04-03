@@ -197,13 +197,13 @@ pub fn normalize(content: &str, source_type: SourceType) -> String {
 /// Strip HTML tags, decode common entities, collapse whitespace.
 fn strip_html(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
-    let mut in_tag = false;
     let mut chars = html.chars().peekable();
 
     while let Some(ch) = chars.next() {
         match ch {
             '<' => {
-                // Check for <br>, <br/>, <p>, </p> — insert newline.
+                // Consume everything until '>' (tag content is discarded).
+                // Insert newline for block-level elements.
                 let mut tag = String::new();
                 for tc in chars.by_ref() {
                     if tc == '>' {
@@ -219,7 +219,6 @@ fn strip_html(html: &str) -> String {
                 if matches!(tag_name, "br" | "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
                     out.push('\n');
                 }
-                in_tag = false;
             }
             '&' => {
                 let mut entity = String::new();
@@ -245,8 +244,7 @@ fn strip_html(html: &str) -> String {
                     }
                 }
             }
-            _ if !in_tag => out.push(ch),
-            _ => {}
+            _ => out.push(ch),
         }
     }
 
@@ -798,6 +796,36 @@ mod tests {
         let bad = "not valid json {{{";
         let result = super::normalize(bad, SourceType::StructuredJson);
         assert_eq!(result, bad);
+    }
+
+    #[test]
+    fn normalize_html_unclosed_tag_does_not_panic() {
+        let html = "Hello <b";
+        let result = super::normalize(html, SourceType::Html);
+        // Should not panic; content before the unclosed tag is preserved.
+        assert!(result.contains("Hello"));
+    }
+
+    #[test]
+    fn normalize_html_unclosed_entity_does_not_panic() {
+        let html = "Hello &unknown stuff";
+        let result = super::normalize(html, SourceType::Html);
+        assert!(result.contains("Hello"));
+    }
+
+    #[test]
+    fn normalize_empty_string_returns_empty() {
+        assert_eq!(super::normalize("", SourceType::PlainText), "");
+        assert_eq!(super::normalize("", SourceType::Html), "");
+        assert_eq!(super::normalize("", SourceType::Markdown), "");
+        assert_eq!(super::normalize("", SourceType::StructuredJson), "");
+    }
+
+    #[test]
+    fn normalize_markdown_unclosed_bracket_does_not_panic() {
+        let md = "Check [this link without closing";
+        let result = super::normalize(md, SourceType::Markdown);
+        assert!(result.contains("this link without closing"));
     }
 
     #[tokio::test]
