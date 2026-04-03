@@ -180,6 +180,25 @@ The most likely early paid expansion areas are:
 - higher-touch support and deployment assurance
 - later managed or hybrid operating options
 
+### First Paid Expansion Choice
+
+The first paid expansion after `team_self_hosted` should be a governance/compliance package.
+
+That package should focus on capabilities that increase enterprise trust and control without changing core runtime semantics.
+
+The initial paid governance/compliance family should center on:
+
+- advanced audit export and governance reporting
+- stricter compliance-oriented policy packs and approval hardening
+- stronger artifact trust and verification layers where required for regulated environments
+
+This should be the first paid step-up because it:
+
+- maps cleanly to self-hosted buyer concerns
+- strengthens the operator/control-plane story rather than diluting it
+- avoids forcing managed cloud to become the first monetization path
+- creates a clear enterprise boundary without requiring a second product architecture
+
 Examples of likely later paid capability families:
 
 - stricter compliance-oriented policy packs
@@ -215,6 +234,16 @@ Required v1 operator-visible commercial surfaces:
 - capability availability where gated features appear
 - deployment/auth/credential health where commercial supportability depends on it
 
+### Early Post-V1 Entitlement UX
+
+The first entitlement surfaces that deserve dedicated operator workflows after v1 are:
+
+- entitlement status and scope inspection
+- capability-to-entitlement mapping for gated features
+- entitlement change/audit visibility for operators
+
+These remain operational and administrative surfaces, not purchasing flows.
+
 Not required in v1:
 
 - in-product purchasing flows
@@ -245,9 +274,9 @@ That means:
 
 ## Open Questions
 
-1. Which governance/compliance capability should be the first paid expansion after the initial self-hosted team release proves out?
-2. What evidence should trigger promotion of managed cloud or hybrid from later motion to first-class commercial offer?
-3. Which entitlement surfaces deserve first-class operator workflows in the first post-v1 release?
+1. What evidence should trigger promotion of managed cloud or hybrid from later motion to first-class commercial offer?
+2. How much of the governance/compliance package should be bundled together in the first paid step-up versus phased across later releases?
+3. Which entitlement operator workflows should move from status/inspection into stronger administrative tooling in the first post-v1 release?
 
 ## Decision
 
@@ -259,3 +288,4 @@ Proceed assuming:
 - the first sellable motion is self-hosted team deployment, not managed cloud
 - managed cloud and hybrid are later business motions on the same product model
 - v1 commercial UX includes entitlement/license visibility and gated capability awareness, not billing workflows
+- the first paid expansion after the initial self-hosted release should be a governance/compliance package rather than a managed-cloud-first upsell
