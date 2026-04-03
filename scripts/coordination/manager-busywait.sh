@@ -65,6 +65,22 @@ task_exists() {
   return 1
 }
 
+recent_done_task_exists() {
+  local worker summary limit file
+  worker="$(normalize_worker "$1")"
+  summary="$2"
+  limit="${3:-0}"
+  (( limit > 0 )) || return 1
+
+  while read -r file; do
+    [[ -f "$file" ]] || continue
+    if [[ "$(task_summary "$file")" == "$summary" ]]; then
+      return 0
+    fi
+  done < <(find "$TASK_ROOT/$worker/done" -maxdepth 1 -type f -name '*.task' | sort | tail -n "$limit")
+  return 1
+}
+
 next_index_file() {
   local worker
   worker="$(normalize_worker "$1")"
@@ -89,32 +105,41 @@ worker_threshold() {
   esac
 }
 
+worker_recent_done_limit() {
+  local worker
+  worker="$(normalize_worker "$1")"
+  case "$worker" in
+    worker-1|worker-2) printf '%s\n' 1 ;;
+    *) printf '%s\n' 0 ;;
+  esac
+}
+
 worker_task_pool() {
   local worker
   worker="$(normalize_worker "$1")"
   case "$worker" in
     worker-1)
       cat <<'EOF'
-Refresh worker slice health after the latest completions and route any new seam drift to the right owner
-Re-run compatibility report generation after the latest API and SSE alignment changes and confirm phase0 reports stay in sync
-Audit queue-bus manager noise for stale replay events and tighten reporting only if it hides real refill signals
-Compare the queue-driven manager loop against mailbox guidance and note any mismatch before it becomes stale coordination debt
-Check whether fast worker turnover is outrunning the current health-report cadence and document the next smallest manager fix if so
-Review the newest cross-worker handoff points and flag only ownership drift that could confuse the next queue refill
-Sanity-check whether current queue health still matches the latest repo state and capture only a concrete manager correction if not
-Inspect the last wave of completions for repeated no-op work and suggest one small refinement to keep worker tasks sharper
+Turn one current Phase 0 HTTP or SSE report gap into an executable cairn-api test or explicit generated artifact update
+Re-run compatibility generation and capture the exact files that changed, then narrow that drift to one concrete owner or test gap
+Audit the current migration README owner map and generated reports for stale prose, then update one concrete mismatch instead of only noting it
+Add one compatibility guard that would fail if feed, memory, or overview route shaping drifts from the preserved Phase 0 contract
+Compare the newest API/SSE tests against generated migration artifacts and tighten whichever side is lagging behind
+Take one explicit response-shape or payload-shape gap from the generated reports and convert it into a reproducible assertion or fixture refresh
+Refresh worker slice health only after checking which concrete crate or seam changed, then record that exact change instead of a general status sweep
+Audit the queue system only if it hides compatibility signal; otherwise spend the pass on a concrete preserved-surface truthfulness check
 EOF
       ;;
     worker-2)
       cat <<'EOF'
-Review whether Worker 1 or Worker 8 surfaced any real shared-type blocker during the latest API and compatibility pass
-Audit the newest downstream domain usage for convenience-only helpers creeping back in and push back if needed
-If no seam is blocked stay in contract-freeze support mode and document the no-op outcome
-Scan the latest runtime and API changes for domain helper duplication and only intervene if the contract boundary actually drifted
-Review whether any new lifecycle or provider types should stay downstream instead of being pulled back into shared contracts
-Check whether recent integrations introduced naming drift between domain contracts and API surfaces and capture only one concrete mismatch
-Audit one recently touched domain seam for accidental policy leakage and stop once the boundary is confirmed
-Review the latest downstream ownership of selectors, prompts, or provider types and only pull back what clearly belongs in shared contracts
+Scan runtime, store, tools, and API for one concrete duplicate of a cairn-domain helper or invariant and either remove it or record the exact blocker
+Add or tighten one cairn-domain regression test for a lifecycle, tool-invocation, selector, or envelope invariant that downstream crates now depend on
+Audit one newly touched downstream seam for domain-boundary leakage and capture the exact helper, type, or validator that should move or stay put
+Check the latest API/runtime/store changes for envelope or ownership assembly outside cairn-domain and identify one concrete remaining offender
+Review one prompt, provider, or selector path end-to-end and verify the shared domain contract is still the only source of truth
+Take one downstream contract ambiguity surfaced by current worktree changes and resolve it into either a domain test, a helper move, or a written blocker
+Inspect one current callsite that still re-derives domain semantics locally and replace or flag that exact spot instead of doing another broad audit
+Verify one recent domain-facing integration uses cairn-domain builders or validators directly, and if not, name the exact missing adoption point
 EOF
       ;;
     worker-3)
@@ -214,13 +239,14 @@ EOF
 }
 
 queue_next_from_pool() {
-  local worker idx_file cycle_file idx cycle count summary rendered queued="0"
+  local worker idx_file cycle_file idx cycle count summary rendered queued="0" recent_done_limit
   local -a pool=()
 
   worker="$(normalize_worker "$1")"
   mapfile -t pool < <(worker_task_pool "$worker")
   count="${#pool[@]}"
   (( count > 0 )) || return 1
+  recent_done_limit="$(worker_recent_done_limit "$worker")"
 
   idx_file="$(next_index_file "$worker")"
   cycle_file="$(worker_cycle_file "$worker")"
@@ -248,7 +274,7 @@ queue_next_from_pool() {
     if [[ "$worker" == "worker-5" || "$worker" == "worker-8" ]]; then
       rendered="Batch ${cycle}: $summary"
     fi
-    if ! task_exists "$worker" "$rendered"; then
+    if ! task_exists "$worker" "$rendered" && ! recent_done_task_exists "$worker" "$rendered" "$recent_done_limit"; then
       "$script_dir/queue-worker-tasks.sh" --from manager "$worker" "$rendered" >/dev/null
       queued="1"
       break
