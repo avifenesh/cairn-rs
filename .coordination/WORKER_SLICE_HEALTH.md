@@ -34,6 +34,7 @@ Interpretation:
 
 ## Manager Read
 
-- current focused blocker is Worker 2's `cairn-domain` test drift; Worker 7 also has a narrow eval warning cleanup, and Worker 8 has the adjacent API adoption follow-up for richer completed/failed `assistant_tool_call` shaping
+- current focused blocker is Worker 2's `cairn-domain` test drift; Worker 7 also has a narrow eval warning cleanup
+- Worker 8's remaining work is back to the two real product-surface decisions: `FeedItem.id` contract and `memory_proposed` publisher ownership, not `assistant_tool_call` field adoption
 - if all rows except one pass, treat the red build as a focused blocker and keep unrelated workers moving
 - if several adjacent rows fail together, stop and look for shared-contract drift before more code lands
