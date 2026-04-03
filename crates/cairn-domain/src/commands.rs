@@ -1,9 +1,9 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, CommandId, MailboxMessageId, RunId, SessionId, TaskId,
+    ApprovalId, CheckpointId, CommandId, MailboxMessageId, RunId, SessionId, SignalId, TaskId,
     ToolInvocationId,
 };
-use crate::lifecycle::{PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget};
+use crate::lifecycle::{FailureClass, PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget};
 use crate::policy::{ApprovalDecision, ExecutionClass};
 use crate::tenancy::{OwnershipKey, ProjectKey};
 use crate::tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget};
@@ -92,9 +92,17 @@ pub enum RuntimeCommand {
     AppendMailboxMessage(AppendMailboxMessage),
     StartToolInvocation(StartToolInvocation),
     FinishToolInvocation(FinishToolInvocation),
+    IngestSignal(IngestSignal),
     ReportExternalWorker(ReportExternalWorker),
     SpawnSubagent(SpawnSubagent),
     RecordRecoverySweep(RecordRecoverySweep),
+    CompleteRun(CompleteRun),
+    FailRun(FailRun),
+    CancelRun(CancelRun),
+    CompleteTask(CompleteTask),
+    FailTask(FailTask),
+    CancelTask(CancelTask),
+    AppendUserMessage(AppendUserMessage),
 }
 
 impl RuntimeCommand {
@@ -116,9 +124,17 @@ impl RuntimeCommand {
             RuntimeCommand::AppendMailboxMessage(command) => &command.project,
             RuntimeCommand::StartToolInvocation(command) => &command.project,
             RuntimeCommand::FinishToolInvocation(command) => &command.project,
+            RuntimeCommand::IngestSignal(command) => &command.project,
             RuntimeCommand::ReportExternalWorker(command) => &command.report.project,
             RuntimeCommand::SpawnSubagent(command) => &command.project,
             RuntimeCommand::RecordRecoverySweep(command) => &command.project,
+            RuntimeCommand::CompleteRun(command) => &command.project,
+            RuntimeCommand::FailRun(command) => &command.project,
+            RuntimeCommand::CancelRun(command) => &command.project,
+            RuntimeCommand::CompleteTask(command) => &command.project,
+            RuntimeCommand::FailTask(command) => &command.project,
+            RuntimeCommand::CancelTask(command) => &command.project,
+            RuntimeCommand::AppendUserMessage(command) => &command.project,
         }
     }
 
@@ -178,6 +194,9 @@ impl RuntimeCommand {
                     invocation_id: command.invocation_id.clone(),
                 })
             }
+            RuntimeCommand::IngestSignal(command) => Some(RuntimeEntityRef::Signal {
+                signal_id: command.signal_id.clone(),
+            }),
             RuntimeCommand::ReportExternalWorker(command) => Some(RuntimeEntityRef::Task {
                 task_id: command.report.task_id.clone(),
             }),
@@ -194,6 +213,27 @@ impl RuntimeCommand {
                         .clone()
                         .map(|run_id| RuntimeEntityRef::Run { run_id })
                 }),
+            RuntimeCommand::CompleteRun(command) => Some(RuntimeEntityRef::Run {
+                run_id: command.run_id.clone(),
+            }),
+            RuntimeCommand::FailRun(command) => Some(RuntimeEntityRef::Run {
+                run_id: command.run_id.clone(),
+            }),
+            RuntimeCommand::CancelRun(command) => Some(RuntimeEntityRef::Run {
+                run_id: command.run_id.clone(),
+            }),
+            RuntimeCommand::CompleteTask(command) => Some(RuntimeEntityRef::Task {
+                task_id: command.task_id.clone(),
+            }),
+            RuntimeCommand::FailTask(command) => Some(RuntimeEntityRef::Task {
+                task_id: command.task_id.clone(),
+            }),
+            RuntimeCommand::CancelTask(command) => Some(RuntimeEntityRef::Task {
+                task_id: command.task_id.clone(),
+            }),
+            RuntimeCommand::AppendUserMessage(command) => Some(RuntimeEntityRef::Run {
+                run_id: command.run_id.clone(),
+            }),
         }
     }
 }
@@ -329,6 +369,15 @@ pub struct FinishToolInvocation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestSignal {
+    pub project: ProjectKey,
+    pub signal_id: SignalId,
+    pub source: String,
+    pub payload: serde_json::Value,
+    pub timestamp_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReportExternalWorker {
     pub report: ExternalWorkerReport,
 }
@@ -349,6 +398,55 @@ pub struct RecordRecoverySweep {
     pub run_id: Option<RunId>,
     pub task_id: Option<TaskId>,
     pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompleteRun {
+    pub project: ProjectKey,
+    pub run_id: RunId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailRun {
+    pub project: ProjectKey,
+    pub run_id: RunId,
+    pub failure_class: FailureClass,
+    pub error_message: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelRun {
+    pub project: ProjectKey,
+    pub run_id: RunId,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompleteTask {
+    pub project: ProjectKey,
+    pub task_id: TaskId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailTask {
+    pub project: ProjectKey,
+    pub task_id: TaskId,
+    pub failure_class: FailureClass,
+    pub error_message: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelTask {
+    pub project: ProjectKey,
+    pub task_id: TaskId,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppendUserMessage {
+    pub project: ProjectKey,
+    pub session_id: SessionId,
+    pub run_id: RunId,
 }
 
 #[cfg(test)]

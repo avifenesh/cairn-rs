@@ -1,5 +1,6 @@
 use crate::ids::{
-    ApprovalId, CheckpointId, MailboxMessageId, RunId, SessionId, TaskId, ToolInvocationId,
+    ApprovalId, CheckpointId, MailboxMessageId, RunId, SessionId, SignalId, TaskId,
+    ToolInvocationId,
 };
 use crate::tenancy::OwnershipKey;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ pub enum RuntimeEntityKind {
     Approval,
     Checkpoint,
     MailboxMessage,
+    Signal,
     ToolInvocation,
 }
 
@@ -27,6 +29,7 @@ pub enum RuntimeEntityRef {
     Approval { approval_id: ApprovalId },
     Checkpoint { checkpoint_id: CheckpointId },
     MailboxMessage { message_id: MailboxMessageId },
+    Signal { signal_id: SignalId },
     ToolInvocation { invocation_id: ToolInvocationId },
 }
 
@@ -39,6 +42,7 @@ impl RuntimeEntityRef {
             RuntimeEntityRef::Approval { .. } => RuntimeEntityKind::Approval,
             RuntimeEntityRef::Checkpoint { .. } => RuntimeEntityKind::Checkpoint,
             RuntimeEntityRef::MailboxMessage { .. } => RuntimeEntityKind::MailboxMessage,
+            RuntimeEntityRef::Signal { .. } => RuntimeEntityKind::Signal,
             RuntimeEntityRef::ToolInvocation { .. } => RuntimeEntityKind::ToolInvocation,
         }
     }
