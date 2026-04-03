@@ -12,7 +12,7 @@ use crate::prompt_releases::PromptReleaseService;
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis() as u64
 }
 
@@ -118,7 +118,7 @@ where
                         project: existing.project.clone(),
                         prompt_release_id: rel.prompt_release_id.clone(),
                         from_state: "active".to_owned(),
-                        to_state: "archived".to_owned(),
+                        to_state: "approved".to_owned(),
                         transitioned_at: now_millis(),
                     },
                 ));

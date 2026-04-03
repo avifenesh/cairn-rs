@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
-## Current RFC: 006 — Prompt Registry and Release
-## Current Phase: implementation (Phase 3a)
+## Current RFC: 007 — Plugin Protocol and Transport
+## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
 
@@ -12,7 +12,7 @@
 | 003 | Owned Retrieval | DONE |
 | 004 | Graph and Eval Matrix | DONE |
 | 005 | Task/Session/Checkpoint Lifecycle | DONE |
-| 006 | Prompt Registry and Release | IN PROGRESS |
+| 006 | Prompt Registry and Release | DONE |
 | 007 | Plugin Protocol and Transport | pending |
 | 008 | Tenant/Workspace/Profile | pending |
 | 009 | Provider Abstraction | pending |
@@ -529,3 +529,6 @@ RFC 006 requires prompt asset list/detail, version history, release list/detail,
 - [x] RFC 005: Phase 5 — marked complete
 - [x] RFC 006: Phase 1 gap analysis — 10 gaps across prompt lifecycle events, persistence, read models, approval integration, runtime binding
 - [x] RFC 006: Phase 2 types — prompt lifecycle commands/events (PromptAssetCreated/VersionCreated/ReleaseCreated/ReleaseTransitioned), read model traits (PromptAssetReadModel/VersionReadModel/ReleaseReadModel), PromptApprovalPolicy type, runtime binding fields
+- [x] RFC 006: Phase 3a impl — InMemoryStore prompt projections, PromptAssetService/PromptVersionService/PromptReleaseService traits + impls, event-sourced persistence
+- [x] RFC 006: Phase 3b+4 — approval policy enforcement, graph wiring, cross-review
+- [x] RFC 006: Phase 5 — marked complete
