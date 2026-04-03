@@ -44,6 +44,7 @@ pub struct ChunkRecord {
     pub credibility_score: Option<f64>,
     pub graph_linkage: Option<String>,
     pub embedding: Option<Vec<f32>>,
+    pub content_hash: Option<String>,
 }
 
 /// Request to ingest a document into the owned retrieval pipeline.

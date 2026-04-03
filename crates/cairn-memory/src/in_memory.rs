@@ -5,7 +5,7 @@
 //! end-to-end retrieval flow without a database.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
@@ -86,6 +86,19 @@ impl DocumentStore for InMemoryDocumentStore {
             .unwrap()
             .get(doc_id.as_str())
             .map(|(s, _, _)| *s))
+    }
+
+    async fn chunk_hashes_for_project(
+        &self,
+        project: &ProjectKey,
+    ) -> Result<HashSet<String>, IngestError> {
+        let chunks = self.chunks.lock().unwrap();
+        let hashes = chunks
+            .iter()
+            .filter(|c| c.project == *project)
+            .filter_map(|c| c.content_hash.clone())
+            .collect();
+        Ok(hashes)
     }
 }
 

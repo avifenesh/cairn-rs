@@ -14,9 +14,18 @@ INIT_FLAG="$REPO_ROOT/.coordination/initialized/$AGENT"
 PROMPTS="$REPO_ROOT/.coordination/prompts"
 mkdir -p "$INBOX" "$(dirname "$INIT_FLAG")"
 
+type_text() {
+  # Type text into pane character-by-character using send-keys -l
+  # Then send Enter separately
+  local pane="$1"
+  local text="$2"
+  tmux send-keys -t "$pane" -l "$text"
+  tmux send-keys -t "$pane" Enter
+}
+
 inject() {
   local file="$1"
-  local from body prefix=""
+  local from body
 
   from="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('from','?'))" "$file" 2>/dev/null || echo "?")"
   body="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('body',''))" "$file" 2>/dev/null || cat "$file")"
@@ -27,33 +36,16 @@ inject() {
     touch "$INIT_FLAG"
     local brief_file="$PROMPTS/$AGENT.md"
     if [[ -f "$brief_file" ]]; then
-      # Flatten to one line — newlines cause premature Enter over tmux send-keys
       local brief
       brief="$(tr '\n' ' ' < "$brief_file" | sed 's/  */ /g; s/# //g; s/## //g')"
       echo "[watch:$AGENT] sending role brief"
-      local tmpf
-      tmpf="$(mktemp)"
-      printf '%s' "$brief" > "$tmpf"
-      tmux load-buffer "$tmpf"
-      tmux paste-buffer -t "$PANE"
-      rm -f "$tmpf"
-      sleep 0.3
-      tmux send-keys -t "$PANE" Enter
+      type_text "$PANE" "$brief"
       sleep 2
     fi
   fi
 
   echo "[watch:$AGENT] injecting from=$from"
-  local msg="Message from ${from}: ${body}"
-  # Write message to temp file WITHOUT trailing newline, paste it, then send Enter
-  local tmpf
-  tmpf="$(mktemp)"
-  printf '%s' "$msg" > "$tmpf"
-  tmux load-buffer "$tmpf"
-  tmux paste-buffer -t "$PANE"
-  rm -f "$tmpf"
-  sleep 1
-  tmux send-keys -t "$PANE" Enter
+  type_text "$PANE" "Message from ${from}: ${body}"
 }
 
 # ── inotifywait (instant) — skip on /mnt/ (WSL Windows FS doesn't support inotify)
