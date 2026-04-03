@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
-## Current RFC: 014 — Commercial Packaging
-## Current Phase: gap analysis (Phase 1)
+## Current RFC: ALL COMPLETE
+## Current Phase: done
 
 ## RFC Status
 
@@ -20,7 +20,7 @@
 | 011 | Deployment Shape | DONE |
 | 012 | Onboarding and Starter Templates | DONE |
 | 013 | Artifact Import/Export | DONE |
-| 014 | Commercial Packaging | IN PROGRESS |
+| 014 | Commercial Packaging | DONE |
 
 ## RFC 002 — Gap Analysis
 
@@ -802,3 +802,5 @@ Nothing. No entitlement, license, feature gating, or commercial packaging types 
 - [x] RFC 012: Phase 2+3 — StarterTemplate/OnboardingProgress/BootstrapProvenance/ImportProvenance types, StarterTemplateRegistry (3 V1 templates), materialize_template(), onboarding checklist, prompt import reconciliation
 - [x] RFC 012: Phase 5 — marked complete
 - [x] RFC 014: Phase 1 gap analysis — 10 gaps across entitlements, licensing, feature gating, product tiers
+- [x] RFC 014: Phase 2+3 — ProductTier (LocalEval/TeamSelfHosted/EnterpriseSelfHosted), Entitlement (4 categories), EntitlementSet, LicenseRecord, FeatureFlag, DefaultFeatureGate with V1 capability mappings, EntitlementChangeRecord
+- [x] RFC 014: Phase 5 — marked complete
