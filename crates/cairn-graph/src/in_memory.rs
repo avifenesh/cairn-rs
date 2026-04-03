@@ -277,6 +277,7 @@ fn bfs_bidirectional(
     edge_filter: Option<&HashSet<EdgeKind>>,
 ) -> Subgraph {
     let mut result_nodes = Vec::new();
+    let mut seen_edges = HashSet::new();
     let mut result_edges = Vec::new();
     let mut visited = HashSet::new();
     let mut frontier = vec![root_id.to_owned()];
@@ -293,17 +294,21 @@ fn bfs_bidirectional(
             if let Some(node) = nodes.get(nid.as_str()) {
                 result_nodes.push(node.clone());
             }
-            for edge in edges {
+            for (ei, edge) in edges.iter().enumerate() {
                 if let Some(filter) = edge_filter {
                     if !filter.contains(&edge.kind) {
                         continue;
                     }
                 }
                 if edge.source_node_id == *nid {
-                    result_edges.push(edge.clone());
+                    if seen_edges.insert(ei) {
+                        result_edges.push(edge.clone());
+                    }
                     next.push(edge.target_node_id.clone());
                 } else if edge.target_node_id == *nid {
-                    result_edges.push(edge.clone());
+                    if seen_edges.insert(ei) {
+                        result_edges.push(edge.clone());
+                    }
                     next.push(edge.source_node_id.clone());
                 }
             }
@@ -326,6 +331,7 @@ fn bfs_downstream(
     edge_filter: Option<&HashSet<EdgeKind>>,
 ) -> Subgraph {
     let mut result_nodes = Vec::new();
+    let mut seen_edges: HashSet<usize> = HashSet::new();
     let mut result_edges = Vec::new();
     let mut visited = HashSet::new();
     let mut frontier = vec![root_id.to_owned()];
@@ -342,14 +348,16 @@ fn bfs_downstream(
             if let Some(node) = nodes.get(nid.as_str()) {
                 result_nodes.push(node.clone());
             }
-            for edge in edges {
+            for (ei, edge) in edges.iter().enumerate() {
                 if edge.source_node_id == *nid {
                     if let Some(filter) = edge_filter {
                         if !filter.contains(&edge.kind) {
                             continue;
                         }
                     }
-                    result_edges.push(edge.clone());
+                    if seen_edges.insert(ei) {
+                        result_edges.push(edge.clone());
+                    }
                     next.push(edge.target_node_id.clone());
                 }
             }
@@ -372,6 +380,7 @@ fn bfs_upstream(
     edge_filter: Option<&HashSet<EdgeKind>>,
 ) -> Subgraph {
     let mut result_nodes = Vec::new();
+    let mut seen_edges: HashSet<usize> = HashSet::new();
     let mut result_edges = Vec::new();
     let mut visited = HashSet::new();
     let mut frontier = vec![leaf_id.to_owned()];
@@ -388,14 +397,16 @@ fn bfs_upstream(
             if let Some(node) = nodes.get(nid.as_str()) {
                 result_nodes.push(node.clone());
             }
-            for edge in edges {
+            for (ei, edge) in edges.iter().enumerate() {
                 if edge.target_node_id == *nid {
                     if let Some(filter) = edge_filter {
                         if !filter.contains(&edge.kind) {
                             continue;
                         }
                     }
-                    result_edges.push(edge.clone());
+                    if seen_edges.insert(ei) {
+                        result_edges.push(edge.clone());
+                    }
                     next.push(edge.source_node_id.clone());
                 }
             }

@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
-## Current RFC: 004 — Graph and Eval Matrix
-## Current Phase: tests (Phase 4)
+## Current RFC: 005 — Task/Session/Checkpoint Lifecycle
+## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
 
@@ -10,7 +10,7 @@
 | 001 | Product Boundary and Non-Goals | scope-only, no code needed |
 | 002 | Runtime and Event Model | DONE |
 | 003 | Owned Retrieval | DONE |
-| 004 | Graph and Eval Matrix | IN PROGRESS |
+| 004 | Graph and Eval Matrix | DONE |
 | 005 | Task/Session/Checkpoint Lifecycle | pending |
 | 006 | Prompt Registry and Release | pending |
 | 007 | Plugin Protocol and Transport | pending |
@@ -342,3 +342,5 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 - [x] RFC 004: Phase 3a impl — InMemory GraphQueryService (query dispatch for all 6 families, neighbors with edge filtering), graph projection fixes (ApprovedBy, Signal, IngestJob nodes)
 - [x] RFC 004: Phase 3b impl — event-sourced EvalRunService (EvalRunReadModel + InMemoryStore projection), scorecard store, matrix store
 - [x] RFC 004: Phase 3c impl — EvalRunStarted/Completed graph projection (EvalRun node + EvaluatedBy edge), GraphBackedExpansion hook for deep search, provenance chain verified
+- [x] RFC 004: Phase 4 cross-review — BFS edge dedup fix, eval projection tests, EvalRunCompleted subject_node_id field
+- [x] RFC 004: Phase 5 — marked complete, all 18 gaps resolved

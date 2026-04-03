@@ -38,6 +38,16 @@ where
         subject_kind: String,
         evaluator_type: String,
     ) -> Result<EvalRunRecord, RuntimeError> {
+        if EvalRunReadModel::get(self.store.as_ref(), &eval_run_id)
+            .await?
+            .is_some()
+        {
+            return Err(RuntimeError::Conflict {
+                entity: "eval_run",
+                id: eval_run_id.to_string(),
+            });
+        }
+
         let event = make_envelope(RuntimeEvent::EvalRunStarted(EvalRunStarted {
             project: project.clone(),
             eval_run_id: eval_run_id.clone(),
@@ -50,10 +60,7 @@ where
 
         EvalRunReadModel::get(self.store.as_ref(), &eval_run_id)
             .await?
-            .ok_or_else(|| RuntimeError::NotFound {
-                entity: "eval_run",
-                id: eval_run_id.to_string(),
-            })
+            .ok_or_else(|| RuntimeError::Internal("eval_run not found after start".into()))
     }
 
     async fn complete(
@@ -69,6 +76,13 @@ where
                 id: eval_run_id.to_string(),
             })?;
 
+        if existing.completed_at.is_some() {
+            return Err(RuntimeError::Conflict {
+                entity: "eval_run",
+                id: eval_run_id.to_string(),
+            });
+        }
+
         let event = make_envelope(RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
             project: existing.project.clone(),
             eval_run_id: eval_run_id.clone(),
@@ -82,10 +96,7 @@ where
 
         EvalRunReadModel::get(self.store.as_ref(), eval_run_id)
             .await?
-            .ok_or_else(|| RuntimeError::NotFound {
-                entity: "eval_run",
-                id: eval_run_id.to_string(),
-            })
+            .ok_or_else(|| RuntimeError::Internal("eval_run not found after complete".into()))
     }
 
     async fn get(&self, eval_run_id: &EvalRunId) -> Result<Option<EvalRunRecord>, RuntimeError> {

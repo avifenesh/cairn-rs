@@ -487,4 +487,70 @@ mod tests {
         assert_eq!(result.nodes_created, 0);
         assert_eq!(result.edges_created, 0);
     }
+
+    #[tokio::test]
+    async fn projects_eval_run_started_and_completed() {
+        let graph = Arc::new(MemGraph::new());
+        let projector = EventProjector::new(graph.clone());
+
+        let events = vec![
+            make_stored(RuntimeEvent::EvalRunStarted(EvalRunStarted {
+                project: ProjectKey::new("t", "w", "p"),
+                eval_run_id: EvalRunId::new("eval_1"),
+                subject_kind: "prompt_release".to_owned(),
+                evaluator_type: "automated".to_owned(),
+                started_at: 100,
+            })),
+            make_stored(RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
+                project: ProjectKey::new("t", "w", "p"),
+                eval_run_id: EvalRunId::new("eval_1"),
+                success: true,
+                error_message: None,
+                subject_node_id: Some("release_1".to_owned()),
+                completed_at: 200,
+            })),
+        ];
+
+        let result = projector.project_events(&events).await.unwrap();
+        assert_eq!(result.nodes_created, 1); // EvalRun node
+        assert_eq!(result.edges_created, 1); // EvaluatedBy edge
+
+        let nodes = graph.nodes.lock().unwrap();
+        assert!(nodes.contains_key("eval_1"));
+        assert_eq!(nodes["eval_1"].kind, NodeKind::EvalRun);
+
+        let edges = graph.edges.lock().unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].source_node_id, "eval_1");
+        assert_eq!(edges[0].target_node_id, "release_1");
+        assert_eq!(edges[0].kind, EdgeKind::EvaluatedBy);
+    }
+
+    #[tokio::test]
+    async fn eval_completed_without_subject_creates_no_edge() {
+        let graph = Arc::new(MemGraph::new());
+        let projector = EventProjector::new(graph.clone());
+
+        let events = vec![
+            make_stored(RuntimeEvent::EvalRunStarted(EvalRunStarted {
+                project: ProjectKey::new("t", "w", "p"),
+                eval_run_id: EvalRunId::new("eval_2"),
+                subject_kind: "prompt_release".to_owned(),
+                evaluator_type: "automated".to_owned(),
+                started_at: 100,
+            })),
+            make_stored(RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
+                project: ProjectKey::new("t", "w", "p"),
+                eval_run_id: EvalRunId::new("eval_2"),
+                success: false,
+                error_message: Some("timeout".to_owned()),
+                subject_node_id: None,
+                completed_at: 200,
+            })),
+        ];
+
+        let result = projector.project_events(&events).await.unwrap();
+        assert_eq!(result.nodes_created, 1); // EvalRun node only
+        assert_eq!(result.edges_created, 0); // No edge without subject
+    }
 }
