@@ -21,6 +21,7 @@ Owner: Runtime Spine
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 4 | Clarification: re-do the real recovery task. Target `recover_interrupted_runs()` and `resolve_stale_dependencies()` directly. Acceptable completion here is code in `crates/cairn-runtime/src/services/recovery_impl.rs` plus focused proof, or an explicit blocker tied to the missing read-model/query seam. Do not finish with generic notes like `verified`, `no drift`, or `all tests green`.
 - 2026-04-03 | Manager -> Worker 4 | Immediate pickup now: 1. replace the `recover_interrupted_runs()` placeholder with the smallest real scan-and-recover path the current read models support, 2. do the same for `resolve_stale_dependencies()` or leave an explicit trait/query blocker if the read seam truly does not exist yet, 3. add one focused integration test per path so these methods stop returning silent zero-work summaries by default.
 - 2026-04-03 | Manager -> Worker 4 | Validation complete: `cargo test -p cairn-runtime --tests` passed, including the new SQLite integration slice.
 - 2026-04-03 | Manager -> Worker 4 | Next queue after SQLite proof: 1. pair with Worker 8 on one store-backed API/SSE seam that consumes the validated runtime path, 2. add one replay/regression guard proving tool/external-worker events preserve the same current-state reads after rebuild, 3. once both are green, stay on runtime seam-watch duty only.

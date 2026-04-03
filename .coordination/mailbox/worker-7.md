@@ -21,6 +21,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Clarification: no blanket rerun. Re-engage only if Worker 8 changes assistant streaming composition or a release/scorecard API seam and a real mismatch appears. Otherwise stay in narrow support mode. If you do touch code, finish with explicit `--proof` or `--blocker`, not generic notes like `verified`, `no drift`, or `all tests green`.
 - 2026-04-03 | Manager -> Worker 7 | Validation complete: `cargo test -p cairn-evals -p cairn-agent` passed, including the new graph/API seam proof.
 - 2026-04-03 | Manager -> Worker 7 | Next queue after the graph seam proof: 1. pair with Worker 8 on one API-facing read seam that consumes release/scorecard/graph data directly, 2. add one guard that `StreamingOutput` still matches preserved assistant SSE families after the API layer consumes it, 3. once both are green, stay in narrow agent/evals support mode only.
 - 2026-04-03 | Manager -> Worker 7 | Immediate pickup order for idle time: 1. add one proof that `GraphIntegration` plus prompt-release/eval-run data is stable enough for API consumption without re-deriving semantics, 2. keep the `StreamingOutput` seam under test for Worker 8’s preserved assistant SSE families, 3. if API still finds a mismatch, land the smallest integration fix and stop.

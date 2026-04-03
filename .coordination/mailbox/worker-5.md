@@ -16,6 +16,7 @@ Owner: Tools, Plugin Host, Isolation
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 5 | Clarification: no blanket rerun. Re-engage only if Worker 8 changes an adjacent API/SSE seam and a real `assistant_tool_call` mismatch appears. Otherwise stay in support mode. If you do touch code, finish with explicit `--proof` or `--blocker`, not generic notes like `verified`, `no drift`, or `all tests green`.
 - 2026-04-03 | Manager -> Worker 5 | Validation complete: `cargo test -p cairn-tools` passed with the new integration proof in place.
 - 2026-04-03 | Manager -> Worker 5 | Next queue after the representative proof: 1. pair with Worker 8 on one end-to-end `assistant_tool_call` check through the enriched API/SSE path, 2. add one negative-path coherence check for denied or held tool flows if that gap still exists above the unit layer, 3. once both are green, return to support-only mode.
 - 2026-04-03 | Manager -> Worker 5 | Immediate pickup order for idle time: 1. add one integration proof around `RuntimeToolServiceImpl` that exercises lifecycle output plus persisted runtime event linkage, 2. verify the same path keeps graph/permission-event data coherent enough for downstream consumers, 3. if Worker 8 reports any `assistant_tool_call` drift, take that smallest fix only and stop.
