@@ -4,6 +4,10 @@ Status: draft for planning and refinement
 Basis: code review of fetched `origin/main` at `72f6d37`, not the older local checkout  
 Audience: product owner, architecture lead, parallel coding agents
 
+Companion execution artifact:
+
+- [`EIGHT_WORKER_EXECUTION_PLAN.md`](./EIGHT_WORKER_EXECUTION_PLAN.md)
+
 ## Purpose
 
 This document defines a rewrite plan for turning Cairn into a coherent, sellable product by:
