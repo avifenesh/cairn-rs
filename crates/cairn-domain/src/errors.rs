@@ -1,5 +1,5 @@
 use crate::ids::{
-    ApprovalId, CheckpointId, MailboxMessageId, RunId, SessionId, SignalId, TaskId,
+    ApprovalId, CheckpointId, IngestJobId, MailboxMessageId, RunId, SessionId, SignalId, TaskId,
     ToolInvocationId,
 };
 use crate::tenancy::OwnershipKey;
@@ -17,6 +17,7 @@ pub enum RuntimeEntityKind {
     MailboxMessage,
     Signal,
     ToolInvocation,
+    IngestJob,
 }
 
 /// Shared runtime entity identifier envelope for API/runtime/store error reporting.
@@ -31,6 +32,7 @@ pub enum RuntimeEntityRef {
     MailboxMessage { message_id: MailboxMessageId },
     Signal { signal_id: SignalId },
     ToolInvocation { invocation_id: ToolInvocationId },
+    IngestJob { job_id: IngestJobId },
 }
 
 impl RuntimeEntityRef {
@@ -44,6 +46,7 @@ impl RuntimeEntityRef {
             RuntimeEntityRef::MailboxMessage { .. } => RuntimeEntityKind::MailboxMessage,
             RuntimeEntityRef::Signal { .. } => RuntimeEntityKind::Signal,
             RuntimeEntityRef::ToolInvocation { .. } => RuntimeEntityKind::ToolInvocation,
+            RuntimeEntityRef::IngestJob { .. } => RuntimeEntityKind::IngestJob,
         }
     }
 }

@@ -22,6 +22,71 @@ pub enum RerankerStrategy {
     ProviderReranker,
 }
 
+/// Operator-tunable weights for each scoring dimension (RFC 003).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScoringWeights {
+    pub semantic_weight: f64,
+    pub lexical_weight: f64,
+    pub freshness_weight: f64,
+    pub staleness_weight: f64,
+    pub credibility_weight: f64,
+    pub corroboration_weight: f64,
+    pub graph_proximity_weight: f64,
+    pub recency_weight: f64,
+}
+
+impl Default for ScoringWeights {
+    fn default() -> Self {
+        Self {
+            semantic_weight: 0.4,
+            lexical_weight: 0.3,
+            freshness_weight: 0.1,
+            staleness_weight: 0.05,
+            credibility_weight: 0.05,
+            corroboration_weight: 0.03,
+            graph_proximity_weight: 0.05,
+            recency_weight: 0.02,
+        }
+    }
+}
+
+/// Operator-tunable scoring policy (RFC 003).
+///
+/// Controls per-project or per-workspace weight presets, decay parameters,
+/// and retrieval mode defaults within bounded ranges.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScoringPolicy {
+    pub weights: ScoringWeights,
+    pub freshness_decay_days: f64,
+    pub staleness_threshold_days: f64,
+    pub recency_enabled: bool,
+    pub retrieval_mode_default: RetrievalMode,
+    pub reranker_default: RerankerStrategy,
+}
+
+impl Default for ScoringPolicy {
+    fn default() -> Self {
+        Self {
+            weights: ScoringWeights::default(),
+            freshness_decay_days: 30.0,
+            staleness_threshold_days: 90.0,
+            recency_enabled: false,
+            retrieval_mode_default: RetrievalMode::Hybrid,
+            reranker_default: RerankerStrategy::None,
+        }
+    }
+}
+
+/// Candidate-generation stage in the retrieval pipeline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateStage {
+    Lexical,
+    Vector,
+    Merged,
+    Reranked,
+}
+
 /// Canonical scoring dimensions (RFC 003).
 ///
 /// All dimensions are fixed by the product contract and must be present
@@ -55,6 +120,7 @@ pub struct RetrievalQuery {
     pub reranker: RerankerStrategy,
     pub limit: usize,
     pub metadata_filters: Vec<MetadataFilter>,
+    pub scoring_policy: Option<ScoringPolicy>,
 }
 
 /// Simple metadata filter for retrieval queries.
@@ -76,6 +142,9 @@ pub struct RetrievalDiagnostics {
     pub candidates_generated: usize,
     pub results_returned: usize,
     pub latency_ms: u64,
+    pub stages_used: Vec<CandidateStage>,
+    pub scoring_dimensions_used: Vec<String>,
+    pub effective_policy: Option<String>,
 }
 
 /// A retrieval response including results and diagnostics.

@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
 ## Current RFC: 003 — Owned Retrieval
-## Current Phase: gap analysis (Phase 1)
+## Current Phase: implementation (Phase 3a)
 
 ## RFC Status
 
@@ -235,3 +235,4 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 - [x] RFC 002: Phase 4 tests — UserMessageAppended event variant, signal lifecycle tests, command/event coverage tests
 - [x] RFC 002: Phase 5 — marked complete, all gaps resolved
 - [x] RFC 003: Phase 1 gap analysis — 12 gaps identified across vector layer, embeddings, chunk model, parsers, ingest pipeline, scoring, reranking, metadata filtering, ingest job entity, deep search, diagnostics, scoring policy
+- [x] RFC 003: Phase 2 types — ChunkId, ScoringPolicy/ScoringWeights, IngestJobId, IngestJobState/IngestJobRecord, StartIngestJob/CompleteIngestJob commands, IngestJobStarted/IngestJobCompleted events, RuntimeEntityKind/Ref::IngestJob, chunk model enrichment

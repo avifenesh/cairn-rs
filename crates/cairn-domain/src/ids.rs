@@ -46,9 +46,11 @@ macro_rules! define_id {
 define_id!(ApprovalId);
 define_id!(ChannelId);
 define_id!(CheckpointId);
+define_id!(ChunkId);
 define_id!(CommandId);
 define_id!(EvalRunId);
 define_id!(EventId);
+define_id!(IngestJobId);
 define_id!(KnowledgeDocumentId);
 define_id!(KnowledgePackId);
 define_id!(MailboxMessageId);

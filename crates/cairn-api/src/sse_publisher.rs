@@ -29,7 +29,9 @@ pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
         RuntimeEvent::RecoveryAttempted(_)
         | RuntimeEvent::RecoveryCompleted(_)
         | RuntimeEvent::SignalIngested(_)
-        | RuntimeEvent::UserMessageAppended(_) => None,
+        | RuntimeEvent::UserMessageAppended(_)
+        | RuntimeEvent::IngestJobStarted(_)
+        | RuntimeEvent::IngestJobCompleted(_) => None,
     }
 }
 

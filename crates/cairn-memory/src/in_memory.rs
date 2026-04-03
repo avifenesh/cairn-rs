@@ -13,8 +13,8 @@ use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
 use crate::ingest::{ChunkRecord, IngestError, IngestStatus, SourceType};
 use crate::pipeline::DocumentStore;
 use crate::retrieval::{
-    RetrievalDiagnostics, RetrievalError, RetrievalMode, RetrievalQuery, RetrievalResponse,
-    RetrievalResult, RetrievalService, ScoringBreakdown,
+    CandidateStage, RetrievalDiagnostics, RetrievalError, RetrievalMode, RetrievalQuery,
+    RetrievalResponse, RetrievalResult, RetrievalService, ScoringBreakdown,
 };
 
 /// In-memory document store for testing.
@@ -165,6 +165,9 @@ impl RetrievalService for InMemoryRetrieval {
                 candidates_generated: results.len(),
                 results_returned: results.len(),
                 latency_ms: elapsed,
+                stages_used: vec![CandidateStage::Lexical],
+                scoring_dimensions_used: vec!["lexical_relevance".to_owned()],
+                effective_policy: None,
             },
         })
     }
@@ -227,6 +230,7 @@ mod tests {
                 reranker: RerankerStrategy::None,
                 limit: 5,
                 metadata_filters: vec![],
+                scoring_policy: None,
             })
             .await
             .unwrap();
@@ -249,6 +253,7 @@ mod tests {
                 reranker: RerankerStrategy::None,
                 limit: 10,
                 metadata_filters: vec![],
+                scoring_policy: None,
             })
             .await
             .unwrap();
@@ -264,6 +269,7 @@ mod tests {
                 reranker: RerankerStrategy::None,
                 limit: 5,
                 metadata_filters: vec![],
+                scoring_policy: None,
             })
             .await
             .unwrap();
@@ -321,6 +327,7 @@ mod tests {
                 reranker: RerankerStrategy::None,
                 limit: 5,
                 metadata_filters: vec![],
+                scoring_policy: None,
             })
             .await;
 
@@ -360,6 +367,7 @@ mod tests {
                 reranker: RerankerStrategy::None,
                 limit: 5,
                 metadata_filters: vec![],
+                scoring_policy: None,
             })
             .await
             .unwrap();

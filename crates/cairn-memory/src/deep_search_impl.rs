@@ -119,7 +119,7 @@ impl<R: RetrievalService + 'static, D: QueryDecomposer + 'static> DeepSearchServ
         let overall_start = Instant::now();
         let mut hops: Vec<DeepSearchHop> = Vec::new();
         let mut all_results: Vec<RetrievalResult> = Vec::new();
-        let mut seen_chunk_ids: HashSet<String> = HashSet::new();
+        let mut seen_chunk_ids: HashSet<cairn_domain::ChunkId> = HashSet::new();
 
         for hop_number in 0..request.max_hops {
             let hop_start = Instant::now();
@@ -137,6 +137,7 @@ impl<R: RetrievalService + 'static, D: QueryDecomposer + 'static> DeepSearchServ
                     reranker: RerankerStrategy::None,
                     limit: request.per_hop_limit,
                     metadata_filters: vec![],
+                    scoring_policy: None,
                 })
                 .await
                 .map_err(|e| DeepSearchError::RetrievalFailed(e.to_string()))?;
@@ -267,7 +268,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut ids: HashSet<String> = HashSet::new();
+        let mut ids: HashSet<cairn_domain::ChunkId> = HashSet::new();
         for result in &response.merged_results {
             assert!(ids.insert(result.chunk.chunk_id.clone()));
         }

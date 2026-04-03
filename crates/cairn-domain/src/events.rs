@@ -1,7 +1,7 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, EventId, MailboxMessageId, RunId, SessionId, SignalId, TaskId,
-    ToolInvocationId,
+    ApprovalId, CheckpointId, EventId, IngestJobId, MailboxMessageId, RunId, SessionId, SignalId,
+    TaskId, ToolInvocationId,
 };
 use crate::lifecycle::{CheckpointDisposition, FailureClass, RunState, SessionState, TaskState};
 use crate::policy::{ApprovalDecision, ApprovalRequirement, ExecutionClass};
@@ -105,6 +105,8 @@ pub enum RuntimeEvent {
     RecoveryAttempted(RecoveryAttempted),
     RecoveryCompleted(RecoveryCompleted),
     UserMessageAppended(UserMessageAppended),
+    IngestJobStarted(IngestJobStarted),
+    IngestJobCompleted(IngestJobCompleted),
 }
 
 impl RuntimeEvent {
@@ -132,6 +134,8 @@ impl RuntimeEvent {
             RuntimeEvent::RecoveryAttempted(event) => &event.project,
             RuntimeEvent::RecoveryCompleted(event) => &event.project,
             RuntimeEvent::UserMessageAppended(event) => &event.project,
+            RuntimeEvent::IngestJobStarted(event) => &event.project,
+            RuntimeEvent::IngestJobCompleted(event) => &event.project,
         }
     }
 
@@ -218,6 +222,12 @@ impl RuntimeEvent {
                 }),
             RuntimeEvent::UserMessageAppended(event) => Some(RuntimeEntityRef::Run {
                 run_id: event.run_id.clone(),
+            }),
+            RuntimeEvent::IngestJobStarted(event) => Some(RuntimeEntityRef::IngestJob {
+                job_id: event.job_id.clone(),
+            }),
+            RuntimeEvent::IngestJobCompleted(event) => Some(RuntimeEntityRef::IngestJob {
+                job_id: event.job_id.clone(),
             }),
         }
     }
@@ -409,6 +419,24 @@ pub struct UserMessageAppended {
     pub project: ProjectKey,
     pub session_id: SessionId,
     pub run_id: RunId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestJobStarted {
+    pub project: ProjectKey,
+    pub job_id: IngestJobId,
+    pub source_id: Option<crate::ids::SourceId>,
+    pub document_count: u32,
+    pub started_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestJobCompleted {
+    pub project: ProjectKey,
+    pub job_id: IngestJobId,
+    pub success: bool,
+    pub error_message: Option<String>,
+    pub completed_at: u64,
 }
 
 #[cfg(test)]

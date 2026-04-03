@@ -97,6 +97,7 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
                 reranker: RerankerStrategy::None,
                 limit: query.effective_limit(),
                 metadata_filters: vec![],
+                scoring_policy: None,
             })
             .await
             .map_err(|e| e.to_string())?;
@@ -105,7 +106,7 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
             .results
             .into_iter()
             .map(|r| MemoryItem {
-                id: r.chunk.chunk_id,
+                id: r.chunk.chunk_id.to_string(),
                 content: r.chunk.text,
                 category: None,
                 status: MemoryStatus::Accepted,

@@ -257,7 +257,9 @@ impl InMemoryStore {
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::UserMessageAppended(_) => {}
+            | RuntimeEvent::UserMessageAppended(_)
+            | RuntimeEvent::IngestJobStarted(_)
+            | RuntimeEvent::IngestJobCompleted(_) => {}
         }
     }
 }

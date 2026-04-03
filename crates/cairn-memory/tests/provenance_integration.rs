@@ -141,7 +141,7 @@ async fn ingest_search_and_trace_provenance_end_to_end() {
     let chunk_ids: Vec<String> = chunks
         .iter()
         .filter(|c| c.document_id == KnowledgeDocumentId::new("doc_troubleshoot"))
-        .map(|c| c.chunk_id.clone())
+        .map(|c| c.chunk_id.to_string())
         .collect();
     retrieval_projector
         .on_chunks_created(
@@ -161,6 +161,7 @@ async fn ingest_search_and_trace_provenance_end_to_end() {
             reranker: RerankerStrategy::None,
             limit: 5,
             metadata_filters: vec![],
+            scoring_policy: None,
         })
         .await
         .unwrap();

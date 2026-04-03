@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cairn_domain::{KnowledgeDocumentId, KnowledgePackId, ProjectKey, SourceId};
+use cairn_domain::{ChunkId, KnowledgeDocumentId, KnowledgePackId, ProjectKey, SourceId};
 use serde::{Deserialize, Serialize};
 
 /// Supported source types for v1 ingest (RFC 003).
@@ -31,7 +31,7 @@ pub enum IngestStatus {
 /// A chunk produced by the ingest pipeline, retaining provenance.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkRecord {
-    pub chunk_id: String,
+    pub chunk_id: ChunkId,
     pub document_id: KnowledgeDocumentId,
     pub source_id: SourceId,
     pub source_type: SourceType,
@@ -39,6 +39,11 @@ pub struct ChunkRecord {
     pub text: String,
     pub position: u32,
     pub created_at: u64,
+    pub updated_at: Option<u64>,
+    pub provenance_metadata: Option<serde_json::Value>,
+    pub credibility_score: Option<f64>,
+    pub graph_linkage: Option<String>,
+    pub embedding: Option<Vec<f32>>,
 }
 
 /// Request to ingest a document into the owned retrieval pipeline.

@@ -31,14 +31,28 @@ inject() {
       local brief
       brief="$(tr '\n' ' ' < "$brief_file" | sed 's/  */ /g; s/# //g; s/## //g')"
       echo "[watch:$AGENT] sending role brief"
-      tmux send-keys -t "$PANE" -l "$brief"
+      local tmpf
+      tmpf="$(mktemp)"
+      printf '%s' "$brief" > "$tmpf"
+      tmux load-buffer "$tmpf"
+      tmux paste-buffer -t "$PANE"
+      rm -f "$tmpf"
+      sleep 0.3
       tmux send-keys -t "$PANE" Enter
       sleep 2
     fi
   fi
 
   echo "[watch:$AGENT] injecting from=$from"
-  tmux send-keys -t "$PANE" -l "Message from ${from}: ${body}"
+  local msg="Message from ${from}: ${body}"
+  # Write message to temp file WITHOUT trailing newline, paste it, then send Enter
+  local tmpf
+  tmpf="$(mktemp)"
+  printf '%s' "$msg" > "$tmpf"
+  tmux load-buffer "$tmpf"
+  tmux paste-buffer -t "$PANE"
+  rm -f "$tmpf"
+  sleep 1
   tmux send-keys -t "$PANE" Enter
 }
 

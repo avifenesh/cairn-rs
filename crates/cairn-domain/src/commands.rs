@@ -1,7 +1,7 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, CommandId, MailboxMessageId, RunId, SessionId, SignalId, TaskId,
-    ToolInvocationId,
+    ApprovalId, CheckpointId, CommandId, IngestJobId, MailboxMessageId, RunId, SessionId, SignalId,
+    TaskId, ToolInvocationId,
 };
 use crate::lifecycle::{FailureClass, PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget};
 use crate::policy::{ApprovalDecision, ExecutionClass};
@@ -103,6 +103,8 @@ pub enum RuntimeCommand {
     FailTask(FailTask),
     CancelTask(CancelTask),
     AppendUserMessage(AppendUserMessage),
+    StartIngestJob(StartIngestJob),
+    CompleteIngestJob(CompleteIngestJob),
 }
 
 impl RuntimeCommand {
@@ -135,6 +137,8 @@ impl RuntimeCommand {
             RuntimeCommand::FailTask(command) => &command.project,
             RuntimeCommand::CancelTask(command) => &command.project,
             RuntimeCommand::AppendUserMessage(command) => &command.project,
+            RuntimeCommand::StartIngestJob(command) => &command.project,
+            RuntimeCommand::CompleteIngestJob(command) => &command.project,
         }
     }
 
@@ -233,6 +237,12 @@ impl RuntimeCommand {
             }),
             RuntimeCommand::AppendUserMessage(command) => Some(RuntimeEntityRef::Run {
                 run_id: command.run_id.clone(),
+            }),
+            RuntimeCommand::StartIngestJob(command) => Some(RuntimeEntityRef::IngestJob {
+                job_id: command.job_id.clone(),
+            }),
+            RuntimeCommand::CompleteIngestJob(command) => Some(RuntimeEntityRef::IngestJob {
+                job_id: command.job_id.clone(),
             }),
         }
     }
@@ -447,6 +457,22 @@ pub struct AppendUserMessage {
     pub project: ProjectKey,
     pub session_id: SessionId,
     pub run_id: RunId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartIngestJob {
+    pub project: ProjectKey,
+    pub job_id: IngestJobId,
+    pub source_id: Option<crate::ids::SourceId>,
+    pub document_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompleteIngestJob {
+    pub project: ProjectKey,
+    pub job_id: IngestJobId,
+    pub success: bool,
+    pub error_message: Option<String>,
 }
 
 #[cfg(test)]

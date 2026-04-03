@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use std::time::SystemTime;
 
-use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
+use cairn_domain::{ChunkId, KnowledgeDocumentId, ProjectKey, SourceId};
 
 use crate::ingest::{ChunkRecord, SourceType};
 use crate::retrieval::{
@@ -111,7 +111,7 @@ struct ChunkSearchRow {
 impl ChunkSearchRow {
     fn into_result(self) -> RetrievalResult {
         let chunk = ChunkRecord {
-            chunk_id: self.chunk_id,
+            chunk_id: ChunkId::new(self.chunk_id),
             document_id: KnowledgeDocumentId::new(self.document_id),
             source_id: SourceId::new(self.source_id),
             source_type: parse_source_type(&self.source_type).unwrap_or(SourceType::PlainText),
@@ -119,6 +119,11 @@ impl ChunkSearchRow {
             text: self.text,
             position: self.position as u32,
             created_at: self.created_at as u64,
+            updated_at: None,
+            provenance_metadata: None,
+            credibility_score: None,
+            graph_linkage: None,
+            embedding: None,
         };
 
         RetrievalResult {

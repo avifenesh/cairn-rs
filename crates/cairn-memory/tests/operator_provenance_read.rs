@@ -105,6 +105,7 @@ async fn operator_search_result_has_traceable_provenance() {
             reranker: RerankerStrategy::None,
             limit: 5,
             metadata_filters: vec![],
+            scoring_policy: None,
         })
         .await
         .unwrap();

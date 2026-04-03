@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
+use cairn_domain::{ChunkId, KnowledgeDocumentId, ProjectKey, SourceId};
 
 use crate::ingest::{
     ChunkRecord, IngestError, IngestPackRequest, IngestRequest, IngestService, IngestStatus,
@@ -128,7 +128,7 @@ fn make_chunk(
     project: &ProjectKey,
     created_at: u64,
 ) -> ChunkRecord {
-    let chunk_id = format!("{}_{}", document_id.as_str(), position);
+    let chunk_id = ChunkId::new(format!("{}_{}", document_id.as_str(), position));
     ChunkRecord {
         chunk_id,
         document_id: document_id.clone(),
@@ -138,6 +138,11 @@ fn make_chunk(
         text: text.trim().to_owned(),
         position,
         created_at,
+        updated_at: None,
+        provenance_metadata: None,
+        credibility_score: None,
+        graph_linkage: None,
+        embedding: None,
     }
 }
 

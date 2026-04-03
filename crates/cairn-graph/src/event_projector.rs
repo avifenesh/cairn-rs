@@ -262,7 +262,9 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
             | RuntimeEvent::SignalIngested(_)
-            | RuntimeEvent::UserMessageAppended(_) => {}
+            | RuntimeEvent::UserMessageAppended(_)
+            | RuntimeEvent::IngestJobStarted(_)
+            | RuntimeEvent::IngestJobCompleted(_) => {}
         }
 
         Ok((nodes, edges))

@@ -79,7 +79,7 @@ impl DocumentStore for SqliteDocumentStore {
                 "INSERT INTO chunks (chunk_id, document_id, source_id, tenant_id, workspace_id, project_id, source_type, text, position, created_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             )
-            .bind(&chunk.chunk_id)
+            .bind(chunk.chunk_id.as_str())
             .bind(chunk.document_id.as_str())
             .bind(chunk.source_id.as_str())
             .bind(chunk.project.tenant_id.as_str())
@@ -95,7 +95,7 @@ impl DocumentStore for SqliteDocumentStore {
 
             // Sync FTS5 index (no triggers due to migration runner limitation).
             sqlx::query("INSERT INTO chunks_fts (chunk_id, text) VALUES ($1, $2)")
-                .bind(&chunk.chunk_id)
+                .bind(chunk.chunk_id.as_str())
                 .bind(&chunk.text)
                 .execute(&self.pool)
                 .await
