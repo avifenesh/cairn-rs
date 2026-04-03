@@ -5,6 +5,7 @@ Owner: Contracts, Fixtures, Migration Harness
 ## Current Status
 
 - 2026-04-03 | Worker 1 / Manager | First seed fixture set complete | Minimum Phase 0 HTTP/SSE fixtures are in repo, inventory checker validates them, and the next step is tightening them against direct backend captures where possible.
+- 2026-04-03 | Worker 1 / Manager | Mismatch report scaffold complete | Phase 0 fixture maps and generated mismatch report now track seeded coverage explicitly. Next step is replacing or confirming seeded fixtures with direct backend captures.
 
 ## Blocked By
 
@@ -29,3 +30,4 @@ Owner: Contracts, Fixtures, Migration Harness
 
 - 2026-04-03 | Worker 1 | Review `tests/compat/*`, `tests/fixtures/*`, and `scripts/check-compat-inventory.sh` for phase-0 compatibility harness baseline.
 - 2026-04-03 | Worker 1 | Review first seed fixture set under `tests/fixtures/http` and `tests/fixtures/sse`; provenance is documented in `tests/fixtures/HARVESTING_NOTES.md`.
+- 2026-04-03 | Worker 1 | Review `tests/fixtures/migration/phase0_mismatch_report.md` plus `tests/compat/phase0_*_fixture_map.tsv` for explicit seeded-coverage status.

@@ -25,6 +25,8 @@ require_file "$COMPAT_DIR/http_routes.tsv"
 require_file "$COMPAT_DIR/sse_events.tsv"
 require_file "$COMPAT_DIR/phase0_required_http.txt"
 require_file "$COMPAT_DIR/phase0_required_sse.txt"
+require_file "$COMPAT_DIR/phase0_http_fixture_map.tsv"
+require_file "$COMPAT_DIR/phase0_sse_fixture_map.tsv"
 require_file "$COMPAT_DIR/MIGRATION_HARNESS.md"
 require_dir "$FIXTURE_DIR/http"
 require_dir "$FIXTURE_DIR/sse"
@@ -37,6 +39,16 @@ awk -F '\t' 'NR == 1 { next } NF != 5 { exit 1 }' "$COMPAT_DIR/http_routes.tsv" 
 
 awk -F '\t' 'NR == 1 { next } NF != 3 { exit 1 }' "$COMPAT_DIR/sse_events.tsv" || {
   echo "sse_events.tsv must contain 3 tab-separated columns on every data row" >&2
+  exit 1
+}
+
+awk -F '\t' 'NR == 1 { next } NF != 4 { exit 1 }' "$COMPAT_DIR/phase0_http_fixture_map.tsv" || {
+  echo "phase0_http_fixture_map.tsv must contain 4 tab-separated columns on every data row" >&2
+  exit 1
+}
+
+awk -F '\t' 'NR == 1 { next } NF != 4 { exit 1 }' "$COMPAT_DIR/phase0_sse_fixture_map.tsv" || {
+  echo "phase0_sse_fixture_map.tsv must contain 4 tab-separated columns on every data row" >&2
   exit 1
 }
 
@@ -59,6 +71,8 @@ while IFS= read -r event_name; do
 done < "$COMPAT_DIR/phase0_required_sse.txt"
 
 require_file "$FIXTURE_DIR/HARVESTING_NOTES.md"
+require_file "$FIXTURE_DIR/migration/README.md"
+require_file "$FIXTURE_DIR/migration/phase0_mismatch_report.md"
 require_file "$FIXTURE_DIR/http/GET__v1_feed__limit20_unread_true.json"
 require_file "$FIXTURE_DIR/http/GET__v1_tasks__status_running_type_agent.json"
 require_file "$FIXTURE_DIR/http/GET__v1_approvals__status_pending.json"

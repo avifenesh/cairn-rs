@@ -1,0 +1,8 @@
+requirement	fixture_file	status	next_step
+GET /v1/feed?limit=20&unread=true	tests/fixtures/http/GET__v1_feed__limit20_unread_true.json	seeded_fixture_present	replace_or_confirm_with_direct_backend_capture
+GET /v1/tasks?status=running&type=agent	tests/fixtures/http/GET__v1_tasks__status_running_type_agent.json	seeded_fixture_present	replace_or_confirm_with_direct_backend_capture
+GET /v1/approvals?status=pending	tests/fixtures/http/GET__v1_approvals__status_pending.json	seeded_fixture_present	replace_or_confirm_with_direct_backend_capture
+GET /v1/memories/search?q=test&limit=10	tests/fixtures/http/GET__v1_memories_search__q_test_limit_10.json	seeded_fixture_present	replace_or_confirm_with_direct_backend_capture
+POST /v1/assistant/message body={message,mode?,sessionId?}	tests/fixtures/http/POST__v1_assistant_message__with_session.json	seeded_fixture_present	replace_or_confirm_with_direct_backend_capture
+POST /v1/assistant/message body={message,mode?}	tests/fixtures/http/POST__v1_assistant_message__without_session.json	seeded_fixture_present	replace_or_confirm_with_direct_backend_capture
+GET /v1/stream?lastEventId=<id>	tests/fixtures/http/GET__v1_stream__replay_from_last_event_id.json	seeded_fixture_present	confirm_against_direct_stream_resume_behavior

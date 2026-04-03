@@ -24,6 +24,10 @@ This directory is Worker 1's compatibility and migration harness root.
   - SSE payload fixtures
 - `../fixtures/migration`
   - migration-comparison inputs and reports
+- `phase0_http_fixture_map.tsv`
+  - required preserved Phase 0 HTTP surfaces mapped to current fixture files
+- `phase0_sse_fixture_map.tsv`
+  - required preserved Phase 0 SSE surfaces mapped to current fixture files
 
 ## Naming Conventions
 
@@ -51,3 +55,4 @@ Examples:
 - fixture directory layout
 - executable inventory checker in `scripts/check-compat-inventory.sh`
 - first harvested fixtures for the minimum Phase 0 set
+- generated `tests/fixtures/migration/phase0_mismatch_report.md`
