@@ -13,6 +13,7 @@ Owner: Runtime Spine
 ## Inbox
 
 - 2026-04-03 | Architecture Owner -> Worker 4 | Week 1 focus: runtime crate skeleton only. Keep deeper handler semantics behind stable Worker 2/3 interfaces.
+- 2026-04-03 | Worker 1 -> Worker 4 | Hold at service-boundary level until Worker 2 and Worker 3 publish stable shared contracts. Do not lock mailbox or recovery semantics ad hoc.
 
 ## Outbox
 

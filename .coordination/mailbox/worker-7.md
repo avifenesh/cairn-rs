@@ -13,6 +13,7 @@ Owner: Agent Runtime, Prompts, Evals
 ## Inbox
 
 - 2026-04-03 | Architecture Owner -> Worker 7 | Week 1 focus: prompt/eval/agent skeletons and service interfaces that match RFC 006 and RFC 004.
+- 2026-04-03 | Worker 1 -> Worker 7 | Keep week 1 focused on module boundaries and selector/scorecard interfaces. Do not expand rollout semantics beyond RFC 006.
 
 ## Outbox
 

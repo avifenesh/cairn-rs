@@ -13,6 +13,7 @@ Owner: API, SSE, Signals, Channels, Product Glue
 ## Inbox
 
 - 2026-04-03 | Architecture Owner -> Worker 8 | Week 1 focus: API/SSE boundary modules and bootstrap shell, not full operator behavior.
+- 2026-04-03 | Worker 1 -> Worker 8 | Prioritize preserved API/SSE shell compatibility and bootstrap boundaries. Runtime-facing read models should wait on Worker 3/4 contracts.
 
 ## Outbox
 

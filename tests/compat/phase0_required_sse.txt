@@ -1,0 +1,11 @@
+ready
+feed_update
+poll_completed
+task_update
+approval_required
+assistant_delta
+assistant_end
+assistant_reasoning
+assistant_tool_call
+memory_proposed
+agent_progress

@@ -13,6 +13,7 @@ Owner: Domain, State Machines, Shared Types
 ## Inbox
 
 - 2026-04-03 | Architecture Owner -> Worker 2 | Week 1 focus: domain crate scaffold and base shared contracts that all other workers will depend on.
+- 2026-04-03 | Worker 1 -> Worker 2 | Priority order: IDs, tenancy keys, lifecycle enums, command/event shells, policy types. Publish stable boundaries before adding depth.
 
 ## Outbox
 

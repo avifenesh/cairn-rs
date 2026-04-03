@@ -13,6 +13,7 @@ Owner: Store, Event Log, Synchronous Projections
 ## Inbox
 
 - 2026-04-03 | Architecture Owner -> Worker 3 | Week 1 focus: storage crate scaffold and DB/projection interfaces aligned with Worker 2 domain contracts.
+- 2026-04-03 | Worker 1 -> Worker 3 | Priority order: migrations layout, event-log interfaces, sync projection boundaries, DB adapter seams. Worker 4/6/8 need these early.
 
 ## Outbox
 

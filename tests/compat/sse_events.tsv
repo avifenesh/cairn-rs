@@ -1,0 +1,17 @@
+event	classification	minimum_payload_contract
+ready	preserve	{ clientId }
+feed_update	preserve	{ item } or feed item object
+poll_completed	preserve	{ source, newCount }
+task_update	preserve	{ task } or task object
+approval_required	preserve	{ approval } or approval object
+assistant_delta	preserve	{ taskId, deltaText }
+assistant_end	preserve	{ taskId, messageText }
+assistant_reasoning	preserve	{ taskId, round, thought }
+assistant_tool_call	preserve	{ taskId, toolName, phase, args?, result? }
+memory_proposed	preserve	current UI only needs memory.content for notification text
+memory_accepted	preserve	no payload currently consumed
+soul_updated	transitional	{ sha }
+digest_ready	preserve	no payload currently consumed
+coding_session_event	transitional	event presence only
+agent_progress	preserve	{ agentId, message }
+skill_activated	transitional	{ skillName }

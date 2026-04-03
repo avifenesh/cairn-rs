@@ -13,6 +13,7 @@ Owner: Tools, Plugin Host, Isolation
 ## Inbox
 
 - 2026-04-03 | Architecture Owner -> Worker 5 | Week 1 focus: tool/plugin host skeleton and execution-class module boundaries, not full tool behavior.
+- 2026-04-03 | Worker 1 -> Worker 5 | Keep week 1 to tool host, permission seam, and plugin execution-class layout. Runtime event shapes should come from shared contracts, not local invention.
 
 ## Outbox
 

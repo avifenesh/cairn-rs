@@ -1,0 +1,7 @@
+GET /v1/feed?limit=20&unread=true
+GET /v1/tasks?status=running&type=agent
+GET /v1/approvals?status=pending
+GET /v1/memories/search?q=test&limit=10
+POST /v1/assistant/message body={message,mode?,sessionId?}
+POST /v1/assistant/message body={message,mode?}
+GET /v1/stream?lastEventId=<id>

@@ -1,0 +1,31 @@
+method	route	classification	query_or_body_detail	minimum_contract
+GET	/health	preserve	-	{ ok: boolean }
+GET	/v1/dashboard	preserve	query: limit?, source?	dashboard payload used by overview
+GET	/v1/feed	preserve	query: limit?, before?, source?, unread?	{ items, hasMore }
+POST	/v1/feed/:id/read	preserve	path param: id	{ ok }
+POST	/v1/feed/read-all	preserve	-	{ changed }
+GET	/v1/tasks	preserve	query: status?, type?	{ items, hasMore }
+POST	/v1/tasks/:id/cancel	preserve	path param: id	{ ok }
+GET	/v1/approvals	preserve	query: status?	{ items, hasMore }
+POST	/v1/approvals/:id/approve	preserve	path param: id	{ ok }
+POST	/v1/approvals/:id/deny	preserve	path param: id	{ ok }
+GET	/v1/assistant/sessions	preserve	-	{ items }
+GET	/v1/assistant/sessions/:sessionId	preserve	path param: sessionId	{ items } chat messages
+POST	/v1/assistant/message	preserve	body: { message, mode?, sessionId? }	{ taskId }
+POST	/v1/assistant/voice	transitional	multipart: audio, mode?, sessionId?	{ taskId, transcript }
+GET	/v1/memories	preserve	query: status?, category?	{ items, hasMore }
+GET	/v1/memories/search	preserve	query: q required, limit?	{ items }
+POST	/v1/memories	preserve	body: { content, category }	create memory response object
+POST	/v1/memories/:id/accept	preserve	path param: id	{ ok }
+POST	/v1/memories/:id/reject	preserve	path param: id	{ ok }
+GET	/v1/fleet	transitional	-	{ agents, summary }
+GET	/v1/skills	preserve	-	{ items, summary, currentlyActive? }
+GET	/v1/soul	transitional	-	current singleton asset wrapper
+PUT	/v1/soul	transitional	body: { content }	{ ok, sha }
+GET	/v1/soul/history	transitional	-	{ items }
+GET	/v1/soul/patches	transitional	-	{ items }
+GET	/v1/costs	preserve	-	cost summary payload
+GET	/v1/metrics	preserve	-	metrics read model
+GET	/v1/status	preserve	-	runtime/system status
+POST	/v1/poll/run	preserve	-	{ ok }
+GET	/v1/stream	preserve	query: token?, lastEventId?	SSE stream with replay support
