@@ -51,6 +51,7 @@ require_dir "$FIXTURE_DIR/migration"
 run_report_generator "$ROOT/scripts/generate-phase0-upstream-contract-report.sh"
 run_report_generator "$ROOT/scripts/generate-phase0-http-endpoint-gap-report.sh"
 run_report_generator "$ROOT/scripts/generate-phase0-sse-publisher-gap-report.sh"
+run_report_generator "$ROOT/scripts/generate-phase0-sse-payload-handoff.sh"
 
 awk -F '\t' 'NR == 1 { next } NF != 5 { exit 1 }' "$COMPAT_DIR/http_routes.tsv" || {
   echo "http_routes.tsv must contain 5 tab-separated columns on every data row" >&2
@@ -96,6 +97,7 @@ require_file "$FIXTURE_DIR/migration/phase0_mismatch_report.md"
 require_file "$FIXTURE_DIR/migration/phase0_upstream_contract_report.md"
 require_file "$FIXTURE_DIR/migration/phase0_http_endpoint_gap_report.md"
 require_file "$FIXTURE_DIR/migration/phase0_sse_publisher_gap_report.md"
+require_file "$FIXTURE_DIR/migration/phase0_sse_payload_handoff.md"
 require_file "$FIXTURE_DIR/http/GET__v1_feed__limit20_unread_true.json"
 require_file "$FIXTURE_DIR/http/GET__v1_tasks__status_running_type_agent.json"
 require_file "$FIXTURE_DIR/http/GET__v1_approvals__status_pending.json"

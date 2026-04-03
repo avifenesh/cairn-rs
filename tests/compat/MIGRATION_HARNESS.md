@@ -62,6 +62,7 @@ Examples:
 - generated `tests/fixtures/migration/phase0_upstream_contract_report.md`
 - generated `tests/fixtures/migration/phase0_http_endpoint_gap_report.md`
 - generated `tests/fixtures/migration/phase0_sse_publisher_gap_report.md`
+- generated `tests/fixtures/migration/phase0_sse_payload_handoff.md`
 
 ## Current Worker 1 Constraint
 

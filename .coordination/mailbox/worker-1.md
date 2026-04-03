@@ -15,6 +15,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | HTTP endpoint gap report added | Worker 1 now publishes an explicit Phase 0 HTTP endpoint gap report so preserved routes with only catalog/fixture coverage stay visible until Worker 8 or later workers add real endpoint boundaries.
 - 2026-04-03 | Worker 1 / Manager | Harness refresh is now automatic | `check-compat-inventory.sh` now regenerates the upstream contract report plus the HTTP/SSE gap reports before validating, so Worker 1 does not rely on stale report artifacts.
 - 2026-04-03 | Worker 1 / Manager | Workspace integration warning surfaced | Full `cargo test --workspace` is currently blocked by borrow-check failures in `cairn-evals/src/services/release_service.rs`; Worker 1 harness checks remain green and independent while Worker 7 tightens that release-service implementation.
+- 2026-04-03 | Worker 1 / Manager | SSE payload handoff published | Worker 1 now generates an explicit event-by-event payload handoff report for Worker 8 showing current runtime event sources, preserved fixture wrapper shapes, and the missing builder directions needed to lock SSE compatibility.
 
 ## Blocked By
 
@@ -47,3 +48,4 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 | Review `crates/cairn-api/tests/phase0_fixture_shapes.rs` for executable minimum-shape checks on the seeded preserved HTTP/SSE Phase 0 fixtures.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-http-endpoint-gap-report.sh` and `tests/fixtures/migration/phase0_http_endpoint_gap_report.md` for the current Rust HTTP endpoint coverage assessment.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-sse-publisher-gap-report.sh` and `tests/fixtures/migration/phase0_sse_publisher_gap_report.md` for the current Rust SSE publisher compatibility gap assessment.
+- 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-sse-payload-handoff.sh` and `tests/fixtures/migration/phase0_sse_payload_handoff.md` for the concrete event-to-payload builder handoff Worker 8 can use to align SSE frames with preserved frontend shapes.
