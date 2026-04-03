@@ -30,5 +30,5 @@ Interpretation:
 
 - all worker-owned crates are currently green in isolation, and `cargo test --workspace` is green too
 - the current manager focus is seam polish and warning cleanup, not red test recovery
-- known quality defect from the latest sweep: 1 unused-import warning in `crates/cairn-tools/src/runtime_service_impl.rs`
+- no warning-level defect is currently surfaced by the latest targeted sweep (`cargo check -p cairn-tools` is clean)
 - highest-value remaining integration seam is API/product glue polish across Worker 5, Worker 6, and Worker 8
