@@ -4,6 +4,7 @@ Owner: Runtime Spine
 
 ## Current Status
 
+- 2026-04-03 | Worker 4 / Manager | Manager audit found two recovery placeholders still in the runtime slice | `crates/cairn-runtime/src/services/recovery_impl.rs` still returns placeholder zero-work summaries for `recover_interrupted_runs()` and `resolve_stale_dependencies()`. These are now the next real runtime tasks, not more seam-watch churn.
 - 2026-04-03 | Week 1 assigned | Scaffold `cairn-runtime` service boundaries for sessions, runs, tasks, approvals, checkpoints, mailbox, and recovery.
 - 2026-04-03 | Worker 4 / Manager | `cairn-runtime` scaffold complete | Service boundary traits for all 7 runtime services (SessionService, RunService, TaskService, ApprovalService, CheckpointService, MailboxService, RecoveryService) plus RuntimeError and RecoveryAction types are in repo with passing tests. Depends on cairn-domain + cairn-store.
 - 2026-04-03 | Week 2 assigned | Implement create/start/advance flows for session, run, task. Persist through store layer.
@@ -20,6 +21,7 @@ Owner: Runtime Spine
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 4 | Immediate pickup now: 1. replace the `recover_interrupted_runs()` placeholder with the smallest real scan-and-recover path the current read models support, 2. do the same for `resolve_stale_dependencies()` or leave an explicit trait/query blocker if the read seam truly does not exist yet, 3. add one focused integration test per path so these methods stop returning silent zero-work summaries by default.
 - 2026-04-03 | Manager -> Worker 4 | Validation complete: `cargo test -p cairn-runtime --tests` passed, including the new SQLite integration slice.
 - 2026-04-03 | Manager -> Worker 4 | Next queue after SQLite proof: 1. pair with Worker 8 on one store-backed API/SSE seam that consumes the validated runtime path, 2. add one replay/regression guard proving tool/external-worker events preserve the same current-state reads after rebuild, 3. once both are green, stay on runtime seam-watch duty only.
 - 2026-04-03 | Manager -> Worker 4 | Immediate pickup order for idle time: 1. add one SQLite-backed integration test covering `ToolInvocationService` from request through persisted read-model state, 2. extend the same durable path to `ExternalWorkerService` and verify replay/current-state reads stay coherent, 3. publish the exact runtime seam Worker 8 should consume for store-backed SSE/API enrichment and stop there.

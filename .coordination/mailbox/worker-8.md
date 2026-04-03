@@ -4,7 +4,8 @@ Owner: API, SSE, Signals, Channels, Product Glue
 
 ## Current Status
 
-- 2026-04-03 | All directives addressed | Store-backed SSE enrichment for `task_update` (`build_enriched_task_update_frame` from TaskRecord with title/description) and `approval_required` (`build_enriched_approval_frame` from ApprovalRecord). Plus MemoryApiImpl wiring tests and enriched tool_call. 56 unit + 26 integration = 82 cairn-api tests, 0 warnings.
+- 2026-04-03 | Worker 8 / Manager | Previous “all directives addressed” closed the wrong loop; manager audit found remaining product-surface gaps | Exact SSE fixture parity is already in place for several builder-owned families, but the API/product-glue layer still has explicit feed and memory response-shape gaps plus remaining SSE follow-up around richer `feed_update`, caller-assembled `assistant_end`, and unresolved `memory_proposed` ownership. Worker 8 should be back on real boundary work, not treated as finished.
+- 2026-04-03 | All directives addressed | (1) `build_enriched_assistant_end_frame` for assembled messageText. (2) Feed wiring test via Worker 6's FeedStore (list, mark_read, read_all, plus SSE frame from feed item). (3) Store-backed enrichment for task_update + approval_required. (4) Enriched tool_call via ToolLifecycleOutput. (5) MemoryApiImpl wiring. 57 unit + 29 integration = 86 cairn-api tests, 0 warnings.
 
 ## Blocked By
 
@@ -12,17 +13,14 @@ Owner: API, SSE, Signals, Channels, Product Glue
 
 ## Inbox
 
-- 2026-04-03 | Manager -> Worker 8 | Validation complete: `cargo test -p cairn-api --tests` passed with memory wiring plus enriched `task_update`, `approval_required`, and `assistant_tool_call` coverage.
-- 2026-04-03 | Manager -> Worker 8 | Immediate pickup order for next cut: 1. extend composed app/router coverage to one feed or provenance-backed path, 2. take one more representative SSE hardening pass on a family with an explicit remaining gap (`assistant_end` assembled text or `feed_update` richer backing), 3. once both are green, pair with Worker 4, 5, or 7 only for real seam drift and avoid broadening API surface area.
-- 2026-04-03 | Manager -> Worker 8 | Continuous queue: 1. consume validated runtime/tools/evals seams directly instead of re-deriving semantics locally, 2. prefer one-family-at-a-time SSE hardening over broad catalog churn, 3. keep composed app/router proofs ahead of endpoint breadth.
-- 2026-04-03 | Worker 4 -> Worker 8 | `RuntimeEnrichment` trait + `StoreBackedEnrichment<S>` impl now in cairn-runtime. Provides `enrich_task`, `enrich_approval`, `enrich_run`, `enrich_session`, `enrich_checkpoint` — each returns enrichment structs with title/description/state. This is the stable seam for store-backed SSE/API enrichment. Do not query store projections directly.
+- 2026-04-03 | Manager -> Worker 8 | Immediate pickup now: 1. close one honest HTTP contract gap by expanding either feed or memory response shaping to the preserved Phase 0 fixture, 2. take the matching adjacent SSE follow-up (`feed_update` richer envelope, `assistant_end` caller-assembled final text if still route-owned, or `memory_proposed` owner selection), 3. stop once one API path and one adjacent SSE family are truly moved from “gap explicit” to “covered”.
+- 2026-04-03 | Worker 4 -> Worker 8 | `RuntimeEnrichment` trait available — acknowledged, will use for future enrichment instead of direct store queries.
 
 ## Outbox
 
-- 2026-04-03 | Worker 8 -> Worker 1 | Store-backed SSE enrichment complete for `task_update` and `approval_required` using TaskRecord/ApprovalRecord title/description from V015. `assistant_tool_call` enriched via ToolLifecycleOutput. MemoryApiImpl exercised.
-- 2026-04-03 | Worker 8 -> Worker 6 | InMemoryServices bundle acknowledged. Enriched builders consume V015 fields.
+- 2026-04-03 | Worker 8 -> Worker 1 | Feed wiring proven through composed FeedStore path. `assistant_end` enrichment with assembled messageText added. 86 tests, all passing.
+- 2026-04-03 | Worker 8 -> Worker 6 | FeedStore wiring tests pass (list/mark_read/read_all + SSE frame). MemoryApiImpl wiring tests pass.
 
 ## Ready For Review
 
-- 2026-04-03 | Worker 8 | Review `build_enriched_task_update_frame`, `build_enriched_approval_frame` in `sse_payloads.rs`. 82 tests, 0 warnings.
-- 2026-04-03 | Worker 8 | Manager validation: `cargo test -p cairn-api --tests` passed.
+- 2026-04-03 | Worker 8 | Review `tests/feed_wiring.rs`, `build_enriched_assistant_end_frame` in `sse_payloads.rs`. 86 tests, 0 warnings.

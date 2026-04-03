@@ -120,14 +120,14 @@ worker_task_pool() {
   case "$worker" in
     worker-1)
       cat <<'EOF'
-Turn one current Phase 0 HTTP or SSE report gap into an executable cairn-api test or explicit generated artifact update
-Re-run compatibility generation and capture the exact files that changed, then narrow that drift to one concrete owner or test gap
-Audit the current migration README owner map and generated reports for stale prose, then update one concrete mismatch instead of only noting it
-Add one compatibility guard that would fail if feed, memory, or overview route shaping drifts from the preserved Phase 0 contract
-Compare the newest API/SSE tests against generated migration artifacts and tighten whichever side is lagging behind
-Take one explicit response-shape or payload-shape gap from the generated reports and convert it into a reproducible assertion or fixture refresh
-Refresh worker slice health only after checking which concrete crate or seam changed, then record that exact change instead of a general status sweep
-Audit the queue system only if it hides compatibility signal; otherwise spend the pass on a concrete preserved-surface truthfulness check
+Regenerate the SSE migration artifacts and remove any rows that still claim task_update approval_required assistant_tool_call or agent_progress need payload alignment when executable tests already prove exact fixture parity
+Compare phase0_sse_publisher_gap_report.md phase0_sse_payload_handoff.md and phase0_owner_map.md against current sse_payload_alignment.rs assertions and land the smallest generator or report fix needed to make them truthful again
+Keep the honest remaining SSE gaps explicit for feed_update assistant_end caller assembly and memory_proposed ownership instead of re-proving already-exact builder payloads
+Refresh compatibility artifacts only after checking which exact generated row is stale relative to cairn-api tests and update that concrete mismatch instead of another broad report sweep
+Take one preserved API or SSE contract gap that is still real and convert it into either a stronger executable guard or a corrected generated artifact, but do not queue another generic proof pass
+Audit one migration report row against current executable tests and stop as soon as one stale claim or one still-open honest gap is made explicit
+Add one compatibility guard only if it protects a real remaining feed memory or overview drift seam; otherwise spend the pass removing stale generated-report noise
+Treat queue or mailbox work as secondary unless it directly hides a compatibility truthfulness issue; prioritize report accuracy over another status refresh
 EOF
       ;;
     worker-2)
@@ -144,30 +144,26 @@ EOF
       ;;
     worker-3)
       cat <<'EOF'
-Add one more deterministic cross-backend ordering test for a Worker-8-facing read or query surface
-Fold the newest rebuild and ordering assumptions into migration-check or parity tooling so regressions fail earlier
-If parity stays green audit one store-backed surface touched by external-worker progress or mailbox reads for backend drift
-Take one more narrow cross-backend regression around replay cursor stability or current-state rebuild ordering and stop at the first proven gap
-If backend parity still holds add one lightweight store-facing assertion that helps Worker 8 trust read ordering without reading store internals
-Check one newly touched projection or backfill path for backend-specific assumptions before it leaks into API-facing behavior
-Verify one mailbox or external-worker read path still orders consistently across backends after the latest completions
-Audit whether replay cursor or resume expectations changed under the latest store work and capture only the smallest needed test
-Confirm one worker-facing API consumer can still rely on store ordering without re-sorting above the backend seam
-Check one projection rebuild edge case around completion or approval state and capture only the smallest backend-specific guard
+Fix CheckpointReadModel::list_by_run ordering so InMemory SQLite and Postgres all return checkpoints in the same deterministic order and keep the parity test green
+After the checkpoint fix rerun cross_backend_parity and take the next concrete ordering mismatch only if one still exists; stop at the first real failing surface
+Fold the checkpoint ordering rule into the smallest backend guard or comment needed so Worker 8 can trust read ordering without route-level re-sorting
+If parity is green after the checkpoint fix take one more replay or rebuild ordering edge case that still affects API-facing reads and no broader store refactor
+Check whether any current mailbox approval or tool_invocation ordering assumptions now differ from the fixed checkpoint rule and capture only one concrete follow-up if so
+Audit one projection rebuild edge case around checkpoint latest-vs-list ordering and make the contract explicit where the adapters and in-memory store must agree
+Use the next store pass on a failing or newly exposed parity seam only; avoid another generic parity sweep if the test suite is already honest
+Take one API-facing read model that depends on deterministic order and prove it still works after the checkpoint parity fix without widening backend behavior
 EOF
       ;;
     worker-4)
       cat <<'EOF'
-Stay on final seam-watch with Worker 8 and take only the next smallest runtime fix if store-backed enrichment drift appears
-If no drift appears add one lightweight guard or doc-level contract check around RuntimeEnrichment consumption and stop
-If Worker 8 reports progress or approval mismatch add only that exact replay-or-current-state regression
-Check whether the latest store-backed runtime seams changed progress or approval payload expectations before API hardening drifts
-Add one narrow regression around runtime enrichment lookup or replay recovery only if it protects an already-used API or SSE path
-Verify one pause, resume, or timeout-facing runtime seam still matches the latest API expectations without widening lifecycle scope
-Check whether one current-state read used by API or SSE is still runtime-owned rather than re-derived above the seam
-Audit the newest runtime-facing enrichment use for hidden dependency on store internals and add only the smallest guard if needed
-Confirm one progress or approval enrichment payload still composes correctly when the store-backed path is exercised repeatedly
-Audit one external-worker-facing runtime seam for drift under the latest API consumption and capture only the smallest corrective guard
+Replace the recover_interrupted_runs placeholder with the smallest real scan-and-recover path supported by current run or checkpoint read models
+Replace the resolve_stale_dependencies placeholder with either a real dependency-resolution pass or an explicit trait/query blocker that names the exact missing store seam
+Add one focused integration test for interrupted-run recovery so the method stops returning scanned=0 with no action by default
+Add one focused integration test for stale-dependency resolution or for the explicit blocker path so the runtime contract is honest instead of silent
+If one of the recovery methods truly cannot be implemented yet capture the exact missing read-model query in code and mailbox form instead of leaving a generic placeholder
+After recovery placeholders are closed recheck only the nearest API or SSE seam that consumes those runtime states; do not widen recovery behavior beyond that
+Keep runtime seam-watch duty secondary until the placeholder methods are either implemented or turned into explicit blocked contracts
+Take one timeout pause or resume regression only if it becomes the next failing surface after the recovery placeholder work is real
 EOF
       ;;
     worker-5)
@@ -187,16 +183,14 @@ EOF
       ;;
     worker-6)
       cat <<'EOF'
-Keep MemoryApiImpl FeedEndpoints and provenance seams honest while Worker 8 consumes them in API paths
-Add one representative provenance-or-search integration proof only if the current HTTP-facing read seam exposes a gap
-If Worker 8 finds no drift stay in support mode and avoid widening the retrieval model
-Check whether one more memory or provenance read path can be proven executable from the API surface without adding new retrieval concepts
-If the seam is still stable add one narrow guard that feed or provenance shaping remains backed by real services rather than route-local shaping
-Verify one feed-facing or deep-search-facing read still composes through real memory services after the latest router changes
-Audit whether a recent provenance or retrieval touch introduced route-local shaping and capture only the smallest correction if so
-Confirm one search or bundle-related read can still be exercised without adding new product-facing retrieval scope
-Check one memory-backed operator read for stable provenance attachment after the latest Worker 8 integration passes
-Verify one feed or poll-facing path still consumes memory services directly instead of rebuilding shape in the route layer
+Implement the smallest real submit_pack path so knowledge-pack ingest stops returning not yet implemented and can flow through the existing RFC 013 bundle types
+Make RetrievalMode behavior honest by either implementing the minimal vector or hybrid path now or tightening the service contract and tests so Hybrid no longer silently means lexical-only
+If submit_pack is too large for one pass wire the first bundle parsing and pipeline handoff step and leave an explicit bounded blocker instead of a generic internal error
+Check whether the current API-facing memory routes need their tests updated once submit_pack or retrieval mode behavior becomes real and stop at the first concrete seam
+Keep provenance and route wiring secondary until the hard not-implemented paths in pipeline.rs and pg/retrieval.rs are either implemented or turned into explicit narrowed contracts
+Take one feed or provenance follow-up only after the memory core stops hard-failing on knowledge packs and ambiguous retrieval modes
+If vector work is still deferred make the exact fallback behavior explicit in diagnostics and tests rather than letting callers infer full hybrid support
+Use the next pass on a real ingest or retrieval capability gap, not another generic support proof for routes that already exercise real services
 EOF
       ;;
     worker-7)
@@ -215,24 +209,16 @@ EOF
       ;;
     worker-8)
       cat <<'EOF'
-Take the next smallest API or SSE mismatch reported by Workers 4 5 6 or 7 using only existing service seams
-If the product-glue pass stays green add one last operator-facing read or SSE consumption proof without widening API scope
-Remain on integration-watch duty and stop before inventing new API breadth
-Prove one more composed app surface stays wired through real services after the latest downstream completions and stop before adding new routes
-Take one more narrow SSE enrichment or operator-facing read proof only if it uses already-stable runtime and memory seams
-Check whether any latest worker completions changed API boundary assumptions and capture only the smallest needed alignment fix
-Verify one operator-facing read or route composition still matches the newest runtime and memory seams without adding breadth
-Audit one SSE family for hidden route-local shaping and add only the smallest correction if it drifted from service-backed data
-Check one feed or overview-facing composed route for drift after the latest runtime and memory completions
-Verify one approval or progress SSE payload still reflects the authoritative service seam under rapid downstream churn
-Audit one operator-facing surface for repeated no-op proof work and capture the next smallest real integration check instead
-Confirm one memory-backed or eval-backed route still uses direct service composition rather than test-only shaping
-Bundle one composed app check plus one SSE check together and stop once both are proven or one concrete mismatch is found
-Take one operator-facing read path and one adjacent SSE family together so the next pass covers composition instead of a single micro-proof
-Verify one memory-backed route plus one overview or feed route still align after the latest downstream changes using only existing service seams
-Check one approval or progress SSE family together with its nearest operator-facing read so drift is caught as a pair rather than in isolation
-Audit one runtime-fed API path plus one memory-fed API path in the same pass and capture only the smallest shared boundary issue
-Confirm one end-to-end product-glue slice remains coherent across route composition and SSE emission without adding any new breadth
+Close one honest HTTP contract gap by expanding either feed or memory response shaping to match the preserved Phase 0 fixture exactly
+After the HTTP gap pick the matching adjacent SSE follow-up: richer feed_update envelope, caller-assembled assistant_end final text, or memory_proposed ownership and builder path
+Stop after moving one API path and one adjacent SSE family from explicit gap to explicit coverage; do not queue another generic proof pass
+Use existing runtime memory and eval seams only; the next API pass should remove one real boundary gap, not add breadth
+If feed is chosen close both the HTTP item shape and the feed_update envelope together enough that Worker 1 can remove that row from the generated gap report
+If memory is chosen close the HTTP search item shape and then decide whether memory_proposed should be runtime-owned or dedicated-builder-owned so the report can stop saying owner missing
+If assistant_end is the next smallest SSE follow-up make the caller-assembled final text path real in the API composition layer and keep the report/tests aligned
+After one real contract gap is closed rerun only the nearest API and compatibility tests and stop at the first newly exposed mismatch
+Avoid another composition-only proof unless it is tied to one remaining preserved response or payload gap
+Treat product-glue work as close one explicit gap at a time until Worker 1’s generated reports shrink for real
 EOF
       ;;
   esac
