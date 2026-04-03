@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
-## Current RFC: 005 — Task/Session/Checkpoint Lifecycle
-## Current Phase: implementation (Phase 3a)
+## Current RFC: 006 — Prompt Registry and Release
+## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
 
@@ -11,7 +11,7 @@
 | 002 | Runtime and Event Model | DONE |
 | 003 | Owned Retrieval | DONE |
 | 004 | Graph and Eval Matrix | DONE |
-| 005 | Task/Session/Checkpoint Lifecycle | IN PROGRESS |
+| 005 | Task/Session/Checkpoint Lifecycle | DONE |
 | 006 | Prompt Registry and Release | pending |
 | 007 | Plugin Protocol and Transport | pending |
 | 008 | Tenant/Workspace/Profile | pending |
