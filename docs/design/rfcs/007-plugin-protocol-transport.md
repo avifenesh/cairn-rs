@@ -839,6 +839,34 @@ For v1:
 
 This keeps the runtime contract stable even if installation UX changes later.
 
+### First Bridge After Stdio
+
+If Cairn adds a second transport after stdio, the first bridge should be HTTP rather than gRPC.
+
+Reasoning for v1 and near-post-v1 evolution:
+
+- HTTP is simpler to debug and operate across deployment boundaries
+- HTTP aligns better with heterogeneous plugin ecosystems and lightweight service wrappers
+- the canonical contract can still remain JSON-RPC-shaped even if the transport later changes
+
+gRPC may still be useful later for specialized high-throughput or strongly typed internal service cases, but it is not the first bridge to optimize for.
+
+### Streaming Rule In V1
+
+V1 does not require plugin categories to expose streaming result bodies beyond:
+
+- progress updates
+- heartbeat-style liveness updates
+
+That means:
+
+- tools do not need streaming stdout/result protocols in the plugin contract
+- signal plugins do not need streaming result feeds through the plugin RPC surface
+- channel plugins do not need streaming delivery-result bodies
+- eval plugins do not need streaming score output
+
+If a workflow needs richer streaming later, that should be introduced as an explicit extension rather than implied by the base v1 protocol.
+
 ## Non-Goals
 
 For v1, do not optimize for:
@@ -850,8 +878,7 @@ For v1, do not optimize for:
 
 ## Open Questions
 
-1. Should the first bridge after stdio be HTTP or gRPC?
-2. Which plugin categories need streaming responses beyond progress events in v1?
+1. Which post-v1 workflows, if any, justify richer streaming result bodies beyond progress and heartbeat updates?
 
 ## Decision
 
@@ -864,4 +891,6 @@ Proceed assuming:
 - the minimum host-managed isolation floor is mandatory in all modes
 - local mode may default to `supervised_process`
 - self-hosted team mode must support policy-enforced `sandboxed_process` execution
+- HTTP is the first bridge to consider after stdio, not gRPC
+- progress and heartbeat updates are the only required streaming-style plugin outputs in v1
 - only `sandboxed_process` provides enforced filesystem/network confinement in v1
