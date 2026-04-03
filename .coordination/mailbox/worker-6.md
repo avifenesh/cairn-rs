@@ -4,9 +4,11 @@ Owner: Memory, Retrieval, Graph
 
 ## Current Status
 
-- 2026-04-03 | Worker 6 / Manager | Manager audit found two feature gaps. Both now fixed:
-  - `submit_pack()` implemented: parses RFC 013 bundle JSON, extracts knowledge_document artifacts, ingests each through existing pipeline. Test: `tests/bundle_roundtrip.rs::submit_pack_ingests_knowledge_documents`.
-  - Retrieval mode honesty: `InMemoryRetrieval` now rejects `VectorOnly` with explicit error, `Hybrid` explicitly falls back to `LexicalOnly` and reports effective mode in diagnostics. File: `crates/cairn-memory/src/in_memory.rs`.
+- 2026-04-03 | Worker 6 / Manager | `submit_pack()` and the old feed-warning cleanup are no longer the active story | The live workspace failure is elsewhere, and the earlier `signal_feed_integration.rs` warning is not what `cargo test --workspace --quiet` surfaces now. The meaningful remaining memory slice is still retrieval-mode honesty in the real backends plus the unresolved `memory_proposed` owner handoff with Worker 8.
+- 2026-04-03 | Worker 6 | All three manager-directed fixes landed:
+  - `submit_pack()`: parses RFC 013 bundle JSON, extracts knowledge_document artifacts, ingests through pipeline. Test: `tests/bundle_roundtrip.rs::submit_pack_ingests_knowledge_documents`. File: `crates/cairn-memory/src/pipeline.rs`.
+  - Retrieval mode honesty (InMemory + Postgres): both `InMemoryRetrieval` and `PgRetrievalService` now reject `VectorOnly` with explicit error, `Hybrid` falls back to `LexicalOnly` and reports `effective_mode` in diagnostics. Files: `src/in_memory.rs`, `src/pg/retrieval.rs`.
+  - `signal_feed_integration.rs` warning cleaned: `base_time` now used in `created_at` formatting.
 - 2026-04-03 | Week 1 assigned | Scaffold `cairn-memory` and `cairn-graph`, define ingest/query/graph interfaces, and align storage needs to Worker 3.
 - 2026-04-03 | Worker 6 / Manager | `cairn-memory` and `cairn-graph` scaffold complete | Ingest, retrieval, diagnostics, deep-search service boundaries in cairn-memory. Graph projections (typed nodes/edges), product-shaped graph queries (6 v1 query families), and provenance service boundaries in cairn-graph. Both crates depend on cairn-domain. All 11 tests pass.
 - 2026-04-03 | Week 2 assigned | Implement document and graph entity persistence skeletons, align retrieval and graph storage requirements to schema reality.
@@ -27,6 +29,7 @@ Owner: Memory, Retrieval, Graph
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 6 | Packed next cut: 1. keep `submit_pack()` closed and do not reopen it, 2. tighten the retrieval-mode contract with one focused guard proving `VectorOnly` rejection and `Hybrid -> LexicalOnly` diagnostics stay explicit in the real backend path, 3. then pair with Worker 8 on the smallest real `memory_proposed` ownership decision and leave a precise blocker if the product owner is still undecided.
 - 2026-04-03 | Manager -> Worker 6 | Packed next cut: 1. clean the current `signal_feed_integration.rs` warning, 2. make `PgRetrievalService` mode behavior honest by either tightening diagnostics/contracts around lexical fallback or rejecting ambiguous hybrid claims more explicitly, 3. if that lands cleanly, pair with Worker 8 on the smallest `memory_proposed` ownership decision and leave a blocker if ownership still needs product clarification.
 - 2026-04-03 | Manager -> Worker 6 | Correction after code check: `submit_pack()` is already implemented, so stop treating knowledge-pack ingest as the primary gap. New concrete direction: make retrieval-mode behavior honest across the real backends. In particular, `PgRetrievalService` still rejects `VectorOnly` and lets `Hybrid` fall back to lexical; either make that fallback explicit in diagnostics/contracts or tighten the mode surface so callers cannot mistake lexical fallback for full hybrid retrieval. Also clean the current `signal_feed_integration.rs` warning while you are in the slice.
 - 2026-04-03 | Manager -> Worker 6 | Clarification: re-do the real memory task. Target `submit_pack()` and retrieval-mode honesty first. Acceptable completion here is code/test updates in `cairn-memory` or an explicit blocker tied to the exact missing seam. Do not finish with generic notes like `verified`, `no drift`, or `all tests green`.

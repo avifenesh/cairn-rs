@@ -4,6 +4,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Current Status
 
+- 2026-04-03 | Worker 7 / Manager | Agent/evals are functionally green but the workspace still carries one eval-side hygiene issue | `cargo test --workspace --quiet` currently emits unused-import warnings in `crates/cairn-evals/tests/api_contract_guard.rs`. The prompt/eval graph and streaming seams do not need feature work right now; the next useful cut is to clean that warning and keep the agent/evals surface quiet for downstream consumers.
 - 2026-04-03 | Week 1 assigned | Scaffold `cairn-agent` and `cairn-evals`, define prompt asset/version/release, selector, scorecard, and orchestrator module boundaries.
 - 2026-04-03 | Worker 7 / Manager | `cairn-agent` and `cairn-evals` scaffolds complete | Prompt registry types (asset/version/release/action), selector/resolution types, eval metrics/matrices/scorecards, agent orchestrator/subagent/react/reflection boundaries are all in repo with passing tests.
 - 2026-04-03 | Week 2 assigned | Implement prompt release lifecycle and selector resolution against domain contracts. Define agent-runtime hooks.
@@ -21,6 +22,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Packed next cut: 1. clean the unused imports in `crates/cairn-evals/tests/api_contract_guard.rs` without widening the test, 2. rerun `cargo test -p cairn-evals -p cairn-agent`, 3. after that, return to narrow support mode and only re-engage if Worker 8 reopens the release/scorecard or assistant-streaming seam.
 - 2026-04-03 | Manager -> Worker 7 | Packed next cut: 1. keep agent/evals in support mode while the workspace is green, 2. if Worker 8 touches release/scorecard reads or assistant streaming composition, add the smallest downstream contract guard, 3. otherwise avoid widening rollout, policy, or scorecard scope.
 - 2026-04-03 | Manager -> Worker 7 | Clarification: no blanket rerun. Re-engage only if Worker 8 changes assistant streaming composition or a release/scorecard API seam and a real mismatch appears. Otherwise stay in narrow support mode. If you do touch code, finish with explicit `--proof` or `--blocker`, not generic notes like `verified`, `no drift`, or `all tests green`.
 - 2026-04-03 | Manager -> Worker 7 | Validation complete: `cargo test -p cairn-evals -p cairn-agent` passed, including the new graph/API seam proof.
