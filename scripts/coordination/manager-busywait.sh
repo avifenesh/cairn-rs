@@ -161,24 +161,19 @@ Replace the resolve_stale_dependencies placeholder with either a real dependency
 Add one focused integration test for interrupted-run recovery so the method stops returning scanned=0 with no action by default
 Add one focused integration test for stale-dependency resolution or for the explicit blocker path so the runtime contract is honest instead of silent
 If one of the recovery methods truly cannot be implemented yet capture the exact missing read-model query in code and mailbox form instead of leaving a generic placeholder
-After recovery placeholders are closed recheck only the nearest API or SSE seam that consumes those runtime states; do not widen recovery behavior beyond that
-Keep runtime seam-watch duty secondary until the placeholder methods are either implemented or turned into explicit blocked contracts
-Take one timeout pause or resume regression only if it becomes the next failing surface after the recovery placeholder work is real
+Once the recovery placeholders are real rerun the nearest runtime integration tests and capture only the next concrete regression
+If recovery is green after that take one concrete timeout, pause, or resume regression only if it becomes the next failing runtime surface
 EOF
       ;;
     worker-5)
       cat <<'EOF'
-Stay on tool-path seam watch and take only the next smallest runtime-to-tools-to-API handoff fix a downstream worker reports
-Add one final guard that downstream API or SSE shaping does not bypass ToolLifecycleOutput semantics
-If the seam stays green add one lightweight contract assertion for assistant_tool_call shaping and stop
-Verify one negative-path assistant_tool_call case still preserves lifecycle and permission coherence after the newest API changes
+If Worker 8 closes a feed memory or assistant contract gap recheck only the neighboring assistant_tool_call seam and fix the smallest concrete mismatch
+Verify one denied or held tool lifecycle still preserves operator-facing shape after the latest API boundary changes
+Add one narrow guard that downstream API or SSE shaping still consumes ToolLifecycleOutput directly instead of re-deriving lifecycle state
 Check one store-backed or replay-backed tool path for drift between runtime output and API-facing tool lifecycle shaping
-If no regression appears add one focused test or assertion that protects tool outcome coherence without widening plugin scope
-Check whether one permission or policy edge case still flows through the same tool lifecycle seam after the latest API work
 Verify one non-happy-path tool outcome still surfaces the right operator-facing shape without bypassing runtime-owned semantics
-Confirm one tool lifecycle payload still holds up under repeated claim/complete churn from fast API-facing consumers
-Check one assistant tool path for idempotent operator-facing shaping after the latest downstream completions
 Audit one runtime-to-tools seam for accidental duplication in API or SSE tests and stop at the first concrete example
+If the tools seam is still green after that keep the slice green and wait for the next concrete downstream handoff bug instead of creating a new proof pass
 EOF
       ;;
     worker-6)
@@ -187,24 +182,21 @@ Implement the smallest real submit_pack path so knowledge-pack ingest stops retu
 Make RetrievalMode behavior honest by either implementing the minimal vector or hybrid path now or tightening the service contract and tests so Hybrid no longer silently means lexical-only
 If submit_pack is too large for one pass wire the first bundle parsing and pipeline handoff step and leave an explicit bounded blocker instead of a generic internal error
 Check whether the current API-facing memory routes need their tests updated once submit_pack or retrieval mode behavior becomes real and stop at the first concrete seam
-Keep provenance and route wiring secondary until the hard not-implemented paths in pipeline.rs and pg/retrieval.rs are either implemented or turned into explicit narrowed contracts
-Take one feed or provenance follow-up only after the memory core stops hard-failing on knowledge packs and ambiguous retrieval modes
-If vector work is still deferred make the exact fallback behavior explicit in diagnostics and tests rather than letting callers infer full hybrid support
-Use the next pass on a real ingest or retrieval capability gap, not another generic support proof for routes that already exercise real services
+If submit_pack lands add one bundle-ingest integration test proving it flows through the existing pipeline rather than a route-local stub
+If retrieval mode behavior stays partially deferred make the exact fallback explicit in diagnostics and tests so API callers cannot infer full hybrid support
+After the core memory gaps are honest rerun the nearest API-facing memory tests and stop at the first concrete seam
+If the core gaps are still blocked capture the exact blocker in code and mailbox form instead of re-running route support tasks
 EOF
       ;;
     worker-7)
       cat <<'EOF'
-Stay in final agent-evals support mode and take only the next smallest API-facing release scorecard graph or streaming mismatch Worker 8 reports
-If no mismatch appears add one lightweight guard against re-deriving prompt or eval semantics above the direct API seam and stop
-Keep rollout and scorecard scope closed unless Worker 8 surfaces a concrete integration blocker
-Check whether the latest API-facing graph or scorecard work drifted from direct eval ownership and add only the smallest guard if it did
-Verify one prompt-release or selector-facing surface still lines up with eval scorecard expectations after the newest downstream changes
+If Worker 8 changes assistant_end or neighboring streaming API composition recheck only that StreamingOutput seam and stop at the first real mismatch
+Recheck one release or scorecard API seam only if the current product-glue work touches that boundary
+Add one lightweight guard against re-deriving prompt or eval semantics above the direct API seam
 Audit one graph or scorecard-facing API seam for accidental duplication of eval logic and stop at the first concrete example
-Check whether one streaming output path still lines up with agent or eval ownership after the latest API changes
-Confirm one selector-driven release surface remains consistent with scorecard and graph expectations without widening rollout scope
-Verify one API-facing evaluation read still composes through the expected ownership seam after rapid downstream churn
-Audit one graph-projection consumer for subtle drift from direct eval semantics and capture only the smallest needed guard
+Verify one prompt-release or selector-facing surface still lines up with eval scorecard expectations after the newest downstream changes
+Keep rollout and scorecard scope closed unless a concrete integration blocker appears
+If no concrete API or streaming mismatch is live stay green and wait for the next real downstream seam instead of inventing another support pass
 EOF
       ;;
     worker-8)
