@@ -432,6 +432,7 @@ mod tests {
                 session_id: SessionId::new("sess_1"),
                 run_id: RunId::new("run_1"),
                 parent_run_id: None,
+                prompt_release_id: None,
             })),
         ];
 

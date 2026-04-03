@@ -34,6 +34,9 @@ struct State {
     signals: HashMap<String, cairn_domain::SignalRecord>,
     ingest_jobs: HashMap<String, cairn_domain::IngestJobRecord>,
     eval_runs: HashMap<String, crate::projections::EvalRunRecord>,
+    prompt_assets: HashMap<String, crate::projections::PromptAssetRecord>,
+    prompt_versions: HashMap<String, crate::projections::PromptVersionRecord>,
+    prompt_releases: HashMap<String, crate::projections::PromptReleaseRecord>,
 }
 
 pub struct InMemoryStore {
@@ -56,6 +59,9 @@ impl InMemoryStore {
                 signals: HashMap::new(),
                 ingest_jobs: HashMap::new(),
                 eval_runs: HashMap::new(),
+                prompt_assets: HashMap::new(),
+                prompt_versions: HashMap::new(),
+                prompt_releases: HashMap::new(),
             }),
         }
     }
@@ -277,10 +283,50 @@ impl InMemoryStore {
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
             | RuntimeEvent::UserMessageAppended(_)
-            | RuntimeEvent::PromptAssetCreated(_)
-            | RuntimeEvent::PromptVersionCreated(_)
-            | RuntimeEvent::PromptReleaseCreated(_)
-            | RuntimeEvent::PromptReleaseTransitioned(_) => {}
+            RuntimeEvent::PromptAssetCreated(e) => {
+                state.prompt_assets.insert(
+                    e.prompt_asset_id.as_str().to_owned(),
+                    crate::projections::PromptAssetRecord {
+                        prompt_asset_id: e.prompt_asset_id.clone(),
+                        project: e.project.clone(),
+                        name: e.name.clone(),
+                        kind: e.kind.clone(),
+                        created_at: e.created_at,
+                    },
+                );
+            }
+            RuntimeEvent::PromptVersionCreated(e) => {
+                state.prompt_versions.insert(
+                    e.prompt_version_id.as_str().to_owned(),
+                    crate::projections::PromptVersionRecord {
+                        prompt_version_id: e.prompt_version_id.clone(),
+                        prompt_asset_id: e.prompt_asset_id.clone(),
+                        project: e.project.clone(),
+                        content_hash: e.content_hash.clone(),
+                        created_at: e.created_at,
+                    },
+                );
+            }
+            RuntimeEvent::PromptReleaseCreated(e) => {
+                state.prompt_releases.insert(
+                    e.prompt_release_id.as_str().to_owned(),
+                    crate::projections::PromptReleaseRecord {
+                        prompt_release_id: e.prompt_release_id.clone(),
+                        project: e.project.clone(),
+                        prompt_asset_id: e.prompt_asset_id.clone(),
+                        prompt_version_id: e.prompt_version_id.clone(),
+                        state: "draft".to_owned(),
+                        created_at: e.created_at,
+                        updated_at: e.created_at,
+                    },
+                );
+            }
+            RuntimeEvent::PromptReleaseTransitioned(e) => {
+                if let Some(rec) = state.prompt_releases.get_mut(e.prompt_release_id.as_str()) {
+                    rec.state = e.to_state.clone();
+                    rec.updated_at = e.transitioned_at;
+                }
+            }
             RuntimeEvent::IngestJobStarted(e) => {
                 state.ingest_jobs.insert(
                     e.job_id.as_str().to_owned(),
@@ -981,6 +1027,7 @@ mod tests {
                 session_id: session_id.clone(),
                 run_id: run_id.clone(),
                 parent_run_id: None,
+                prompt_release_id: None,
             }))])
             .await
             .unwrap();
@@ -1034,6 +1081,7 @@ mod tests {
                 task_id: task_id.clone(),
                 parent_run_id: None,
                 parent_task_id: None,
+                prompt_release_id: None,
             }))])
             .await
             .unwrap();
@@ -1132,6 +1180,7 @@ mod tests {
                         tool_name: "fs.read".to_owned(),
                     },
                     execution_class: ExecutionClass::SupervisedProcess,
+                    prompt_release_id: None,
                     requested_at_ms: 100,
                     started_at_ms: 101,
                 })),
@@ -1184,6 +1233,7 @@ mod tests {
                         tool_name: "shell.exec".to_owned(),
                     },
                     execution_class: ExecutionClass::SandboxedProcess,
+                    prompt_release_id: None,
                     requested_at_ms: 200,
                     started_at_ms: 201,
                 })),
@@ -1206,6 +1256,7 @@ mod tests {
                         tool_name: "fs.read".to_owned(),
                     },
                     execution_class: ExecutionClass::SupervisedProcess,
+                    prompt_release_id: None,
                     requested_at_ms: 100,
                     started_at_ms: 101,
                 })),
@@ -1296,6 +1347,7 @@ mod tests {
                 session_id: session_id.clone(),
                 run_id: run_id.clone(),
                 parent_run_id: None,
+                prompt_release_id: None,
             }))])
             .await
             .unwrap();
@@ -1325,6 +1377,7 @@ mod tests {
                 task_id: task_id.clone(),
                 parent_run_id: Some(run_id.clone()),
                 parent_task_id: None,
+                prompt_release_id: None,
             }))])
             .await
             .unwrap();
@@ -1550,6 +1603,7 @@ mod tests {
                     task_id: task_id.clone(),
                     parent_run_id: None,
                     parent_task_id: None,
+                    prompt_release_id: None,
                 }))])
                 .await
                 .unwrap();

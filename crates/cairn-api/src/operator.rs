@@ -76,6 +76,7 @@ mod tests {
                 parent_run_id: None,
                 project: ProjectKey::new("t", "w", "p"),
                 state: RunState::Running,
+                prompt_release_id: None,
                 failure_class: None,
                 pause_reason: None,
                 resume_trigger: None,

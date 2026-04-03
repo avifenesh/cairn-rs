@@ -40,6 +40,7 @@ mod sqlite_parity {
             session_id: SessionId::new(session_id),
             run_id: RunId::new(run_id),
             parent_run_id: None,
+            prompt_release_id: None,
         }))
     }
 
@@ -282,6 +283,7 @@ mod sqlite_parity {
                 task_id: TaskId::new(id),
                 parent_run_id: Some(RunId::new("r1")),
                 parent_task_id: None,
+                prompt_release_id: None,
             }))])
             .await
             .unwrap();
@@ -403,6 +405,7 @@ mod sqlite_parity {
                     tool_name: "fs.write".to_owned(),
                 },
                 execution_class: cairn_domain::ExecutionClass::SupervisedProcess,
+                prompt_release_id: None,
                 requested_at_ms: 200,
                 started_at_ms: 201,
             },
@@ -422,6 +425,7 @@ mod sqlite_parity {
                     tool_name: "fs.read".to_owned(),
                 },
                 execution_class: cairn_domain::ExecutionClass::SupervisedProcess,
+                prompt_release_id: None,
                 requested_at_ms: 100,
                 started_at_ms: 101,
             },
@@ -720,18 +724,21 @@ mod sqlite_parity {
                 task_id: TaskId::new("child_z"),
                 parent_run_id: Some(RunId::new("r_parent")),
                 parent_task_id: None,
+                prompt_release_id: None,
             })),
             make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
                 project: project.clone(),
                 task_id: TaskId::new("child_a"),
                 parent_run_id: Some(RunId::new("r_parent")),
                 parent_task_id: None,
+                prompt_release_id: None,
             })),
             make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
                 project: project.clone(),
                 task_id: TaskId::new("child_m"),
                 parent_run_id: Some(RunId::new("r_parent")),
                 parent_task_id: None,
+                prompt_release_id: None,
             })),
         ])
         .await
@@ -868,6 +875,7 @@ mod sqlite_parity {
                 task_id: TaskId::new("t1"),
                 parent_run_id: Some(RunId::new("r1")),
                 parent_task_id: None,
+                prompt_release_id: None,
             })),
             make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
                 project: project.clone(),
@@ -904,6 +912,7 @@ mod sqlite_parity {
                     tool_name: "fs.read".to_owned(),
                 },
                 execution_class: cairn_domain::ExecutionClass::SupervisedProcess,
+                prompt_release_id: None,
                 requested_at_ms: 100,
                 started_at_ms: 101,
             })),
@@ -928,6 +937,7 @@ mod sqlite_parity {
                     tool_name: "fs.write".to_owned(),
                 },
                 execution_class: cairn_domain::ExecutionClass::SandboxedProcess,
+                prompt_release_id: None,
                 requested_at_ms: 300,
                 started_at_ms: 301,
             })),
@@ -1098,6 +1108,7 @@ mod sqlite_parity {
                             tool_name: "test".to_owned(),
                         },
                         execution_class: cairn_domain::ExecutionClass::SupervisedProcess,
+                        prompt_release_id: None,
                         requested_at_ms: req_ms,
                         started_at_ms: req_ms + 1,
                     },

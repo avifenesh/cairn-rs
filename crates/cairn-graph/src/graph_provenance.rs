@@ -278,12 +278,14 @@ mod tests {
                     session_id: SessionId::new("sess_1"),
                     run_id: RunId::new("run_1"),
                     parent_run_id: None,
+                    prompt_release_id: None,
                 })),
                 make_stored(RuntimeEvent::TaskCreated(TaskCreated {
                     project: ProjectKey::new("t", "w", "p"),
                     task_id: TaskId::new("task_1"),
                     parent_run_id: Some(RunId::new("run_1")),
                     parent_task_id: None,
+                    prompt_release_id: None,
                 })),
             ])
             .await
@@ -316,6 +318,7 @@ mod tests {
                     session_id: SessionId::new("s1"),
                     run_id: RunId::new("r1"),
                     parent_run_id: None,
+                    prompt_release_id: None,
                 })),
             ])
             .await

@@ -524,6 +524,7 @@ mod tests {
             task_id: TaskId::new("task_1"),
             parent_run_id: None,
             parent_task_id: None,
+            prompt_release_id: None,
         });
         let payload = shape_event_payload(&event).unwrap();
         assert!(payload.get("task").is_some());
@@ -577,6 +578,7 @@ mod tests {
             task_id: TaskId::new("task_1"),
             parent_run_id: None,
             parent_task_id: None,
+            prompt_release_id: None,
         });
         let record = TaskRecord {
             task_id: TaskId::new("task_1"),
@@ -584,6 +586,7 @@ mod tests {
             parent_run_id: None,
             parent_task_id: None,
             state: TaskState::Running,
+            prompt_release_id: None,
             failure_class: None,
             pause_reason: None,
             resume_trigger: None,
@@ -656,6 +659,7 @@ mod tests {
                 tool_name: "fs.read".to_owned(),
             },
             execution_class: ExecutionClass::SupervisedProcess,
+            prompt_release_id: None,
             requested_at_ms: 100,
             started_at_ms: 101,
         });
@@ -810,6 +814,7 @@ mod tests {
             parent_run_id: None,
             parent_task_id: None,
             state: cairn_domain::lifecycle::TaskState::Running,
+            prompt_release_id: None,
             failure_class: None,
             pause_reason: None,
             resume_trigger: None,

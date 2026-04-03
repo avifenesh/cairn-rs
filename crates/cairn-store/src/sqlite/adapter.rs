@@ -703,6 +703,7 @@ impl TaskRow {
             parent_run_id: self.parent_run_id.map(RunId::new),
             parent_task_id: self.parent_task_id.map(TaskId::new),
             state: parse_string_enum::<TaskState>(&self.state)?,
+            prompt_release_id: None,
             failure_class: self
                 .failure_class
                 .as_deref()

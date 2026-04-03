@@ -70,6 +70,7 @@ fn task_update_runtime_mapping_falls_back_without_current_state() {
         task_id: TaskId::new("task_001"),
         parent_run_id: None,
         parent_task_id: None,
+        prompt_release_id: None,
     });
     let payload = cairn_api::sse_payloads::shape_event_payload(&event).unwrap();
 
@@ -98,6 +99,7 @@ fn task_update_current_state_helper_uses_store_record() {
         task_id: TaskId::new("task_001"),
         parent_run_id: None,
         parent_task_id: None,
+        prompt_release_id: None,
     });
     let record = TaskRecord {
         task_id: TaskId::new("task_001"),
@@ -105,6 +107,7 @@ fn task_update_current_state_helper_uses_store_record() {
         parent_run_id: None,
         parent_task_id: None,
         state: TaskState::Running,
+        prompt_release_id: None,
         failure_class: None,
         pause_reason: None,
         resume_trigger: None,

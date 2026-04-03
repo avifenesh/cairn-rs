@@ -193,6 +193,7 @@ mod tests {
             task_id: TaskId::new("task_1"),
             parent_run_id: None,
             parent_task_id: None,
+            prompt_release_id: None,
         });
         let stored = test_stored_event(event, 42);
         let frame = build_sse_frame(&stored).unwrap();
@@ -210,6 +211,7 @@ mod tests {
             task_id: TaskId::new("task_1"),
             parent_run_id: None,
             parent_task_id: None,
+            prompt_release_id: None,
         });
         let stored = test_stored_event(event, 7);
         let record = TaskRecord {
@@ -218,6 +220,7 @@ mod tests {
             parent_run_id: None,
             parent_task_id: None,
             state: TaskState::Running,
+            prompt_release_id: None,
             failure_class: None,
             pause_reason: None,
             resume_trigger: None,
