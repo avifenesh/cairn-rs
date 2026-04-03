@@ -211,14 +211,20 @@ write_last_seen_event() {
 }
 
 print_worker_queue_snapshot() {
-  local worker
+  local worker id summary shown=0
   worker="$(normalize_worker "$1")"
   printf '%s pending=%s claimed=%s done=%s\n' \
     "$worker" \
     "$(pending_count "$worker")" \
     "$(claimed_count "$worker")" \
     "$(done_count "$worker")"
-  list_tasks_table "$worker" pending | head -n 10 | while IFS=$'\t' read -r id summary; do
+
+  while IFS=$'\t' read -r id summary; do
+    [[ -n "$id" ]] || continue
     printf '  PENDING %s %s\n' "$id" "$summary"
-  done
+    shown=$(( shown + 1 ))
+    if (( shown >= 10 )); then
+      break
+    fi
+  done < <(list_tasks_table "$worker" pending)
 }

@@ -42,6 +42,16 @@ done
 
 ensure_queue_layout
 
+lock_dir="$STATE_ROOT/manager-busywait.lock"
+if ! mkdir "$lock_dir" 2>/dev/null; then
+  echo "manager busywait already running" >&2
+  exit 0
+fi
+cleanup_lock() {
+  rmdir "$lock_dir" 2>/dev/null || true
+}
+trap cleanup_lock EXIT INT TERM
+
 task_exists() {
   local worker summary file
   worker="$(normalize_worker "$1")"
