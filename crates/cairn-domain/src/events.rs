@@ -3,7 +3,10 @@ use crate::ids::{
     ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, RunId, SessionId,
     SignalId, TaskId, ToolInvocationId,
 };
-use crate::lifecycle::{CheckpointDisposition, FailureClass, RunState, SessionState, TaskState};
+use crate::lifecycle::{
+    CheckpointDisposition, FailureClass, PauseReason, ResumeTrigger, RunState, SessionState,
+    TaskState,
+};
 use crate::policy::{ApprovalDecision, ApprovalRequirement, ExecutionClass};
 use crate::tenancy::{OwnershipKey, ProjectKey};
 use crate::tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget};
@@ -276,6 +279,8 @@ pub struct RunStateChanged {
     pub run_id: RunId,
     pub transition: StateTransition<RunState>,
     pub failure_class: Option<FailureClass>,
+    pub pause_reason: Option<PauseReason>,
+    pub resume_trigger: Option<ResumeTrigger>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,6 +314,8 @@ pub struct TaskStateChanged {
     pub task_id: TaskId,
     pub transition: StateTransition<TaskState>,
     pub failure_class: Option<FailureClass>,
+    pub pause_reason: Option<PauseReason>,
+    pub resume_trigger: Option<ResumeTrigger>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -333,6 +340,7 @@ pub struct CheckpointRecorded {
     pub run_id: RunId,
     pub checkpoint_id: CheckpointId,
     pub disposition: CheckpointDisposition,
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

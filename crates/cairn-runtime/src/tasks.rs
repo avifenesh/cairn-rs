@@ -63,6 +63,9 @@ pub trait TaskService: Send + Sync {
     /// Cancel a task (terminal).
     async fn cancel(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
 
+    /// Dead-letter a task (terminal, after exhausting retries).
+    async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
+
     /// Pause a task.
     async fn pause(
         &self,

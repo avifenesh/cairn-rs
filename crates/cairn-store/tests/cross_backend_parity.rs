@@ -797,18 +797,21 @@ mod sqlite_parity {
                 run_id: RunId::new("r1"),
                 checkpoint_id: CheckpointId::new("cp_z"),
                 disposition: CheckpointDisposition::Superseded,
+                data: None,
             })),
             make_envelope(RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
                 project: project.clone(),
                 run_id: RunId::new("r1"),
                 checkpoint_id: CheckpointId::new("cp_a"),
                 disposition: CheckpointDisposition::Superseded,
+                data: None,
             })),
             make_envelope(RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
                 project: project.clone(),
                 run_id: RunId::new("r1"),
                 checkpoint_id: CheckpointId::new("cp_m"),
                 disposition: CheckpointDisposition::Latest,
+                data: None,
             })),
         ])
         .await

@@ -68,6 +68,8 @@ where
                         to: target_state,
                     },
                     failure_class: Some(FailureClass::LeaseExpired),
+                    pause_reason: None,
+                    resume_trigger: None,
                 })),
                 make_envelope(RuntimeEvent::RecoveryCompleted(RecoveryCompleted {
                     project: task.project.clone(),
@@ -136,6 +138,8 @@ where
                             to: RunState::Failed,
                         },
                         failure_class: Some(FailureClass::ExecutionError),
+                        pause_reason: None,
+                        resume_trigger: None,
                     })),
                     make_envelope(RuntimeEvent::RecoveryCompleted(RecoveryCompleted {
                         project: run.project.clone(),
@@ -198,6 +202,8 @@ where
                         to: RunState::Running,
                     },
                     failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 })),
                 make_envelope(RuntimeEvent::RecoveryCompleted(RecoveryCompleted {
                     project: run.project.clone(),

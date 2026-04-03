@@ -35,6 +35,7 @@ where
             run_id: run_id.clone(),
             checkpoint_id: checkpoint_id.clone(),
             disposition: CheckpointDisposition::Latest,
+            data: None,
         }));
 
         self.store.append(&[event]).await?;

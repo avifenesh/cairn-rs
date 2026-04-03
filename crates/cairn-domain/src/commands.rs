@@ -349,6 +349,7 @@ pub struct RecordCheckpoint {
     pub run_id: RunId,
     pub checkpoint_id: CheckpointId,
     pub mark_latest: bool,
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

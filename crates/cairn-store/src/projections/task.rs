@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cairn_domain::{FailureClass, ProjectKey, RunId, TaskId, TaskState};
+use cairn_domain::{FailureClass, PauseReason, ProjectKey, ResumeTrigger, RunId, TaskId, TaskState};
 use serde::{Deserialize, Serialize};
 
 use crate::error::StoreError;
@@ -13,6 +13,9 @@ pub struct TaskRecord {
     pub parent_task_id: Option<TaskId>,
     pub state: TaskState,
     pub failure_class: Option<FailureClass>,
+    pub pause_reason: Option<PauseReason>,
+    pub resume_trigger: Option<ResumeTrigger>,
+    pub retry_count: u32,
     pub lease_owner: Option<String>,
     pub lease_expires_at: Option<u64>,
     /// Product-level title for operator/SSE surfaces.

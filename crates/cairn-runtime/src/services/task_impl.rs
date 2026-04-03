@@ -53,6 +53,8 @@ impl<S: EventLog + TaskReadModel + 'static> TaskServiceImpl<S> {
                 to,
             },
             failure_class,
+            pause_reason: None,
+            resume_trigger: None,
         }));
 
         self.store.append(&[event]).await?;
@@ -124,6 +126,8 @@ where
                     to: TaskState::Leased,
                 },
                 failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
             })),
         ];
 
@@ -193,25 +197,76 @@ where
             .await
     }
 
+    async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+        self.transition_task(task_id, TaskState::DeadLettered, None)
+            .await
+    }
+
     async fn pause(
         &self,
         task_id: &TaskId,
-        _reason: PauseReason,
+        reason: PauseReason,
     ) -> Result<TaskRecord, RuntimeError> {
-        self.transition_task(task_id, TaskState::Paused, None).await
+        let task = self.get_task(task_id).await?;
+
+        if !can_transition_task_state(task.state, TaskState::Paused) {
+            return Err(RuntimeError::InvalidTransition {
+                entity: "task",
+                from: format!("{:?}", task.state),
+                to: format!("{:?}", TaskState::Paused),
+            });
+        }
+
+        let event = make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
+            project: task.project.clone(),
+            task_id: task_id.clone(),
+            transition: StateTransition {
+                from: Some(task.state),
+                to: TaskState::Paused,
+            },
+            failure_class: None,
+            pause_reason: Some(reason),
+            resume_trigger: None,
+        }));
+
+        self.store.append(&[event]).await?;
+        self.get_task(task_id).await
     }
 
     async fn resume(
         &self,
         task_id: &TaskId,
-        _trigger: ResumeTrigger,
+        trigger: ResumeTrigger,
         target: TaskResumeTarget,
     ) -> Result<TaskRecord, RuntimeError> {
+        let task = self.get_task(task_id).await?;
         let to = match target {
             TaskResumeTarget::Queued => TaskState::Queued,
             TaskResumeTarget::Running => TaskState::Running,
         };
-        self.transition_task(task_id, to, None).await
+
+        if !can_transition_task_state(task.state, to) {
+            return Err(RuntimeError::InvalidTransition {
+                entity: "task",
+                from: format!("{:?}", task.state),
+                to: format!("{to:?}"),
+            });
+        }
+
+        let event = make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
+            project: task.project.clone(),
+            task_id: task_id.clone(),
+            transition: StateTransition {
+                from: Some(task.state),
+                to,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: Some(trigger),
+        }));
+
+        self.store.append(&[event]).await?;
+        self.get_task(task_id).await
     }
 
     async fn list_by_state(

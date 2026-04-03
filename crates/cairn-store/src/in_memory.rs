@@ -93,6 +93,8 @@ impl InMemoryStore {
                         project: e.project.clone(),
                         state: RunState::Pending,
                         failure_class: None,
+                        pause_reason: None,
+                        resume_trigger: None,
                         version: 1,
                         created_at: now,
                         updated_at: now,
@@ -103,6 +105,8 @@ impl InMemoryStore {
                 if let Some(rec) = state.runs.get_mut(e.run_id.as_str()) {
                     rec.state = e.transition.to;
                     rec.failure_class = e.failure_class;
+                    rec.pause_reason = e.pause_reason.clone();
+                    rec.resume_trigger = e.resume_trigger;
                     rec.version += 1;
                     rec.updated_at = now;
                 }
@@ -117,6 +121,9 @@ impl InMemoryStore {
                         parent_task_id: e.parent_task_id.clone(),
                         state: TaskState::Queued,
                         failure_class: None,
+                        pause_reason: None,
+                        resume_trigger: None,
+                        retry_count: 0,
                         lease_owner: None,
                         lease_expires_at: None,
                         title: None,
@@ -131,6 +138,11 @@ impl InMemoryStore {
                 if let Some(rec) = state.tasks.get_mut(e.task_id.as_str()) {
                     rec.state = e.transition.to;
                     rec.failure_class = e.failure_class;
+                    rec.pause_reason = e.pause_reason.clone();
+                    rec.resume_trigger = e.resume_trigger;
+                    if e.transition.to == TaskState::RetryableFailed {
+                        rec.retry_count += 1;
+                    }
                     rec.version += 1;
                     rec.updated_at = now;
                 }
@@ -178,6 +190,7 @@ impl InMemoryStore {
                         project: e.project.clone(),
                         run_id: e.run_id.clone(),
                         disposition: e.disposition,
+                        data: e.data.clone(),
                         version: 1,
                         created_at: now,
                     },
@@ -968,6 +981,8 @@ mod tests {
                         to: RunState::Running,
                     },
                     failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 })),
                 make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
                     project: project.clone(),
@@ -1047,6 +1062,7 @@ mod tests {
                     run_id: run_id.clone(),
                     checkpoint_id: CheckpointId::new("cp_1"),
                     disposition: CheckpointDisposition::Latest,
+                    data: None,
                 },
             ))])
             .await
@@ -1059,6 +1075,7 @@ mod tests {
                     run_id: run_id.clone(),
                     checkpoint_id: CheckpointId::new("cp_2"),
                     disposition: CheckpointDisposition::Latest,
+                    data: None,
                 },
             ))])
             .await
@@ -1272,6 +1289,8 @@ mod tests {
                         to: RunState::Running,
                     },
                     failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 },
             ))])
             .await
@@ -1313,6 +1332,8 @@ mod tests {
                         to: TaskState::Running,
                     },
                     failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 },
             ))])
             .await
@@ -1340,6 +1361,7 @@ mod tests {
                     run_id: run_id.clone(),
                     checkpoint_id: checkpoint_id_1.clone(),
                     disposition: CheckpointDisposition::Latest,
+                    data: None,
                 },
             ))])
             .await
@@ -1353,6 +1375,7 @@ mod tests {
                     run_id: run_id.clone(),
                     checkpoint_id: checkpoint_id_2.clone(),
                     disposition: CheckpointDisposition::Latest,
+                    data: None,
                 },
             ))])
             .await
@@ -1394,6 +1417,8 @@ mod tests {
                         to: TaskState::Completed,
                     },
                     failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 },
             ))])
             .await
@@ -1410,6 +1435,8 @@ mod tests {
                         to: RunState::Completed,
                     },
                     failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 },
             ))])
             .await

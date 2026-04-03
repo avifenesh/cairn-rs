@@ -34,6 +34,7 @@ pub fn parse_outcome(outcome_str: &str) -> Result<ExternalWorkerOutcome, Runtime
             reason: cairn_domain::PauseReason {
                 kind: cairn_domain::PauseReasonKind::RuntimeSuspension,
                 detail: None,
+                resume_after_ms: None,
             },
         }),
         other => Err(RuntimeError::Internal(format!(
@@ -111,6 +112,8 @@ where
                         to: to_state,
                     },
                     failure_class,
+                    pause_reason: None,
+                    resume_trigger: None,
                 },
             )));
         }

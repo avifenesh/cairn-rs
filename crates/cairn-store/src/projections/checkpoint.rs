@@ -11,6 +11,7 @@ pub struct CheckpointRecord {
     pub project: ProjectKey,
     pub run_id: RunId,
     pub disposition: CheckpointDisposition,
+    pub data: Option<serde_json::Value>,
     pub version: u64,
     pub created_at: u64,
 }

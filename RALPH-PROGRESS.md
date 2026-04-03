@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
 ## Current RFC: 005 — Task/Session/Checkpoint Lifecycle
-## Current Phase: gap analysis (Phase 1)
+## Current Phase: implementation (Phase 3a)
 
 ## RFC Status
 
@@ -430,3 +430,4 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 - [x] RFC 004: Phase 4 cross-review — BFS edge dedup fix, eval projection tests, EvalRunCompleted subject_node_id field
 - [x] RFC 004: Phase 5 — marked complete, all 18 gaps resolved
 - [x] RFC 005: Phase 1 gap analysis — 18 gaps across session derivation, pause/resume tracking, task lifecycle, checkpoint restore, recovery fixes
+- [x] RFC 005: Phase 2 types — pause_reason/resume_trigger on RunRecord/TaskRecord, retry_count on TaskRecord, resume_after_ms on PauseRun/PauseTask, checkpoint_data payload field, dead_letter method

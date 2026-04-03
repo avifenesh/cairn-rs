@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cairn_domain::{FailureClass, ProjectKey, RunId, RunState, SessionId};
+use cairn_domain::{FailureClass, PauseReason, ProjectKey, ResumeTrigger, RunId, RunState, SessionId};
 use serde::{Deserialize, Serialize};
 
 use crate::error::StoreError;
@@ -13,6 +13,8 @@ pub struct RunRecord {
     pub project: ProjectKey,
     pub state: RunState,
     pub failure_class: Option<FailureClass>,
+    pub pause_reason: Option<PauseReason>,
+    pub resume_trigger: Option<ResumeTrigger>,
     pub version: u64,
     pub created_at: u64,
     pub updated_at: u64,

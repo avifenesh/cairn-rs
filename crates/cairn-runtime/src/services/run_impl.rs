@@ -53,6 +53,8 @@ impl<S: EventLog + RunReadModel + 'static> RunServiceImpl<S> {
                 to,
             },
             failure_class,
+            pause_reason: None,
+            resume_trigger: None,
         }));
 
         self.store.append(&[event]).await?;
@@ -72,6 +74,16 @@ where
         run_id: RunId,
         parent_run_id: Option<RunId>,
     ) -> Result<RunRecord, RuntimeError> {
+        if RunReadModel::get(self.store.as_ref(), &run_id)
+            .await?
+            .is_some()
+        {
+            return Err(RuntimeError::Conflict {
+                entity: "run",
+                id: run_id.to_string(),
+            });
+        }
+
         let event = make_envelope(RuntimeEvent::RunCreated(RunCreated {
             project: project.clone(),
             session_id: session_id.clone(),
@@ -116,20 +128,66 @@ where
         self.transition_run(run_id, RunState::Canceled, None).await
     }
 
-    async fn pause(&self, run_id: &RunId, _reason: PauseReason) -> Result<RunRecord, RuntimeError> {
-        self.transition_run(run_id, RunState::Paused, None).await
+    async fn pause(&self, run_id: &RunId, reason: PauseReason) -> Result<RunRecord, RuntimeError> {
+        let run = self.get_run(run_id).await?;
+
+        if !can_transition_run_state(run.state, RunState::Paused) {
+            return Err(RuntimeError::InvalidTransition {
+                entity: "run",
+                from: format!("{:?}", run.state),
+                to: format!("{:?}", RunState::Paused),
+            });
+        }
+
+        let event = make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: run.project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: Some(run.state),
+                to: RunState::Paused,
+            },
+            failure_class: None,
+            pause_reason: Some(reason),
+            resume_trigger: None,
+        }));
+
+        self.store.append(&[event]).await?;
+        self.get_run(run_id).await
     }
 
     async fn resume(
         &self,
         run_id: &RunId,
-        _trigger: ResumeTrigger,
+        trigger: ResumeTrigger,
         target: RunResumeTarget,
     ) -> Result<RunRecord, RuntimeError> {
+        let run = self.get_run(run_id).await?;
         let to = match target {
             RunResumeTarget::Pending => RunState::Pending,
             RunResumeTarget::Running => RunState::Running,
         };
-        self.transition_run(run_id, to, None).await
+
+        if !can_transition_run_state(run.state, to) {
+            return Err(RuntimeError::InvalidTransition {
+                entity: "run",
+                from: format!("{:?}", run.state),
+                to: format!("{to:?}"),
+            });
+        }
+
+        let event = make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: run.project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: Some(run.state),
+                to,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: Some(trigger),
+        }));
+
+        self.store.append(&[event]).await?;
+        self.get_run(run_id).await
     }
 }
