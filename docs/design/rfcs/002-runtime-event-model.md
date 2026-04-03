@@ -233,6 +233,22 @@ For SSE/event-feed replay in v1:
 - the product must support a durable replay window sufficient for client resume and operator inspection
 - the replay window may be implemented as a retained subset or cursorable view over canonical event history
 
+### SSE Replay SLA In V1
+
+V1 defines one operational replay expectation for SSE consumers:
+
+- durable replay for client resume must be available for at least a documented short-term operational window
+
+The canonical v1 contract is:
+
+- the product exposes a replayable event position or cursor
+- reconnecting clients may request resume within the documented replay window
+- operators may inspect recent runtime event streams from that same replayable window
+
+V1 does not require the SSE feed itself to expose the full retained lifetime of canonical runtime history.
+
+Longer-lived historical inspection should use product read models and history-oriented APIs rather than assuming the live SSE channel is an infinite archive.
+
 ## Mailbox Model
 
 Mailbox messages should be durable runtime records with:
@@ -278,6 +294,18 @@ HTTP APIs should submit commands or query projections.
 SSE should expose runtime facts and projection updates, not ad-hoc UI-only events.
 
 This gives the frontend and external operators one consistent model.
+
+### Event History Export Rule
+
+V1 does not require a general-purpose raw full event-history export API as part of the canonical product surface.
+
+Instead:
+
+- product APIs should expose history through product-shaped read models, timelines, and detail endpoints
+- internal rebuild and migration tooling may use the canonical event log directly
+- if direct event-log export exists in v1, it is additive and non-canonical rather than a required application contract
+
+This keeps the operator/API contract focused on product semantics rather than exposing the raw event store as a primary user-facing interface.
 
 ### Projection Timing Rules
 
@@ -335,8 +363,7 @@ Do not:
 
 ## Open Questions
 
-1. Should v1 expose full event-history export for `full_history` entities directly, or rely on projections plus the canonical event log internally?
-2. Should the SSE replay window be bounded only by retention policy, or should v1 define a smaller operational replay SLA for client resume?
+1. What concrete minimum replay window should the first sellable release document for SSE resume and recent operator inspection?
 
 ## Decision
 
@@ -350,3 +377,5 @@ Proceed assuming:
 - replay in v1 covers canonical runtime entities and rebuildable projections, not whole-system time travel
 - synchronous projections are reserved for correctness-critical runtime state
 - external workers may execute and report work, but canonical command handling and event persistence remain Rust-runtime-owned
+- product-facing history access in v1 is read-model-first rather than raw event-export-first
+- SSE replay in v1 uses a documented operational replay window rather than implying infinite history on the live stream
