@@ -20,6 +20,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 7 | Immediate pickup order for idle time: 1. add one proof that `GraphIntegration` plus prompt-release/eval-run data is stable enough for API consumption without re-deriving semantics, 2. keep the `StreamingOutput` seam under test for Worker 8’s preserved assistant SSE families, 3. if API still finds a mismatch, land the smallest integration fix and stop.
 - 2026-04-03 | Manager -> Worker 7 | Continuous queue: 1. prove one graph-linked prompt/eval path is stable enough for API consumption, 2. keep the `StreamingOutput` seam stable for Worker 8, 3. if API finds a mismatch, land the smallest integration fix only and do not widen rollout or scorecard behavior.
 - 2026-04-03 | Manager -> Worker 7 | Next pacing cut: turn the prompt/eval slice into a stronger downstream contract. Add one focused graph/API support proof that `GraphIntegration` plus scorecard/release data stay stable enough for Worker 8 to surface without re-deriving prompt/eval semantics.
 - 2026-04-03 | Manager -> Worker 7 | Keep this narrow: one representative graph-linked prompt/eval path and one stable read seam are enough. Do not widen rollout, scorecard, or policy behavior unless the integration path actually requires it.

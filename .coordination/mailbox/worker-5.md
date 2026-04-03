@@ -15,6 +15,7 @@ Owner: Tools, Plugin Host, Isolation
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 5 | Immediate pickup order for idle time: 1. add one integration proof around `RuntimeToolServiceImpl` that exercises lifecycle output plus persisted runtime event linkage, 2. verify the same path keeps graph/permission-event data coherent enough for downstream consumers, 3. if Worker 8 reports any `assistant_tool_call` drift, take that smallest fix only and stop.
 - 2026-04-03 | Manager -> Worker 5 | Continuous queue: 1. prove one representative `runtime -> tools -> plugin -> outcome` path end to end, 2. verify `ToolLifecycleOutput` stays coherent with graph-linkable and permission-event data, 3. if Worker 8 surfaces any `assistant_tool_call` mismatch, take that narrow fix and no broader protocol work.
 - 2026-04-03 | Manager -> Worker 5 | Next pacing cut: prove the representative tool path end-to-end, not just by unit tests. Add one integration path around `RuntimeToolServiceImpl` that shows runtime invocation, lifecycle output shaping, and graph-linkable/permission-event data stay coherent together.
 - 2026-04-03 | Manager -> Worker 5 | Keep scope guard intact: no new plugin categories, no protocol widening. This is about integration confidence for Worker 6/8, not feature expansion.
