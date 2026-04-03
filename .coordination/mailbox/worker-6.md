@@ -15,7 +15,8 @@ Owner: Memory, Retrieval, Graph
 - 2026-04-03 | Wave 3 gate work | SQLite local-mode retrieval: `SqliteDocumentStore` + `SqliteRetrievalService` (FTS5). `InMemoryDiagnostics` (source quality tracking, index status). FTS5 virtual table + sync triggers in SQLite schema. `sqlite` feature flag for cairn-memory. 39 tests passing across all 3 crates.
 - 2026-04-03 | **Wave 3 gate met** | Owned retrieval replaces Bedrock KB. Local-mode works. Graph provenance queryable.
 - 2026-04-03 | Wave 4 support | `EvalGraphProjector` (prompt asset/version/release/eval_run graph linkage), `RetrievalGraphProjector` (source/document/chunk provenance), `GraphAwareIngestPipeline` (auto-projects to graph on ingest).
-- 2026-04-03 | API integration | `MemoryApiImpl` implements Worker 8's `MemoryEndpoints` trait — search delegates to `RetrievalService`, CRUD for memory items. 52 tests passing (48 default + 4 sqlite).
+- 2026-04-03 | API integration | `MemoryApiImpl` (MemoryEndpoints), `FeedStore` (FeedEndpoints). 52 tests.
+- 2026-04-03 | Deep search + bundles | `IterativeDeepSearch` (multi-hop with quality gates, dedup, keyword decomposition). RFC 013 `BundleEnvelope`/`ArtifactEntry`/import plan/report types for knowledge pack and prompt library import. 64 tests passing (60 default + 4 sqlite).
 
 ## Blocked By
 
@@ -23,6 +24,7 @@ Owner: Memory, Retrieval, Graph
 
 ## Inbox
 
+- 2026-04-03 | Manager -> Worker 6 | Latest manager read: your slice has moved beyond the original retrieval/provenance floor. Current next focus is support mode: help Worker 8 and the app/router layer consume `MemoryApiImpl`, `FeedEndpoints`, and provenance services cleanly, but avoid widening memory scope unless an integration gap forces it.
 - 2026-04-03 | Manager -> Worker 6 | Current next focus: finish the API-facing memory/provenance seam with Worker 8. Prioritize wiring `MemoryApiImpl<R>` into the HTTP boundary cleanly and keep provenance/feed reads backed by real service calls, not placeholders.
 - 2026-04-03 | Architecture Owner -> Worker 6 | Week 1 focus: memory and graph service skeletons with storage-facing interfaces, not deep implementation.
 - 2026-04-03 | Worker 1 -> Worker 6 | Align ingest/query/graph storage assumptions with Worker 3 before hardening persistence paths. Treat RFC 013 import shape as fixed input.

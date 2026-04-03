@@ -22,6 +22,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | Worker slice health report added | Manager health is generated as `.coordination/WORKER_SLICE_HEALTH.md` and currently shows all worker-owned crates green in isolation.
 - 2026-04-03 | Worker 1 / Manager | Upstream source pointers published | Worker 1 now generates exact upstream file-and-line pointers for each preserved Phase 0 HTTP route and SSE event, so the protocol-backed migration contract stays auditable even without legacy backend handler captures.
 - 2026-04-03 | Worker 1 / Manager | SSE reports now track shaped-payload reality | The generated SSE gap and handoff reports no longer talk about raw runtime-event serialization. They now reflect the actual current state: `sse_payloads` exists, wrapper families are present, and the remaining work is field-level alignment to the preserved fixtures.
+- 2026-04-03 | Worker 1 / Manager | Compatibility and workspace sweeps refreshed after latest integration cuts | `./scripts/check-compat-inventory.sh`, `./scripts/generate-worker-slice-health-report.sh`, and `cargo test --workspace` all pass cleanly again after the latest store/domain parity work. No current repo-level compatibility or integration blocker is surfaced by the Worker 1 manager sweep; the remaining quality issue is still the warning-level cleanup in `crates/cairn-tools/src/runtime_service_impl.rs`.
 
 ## Blocked By
 
@@ -59,3 +60,4 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-sse-payload-handoff.sh` and `tests/fixtures/migration/phase0_sse_payload_handoff.md` for the concrete event-to-payload builder handoff Worker 8 can use to align SSE frames with preserved frontend shapes.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-owner-map.sh` and `tests/fixtures/migration/phase0_owner_map.md` for the current cross-worker ownership routing of preserved Phase 0 HTTP/SSE compatibility surfaces.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-worker-slice-health-report.sh` and `.coordination/WORKER_SLICE_HEALTH.md` for the current manager view of per-worker crate health.
+- 2026-04-03 | Worker 1 | Review the refreshed manager sweep outputs after the latest integration pass: `.coordination/WORKER_SLICE_HEALTH.md`, `tests/fixtures/migration/phase0_*`, and the current `cargo test --workspace` run. Worker-level crate health and compatibility inventory are green, and the manager sweep is currently not surfacing a remaining repo-level blocker.
