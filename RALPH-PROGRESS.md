@@ -18,7 +18,7 @@
 | 009 | Provider Abstraction | DONE |
 | 010 | Operator Control Plane | pending |
 | 011 | Deployment Shape | pending |
-| 012 | Onboarding and Starter Templates | pending |
+| 012 | Onboarding and Starter Templates | IN PROGRESS |
 | 013 | Artifact Import/Export | pending |
 | 014 | Commercial Packaging | pending |
 
@@ -703,6 +703,34 @@ RFC 008 says every API request operates in explicit scope context.
 3. **Phase 4 — Tests + review**
 4. **Phase 5 — Mark complete**
 
+## RFC 012 — Gap Analysis
+
+### What exists
+
+**cairn-api bootstrap.rs**: BootstrapConfig (port, deployment_mode: Local/SelfHosted), ServerBootstrap trait, DeploymentMode enum. Basic server startup only.
+
+**cairn-memory bundles.rs**: BundleEnvelope, ArtifactKind, BundleType for knowledge pack import. IngestPackRequest for curated knowledge packs.
+
+### Gaps
+
+1. No StarterTemplate type — [ ] Add StarterTemplateId, StarterTemplateCategory (KnowledgeAssistant/ApprovalGatedWorker/MultiStepWorkflow), StarterTemplate struct
+2. No OnboardingFlow types — [ ] Add OnboardingFlowState, OnboardingStep, OnboardingProgress for tracking bootstrap
+3. No template materialization service — [ ] Add TemplateMaterializationService that creates tenant/workspace/project + starter assets from template
+4. No template registry — [ ] Add system-scoped StarterTemplateRegistry listing available templates
+5. No bootstrap provenance — [ ] Add BootstrapProvenance recording which template, when, what was materialized
+6. No prompt import service — [ ] Add canonical PromptImportService with reconciliation (match by id or name+hash, idempotent)
+7. No import provenance model — [ ] Add ImportProvenanceRecord (source, timestamp, bundle ref, created/reused/skipped/conflicted)
+8. No onboarding checklist — [ ] Add OnboardingChecklist type tracking setup completion steps
+9. Bootstrap doesn't create product state — [ ] Wire bootstrap to create tenant/workspace/project/operator/provider via existing services
+10. No shipped starter content — [ ] Add starter prompt/policy definitions for the 3 required template categories
+
+### Phase plan
+
+1. **Phase 2 — Types**: StarterTemplate, OnboardingFlow, ImportProvenance, BootstrapProvenance types
+2. **Phase 3 — Impl**: template registry, materialization service, prompt import service
+3. **Phase 4 — Tests + review**
+4. **Phase 5 — Mark complete**
+
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
 - [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants
@@ -745,3 +773,4 @@ RFC 008 says every API request operates in explicit scope context.
 - [x] RFC 009: Phase 1 gap analysis — 10 gaps across provider records, routing events, store projections, route resolver
 - [x] RFC 009: Phase 2+3 — ProviderConnectionRecord, ProviderBindingRecord, RouteDecisionMade/ProviderCallCompleted events, RouteDecisionReadModel/ProviderCallReadModel + InMemoryStore impls, RouteResolverService trait
 - [x] RFC 009: Phase 5 — marked complete
+- [x] RFC 012: Phase 1 gap analysis — 10 gaps across starter templates, onboarding flow, materialization, import, provenance
