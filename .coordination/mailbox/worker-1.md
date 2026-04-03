@@ -16,6 +16,7 @@ Owner: Contracts, Fixtures, Migration Harness
 
 ## Outbox
 
+- 2026-04-03 | Worker 1 / Manager -> Worker 2 | Week 2 target: publish the narrow runtime-critical domain cut for session/run/task/approval/checkpoint/mailbox advancement, shared error enums, external-worker reporting, and any required tool-invocation shared records. Land this cut early for Worker 3/4/5.
 - 2026-04-03 | Worker 1 -> Worker 2 | Deliver stable base IDs, command/event enums, tenancy keys, and lifecycle types first. Worker 4, 5, 7, and 8 will build on those boundaries immediately.
 - 2026-04-03 | Worker 1 -> Worker 3 | Deliver migration layout, event-log interfaces, and sync-projection boundaries early. Worker 4, 6, and 8 are blocked on store shape drifting.
 - 2026-04-03 | Worker 1 -> Worker 4 | Stay at runtime service-boundary level until Worker 2/3 shared contracts settle. Avoid locking handler semantics locally.
