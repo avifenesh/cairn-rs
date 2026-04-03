@@ -16,6 +16,7 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 / Manager | Harness refresh is now automatic | `check-compat-inventory.sh` now regenerates the upstream contract report plus the HTTP/SSE gap reports before validating, so Worker 1 does not rely on stale report artifacts.
 - 2026-04-03 | Worker 1 / Manager | Workspace integration warning surfaced | Full `cargo test --workspace` is currently blocked by borrow-check failures in `cairn-evals/src/services/release_service.rs`; Worker 1 harness checks remain green and independent while Worker 7 tightens that release-service implementation.
 - 2026-04-03 | Worker 1 / Manager | SSE payload handoff published | Worker 1 now generates an explicit event-by-event payload handoff report for Worker 8 showing current runtime event sources, preserved fixture wrapper shapes, and the missing builder directions needed to lock SSE compatibility.
+- 2026-04-03 | Worker 1 / Manager | Phase 0 owner map published | Worker 1 now generates an explicit owner map for preserved HTTP and SSE compatibility surfaces so route/SSE gaps are routed to Worker 4/6/7/8 intentionally instead of turning into orphaned compatibility TODOs.
 
 ## Blocked By
 
@@ -49,3 +50,4 @@ Owner: Contracts, Fixtures, Migration Harness
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-http-endpoint-gap-report.sh` and `tests/fixtures/migration/phase0_http_endpoint_gap_report.md` for the current Rust HTTP endpoint coverage assessment.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-sse-publisher-gap-report.sh` and `tests/fixtures/migration/phase0_sse_publisher_gap_report.md` for the current Rust SSE publisher compatibility gap assessment.
 - 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-sse-payload-handoff.sh` and `tests/fixtures/migration/phase0_sse_payload_handoff.md` for the concrete event-to-payload builder handoff Worker 8 can use to align SSE frames with preserved frontend shapes.
+- 2026-04-03 | Worker 1 | Review `scripts/generate-phase0-owner-map.sh` and `tests/fixtures/migration/phase0_owner_map.md` for the current cross-worker ownership routing of preserved Phase 0 HTTP/SSE compatibility surfaces.
