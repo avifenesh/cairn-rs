@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
-## Current RFC: 003 — Owned Retrieval
-## Current Phase: tests (Phase 4)
+## Current RFC: 004 — Graph and Eval Matrix
+## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
 
@@ -9,7 +9,7 @@
 |-----|-------|--------|
 | 001 | Product Boundary and Non-Goals | scope-only, no code needed |
 | 002 | Runtime and Event Model | DONE |
-| 003 | Owned Retrieval | IN PROGRESS |
+| 003 | Owned Retrieval | DONE |
 | 004 | Graph and Eval Matrix | pending |
 | 005 | Task/Session/Checkpoint Lifecycle | pending |
 | 006 | Prompt Registry and Release | pending |
@@ -240,3 +240,5 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 - [x] RFC 003: Phase 3b impl — scoring calculators (freshness/staleness with decay), metadata filtering in all backends, MMR reranking (cosine similarity on embeddings, Jaccard fallback on text)
 - [x] RFC 003: Phase 3c impl — diagnostics enrichment (candidate stages, scoring dimensions, effective policy), deep search graph hooks
 - [x] RFC 003: Phase 3d impl — IngestJobReadModel trait + InMemoryStore projection, IngestJobService trait + impl in cairn-runtime
+- [x] RFC 003: Phase 4 tests — full pipeline tests, ingest job lifecycle, scoring, reranking, diagnostics coverage
+- [x] RFC 003: Phase 5 — marked complete, all 12 gaps resolved
