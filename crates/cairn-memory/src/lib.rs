@@ -20,6 +20,7 @@ pub mod ingest;
 #[cfg(feature = "postgres")]
 pub mod pg;
 pub mod pipeline;
+pub mod reranking;
 pub mod retrieval;
 pub mod services;
 #[cfg(feature = "sqlite")]

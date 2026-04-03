@@ -165,6 +165,72 @@ pub trait RetrievalService: Send + Sync {
     async fn query(&self, query: RetrievalQuery) -> Result<RetrievalResponse, RetrievalError>;
 }
 
+// --- Scoring calculators (RFC 003) ---
+
+const MS_PER_DAY: f64 = 86_400_000.0;
+
+/// Compute freshness score based on content age.
+///
+/// Returns a value in [0.0, 1.0] that decays exponentially from 1.0
+/// as the content ages. `decay_days` controls the half-life-like rate:
+/// content `decay_days` old scores ~0.37 (1/e).
+pub fn freshness_score(created_at_ms: u64, now_ms: u64, decay_days: f64) -> f64 {
+    if decay_days <= 0.0 || now_ms <= created_at_ms {
+        return 1.0;
+    }
+    let age_days = (now_ms - created_at_ms) as f64 / MS_PER_DAY;
+    (-age_days / decay_days).exp()
+}
+
+/// Compute staleness penalty for content that hasn't been updated recently.
+///
+/// Returns a value in [0.0, 1.0] where 0.0 means no penalty (fresh or
+/// recently updated) and 1.0 means maximally stale. Content within
+/// `threshold_days` of its last update receives no penalty. Beyond that,
+/// the penalty grows linearly up to 1.0 at 2x the threshold.
+pub fn staleness_penalty(updated_at_ms: Option<u64>, created_at_ms: u64, now_ms: u64, threshold_days: f64) -> f64 {
+    if threshold_days <= 0.0 {
+        return 0.0;
+    }
+    let reference_ms = updated_at_ms.unwrap_or(created_at_ms);
+    if now_ms <= reference_ms {
+        return 0.0;
+    }
+    let age_days = (now_ms - reference_ms) as f64 / MS_PER_DAY;
+    if age_days <= threshold_days {
+        0.0
+    } else {
+        ((age_days - threshold_days) / threshold_days).min(1.0)
+    }
+}
+
+/// Compute a weighted final score from a scoring breakdown and weights.
+///
+/// The staleness_penalty dimension is subtracted (it's a penalty), all
+/// others are added. recency_of_use is included only when present.
+pub fn compute_final_score(breakdown: &ScoringBreakdown, weights: &ScoringWeights) -> f64 {
+    let mut score = 0.0;
+    score += breakdown.semantic_relevance * weights.semantic_weight;
+    score += breakdown.lexical_relevance * weights.lexical_weight;
+    score += breakdown.freshness * weights.freshness_weight;
+    score -= breakdown.staleness_penalty * weights.staleness_weight;
+    score += breakdown.source_credibility * weights.credibility_weight;
+    score += breakdown.corroboration * weights.corroboration_weight;
+    score += breakdown.graph_proximity * weights.graph_proximity_weight;
+    if let Some(recency) = breakdown.recency_of_use {
+        score += recency * weights.recency_weight;
+    }
+    score.max(0.0)
+}
+
+/// Retrieve current time in milliseconds (utility for scoring callers).
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 /// Retrieval-specific errors.
 #[derive(Debug)]
 pub enum RetrievalError {
@@ -187,7 +253,7 @@ impl std::error::Error for RetrievalError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{RerankerStrategy, RetrievalMode, ScoringBreakdown};
+    use super::*;
 
     #[test]
     fn retrieval_modes_are_distinct() {
@@ -205,5 +271,131 @@ mod tests {
     #[test]
     fn reranker_strategies_are_distinct() {
         assert_ne!(RerankerStrategy::None, RerankerStrategy::Mmr);
+    }
+
+    // --- Scoring calculator tests ---
+
+    #[test]
+    fn freshness_score_is_1_for_brand_new_content() {
+        let now = 1_000_000;
+        assert_eq!(freshness_score(now, now, 30.0), 1.0);
+    }
+
+    #[test]
+    fn freshness_score_decays_over_time() {
+        let day_ms = MS_PER_DAY as u64;
+        let now = 100 * day_ms;
+        let created_30_days_ago = now - 30 * day_ms;
+
+        let score = freshness_score(created_30_days_ago, now, 30.0);
+        // At exactly decay_days, score should be ~1/e ≈ 0.368
+        assert!(score > 0.35 && score < 0.40, "score was {score}");
+    }
+
+    #[test]
+    fn freshness_score_approaches_zero_for_old_content() {
+        let day_ms = MS_PER_DAY as u64;
+        let now = 1000 * day_ms;
+        let created_long_ago = now - 365 * day_ms;
+
+        let score = freshness_score(created_long_ago, now, 30.0);
+        assert!(score < 0.01, "very old content should score near 0, got {score}");
+    }
+
+    #[test]
+    fn freshness_score_handles_zero_decay() {
+        assert_eq!(freshness_score(0, 1_000_000, 0.0), 1.0);
+    }
+
+    #[test]
+    fn staleness_penalty_zero_within_threshold() {
+        let day_ms = MS_PER_DAY as u64;
+        let now = 100 * day_ms;
+        let updated_10_days_ago = now - 10 * day_ms;
+
+        let penalty = staleness_penalty(Some(updated_10_days_ago), 0, now, 90.0);
+        assert_eq!(penalty, 0.0);
+    }
+
+    #[test]
+    fn staleness_penalty_grows_past_threshold() {
+        let day_ms = MS_PER_DAY as u64;
+        let now = 200 * day_ms;
+        let updated_135_days_ago = now - 135 * day_ms;
+
+        let penalty = staleness_penalty(Some(updated_135_days_ago), 0, now, 90.0);
+        // 135 - 90 = 45 days past threshold. Penalty = 45/90 = 0.5
+        assert!((penalty - 0.5).abs() < 0.01, "penalty was {penalty}");
+    }
+
+    #[test]
+    fn staleness_penalty_caps_at_1() {
+        let day_ms = MS_PER_DAY as u64;
+        let now = 500 * day_ms;
+        let very_old = now - 400 * day_ms;
+
+        let penalty = staleness_penalty(Some(very_old), 0, now, 90.0);
+        assert_eq!(penalty, 1.0);
+    }
+
+    #[test]
+    fn staleness_uses_created_at_when_no_updated_at() {
+        let day_ms = MS_PER_DAY as u64;
+        let now = 200 * day_ms;
+        let created_150_days_ago = now - 150 * day_ms;
+
+        let penalty = staleness_penalty(None, created_150_days_ago, now, 90.0);
+        // 150 - 90 = 60 days past. Penalty = 60/90 ≈ 0.667
+        assert!(penalty > 0.6 && penalty < 0.7, "penalty was {penalty}");
+    }
+
+    #[test]
+    fn compute_final_score_weighted_sum() {
+        let breakdown = ScoringBreakdown {
+            semantic_relevance: 0.0,
+            lexical_relevance: 1.0,
+            freshness: 0.8,
+            staleness_penalty: 0.0,
+            source_credibility: 0.0,
+            corroboration: 0.0,
+            graph_proximity: 0.0,
+            recency_of_use: None,
+        };
+        let weights = ScoringWeights::default();
+
+        let score = compute_final_score(&breakdown, &weights);
+        // lexical: 1.0 * 0.3 = 0.3, freshness: 0.8 * 0.1 = 0.08 → 0.38
+        assert!((score - 0.38).abs() < 0.001, "score was {score}");
+    }
+
+    #[test]
+    fn compute_final_score_subtracts_staleness() {
+        let breakdown = ScoringBreakdown {
+            semantic_relevance: 0.0,
+            lexical_relevance: 1.0,
+            freshness: 0.0,
+            staleness_penalty: 1.0,
+            source_credibility: 0.0,
+            corroboration: 0.0,
+            graph_proximity: 0.0,
+            recency_of_use: None,
+        };
+        let weights = ScoringWeights::default();
+
+        let score = compute_final_score(&breakdown, &weights);
+        // lexical: 0.3, minus staleness: 0.05 → 0.25
+        assert!((score - 0.25).abs() < 0.001, "score was {score}");
+    }
+
+    #[test]
+    fn compute_final_score_floors_at_zero() {
+        let breakdown = ScoringBreakdown {
+            staleness_penalty: 1.0,
+            ..ScoringBreakdown::default()
+        };
+        let weights = ScoringWeights::default();
+
+        let score = compute_final_score(&breakdown, &weights);
+        assert_eq!(score, 0.0);
     }
 }

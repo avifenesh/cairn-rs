@@ -12,9 +12,10 @@ use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
 
 use crate::ingest::{ChunkRecord, IngestError, IngestStatus, SourceType};
 use crate::pipeline::DocumentStore;
+use crate::reranking::mmr_rerank;
 use crate::retrieval::{
-    CandidateStage, RetrievalDiagnostics, RetrievalError, RetrievalMode, RetrievalQuery,
-    RetrievalResponse, RetrievalResult, RetrievalService, ScoringBreakdown,
+    self, CandidateStage, RerankerStrategy, RetrievalDiagnostics, RetrievalError, RetrievalMode,
+    RetrievalQuery, RetrievalResponse, RetrievalResult, RetrievalService, ScoringBreakdown,
 };
 
 /// In-memory document store for testing.
@@ -142,6 +143,15 @@ impl RetrievalService for InMemoryRetrieval {
         let mut scored: Vec<(ChunkRecord, f64)> = chunks
             .into_iter()
             .filter(|c| c.project == query.project)
+            .filter(|c| {
+                query.metadata_filters.iter().all(|f| {
+                    c.provenance_metadata
+                        .as_ref()
+                        .and_then(|m| m.get(&f.key))
+                        .and_then(|v| v.as_str())
+                        .map_or(false, |v| v == f.value)
+                })
+            })
             .filter_map(|c| {
                 let text_lower = c.text.to_lowercase();
                 let matches = words.iter().filter(|w| text_lower.contains(*w)).count();
@@ -154,19 +164,76 @@ impl RetrievalService for InMemoryRetrieval {
             .collect();
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(query.limit);
 
-        let results: Vec<RetrievalResult> = scored
+        // For MMR, keep a larger candidate pool so diversity selection has room.
+        let candidate_limit = if query.reranker == RerankerStrategy::Mmr {
+            (query.limit * 3).min(scored.len())
+        } else {
+            query.limit
+        };
+        scored.truncate(candidate_limit);
+
+        let policy = query.scoring_policy.as_ref().cloned().unwrap_or_default();
+        let now = retrieval::now_ms();
+
+        let mut scoring_dims = vec!["lexical_relevance".to_owned()];
+
+        let mut results: Vec<RetrievalResult> = scored
             .into_iter()
-            .map(|(chunk, score)| RetrievalResult {
-                chunk,
-                score,
-                breakdown: ScoringBreakdown {
-                    lexical_relevance: score,
+            .map(|(chunk, lexical_score)| {
+                let fresh = retrieval::freshness_score(
+                    chunk.created_at,
+                    now,
+                    policy.freshness_decay_days,
+                );
+                let stale = retrieval::staleness_penalty(
+                    chunk.updated_at,
+                    chunk.created_at,
+                    now,
+                    policy.staleness_threshold_days,
+                );
+
+                let breakdown = ScoringBreakdown {
+                    lexical_relevance: lexical_score,
+                    freshness: fresh,
+                    staleness_penalty: stale,
                     ..ScoringBreakdown::default()
-                },
+                };
+
+                let final_score = retrieval::compute_final_score(&breakdown, &policy.weights);
+
+                RetrievalResult {
+                    chunk,
+                    score: final_score,
+                    breakdown,
+                }
             })
             .collect();
+
+        if results.iter().any(|r| r.breakdown.freshness != 0.0) {
+            scoring_dims.push("freshness".to_owned());
+        }
+        if results.iter().any(|r| r.breakdown.staleness_penalty != 0.0) {
+            scoring_dims.push("staleness_penalty".to_owned());
+        }
+
+        // Re-sort by final weighted score.
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+        let candidates_generated = results.len();
+
+        // Apply reranking if requested.
+        let (results, stages) = match query.reranker {
+            RerankerStrategy::Mmr => {
+                let reranked = mmr_rerank(&results, query.limit, 0.5);
+                (reranked, vec![CandidateStage::Lexical, CandidateStage::Reranked])
+            }
+            _ => {
+                let mut r = results;
+                r.truncate(query.limit);
+                (r, vec![CandidateStage::Lexical])
+            }
+        };
 
         let elapsed = start.elapsed().as_millis() as u64;
 
@@ -175,11 +242,11 @@ impl RetrievalService for InMemoryRetrieval {
             diagnostics: RetrievalDiagnostics {
                 mode_used: effective_mode,
                 reranker_used: query.reranker,
-                candidates_generated: results.len(),
+                candidates_generated,
                 results_returned: results.len(),
                 latency_ms: elapsed,
-                stages_used: vec![CandidateStage::Lexical],
-                scoring_dimensions_used: vec!["lexical_relevance".to_owned()],
+                stages_used: stages,
+                scoring_dimensions_used: scoring_dims,
                 effective_policy: None,
             },
         })
@@ -389,6 +456,79 @@ mod tests {
             response.diagnostics.mode_used,
             RetrievalMode::LexicalOnly,
             "Hybrid must report LexicalOnly in diagnostics, not Hybrid"
+        );
+    }
+
+    #[tokio::test]
+    async fn metadata_filter_narrows_results() {
+        use crate::retrieval::MetadataFilter;
+
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let chunker = ParagraphChunker {
+            max_chunk_size: 500,
+        };
+        let pipeline = IngestPipeline::new(store.clone(), chunker);
+
+        // Ingest two docs with different source types.
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_plain"),
+                source_id: SourceId::new("src_a"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Rust ownership model ensures memory safety.".to_owned(),
+            })
+            .await
+            .unwrap();
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_md"),
+                source_id: SourceId::new("src_b"),
+                source_type: SourceType::Markdown,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Rust ownership provides fearless concurrency.".to_owned(),
+            })
+            .await
+            .unwrap();
+
+        let retrieval = InMemoryRetrieval::new(store);
+
+        // Without filter: both docs match "Rust ownership".
+        let all = retrieval
+            .query(RetrievalQuery {
+                project: ProjectKey::new("t", "w", "p"),
+                query_text: "Rust ownership".to_owned(),
+                mode: RetrievalMode::LexicalOnly,
+                reranker: RerankerStrategy::None,
+                limit: 10,
+                metadata_filters: vec![],
+                scoring_policy: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(all.results.len(), 2);
+
+        // With filter on source_type=PlainText: only plain text doc matches.
+        let filtered = retrieval
+            .query(RetrievalQuery {
+                project: ProjectKey::new("t", "w", "p"),
+                query_text: "Rust ownership".to_owned(),
+                mode: RetrievalMode::LexicalOnly,
+                reranker: RerankerStrategy::None,
+                limit: 10,
+                metadata_filters: vec![MetadataFilter {
+                    key: "source_type".to_owned(),
+                    value: "PlainText".to_owned(),
+                }],
+                scoring_policy: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(filtered.results.len(), 1);
+        assert_eq!(
+            filtered.results[0].chunk.document_id,
+            KnowledgeDocumentId::new("doc_plain")
         );
     }
 }
