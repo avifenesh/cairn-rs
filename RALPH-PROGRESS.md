@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
-## Current RFC: 010 — Operator Control Plane
-## Current Phase: gap analysis (Phase 1)
+## Current RFC: 011 — Deployment Shape
+## Current Phase: implementation (Phase 2+3)
 
 ## RFC Status
 
