@@ -90,6 +90,18 @@ Default:
 
 This is sufficient to build initial hybrid retrieval without operationally splitting the stack.
 
+### V1 Lexical Scope
+
+For the first sellable release, Postgres full-text search plus product-owned normalization, filtering, and reranking is the canonical lexical floor.
+
+V1 does not require:
+
+- a separate lexical search engine
+- custom BM25 infrastructure outside the product store
+- language-specific retrieval plugins as part of the core lexical claim
+
+If later workloads justify richer lexical retrieval, that should be an additive capability rather than an implied part of the initial product promise.
+
 SQLite local mode should provide:
 
 - FTS-backed lexical retrieval where feasible
@@ -135,6 +147,16 @@ The first sellable release must support these canonical source types for owned r
 The first sellable release may additionally support extracted text from common office or PDF sources where a stable parser pipeline is available, but those formats are additive rather than required for the v1 product claim.
 
 V1 must normalize supported source types into portable owned retrieval documents with explicit provenance rather than keeping parser-specific opaque blobs as the main retrieval unit.
+
+### Additive Parser Rule
+
+PDF and office-document extraction are explicitly additive in v1.
+
+That means:
+
+- the first sellable retrieval claim does not depend on PDF/office parser support
+- if a deployment enables those parsers, the extracted result must still normalize into the same owned document and provenance model
+- unsupported or low-confidence parser outputs must fail explicitly rather than silently entering the canonical corpus as opaque best-effort text
 
 ### Chunk Model
 
@@ -303,8 +325,7 @@ Focus on product-owned, inspectable retrieval for agent workloads.
 
 ## Open Questions
 
-1. How much lexical sophistication is needed beyond Postgres full-text for v1?
-2. Should extracted text from PDF/office sources be part of the first sellable release, or remain an additive parser package until parser quality is proven?
+1. Which later lexical enhancements would most likely justify expansion beyond the v1 Postgres full-text floor after initial operator feedback?
 
 ## Decision
 
@@ -318,5 +339,7 @@ Proceed with a Postgres-first owned retrieval stack using:
 - in-process canonical retrieval services with runtime-owned background ingest jobs
 - the supported v1 document-type floor defined above
 - fixed scoring dimensions with bounded operator-tunable scoring policy
+- Postgres full-text plus product-owned normalization/filtering/reranking is the canonical v1 lexical floor
+- PDF/office extraction remains additive rather than part of the first sellable retrieval floor
 
 Bedrock KB becomes optional and transitional, not foundational.
