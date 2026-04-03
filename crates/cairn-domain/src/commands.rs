@@ -1,7 +1,8 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
     ApprovalId, CheckpointId, CommandId, EvalRunId, IngestJobId, MailboxMessageId, PromptAssetId,
-    PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, ToolInvocationId,
+    PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, TenantId,
+    ToolInvocationId, WorkspaceId,
 };
 use crate::lifecycle::{FailureClass, PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget};
 use crate::policy::{ApprovalDecision, ExecutionClass};
@@ -111,6 +112,9 @@ pub enum RuntimeCommand {
     CreatePromptVersion(CreatePromptVersion),
     CreatePromptRelease(CreatePromptRelease),
     TransitionPromptRelease(TransitionPromptRelease),
+    CreateTenant(CreateTenant),
+    CreateWorkspace(CreateWorkspace),
+    CreateProject(CreateProject),
 }
 
 impl RuntimeCommand {
@@ -151,6 +155,9 @@ impl RuntimeCommand {
             RuntimeCommand::CreatePromptVersion(command) => &command.project,
             RuntimeCommand::CreatePromptRelease(command) => &command.project,
             RuntimeCommand::TransitionPromptRelease(command) => &command.project,
+            RuntimeCommand::CreateTenant(command) => &command.project,
+            RuntimeCommand::CreateWorkspace(command) => &command.project,
+            RuntimeCommand::CreateProject(command) => &command.project,
         }
     }
 
@@ -282,6 +289,9 @@ impl RuntimeCommand {
                     prompt_release_id: command.prompt_release_id.clone(),
                 })
             }
+            RuntimeCommand::CreateTenant(_) => None,
+            RuntimeCommand::CreateWorkspace(_) => None,
+            RuntimeCommand::CreateProject(_) => None,
         }
     }
 }
@@ -560,6 +570,27 @@ pub struct TransitionPromptRelease {
     pub project: ProjectKey,
     pub prompt_release_id: PromptReleaseId,
     pub to_state: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateTenant {
+    pub project: ProjectKey,
+    pub tenant_id: TenantId,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateWorkspace {
+    pub project: ProjectKey,
+    pub workspace_id: WorkspaceId,
+    pub tenant_id: TenantId,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateProject {
+    pub project: ProjectKey,
+    pub name: String,
 }
 
 #[cfg(test)]

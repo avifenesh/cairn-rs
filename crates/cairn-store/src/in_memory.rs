@@ -282,7 +282,10 @@ impl InMemoryStore {
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::UserMessageAppended(_) => {}
+            | RuntimeEvent::UserMessageAppended(_)
+            | RuntimeEvent::TenantCreated(_)
+            | RuntimeEvent::WorkspaceCreated(_)
+            | RuntimeEvent::ProjectCreated(_) => {}
             RuntimeEvent::PromptAssetCreated(e) => {
                 state.prompt_assets.insert(
                     e.prompt_asset_id.as_str().to_owned(),

@@ -1,7 +1,8 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
     ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, PromptAssetId,
-    PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, ToolInvocationId,
+    PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, TenantId,
+    ToolInvocationId, WorkspaceId,
 };
 use crate::lifecycle::{
     CheckpointDisposition, FailureClass, PauseReason, ResumeTrigger, RunState, SessionState,
@@ -116,6 +117,9 @@ pub enum RuntimeEvent {
     PromptVersionCreated(PromptVersionCreated),
     PromptReleaseCreated(PromptReleaseCreated),
     PromptReleaseTransitioned(PromptReleaseTransitioned),
+    TenantCreated(TenantCreated),
+    WorkspaceCreated(WorkspaceCreated),
+    ProjectCreated(ProjectCreated),
 }
 
 impl RuntimeEvent {
@@ -151,6 +155,9 @@ impl RuntimeEvent {
             RuntimeEvent::PromptVersionCreated(event) => &event.project,
             RuntimeEvent::PromptReleaseCreated(event) => &event.project,
             RuntimeEvent::PromptReleaseTransitioned(event) => &event.project,
+            RuntimeEvent::TenantCreated(event) => &event.project,
+            RuntimeEvent::WorkspaceCreated(event) => &event.project,
+            RuntimeEvent::ProjectCreated(event) => &event.project,
         }
     }
 
@@ -264,6 +271,9 @@ impl RuntimeEvent {
                     prompt_release_id: event.prompt_release_id.clone(),
                 })
             }
+            RuntimeEvent::TenantCreated(_) => None,
+            RuntimeEvent::WorkspaceCreated(_) => None,
+            RuntimeEvent::ProjectCreated(_) => None,
         }
     }
 }
@@ -536,6 +546,30 @@ pub struct PromptReleaseTransitioned {
     pub from_state: String,
     pub to_state: String,
     pub transitioned_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TenantCreated {
+    pub project: ProjectKey,
+    pub tenant_id: TenantId,
+    pub name: String,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceCreated {
+    pub project: ProjectKey,
+    pub workspace_id: WorkspaceId,
+    pub tenant_id: TenantId,
+    pub name: String,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectCreated {
+    pub project: ProjectKey,
+    pub name: String,
+    pub created_at: u64,
 }
 
 #[cfg(test)]

@@ -37,7 +37,10 @@ pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
         | RuntimeEvent::PromptAssetCreated(_)
         | RuntimeEvent::PromptVersionCreated(_)
         | RuntimeEvent::PromptReleaseCreated(_)
-        | RuntimeEvent::PromptReleaseTransitioned(_) => None,
+        | RuntimeEvent::PromptReleaseTransitioned(_)
+        | RuntimeEvent::TenantCreated(_)
+        | RuntimeEvent::WorkspaceCreated(_)
+        | RuntimeEvent::ProjectCreated(_) => None,
     }
 }
 

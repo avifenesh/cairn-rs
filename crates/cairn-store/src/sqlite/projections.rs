@@ -295,7 +295,10 @@ impl SqliteSyncProjection {
             | RuntimeEvent::PromptAssetCreated(_)
             | RuntimeEvent::PromptVersionCreated(_)
             | RuntimeEvent::PromptReleaseCreated(_)
-            | RuntimeEvent::PromptReleaseTransitioned(_) => {}
+            | RuntimeEvent::PromptReleaseTransitioned(_)
+            | RuntimeEvent::TenantCreated(_)
+            | RuntimeEvent::WorkspaceCreated(_)
+            | RuntimeEvent::ProjectCreated(_) => {}
         }
 
         Ok(())
