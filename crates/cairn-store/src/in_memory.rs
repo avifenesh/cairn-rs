@@ -256,7 +256,8 @@ impl InMemoryStore {
             | RuntimeEvent::ExternalWorkerReported(_)
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
-            | RuntimeEvent::RecoveryCompleted(_) => {}
+            | RuntimeEvent::RecoveryCompleted(_)
+            | RuntimeEvent::UserMessageAppended(_) => {}
         }
     }
 }
@@ -368,6 +369,7 @@ fn event_matches_entity(event: &RuntimeEvent, entity: &EntityRef) -> bool {
             e.invocation_id == *id
         }
         (RuntimeEvent::SignalIngested(e), EntityRef::Signal(id)) => e.signal_id == *id,
+        (RuntimeEvent::UserMessageAppended(e), EntityRef::Run(id)) => e.run_id == *id,
         _ => false,
     }
 }
@@ -1418,5 +1420,88 @@ mod tests {
         let expired = store.list_expired_leases(500, 100).await.unwrap();
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0].task_id, TaskId::new("t1"));
+    }
+
+    #[tokio::test]
+    async fn signal_projection_and_read_model() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let signal_id = SignalId::new("sig_1");
+
+        store
+            .append(&[make_envelope(RuntimeEvent::SignalIngested(
+                SignalIngested {
+                    project: project.clone(),
+                    signal_id: signal_id.clone(),
+                    source: "webhook".to_owned(),
+                    payload: serde_json::json!({"key": "value"}),
+                    timestamp_ms: 1000,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // get returns the record with correct fields.
+        let record = SignalReadModel::get(&store, &signal_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.id, signal_id);
+        assert_eq!(record.project, project);
+        assert_eq!(record.source, "webhook");
+        assert_eq!(record.payload["key"], "value");
+        assert_eq!(record.timestamp_ms, 1000);
+
+        // list_by_project returns it.
+        let list = SignalReadModel::list_by_project(&store, &project, 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, signal_id);
+
+        // list_by_project with a different project returns empty.
+        let other_project = ProjectKey::new("other_tenant", "other_ws", "other_proj");
+        let empty = SignalReadModel::list_by_project(&store, &other_project, 10, 0)
+            .await
+            .unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[tokio::test]
+    async fn signal_entity_ref_filtering() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let signal_id = SignalId::new("sig_entity");
+
+        store
+            .append(&[make_envelope(RuntimeEvent::SignalIngested(
+                SignalIngested {
+                    project: project.clone(),
+                    signal_id: signal_id.clone(),
+                    source: "api".to_owned(),
+                    payload: serde_json::json!(null),
+                    timestamp_ms: 500,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // read_by_entity with matching Signal ref returns the event.
+        let events = store
+            .read_by_entity(&EntityRef::Signal(signal_id.clone()), None, 100)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].envelope.payload,
+            RuntimeEvent::SignalIngested(e) if e.signal_id == signal_id
+        ));
+
+        // read_by_entity with a different signal ID returns empty.
+        let other = store
+            .read_by_entity(&EntityRef::Signal(SignalId::new("sig_other")), None, 100)
+            .await
+            .unwrap();
+        assert!(other.is_empty());
     }
 }

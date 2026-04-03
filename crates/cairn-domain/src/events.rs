@@ -104,6 +104,7 @@ pub enum RuntimeEvent {
     SubagentSpawned(SubagentSpawned),
     RecoveryAttempted(RecoveryAttempted),
     RecoveryCompleted(RecoveryCompleted),
+    UserMessageAppended(UserMessageAppended),
 }
 
 impl RuntimeEvent {
@@ -130,6 +131,7 @@ impl RuntimeEvent {
             RuntimeEvent::SubagentSpawned(event) => &event.project,
             RuntimeEvent::RecoveryAttempted(event) => &event.project,
             RuntimeEvent::RecoveryCompleted(event) => &event.project,
+            RuntimeEvent::UserMessageAppended(event) => &event.project,
         }
     }
 
@@ -214,6 +216,9 @@ impl RuntimeEvent {
                         .clone()
                         .map(|run_id| RuntimeEntityRef::Run { run_id })
                 }),
+            RuntimeEvent::UserMessageAppended(event) => Some(RuntimeEntityRef::Run {
+                run_id: event.run_id.clone(),
+            }),
         }
     }
 }
@@ -399,13 +404,21 @@ pub struct RecoveryCompleted {
     pub recovered: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserMessageAppended {
+    pub project: ProjectKey,
+    pub session_id: SessionId,
+    pub run_id: RunId,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ApprovalRequested, EventEnvelope, EventSource, ExternalWorkerReported, RuntimeEvent,
         SessionCreated, TaskCreated, ToolInvocationFailed, ToolInvocationStarted,
+        UserMessageAppended,
     };
-    use crate::ids::{ApprovalId, CommandId, EventId, TaskId};
+    use crate::ids::{ApprovalId, CommandId, EventId, RunId, TaskId};
     use crate::policy::ExecutionClass;
     use crate::tenancy::{OwnershipKey, ProjectKey};
     use crate::tool_invocation::ToolInvocationTarget;
@@ -588,6 +601,22 @@ mod tests {
         assert!(matches!(
             event.primary_entity_ref(),
             Some(crate::errors::RuntimeEntityRef::Session { .. })
+        ));
+    }
+
+    #[test]
+    fn user_message_appended_reports_project_and_run_entity() {
+        let project = ProjectKey::new("tenant", "workspace", "project");
+        let event = RuntimeEvent::UserMessageAppended(UserMessageAppended {
+            project: project.clone(),
+            session_id: "session_10".into(),
+            run_id: RunId::new("run_10"),
+        });
+
+        assert_eq!(event.project(), &project);
+        assert!(matches!(
+            event.primary_entity_ref(),
+            Some(crate::errors::RuntimeEntityRef::Run { ref run_id }) if run_id.as_str() == "run_10"
         ));
     }
 }

@@ -261,7 +261,8 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::ExternalWorkerReported(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::SignalIngested(_) => {}
+            | RuntimeEvent::SignalIngested(_)
+            | RuntimeEvent::UserMessageAppended(_) => {}
         }
 
         Ok((nodes, edges))
