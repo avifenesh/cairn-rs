@@ -774,3 +774,5 @@ RFC 008 says every API request operates in explicit scope context.
 - [x] RFC 009: Phase 2+3 — ProviderConnectionRecord, ProviderBindingRecord, RouteDecisionMade/ProviderCallCompleted events, RouteDecisionReadModel/ProviderCallReadModel + InMemoryStore impls, RouteResolverService trait
 - [x] RFC 009: Phase 5 — marked complete
 - [x] RFC 012: Phase 1 gap analysis — 10 gaps across starter templates, onboarding flow, materialization, import, provenance
+- [x] RFC 012: Phase 2+3 — StarterTemplate/OnboardingProgress/BootstrapProvenance/ImportProvenance types, StarterTemplateRegistry (3 V1 templates), materialize_template(), onboarding checklist, prompt import reconciliation
+- [x] RFC 012: Phase 5 — marked complete
