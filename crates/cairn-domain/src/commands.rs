@@ -1,7 +1,7 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, CommandId, IngestJobId, MailboxMessageId, RunId, SessionId, SignalId,
-    TaskId, ToolInvocationId,
+    ApprovalId, CheckpointId, CommandId, EvalRunId, IngestJobId, MailboxMessageId, RunId, SessionId,
+    SignalId, TaskId, ToolInvocationId,
 };
 use crate::lifecycle::{FailureClass, PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget};
 use crate::policy::{ApprovalDecision, ExecutionClass};
@@ -105,6 +105,8 @@ pub enum RuntimeCommand {
     AppendUserMessage(AppendUserMessage),
     StartIngestJob(StartIngestJob),
     CompleteIngestJob(CompleteIngestJob),
+    StartEvalRun(StartEvalRun),
+    CompleteEvalRun(CompleteEvalRun),
 }
 
 impl RuntimeCommand {
@@ -139,6 +141,8 @@ impl RuntimeCommand {
             RuntimeCommand::AppendUserMessage(command) => &command.project,
             RuntimeCommand::StartIngestJob(command) => &command.project,
             RuntimeCommand::CompleteIngestJob(command) => &command.project,
+            RuntimeCommand::StartEvalRun(command) => &command.project,
+            RuntimeCommand::CompleteEvalRun(command) => &command.project,
         }
     }
 
@@ -243,6 +247,12 @@ impl RuntimeCommand {
             }),
             RuntimeCommand::CompleteIngestJob(command) => Some(RuntimeEntityRef::IngestJob {
                 job_id: command.job_id.clone(),
+            }),
+            RuntimeCommand::StartEvalRun(command) => Some(RuntimeEntityRef::EvalRun {
+                eval_run_id: command.eval_run_id.clone(),
+            }),
+            RuntimeCommand::CompleteEvalRun(command) => Some(RuntimeEntityRef::EvalRun {
+                eval_run_id: command.eval_run_id.clone(),
             }),
         }
     }
@@ -471,6 +481,22 @@ pub struct StartIngestJob {
 pub struct CompleteIngestJob {
     pub project: ProjectKey,
     pub job_id: IngestJobId,
+    pub success: bool,
+    pub error_message: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartEvalRun {
+    pub project: ProjectKey,
+    pub eval_run_id: EvalRunId,
+    pub subject_kind: String,
+    pub evaluator_type: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompleteEvalRun {
+    pub project: ProjectKey,
+    pub eval_run_id: EvalRunId,
     pub success: bool,
     pub error_message: Option<String>,
 }

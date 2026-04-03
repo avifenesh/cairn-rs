@@ -13,12 +13,17 @@ pub mod scorecards;
 pub mod selectors;
 pub mod services;
 
-pub use matrices::{EvalMetrics, MatrixCategory, PromptComparisonRow};
+pub use matrices::{
+    EvalMetrics, GuardrailPolicyRow, MatrixCategory, MemorySourceQualityRow, PermissionRow,
+    PromptComparisonRow, ProviderRoutingRow, SkillHealthRow,
+};
 pub use prompts::{
     PromptAsset, PromptAssetStatus, PromptFormat, PromptKind, PromptRelease, PromptReleaseState,
     PromptVersion, PromptVersionMetadata, ReleaseAction, ReleaseActionType,
 };
-pub use scorecards::{EvalRun, EvalRunStatus, EvalSubjectKind, Scorecard, ScorecardEntry};
+pub use scorecards::{
+    DatasetSource, EvalRun, EvalRunStatus, EvalSubjectKind, Scorecard, ScorecardEntry,
+};
 pub use selectors::{ResolutionContext, RolloutTarget, SelectorKind, SelectorValue};
 pub use services::{EvalRunService, GraphIntegration, PromptReleaseService, SelectorResolver};
 

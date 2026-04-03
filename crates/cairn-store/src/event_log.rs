@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use cairn_domain::{
-    ApprovalId, CheckpointId, EventEnvelope, IngestJobId, MailboxMessageId, RunId, RuntimeEvent,
-    SessionId, SignalId, TaskId, ToolInvocationId,
+    ApprovalId, CheckpointId, EvalRunId, EventEnvelope, IngestJobId, MailboxMessageId, RunId,
+    RuntimeEvent, SessionId, SignalId, TaskId, ToolInvocationId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +35,7 @@ pub enum EntityRef {
     ToolInvocation(ToolInvocationId),
     Signal(SignalId),
     IngestJob(IngestJobId),
+    EvalRun(EvalRunId),
 }
 
 /// An event persisted in the log with storage metadata.

@@ -31,7 +31,9 @@ pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
         | RuntimeEvent::SignalIngested(_)
         | RuntimeEvent::UserMessageAppended(_)
         | RuntimeEvent::IngestJobStarted(_)
-        | RuntimeEvent::IngestJobCompleted(_) => None,
+        | RuntimeEvent::IngestJobCompleted(_)
+        | RuntimeEvent::EvalRunStarted(_)
+        | RuntimeEvent::EvalRunCompleted(_) => None,
     }
 }
 

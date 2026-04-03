@@ -1,4 +1,4 @@
-use cairn_domain::RuntimeEvent;
+use cairn_domain::{ProjectKey, RuntimeEvent};
 use cairn_store::event_log::StoredEvent;
 
 use crate::projections::{
@@ -49,13 +49,13 @@ impl<P: GraphProjection> EventProjector<P> {
 
         match &event.envelope.payload {
             RuntimeEvent::SessionCreated(e) => {
-                self.add_node(&e.session_id.as_str(), NodeKind::Session, ts)
+                self.add_node(e.session_id.as_str(), NodeKind::Session, Some(&e.project), ts)
                     .await?;
                 nodes += 1;
             }
 
             RuntimeEvent::RunCreated(e) => {
-                self.add_node(e.run_id.as_str(), NodeKind::Run, ts).await?;
+                self.add_node(e.run_id.as_str(), NodeKind::Run, Some(&e.project), ts).await?;
                 nodes += 1;
 
                 // Run -> Session
@@ -77,7 +77,7 @@ impl<P: GraphProjection> EventProjector<P> {
             }
 
             RuntimeEvent::TaskCreated(e) => {
-                self.add_node(e.task_id.as_str(), NodeKind::Task, ts)
+                self.add_node(e.task_id.as_str(), NodeKind::Task, Some(&e.project), ts)
                     .await?;
                 nodes += 1;
 
@@ -100,11 +100,12 @@ impl<P: GraphProjection> EventProjector<P> {
             }
 
             RuntimeEvent::ApprovalRequested(e) => {
-                self.add_node(e.approval_id.as_str(), NodeKind::Approval, ts)
+                self.add_node(e.approval_id.as_str(), NodeKind::Approval, Some(&e.project), ts)
                     .await?;
                 nodes += 1;
 
                 if let Some(run_id) = &e.run_id {
+                    // run -> approval (Triggered)
                     self.add_edge(
                         run_id.as_str(),
                         e.approval_id.as_str(),
@@ -113,8 +114,18 @@ impl<P: GraphProjection> EventProjector<P> {
                     )
                     .await?;
                     edges += 1;
+                    // approval -> run (ApprovedBy) for reverse provenance traversal
+                    self.add_edge(
+                        e.approval_id.as_str(),
+                        run_id.as_str(),
+                        EdgeKind::ApprovedBy,
+                        ts,
+                    )
+                    .await?;
+                    edges += 1;
                 }
                 if let Some(task_id) = &e.task_id {
+                    // task -> approval (Triggered)
                     self.add_edge(
                         task_id.as_str(),
                         e.approval_id.as_str(),
@@ -123,18 +134,24 @@ impl<P: GraphProjection> EventProjector<P> {
                     )
                     .await?;
                     edges += 1;
+                    // approval -> task (ApprovedBy) for reverse provenance traversal
+                    self.add_edge(
+                        e.approval_id.as_str(),
+                        task_id.as_str(),
+                        EdgeKind::ApprovedBy,
+                        ts,
+                    )
+                    .await?;
+                    edges += 1;
                 }
             }
 
-            RuntimeEvent::ApprovalResolved(e) => {
-                // Edge from approval to itself marking resolution — the
-                // node already exists from ApprovalRequested.
-                // No new node needed.
-                let _ = e;
+            RuntimeEvent::ApprovalResolved(_) => {
+                // Decision recorded; node and edges already exist from ApprovalRequested.
             }
 
             RuntimeEvent::CheckpointRecorded(e) => {
-                self.add_node(e.checkpoint_id.as_str(), NodeKind::Checkpoint, ts)
+                self.add_node(e.checkpoint_id.as_str(), NodeKind::Checkpoint, Some(&e.project), ts)
                     .await?;
                 nodes += 1;
 
@@ -160,7 +177,7 @@ impl<P: GraphProjection> EventProjector<P> {
             }
 
             RuntimeEvent::MailboxMessageAppended(e) => {
-                self.add_node(e.message_id.as_str(), NodeKind::MailboxMessage, ts)
+                self.add_node(e.message_id.as_str(), NodeKind::MailboxMessage, Some(&e.project), ts)
                     .await?;
                 nodes += 1;
 
@@ -182,7 +199,7 @@ impl<P: GraphProjection> EventProjector<P> {
             }
 
             RuntimeEvent::ToolInvocationStarted(e) => {
-                self.add_node(e.invocation_id.as_str(), NodeKind::ToolInvocation, ts)
+                self.add_node(e.invocation_id.as_str(), NodeKind::ToolInvocation, Some(&e.project), ts)
                     .await?;
                 nodes += 1;
 
@@ -210,9 +227,9 @@ impl<P: GraphProjection> EventProjector<P> {
 
             RuntimeEvent::SubagentSpawned(e) => {
                 // Create child session and task nodes if they don't exist.
-                self.add_node(e.child_session_id.as_str(), NodeKind::Session, ts)
+                self.add_node(e.child_session_id.as_str(), NodeKind::Session, Some(&e.project), ts)
                     .await?;
-                self.add_node(e.child_task_id.as_str(), NodeKind::Task, ts)
+                self.add_node(e.child_task_id.as_str(), NodeKind::Task, Some(&e.project), ts)
                     .await?;
                 nodes += 2;
 
@@ -237,7 +254,7 @@ impl<P: GraphProjection> EventProjector<P> {
                 edges += 1;
 
                 if let Some(child_run) = &e.child_run_id {
-                    self.add_node(child_run.as_str(), NodeKind::Run, ts).await?;
+                    self.add_node(child_run.as_str(), NodeKind::Run, Some(&e.project), ts).await?;
                     nodes += 1;
                     self.add_edge(
                         e.child_session_id.as_str(),
@@ -248,6 +265,18 @@ impl<P: GraphProjection> EventProjector<P> {
                     .await?;
                     edges += 1;
                 }
+            }
+
+            RuntimeEvent::SignalIngested(e) => {
+                self.add_node(e.signal_id.as_str(), NodeKind::Signal, Some(&e.project), ts)
+                    .await?;
+                nodes += 1;
+            }
+
+            RuntimeEvent::IngestJobStarted(e) => {
+                self.add_node(e.job_id.as_str(), NodeKind::IngestJob, Some(&e.project), ts)
+                    .await?;
+                nodes += 1;
             }
 
             // State-change and audit events don't create new nodes/edges.
@@ -261,10 +290,10 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::ExternalWorkerReported(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::SignalIngested(_)
             | RuntimeEvent::UserMessageAppended(_)
-            | RuntimeEvent::IngestJobStarted(_)
-            | RuntimeEvent::IngestJobCompleted(_) => {}
+            | RuntimeEvent::IngestJobCompleted(_)
+            | RuntimeEvent::EvalRunStarted(_)
+            | RuntimeEvent::EvalRunCompleted(_) => {}
         }
 
         Ok((nodes, edges))
@@ -274,12 +303,14 @@ impl<P: GraphProjection> EventProjector<P> {
         &self,
         id: &str,
         kind: NodeKind,
+        project: Option<&ProjectKey>,
         ts: u64,
     ) -> Result<(), GraphProjectionError> {
         self.projection
             .add_node(GraphNode {
                 node_id: id.to_owned(),
                 kind,
+                project: project.cloned(),
                 created_at: ts,
             })
             .await

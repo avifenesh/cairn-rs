@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
 ## Current RFC: 004 — Graph and Eval Matrix
-## Current Phase: gap analysis (Phase 1)
+## Current Phase: implementation (Phase 3a)
 
 ## RFC Status
 
@@ -338,3 +338,4 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 - [x] RFC 003: Phase 4 tests — full pipeline tests, ingest job lifecycle, scoring, reranking, diagnostics coverage
 - [x] RFC 003: Phase 5 — marked complete, all 12 gaps resolved
 - [x] RFC 004: Phase 1 gap analysis — 18 gaps identified across graph projections, query dispatch, provenance, eval lifecycle, matrix storage, graph-eval integration
+- [x] RFC 004: Phase 2 types — GraphNode project scope, StartEvalRun/CompleteEvalRun commands+events, RuntimeEntityKind/Ref::EvalRun, EntityRef::EvalRun, DatasetSource struct, 5 matrix row types, MatrixThresholdPolicy

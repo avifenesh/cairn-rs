@@ -34,6 +34,7 @@ pub enum RuntimeEntityRef {
     Signal { signal_id: SignalId },
     ToolInvocation { invocation_id: ToolInvocationId },
     IngestJob { job_id: IngestJobId },
+    EvalRun { eval_run_id: EvalRunId },
 }
 
 impl RuntimeEntityRef {
@@ -48,6 +49,7 @@ impl RuntimeEntityRef {
             RuntimeEntityRef::Signal { .. } => RuntimeEntityKind::Signal,
             RuntimeEntityRef::ToolInvocation { .. } => RuntimeEntityKind::ToolInvocation,
             RuntimeEntityRef::IngestJob { .. } => RuntimeEntityKind::IngestJob,
+            RuntimeEntityRef::EvalRun { .. } => RuntimeEntityKind::EvalRun,
         }
     }
 }

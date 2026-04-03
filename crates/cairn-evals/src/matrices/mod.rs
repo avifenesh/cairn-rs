@@ -7,7 +7,8 @@
 //! - A canonical scope model
 
 use cairn_domain::{
-    EvalRunId, ProjectId, PromptAssetId, PromptReleaseId, PromptVersionId, ProviderBindingId,
+    EvalRunId, PolicyId, ProjectId, PromptAssetId, PromptReleaseId, PromptVersionId,
+    ProviderBindingId, RouteDecisionId, SourceId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +36,71 @@ pub struct PromptComparisonRow {
     pub prompt_asset_id: PromptAssetId,
     pub prompt_version_id: PromptVersionId,
     pub provider_binding_id: Option<ProviderBindingId>,
+    pub eval_run_id: EvalRunId,
+    pub metrics: EvalMetrics,
+}
+
+/// A single row in the provider routing matrix.
+///
+/// Canonical subject: `route_decision`
+/// Canonical row grain: one row per route_decision_id.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProviderRoutingRow {
+    pub project_id: ProjectId,
+    pub route_decision_id: RouteDecisionId,
+    pub provider_binding_id: Option<ProviderBindingId>,
+    pub eval_run_id: EvalRunId,
+    pub metrics: EvalMetrics,
+}
+
+/// A single row in the permission matrix.
+///
+/// Canonical subject: permission decision family.
+/// Canonical row grain: one row per effective permission policy outcome
+/// for mode x capability x scope.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PermissionRow {
+    pub project_id: ProjectId,
+    pub policy_id: PolicyId,
+    pub mode: String,
+    pub capability: String,
+    pub eval_run_id: EvalRunId,
+    pub metrics: EvalMetrics,
+}
+
+/// A single row in the memory source quality matrix.
+///
+/// Canonical subject: memory source or source document family.
+/// Canonical row grain: one row per source_id within scope.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MemorySourceQualityRow {
+    pub project_id: ProjectId,
+    pub source_id: SourceId,
+    pub eval_run_id: EvalRunId,
+    pub metrics: EvalMetrics,
+}
+
+/// A single row in the skill health / intervention matrix.
+///
+/// Canonical subject: skill.
+/// Canonical row grain: one row per skill_id within scope.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SkillHealthRow {
+    pub project_id: ProjectId,
+    pub skill_id: String,
+    pub eval_run_id: EvalRunId,
+    pub metrics: EvalMetrics,
+}
+
+/// A single row in the guardrail / policy outcome matrix.
+///
+/// Canonical subject: policy or guardrail rule.
+/// Canonical row grain: one row per policy-rule outcome slice.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GuardrailPolicyRow {
+    pub project_id: ProjectId,
+    pub policy_id: PolicyId,
+    pub rule_name: String,
     pub eval_run_id: EvalRunId,
     pub metrics: EvalMetrics,
 }

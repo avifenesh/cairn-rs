@@ -10,6 +10,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::matrices::EvalMetrics;
 
+/// Structured dataset source for eval runs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DatasetSource {
+    pub name: String,
+    pub source_type: String,
+    pub document_count: u32,
+    pub description: Option<String>,
+}
+
 /// What is being evaluated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,7 +58,7 @@ pub struct EvalRun {
     pub prompt_release_id: Option<PromptReleaseId>,
     /// Evaluator configuration.
     pub evaluator_type: String,
-    pub dataset_source: Option<String>,
+    pub dataset_source: Option<DatasetSource>,
     /// Aggregated metrics from this run.
     pub metrics: EvalMetrics,
     /// Supplemental plugin metrics.

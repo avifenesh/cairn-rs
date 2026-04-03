@@ -28,6 +28,7 @@ impl<P: GraphProjection> EvalGraphProjector<P> {
             .add_node(GraphNode {
                 node_id: asset_id.as_str().to_owned(),
                 kind: NodeKind::PromptAsset,
+                project: None,
                 created_at: ts,
             })
             .await
@@ -44,6 +45,7 @@ impl<P: GraphProjection> EvalGraphProjector<P> {
             .add_node(GraphNode {
                 node_id: version_id.as_str().to_owned(),
                 kind: NodeKind::PromptVersion,
+                project: None,
                 created_at: ts,
             })
             .await?;
@@ -70,6 +72,7 @@ impl<P: GraphProjection> EvalGraphProjector<P> {
             .add_node(GraphNode {
                 node_id: release_id.as_str().to_owned(),
                 kind: NodeKind::PromptRelease,
+                project: None,
                 created_at: ts,
             })
             .await?;
@@ -113,6 +116,7 @@ impl<P: GraphProjection> EvalGraphProjector<P> {
             .add_node(GraphNode {
                 node_id: eval_run_id.as_str().to_owned(),
                 kind: NodeKind::EvalRun,
+                project: None,
                 created_at: ts,
             })
             .await?;

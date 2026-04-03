@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use cairn_domain::ProjectKey;
 use serde::{Deserialize, Serialize};
 
 /// Graph node categories (RFC 004).
@@ -22,6 +23,8 @@ pub enum NodeKind {
     EvalRun,
     Skill,
     ChannelTarget,
+    Signal,
+    IngestJob,
 }
 
 /// Graph edge categories (RFC 004).
@@ -51,6 +54,7 @@ pub enum EdgeKind {
 pub struct GraphNode {
     pub node_id: String,
     pub kind: NodeKind,
+    pub project: Option<ProjectKey>,
     pub created_at: u64,
 }
 

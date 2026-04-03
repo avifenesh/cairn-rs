@@ -259,6 +259,7 @@ impl NodeRow {
         GraphNode {
             node_id: self.node_id,
             kind: parse_node_kind(&self.kind).unwrap_or(NodeKind::Session),
+            project: None,
             created_at: self.created_at as u64,
         }
     }
@@ -341,6 +342,7 @@ async fn fetch_neighbor_rows(
         nodes.push(GraphNode {
             node_id: r.node_id,
             kind: parse_node_kind(&r.node_kind).unwrap_or(NodeKind::Session),
+            project: None,
             created_at: r.node_created_at as u64,
         });
     }
@@ -367,6 +369,8 @@ fn node_kind_str(kind: NodeKind) -> &'static str {
         NodeKind::EvalRun => "eval_run",
         NodeKind::Skill => "skill",
         NodeKind::ChannelTarget => "channel_target",
+        NodeKind::Signal => "signal",
+        NodeKind::IngestJob => "ingest_job",
     }
 }
 
@@ -389,6 +393,8 @@ fn parse_node_kind(s: &str) -> Option<NodeKind> {
         "eval_run" => Some(NodeKind::EvalRun),
         "skill" => Some(NodeKind::Skill),
         "channel_target" => Some(NodeKind::ChannelTarget),
+        "signal" => Some(NodeKind::Signal),
+        "ingest_job" => Some(NodeKind::IngestJob),
         _ => None,
     }
 }

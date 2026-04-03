@@ -27,6 +27,7 @@ impl<P: GraphProjection> RetrievalGraphProjector<P> {
             .add_node(GraphNode {
                 node_id: source_id.as_str().to_owned(),
                 kind: NodeKind::Source,
+                project: None,
                 created_at: ts,
             })
             .await
@@ -43,6 +44,7 @@ impl<P: GraphProjection> RetrievalGraphProjector<P> {
             .add_node(GraphNode {
                 node_id: document_id.as_str().to_owned(),
                 kind: NodeKind::Document,
+                project: None,
                 created_at: ts,
             })
             .await?;
@@ -69,6 +71,7 @@ impl<P: GraphProjection> RetrievalGraphProjector<P> {
                 .add_node(GraphNode {
                     node_id: chunk_id.clone(),
                     kind: NodeKind::Chunk,
+                    project: None,
                     created_at: ts,
                 })
                 .await?;

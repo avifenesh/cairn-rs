@@ -286,6 +286,7 @@ impl InMemoryStore {
                     rec.updated_at = e.completed_at;
                 }
             }
+            RuntimeEvent::EvalRunStarted(_) | RuntimeEvent::EvalRunCompleted(_) => {}
         }
     }
 }
@@ -400,6 +401,8 @@ fn event_matches_entity(event: &RuntimeEvent, entity: &EntityRef) -> bool {
         (RuntimeEvent::UserMessageAppended(e), EntityRef::Run(id)) => e.run_id == *id,
         (RuntimeEvent::IngestJobStarted(e), EntityRef::IngestJob(id)) => e.job_id == *id,
         (RuntimeEvent::IngestJobCompleted(e), EntityRef::IngestJob(id)) => e.job_id == *id,
+        (RuntimeEvent::EvalRunStarted(e), EntityRef::EvalRun(id)) => e.eval_run_id == *id,
+        (RuntimeEvent::EvalRunCompleted(e), EntityRef::EvalRun(id)) => e.eval_run_id == *id,
         _ => false,
     }
 }
