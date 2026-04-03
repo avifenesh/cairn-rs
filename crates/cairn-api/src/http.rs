@@ -212,6 +212,57 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
             path: "/v1/stream".into(),
             classification: Preserve,
         },
+        // RFC 010: Operator control plane routes
+        RouteEntry {
+            method: Get,
+            path: "/v1/runs".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/runs/:id".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/prompts/assets".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/prompts/releases".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/graph/trace".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/policies/decisions".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/providers/health".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/settings".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/admin/tenants".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/admin/workspaces".into(),
+            classification: Preserve,
+        },
     ]
 }
 

@@ -8,7 +8,9 @@
 //!
 mod sse_hooks;
 
-use cairn_api::bootstrap::{BootstrapConfig, DeploymentMode, ServerBootstrap};
+use cairn_api::bootstrap::{
+    BootstrapConfig, DeploymentMode, EncryptionKeySource, ServerBootstrap, StorageBackend,
+};
 
 struct AppBootstrap;
 
@@ -52,13 +54,42 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
                     config.listen_addr = args[i].clone();
                 }
             }
+            "--db" => {
+                i += 1;
+                if i < args.len() {
+                    let val = &args[i];
+                    if val.starts_with("postgres://") || val.starts_with("postgresql://") {
+                        config.storage = StorageBackend::Postgres {
+                            connection_url: val.clone(),
+                        };
+                    } else {
+                        config.storage = StorageBackend::Sqlite {
+                            path: val.clone(),
+                        };
+                    }
+                }
+            }
+            "--encryption-key-env" => {
+                i += 1;
+                if i < args.len() {
+                    config.encryption_key = EncryptionKeySource::EnvVar {
+                        var_name: args[i].clone(),
+                    };
+                }
+            }
             _ => {}
         }
         i += 1;
     }
 
-    if config.mode == DeploymentMode::SelfHostedTeam && config.listen_addr == "127.0.0.1" {
-        config.listen_addr = "0.0.0.0".to_owned();
+    if config.mode == DeploymentMode::SelfHostedTeam {
+        if config.listen_addr == "127.0.0.1" {
+            config.listen_addr = "0.0.0.0".to_owned();
+        }
+        // Team mode uses LocalAuto only if no explicit key — credentials_available() will reject it.
+        if matches!(config.encryption_key, EncryptionKeySource::LocalAuto) {
+            config.encryption_key = EncryptionKeySource::None;
+        }
     }
 
     config
@@ -142,15 +173,44 @@ mod tests {
     #[test]
     fn run_bootstrap_delegates_to_server_bootstrap() {
         let bootstrap = RecordingBootstrap::new();
-        let config = BootstrapConfig {
-            mode: DeploymentMode::SelfHostedTeam,
-            listen_addr: "0.0.0.0".to_owned(),
-            listen_port: 8080,
-        };
+        let config = BootstrapConfig::team("postgres://localhost/cairn");
 
         run_bootstrap(&bootstrap, &config).unwrap();
 
         assert_eq!(bootstrap.seen(), Some(config));
+    }
+
+    #[test]
+    fn parse_args_db_flag_sets_postgres() {
+        let args = vec![
+            "cairn-app".to_owned(),
+            "--db".to_owned(),
+            "postgres://localhost/cairn".to_owned(),
+        ];
+        let config = parse_args_from(&args);
+        assert!(matches!(config.storage, StorageBackend::Postgres { .. }));
+    }
+
+    #[test]
+    fn parse_args_db_flag_sets_sqlite() {
+        let args = vec![
+            "cairn-app".to_owned(),
+            "--db".to_owned(),
+            "my_data.db".to_owned(),
+        ];
+        let config = parse_args_from(&args);
+        assert!(matches!(config.storage, StorageBackend::Sqlite { .. }));
+    }
+
+    #[test]
+    fn team_mode_clears_local_auto_encryption() {
+        let args = vec![
+            "cairn-app".to_owned(),
+            "--mode".to_owned(),
+            "team".to_owned(),
+        ];
+        let config = parse_args_from(&args);
+        assert!(!config.credentials_available());
     }
 
     #[test]
