@@ -80,7 +80,7 @@ fn phase0_http_fixtures_match_minimum_contracts() {
     assert_array(&feed, "/response/items");
     assert_bool(&feed, "/response/hasMore");
     assert_object(&feed, "/response/items/0");
-    assert_number(&feed, "/response/items/0/id");
+    assert_string(&feed, "/response/items/0/id");
 
     let tasks = read_json("tests/fixtures/http/GET__v1_tasks__status_running_type_agent.json");
     assert_provenance(&tasks);

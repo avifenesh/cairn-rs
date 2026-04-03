@@ -77,9 +77,14 @@ awk -F '\t' 'NR == 1 { next } NF != 4 { exit 1 }' "$COMPAT_DIR/phase0_sse_fixtur
 
 while IFS= read -r route; do
   [[ -z "$route" ]] && continue
-  path="$(printf '%s\n' "$route" | awk '{print $2}')"
+  method="${route%% *}"
+  remainder="${route#* }"
+  path="${remainder%% *}"
   base="${path%%\?*}"
-  if ! grep -Fq "$base" "$COMPAT_DIR/http_routes.tsv"; then
+  if ! awk -F '\t' -v method="$method" -v route="$base" '
+    NR > 1 && $1 == method && $2 == route { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$COMPAT_DIR/http_routes.tsv"; then
     echo "missing required HTTP inventory entry for: $route" >&2
     exit 1
   fi
@@ -87,7 +92,10 @@ done < "$COMPAT_DIR/phase0_required_http.txt"
 
 while IFS= read -r event_name; do
   [[ -z "$event_name" ]] && continue
-  if ! grep -Fq "${event_name}" "$COMPAT_DIR/sse_events.tsv"; then
+  if ! awk -F '\t' -v event_name="$event_name" '
+    NR > 1 && $1 == event_name { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$COMPAT_DIR/sse_events.tsv"; then
     echo "missing required SSE inventory entry for: $event_name" >&2
     exit 1
   fi
@@ -123,5 +131,8 @@ require_file "$FIXTURE_DIR/sse/agent_progress__message.json"
 
 cargo_test_clean_env -p cairn-api --test compat_catalog_sync --manifest-path "$ROOT/Cargo.toml"
 cargo_test_clean_env -p cairn-api --test phase0_fixture_shapes --manifest-path "$ROOT/Cargo.toml"
+cargo_test_clean_env -p cairn-api --test http_boundary_alignment --manifest-path "$ROOT/Cargo.toml"
+cargo_test_clean_env -p cairn-api --test sse_payload_alignment --manifest-path "$ROOT/Cargo.toml"
+cargo_test_clean_env -p cairn-api --test migration_report_consistency --manifest-path "$ROOT/Cargo.toml"
 
 echo "compatibility inventory looks structurally valid"

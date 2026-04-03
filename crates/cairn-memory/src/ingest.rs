@@ -1,0 +1,125 @@
+use async_trait::async_trait;
+use cairn_domain::{KnowledgeDocumentId, KnowledgePackId, ProjectKey, SourceId};
+use serde::{Deserialize, Serialize};
+
+/// Supported source types for v1 ingest (RFC 003).
+///
+/// PDF/office extraction is additive and not part of the first sellable floor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceType {
+    PlainText,
+    Markdown,
+    Html,
+    StructuredJson,
+    KnowledgePack,
+}
+
+/// Ingest job status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestStatus {
+    Pending,
+    Parsing,
+    Chunking,
+    Embedding,
+    Indexing,
+    Completed,
+    Failed,
+}
+
+/// A chunk produced by the ingest pipeline, retaining provenance.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChunkRecord {
+    pub chunk_id: String,
+    pub document_id: KnowledgeDocumentId,
+    pub source_id: SourceId,
+    pub source_type: SourceType,
+    pub project: ProjectKey,
+    pub text: String,
+    pub position: u32,
+    pub created_at: u64,
+}
+
+/// Request to ingest a document into the owned retrieval pipeline.
+#[derive(Clone, Debug)]
+pub struct IngestRequest {
+    pub document_id: KnowledgeDocumentId,
+    pub source_id: SourceId,
+    pub source_type: SourceType,
+    pub project: ProjectKey,
+    pub content: String,
+}
+
+/// Request to ingest a curated knowledge pack (RFC 013 bundle).
+#[derive(Clone, Debug)]
+pub struct IngestPackRequest {
+    pub pack_id: KnowledgePackId,
+    pub project: ProjectKey,
+    /// The serialized bundle JSON. Parsed internally to extract documents.
+    pub bundle_json: String,
+}
+
+/// Ingest service boundary.
+///
+/// Per RFC 003, ingest runs as a runtime-owned job that passes through:
+/// source registration, normalization, parsing, chunking, metadata extraction,
+/// deduplication, embedding generation, and index update.
+///
+/// Heavier ingest work may execute asynchronously but reports through
+/// runtime-owned command/event surfaces.
+#[async_trait]
+pub trait IngestService: Send + Sync {
+    /// Submit a document for ingest. Returns immediately; processing is async.
+    async fn submit(&self, request: IngestRequest) -> Result<(), IngestError>;
+
+    /// Submit a knowledge pack for ingest.
+    async fn submit_pack(&self, request: IngestPackRequest) -> Result<(), IngestError>;
+
+    /// Query the ingest status for a document.
+    async fn status(
+        &self,
+        document_id: &KnowledgeDocumentId,
+    ) -> Result<Option<IngestStatus>, IngestError>;
+}
+
+/// Ingest-specific errors.
+#[derive(Debug)]
+pub enum IngestError {
+    UnsupportedSource(SourceType),
+    ParseFailed(String),
+    EmbeddingFailed(String),
+    StorageError(String),
+    Internal(String),
+}
+
+impl std::fmt::Display for IngestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IngestError::UnsupportedSource(t) => write!(f, "unsupported source type: {t:?}"),
+            IngestError::ParseFailed(msg) => write!(f, "parse failed: {msg}"),
+            IngestError::EmbeddingFailed(msg) => write!(f, "embedding failed: {msg}"),
+            IngestError::StorageError(msg) => write!(f, "storage error: {msg}"),
+            IngestError::Internal(msg) => write!(f, "internal ingest error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for IngestError {}
+
+#[cfg(test)]
+mod tests {
+    use super::{IngestStatus, SourceType};
+
+    #[test]
+    fn source_types_are_distinct() {
+        assert_ne!(SourceType::PlainText, SourceType::Markdown);
+        assert_ne!(SourceType::Html, SourceType::KnowledgePack);
+    }
+
+    #[test]
+    fn ingest_status_terminal_check() {
+        assert!(matches!(IngestStatus::Completed, IngestStatus::Completed));
+        assert!(matches!(IngestStatus::Failed, IngestStatus::Failed));
+    }
+}

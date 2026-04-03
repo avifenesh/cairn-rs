@@ -71,7 +71,10 @@ fn http_catalog_matches_compat_inventory() {
         })
         .collect();
 
-    assert_eq!(actual, expected, "cairn-api route catalog drifted from tests/compat/http_routes.tsv");
+    assert_eq!(
+        actual, expected,
+        "cairn-api route catalog drifted from tests/compat/http_routes.tsv"
+    );
 }
 
 #[test]
@@ -83,10 +86,19 @@ fn sse_catalog_matches_compat_inventory() {
 
     let actual: BTreeSet<_> = preserved_sse_catalog()
         .into_iter()
-        .map(|entry| format!("{}\t{}", entry.name, classification_str(entry.classification)))
+        .map(|entry| {
+            format!(
+                "{}\t{}",
+                entry.name,
+                classification_str(entry.classification)
+            )
+        })
         .collect();
 
-    assert_eq!(actual, expected, "cairn-api SSE catalog drifted from tests/compat/sse_events.tsv");
+    assert_eq!(
+        actual, expected,
+        "cairn-api SSE catalog drifted from tests/compat/sse_events.tsv"
+    );
 }
 
 #[test]
@@ -101,9 +113,9 @@ fn phase0_required_http_is_backed_by_api_catalog() {
         let path = parts.next().expect("missing path");
         let base_path = path.split('?').next().expect("base path");
 
-        let found = catalog.iter().any(|entry| {
-            method_str(entry.method) == method && entry.path == base_path
-        });
+        let found = catalog
+            .iter()
+            .any(|entry| method_str(entry.method) == method && entry.path == base_path);
 
         assert!(
             found,

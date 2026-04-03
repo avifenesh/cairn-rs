@@ -1,0 +1,507 @@
+{
+  "topic": "live collaboration between terminal agents",
+  "slug": "live-collaboration-between-terminal-agents",
+  "generated": "2026-04-03T00:00:00.000Z",
+  "depth": "medium",
+  "totalSources": 24,
+  "sources": [
+    {
+      "url": "https://code.claude.com/docs/en/agent-teams",
+      "title": "Orchestrate teams of Claude Code sessions - Claude Code Docs",
+      "qualityScore": 98,
+      "scores": {
+        "authority": 10,
+        "recency": 10,
+        "depth": 10,
+        "examples": 10,
+        "uniqueness": 8
+      },
+      "type": "officialDocs",
+      "keyInsights": [
+        "Team lead + teammates architecture: lead coordinates, teammates work independently in own context windows",
+        "Mailbox messaging system: JSON inbox files at ~/.claude/teams/{team-name}/ with automatic delivery",
+        "Shared task list with file-locking for race-free task claiming",
+        "Two display modes: in-process (any terminal) and split-panes (tmux/iTerm2)",
+        "Hooks for quality gates: TeammateIdle, TaskCreated, TaskCompleted",
+        "Subagent definitions reusable as teammate roles",
+        "3-5 teammates recommended; 5-6 tasks per teammate optimal",
+        "No session resumption for in-process teammates (known limitation)"
+      ]
+    },
+    {
+      "url": "https://www.anthropic.com/engineering/multi-agent-research-system",
+      "title": "How we built our multi-agent research system - Anthropic",
+      "qualityScore": 95,
+      "scores": {
+        "authority": 10,
+        "recency": 9,
+        "depth": 10,
+        "examples": 8,
+        "uniqueness": 8
+      },
+      "type": "officialDocs",
+      "keyInsights": [
+        "Orchestrator-worker: lead analyzes queries, spawns subagents for parallel exploration",
+        "Lead saves research plan to external memory to survive 200k token context truncation",
+        "Effort scaling: simple queries use 1 agent + 3-10 tool calls; complex queries use 10+ subagents",
+        "15x more tokens than chats but enables up to 90% research time reduction for complex queries",
+        "Prompt engineering over rigid rules: encode human heuristics (decomposition, source evaluation)",
+        "Monitor emergent behaviors without reading conversation contents"
+      ]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns",
+      "title": "AI Agent Orchestration Patterns - Azure Architecture Center",
+      "qualityScore": 94,
+      "scores": {
+        "authority": 10,
+        "recency": 10,
+        "depth": 10,
+        "examples": 9,
+        "uniqueness": 7
+      },
+      "type": "officialDocs",
+      "keyInsights": [
+        "Sequential: linear pipeline, each agent processes previous output (also: pipeline, prompt chaining)",
+        "Concurrent: parallel fan-out/fan-in, all agents work simultaneously then aggregate",
+        "Group chat: shared conversation thread, chat manager coordinates, all agents see accumulating context",
+        "Handoff: dynamic routing/triage, full control transfers from agent to agent",
+        "Maker-checker loop: maker creates, checker evaluates against criteria, iterate until approved",
+        "Start with lowest complexity level; add agents only when single-agent fails due to prompt complexity",
+        "Limit group chat to 3 agents max to maintain control"
+      ]
+    },
+    {
+      "url": "https://docs.aws.amazon.com/prescriptive-guidance/latest/agentic-ai-patterns/multi-agent-collaboration.html",
+      "title": "Multi-agent collaboration - AWS Prescriptive Guidance",
+      "qualityScore": 90,
+      "scores": {
+        "authority": 9,
+        "recency": 9,
+        "depth": 9,
+        "examples": 8,
+        "uniqueness": 6
+      },
+      "type": "officialDocs",
+      "keyInsights": [
+        "Collaboration is peer-to-peer emergent coordination; workflow agents use centralized control",
+        "Implementation flow: task initiation → role assignment → agent communication → specialized reasoning → output coordination",
+        "Communication channels: shared memory, messaging queues, or prompt chaining",
+        "AWS stack: SQS/EventBridge for messaging, DynamoDB/S3 for blackboard state, Step Functions for orchestration"
+      ]
+    },
+    {
+      "url": "https://developers.googleblog.com/en/a2a-a-new-era-of-agent-interoperability/",
+      "title": "Announcing the Agent2Agent Protocol (A2A) - Google Developers Blog",
+      "qualityScore": 93,
+      "scores": {
+        "authority": 10,
+        "recency": 10,
+        "depth": 8,
+        "examples": 7,
+        "uniqueness": 10
+      },
+      "type": "officialDocs",
+      "keyInsights": [
+        "A2A enables agents from different vendors/frameworks to communicate via HTTP + SSE + JSON-RPC",
+        "Agent Card: JSON self-description of capabilities, enabling automatic agent discovery",
+        "Client agent formulates tasks; remote agent executes; synchronized status through message parts",
+        "Messages contain typed parts: text, images, video, interactive elements",
+        "Linux Foundation governance as of June 2025; 50+ enterprise partners",
+        "Version 0.3 adds gRPC support and signed Agent Cards"
+      ]
+    },
+    {
+      "url": "https://dev.to/alexivison/the-adventuring-party-from-sub-agents-to-multi-agent-orchestration-with-tmux-2edf",
+      "title": "The Adventuring Party: From Sub-Agents to Multi-Agent Orchestration with tmux",
+      "qualityScore": 88,
+      "scores": {
+        "authority": 6,
+        "recency": 10,
+        "depth": 9,
+        "examples": 10,
+        "uniqueness": 9
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Three adjacent tmux panes: Codex (reviewer), Claude (implementor), Shell (utilities)",
+        "tmux send-keys enables asynchronous bidirectional communication with persistent context",
+        "Evolution: sub-agent relay → direct CLI (synchronous) → tmux transport (async)",
+        "Master-worker: Go TUI displays worker progress, enables message relay and session jumping",
+        "Quality gates: RED/GREEN phases, sub-agent critics, deep review, evidence JSON logging",
+        "Separate implementor from reviewer; never allow self-approval",
+        "Evidence becomes stale; gates force re-review if code changes after approval"
+      ]
+    },
+    {
+      "url": "https://koutian.is-a.dev/posts/2025/08/tmux-orchestrator/",
+      "title": "Tmux Orchestrator - Run AI agents 24/7",
+      "qualityScore": 82,
+      "scores": {
+        "authority": 5,
+        "recency": 8,
+        "depth": 8,
+        "examples": 9,
+        "uniqueness": 8
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Three-tier hierarchy: Orchestrator → Project Managers → Engineers",
+        "send-claude-message.sh script: ./send-claude-message.sh session:window 'message'",
+        "Sessions survive disconnects: work continues when laptop is closed",
+        "Self-scheduling: ./schedule_with_note.sh 30 'Continue implementation'",
+        "Git safety: feature branches + 30-minute commits + stable version tags"
+      ]
+    },
+    {
+      "url": "https://dev.to/uenyioha/porting-claude-codes-agent-teams-to-opencode-4hol",
+      "title": "Building Agent Teams in OpenCode: Architecture of Multi-Agent Coordination",
+      "qualityScore": 87,
+      "scores": {
+        "authority": 6,
+        "recency": 10,
+        "depth": 10,
+        "examples": 9,
+        "uniqueness": 9
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Per-agent JSONL files at team_inbox/<projectId>/<teamName>/<agentName>.jsonl (append-only for O(1))",
+        "Fire-and-forget + auto-wake: messages inject as synthetic user messages restarting idle prompt loops",
+        "Peer-to-peer: agents message teammates directly, not only through lead",
+        "Dual state machines: coarse lifecycle (ready/busy/shutdown) + fine execution (10 states)",
+        "Sub-agent isolation via permission deny rules + hidden tool visibility",
+        "Recovery: interrupted teammates marked ready but prompt loops don't auto-restart"
+      ]
+    },
+    {
+      "url": "https://notes.muthu.co/2025/10/collaborative-problem-solving-in-multi-agent-systems-with-the-blackboard-architecture/",
+      "title": "Collaborative Problem-Solving with the Blackboard Architecture",
+      "qualityScore": 85,
+      "scores": {
+        "authority": 6,
+        "recency": 8,
+        "depth": 9,
+        "examples": 8,
+        "uniqueness": 8
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Three components: Blackboard (shared state), Knowledge Sources (agents), Control Component (orchestrator)",
+        "Agent condition part (activation criteria) + action part (modifications to blackboard)",
+        "Control strategies: priority-based, focus-based, opportunistic",
+        "Document analysis example: EntityExtractor, SentimentAnalyzer, SummarySynthesizer with preconditions",
+        "Opportunistic reasoning: agents respond to evolving state, not predetermined sequences",
+        "Modern implementations: Redis/Kafka for distributed blackboard; LLMs as knowledge sources and control"
+      ]
+    },
+    {
+      "url": "https://dev.to/aureus_c_b3ba7f87cc34d74d49/multi-agent-communication-patterns-that-actually-work-50kp",
+      "title": "Multi-Agent Communication Patterns That Actually Work",
+      "qualityScore": 83,
+      "scores": {
+        "authority": 5,
+        "recency": 9,
+        "depth": 9,
+        "examples": 8,
+        "uniqueness": 8
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Five patterns: Shared Filesystem (mailbox), Relay Agent (hub-and-spoke), Shared Ledger (event sourcing), Handoff Chain, Contract Board",
+        "Mailbox: atomic writes + timestamp naming; best for 2-5 same-machine agents",
+        "Relay: central routing + audit trail; best for 5-50 heterogeneous agents across machines",
+        "Shared Ledger: append-only log, full auditability; needs log compaction",
+        "Handoff Chain: structured context transfer; only for serial workflows",
+        "Anti-patterns: free-form text parsing, omniscient hub, polling storms, unsequenced delivery",
+        "Start simple: Mailbox + Handoff Chain covers most use cases"
+      ]
+    },
+    {
+      "url": "https://arxiv.org/html/2603.10062v1",
+      "title": "Multi-Agent Memory from a Computer Architecture Perspective",
+      "qualityScore": 88,
+      "scores": {
+        "authority": 8,
+        "recency": 10,
+        "depth": 10,
+        "examples": 6,
+        "uniqueness": 9
+      },
+      "type": "tutorials",
+      "keyInsights": [
+        "Three-layer memory hierarchy: I/O (interfaces), Cache (fast/limited), Memory (persistent/retrieval)",
+        "Shared memory: common pool, easy reuse, requires coherence; distributed: local + selective sync",
+        "Without coherence: agents overwrite each other, read stale info, or use inconsistent versions",
+        "Missing protocols: no principled KV cache sharing across agents; no memory access permission spec",
+        "Read-time conflicts and update-time visibility are the key unsolved consistency challenges",
+        "Agent performance is an end-to-end data movement problem"
+      ]
+    },
+    {
+      "url": "https://galileo.ai/blog/multi-agent-coordination-strategies",
+      "title": "Multi-Agent Coordination Gone Wrong? Fix With 10 Strategies",
+      "qualityScore": 85,
+      "scores": {
+        "authority": 7,
+        "recency": 9,
+        "depth": 9,
+        "examples": 7,
+        "uniqueness": 7
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Coordination failures = 36.9% of all multi-agent failures; framework failure rates: 41-86.7%",
+        "10 strategies: deterministic task allocation, hierarchical decomposition, token budgets/timeouts, shared memory with ACLs, consistency checks, contention detection, consensus voting, guardrails, CLHF, checkpoint rollbacks",
+        "Byzantine Fault-Tolerant consensus reduces attack success from 46.34% to 19.37%",
+        "Coordination gains plateau beyond 4 agents",
+        "Error amplification 17x in decentralized 'bag of agents' vs. centralized control plane"
+      ]
+    },
+    {
+      "url": "https://lumenalta.com/insights/8-tactics-to-reduce-context-drift-with-parallel-ai-agents",
+      "title": "8 Tactics to Reduce Context Drift with Parallel AI Agents",
+      "qualityScore": 84,
+      "scores": {
+        "authority": 6,
+        "recency": 9,
+        "depth": 9,
+        "examples": 7,
+        "uniqueness": 7
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Central Shared Task Spec: single living document as source of truth for all agents",
+        "Scoped Role-Specific Context: each agent receives only relevant code/rules",
+        "External Memory with Selective Retrieval: knowledge base queried per task, not embedded in chat history",
+        "Aggressive History Trimming: condense exchanges into precise decision notes",
+        "Coordinator/Arbiter Agent: meta-agent monitors parallel workers, flags spec conflicts",
+        "Structured State and Protocols: explicit fields + procedural steps (plan/propose/review/finalize)",
+        "Guardrail Prompts: hard limits on security/compliance enforced via linters/tests",
+        "Observability: log prompts + context + decisions; connect metrics to business outcomes"
+      ]
+    },
+    {
+      "url": "https://www.confluent.io/blog/event-driven-multi-agent-systems/",
+      "title": "Four Design Patterns for Event-Driven, Multi-Agent Systems",
+      "qualityScore": 86,
+      "scores": {
+        "authority": 8,
+        "recency": 7,
+        "depth": 9,
+        "examples": 8,
+        "uniqueness": 8
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Orchestrator-Worker via Kafka: key-based topic partitioning distributes tasks without connection management",
+        "Hierarchical Agent: same event-driven techniques apply recursively per subtree",
+        "Blackboard via Kafka: shared topic as async knowledge repository, no direct agent communication",
+        "Market-Based: bid/ask topics with market maker, eliminates quadratic agent connections",
+        "Consumer group rebalancing: auto load distribution when agents added/removed",
+        "Immutable event logs: single source of truth, enables replay and recovery"
+      ]
+    },
+    {
+      "url": "https://www.datacamp.com/tutorial/crewai-vs-langgraph-vs-autogen",
+      "title": "CrewAI vs LangGraph vs AutoGen: Choosing the Right Framework",
+      "qualityScore": 83,
+      "scores": {
+        "authority": 7,
+        "recency": 8,
+        "depth": 8,
+        "examples": 8,
+        "uniqueness": 6
+      },
+      "type": "tutorials",
+      "keyInsights": [
+        "LangGraph: graph-based workflows, typed state channels, conditional edges, LangSmith debugging",
+        "CrewAI: role-based team model, task.context[] for state sharing, allow_delegation for peer delegation",
+        "AutoGen: group chat model, dynamic conversational collaboration, flexible agent topologies",
+        "Without shared visual reference, parallel agents diverge on different data and make contradictory decisions",
+        "CrewAI hierarchical process needs manager_llm + memory=True to cache context across delegations"
+      ]
+    },
+    {
+      "url": "https://docs.crewai.com/en/concepts/collaboration",
+      "title": "Collaboration - CrewAI Docs",
+      "qualityScore": 88,
+      "scores": {
+        "authority": 9,
+        "recency": 9,
+        "depth": 8,
+        "examples": 9,
+        "uniqueness": 6
+      },
+      "type": "officialDocs",
+      "keyInsights": [
+        "allow_delegation=True gives agents delegate_work and ask_question tools automatically",
+        "allowed_agents parameter constrains delegation to specific subordinates",
+        "context=[task] parameter threads prior task outputs into dependent tasks",
+        "step_callback tracks delegation events: 'Delegate work to coworker', 'Ask question to coworker'",
+        "memory=True reduces manager re-read cost ~30% by caching delegation context"
+      ]
+    },
+    {
+      "url": "https://github.com/a2aproject/A2A",
+      "title": "Agent2Agent (A2A) GitHub Repository",
+      "qualityScore": 87,
+      "scores": {
+        "authority": 9,
+        "recency": 10,
+        "depth": 8,
+        "examples": 7,
+        "uniqueness": 8
+      },
+      "type": "github",
+      "keyInsights": [
+        "Open protocol for communication between opaque agentic applications",
+        "Specification at https://a2a-protocol.org/latest/specification/",
+        "Uses HTTP, SSE, JSON-RPC as transport",
+        "Agent Cards in JSON advertise capabilities for discovery",
+        "Task lifecycle: submitted → running → completed/failed/cancelled",
+        "Python and JavaScript SDKs available"
+      ]
+    },
+    {
+      "url": "https://github.com/Dicklesworthstone/mcp_agent_mail",
+      "title": "MCP Agent Mail: Coordination Infrastructure for AI Coding Agents",
+      "qualityScore": 82,
+      "scores": {
+        "authority": 6,
+        "recency": 10,
+        "depth": 8,
+        "examples": 7,
+        "uniqueness": 10
+      },
+      "type": "github",
+      "keyInsights": [
+        "Persistent identities: memorable adjective+noun names registered per project",
+        "Git-backed JSONL + SQLite FTS5: messages stored outside agent context windows",
+        "File reservation leases: advisory/exclusive on glob patterns with TTL expiration",
+        "Pre-commit hook enforcement: prevents simultaneous conflicting edits",
+        "Multi-repo coordination via request_contact/respond_contact handshakes",
+        "Web UI for human oversight of projects, messages, reservations"
+      ]
+    },
+    {
+      "url": "https://redis.io/blog/multi-agent-systems-coordinated-ai/",
+      "title": "Multi-agent systems: Why coordinated AI beats going solo",
+      "qualityScore": 80,
+      "scores": {
+        "authority": 8,
+        "recency": 7,
+        "depth": 7,
+        "examples": 7,
+        "uniqueness": 6
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Shared memory architectures with proper access controls prevent stale-information failures",
+        "Redis as blackboard: agents never forget history, never overwrite each other with proper boundaries",
+        "Vector search enables semantic retrieval across agent-written knowledge",
+        "TTL-based expiration keeps shared state fresh without manual cleanup"
+      ]
+    },
+    {
+      "url": "https://www.heyuan110.com/posts/ai/2026-02-28-claude-code-teams-guide/",
+      "title": "Claude Code --teammate-mode Explained: Run Multiple Agents That Actually Collaborate",
+      "qualityScore": 78,
+      "scores": {
+        "authority": 5,
+        "recency": 10,
+        "depth": 7,
+        "examples": 8,
+        "uniqueness": 6
+      },
+      "type": "tutorials",
+      "keyInsights": [
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 environment variable or settings.json to enable",
+        "--teammate-mode in-process flag forces single-terminal mode",
+        "Shift+Down cycles through teammates; Ctrl+T toggles task list",
+        "Teammates load CLAUDE.md automatically from working directory",
+        "Claude proposes a team if it determines parallel work would benefit the task"
+      ]
+    },
+    {
+      "url": "https://github.com/openai/swarm",
+      "title": "OpenAI Swarm: Educational Multi-Agent Orchestration Framework",
+      "qualityScore": 82,
+      "scores": {
+        "authority": 9,
+        "recency": 7,
+        "depth": 7,
+        "examples": 8,
+        "uniqueness": 7
+      },
+      "type": "github",
+      "keyInsights": [
+        "Two primitives: Agents (LLM + instructions + tools) and handoffs (transfer control to another agent)",
+        "Stateless client-side orchestration: conversation history passed between calls, no server state",
+        "Handoffs carry conversation context through transitions",
+        "Triage pattern: receiving agent classifies intent and hands off to specialist",
+        "Superseded by OpenAI Agents SDK (released March 2026) for production use"
+      ]
+    },
+    {
+      "url": "https://langchain-ai.github.io/langgraph/tutorials/multi_agent/hierarchical_agent_teams/",
+      "title": "Hierarchical Agent Teams - LangGraph",
+      "qualityScore": 88,
+      "scores": {
+        "authority": 9,
+        "recency": 9,
+        "depth": 9,
+        "examples": 10,
+        "uniqueness": 7
+      },
+      "type": "officialDocs",
+      "keyInsights": [
+        "Top-level supervisor + mid-level supervisors + workers compose via subgraph nesting",
+        "Typed state channels: each node reads/writes well-defined state schema",
+        "Conditional edges route to next agent based on current state",
+        "LangSmith integration enables step-by-step debugging of agent decisions",
+        "Structured output for supervisor routing decisions (2026 best practice)"
+      ]
+    },
+    {
+      "url": "https://orq.ai/blog/why-do-multi-agent-llm-systems-fail",
+      "title": "Why Multi-Agent LLM Systems Fail: Key Issues Explained",
+      "qualityScore": 80,
+      "scores": {
+        "authority": 6,
+        "recency": 9,
+        "depth": 8,
+        "examples": 6,
+        "uniqueness": 7
+      },
+      "type": "blogPosts",
+      "keyInsights": [
+        "Under-specification causes 15% of breakdowns (MAST taxonomy)",
+        "Prompt injection (OWASP LLM01:2025) has 46% baseline success rate in multi-agent systems",
+        "Memory poisoning: malicious outputs propagate through shared state to other agents",
+        "Circular dependencies: agents deadlock in recursive planning loops",
+        "Tool misuse: compromised agents accessing unauthorized resources"
+      ]
+    },
+    {
+      "url": "https://aws.amazon.com/blogs/machine-learning/multi-agent-collaboration-patterns-with-strands-agents-and-amazon-nova/",
+      "title": "Multi-Agent Collaboration Patterns with Strands Agents",
+      "qualityScore": 79,
+      "scores": {
+        "authority": 8,
+        "recency": 9,
+        "depth": 7,
+        "examples": 8,
+        "uniqueness": 6
+      },
+      "type": "tutorials",
+      "keyInsights": [
+        "Swarm pattern: peer agents exchange directly, each approaches from different perspective",
+        "No central controller in swarm; intelligence emerges from collective sharing and refinement",
+        "Handoff collaboration: agents know about each other and decide when to defer",
+        "Agent-as-tool: orchestrator calls agents as if they were function tools, single control thread",
+        "Amazon Strands framework supports all three patterns natively"
+      ]
+    }
+  ]
+}

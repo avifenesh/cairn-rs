@@ -13,6 +13,7 @@ Interpretation:
 
 - `read_endpoint_trait_present`: a Rust-side read endpoint/service seam already exists for the preserved route family
 - `dedicated_endpoint_trait_present`: a dedicated preserved-route endpoint or mutation trait exists outside the generic runtime read boundary
+- `dedicated_endpoint_trait_present_followup_remaining`: the route seam exists, but the current serialized request or response shape is still thinner than the preserved fixture contract
 - `stream_publisher_present_followup_remaining`: the stream surface exists, but compatibility work remains before it is locked
 - `no_explicit_api_boundary_yet`: preserved route exists in the catalog and fixtures, but no dedicated Rust-side endpoint/mutation seam is visible yet
 
@@ -20,10 +21,10 @@ Interpretation:
 
 | Requirement | Current Status | Notes | Next Step |
 |---|---|---|---|
-| `GET /v1/feed?limit=20&unread=true` | `dedicated_endpoint_trait_present` | `FeedEndpoints::list` plus read-marking boundaries exist in `feed.rs`, so the preserved feed route family now has an explicit Rust-side API seam. | `keep_contract_stable` |
+| `GET /v1/feed?limit=20&unread=true` | `dedicated_endpoint_trait_present` | `FeedEndpoints::list` plus read-marking boundaries exist in `feed.rs`, and the current `ListResponse<FeedItem>` shape matches the preserved feed fixture contract. | `keep_contract_stable` |
 | `GET /v1/tasks?status=running&type=agent` | `read_endpoint_trait_present` | `RuntimeReadEndpoints::list_tasks` exists and already uses the shared `ListQuery` boundary. | `keep_contract_stable` |
 | `GET /v1/approvals?status=pending` | `read_endpoint_trait_present` | `RuntimeReadEndpoints::list_approvals` exists and already uses the shared `ListQuery` boundary. | `keep_contract_stable` |
-| `GET /v1/memories/search?q=test&limit=10` | `dedicated_endpoint_trait_present` | `MemoryEndpoints::search` exists in `memory_api.rs`, so the preserved memory search route now has an explicit Rust-side API seam. | `keep_contract_stable` |
+| `GET /v1/memories/search?q=test&limit=10` | `dedicated_endpoint_trait_present_followup_remaining` | `MemoryEndpoints::search` exists in `memory_api.rs`, but the current `MemoryItem` response shape is still thinner than the preserved fixture contract (missing preserved `source` / `confidence`, and `createdAt` is not yet aligned to the fixture format). | `expand_memory_search_response_shape_to_preserved_fixture` |
 | `POST /v1/assistant/message body={message,mode?,sessionId?}` | `dedicated_endpoint_trait_present` | `AssistantEndpoints::send_message` exists in `assistant.rs`, so the preserved assistant-message mutation now has an explicit Rust-side command boundary. | `keep_contract_stable` |
 | `POST /v1/assistant/message body={message,mode?}` | `dedicated_endpoint_trait_present` | `AssistantEndpoints::send_message` exists in `assistant.rs`, so the preserved assistant-message mutation now has an explicit Rust-side command boundary. | `keep_contract_stable` |
 | `GET /v1/stream?lastEventId=<id>` | `stream_publisher_present_followup_remaining` | `SsePublisher`, `build_sse_frame`, and `parse_last_event_id` exist, but preserved SSE payload-shape alignment is still an explicit follow-up. | `align_sse_payload_shape` |

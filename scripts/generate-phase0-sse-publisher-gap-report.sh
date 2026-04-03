@@ -27,11 +27,26 @@ status_for_event() {
     ready)
       printf 'supported_via_ready_frame'
       ;;
-    task_update|approval_required|assistant_tool_call|agent_progress)
-      printf 'mapped_with_shaped_payload_followup_remaining'
+    task_update|approval_required)
+      printf 'runtime_mapping_followup_remaining_exact_dedicated_builder_present'
       ;;
-    feed_update|poll_completed|assistant_delta|assistant_end|assistant_reasoning|memory_proposed)
-      printf 'no_runtime_publisher_mapping_yet'
+    assistant_tool_call)
+      printf 'runtime_mapping_followup_remaining_enriched_builder_present'
+      ;;
+    agent_progress)
+      printf 'mapped_with_shaped_payload_exact_current_contract'
+      ;;
+    poll_completed|assistant_delta|assistant_reasoning)
+      printf 'supported_via_dedicated_builder'
+      ;;
+    assistant_end)
+      printf 'supported_via_dedicated_builder_followup_remaining'
+      ;;
+    feed_update|poll_completed|assistant_delta|assistant_reasoning)
+      printf 'supported_via_dedicated_builder'
+      ;;
+    memory_proposed)
+      printf 'no_runtime_or_dedicated_publisher_mapping_yet'
       ;;
     *)
       printf 'unclassified'
@@ -45,34 +60,34 @@ notes_for_event() {
       printf '`build_ready_frame()` covers connection bootstrap with `{ clientId }`.'
       ;;
     task_update)
-      printf 'Name is mapped and payload shaping exists, but current `sse_payloads` output is still narrower than the preserved fixture contract (`taskId/state/eventType` instead of the fuller `{ task: { id, type, status, title, description, progress, createdAt, updatedAt } }` shape).'
+      printf 'An exact dedicated task-update builder exists (`build_enriched_task_update_frame(...)`), but the runtime-event path currently published through `shape_event_payload(...)` is still thinner than the preserved fixture contract because it lacks task metadata/read-model fields like `type`, `title`, `description`, `progress`, `createdAt`, and `updatedAt`.'
       ;;
     approval_required)
-      printf 'Name is mapped and payload shaping exists, but current `sse_payloads` output only carries `approvalId/runId/taskId` instead of the fuller preserved `{ approval: { id, type, status, title, description, context, createdAt } }` shape.'
+      printf 'An exact dedicated approval builder exists (`build_enriched_approval_frame(...)`), but the runtime-event path currently published through `shape_event_payload(...)` is still thinner than the preserved fixture contract because it lacks approval metadata/read-model fields like `type`, `title`, `description`, `context`, and `createdAt`.'
       ;;
     assistant_tool_call)
-      printf 'Name is mapped and payload shaping exists, but current `sse_payloads` output still needs preserved-field alignment across phases (for example completed/failed events currently collapse toward invocation identifiers instead of preserving the frontend tool-call envelope consistently).'
+      printf 'The exact start-phase payload exists and there is an enriched builder path (`build_enriched_tool_call_frame(...)`), and the runtime-event completed/failed paths in `shape_event_payload(...)` now preserve `taskId`, `toolName`, and `phase`; the remaining follow-up is richer result/error payload semantics.'
       ;;
     agent_progress)
-      printf 'Name is mapped and payload shaping exists, but current builder still needs frontend-contract tightening for subagent/runtime progress semantics beyond the minimal `{ agentId, message }` fields.'
+      printf 'Name is mapped and the current `sse_payloads` builder already matches the preserved minimal `{ agentId, message }` contract used by the frontend fixture; richer progress semantics are a later product concern, not a current contract mismatch.'
       ;;
     feed_update)
-      printf 'Required by preserved frontend SSE contract; no runtime publisher mapping is visible yet in `sse_publisher.rs`.'
+      printf 'Covered by `build_feed_update_frame(...)` in `sse_payloads.rs`; the preserved feed item envelope now matches the current string-ID fixture contract.'
       ;;
     poll_completed)
-      printf 'Required by preserved frontend SSE contract; no runtime publisher mapping is visible yet in `sse_publisher.rs`.'
+      printf 'Covered by `build_poll_completed_frame(...)` in `sse_payloads.rs`; this SSE family is available through the dedicated polling publisher path rather than runtime-event mapping.'
       ;;
     assistant_delta)
-      printf 'Required by preserved frontend SSE contract; streaming token events are not yet represented by the current runtime-event publisher mapping.'
+      printf 'Covered by `build_streaming_sse_frame(StreamingOutput::AssistantDelta, ...)`; streaming token updates are available through the dedicated assistant-streaming builder path.'
       ;;
     assistant_end)
-      printf 'Required by preserved frontend SSE contract; final assistant text event is not yet represented by the current runtime-event publisher mapping.'
+      printf 'Covered by `build_streaming_sse_frame(StreamingOutput::AssistantEnd, ...)`, but the builder still emits an empty `messageText` placeholder unless the caller supplies the assembled final reply text.'
       ;;
     assistant_reasoning)
-      printf 'Required by preserved frontend SSE contract; reasoning trace event is not yet represented by the current runtime-event publisher mapping.'
+      printf 'Covered by `build_streaming_sse_frame(StreamingOutput::AssistantReasoning, ...)`; reasoning trace updates are available through the dedicated assistant-streaming builder path.'
       ;;
     memory_proposed)
-      printf 'Required by preserved frontend SSE contract; no runtime publisher mapping is visible yet in `sse_publisher.rs`.'
+      printf 'Required by preserved frontend SSE contract, but no runtime-event mapping or dedicated non-runtime builder is visible yet in the current Rust API slice.'
       ;;
     *)
       printf 'No note recorded.'
@@ -85,10 +100,22 @@ next_step_for_event() {
     ready)
       printf 'keep'
       ;;
-    task_update|approval_required|assistant_tool_call|agent_progress)
+    task_update|approval_required|assistant_tool_call)
       printf 'expand_shaped_payload_to_preserved_fixture'
       ;;
-    feed_update|poll_completed|assistant_delta|assistant_end|assistant_reasoning|memory_proposed)
+    agent_progress)
+      printf 'keep'
+      ;;
+    poll_completed|assistant_delta|assistant_reasoning)
+      printf 'keep'
+      ;;
+    feed_update)
+      printf 'keep'
+      ;;
+    assistant_end)
+      printf 'pass_assembled_final_message_text_into_streaming_builder'
+      ;;
+    memory_proposed)
       printf 'decide_runtime_or_non_runtime_publisher_owner'
       ;;
     *)
@@ -107,8 +134,12 @@ next_step_for_event() {
   printf -- '- Worker 1 should use this report to keep payload-shape drift visible while Worker 8 tightens the SSE publisher\n\n'
   printf 'Interpretation:\n\n'
   printf -- '- `supported_via_ready_frame`: already covered by a dedicated publisher path\n'
-  printf -- '- `mapped_with_shaped_payload_followup_remaining`: event name is present and the publisher now uses `sse_payloads`, but the emitted field set still needs alignment with the preserved frontend fixture contract\n'
-  printf -- '- `no_runtime_publisher_mapping_yet`: preserved SSE event exists in the frontend contract, but no equivalent runtime-publisher mapping is visible yet in the current Rust source\n\n'
+  printf -- '- `supported_via_dedicated_builder`: covered by a dedicated non-runtime builder path (feed, poll, or assistant streaming)\n'
+  printf -- '- `supported_via_dedicated_builder_followup_remaining`: a dedicated builder path exists, but one preserved payload field still needs to be populated correctly\n'
+  printf -- '- `runtime_mapping_followup_remaining_exact_dedicated_builder_present`: an exact dedicated builder already exists, but the generic runtime-event mapping path is still thinner than the preserved fixture contract\n'
+  printf -- '- `runtime_mapping_followup_remaining_enriched_builder_present`: an enriched builder exists for this family, but the generic runtime-event mapping path still drops preserved phase/result detail\n'
+  printf -- '- `mapped_with_shaped_payload_exact_current_contract`: event name is mapped and the current shaped payload already matches the preserved contract that the Phase 0 fixtures exercise today\n'
+  printf -- '- `no_runtime_or_dedicated_publisher_mapping_yet`: preserved SSE event exists in the frontend contract, but no equivalent runtime or dedicated non-runtime publisher mapping is visible yet in the current Rust source\n\n'
 
   printf '## Phase 0 SSE Status\n\n'
   printf '| Event | Current Status | Notes | Next Step |\n'

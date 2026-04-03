@@ -1,30 +1,43 @@
 //! Durable runtime services for sessions, runs, tasks, approvals, and recovery.
+//!
+//! `cairn-runtime` owns the runtime service boundaries that accept
+//! commands, validate state transitions, persist events, and update
+//! synchronous projections through `cairn-store`.
 
-/// Session orchestration boundaries.
-pub mod sessions {}
+pub mod approvals;
+pub mod checkpoints;
+pub mod enrichment;
+pub mod error;
+pub mod mailbox;
+pub mod recovery;
+pub mod runs;
+pub mod services;
+pub mod sessions;
+pub mod tasks;
 
-/// Run orchestration boundaries.
-pub mod runs {}
-
-/// Task orchestration boundaries.
-pub mod tasks {}
-
-/// Approval lifecycle boundaries.
-pub mod approvals {}
-
-/// Checkpoint persistence and recovery boundaries.
-pub mod checkpoints {}
-
-/// Durable mailbox boundaries.
-pub mod mailbox {}
-
-/// Replay, recovery, and pause/resume boundaries.
-pub mod recovery {}
+pub use approvals::ApprovalService;
+pub use checkpoints::CheckpointService;
+pub use enrichment::{
+    ApprovalEnrichment, CheckpointEnrichment, RunEnrichment, RuntimeEnrichment, SessionEnrichment,
+    StoreBackedEnrichment, TaskEnrichment,
+};
+pub use error::RuntimeError;
+pub use mailbox::MailboxService;
+pub use recovery::{RecoveryAction, RecoveryService, RecoverySummary};
+pub use runs::RunService;
+pub use services::{
+    ApprovalServiceImpl, CheckpointServiceImpl, ExternalWorkerService, ExternalWorkerServiceImpl,
+    MailboxServiceImpl, RecoveryServiceImpl, RunServiceImpl, SessionServiceImpl, TaskServiceImpl,
+    ToolInvocationService, ToolInvocationServiceImpl,
+};
+pub use sessions::SessionService;
+pub use tasks::TaskService;
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn smoke() {
-        assert!(true);
+    fn crate_compiles_with_domain_and_store_deps() {
+        let id = cairn_domain::SessionId::new("test");
+        assert_eq!(id.as_str(), "test");
     }
 }

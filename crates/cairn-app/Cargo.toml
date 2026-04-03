@@ -9,3 +9,7 @@ publish = false
 name = "cairn-app"
 path = "src/main.rs"
 
+[dependencies]
+cairn-api = { path = "../cairn-api" }
+cairn-memory = { path = "../cairn-memory" }
+

@@ -48,19 +48,19 @@ runtime_source_for_event() {
       printf '`ExternalWorkerReported | SubagentSpawned`'
       ;;
     feed_update)
-      printf '`no_runtime_mapping_yet`'
+      printf '`build_feed_update_frame(item, eventId)`'
       ;;
     poll_completed)
-      printf '`no_runtime_mapping_yet`'
+      printf '`build_poll_completed_frame(source, newCount, eventId)`'
       ;;
     assistant_delta)
-      printf '`no_runtime_mapping_yet`'
+      printf '`build_streaming_sse_frame(StreamingOutput::AssistantDelta, taskId, eventId)`'
       ;;
     assistant_end)
-      printf '`no_runtime_mapping_yet`'
+      printf '`build_streaming_sse_frame(StreamingOutput::AssistantEnd, taskId, eventId)`'
       ;;
     assistant_reasoning)
-      printf '`no_runtime_mapping_yet`'
+      printf '`build_streaming_sse_frame(StreamingOutput::AssistantReasoning, taskId, eventId)`'
       ;;
     memory_proposed)
       printf '`no_runtime_mapping_yet`'
@@ -118,31 +118,31 @@ builder_direction_for_event() {
       printf '`keep_existing_ready_builder`'
       ;;
     task_update)
-      printf '`expand_existing_task_update_shaper_fields`'
+      printf '`prefer_exact_task_update_builder_or_backfill_runtime_mapping`'
       ;;
     approval_required)
-      printf '`expand_existing_approval_required_shaper_fields`'
+      printf '`prefer_exact_approval_builder_or_backfill_runtime_mapping`'
       ;;
     assistant_tool_call)
-      printf '`expand_existing_assistant_tool_call_shaper_fields`'
+      printf '`preserve_start_builder_expand_completed_failed_runtime_mapping`'
       ;;
     agent_progress)
-      printf '`tighten_existing_agent_progress_shaper_fields`'
+      printf '`keep_existing_agent_progress_shaper`'
       ;;
     feed_update)
-      printf '`decide_non_runtime_or_signal_owner_then_add_builder`'
+      printf '`keep_existing_feed_update_builder`'
       ;;
     poll_completed)
-      printf '`decide_non_runtime_or_signal_owner_then_add_builder`'
+      printf '`keep_existing_poll_completed_builder`'
       ;;
     assistant_delta)
-      printf '`decide_agent_stream_owner_then_add_builder`'
+      printf '`keep_existing_streaming_builder`'
       ;;
     assistant_end)
-      printf '`decide_agent_stream_owner_then_add_builder`'
+      printf '`tighten_existing_streaming_end_builder`'
       ;;
     assistant_reasoning)
-      printf '`decide_agent_stream_owner_then_add_builder`'
+      printf '`keep_existing_streaming_builder`'
       ;;
     memory_proposed)
       printf '`decide_memory_owner_then_add_builder`'
@@ -158,10 +158,25 @@ status_for_event() {
     ready)
       printf '`covered`'
       ;;
-    task_update|approval_required|assistant_tool_call|agent_progress)
+    task_update|approval_required)
+      printf '`exact_builder_present_runtime_mapping_followup_remaining`'
+      ;;
+    assistant_tool_call)
+      printf '`start_fixture_exact_runtime_phase_followup_remaining`'
+      ;;
+    agent_progress)
+      printf '`covered_for_current_fixture_contract`'
+      ;;
+    poll_completed|assistant_delta|assistant_reasoning)
+      printf '`covered`'
+      ;;
+    feed_update)
+      printf '`covered`'
+      ;;
+    assistant_end)
       printf '`shaped_builder_present_fixture_alignment_remaining`'
       ;;
-    feed_update|poll_completed|assistant_delta|assistant_end|assistant_reasoning|memory_proposed)
+    memory_proposed)
       printf '`owner_and_builder_missing`'
       ;;
     *)
@@ -176,25 +191,28 @@ exact_followup_for_event() {
       printf '`none`'
       ;;
     task_update)
-      printf '`populate task.type/title/description/progress/createdAt/updatedAt from runtime-owned task metadata or read model`'
+      printf '`either prefer the existing exact enriched builder or populate task.type/title/description/progress/createdAt/updatedAt on the generic runtime path from task metadata/read models`'
       ;;
     approval_required)
-      printf '`populate approval.type/title/description/context/createdAt from approval requirement + read-model context`'
+      printf '`either prefer the existing exact enriched builder or populate approval.type/title/description/context/createdAt on the generic runtime path from approval metadata/read-model context`'
       ;;
     assistant_tool_call)
-      printf '`preserve args on start, then add stable completed/failed payload semantics for taskId/result/error detail instead of collapsing to invocation id`'
+      printf '`preserve the existing exact start shape, keep the now-stable completed/failed taskId/toolName/phase semantics, and add richer result/error detail next`'
       ;;
     agent_progress)
-      printf '`keep minimal agentId/message shape, but replace placeholder subagent text with stable runtime/agent progress semantics`'
+      printf '`none for the current minimal fixture contract; richer subagent/progress semantics can be deferred until the product contract expands`'
       ;;
     feed_update)
-      printf '`wire feed publisher to feed/signal aggregation source that can emit full item payloads`'
+      printf '`none`'
       ;;
     poll_completed)
-      printf '`wire signal/source polling completion path to emit source + newCount through the explicit publisher seam`'
+      printf '`none`'
       ;;
-    assistant_delta|assistant_end|assistant_reasoning)
-      printf '`wait for Worker 7 streaming/output seam, then add explicit publisher builder for the preserved payload family`'
+    assistant_delta|assistant_reasoning)
+      printf '`none`'
+      ;;
+    assistant_end)
+      printf '`keep the current streaming builder path, but pass assembled final message text instead of the empty placeholder when emitting assistant_end`'
       ;;
     memory_proposed)
       printf '`decide whether this is a memory-service publisher or proposal workflow publisher, then emit the full memory envelope`'

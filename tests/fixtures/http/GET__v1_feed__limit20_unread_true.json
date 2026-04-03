@@ -11,7 +11,7 @@
   "response": {
     "items": [
       {
-        "id": 101,
+        "id": "101",
         "source": "slack",
         "kind": "message",
         "title": "Build pipeline needs approval",

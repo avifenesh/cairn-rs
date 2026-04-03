@@ -1,0 +1,337 @@
+//! RFC 013 artifact import/export bundle types.
+//!
+//! One canonical JSON bundle format for prompt libraries and curated
+//! knowledge packs. Defines the envelope, artifact entries, identity/
+//! provenance, reconciliation outcomes, and import service contract.
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+// --- Bundle Envelope ---
+
+/// Top-level bundle envelope per RFC 013.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BundleEnvelope {
+    pub bundle_schema_version: String,
+    pub bundle_type: BundleType,
+    pub bundle_id: String,
+    pub bundle_name: String,
+    pub created_at: u64,
+    pub created_by: Option<String>,
+    pub source_deployment_id: Option<String>,
+    pub source_scope: SourceScope,
+    pub artifact_count: usize,
+    pub artifacts: Vec<ArtifactEntry>,
+    pub provenance: BundleProvenance,
+}
+
+/// V1 bundle types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleType {
+    PromptLibraryBundle,
+    CuratedKnowledgePackBundle,
+}
+
+/// Originating scope of the bundle.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceScope {
+    pub tenant_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub project_id: Option<String>,
+}
+
+/// Bundle-level provenance metadata.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BundleProvenance {
+    pub description: Option<String>,
+    pub source_system: Option<String>,
+    pub export_reason: Option<String>,
+}
+
+// --- Artifact Entry ---
+
+/// One artifact entry in a bundle's `artifacts` array.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ArtifactEntry {
+    pub artifact_kind: ArtifactKind,
+    pub artifact_logical_id: String,
+    pub artifact_display_name: String,
+    pub origin_scope: SourceScope,
+    pub origin_artifact_id: Option<String>,
+    pub content_hash: String,
+    pub source_bundle_id: String,
+    pub origin_timestamp: u64,
+    pub metadata: HashMap<String, serde_json::Value>,
+    pub payload: serde_json::Value,
+    pub lineage: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// V1 artifact kinds across both bundle types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    PromptAsset,
+    PromptVersion,
+    KnowledgePack,
+    KnowledgeDocument,
+}
+
+// --- Knowledge Document Payload ---
+
+/// Payload for a `knowledge_document` artifact entry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct KnowledgeDocumentPayload {
+    pub knowledge_pack_logical_id: String,
+    pub document_name: String,
+    pub source_type: BundleSourceType,
+    pub content: DocumentContent,
+    pub metadata: HashMap<String, serde_json::Value>,
+    pub chunk_hints: Vec<ChunkHint>,
+    pub retrieval_hints: Vec<String>,
+}
+
+/// Source types for bundle documents (stricter than ingest source types).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleSourceType {
+    TextPlain,
+    TextMarkdown,
+    TextHtml,
+    JsonStructured,
+    ExternalRef,
+}
+
+/// Canonical inline or external content forms.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DocumentContent {
+    InlineText {
+        text: String,
+    },
+    InlineJson {
+        value: serde_json::Value,
+    },
+    ExternalRef {
+        ref_type: String,
+        uri: String,
+        media_type: Option<String>,
+        sha256: Option<String>,
+        bytes: Option<u64>,
+    },
+}
+
+/// Advisory chunk hint.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChunkHint {
+    pub start_offset: usize,
+    pub end_offset: usize,
+    pub hint_text: Option<String>,
+}
+
+// --- Knowledge Pack Payload ---
+
+/// Payload for a `knowledge_pack` artifact entry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct KnowledgePackPayload {
+    pub name: String,
+    pub description: Option<String>,
+    pub target_scope_hint: Option<String>,
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+// --- Import/Export Contract ---
+
+/// Import plan classification for each artifact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportOutcome {
+    Create,
+    Reuse,
+    Update,
+    Skip,
+    Conflict,
+}
+
+/// Per-artifact import plan entry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImportPlanEntry {
+    pub artifact_logical_id: String,
+    pub artifact_kind: ArtifactKind,
+    pub outcome: ImportOutcome,
+    pub reason: String,
+    pub existing_id: Option<String>,
+}
+
+/// Complete import plan (preview before apply).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImportPlan {
+    pub bundle_id: String,
+    pub target_scope: SourceScope,
+    pub entries: Vec<ImportPlanEntry>,
+    pub create_count: usize,
+    pub reuse_count: usize,
+    pub update_count: usize,
+    pub skip_count: usize,
+    pub conflict_count: usize,
+}
+
+impl ImportPlan {
+    pub fn has_conflicts(&self) -> bool {
+        self.conflict_count > 0
+    }
+
+    pub fn summarize_counts(entries: &[ImportPlanEntry]) -> (usize, usize, usize, usize, usize) {
+        let mut create = 0;
+        let mut reuse = 0;
+        let mut update = 0;
+        let mut skip = 0;
+        let mut conflict = 0;
+        for e in entries {
+            match e.outcome {
+                ImportOutcome::Create => create += 1,
+                ImportOutcome::Reuse => reuse += 1,
+                ImportOutcome::Update => update += 1,
+                ImportOutcome::Skip => skip += 1,
+                ImportOutcome::Conflict => conflict += 1,
+            }
+        }
+        (create, reuse, update, skip, conflict)
+    }
+}
+
+/// Final import report.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImportReport {
+    pub bundle_id: String,
+    pub target_scope: SourceScope,
+    pub import_actor: Option<String>,
+    pub entries: Vec<ImportReportEntry>,
+    pub create_count: usize,
+    pub reuse_count: usize,
+    pub update_count: usize,
+    pub skip_count: usize,
+    pub conflict_count: usize,
+}
+
+/// Per-artifact outcome in the final report.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImportReportEntry {
+    pub artifact_logical_id: String,
+    pub artifact_kind: ArtifactKind,
+    pub outcome: ImportOutcome,
+    pub reason: String,
+    pub created_object_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundle_envelope_round_trips() {
+        let bundle = BundleEnvelope {
+            bundle_schema_version: "1".to_owned(),
+            bundle_type: BundleType::CuratedKnowledgePackBundle,
+            bundle_id: "bundle_1".to_owned(),
+            bundle_name: "Test Pack".to_owned(),
+            created_at: 1000,
+            created_by: Some("operator".to_owned()),
+            source_deployment_id: None,
+            source_scope: SourceScope {
+                tenant_id: Some("t".to_owned()),
+                workspace_id: Some("w".to_owned()),
+                project_id: None,
+            },
+            artifact_count: 1,
+            artifacts: vec![ArtifactEntry {
+                artifact_kind: ArtifactKind::KnowledgeDocument,
+                artifact_logical_id: "doc_1".to_owned(),
+                artifact_display_name: "Test Doc".to_owned(),
+                origin_scope: SourceScope {
+                    tenant_id: Some("t".to_owned()),
+                    workspace_id: Some("w".to_owned()),
+                    project_id: Some("p".to_owned()),
+                },
+                origin_artifact_id: None,
+                content_hash: "abc123".to_owned(),
+                source_bundle_id: "bundle_1".to_owned(),
+                origin_timestamp: 1000,
+                metadata: HashMap::new(),
+                payload: serde_json::json!({"document_name": "test"}),
+                lineage: None,
+                tags: vec!["curated".to_owned()],
+            }],
+            provenance: BundleProvenance {
+                description: Some("Test export".to_owned()),
+                source_system: None,
+                export_reason: None,
+            },
+        };
+
+        let json = serde_json::to_string(&bundle).unwrap();
+        let parsed: BundleEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.bundle_id, "bundle_1");
+        assert_eq!(parsed.bundle_type, BundleType::CuratedKnowledgePackBundle);
+        assert_eq!(parsed.artifacts.len(), 1);
+    }
+
+    #[test]
+    fn import_plan_counts() {
+        let entries = vec![
+            ImportPlanEntry {
+                artifact_logical_id: "a".to_owned(),
+                artifact_kind: ArtifactKind::KnowledgeDocument,
+                outcome: ImportOutcome::Create,
+                reason: "new".to_owned(),
+                existing_id: None,
+            },
+            ImportPlanEntry {
+                artifact_logical_id: "b".to_owned(),
+                artifact_kind: ArtifactKind::KnowledgeDocument,
+                outcome: ImportOutcome::Reuse,
+                reason: "same hash".to_owned(),
+                existing_id: Some("existing_b".to_owned()),
+            },
+            ImportPlanEntry {
+                artifact_logical_id: "c".to_owned(),
+                artifact_kind: ArtifactKind::KnowledgeDocument,
+                outcome: ImportOutcome::Conflict,
+                reason: "scope mismatch".to_owned(),
+                existing_id: None,
+            },
+        ];
+
+        let (create, reuse, update, skip, conflict) = ImportPlan::summarize_counts(&entries);
+        assert_eq!(create, 1);
+        assert_eq!(reuse, 1);
+        assert_eq!(update, 0);
+        assert_eq!(skip, 0);
+        assert_eq!(conflict, 1);
+    }
+
+    #[test]
+    fn document_content_inline_text() {
+        let content = DocumentContent::InlineText {
+            text: "Hello world".to_owned(),
+        };
+        let json = serde_json::to_value(&content).unwrap();
+        assert_eq!(json["kind"], "inline_text");
+        assert_eq!(json["text"], "Hello world");
+    }
+
+    #[test]
+    fn document_content_external_ref() {
+        let content = DocumentContent::ExternalRef {
+            ref_type: "url".to_owned(),
+            uri: "s3://bucket/doc.pdf".to_owned(),
+            media_type: Some("application/pdf".to_owned()),
+            sha256: Some("deadbeef".to_owned()),
+            bytes: Some(1024),
+        };
+        let json = serde_json::to_value(&content).unwrap();
+        assert_eq!(json["kind"], "external_ref");
+        assert_eq!(json["ref_type"], "url");
+    }
+}

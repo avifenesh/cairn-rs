@@ -63,6 +63,11 @@ status_row() {
     status_row "$worker" "$crate"
   done
 
+  printf '\n## Manager Notes\n\n'
+  printf -- '- this report is intentionally limited to per-crate isolated test status; it should not be treated as a full workspace or compatibility sweep on its own\n'
+  printf -- '- compatibility and preserved-surface drift are tracked separately through `./scripts/check-compat-inventory.sh` and the generated `tests/fixtures/migration/phase0_*` reports\n'
+  printf -- '- if this table is green and the workspace is also green, remaining work is usually seam-polish or product-surface follow-up rather than a crate-level blocker\n'
+
   printf '\n## Manager Read\n\n'
   printf -- '- if all rows except one pass, treat the red build as a focused blocker and keep unrelated workers moving\n'
   printf -- '- if several adjacent rows fail together, stop and look for shared-contract drift before more code lands\n'

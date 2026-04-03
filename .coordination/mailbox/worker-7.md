@@ -4,7 +4,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Current Status
 
-- 2026-04-03 | Worker 7 | Unused imports removed from `api_contract_guard.rs` | Removed 10 unused imports (`EvalRun`, `GraphIntegration`, `PromptAsset`, `PromptComparisonRow`, `PromptRelease`, `PromptVersion`, `PromptVersionMetadata`, `ReleaseAction`, `SelectorResolver`, `SelectorValue`). Kept only imports actually used in assertions. `cargo test -p cairn-evals -p cairn-agent`: 48 tests, 0 warnings. Back in narrow support mode.
+- 2026-04-03 | Worker 7 | Unused imports removed + streaming crate-root guard | Removed 10 unused imports from `api_contract_guard.rs`. Updated `streaming_guard.rs` to import `AssistantDelta/End/Reasoning/StopReason/StreamingOutput` from `cairn_agent::` crate root (not submodule), proving Worker 8 can consume without reach-in. 48 evals + 16 agent tests, 0 warnings. Back in support mode.
 - 2026-04-03 | Week 1 assigned | Scaffold `cairn-agent` and `cairn-evals`, define prompt asset/version/release, selector, scorecard, and orchestrator module boundaries.
 - 2026-04-03 | Worker 7 / Manager | `cairn-agent` and `cairn-evals` scaffolds complete | Prompt registry types (asset/version/release/action), selector/resolution types, eval metrics/matrices/scorecards, agent orchestrator/subagent/react/reflection boundaries are all in repo with passing tests.
 - 2026-04-03 | Week 2 assigned | Implement prompt release lifecycle and selector resolution against domain contracts. Define agent-runtime hooks.

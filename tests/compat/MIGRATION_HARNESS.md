@@ -57,6 +57,9 @@ Examples:
 - report generators rerun from the inventory checker so migration reports stay fresh
 - executable Rust-side API catalog sync test in `crates/cairn-api/tests/compat_catalog_sync.rs`
 - executable Phase 0 fixture-shape test in `crates/cairn-api/tests/phase0_fixture_shapes.rs`
+- executable HTTP boundary-alignment test in `crates/cairn-api/tests/http_boundary_alignment.rs`
+- executable SSE payload-alignment test in `crates/cairn-api/tests/sse_payload_alignment.rs`
+- executable migration-report consistency test in `crates/cairn-api/tests/migration_report_consistency.rs`
 - first harvested fixtures for the minimum Phase 0 set
 - generated `tests/fixtures/migration/phase0_mismatch_report.md`
 - generated `tests/fixtures/migration/phase0_upstream_contract_report.md`
