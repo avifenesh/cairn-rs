@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
 ## Current RFC: 011 — Deployment Shape
-## Current Phase: implementation (Phase 2+3)
+## Current Phase: gap analysis (Phase 1)
 
 ## RFC Status
 
@@ -16,7 +16,7 @@
 | 007 | Plugin Protocol and Transport | DONE |
 | 008 | Tenant/Workspace/Profile | DONE |
 | 009 | Provider Abstraction | DONE |
-| 010 | Operator Control Plane | pending |
+| 010 | Operator Control Plane | DONE |
 | 011 | Deployment Shape | pending |
 | 012 | Onboarding and Starter Templates | IN PROGRESS |
 | 013 | Artifact Import/Export | pending |

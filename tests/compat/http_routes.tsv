@@ -29,3 +29,13 @@ GET	/v1/metrics	preserve	-	metrics read model
 GET	/v1/status	preserve	-	runtime/system status
 POST	/v1/poll/run	preserve	-	{ ok }
 GET	/v1/stream	preserve	query: token?, lastEventId?	SSE stream with replay support
+GET	/v1/runs	preserve	query: session_id?, limit?	{ items }
+GET	/v1/runs/:id	preserve	path param: id	run detail
+GET	/v1/admin/tenants	preserve	-	{ items }
+GET	/v1/admin/workspaces	preserve	-	{ items }
+GET	/v1/graph/trace	preserve	query: root_id, kind	subgraph
+GET	/v1/policies/decisions	preserve	query: limit?	{ items }
+GET	/v1/prompts/assets	preserve	query: limit?	{ items }
+GET	/v1/prompts/releases	preserve	query: limit?	{ items }
+GET	/v1/providers/health	preserve	-	provider connection health
+GET	/v1/settings	preserve	-	deployment settings
