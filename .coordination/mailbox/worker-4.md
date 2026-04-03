@@ -5,20 +5,37 @@ Owner: Runtime Spine
 ## Current Status
 
 - 2026-04-03 | Week 1 assigned | Scaffold `cairn-runtime` service boundaries for sessions, runs, tasks, approvals, checkpoints, mailbox, and recovery.
+- 2026-04-03 | Worker 4 / Manager | `cairn-runtime` scaffold complete | Service boundary traits for all 7 runtime services (SessionService, RunService, TaskService, ApprovalService, CheckpointService, MailboxService, RecoveryService) plus RuntimeError and RecoveryAction types are in repo with passing tests. Depends on cairn-domain + cairn-store.
+- 2026-04-03 | Week 2 assigned | Implement create/start/advance flows for session, run, task. Persist through store layer.
+- 2026-04-03 | Worker 4 / Manager | Week 2 complete | InMemoryStore in cairn-store (EventLog + all ReadModel impls, projection apply for all 20 RuntimeEvent variants). Concrete service impls: SessionServiceImpl, RunServiceImpl, TaskServiceImpl with full lifecycle support (create, claim, heartbeat, start, complete, fail, cancel, pause, resume). 16 runtime tests + 5 in-memory store tests passing (47 total across Worker 4+7 crates).
+- 2026-04-03 | Week 3 assigned | Implement recovery, timeout classification, pause/resume semantics, and external-worker reporting on top of the runtime spine.
 
 ## Blocked By
 
-- 2026-04-03 | Waiting on Worker 2 base domain contracts and Worker 3 store interfaces before runtime handlers go deeper than skeleton boundaries.
+- none
 
 ## Inbox
 
 - 2026-04-03 | Architecture Owner -> Worker 4 | Week 1 focus: runtime crate skeleton only. Keep deeper handler semantics behind stable Worker 2/3 interfaces.
 - 2026-04-03 | Worker 1 -> Worker 4 | Hold at service-boundary level until Worker 2 and Worker 3 publish stable shared contracts. Do not lock mailbox or recovery semantics ad hoc.
+- 2026-04-03 | Worker 2 -> Worker 4 | Session/run/task/checkpoint lifecycle enums and pause/resume/failure helpers are ready to consume from `cairn-domain`.
+- 2026-04-03 | Worker 3 -> Worker 4 | `cairn-store` exposes `EventLog` trait, `SyncProjection` trait, and read-model traits for all entities. Code runtime service boundaries against these interfaces.
+- 2026-04-03 | Worker 7 -> Worker 4 | `cairn-agent` exposes `AgentConfig`, `StepOutcome`, `StepContext`, `SpawnRequest`, `SubagentLink` types for agent execution coordination.
+- 2026-04-03 | Worker 5 -> Worker 4 | `cairn-tools` now exposes `ToolHost` trait, `ToolInput`/`ToolOutcome` types, and `PermissionGate` seam. Runtime can wire tool invocation through these interfaces.
+- 2026-04-03 | Worker 8 -> Worker 4 | `cairn-api::read_models` exposes `RunSummary`, `TaskSummary`, `ApprovalSummary`, and `ReadModelQuery` trait. Runtime can implement these for operator-facing read endpoints.
+- 2026-04-03 | Worker 6 -> Worker 4 | `cairn-graph` now exposes `GraphProjection` (add_node/add_edge), `GraphQueryService` (6 query families), and `ProvenanceService` for execution/retrieval provenance. Runtime can build graph projections from events using these interfaces.
+- 2026-04-03 | Worker 5 -> Worker 4 | Week 2: `InvocationService` trait and durable record lifecycle helpers (request/start/finish) are ready. Runtime can persist tool invocations through these interfaces against `cairn-store`.
+- 2026-04-03 | Worker 8 -> Worker 4 | Week 2: `RuntimeReadEndpoints` trait and `ListQuery` are ready. Runtime read endpoints wire directly to `cairn-store` read-model traits.
+- 2026-04-03 | Worker 3 -> Worker 4 | Week 2: Postgres schema is ready (13 migrations). `PgEventLog` and `PgSyncProjection::apply_async` handle all 20 RuntimeEvent variants. Runtime can persist end-to-end through the store.
+- 2026-04-03 | Worker 6 -> Worker 4 | Week 2: `PgGraphStore` implements `GraphProjection` + `GraphQueryService` with Postgres persistence and BFS traversal for all 6 v1 query families.
+- 2026-04-03 | Worker 1 / Manager -> Worker 4 | Current next focus: finish the Week 3 runtime hardening slice. Wire recovery sweep, lease timeout classification, pause/resume trigger handling, and external-worker report ingestion against the stable domain/store contracts before taking broader API glue.
 
 ## Outbox
 
-- none
+- 2026-04-03 | Worker 4 -> Worker 8 | `cairn-runtime` exposes service boundary traits for all runtime entities. API layer can accept commands through these service interfaces and query state via the cairn-store read-model traits.
+- 2026-04-03 | Worker 4 -> Worker 5 | `cairn-runtime` TaskService includes claim/heartbeat/start lifecycle. Tool invocations flow through the runtime's task and run management before hitting ToolHost.
+- 2026-04-03 | Worker 4 -> Worker 6 | `cairn-runtime` RecoveryService exposes recovery sweep and stale-dependency resolution. Graph projections should consume runtime events emitted during recovery.
 
 ## Ready For Review
 
-- none
+- 2026-04-03 | Worker 4 | Review `crates/cairn-runtime/*` for Week 1 runtime scaffold: service traits for sessions, runs, tasks, approvals, checkpoints, mailbox, and recovery.

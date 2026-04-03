@@ -4,8 +4,10 @@ Owner: Tools, Plugin Host, Isolation
 
 ## Current Status
 
-- 2026-04-03 | Week 1 assigned | Scaffold `cairn-tools`, permission boundary interfaces, builtin tool host skeleton, and plugin host integration points.
-- 2026-04-03 | Worker 1 / Manager | Domain dependency available | Worker 2's shared invocation, policy, and execution-class types are now in repo and the workspace test suite is green with `cairn-tools` present.
+- 2026-04-03 | Week 1 complete | Permission model, builtin tool host, plugin host, execution-class modules. 15 tests.
+- 2026-04-03 | Week 2 complete | Durable invocation service and permission-decision events. 25 tests.
+- 2026-04-03 | Week 3 complete | Builtin executor, plugin bridge, execution-class selection, cairn-plugin-proto wire types. 45 tests.
+- 2026-04-03 | Week 4 complete | End-to-end `pipeline` module closing full tool_provider path: manifest -> execution-class selection -> permission check -> invoke (builtin or plugin JSON-RPC) -> durable record lifecycle. `run_builtin_pipeline` produces 3 record snapshots (Requested->Started->Completed). `build_plugin_pipeline_request` produces record + selected config + JSON-RPC payload for plugin execution. 42 cairn-tools + 7 cairn-plugin-proto tests passing.
 
 ## Blocked By
 
@@ -13,14 +15,15 @@ Owner: Tools, Plugin Host, Isolation
 
 ## Inbox
 
-- 2026-04-03 | Architecture Owner -> Worker 5 | Week 1 focus: tool/plugin host skeleton and execution-class module boundaries, not full tool behavior.
-- 2026-04-03 | Worker 1 -> Worker 5 | Keep week 1 to tool host, permission seam, and plugin execution-class layout. Runtime event shapes should come from shared contracts, not local invention.
-- 2026-04-03 | Worker 1 / Manager -> Worker 5 | You are unblocked. Build the narrow durable tool-invocation seam against Worker 2 shared types, but keep scope tight: permission gating, execution-class selection, plugin manifest/host boundary, and invocation records only.
+- 2026-04-03 | Worker 6 -> Worker 5 | `cairn-graph` includes `UsedTool` edge kind and `ToolInvocation` node kind. Tool invocation graph linking is ready for integration when tool calls emit graph-linkable events.
+- 2026-04-03 | Worker 1 / Manager -> Worker 5 | Current next focus: integration hardening. Connect pipeline/tool-invocation outputs to the graph-linkable/runtime-facing seams cleanly, and keep one representative plugin path ready for end-to-end runtime/API integration without broadening protocol scope.
 
 ## Outbox
 
-- none
+- 2026-04-03 | Worker 5 -> Worker 4 | Week 4: `run_builtin_pipeline` closes the end-to-end builtin tool path. `build_plugin_pipeline_request` prepares plugin tool invocation for runtime dispatch. Both produce durable `ToolInvocationRecord` snapshots for the store.
+- 2026-04-03 | Worker 5 -> Worker 6 | Week 4: Pipeline produces record snapshots at each lifecycle stage. Graph projection can link tool invocations using records from `pipeline::PipelineResult.records`.
+- 2026-04-03 | Worker 5 -> Worker 7 | Week 4: Plugin protocol is complete for `tool_provider` category. `eval.score` wire types in `cairn-plugin-proto` are ready for eval scorer plugin integration.
 
 ## Ready For Review
 
-- none
+- 2026-04-03 | Worker 5 | Review `crates/cairn-tools/src/pipeline.rs` for Week 4 end-to-end tool_provider pipeline. 42+7 tests passing, 0 warnings.
