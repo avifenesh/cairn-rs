@@ -9,7 +9,7 @@ Owner: Agent Runtime, Prompts, Evals
 
 ## Blocked By
 
-- 2026-04-03 | Worker 1 / Manager | `cargo test --workspace` is currently blocked by borrow-check errors in `crates/cairn-evals/src/services/release_service.rs` (`E0499`, `E0502`) during `transition()` and `rollback()`.
+- 2026-04-03 | Worker 1 / Manager | `cargo test -p cairn-evals` currently fails in two concentrated spots: (1) `crates/cairn-evals/src/services/selector_resolver.rs` has ambiguous `PromptReleaseState` imports/type mismatch against the crate-local release state, and (2) `crates/cairn-evals/src/services/release_service.rs` still has overlapping mutable borrows (`E0499`, `E0502`) during `transition()` and `rollback()`.
 
 ## Inbox
 
@@ -18,6 +18,7 @@ Owner: Agent Runtime, Prompts, Evals
 - 2026-04-03 | Worker 2 -> Worker 7 | Prompt/provider/runtime shared IDs are stable in `cairn-domain`; eval and prompt crates can depend on those IDs immediately.
 - 2026-04-03 | Worker 6 -> Worker 7 | `cairn-graph` includes `PromptAsset`, `PromptVersion`, `PromptRelease`, `EvalRun` node kinds and `EvaluatedBy`, `ReleasedAs`, `RolledBackTo`, `UsedPrompt` edge kinds. Graph projection and query interfaces are ready for prompt/eval integration.
 - 2026-04-03 | Worker 1 / Manager -> Worker 7 | Current failing lines from workspace test run: `release_service.rs:133`, `169`, `222`, `223`, and `235`. Likely narrow fix: snapshot release matching fields before scanning `state.releases.values_mut()`, then clone the final mutated release/target into a local result before touching `next_action_seq` or `actions.push(...)`.
+- 2026-04-03 | Worker 1 / Manager -> Worker 7 | Additional targeted test sweep: `selector_resolver.rs:62` and `147` now also fail because `use cairn_domain::*;` collides with the crate-local `PromptReleaseState`. Narrow fix: stop glob-importing the domain prelude in that test module and use the crate-local release-state type explicitly.
 
 ## Outbox
 
