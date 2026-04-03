@@ -7,7 +7,7 @@ source "$script_dir/lib.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  manager-busywait.sh [--interval 2] [--threshold 6]
+  manager-busywait.sh [--interval 1] [--threshold 6]
 
 Keeps a standing pending-task buffer for every worker by enqueueing
 low-risk evergreen follow-up tasks whenever pending count drops below
@@ -15,13 +15,13 @@ the threshold.
 EOF
 }
 
-interval=2
+interval=1
 threshold=6
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --interval)
-      interval="${2:-2}"
+      interval="${2:-1}"
       shift 2
       ;;
     --threshold)
@@ -59,6 +59,24 @@ next_index_file() {
   local worker
   worker="$(normalize_worker "$1")"
   printf '%s\n' "$STATE_ROOT/${worker}.next-index"
+}
+
+worker_cycle_file() {
+  local worker
+  worker="$(normalize_worker "$1")"
+  printf '%s\n' "$STATE_ROOT/${worker}.cycle"
+}
+
+worker_threshold() {
+  local worker
+  worker="$(normalize_worker "$1")"
+  case "$worker" in
+    worker-3) printf '%s\n' 10 ;;
+    worker-4) printf '%s\n' 10 ;;
+    worker-5) printf '%s\n' 30 ;;
+    worker-8) printf '%s\n' 80 ;;
+    *) printf '%s\n' "$threshold" ;;
+  esac
 }
 
 worker_task_pool() {
@@ -99,6 +117,8 @@ If backend parity still holds add one lightweight store-facing assertion that he
 Check one newly touched projection or backfill path for backend-specific assumptions before it leaks into API-facing behavior
 Verify one mailbox or external-worker read path still orders consistently across backends after the latest completions
 Audit whether replay cursor or resume expectations changed under the latest store work and capture only the smallest needed test
+Confirm one worker-facing API consumer can still rely on store ordering without re-sorting above the backend seam
+Check one projection rebuild edge case around completion or approval state and capture only the smallest backend-specific guard
 EOF
       ;;
     worker-4)
@@ -111,6 +131,8 @@ Add one narrow regression around runtime enrichment lookup or replay recovery on
 Verify one pause, resume, or timeout-facing runtime seam still matches the latest API expectations without widening lifecycle scope
 Check whether one current-state read used by API or SSE is still runtime-owned rather than re-derived above the seam
 Audit the newest runtime-facing enrichment use for hidden dependency on store internals and add only the smallest guard if needed
+Confirm one progress or approval enrichment payload still composes correctly when the store-backed path is exercised repeatedly
+Audit one external-worker-facing runtime seam for drift under the latest API consumption and capture only the smallest corrective guard
 EOF
       ;;
     worker-5)
@@ -123,6 +145,9 @@ Check one store-backed or replay-backed tool path for drift between runtime outp
 If no regression appears add one focused test or assertion that protects tool outcome coherence without widening plugin scope
 Check whether one permission or policy edge case still flows through the same tool lifecycle seam after the latest API work
 Verify one non-happy-path tool outcome still surfaces the right operator-facing shape without bypassing runtime-owned semantics
+Confirm one tool lifecycle payload still holds up under repeated claim/complete churn from fast API-facing consumers
+Check one assistant tool path for idempotent operator-facing shaping after the latest downstream completions
+Audit one runtime-to-tools seam for accidental duplication in API or SSE tests and stop at the first concrete example
 EOF
       ;;
     worker-6)
@@ -135,6 +160,8 @@ If the seam is still stable add one narrow guard that feed or provenance shaping
 Verify one feed-facing or deep-search-facing read still composes through real memory services after the latest router changes
 Audit whether a recent provenance or retrieval touch introduced route-local shaping and capture only the smallest correction if so
 Confirm one search or bundle-related read can still be exercised without adding new product-facing retrieval scope
+Check one memory-backed operator read for stable provenance attachment after the latest Worker 8 integration passes
+Verify one feed or poll-facing path still consumes memory services directly instead of rebuilding shape in the route layer
 EOF
       ;;
     worker-7)
@@ -147,6 +174,8 @@ Verify one prompt-release or selector-facing surface still lines up with eval sc
 Audit one graph or scorecard-facing API seam for accidental duplication of eval logic and stop at the first concrete example
 Check whether one streaming output path still lines up with agent or eval ownership after the latest API changes
 Confirm one selector-driven release surface remains consistent with scorecard and graph expectations without widening rollout scope
+Verify one API-facing evaluation read still composes through the expected ownership seam after rapid downstream churn
+Audit one graph-projection consumer for subtle drift from direct eval semantics and capture only the smallest needed guard
 EOF
       ;;
     worker-8)
@@ -159,13 +188,23 @@ Take one more narrow SSE enrichment or operator-facing read proof only if it use
 Check whether any latest worker completions changed API boundary assumptions and capture only the smallest needed alignment fix
 Verify one operator-facing read or route composition still matches the newest runtime and memory seams without adding breadth
 Audit one SSE family for hidden route-local shaping and add only the smallest correction if it drifted from service-backed data
+Check one feed or overview-facing composed route for drift after the latest runtime and memory completions
+Verify one approval or progress SSE payload still reflects the authoritative service seam under rapid downstream churn
+Audit one operator-facing surface for repeated no-op proof work and capture the next smallest real integration check instead
+Confirm one memory-backed or eval-backed route still uses direct service composition rather than test-only shaping
+Bundle one composed app check plus one SSE check together and stop once both are proven or one concrete mismatch is found
+Take one operator-facing read path and one adjacent SSE family together so the next pass covers composition instead of a single micro-proof
+Verify one memory-backed route plus one overview or feed route still align after the latest downstream changes using only existing service seams
+Check one approval or progress SSE family together with its nearest operator-facing read so drift is caught as a pair rather than in isolation
+Audit one runtime-fed API path plus one memory-fed API path in the same pass and capture only the smallest shared boundary issue
+Confirm one end-to-end product-glue slice remains coherent across route composition and SSE emission without adding any new breadth
 EOF
       ;;
   esac
 }
 
 queue_next_from_pool() {
-  local worker idx_file idx count summary queued="0"
+  local worker idx_file cycle_file idx cycle count summary rendered queued="0"
   local -a pool=()
 
   worker="$(normalize_worker "$1")"
@@ -174,36 +213,51 @@ queue_next_from_pool() {
   (( count > 0 )) || return 1
 
   idx_file="$(next_index_file "$worker")"
+  cycle_file="$(worker_cycle_file "$worker")"
   idx=0
+  cycle=1
   if [[ -f "$idx_file" ]]; then
     idx="$(cat "$idx_file" 2>/dev/null || printf '0')"
   fi
+  if [[ -f "$cycle_file" ]]; then
+    cycle="$(cat "$cycle_file" 2>/dev/null || printf '1')"
+  fi
   [[ "$idx" =~ ^[0-9]+$ ]] || idx=0
+  [[ "$cycle" =~ ^[0-9]+$ ]] || cycle=1
   idx=$(( idx % count ))
 
   local attempts=0
   while (( attempts < count )); do
     summary="${pool[$idx]}"
     idx=$(( (idx + 1) % count ))
+    if (( idx == 0 )); then
+      cycle=$(( cycle + 1 ))
+    fi
     attempts=$(( attempts + 1 ))
-    if ! task_exists "$worker" "$summary"; then
-      "$script_dir/queue-worker-tasks.sh" --from manager "$worker" "$summary" >/dev/null
+    rendered="$summary"
+    if [[ "$worker" == "worker-5" || "$worker" == "worker-8" ]]; then
+      rendered="Batch ${cycle}: $summary"
+    fi
+    if ! task_exists "$worker" "$rendered"; then
+      "$script_dir/queue-worker-tasks.sh" --from manager "$worker" "$rendered" >/dev/null
       queued="1"
       break
     fi
   done
 
   printf '%s\n' "$idx" > "$idx_file"
+  printf '%s\n' "$cycle" > "$cycle_file"
   [[ "$queued" == "1" ]]
 }
 
 refill_worker() {
-  local worker pending
+  local worker pending target
   worker="$(normalize_worker "$1")"
+  target="$(worker_threshold "$worker")"
 
   while true; do
     pending="$(pending_count "$worker")"
-    if (( pending >= threshold )); then
+    if (( pending >= target )); then
       break
     fi
     if ! queue_next_from_pool "$worker"; then
