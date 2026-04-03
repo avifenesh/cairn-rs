@@ -11,6 +11,7 @@ pub mod error;
 pub mod eval_runs;
 pub mod ingest_jobs;
 pub mod mailbox;
+pub mod projects;
 pub mod prompt_assets;
 pub mod prompt_releases;
 pub mod prompt_versions;
@@ -20,6 +21,8 @@ pub mod services;
 pub mod sessions;
 pub mod signals;
 pub mod tasks;
+pub mod tenants;
+pub mod workspaces;
 
 pub use approvals::ApprovalService;
 pub use checkpoints::CheckpointService;
@@ -39,14 +42,18 @@ pub use prompt_versions::PromptVersionService;
 pub use services::{
     ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl, ExternalWorkerService,
     ExternalWorkerServiceImpl, IngestJobServiceImpl, MailboxServiceImpl,
-    PromptAssetServiceImpl, PromptReleaseServiceImpl, PromptVersionServiceImpl,
-    RecoveryServiceImpl,
-    RunServiceImpl, SessionServiceImpl, SignalServiceImpl, TaskServiceImpl, ToolInvocationService,
-    ToolInvocationServiceImpl,
+    ProjectServiceImpl, PromptAssetServiceImpl, PromptReleaseServiceImpl,
+    PromptVersionServiceImpl, RecoveryServiceImpl,
+    RunServiceImpl, SessionServiceImpl, SignalServiceImpl, TaskServiceImpl,
+    TenantServiceImpl, ToolInvocationService, ToolInvocationServiceImpl,
+    WorkspaceServiceImpl,
 };
+pub use projects::ProjectService;
 pub use sessions::SessionService;
 pub use signals::SignalService;
 pub use tasks::TaskService;
+pub use tenants::TenantService;
+pub use workspaces::WorkspaceService;
 
 #[cfg(test)]
 mod tests {

@@ -37,6 +37,9 @@ struct State {
     prompt_assets: HashMap<String, crate::projections::PromptAssetRecord>,
     prompt_versions: HashMap<String, crate::projections::PromptVersionRecord>,
     prompt_releases: HashMap<String, crate::projections::PromptReleaseRecord>,
+    tenants: HashMap<String, cairn_domain::org::TenantRecord>,
+    workspaces: HashMap<String, cairn_domain::org::WorkspaceRecord>,
+    projects: HashMap<String, cairn_domain::org::ProjectRecord>,
 }
 
 pub struct InMemoryStore {
@@ -62,6 +65,9 @@ impl InMemoryStore {
                 prompt_assets: HashMap::new(),
                 prompt_versions: HashMap::new(),
                 prompt_releases: HashMap::new(),
+                tenants: HashMap::new(),
+                workspaces: HashMap::new(),
+                projects: HashMap::new(),
             }),
         }
     }
@@ -282,10 +288,43 @@ impl InMemoryStore {
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::UserMessageAppended(_)
-            | RuntimeEvent::TenantCreated(_)
-            | RuntimeEvent::WorkspaceCreated(_)
-            | RuntimeEvent::ProjectCreated(_) => {}
+            | RuntimeEvent::UserMessageAppended(_) => {}
+            RuntimeEvent::TenantCreated(e) => {
+                state.tenants.insert(
+                    e.tenant_id.as_str().to_owned(),
+                    cairn_domain::org::TenantRecord {
+                        tenant_id: e.tenant_id.clone(),
+                        name: e.name.clone(),
+                        created_at: e.created_at,
+                        updated_at: e.created_at,
+                    },
+                );
+            }
+            RuntimeEvent::WorkspaceCreated(e) => {
+                state.workspaces.insert(
+                    e.workspace_id.as_str().to_owned(),
+                    cairn_domain::org::WorkspaceRecord {
+                        workspace_id: e.workspace_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        name: e.name.clone(),
+                        created_at: e.created_at,
+                        updated_at: e.created_at,
+                    },
+                );
+            }
+            RuntimeEvent::ProjectCreated(e) => {
+                state.projects.insert(
+                    e.project.project_id.as_str().to_owned(),
+                    cairn_domain::org::ProjectRecord {
+                        project_id: e.project.project_id.clone(),
+                        workspace_id: e.project.workspace_id.clone(),
+                        tenant_id: e.project.tenant_id.clone(),
+                        name: e.name.clone(),
+                        created_at: e.created_at,
+                        updated_at: e.created_at,
+                    },
+                );
+            }
             RuntimeEvent::PromptAssetCreated(e) => {
                 state.prompt_assets.insert(
                     e.prompt_asset_id.as_str().to_owned(),
@@ -1025,6 +1064,91 @@ impl PromptReleaseReadModel for InMemoryStore {
                     && r.state == "active"
             })
             .cloned())
+    }
+}
+
+// -- TenantReadModel --
+
+#[async_trait]
+impl TenantReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        id: &cairn_domain::TenantId,
+    ) -> Result<Option<cairn_domain::org::TenantRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.tenants.get(id.as_str()).cloned())
+    }
+
+    async fn list(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::org::TenantRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state.tenants.values().cloned().collect();
+        results.sort_by_key(|t| t.created_at);
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- WorkspaceReadModel --
+
+#[async_trait]
+impl WorkspaceReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        id: &cairn_domain::WorkspaceId,
+    ) -> Result<Option<cairn_domain::org::WorkspaceRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.workspaces.get(id.as_str()).cloned())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::org::WorkspaceRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state
+            .workspaces
+            .values()
+            .filter(|w| w.tenant_id == *tenant_id)
+            .cloned()
+            .collect();
+        results.sort_by_key(|w| w.created_at);
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- ProjectReadModel --
+
+#[async_trait]
+impl ProjectReadModel for InMemoryStore {
+    async fn get_project(
+        &self,
+        project: &cairn_domain::ProjectKey,
+    ) -> Result<Option<cairn_domain::org::ProjectRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.projects.get(project.project_id.as_str()).cloned())
+    }
+
+    async fn list_by_workspace(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        workspace_id: &cairn_domain::WorkspaceId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::org::ProjectRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state
+            .projects
+            .values()
+            .filter(|p| p.tenant_id == *tenant_id && p.workspace_id == *workspace_id)
+            .cloned()
+            .collect();
+        results.sort_by_key(|p| p.created_at);
+        Ok(results.into_iter().skip(offset).take(limit).collect())
     }
 }
 
