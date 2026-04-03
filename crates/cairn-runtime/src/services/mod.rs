@@ -11,6 +11,7 @@ pub mod mailbox_impl;
 pub mod recovery_impl;
 pub mod run_impl;
 pub mod session_impl;
+pub mod signal_impl;
 pub mod task_impl;
 pub mod tool_invocation_impl;
 
@@ -21,5 +22,6 @@ pub use mailbox_impl::MailboxServiceImpl;
 pub use recovery_impl::RecoveryServiceImpl;
 pub use run_impl::RunServiceImpl;
 pub use session_impl::SessionServiceImpl;
+pub use signal_impl::SignalServiceImpl;
 pub use task_impl::TaskServiceImpl;
 pub use tool_invocation_impl::{ToolInvocationService, ToolInvocationServiceImpl};

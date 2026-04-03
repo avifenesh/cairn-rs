@@ -13,6 +13,7 @@ pub mod recovery;
 pub mod runs;
 pub mod services;
 pub mod sessions;
+pub mod signals;
 pub mod tasks;
 
 pub use approvals::ApprovalService;
@@ -28,9 +29,10 @@ pub use runs::RunService;
 pub use services::{
     ApprovalServiceImpl, CheckpointServiceImpl, ExternalWorkerService, ExternalWorkerServiceImpl,
     MailboxServiceImpl, RecoveryServiceImpl, RunServiceImpl, SessionServiceImpl, TaskServiceImpl,
-    ToolInvocationService, ToolInvocationServiceImpl,
+    SignalServiceImpl, ToolInvocationService, ToolInvocationServiceImpl,
 };
 pub use sessions::SessionService;
+pub use signals::SignalService;
 pub use tasks::TaskService;
 
 #[cfg(test)]

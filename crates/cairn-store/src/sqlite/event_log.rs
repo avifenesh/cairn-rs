@@ -202,5 +202,6 @@ fn entity_ref_filter(entity: &EntityRef) -> (&'static str, String) {
         EntityRef::Checkpoint(id) => ("checkpoint_id", id.to_string()),
         EntityRef::Mailbox(id) => ("message_id", id.to_string()),
         EntityRef::ToolInvocation(id) => ("invocation_id", id.to_string()),
+        EntityRef::Signal(id) => ("signal_id", id.to_string()),
     }
 }

@@ -1,7 +1,7 @@
 # Ralph Loop Progress
 
 ## Current RFC: 002 — Runtime and Event Model
-## Current Phase: implementation (Phase 3)
+## Current Phase: tests (Phase 4)
 
 ## RFC Status
 
@@ -72,8 +72,8 @@ RFC 002 lists "signal event" as a core runtime entity with `current_state_plus_a
 - [x] `RuntimeEntityKind::Signal` and `RuntimeEntityRef::Signal` in errors.rs
 - [x] `EntityRef::Signal` in cairn-store event_log.rs
 - [x] Signal projection: `SignalReadModel` trait + `SignalRecord` struct in cairn-store
-- [ ] Signal projection impl in InMemoryStore (trait exists, impl deferred to Phase 3a)
-- [ ] Signal feed read model query impls (trait exists, impl deferred to Phase 3a)
+- [x] Signal projection impl in InMemoryStore
+- [x] Signal feed read model query impls
 
 #### 2. Missing command variants for terminal operations — MINOR
 
@@ -103,3 +103,4 @@ These `current_state_plus_audit` entities are classified in RFC 002 but implemen
 ## Completed This Session
 - [x] RFC 002: Phase 1 gap analysis
 - [x] RFC 002: Phase 2 types and traits — SignalId, SignalRecord, IngestSignal command, SignalIngested event, RuntimeEntityKind/Ref::Signal, EntityRef::Signal, SignalReadModel trait, CompleteRun/FailRun/CancelRun/CompleteTask/FailTask/CancelTask/AppendUserMessage command variants
+- [x] RFC 002: Phase 3 implementation — Signal projection in InMemoryStore, signal feed read model queries, EntityRef::Signal in pg/sqlite event_log
