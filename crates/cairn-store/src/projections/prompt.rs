@@ -41,6 +41,8 @@ pub struct PromptReleaseRecord {
     pub prompt_asset_id: PromptAssetId,
     pub prompt_version_id: PromptVersionId,
     pub state: String,
+    /// RFC 001: percentage of traffic routed to this release (0-100).
+    pub rollout_percent: Option<u8>,
     pub created_at: u64,
     pub updated_at: u64,
 }

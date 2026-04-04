@@ -28,6 +28,27 @@ pub trait PromptReleaseService: Send + Sync {
         to_state: &str,
     ) -> Result<PromptReleaseRecord, RuntimeError>;
 
+    /// RFC 006: attach an approval policy to a release.
+    /// Subsequent activate() calls will be blocked until approval is granted.
+    async fn attach_approval_policy(
+        &self,
+        release_id: &PromptReleaseId,
+        policy_id: &str,
+    ) -> Result<(), RuntimeError>;
+
+    /// RFC 006: request approval for a release (emits ApprovalRequested).
+    async fn request_approval(
+        &self,
+        release_id: &PromptReleaseId,
+    ) -> Result<cairn_store::projections::ApprovalRecord, RuntimeError>;
+
+    /// RFC 001: start a gradual traffic rollout at the given percentage.
+    async fn start_rollout(
+        &self,
+        release_id: &PromptReleaseId,
+        percent: u8,
+    ) -> Result<PromptReleaseRecord, RuntimeError>;
+
     /// Activate a release (deactivates any previously active release for the same asset).
     async fn activate(
         &self,

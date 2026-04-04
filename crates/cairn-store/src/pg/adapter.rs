@@ -198,6 +198,30 @@ impl RunReadModel for PgAdapter {
 
         rows.into_iter().map(RunRow::into_record).collect()
     }
+
+    async fn list_active_by_project(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError> {
+        let rows = sqlx::query_as::<_, RunRow>(
+            "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
+                    state, failure_class, version, created_at, updated_at
+             FROM runs
+             WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3
+               AND state NOT IN ('completed', 'failed', 'canceled', 'dead_lettered')
+             ORDER BY created_at ASC, run_id ASC
+             LIMIT $4",
+        )
+        .bind(project.tenant_id.as_str())
+        .bind(project.workspace_id.as_str())
+        .bind(project.project_id.as_str())
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        rows.into_iter().map(RunRow::into_record).collect()
+    }
 }
 
 #[async_trait]

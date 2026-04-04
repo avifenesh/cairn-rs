@@ -203,6 +203,22 @@ where
             .await
     }
 
+    /// RFC 005: return all dead-lettered tasks for a project (the dead-letter queue).
+    async fn list_dead_lettered(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<TaskRecord>, RuntimeError> {
+        Ok(self
+            .store
+            .list_by_state(project, TaskState::DeadLettered, limit)
+            .await?
+            .into_iter()
+            .skip(offset)
+            .collect())
+    }
+
     async fn pause(
         &self,
         task_id: &TaskId,

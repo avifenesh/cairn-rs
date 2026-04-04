@@ -72,6 +72,12 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
             path: "/v1/dashboard".into(),
             classification: Preserve,
         },
+        // RFC 010: overview surface is the canonical operator entry point.
+        RouteEntry {
+            method: Get,
+            path: "/v1/overview".into(),
+            classification: Preserve,
+        },
         RouteEntry {
             method: Get,
             path: "/v1/feed".into(),
@@ -243,6 +249,28 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
             path: "/v1/policies/decisions".into(),
             classification: Preserve,
         },
+        // RFC 010: evals surface — required top-level operator view.
+        RouteEntry {
+            method: Get,
+            path: "/v1/evals/runs".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/evals/datasets".into(),
+            classification: Preserve,
+        },
+        // RFC 010: sources and channels surface.
+        RouteEntry {
+            method: Get,
+            path: "/v1/sources".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/channels".into(),
+            classification: Preserve,
+        },
         RouteEntry {
             method: Get,
             path: "/v1/providers/health".into(),
@@ -299,5 +327,62 @@ mod tests {
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["hasMore"], true);
         assert_eq!(json["items"].as_array().unwrap().len(), 2);
+    }
+
+    // ── RFC 010 Gap Tests ─────────────────────────────────────────────────
+
+    /// RFC 010: minimum top-level operator views must all be present as routes.
+    /// Required: overview, runs, approvals, memory, graph, prompts, evals,
+    ///           policies, sources/channels, settings.
+    #[test]
+    fn rfc010_all_operator_views_have_routes() {
+        let catalog = preserved_route_catalog();
+        let paths: Vec<&str> = catalog.iter().map(|r| r.path.as_str()).collect();
+
+        let required_surfaces = [
+            ("/v1/overview",   "overview"),
+            ("/v1/runs",       "runs"),
+            ("/v1/approvals",  "approvals"),
+            ("/v1/memories",   "memory"),
+            ("/v1/graph/",     "graph"),
+            ("/v1/prompts/",   "prompts"),
+            ("/v1/evals/",     "evals"),
+            ("/v1/policies/",  "policies"),
+            ("/v1/sources",    "sources/channels"),
+            ("/v1/settings",   "settings"),
+        ];
+
+        for (prefix, surface) in &required_surfaces {
+            assert!(
+                paths.iter().any(|p| p.starts_with(prefix)),
+                "RFC 010: missing route for operator surface '{}' (expected path starting with '{}')",
+                surface,
+                prefix,
+            );
+        }
+    }
+
+    /// RFC 010: graph surface must have a route exposing relationship/visual data.
+    #[test]
+    fn rfc010_graph_surface_has_trace_or_execution_route() {
+        let catalog = preserved_route_catalog();
+        let paths: Vec<&str> = catalog.iter().map(|r| r.path.as_str()).collect();
+        // RFC 010 requires graph to include a genuinely visual relationship view.
+        // At minimum it must expose execution trace or graph query routes.
+        let has_graph_route = paths.iter().any(|p| p.starts_with("/v1/graph/"));
+        assert!(has_graph_route,
+            "RFC 010: graph surface must expose relationship/trace routes");
+    }
+
+    /// RFC 010: tenant-level roll-up views must be read-only for operational actions.
+    /// Verify admin tenant routes are GET (read) not mutation routes for operations.
+    #[test]
+    fn rfc010_admin_tenant_routes_support_read_operations() {
+        let catalog = preserved_route_catalog();
+        let admin_gets: Vec<_> = catalog.iter()
+            .filter(|r| r.path.starts_with("/v1/admin/tenants") && r.method == HttpMethod::Get)
+            .collect();
+        assert!(!admin_gets.is_empty(),
+            "RFC 010: admin tenant GET routes must exist for tenant-level roll-up views");
     }
 }

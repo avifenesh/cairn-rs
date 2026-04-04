@@ -66,6 +66,14 @@ pub trait TaskService: Send + Sync {
     /// Dead-letter a task (terminal, after exhausting retries).
     async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
 
+    /// RFC 005: query the dead-letter queue — tasks that exhausted all retry attempts.
+    async fn list_dead_lettered(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<TaskRecord>, RuntimeError>;
+
     /// Pause a task.
     async fn pause(
         &self,

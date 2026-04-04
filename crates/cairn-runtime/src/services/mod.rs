@@ -4,6 +4,7 @@
 //! emits events through the EventLog, and returns the updated projection.
 
 pub mod approval_impl;
+pub mod approval_policy_impl;
 pub mod checkpoint_impl;
 pub mod eval_run_impl;
 pub mod event_helpers;
@@ -25,6 +26,7 @@ pub mod tool_invocation_impl;
 pub mod workspace_impl;
 
 pub use approval_impl::ApprovalServiceImpl;
+pub use approval_policy_impl::ApprovalPolicyServiceImpl;
 pub use checkpoint_impl::CheckpointServiceImpl;
 pub use eval_run_impl::EvalRunServiceImpl;
 pub use external_worker_impl::{parse_outcome, ExternalWorkerService, ExternalWorkerServiceImpl};

@@ -15,7 +15,7 @@ pub mod services;
 
 pub use matrices::{
     EvalMetrics, GuardrailPolicyRow, MatrixCategory, MemorySourceQualityRow, PermissionRow,
-    PromptComparisonRow, ProviderRoutingRow, SkillHealthRow,
+    PromptComparisonRow, ProviderRoutingMatrix, ProviderRoutingRow, SkillHealthRow,
 };
 pub use prompts::{
     PromptAsset, PromptAssetStatus, PromptFormat, PromptKind, PromptRelease, PromptReleaseState,

@@ -155,7 +155,12 @@ impl DefaultFeatureGate {
 impl FeatureGate for DefaultFeatureGate {
     fn check(&self, entitlements: &EntitlementSet, feature: &str) -> FeatureGateResult {
         match self.mappings.iter().find(|m| m.feature_name == feature) {
-            None => FeatureGateResult::Allowed, // Unknown features default to allowed
+            // RFC 014: unknown feature names must return Denied, not Allowed.
+            // Defaulting unknown features to Allowed would silently grant access
+            // to anything not explicitly listed — the opposite of fail-closed.
+            None => FeatureGateResult::Denied {
+                reason: format!("feature '{feature}' is not a recognized capability"),
+            },
             Some(mapping) => match mapping.flag {
                 FeatureFlag::GeneralAvailability => FeatureGateResult::Allowed,
                 FeatureFlag::Preview => FeatureGateResult::Allowed,
@@ -227,13 +232,18 @@ mod tests {
         );
     }
 
+    /// RFC 014: unknown feature names MUST return Denied (fail-closed), not Allowed.
+    ///
+    /// Defaulting to Allowed for unrecognized names would silently permit anything
+    /// not on the list — the opposite of entitlement-gated access control.
     #[test]
-    fn unknown_feature_defaults_to_allowed() {
+    fn unknown_feature_returns_denied_not_allowed() {
         let gate = DefaultFeatureGate::v1_defaults();
         let set = EntitlementSet::new(TenantId::new("t1"), ProductTier::LocalEval);
-        assert_eq!(
-            gate.check(&set, "nonexistent_feature"),
-            FeatureGateResult::Allowed
+        let result = gate.check(&set, "nonexistent_feature");
+        assert!(
+            matches!(result, FeatureGateResult::Denied { .. }),
+            "RFC 014: unknown feature must return Denied; got {:?}", result
         );
     }
 
@@ -252,5 +262,42 @@ mod tests {
             .with_entitlement(Entitlement::GovernanceCompliance)
             .with_entitlement(Entitlement::GovernanceCompliance);
         assert_eq!(set.active.len(), 1);
+    }
+
+    /// RFC 014 §4: absent entitlement must REFUSE the request, not corrupt state.
+    ///
+    /// When a feature gate denies access due to a missing entitlement:
+    ///  - the result is `Denied` (the request is refused)
+    ///  - the caller's `EntitlementSet` is not mutated (no corruption)
+    ///  - other entitlements the tenant holds remain valid and accessible
+    #[test]
+    fn absent_entitlement_refuses_without_corrupting_existing_entitlements() {
+        let gate = DefaultFeatureGate::v1_defaults();
+
+        // Tenant has GovernanceCompliance but NOT AdvancedAdmin.
+        let set = EntitlementSet::new(TenantId::new("t1"), ProductTier::TeamSelfHosted)
+            .with_entitlement(Entitlement::GovernanceCompliance);
+
+        let initial_active_count = set.active.len();
+
+        // Gate check for absent entitlement must return Denied.
+        let result = gate.check(&set, "advanced_admin");
+        assert!(
+            matches!(result, FeatureGateResult::Denied { .. }),
+            "absent entitlement must refuse with Denied, got {:?}", result
+        );
+
+        // Denial must not corrupt the EntitlementSet — count unchanged, existing entitlement still valid.
+        assert_eq!(set.active.len(), initial_active_count,
+            "gate check must not mutate the EntitlementSet");
+        assert!(set.has(Entitlement::GovernanceCompliance),
+            "pre-existing entitlement must survive a denial of a different feature");
+
+        // The feature backed by the held entitlement must still be accessible.
+        assert_eq!(
+            gate.check(&set, "advanced_audit_export"),
+            FeatureGateResult::Allowed,
+            "held entitlement must still grant access after an unrelated denial"
+        );
     }
 }

@@ -43,6 +43,7 @@ pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
         | RuntimeEvent::ProjectCreated(_)
         | RuntimeEvent::RouteDecisionMade(_)
         | RuntimeEvent::ProviderCallCompleted(_) => None,
+        _ => None,
     }
 }
 

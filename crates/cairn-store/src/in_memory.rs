@@ -24,6 +24,8 @@ fn now_millis() -> u64 {
 struct State {
     events: Vec<StoredEvent>,
     next_position: u64,
+    /// RFC 002: causation_id → event position for idempotency.
+    command_id_index: HashMap<String, u64>,
     sessions: HashMap<String, SessionRecord>,
     runs: HashMap<String, RunRecord>,
     tasks: HashMap<String, TaskRecord>,
@@ -42,6 +44,7 @@ struct State {
     projects: HashMap<String, cairn_domain::org::ProjectRecord>,
     route_decisions: HashMap<String, cairn_domain::providers::RouteDecisionRecord>,
     provider_calls: HashMap<String, cairn_domain::providers::ProviderCallRecord>,
+    approval_policies: HashMap<String, cairn_domain::ApprovalPolicyRecord>,
 }
 
 pub struct InMemoryStore {
@@ -54,6 +57,7 @@ impl InMemoryStore {
             state: Mutex::new(State {
                 events: Vec::new(),
                 next_position: 1,
+                command_id_index: HashMap::new(),
                 sessions: HashMap::new(),
                 runs: HashMap::new(),
                 tasks: HashMap::new(),
@@ -69,6 +73,7 @@ impl InMemoryStore {
                 prompt_releases: HashMap::new(),
                 route_decisions: HashMap::new(),
                 provider_calls: HashMap::new(),
+                approval_policies: HashMap::new(),
                 tenants: HashMap::new(),
                 workspaces: HashMap::new(),
                 projects: HashMap::new(),
@@ -396,6 +401,21 @@ impl InMemoryStore {
                     },
                 );
             }
+            RuntimeEvent::ApprovalPolicyCreated(e) => {
+                state.approval_policies.insert(
+                    e.policy_id.clone(),
+                    cairn_domain::ApprovalPolicyRecord {
+                        policy_id: e.policy_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        name: e.name.clone(),
+                        required_approvers: e.required_approvers,
+                        allowed_approver_roles: e.allowed_approver_roles.clone(),
+                        auto_approve_after_ms: e.auto_approve_after_ms,
+                        auto_reject_after_ms: e.auto_reject_after_ms,
+                        attached_release_ids: Vec::new(),
+                    },
+                );
+            }
             RuntimeEvent::PromptReleaseCreated(e) => {
                 state.prompt_releases.insert(
                     e.prompt_release_id.as_str().to_owned(),
@@ -405,6 +425,7 @@ impl InMemoryStore {
                         prompt_asset_id: e.prompt_asset_id.clone(),
                         prompt_version_id: e.prompt_version_id.clone(),
                         state: "draft".to_owned(),
+                        rollout_percent: None,
                         created_at: e.created_at,
                         updated_at: e.created_at,
                     },
@@ -414,6 +435,13 @@ impl InMemoryStore {
                 if let Some(rec) = state.prompt_releases.get_mut(e.prompt_release_id.as_str()) {
                     rec.state = e.to_state.clone();
                     rec.updated_at = e.transitioned_at;
+                }
+            }
+            RuntimeEvent::PromptRolloutStarted(e) => {
+                if let Some(rec) = state.prompt_releases.get_mut(e.prompt_release_id.as_str()) {
+                    rec.rollout_percent = Some(e.percent);
+                    rec.state = "active".to_owned();
+                    rec.updated_at = e.started_at;
                 }
             }
             RuntimeEvent::IngestJobStarted(e) => {
@@ -464,6 +492,8 @@ impl InMemoryStore {
                     rec.completed_at = Some(e.completed_at);
                 }
             }
+            // No projection required for policy lifecycle events; handled by policy read model.
+            RuntimeEvent::ApprovalPolicyCreated(_) => {}
         }
     }
 }
@@ -547,6 +577,19 @@ impl EventLog for InMemoryStore {
     async fn head_position(&self) -> Result<Option<EventPosition>, StoreError> {
         let state = self.state.lock().unwrap();
         Ok(state.events.last().map(|e| e.position))
+    }
+
+    async fn find_by_causation_id(
+        &self,
+        causation_id: &str,
+    ) -> Result<Option<EventPosition>, StoreError> {
+        let state = self.state.lock().unwrap();
+        for stored in &state.events {
+            if stored.envelope.causation_id.as_ref().map(|id| id.as_str()) == Some(causation_id) {
+                return Ok(Some(stored.position));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -682,6 +725,23 @@ impl RunReadModel for InMemoryStore {
             .runs
             .values()
             .filter(|r| r.state == state)
+            .cloned()
+            .collect();
+        results.sort_by_key(|r| r.created_at);
+        results.truncate(limit);
+        Ok(results)
+    }
+
+    async fn list_active_by_project(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError> {
+        let store = self.state.lock().unwrap();
+        let mut results: Vec<RunRecord> = store
+            .runs
+            .values()
+            .filter(|r| r.project == *project && !r.state.is_terminal())
             .cloned()
             .collect();
         results.sort_by_key(|r| r.created_at);
@@ -1068,6 +1128,16 @@ impl PromptVersionReadModel for InMemoryStore {
 
 // -- PromptReleaseReadModel --
 
+
+/// RFC 001: deterministic hash-based selector bucket for traffic routing (0-100).
+fn selector_bucket(selector: &str) -> u8 {
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+    let mut h = DefaultHasher::new();
+    selector.hash(&mut h);
+    (h.finish() % 100) as u8
+}
+
 #[async_trait]
 impl PromptReleaseReadModel for InMemoryStore {
     async fn get(
@@ -1099,18 +1169,37 @@ impl PromptReleaseReadModel for InMemoryStore {
         &self,
         project: &cairn_domain::ProjectKey,
         prompt_asset_id: &cairn_domain::PromptAssetId,
-        _selector: &str,
+        selector: &str,
     ) -> Result<Option<crate::projections::PromptReleaseRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state
+        let mut active: Vec<_> = state
             .prompt_releases
             .values()
-            .find(|r| {
+            .filter(|r| {
                 r.project == *project
                     && r.prompt_asset_id == *prompt_asset_id
                     && r.state == "active"
             })
-            .cloned())
+            .cloned()
+            .collect();
+        active.sort_by_key(|r| r.prompt_release_id.as_str().to_owned());
+        if active.is_empty() {
+            return Ok(None);
+        }
+        // RFC 001: if any release has rollout_percent, use deterministic bucket routing.
+        if active.iter().any(|r| r.rollout_percent.is_some()) {
+            let bucket = selector_bucket(selector);
+            let mut cumulative = 0u8;
+            for release in &active {
+                let pct = release.rollout_percent.unwrap_or(100);
+                cumulative = cumulative.saturating_add(pct);
+                if bucket < cumulative {
+                    return Ok(Some(release.clone()));
+                }
+            }
+            return Ok(active.into_iter().last());
+        }
+        Ok(active.into_iter().next())
     }
 }
 
@@ -2067,5 +2156,34 @@ mod tests {
             .await
             .unwrap();
         assert!(other.is_empty());
+    }
+}
+
+
+#[async_trait]
+impl ApprovalPolicyReadModel for InMemoryStore {
+    async fn get_policy(
+        &self,
+        policy_id: &str,
+    ) -> Result<Option<cairn_domain::ApprovalPolicyRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.approval_policies.get(policy_id).cloned())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::ApprovalPolicyRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state
+            .approval_policies
+            .values()
+            .filter(|p| p.tenant_id == *tenant_id)
+            .cloned()
+            .collect();
+        results.sort_by_key(|p| p.policy_id.clone());
+        Ok(results.into_iter().skip(offset).take(limit).collect())
     }
 }

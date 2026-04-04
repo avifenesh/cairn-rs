@@ -116,8 +116,11 @@ pub enum RuntimeEvent {
     EvalRunCompleted(EvalRunCompleted),
     PromptAssetCreated(PromptAssetCreated),
     PromptVersionCreated(PromptVersionCreated),
+    ApprovalPolicyCreated(ApprovalPolicyCreated),
     PromptReleaseCreated(PromptReleaseCreated),
     PromptReleaseTransitioned(PromptReleaseTransitioned),
+    /// RFC 001: gradual traffic rollout started.
+    PromptRolloutStarted(PromptRolloutStarted),
     TenantCreated(TenantCreated),
     WorkspaceCreated(WorkspaceCreated),
     ProjectCreated(ProjectCreated),
@@ -156,8 +159,10 @@ impl RuntimeEvent {
             RuntimeEvent::EvalRunCompleted(event) => &event.project,
             RuntimeEvent::PromptAssetCreated(event) => &event.project,
             RuntimeEvent::PromptVersionCreated(event) => &event.project,
+            RuntimeEvent::ApprovalPolicyCreated(event) => &event.project,
             RuntimeEvent::PromptReleaseCreated(event) => &event.project,
             RuntimeEvent::PromptReleaseTransitioned(event) => &event.project,
+            RuntimeEvent::PromptRolloutStarted(event) => &event.project,
             RuntimeEvent::TenantCreated(event) => &event.project,
             RuntimeEvent::WorkspaceCreated(event) => &event.project,
             RuntimeEvent::ProjectCreated(event) => &event.project,
@@ -268,6 +273,7 @@ impl RuntimeEvent {
             RuntimeEvent::PromptVersionCreated(event) => Some(RuntimeEntityRef::PromptVersion {
                 prompt_version_id: event.prompt_version_id.clone(),
             }),
+            RuntimeEvent::ApprovalPolicyCreated(_) => None,
             RuntimeEvent::PromptReleaseCreated(event) => Some(RuntimeEntityRef::PromptRelease {
                 prompt_release_id: event.prompt_release_id.clone(),
             }),
@@ -276,6 +282,7 @@ impl RuntimeEvent {
                     prompt_release_id: event.prompt_release_id.clone(),
                 })
             }
+            RuntimeEvent::PromptRolloutStarted(event) => Some(RuntimeEntityRef::PromptRelease { prompt_release_id: event.prompt_release_id.clone() }),
             RuntimeEvent::TenantCreated(_) => None,
             RuntimeEvent::WorkspaceCreated(_) => None,
             RuntimeEvent::ProjectCreated(_) => None,
@@ -553,6 +560,28 @@ pub struct PromptReleaseTransitioned {
     pub from_state: String,
     pub to_state: String,
     pub transitioned_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalPolicyCreated {
+    pub project: ProjectKey,
+    pub policy_id: String,
+    pub tenant_id: TenantId,
+    pub name: String,
+    pub required_approvers: u32,
+    pub allowed_approver_roles: Vec<crate::tenancy::WorkspaceRole>,
+    pub auto_approve_after_ms: Option<u64>,
+    pub auto_reject_after_ms: Option<u64>,
+    pub created_at_ms: u64,
+}
+
+/// RFC 001: emitted when a partial rollout (percentage-based traffic split) is started.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptRolloutStarted {
+    pub project: ProjectKey,
+    pub prompt_release_id: PromptReleaseId,
+    pub percent: u8,
+    pub started_at: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

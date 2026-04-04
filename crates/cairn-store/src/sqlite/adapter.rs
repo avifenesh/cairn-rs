@@ -226,6 +226,44 @@ impl RunReadModel for SqliteAdapter {
 
         rows.into_iter().map(RunRow::into_record).collect()
     }
+
+    async fn list_active_by_project(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError> {
+        let terminal_states = ["completed", "failed", "canceled", "dead_lettered"];
+        let placeholders = terminal_states
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("${}", i + 4))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT run_id, session_id, parent_run_id, tenant_id, workspace_id, project_id,
+                    state, failure_class, version, created_at, updated_at
+             FROM runs
+             WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3
+               AND state NOT IN ({placeholders})
+             ORDER BY created_at ASC
+             LIMIT ${}",
+            4 + terminal_states.len()
+        );
+        let mut q = sqlx::query_as::<_, RunRow>(&sql)
+            .bind(project.tenant_id.as_str())
+            .bind(project.workspace_id.as_str())
+            .bind(project.project_id.as_str());
+        for s in &terminal_states {
+            q = q.bind(*s);
+        }
+        q = q.bind(limit as i64);
+        q.fetch_all(&self.pool)
+            .await
+            .map_err(|e| StoreError::Internal(e.to_string()))?
+            .into_iter()
+            .map(RunRow::into_record)
+            .collect()
+    }
 }
 
 #[async_trait]

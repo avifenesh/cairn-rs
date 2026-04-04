@@ -12,6 +12,7 @@
 //! contract: applying stored events to update current state.
 
 pub mod approval;
+pub mod approval_policy;
 pub mod checkpoint;
 pub mod eval_run;
 pub mod ingest_job;
@@ -26,6 +27,7 @@ pub mod task;
 pub mod tool_invocation;
 
 pub use approval::*;
+pub use approval_policy::*;
 pub use checkpoint::*;
 pub use eval_run::*;
 pub use ingest_job::*;

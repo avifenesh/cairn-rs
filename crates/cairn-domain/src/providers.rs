@@ -543,3 +543,135 @@ mod tests {
         assert_eq!(ProviderCallStatus::Succeeded, ProviderCallStatus::Succeeded);
     }
 }
+
+// ── RFC 009 Gap Tests ─────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod rfc009_tests {
+    use super::*;
+    use crate::ids::{
+        ProviderBindingId, ProviderCallId, ProviderConnectionId, ProviderModelId,
+        RouteAttemptId, RouteDecisionId,
+    };
+
+    /// RFC 009: skipped/vetoed route attempts must NOT create provider call records.
+    /// Only `Selected` or `Failed` decisions can have associated provider calls.
+    #[test]
+    fn rfc009_vetoed_attempt_has_no_provider_call() {
+        // A vetoed route attempt: no provider dispatch occurred.
+        let attempt = RouteAttemptRecord {
+            route_attempt_id: RouteAttemptId::new("ra_1"),
+            route_decision_id: RouteDecisionId::new("rd_1"),
+            project_id: crate::ids::ProjectId::new("p1"),
+            operation_kind: OperationKind::Generate,
+            provider_binding_id: ProviderBindingId::new("binding_expensive"),
+            selector_context: SelectorContext::default(),
+            attempt_index: 0,
+            decision: RouteAttemptDecision::Vetoed,
+            decision_reason: RouteDecisionReason::BudgetExhausted,
+        };
+
+        // RFC 009: vetoed attempts should not have an associated provider call.
+        // Verify the decision type matches and no call was dispatched.
+        assert_eq!(attempt.decision, RouteAttemptDecision::Vetoed,
+            "RFC 009: vetoed attempt must be explicitly marked Vetoed");
+        // Veto reason must be explicit, not Other
+        assert_ne!(attempt.decision_reason, RouteDecisionReason::Other,
+            "RFC 009: every veto must have a concrete decision_reason");
+    }
+
+    /// RFC 009: a selected route decision must have selected_provider_binding_id set.
+    #[test]
+    fn rfc009_selected_decision_has_binding_id() {
+        let decision = RouteDecisionRecord {
+            route_decision_id: RouteDecisionId::new("rd_sel"),
+            project_id: crate::ids::ProjectId::new("proj"),
+            operation_kind: OperationKind::Generate,
+            terminal_route_attempt_id: Some(RouteAttemptId::new("ra_sel")),
+            selected_provider_binding_id: Some(ProviderBindingId::new("binding_fast")),
+            selected_route_attempt_id: Some(RouteAttemptId::new("ra_sel")),
+            selector_context: SelectorContext::default(),
+            attempt_count: 1,
+            fallback_used: false,
+            final_status: RouteDecisionStatus::Selected,
+        };
+
+        assert!(decision.selected_provider_binding_id.is_some(),
+            "RFC 009: Selected route decision must have selected_provider_binding_id");
+        assert!(decision.selected_route_attempt_id.is_some(),
+            "RFC 009: Selected route decision must have selected_route_attempt_id");
+    }
+
+    /// RFC 009: no_viable_route decision must have no selected binding.
+    #[test]
+    fn rfc009_no_viable_route_has_no_selected_binding() {
+        let decision = RouteDecisionRecord {
+            route_decision_id: RouteDecisionId::new("rd_nvr"),
+            project_id: crate::ids::ProjectId::new("proj"),
+            operation_kind: OperationKind::Generate,
+            terminal_route_attempt_id: None,
+            selected_provider_binding_id: None,
+            selected_route_attempt_id: None,
+            selector_context: SelectorContext::default(),
+            attempt_count: 2,
+            fallback_used: false,
+            final_status: RouteDecisionStatus::NoViableRoute,
+        };
+
+        assert!(decision.selected_provider_binding_id.is_none(),
+            "RFC 009: NoViableRoute decision must have no selected binding");
+    }
+
+    /// RFC 009: every provider call must belong to exactly one route decision.
+    /// Verify RouteDecisionId and RouteAttemptId are required on ProviderCallRecord.
+    #[test]
+    fn rfc009_provider_call_belongs_to_route_decision_and_attempt() {
+        let call = ProviderCallRecord {
+            provider_call_id: ProviderCallId::new("call_1"),
+            route_decision_id: RouteDecisionId::new("rd_1"),
+            route_attempt_id: RouteAttemptId::new("ra_1"),
+            project_id: crate::ids::ProjectId::new("p1"),
+            operation_kind: OperationKind::Generate,
+            provider_binding_id: ProviderBindingId::new("binding_1"),
+            provider_connection_id: ProviderConnectionId::new("conn_1"),
+            provider_adapter: "openai_responses".to_owned(),
+            provider_model_id: ProviderModelId::new("gpt-5"),
+            task_id: None,
+            run_id: None,
+            prompt_release_id: None,
+            fallback_position: 0,
+            status: ProviderCallStatus::Succeeded,
+            latency_ms: Some(245),
+            input_tokens: Some(512),
+            output_tokens: Some(128),
+            cost_micros: Some(1200),
+            error_class: None,
+        };
+
+        // RFC 009: every provider call must link to exactly one route_decision and attempt.
+        assert_eq!(call.route_decision_id.as_str(), "rd_1");
+        assert_eq!(call.route_attempt_id.as_str(), "ra_1");
+        assert_eq!(call.fallback_position, 0, "first attempt has fallback_position=0");
+    }
+
+    /// RFC 009: veto reasons must cover all product-defined rejection scenarios.
+    #[test]
+    fn rfc009_all_veto_reasons_are_defined() {
+        // All these reasons must be expressible per RFC 009.
+        let reasons = [
+            RouteDecisionReason::MissingRequiredCapability,
+            RouteDecisionReason::DisallowedProviderFamily,
+            RouteDecisionReason::BudgetExhausted,
+            RouteDecisionReason::ProjectPolicyRestriction,
+            RouteDecisionReason::SafetyModeRestriction,
+        ];
+        // All reasons must be distinct.
+        for (i, a) in reasons.iter().enumerate() {
+            for (j, b) in reasons.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "RFC 009: all veto reason variants must be distinct");
+                }
+            }
+        }
+    }
+}

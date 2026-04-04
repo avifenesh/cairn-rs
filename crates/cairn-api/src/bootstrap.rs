@@ -122,6 +122,53 @@ impl BootstrapConfig {
     }
 }
 
+/// Configuration validation errors (RFC 011).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfigValidationError {
+    /// SQLite is not permitted for team/production deployments.
+    SqliteNotSupportedInTeamMode,
+    /// Team mode requires an explicit encryption key (not LocalAuto).
+    MissingEncryptionKeyInTeamMode,
+}
+
+impl std::fmt::Display for ConfigValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigValidationError::SqliteNotSupportedInTeamMode => write!(
+                f,
+                "SQLite is not supported in team/production mode; use Postgres"
+            ),
+            ConfigValidationError::MissingEncryptionKeyInTeamMode => write!(
+                f,
+                "team mode requires an explicit encryption key (EnvVar or File)"
+            ),
+        }
+    }
+}
+
+impl BootstrapConfig {
+    /// RFC 011: validate deployment configuration before startup.
+    ///
+    /// Returns all constraint violations rather than stopping at the first.
+    pub fn validate(&self) -> Result<(), Vec<ConfigValidationError>> {
+        let mut errors = Vec::new();
+
+        if self.mode == DeploymentMode::SelfHostedTeam {
+            if matches!(self.storage, StorageBackend::Sqlite { .. }) {
+                errors.push(ConfigValidationError::SqliteNotSupportedInTeamMode);
+            }
+            if matches!(
+                self.encryption_key,
+                EncryptionKeySource::None | EncryptionKeySource::LocalAuto
+            ) {
+                errors.push(ConfigValidationError::MissingEncryptionKeyInTeamMode);
+            }
+        }
+
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
+}
+
 /// Seam for server bootstrap. Implementors start the HTTP/SSE server.
 pub trait ServerBootstrap {
     type Error;
@@ -175,10 +222,136 @@ mod tests {
         assert!(config.credentials_available());
     }
 
+    /// RFC 011: SQLite must be rejected for team/self-hosted mode.
+    #[test]
+    fn validate_rejects_sqlite_in_team_mode() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Sqlite { path: "cairn.db".to_owned() },
+            encryption_key: EncryptionKeySource::EnvVar { var_name: "KEY".to_owned() },
+            ..BootstrapConfig::default()
+        };
+        let errs = config.validate().unwrap_err();
+        assert!(errs.contains(&ConfigValidationError::SqliteNotSupportedInTeamMode));
+    }
+
+    /// RFC 011: Postgres is accepted for team mode when a key is present.
+    #[test]
+    fn validate_accepts_postgres_in_team_mode_with_key() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Postgres { connection_url: "postgres://localhost/cairn".to_owned() },
+            encryption_key: EncryptionKeySource::EnvVar { var_name: "CAIRN_KEY".to_owned() },
+            ..BootstrapConfig::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    /// RFC 011: local mode with SQLite is always valid.
+    #[test]
+    fn validate_accepts_sqlite_in_local_mode() {
+        let config = BootstrapConfig::default(); // Local + SQLite + LocalAuto
+        assert!(config.validate().is_ok());
+    }
+
+    /// RFC 011: team mode without any key must also fail validation.
+    #[test]
+    fn validate_rejects_missing_key_in_team_mode() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Postgres { connection_url: "postgres://localhost/cairn".to_owned() },
+            encryption_key: EncryptionKeySource::None,
+            ..BootstrapConfig::default()
+        };
+        let errs = config.validate().unwrap_err();
+        assert!(errs.contains(&ConfigValidationError::MissingEncryptionKeyInTeamMode));
+    }
+
     #[test]
     fn local_auto_key_rejected_in_team_mode() {
         let mut config = BootstrapConfig::team("postgres://localhost/cairn");
         config.encryption_key = EncryptionKeySource::LocalAuto;
         assert!(!config.credentials_available());
+    }
+}
+
+// ── RFC 011 Gap Tests ─────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod rfc011_tests {
+    use super::*;
+
+    /// RFC 011: team mode must NOT use SQLite — fail closed.
+    #[test]
+    fn rfc011_team_mode_rejects_sqlite_fail_closed() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Sqlite { path: "cairn.db".to_owned() },
+            encryption_key: EncryptionKeySource::EnvVar { var_name: "KEY".to_owned() },
+            ..BootstrapConfig::default()
+        };
+        let errs = config.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| *e == ConfigValidationError::SqliteNotSupportedInTeamMode),
+            "RFC 011: SQLite must be rejected in self-hosted team mode"
+        );
+    }
+
+    /// RFC 011: team mode without encryption key must fail closed — credentials unavailable.
+    #[test]
+    fn rfc011_team_mode_without_key_fails_closed() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Postgres { connection_url: "postgres://localhost/cairn".to_owned() },
+            encryption_key: EncryptionKeySource::None,
+            ..BootstrapConfig::default()
+        };
+        assert!(
+            !config.credentials_available(),
+            "RFC 011: credentials must be unavailable when no key is configured"
+        );
+        let errs = config.validate().unwrap_err();
+        assert!(
+            errs.iter().any(|e| *e == ConfigValidationError::MissingEncryptionKeyInTeamMode),
+            "RFC 011: missing encryption key must be a validation error"
+        );
+    }
+
+    /// RFC 011: all four canonical server roles must be definable.
+    #[test]
+    fn rfc011_all_four_server_roles_are_defined() {
+        use ServerRole::*;
+        // RFC 011: canonical roles: API, RuntimeWorker, Scheduler, PluginHost
+        let all_roles = [Api, RuntimeWorker, Scheduler, PluginHost];
+        for role in &all_roles {
+            // Each role must be expressible and distinct.
+            let config = BootstrapConfig::default();
+            assert!(config.has_role(*role),
+                "RFC 011: all-in-one default must have role {:?}", role);
+        }
+    }
+
+    /// RFC 011: local mode is a valid first-class deployment.
+    #[test]
+    fn rfc011_local_mode_is_first_class_valid_deployment() {
+        let config = BootstrapConfig::default();
+        assert_eq!(config.mode, DeploymentMode::Local);
+        assert!(config.validate().is_ok(),
+            "RFC 011: default local mode must pass validation");
+        assert!(config.credentials_available(),
+            "RFC 011: local mode with LocalAuto key must have credentials available");
+    }
+
+    /// RFC 011: self-hosted team mode with valid postgres+key passes.
+    #[test]
+    fn rfc011_team_mode_with_postgres_and_key_is_valid() {
+        let config = BootstrapConfig {
+            mode: DeploymentMode::SelfHostedTeam,
+            storage: StorageBackend::Postgres { connection_url: "postgres://localhost/cairn".to_owned() },
+            encryption_key: EncryptionKeySource::EnvVar { var_name: "CAIRN_KEK".to_owned() },
+            ..BootstrapConfig::default()
+        };
+        assert!(config.validate().is_ok(),
+            "RFC 011: team mode with Postgres and env key must pass validation");
     }
 }

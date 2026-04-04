@@ -9,6 +9,28 @@ use std::collections::HashMap;
 
 // --- Bundle Envelope ---
 
+/// Supported bundle schema versions (RFC 013 §5.1).
+pub const SUPPORTED_BUNDLE_SCHEMA_VERSIONS: &[&str] = &["1"];
+
+/// Validate the bundle_schema_version field per RFC 013.
+///
+/// Returns `Ok(())` if the version is present and supported.
+/// Returns an error string if the version is absent or unsupported.
+pub fn validate_bundle_schema_version(bundle: &BundleEnvelope) -> Result<(), String> {
+    let v = bundle.bundle_schema_version.trim();
+    if v.is_empty() {
+        return Err("bundle_schema_version is required".to_owned());
+    }
+    if !SUPPORTED_BUNDLE_SCHEMA_VERSIONS.contains(&v) {
+        return Err(format!(
+            "unsupported bundle_schema_version '{}'; supported: {}",
+            v,
+            SUPPORTED_BUNDLE_SCHEMA_VERSIONS.join(", ")
+        ));
+    }
+    Ok(())
+}
+
 /// Top-level bundle envelope per RFC 013.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BundleEnvelope {
@@ -379,6 +401,46 @@ mod tests {
         let json = serde_json::to_value(&content).unwrap();
         assert_eq!(json["kind"], "inline_text");
         assert_eq!(json["text"], "Hello world");
+    }
+
+    /// RFC 013 §5.1: bundle_schema_version MUST be present.
+    #[test]
+    fn validate_schema_version_rejects_empty() {
+        let mut bundle = make_minimal_bundle("1");
+        bundle.bundle_schema_version = "".to_owned();
+        let err = validate_bundle_schema_version(&bundle).unwrap_err();
+        assert!(err.contains("bundle_schema_version is required"), "got: {err}");
+    }
+
+    /// RFC 013 §5.1: unsupported schema version must be rejected.
+    #[test]
+    fn validate_schema_version_rejects_unknown_version() {
+        let bundle = make_minimal_bundle("99");
+        let err = validate_bundle_schema_version(&bundle).unwrap_err();
+        assert!(err.contains("unsupported"), "got: {err}");
+    }
+
+    /// RFC 013 §5.1: version "1" is the supported v1 schema version.
+    #[test]
+    fn validate_schema_version_accepts_version_1() {
+        let bundle = make_minimal_bundle("1");
+        assert!(validate_bundle_schema_version(&bundle).is_ok());
+    }
+
+    fn make_minimal_bundle(schema_version: &str) -> BundleEnvelope {
+        BundleEnvelope {
+            bundle_schema_version: schema_version.to_owned(),
+            bundle_type: BundleType::PromptLibraryBundle,
+            bundle_id: "b1".to_owned(),
+            bundle_name: "Test".to_owned(),
+            created_at: 0,
+            created_by: None,
+            source_deployment_id: None,
+            source_scope: SourceScope { tenant_id: None, workspace_id: None, project_id: None },
+            artifact_count: 0,
+            artifacts: vec![],
+            provenance: BundleProvenance { description: None, source_system: None, export_reason: None },
+        }
     }
 
     #[test]

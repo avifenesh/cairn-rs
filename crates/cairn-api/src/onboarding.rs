@@ -273,4 +273,150 @@ mod tests {
             ImportOutcome::Conflicted
         );
     }
+
+    /// RFC 012 §4: checklist MUST contain every canonical bootstrap step, in order.
+    ///
+    /// Each step_id is load-bearing — the frontend tracks progress by ID,
+    /// so removing or renaming any step is a breaking change.
+    #[test]
+    fn onboarding_checklist_contains_all_required_step_ids_in_order() {
+        const REQUIRED_STEPS: &[&str] = &[
+            "create_project",
+            "select_template",
+            "configure_provider",
+            "create_operator",
+            "import_assets",
+            "first_run",
+            "inspect_results",
+        ];
+
+        let checklist = create_onboarding_checklist(
+            &ProjectId::new("p1"),
+            Some("knowledge-assistant"),
+        );
+        let step_ids: Vec<&str> = checklist.steps.iter().map(|s| s.step_id.as_str()).collect();
+
+        // Every required step must be present.
+        for required in REQUIRED_STEPS {
+            assert!(
+                step_ids.contains(required),
+                "RFC 012 requires step '{}'; present: {:?}", required, step_ids
+            );
+        }
+
+        // Required steps must appear in canonical order.
+        let positions: Vec<usize> = REQUIRED_STEPS
+            .iter()
+            .map(|req| step_ids.iter().position(|id| id == req).unwrap())
+            .collect();
+        for i in 1..positions.len() {
+            assert!(
+                positions[i - 1] < positions[i],
+                "RFC 012: '{}' must appear before '{}' in the checklist",
+                REQUIRED_STEPS[i - 1],
+                REQUIRED_STEPS[i],
+            );
+        }
+    }
+}
+
+// ── RFC 012 Gap Tests ─────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod rfc012_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// RFC 012: three mandatory starter template categories must all be present.
+    #[test]
+    fn rfc012_mandatory_three_starter_templates_present() {
+        let registry = StarterTemplateRegistry::v1_defaults();
+        let templates = registry.list();
+        assert!(templates.len() >= 3,
+            "RFC 012: v1 must ship at least 3 starter templates");
+
+        let has_ka = templates.iter().any(|t| t.category == StarterTemplateCategory::KnowledgeAssistant);
+        let has_agw = templates.iter().any(|t| t.category == StarterTemplateCategory::ApprovalGatedWorker);
+        let has_msw = templates.iter().any(|t| t.category == StarterTemplateCategory::MultiStepWorkflow);
+
+        assert!(has_ka,  "RFC 012: KnowledgeAssistant template required");
+        assert!(has_agw, "RFC 012: ApprovalGatedWorker template required");
+        assert!(has_msw, "RFC 012: MultiStepWorkflow template required");
+    }
+
+    /// RFC 012: bootstrap provenance must record starter template origin.
+    #[test]
+    fn rfc012_bootstrap_records_template_provenance() {
+        let registry = StarterTemplateRegistry::v1_defaults();
+        let template = registry.get("knowledge-assistant").unwrap();
+        let provenance = materialize_template(
+            template,
+            &cairn_domain::TenantId::new("t1"),
+            &cairn_domain::WorkspaceId::new("w1"),
+            &cairn_domain::ProjectId::new("p1"),
+            12345,
+        );
+
+        assert_eq!(provenance.template_id, "knowledge-assistant",
+            "RFC 012: provenance must record which template was selected");
+        assert!(provenance.materialized_at == 12345,
+            "RFC 012: provenance must record when materialization happened");
+        assert!(!provenance.materialized_assets.is_empty(),
+            "RFC 012: provenance must record which assets were materialized");
+    }
+
+    /// RFC 012: bootstrap must be idempotent — repeated import of same content = Reused.
+    #[test]
+    fn rfc012_prompt_import_is_idempotent() {
+        let mut existing = HashMap::new();
+        existing.insert("system.prompt".to_owned(), "abc123".to_owned());
+
+        // First import = Created.
+        assert_eq!(
+            reconcile_prompt_import(&HashMap::new(), "system.prompt", "abc123"),
+            ImportOutcome::Created,
+            "RFC 012: first import of new prompt must be Created"
+        );
+
+        // Second import with same content = Reused (idempotent).
+        assert_eq!(
+            reconcile_prompt_import(&existing, "system.prompt", "abc123"),
+            ImportOutcome::Reused,
+            "RFC 012: repeat import of same content must be Reused (idempotent)"
+        );
+    }
+
+    /// RFC 012: prompt import must NEVER silently mutate an existing version.
+    /// Changed content must produce Conflicted, not silent overwrite.
+    #[test]
+    fn rfc012_changed_content_produces_conflict_not_silent_overwrite() {
+        let mut existing = HashMap::new();
+        existing.insert("agent.prompt".to_owned(), "original_hash".to_owned());
+
+        let outcome = reconcile_prompt_import(&existing, "agent.prompt", "new_hash");
+        assert_eq!(outcome, ImportOutcome::Conflicted,
+            "RFC 012: changed content must produce Conflicted, not silent overwrite");
+        assert_ne!(outcome, ImportOutcome::Reused,
+            "RFC 012: must not silently reuse when content changed");
+    }
+
+    /// RFC 012: materialized assets must not diverge by default.
+    #[test]
+    fn rfc012_materialized_assets_are_not_diverged_on_creation() {
+        let registry = StarterTemplateRegistry::v1_defaults();
+        let template = registry.get("approval-gated-worker").unwrap();
+        let provenance = materialize_template(
+            template,
+            &cairn_domain::TenantId::new("t1"),
+            &cairn_domain::WorkspaceId::new("w1"),
+            &cairn_domain::ProjectId::new("p1"),
+            100,
+        );
+        // RFC 012: newly materialized assets must not show as diverged from shipped defaults.
+        for asset in &provenance.materialized_assets {
+            assert!(!asset.diverged,
+                "RFC 012: freshly materialized asset '{}' must not be marked diverged",
+                asset.asset_id);
+        }
+    }
 }

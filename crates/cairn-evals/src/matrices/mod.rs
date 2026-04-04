@@ -53,6 +53,12 @@ pub struct ProviderRoutingRow {
     pub metrics: EvalMetrics,
 }
 
+/// RFC 004: aggregated provider routing matrix for a project.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProviderRoutingMatrix {
+    pub rows: Vec<ProviderRoutingRow>,
+}
+
 /// A single row in the permission matrix.
 ///
 /// Canonical subject: permission decision family.

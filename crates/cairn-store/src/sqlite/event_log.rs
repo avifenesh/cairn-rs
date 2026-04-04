@@ -134,6 +134,23 @@ impl EventLog for SqliteEventLog {
             }
         }))
     }
+
+    async fn find_by_causation_id(
+        &self,
+        causation_id: &str,
+    ) -> Result<Option<EventPosition>, StoreError> {
+        let row: Option<(i64,)> = sqlx::query_as(
+            "SELECT MIN(position) FROM event_log WHERE causation_id = ?",
+        )
+        .bind(causation_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+
+        Ok(row.and_then(|(pos,)| {
+            if pos > 0 { Some(EventPosition(pos as u64)) } else { None }
+        }))
+    }
 }
 
 #[derive(sqlx::FromRow)]

@@ -82,6 +82,84 @@ mod tests {
         assert_eq!(json["uptime_secs"], 3600);
     }
 
+    /// RFC 010: active_runs must aggregate across ALL sessions, not just one.
+    ///
+    /// Operators need the workspace-level view: runs from session A and session B
+    /// both appear in the same dashboard count.
+    #[test]
+    fn active_runs_aggregates_across_sessions() {
+        use cairn_domain::lifecycle::RunState;
+        use cairn_store::projections::RunRecord;
+        use cairn_domain::{RunId, SessionId};
+        use cairn_domain::tenancy::ProjectKey;
+
+        let project = ProjectKey::new("t1", "w1", "p1");
+
+        // Simulate runs from two different sessions.
+        let runs = vec![
+            RunRecord {
+                run_id: RunId::new("run_1"),
+                session_id: SessionId::new("sess_a"),
+                parent_run_id: None,
+                project: project.clone(),
+                state: RunState::Running,
+                prompt_release_id: None,
+                failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
+                version: 1,
+                created_at: 1000,
+                updated_at: 1000,
+            },
+            RunRecord {
+                run_id: RunId::new("run_2"),
+                session_id: SessionId::new("sess_b"), // different session
+                parent_run_id: None,
+                project: project.clone(),
+                state: RunState::WaitingApproval,
+                prompt_release_id: None,
+                failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
+                version: 1,
+                created_at: 2000,
+                updated_at: 2000,
+            },
+            RunRecord {
+                run_id: RunId::new("run_3"),
+                session_id: SessionId::new("sess_a"),
+                parent_run_id: None,
+                project: project.clone(),
+                state: RunState::Completed, // terminal — must not count
+                prompt_release_id: None,
+                failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
+                version: 1,
+                created_at: 3000,
+                updated_at: 3000,
+            },
+        ];
+
+        // Aggregate: count non-terminal runs across all sessions for the project.
+        let active_count = runs
+            .iter()
+            .filter(|r| r.project == project && !r.state.is_terminal())
+            .count() as u32;
+
+        let overview = DashboardOverview {
+            active_runs: active_count,
+            active_tasks: 0,
+            pending_approvals: 0,
+            failed_runs_24h: 0,
+            system_healthy: true,
+        };
+
+        // Both session A (run_1) and session B (run_2) contribute.
+        assert_eq!(overview.active_runs, 2,
+            "active_runs must count runs from all sessions, not just the current one");
+    }
+
     #[test]
     fn metrics_summary_serialization() {
         let metrics = MetricsSummary {

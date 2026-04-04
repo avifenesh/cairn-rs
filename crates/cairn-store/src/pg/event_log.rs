@@ -153,6 +153,19 @@ impl EventLog for PgEventLog {
             }
         }))
     }
+
+    async fn find_by_causation_id(
+        &self,
+        causation_id: &str,
+    ) -> Result<Option<EventPosition>, StoreError> {
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT position FROM event_log WHERE causation_id = $1 LIMIT 1")
+                .bind(causation_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| StoreError::Internal(e.to_string()))?;
+        Ok(row.map(|(pos,)| EventPosition(pos as u64)))
+    }
 }
 
 /// Raw row from the event_log table.

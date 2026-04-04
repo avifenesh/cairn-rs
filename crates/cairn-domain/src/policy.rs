@@ -109,3 +109,16 @@ mod tests {
         assert_eq!(verdict.requirement, ApprovalRequirement::Required);
     }
 }
+
+/// Tenant-scoped configurable approval workflow record (RFC 006).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalPolicyRecord {
+    pub policy_id: String,
+    pub tenant_id: crate::ids::TenantId,
+    pub name: String,
+    pub required_approvers: u32,
+    pub allowed_approver_roles: Vec<crate::tenancy::WorkspaceRole>,
+    pub auto_approve_after_ms: Option<u64>,
+    pub auto_reject_after_ms: Option<u64>,
+    pub attached_release_ids: Vec<crate::ids::PromptReleaseId>,
+}

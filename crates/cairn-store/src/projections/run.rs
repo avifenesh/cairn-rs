@@ -51,4 +51,15 @@ pub trait RunReadModel: Send + Sync {
         state: RunState,
         limit: usize,
     ) -> Result<Vec<RunRecord>, StoreError>;
+
+    /// RFC 010: list non-terminal (active) runs across ALL sessions in a project.
+    ///
+    /// Operators must be able to view active runs regardless of which session
+    /// originated them — session membership is irrelevant to the control-plane
+    /// view.
+    async fn list_active_by_project(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError>;
 }

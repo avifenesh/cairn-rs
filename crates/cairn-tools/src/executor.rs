@@ -50,7 +50,9 @@ pub fn execute_builtin<G: PermissionGate, H: ToolHost>(
     execution_class: ExecutionClass,
     _now_ms: u64,
 ) -> ExecutionOutcome {
-    // Find the tool descriptor to get required permissions
+    // RFC 007: tools.list pre-invocation discovery.
+    // The host MUST call list_tools() before executing any tool invocation
+    // to verify the tool exists and to retrieve declared permissions.
     let tools = host.list_tools();
     let descriptor = match tools.iter().find(|t| t.name == tool_name) {
         Some(d) => d,

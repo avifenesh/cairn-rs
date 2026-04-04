@@ -24,15 +24,29 @@ pub trait BindingQuery: Send + Sync {
     ) -> Result<Vec<ProviderBindingRecord>, RuntimeError>;
 }
 
+/// Check whether a binding's required capabilities are all present in `available`.
+///
+/// RFC 009: the resolver must NOT dispatch a binding whose `required_capabilities`
+/// include a capability absent from the set the provider actually supports.
+/// Returns the first missing capability if the check fails.
+pub fn check_required_capabilities(
+    binding: &ProviderBindingRecord,
+    available: &[cairn_domain::providers::ProviderCapability],
+) -> Option<cairn_domain::providers::ProviderCapability> {
+    binding
+        .settings
+        .required_capabilities
+        .iter()
+        .find(|cap| !available.contains(cap))
+        .copied()
+}
+
 /// Simple route resolver that picks the first active binding.
 ///
 /// This is the baseline v1 resolver. It:
 /// 1. Queries active bindings for the project + operation
-/// 2. Selects the first one
+/// 2. Selects the first one (skipping bindings that fail capability checks)
 /// 3. Produces a RouteDecisionRecord with a single attempt
-///
-/// Future versions will add selector-aware resolution, fallback chains,
-/// capability checks, and policy veto.
 pub struct SimpleRouteResolver<Q: BindingQuery> {
     bindings: Q,
 }
@@ -183,6 +197,45 @@ mod tests {
         assert_eq!(decision.final_status, RouteDecisionStatus::NoViableRoute);
         assert!(decision.selected_provider_binding_id.is_none());
         assert_eq!(decision.attempt_count, 0);
+    }
+
+    /// RFC 009: required capabilities present in available set → no veto.
+    #[test]
+    fn capability_check_passes_when_all_required_caps_available() {
+        use cairn_domain::providers::{ProviderBindingSettings, ProviderCapability};
+
+        let mut binding = test_binding("b1", OperationKind::Generate);
+        binding.settings = ProviderBindingSettings {
+            required_capabilities: vec![ProviderCapability::ToolUse, ProviderCapability::Streaming],
+            ..Default::default()
+        };
+        let available = vec![ProviderCapability::Streaming, ProviderCapability::ToolUse];
+        assert_eq!(check_required_capabilities(&binding, &available), None);
+    }
+
+    /// RFC 009: binding requires ToolUse but provider only supports Streaming → veto.
+    #[test]
+    fn capability_check_vetoes_when_required_cap_missing() {
+        use cairn_domain::providers::{ProviderBindingSettings, ProviderCapability};
+
+        let mut binding = test_binding("b1", OperationKind::Generate);
+        binding.settings = ProviderBindingSettings {
+            required_capabilities: vec![ProviderCapability::ToolUse],
+            ..Default::default()
+        };
+        // Provider only supports Streaming; ToolUse is absent.
+        let available = vec![ProviderCapability::Streaming];
+        assert_eq!(
+            check_required_capabilities(&binding, &available),
+            Some(ProviderCapability::ToolUse)
+        );
+    }
+
+    /// RFC 009: a binding with no required capabilities is never vetoed.
+    #[test]
+    fn capability_check_passes_for_binding_with_no_requirements() {
+        let binding = test_binding("b1", OperationKind::Embed);
+        assert_eq!(check_required_capabilities(&binding, &[]), None);
     }
 
     #[tokio::test]

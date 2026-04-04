@@ -4,6 +4,7 @@
 //! commands, validate state transitions, persist events, and update
 //! synchronous projections through `cairn-store`.
 
+pub mod approval_policies;
 pub mod approvals;
 pub mod checkpoints;
 pub mod enrichment;
@@ -25,6 +26,7 @@ pub mod tasks;
 pub mod tenants;
 pub mod workspaces;
 
+pub use approval_policies::ApprovalPolicyService;
 pub use approvals::ApprovalService;
 pub use checkpoints::CheckpointService;
 pub use enrichment::{
@@ -41,7 +43,7 @@ pub use prompt_assets::PromptAssetService;
 pub use prompt_releases::PromptReleaseService;
 pub use prompt_versions::PromptVersionService;
 pub use services::{
-    ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl, ExternalWorkerService,
+    ApprovalPolicyServiceImpl, ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl, ExternalWorkerService,
     ExternalWorkerServiceImpl, IngestJobServiceImpl, MailboxServiceImpl,
     ProjectServiceImpl, PromptAssetServiceImpl, PromptReleaseServiceImpl,
     PromptVersionServiceImpl, RecoveryServiceImpl,

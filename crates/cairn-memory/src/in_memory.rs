@@ -19,6 +19,21 @@ use crate::retrieval::{
 };
 
 /// In-memory document store for testing.
+/// A document record suitable for export operations.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ExportableDocument {
+    pub document_id: KnowledgeDocumentId,
+    pub source_id: SourceId,
+    pub project: ProjectKey,
+    pub source_type: SourceType,
+    pub text: String,
+    pub credibility_score: Option<f32>,
+    pub provenance: Option<serde_json::Value>,
+    pub tags: Vec<String>,
+    pub corpus_id: Option<String>,
+    pub created_at_ms: u64,
+}
+
 pub struct InMemoryDocumentStore {
     docs: Mutex<HashMap<String, (IngestStatus, ProjectKey, SourceType)>>,
     chunks: Mutex<Vec<ChunkRecord>>,

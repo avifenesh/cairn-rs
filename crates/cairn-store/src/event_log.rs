@@ -89,6 +89,15 @@ pub trait EventLog: Send + Sync {
 
     /// Current head position of the log, or `None` if empty.
     async fn head_position(&self) -> Result<Option<EventPosition>, StoreError>;
+
+    /// Look up the position of the event caused by the given causation ID.
+    ///
+    /// Used for idempotency: callers can check whether a command has already
+    /// been applied before re-appending it (RFC 002).
+    async fn find_by_causation_id(
+        &self,
+        causation_id: &str,
+    ) -> Result<Option<EventPosition>, StoreError>;
 }
 
 #[cfg(test)]

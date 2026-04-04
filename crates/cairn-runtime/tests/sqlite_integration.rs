@@ -82,6 +82,13 @@ impl EventLog for SqliteStore {
     async fn head_position(&self) -> Result<Option<EventPosition>, StoreError> {
         self.event_log.head_position().await
     }
+
+    async fn find_by_causation_id(
+        &self,
+        causation_id: &str,
+    ) -> Result<Option<EventPosition>, StoreError> {
+        self.event_log.find_by_causation_id(causation_id).await
+    }
 }
 
 #[async_trait]
@@ -124,6 +131,13 @@ impl RunReadModel for SqliteStore {
         limit: usize,
     ) -> Result<Vec<RunRecord>, StoreError> {
         RunReadModel::list_by_state(&self.adapter, state, limit).await
+    }
+    async fn list_active_by_project(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, StoreError> {
+        RunReadModel::list_active_by_project(&self.adapter, project, limit).await
     }
 }
 
