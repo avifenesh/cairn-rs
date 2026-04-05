@@ -339,7 +339,12 @@ impl ProjectQuery {
 fn is_auth_exempt(path: &str) -> bool {
     // /v1/ws: browsers can't send headers during WS upgrade, so auth is
     // handled inside the handler via ?token= query parameter instead.
-    path == "/health" || path.starts_with("/v1/stream") || path == "/v1/ws"
+    path == "/health"
+        || path.starts_with("/v1/stream")
+        || path == "/v1/ws"
+        || path == "/v1/openapi.json"
+        || path == "/v1/docs"
+        || path == "/v1/rate-limit"
 }
 
 /// Extract the raw token from an `Authorization: Bearer <token>` header.
