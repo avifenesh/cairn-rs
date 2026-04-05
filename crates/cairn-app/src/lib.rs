@@ -53,7 +53,7 @@ use cairn_domain::tool_invocation::{ToolInvocationState, ToolInvocationTarget};
 use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerRecord, ExternalWorkerReport};
 use cairn_domain::{
     ApprovalDecision, ApprovalId, ApprovalRequirement, AuditLogEntry, AuditOutcome, ChannelId,
-    ChannelRecord, CheckpointId, CheckpointStrategy, CredentialId, DefaultSetting,
+    ChannelRecord, CheckpointId, CheckpointStrategy, CheckpointStrategySet, CredentialId, DefaultSetting,
     DefaultFeatureGate, Entitlement, EntitlementSet, EvalRunId,
     EventEnvelope, EventId, EventSource, ExecutionClass, FeatureGate, FeatureGateResult,
     IngestJobId, IngestJobState,
