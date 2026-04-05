@@ -201,7 +201,7 @@ fn tokenize(text: &str) -> Vec<Token> {
         // Strip leading punctuation.
         let clean = word.trim_matches(|c: char| matches!(c, ',' | ';' | ':' | '"' | '(' | '['));
         // Strip trailing punctuation.
-        let clean = clean.trim_end_matches(|c: char| matches!(c, '.' | '!' | '?' | ',' | ';' | ':' | '"' | ')' | ']' | '\''));
+        let clean = clean.trim_end_matches(['.', '!', '?', ',', ';', ':', '"', ')', ']', '\'']);
         if !clean.is_empty() {
             tokens.push(Token { text: clean.to_owned() });
         }

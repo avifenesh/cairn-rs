@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cairn_domain::providers::RunCostAlert;
 use cairn_domain::{
-    RunCostAlertSet, RunCostAlertTriggered, RunCostUpdated, RuntimeEvent, RunId, TenantId,
+    RunCostAlertSet, RunCostAlertTriggered, RuntimeEvent, RunId, TenantId,
 };
 use cairn_store::projections::{RunCostAlertReadModel, RunCostReadModel};
 use cairn_store::EventLog;

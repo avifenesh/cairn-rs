@@ -1,6 +1,6 @@
 //! Skill catalog service boundary — GAP-012.
 
-use cairn_domain::skills::{Skill, SkillCatalog, SkillInvocation};
+use cairn_domain::skills::{Skill, SkillInvocation};
 
 use crate::error::RuntimeError;
 

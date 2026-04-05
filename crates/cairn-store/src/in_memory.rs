@@ -4789,8 +4789,8 @@ impl InMemoryStore {
             .runs
             .values()
             .filter(|r| r.project == *query)
-            .filter(|r| session_id.map_or(true, |s| r.session_id == *s))
-            .filter(|r| status.map_or(true, |st| r.state == st))
+            .filter(|r| session_id.is_none_or(|s| r.session_id == *s))
+            .filter(|r| status.is_none_or(|st| r.state == st))
             .skip(offset)
             .take(limit)
             .cloned()

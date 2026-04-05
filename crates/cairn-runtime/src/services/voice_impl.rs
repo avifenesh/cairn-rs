@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use cairn_domain::voice::{
     SpeechToTextRequest, SpeechToTextResult, TextToSpeechRequest, TextToSpeechResult,
-    TranscriptSegment, VoiceFormat,
+    TranscriptSegment,
 };
 
 use crate::error::RuntimeError;

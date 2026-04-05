@@ -4,13 +4,12 @@
 //! stdio transport into a single invocation flow for Plugin targets.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 use cairn_domain::tenancy::ProjectKey;
 use cairn_plugin_proto::wire::ToolsInvokeResult;
 
 use crate::builtin::ToolOutcome;
-use crate::permissions::{DeclaredPermissions, PermissionCheckResult, PermissionGate};
+use crate::permissions::{PermissionCheckResult, PermissionGate};
 use crate::plugin_bridge::{build_tools_invoke_request, invoke_result_to_outcome};
 use crate::plugins::PluginManifest;
 use crate::registry::PluginRegistry;

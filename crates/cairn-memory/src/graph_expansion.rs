@@ -77,14 +77,13 @@ impl<Q: GraphQueryService + 'static> GraphExpansionHook for GraphBackedExpansion
 
                 if let Ok(neighbors) = neighbors {
                     for (_, node) in neighbors {
-                        if node.kind == NodeKind::Document || node.kind == NodeKind::Source {
-                            if seen.insert(node.node_id.clone()) {
+                        if (node.kind == NodeKind::Document || node.kind == NodeKind::Source)
+                            && seen.insert(node.node_id.clone()) {
                                 expansions.push(node.node_id);
                                 if expansions.len() >= self.max_expansions {
                                     break;
                                 }
                             }
-                        }
                     }
                 }
             }

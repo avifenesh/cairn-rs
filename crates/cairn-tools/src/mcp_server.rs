@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::mcp_client::{McpClient, McpEndpoint, McpError, McpTool};
+use crate::mcp_client::{McpClient, McpEndpoint, McpError};
 
 // ── Request / response types (HTTP surface) ───────────────────────────────
 

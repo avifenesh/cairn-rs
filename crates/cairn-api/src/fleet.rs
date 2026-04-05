@@ -4,7 +4,7 @@
 //! - `GET /v1/fleet` returns at most 200 active sessions with status, summary, and truncation flag.
 //! - Status is derived from the session's latest run state.
 
-use cairn_domain::lifecycle::{AgentStatus, RunState};
+use cairn_domain::lifecycle::AgentStatus;
 use cairn_store::projections::{RunRecord, SessionRecord};
 use serde::{Deserialize, Serialize};
 

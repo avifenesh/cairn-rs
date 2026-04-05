@@ -4,7 +4,7 @@
 //! and a canonical bootstrap path from install to first value.
 
 use cairn_domain::onboarding::{
-    BootstrapProvenance, ImportOutcome, ImportProvenanceRecord, MaterializedAsset,
+    BootstrapProvenance, ImportOutcome, MaterializedAsset,
     OnboardingFlowState, OnboardingProgress as DomainOnboardingProgress, OnboardingStep,
     StarterTemplate, StarterTemplateCategory,
 };

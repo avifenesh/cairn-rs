@@ -2,8 +2,7 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use cairn_domain::providers::{OperationKind, ProviderModelCapability};
+use cairn_domain::providers::ProviderModelCapability;
 use cairn_domain::*;
 use cairn_store::projections::ProviderModelReadModel;
 use cairn_store::EventLog;

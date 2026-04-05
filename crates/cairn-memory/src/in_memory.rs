@@ -100,7 +100,7 @@ impl InMemoryDocumentStore {
                     document_id: KnowledgeDocumentId::new(id.clone()),
                     source_id,
                     project: project.clone(),
-                    source_type: source_type.clone(),
+                    source_type: *source_type,
                     text,
                     credibility_score: None,
                     provenance: None,

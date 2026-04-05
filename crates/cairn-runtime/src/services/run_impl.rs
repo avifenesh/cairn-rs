@@ -351,7 +351,7 @@ where
         // Scan event log for RunCreated events that reference this parent_run_id,
         // then fetch the current record for each child run found.
         let events = cairn_store::EventLog::read_stream(self.store.as_ref(), None, 10_000).await?;
-        let mut child_run_ids: Vec<cairn_domain::RunId> = events
+        let child_run_ids: Vec<cairn_domain::RunId> = events
             .into_iter()
             .filter_map(|stored| {
                 if let cairn_domain::RuntimeEvent::RunCreated(e) = stored.envelope.payload {
