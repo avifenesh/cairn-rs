@@ -67,6 +67,9 @@ fn set_strategy(
             description:  description.to_owned(),
             set_at_ms:    ts,
             run_id:       Some(RunId::new(run_id)),
+            interval_ms:  0,
+            max_checkpoints: 10,
+            trigger_on_task_complete: false,
         }),
     }
 }
@@ -124,6 +127,9 @@ async fn strategy_without_run_id_is_not_stored() {
             description:  "no run".to_owned(),
             set_at_ms:    ts,
             run_id:       None,
+            interval_ms:  0,
+            max_checkpoints: 10,
+            trigger_on_task_complete: false,
         }),
     }]).await.unwrap();
 

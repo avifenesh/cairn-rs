@@ -197,7 +197,7 @@ mod tests {
         assert!(config.has_role(ServerRole::RuntimeWorker));
         assert!(config.has_role(ServerRole::Scheduler));
         assert!(config.has_role(ServerRole::PluginHost));
-        assert!(matches!(config.storage, StorageBackend::Sqlite { .. }));
+        assert!(matches!(config.storage, StorageBackend::InMemory));
     }
 
     #[test]

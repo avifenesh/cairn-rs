@@ -42,7 +42,7 @@ use cairn_runtime::tasks::TaskService;
 use cairn_runtime::tenants::TenantService;
 use cairn_runtime::{InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider};
 use cairn_domain::providers::EmbeddingProvider as _;
-use cairn_store::projections::{ApprovalReadModel, LlmCallTraceReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
+use cairn_store::projections::{ApprovalReadModel, AuditLogReadModel, LlmCallTraceReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
 use cairn_store::{EventLog, EventPosition, StoredEvent};
 use cairn_store::DbAdapter;
 use cairn_store::pg::{PgAdapter, PgEventLog};
@@ -2403,6 +2403,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/sessions/:id/llm-traces", get(list_session_traces_handler))
         // Admin routes
         .route("/v1/admin/tenants", post(create_tenant_handler))
+        .route("/v1/admin/audit-log", get(list_audit_log_handler))
         // Ollama local LLM provider
         .route("/v1/providers/ollama/models",          get(ollama_models_handler))
         .route("/v1/providers/ollama/models/:name/info", get(ollama_model_info_handler))

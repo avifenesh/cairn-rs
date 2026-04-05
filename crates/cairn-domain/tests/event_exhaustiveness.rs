@@ -611,6 +611,7 @@ fn all_variants() -> Vec<RuntimeEvent> {
         RuntimeEvent::CheckpointStrategySet(CheckpointStrategySet {
             strategy_id: "cs1".to_owned(), description: "desc".to_owned(),
             set_at_ms: ts, run_id: None,
+            interval_ms: 0, max_checkpoints: 10, trigger_on_task_complete: false,
         }),
         RuntimeEvent::CredentialKeyRotated(CredentialKeyRotated {
             tenant_id: tid(), rotation_id: "rot1".to_owned(),
