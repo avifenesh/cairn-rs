@@ -2201,7 +2201,7 @@ impl TaskReadModel for InMemoryStore {
             .tasks
             .values()
             .filter(|t| {
-                t.state == TaskState::Leased && t.lease_expires_at.map_or(false, |exp| exp < now)
+                t.state == TaskState::Leased && t.lease_expires_at.is_some_and(|exp| exp < now)
             })
             .cloned()
             .collect();
@@ -2880,8 +2880,8 @@ impl ProviderCallReadModel for InMemoryStore {
             .provider_calls
             .values()
             .filter(|c| c.route_decision_id == *decision_id)
-            .cloned()
             .take(limit)
+            .cloned()
             .collect();
         Ok(results)
     }
@@ -4224,7 +4224,7 @@ impl crate::projections::RetentionMaintenance for InMemoryStore {
         let mut to_prune: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
         let mut entities_affected = 0u32;
 
-        for (_, positions) in &entity_positions {
+        for positions in entity_positions.values() {
             if positions.len() > max_per_entity {
                 // Keep the most recent max_per_entity events; prune the rest (oldest).
                 let prune_count = positions.len() - max_per_entity;
@@ -4444,7 +4444,7 @@ impl crate::projections::TaskLeaseExpiredReadModel for InMemoryStore {
         Ok(state.tasks.values()
             .filter(|t| {
                 matches!(t.state, cairn_domain::TaskState::Leased | cairn_domain::TaskState::Running)
-                    && t.lease_expires_at.map_or(false, |exp| exp <= now_ms)
+                    && t.lease_expires_at.is_some_and(|exp| exp <= now_ms)
             })
             .cloned()
             .collect())

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 // ── Worker health / fleet types ───────────────────────────────────────────
 
 /// Live health snapshot for a registered external worker (GAP-005).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerHealth {
     /// Epoch-ms of the last received heartbeat (0 if no heartbeat yet).
     pub last_heartbeat_ms: u64,
@@ -14,16 +14,6 @@ pub struct WorkerHealth {
     pub is_alive: bool,
     /// Number of tasks currently leased to this worker.
     pub active_task_count: u32,
-}
-
-impl Default for WorkerHealth {
-    fn default() -> Self {
-        Self {
-            last_heartbeat_ms: 0,
-            is_alive: false,
-            active_task_count: 0,
-        }
-    }
 }
 
 /// Persistent record for a registered external worker (GAP-005).

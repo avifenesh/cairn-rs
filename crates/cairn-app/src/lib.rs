@@ -1553,7 +1553,7 @@ impl From<CreateRoutePolicyRuleRequest> for RoutePolicyRule {
             },
             policy_id: r.policy_id,
             priority: r.priority,
-            description: r.description.or_else(|| r.capability),
+            description: r.description.or(r.capability),
         }
     }
 }
@@ -3984,7 +3984,7 @@ async fn rate_limit_middleware(
         }
 
         if bucket.count >= MAX_REQUESTS {
-            Some(((WINDOW_MS - now.saturating_sub(bucket.window_started_ms)).max(1) + 999) / 1000)
+            Some((WINDOW_MS - now.saturating_sub(bucket.window_started_ms)).max(1).div_ceil(1000))
         } else {
             bucket.count += 1;
             None
@@ -9282,7 +9282,7 @@ async fn cancel_tool_invocation_handler(
     // Best-effort: send cancel RPC to the plugin if one is handling this invocation
     if let ToolInvocationTarget::Plugin { plugin_id, .. } = &record.target {
         if let Ok(mut host) = state.plugin_host.lock() {
-            let _ = cancel_plugin_invocation(&mut host, plugin_id, invocation_id.as_str());
+            cancel_plugin_invocation(&mut host, plugin_id, invocation_id.as_str());
         }
     }
 
@@ -10994,7 +10994,7 @@ async fn create_eval_run_handler(
     };
     // Convert cairn_domain::EvalSubjectKind to cairn_evals::EvalSubjectKind via serde.
     let subject_kind: EvalSubjectKind = serde_json::from_value(
-        serde_json::to_value(&domain_subject_kind).unwrap_or_default()
+        serde_json::to_value(domain_subject_kind).unwrap_or_default()
     ).unwrap_or(EvalSubjectKind::PromptRelease);
 
     if let Some(dataset_id) = body.dataset_id.as_deref() {

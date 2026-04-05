@@ -67,16 +67,18 @@ pub fn select_execution_config(manifest: &PluginManifest, mode: DeploymentMode) 
 
     match effective_class {
         ExecutionClass::SupervisedProcess => {
-            let mut config = SupervisedProcessConfig::default();
-            config.timeout_ms = timeout_ms;
-            config.granted_permissions = manifest.permissions.permissions.clone();
-            SelectedConfig::Supervised(config)
+            SelectedConfig::Supervised(SupervisedProcessConfig {
+                timeout_ms,
+                granted_permissions: manifest.permissions.permissions.clone(),
+                ..Default::default()
+            })
         }
         ExecutionClass::SandboxedProcess => {
-            let mut config = SandboxedProcessConfig::default();
-            config.timeout_ms = timeout_ms;
-            config.granted_permissions = manifest.permissions.permissions.clone();
-            SelectedConfig::Sandboxed(config)
+            SelectedConfig::Sandboxed(SandboxedProcessConfig {
+                timeout_ms,
+                granted_permissions: manifest.permissions.permissions.clone(),
+                ..Default::default()
+            })
         }
     }
 }

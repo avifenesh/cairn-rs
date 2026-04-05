@@ -38,7 +38,7 @@ impl Default for StorageBackend {
 }
 
 /// Encryption key source for credential encryption at rest (RFC 011).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EncryptionKeySource {
     /// Operator-supplied key from environment variable.
@@ -48,13 +48,8 @@ pub enum EncryptionKeySource {
     /// Auto-generated local key (local mode convenience only).
     LocalAuto,
     /// No key configured — credential features fail closed in team mode.
+    #[default]
     None,
-}
-
-impl Default for EncryptionKeySource {
-    fn default() -> Self {
-        EncryptionKeySource::None
-    }
 }
 
 /// Full deployment configuration per RFC 011.

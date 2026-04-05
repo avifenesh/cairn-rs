@@ -344,7 +344,7 @@ impl RetrievalService for InMemoryRetrieval {
                 query.metadata_filters.iter().all(|f| {
                     c.provenance_metadata
                         .as_ref()
-                        .map_or(false, |m| {
+                        .is_some_and(|m| {
                             // Direct key match: check scalar string value.
                             if let Some(v) = m.get(&f.key).and_then(|v| v.as_str()) {
                                 return v == f.value;

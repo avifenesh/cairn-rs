@@ -207,9 +207,9 @@ impl StdioPluginHost {
             });
         }
 
-        let process = managed.process.as_mut().ok_or_else(|| {
+        let process = managed.process.as_mut().ok_or(
             PluginHostError::Transport(TransportError::ProcessExited(None))
-        })?;
+        )?;
 
         process.send(request)?;
         process.recv().map_err(PluginHostError::Transport)

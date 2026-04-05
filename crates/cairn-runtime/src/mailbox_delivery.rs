@@ -34,7 +34,7 @@ impl<M: MailboxService> MailboxDeliveryService<M> {
         to_task_id: Option<TaskId>,
         content: String,
     ) -> Result<MailboxRecord, RuntimeError> {
-        let message_id = MailboxMessageId::new(&format!("msg_{}", uuid_like()));
+        let message_id = MailboxMessageId::new(format!("msg_{}", uuid_like()));
         self.mailbox
             .append(project, message_id, to_run_id, to_task_id, content, from_run_id, 0)
             .await
@@ -50,7 +50,7 @@ impl<M: MailboxService> MailboxDeliveryService<M> {
         content: String,
         deliver_at_ms: u64,
     ) -> Result<MailboxRecord, RuntimeError> {
-        let message_id = MailboxMessageId::new(&format!("msg_{}", uuid_like()));
+        let message_id = MailboxMessageId::new(format!("msg_{}", uuid_like()));
         self.mailbox
             .append(project, message_id, to_run_id, to_task_id, content, from_run_id, deliver_at_ms)
             .await

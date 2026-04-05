@@ -506,7 +506,7 @@ pub fn shape_event_payload_with_records(
             .and_then(|record| serde_json::to_value(&task_update_payload_from_record(record)).ok())
             .or_else(|| shape_event_payload(event)),
         RuntimeEvent::ApprovalRequested(_) => approval_record
-            .and_then(|record| serde_json::to_value(&approval_required_payload_from_record(record)).ok())
+            .and_then(|record| serde_json::to_value(approval_required_payload_from_record(record)).ok())
             .or_else(|| shape_event_payload(event)),
         _ => shape_event_payload(event),
     }
