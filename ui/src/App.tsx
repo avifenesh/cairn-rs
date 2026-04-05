@@ -8,6 +8,7 @@ import { MemoryPage } from './pages/MemoryPage';
 import { ProvidersPage } from './pages/ProvidersPage';
 import { RunsPage } from './pages/RunsPage';
 import { RunDetailPage } from './pages/RunDetailPage';
+import { SessionDetailPage } from './pages/SessionDetailPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -27,6 +28,7 @@ export default function App() {
     <Layout
       routeRenderer={(route) => {
         if (route.kind === 'run-detail') return <RunDetailPage runId={route.runId} />;
+        if (route.kind === 'session-detail') return <SessionDetailPage sessionId={route.sessionId} />;
         switch (route.page) {
           case 'dashboard': return <DashboardPage />;
           case 'runs':      return <RunsPage />;

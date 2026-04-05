@@ -1,11 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowLeft, Loader2, ServerCrash, Clock, Hash, Cpu,
+  ArrowLeft, Loader2, Clock, Hash, Cpu,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
 import { defaultApi } from "../lib/api";
-import type { TaskState } from "../lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 

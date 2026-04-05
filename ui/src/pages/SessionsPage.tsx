@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, Plus } from 'lucide-react';
+import { ChevronRight, Loader2, RefreshCw, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import { StateBadge } from '../components/StateBadge';
@@ -115,7 +115,7 @@ function SessionRow({ session, runCount, expanded, onToggle, even }: {
   return (
     <>
       <tr
-        onClick={onToggle}
+        onClick={() => { window.location.hash = `session/${session.session_id}`; }}
         className={clsx(
           'cursor-pointer border-b border-zinc-800/50 select-none transition-colors',
           expanded ? 'bg-white/5' : even ? 'bg-zinc-900/50 hover:bg-white/5' : 'bg-zinc-900 hover:bg-white/5',

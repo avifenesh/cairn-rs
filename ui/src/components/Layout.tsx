@@ -16,13 +16,18 @@ const VALID_PAGES: NavPage[] = [
 /** A parsed hash route: either a named page or a dynamic segment. */
 export type Route =
   | { kind: 'page'; page: NavPage }
-  | { kind: 'run-detail'; runId: string };
+  | { kind: 'run-detail'; runId: string }
+  | { kind: 'session-detail'; sessionId: string };
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#/, '');
   // Dynamic: #run/<runId>
   if (h.startsWith('run/') && h.length > 4) {
     return { kind: 'run-detail', runId: h.slice(4) };
+  }
+  // Dynamic: #session/<sessionId>
+  if (h.startsWith('session/') && h.length > 8) {
+    return { kind: 'session-detail', sessionId: h.slice(8) };
   }
   const page = h as NavPage;
   return { kind: 'page', page: VALID_PAGES.includes(page) ? page : 'dashboard' };
@@ -50,11 +55,13 @@ export const PAGE_TITLES: Record<NavPage, string> = {
 
 function routeTitle(route: Route): string {
   if (route.kind === 'run-detail') return `Run ${route.runId.slice(0, 12)}…`;
+  if (route.kind === 'session-detail') return `Session ${route.sessionId.slice(0, 12)}…`;
   return PAGE_TITLES[route.page];
 }
 
 function activePage(route: Route): NavPage {
   if (route.kind === 'run-detail') return 'runs';
+  if (route.kind === 'session-detail') return 'sessions';
   return route.page;
 }
 
