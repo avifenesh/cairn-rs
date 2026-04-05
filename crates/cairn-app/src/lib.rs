@@ -34,7 +34,7 @@ use cairn_api::feed::{FeedEndpoints, FeedItem, FeedQuery};
 use cairn_api::http::{preserved_route_catalog, ApiError, HttpMethod, ListResponse};
 use cairn_api::memory_api::{MemoryItem, MemoryStatus};
 use cairn_api::onboarding::{
-    create_onboarding_checklist, materialize_template, MaterializeContext,
+    create_onboarding_checklist, materialize_template,
     ProviderBindingBootstrapService, StarterTemplateRegistry,
 };
 use cairn_api::settings_api::SettingsSummary;
@@ -43,17 +43,16 @@ use cairn_api::sse_publisher::build_sse_frame_with_current_state;
 use cairn_api::{CriticalEventSummary, DashboardOverview};
 use cairn_domain::credentials::CredentialRecord;
 use cairn_domain::policy::{
-    GuardrailDecision, GuardrailPolicy, GuardrailRule, GuardrailSubjectType,
+    GuardrailRule, GuardrailSubjectType,
 };
 use cairn_domain::providers::{
-    OperationKind, ProviderBudget, ProviderBudgetPeriod, ProviderHealthRecord,
-    ProviderHealthSchedule, ProviderModelCapability, RoutePolicy, RoutePolicyRule,
+    OperationKind, ProviderBudget, ProviderBudgetPeriod, ProviderHealthRecord, ProviderModelCapability, RoutePolicyRule,
 };
 use cairn_domain::tool_invocation::{ToolInvocationState, ToolInvocationTarget};
 use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerRecord, ExternalWorkerReport};
 use cairn_domain::{
     ApprovalDecision, ApprovalId, ApprovalRequirement, AuditLogEntry, AuditOutcome, ChannelId,
-    ChannelRecord, CheckpointId, CheckpointStrategy, CheckpointStrategySet, CredentialId, DefaultSetting,
+    ChannelRecord, CheckpointId, CheckpointStrategy, CheckpointStrategySet, CredentialId,
     DefaultFeatureGate, Entitlement, EntitlementSet, EvalRunId,
     EventEnvelope, EventId, EventSource, ExecutionClass, FeatureGate, FeatureGateResult,
     IngestJobId, IngestJobState,
@@ -61,17 +60,17 @@ use cairn_domain::{
     ProductTier, ProjectId, ProjectKey, PromptAssetId, PromptReleaseId, PromptTemplateVar,
     PromptVersionId, ProviderBindingId, ProviderBindingRecord, ProviderConnectionId,
     ProviderModelId, ResumeTrigger, RouteDecisionId, RunId, RunResumeTarget, RunState, RunStateChanged,
-    RuntimeEvent, Scope, SessionId, SessionState, SignalId, SignalRecord, SourceId,
-    StateTransition, TaskId, TaskResumeTarget, TaskState, TaskStateChanged, TenantId, ToolInvocationId, WorkerId,
+    RuntimeEvent, Scope, SessionId, SessionState, SignalId, SourceId,
+    StateTransition, TaskId, TaskState, TaskStateChanged, TenantId, ToolInvocationId, WorkerId,
     WorkspaceId, WorkspaceKey, WorkspaceRole,
     CREDENTIAL_MANAGEMENT, EVAL_MATRICES, MULTI_PROVIDER,
 };
 use cairn_evals::{
     EvalBaselineServiceImpl, EvalDatasetServiceImpl, EvalMetrics, EvalRubricServiceImpl, ModelComparisonServiceImpl,
     EvalRun as ProductEvalRun, EvalRunService as ProductEvalRunService, EvalSubjectKind,
-    GraphIntegration as EvalGraphIntegration, GuardrailMatrix, MemorySourceQualityMatrix, PermissionMatrix,
-    PluginDimensionScore, PluginRubricScorer, PromptComparisonMatrix, RubricDimension, Scorecard,
-    ProviderRoutingMatrix, ProviderRoutingRow, ScorecardEntry, SkillHealthMatrix,
+    GraphIntegration as EvalGraphIntegration, GuardrailMatrix,
+    PluginDimensionScore, PluginRubricScorer, PromptComparisonMatrix, RubricDimension,
+    ProviderRoutingMatrix, ProviderRoutingRow, SkillHealthMatrix,
 };
 use cairn_evals::services::eval_service::{MemoryDiagnosticsSource, SourceQualitySnapshot};
 use cairn_graph::event_projector::EventProjector as RuntimeGraphProjector;
@@ -82,7 +81,7 @@ use cairn_graph::provenance::ProvenanceService;
 use cairn_graph::retrieval_projector::RetrievalGraphProjector;
 use cairn_graph::{GraphQuery, GraphQueryService, TraversalDirection};
 use cairn_memory::bundles::{
-    BundleEnvelope, ConflictResolutionStrategy, DocumentExportFilters, ExportService, ImportService,
+    BundleEnvelope, ConflictResolutionStrategy, DocumentExportFilters, ImportService,
 };
 use cairn_memory::deep_search::{DeepSearchRequest, DeepSearchService};
 use cairn_memory::deep_search_impl::{IterativeDeepSearch, KeywordDecomposer};
@@ -90,9 +89,9 @@ use cairn_memory::diagnostics::{DiagnosticsService, IndexStatus, SourceQualityRe
 use cairn_memory::diagnostics_impl::InMemoryDiagnostics;
 use cairn_memory::export_service_impl::InMemoryExportService;
 use cairn_memory::feed_impl::FeedStore;
-use cairn_memory::graph_expansion::{related_documents_for, GraphBackedExpansion};
+use cairn_memory::graph_expansion::GraphBackedExpansion;
 use cairn_memory::import_service_impl::InMemoryImportService;
-use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval, SourceSummary};
+use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::{DocumentVersionReadModel, IngestRequest, IngestService, SourceType};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
@@ -110,7 +109,7 @@ use cairn_runtime::{
 };
 use cairn_store::projections::{
     ApprovalReadModel, AuditLogReadModel, CheckpointReadModel, CheckpointStrategyReadModel,
-    EvalRunReadModel, MailboxReadModel, MailboxRecord, OperatorInterventionReadModel,
+    EvalRunReadModel, MailboxReadModel, OperatorInterventionReadModel,
     PauseScheduleReadModel, PromptReleaseReadModel, PromptVersionReadModel,
     ProviderBindingReadModel, ProviderConnectionReadModel, QuotaReadModel, RetentionPolicyReadModel, RoutePolicyReadModel,
     LlmCallTraceReadModel, RunCostReadModel, RunReadModel, RunRecord, SessionCostReadModel, SessionRecord,
@@ -119,9 +118,8 @@ use cairn_store::projections::{
 };
 use cairn_store::{EntityRef, EventLog, EventPosition, StoredEvent};
 use cairn_tools::{
-    build_eval_score_request, build_initialize_request,
-    cancel_plugin_invocation, execute_eval_score, InMemoryPluginRegistry, PluginCapability,
-    PluginCapabilityVerification, PluginHost, PluginLifecycleSnapshot, PluginLogEntry,
+    build_eval_score_request,
+    cancel_plugin_invocation, execute_eval_score, InMemoryPluginRegistry, PluginCapability, PluginHost, PluginLifecycleSnapshot, PluginLogEntry,
     PluginManifest, PluginMetrics, PluginRegistry, PluginState, PluginToolDescriptor, StdioPluginHost,
 };
 use serde::de::DeserializeOwned;
@@ -5500,7 +5498,7 @@ async fn materialize_onboarding_template_handler(
 
 async fn get_settings_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let tenant_id = TenantId::new(DEFAULT_TENANT_ID);
-    let license_tier = state
+    let _license_tier = state
         .runtime
         .licenses
         .get_active(&tenant_id)
@@ -7022,7 +7020,7 @@ async fn suspend_worker_handler(
     State(state): State<Arc<AppState>>,
     tenant_scope: TenantScope,
     Path(id): Path<String>,
-    Json(body): Json<SuspendWorkerRequest>,
+    Json(_body): Json<SuspendWorkerRequest>,
 ) -> impl IntoResponse {
     match scoped_worker(state.as_ref(), tenant_scope.tenant_id(), &id).await {
         Ok(_) => {}
@@ -7741,7 +7739,7 @@ async fn spawn_subagent_run_handler(
         Err(err) => return runtime_error_response(err),
     }
 
-    let child_task_id = body
+    let _child_task_id = body
         .child_task_id
         .map(TaskId::new)
         .unwrap_or_else(|| TaskId::new(format!("task_subagent_{}", Uuid::new_v4())));
@@ -8856,7 +8854,7 @@ async fn list_task_dependencies_handler(
 async fn set_task_priority_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(body): Json<SetTaskPriorityRequest>,
+    Json(_body): Json<SetTaskPriorityRequest>,
 ) -> impl IntoResponse {
     let task_id = TaskId::new(id);
     // set_priority is not yet implemented in TaskService; return task as-is
@@ -10194,7 +10192,7 @@ struct RegisterModelRequest {
 }
 
 async fn register_provider_model_handler(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Path(connection_id): Path<String>,
     Json(body): Json<RegisterModelRequest>,
 ) -> impl IntoResponse {
@@ -11131,7 +11129,7 @@ async fn get_eval_dashboard_handler(
     Query(query): Query<OptionalProjectScopedQuery>,
 ) -> impl IntoResponse {
     let project_key = query.project();
-    let workspace_key = WorkspaceKey::new(
+    let _workspace_key = WorkspaceKey::new(
         query.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
         query.workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID),
     );
@@ -11637,7 +11635,7 @@ fn parse_ingest_job_state(status: &str) -> Option<IngestJobState> {
 
 async fn project_source_in_graph(
     state: &Arc<AppState>,
-    project: &ProjectKey,
+    _project: &ProjectKey,
     source_id: &SourceId,
 ) -> Result<(), String> {
     let projector = RetrievalGraphProjector::new(state.graph.clone());
@@ -11653,7 +11651,7 @@ async fn project_source_in_graph(
 
 async fn project_document_in_graph(
     state: &Arc<AppState>,
-    project: &ProjectKey,
+    _project: &ProjectKey,
     source_id: &SourceId,
     document_id: &KnowledgeDocumentId,
     chunk_ids: Vec<String>,
@@ -12598,7 +12596,7 @@ async fn memory_related_documents_handler(
     State(state): State<Arc<AppState>>,
     Path(document_id): Path<String>,
 ) -> impl IntoResponse {
-    let seed = match exportable_document_by_id(&state.document_store, &document_id) {
+    let _seed = match exportable_document_by_id(&state.document_store, &document_id) {
         Some(document) => document,
         None => {
             return AppApiError::new(
@@ -13891,7 +13889,7 @@ fn cors_layer(config: &BootstrapConfig) -> CorsLayer {
 fn config_socket_addr(config: &BootstrapConfig) -> Result<SocketAddr, String> {
     format!("{}:{}", config.listen_addr, config.listen_port)
         .parse::<SocketAddr>()
-        .map_err(|err| {
+        .map_err(|_err| {
             format!(
                 "invalid listen address {}:{}: :err",
                 config.listen_addr, config.listen_port

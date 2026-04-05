@@ -18,6 +18,12 @@ pub struct SseMemoryProposalHook {
     frames: std::sync::Mutex<Vec<cairn_api::sse::SseFrame>>,
 }
 
+impl Default for SseMemoryProposalHook {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SseMemoryProposalHook {
     pub fn new() -> Self {
         Self {
