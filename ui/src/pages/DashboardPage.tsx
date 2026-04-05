@@ -81,13 +81,22 @@ function DegradedBanner({ components }: { components: string[] }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
+  // Primary: fast real-time counts from /v1/stats (5s refresh).
+  const { data: stats, dataUpdatedAt: statsUpdatedAt } = useQuery({
+    queryKey: ["stats"],
+    queryFn: () => defaultApi.getStats(),
+    refetchInterval: 5_000,
+    retry: false,
+  });
+
+  // Fallback: richer dashboard payload (15s refresh) for fields not in stats.
   const { data, isLoading, isError, error, dataUpdatedAt } = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => defaultApi.getDashboard(),
     refetchInterval: 15_000,
   });
 
-  if (isError) {
+  if (isError && !stats) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-8">
         <ServerCrash size={32} className="text-red-500" />
@@ -99,9 +108,10 @@ export function DashboardPage() {
     );
   }
 
-  const runs      = data?.active_runs ?? 0;
-  const tasks     = data?.active_tasks ?? 0;
-  const approvals = data?.pending_approvals ?? 0;
+  // Prefer stats counts (faster); fall back to dashboard payload.
+  const runs      = stats?.active_runs      ?? data?.active_runs      ?? 0;
+  const tasks     = stats?.total_tasks      ?? data?.active_tasks     ?? 0;
+  const approvals = stats?.pending_approvals ?? data?.pending_approvals ?? 0;
   const failed    = data?.failed_runs_24h ?? 0;
 
   const runVariant:  StatCardVariant = runs      > 0 ? "info"    : "default";
@@ -109,7 +119,8 @@ export function DashboardPage() {
   const aprVariant:  StatCardVariant = approvals > 0 ? "warning" : "default";
   const failVariant: StatCardVariant = failed    > 0 ? "danger"  : "success";
 
-  const updatedAt = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : null;
+  const latestUpdate = statsUpdatedAt || dataUpdatedAt;
+  const updatedAt = latestUpdate ? new Date(latestUpdate).toLocaleTimeString() : null;
 
   return (
     <div className="h-full overflow-y-auto bg-zinc-950">

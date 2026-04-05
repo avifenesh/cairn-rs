@@ -253,6 +253,29 @@ export interface SourceQualityRecord {
   chunk_count: number;
 }
 
+// ── Recent events ─────────────────────────────────────────────────────────────
+
+/** One entry from GET /v1/events/recent — includes SSE sequence ID. */
+export interface RecentEvent {
+  seq: number;
+  event_type: string;
+  data: unknown;
+  timestamp: string;
+}
+
+// ── System stats ──────────────────────────────────────────────────────────────
+
+/** GET /v1/stats — real-time system-wide counters. */
+export interface SystemStats {
+  total_events: number;
+  total_sessions: number;
+  total_runs: number;
+  total_tasks: number;
+  active_runs: number;
+  pending_approvals: number;
+  uptime_seconds: number;
+}
+
 // ── Generic list response ─────────────────────────────────────────────────────
 
 /** Paginated list wrapper used by some endpoints */

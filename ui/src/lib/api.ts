@@ -237,6 +237,14 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/settings — deployment configuration. */
     getSettings: (): Promise<DeploymentSettings> => get("/v1/settings"),
 
+    /** GET /v1/events/recent — most recent N runtime events with sequence IDs. */
+    getRecentEvents: (limit = 50): Promise<import("./types").RecentEvent[]> =>
+      get(`/v1/events/recent?limit=${limit}`),
+
+    /** GET /v1/stats — real-time system-wide counters. */
+    getStats: (): Promise<import("./types").SystemStats> =>
+      get("/v1/stats"),
+
     // ── Providers ────────────────────────────────────────────────────────────
 
     /** GET /v1/providers/health — list provider health records. */

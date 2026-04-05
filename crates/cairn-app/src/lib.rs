@@ -15971,4 +15971,225 @@ mod tests {
         assert_eq!(row["success_rate"].as_f64().unwrap(), 1.0);
     }
 
+    // ── New endpoint tests ────────────────────────────────────────────────────
+
+    /// Helper: register a service-account token for DEFAULT_TENANT_ID.
+    fn register_token(state: &Arc<AppState>, token: &str) {
+        state.service_tokens.register(
+            token.to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "test".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new(DEFAULT_TENANT_ID)),
+            },
+        );
+    }
+
+    /// Helper: POST JSON to a path and return the response.
+    async fn post_json(
+        app: axum::Router,
+        path: &str,
+        token: &str,
+        body: serde_json::Value,
+    ) -> axum::response::Response {
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    /// Helper: GET a path and return parsed JSON body.
+    async fn get_json(
+        app: axum::Router,
+        path: &str,
+        token: &str,
+    ) -> serde_json::Value {
+        let resp = app.oneshot(
+            Request::builder()
+                .uri(path)
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "GET {path} returned non-200");
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).expect("response is valid JSON")
+    }
+
+    #[tokio::test]
+    async fn deny_approval_returns_rejected_decision() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "deny-token");
+
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let session_id = SessionId::new("sess_deny_test");
+        let run_id     = RunId::new("run_deny_test");
+        let appr_id    = ApprovalId::new("appr_deny_test");
+
+        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
+        state.runtime.runs.start(&project, &session_id, run_id.clone(), None).await.unwrap();
+        state.runtime.approvals
+            .request(&project, appr_id.clone(), Some(run_id), None, ApprovalRequirement::Required)
+            .await.unwrap();
+
+        let app = AppBootstrap::build_router(state);
+        let resp = post_json(
+            app,
+            "/v1/approvals/appr_deny_test/deny",
+            "deny-token",
+            serde_json::json!({}),
+        ).await;
+
+        assert_eq!(resp.status(), StatusCode::OK, "deny approval should return 200");
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        // The handler resolves with ApprovalDecision::Rejected
+        assert_eq!(
+            body["decision"].as_str().unwrap_or(""),
+            "rejected",
+            "denied approval must have decision = rejected"
+        );
+        assert_eq!(body["approval_id"], "appr_deny_test");
+    }
+
+    #[tokio::test]
+    async fn cancel_task_returns_canceled_state() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "cancel-token");
+
+        let project    = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let session_id = SessionId::new("sess_cancel_test");
+        let run_id     = RunId::new("run_cancel_test");
+        let task_id    = TaskId::new("task_cancel_test");
+
+        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
+        state.runtime.runs.start(&project, &session_id, run_id.clone(), None).await.unwrap();
+        state.runtime.tasks.submit(&project, task_id.clone(), None, None).await.unwrap();
+
+        let app = AppBootstrap::build_router(state);
+        let resp = post_json(
+            app,
+            "/v1/tasks/task_cancel_test/cancel",
+            "cancel-token",
+            serde_json::json!({}),
+        ).await;
+
+        assert_eq!(resp.status(), StatusCode::OK, "cancel task should return 200");
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        // TaskState::Canceled serialises as "canceled"
+        assert_eq!(
+            body["state"].as_str().unwrap_or(""),
+            "canceled",
+            "cancelled task must have state = canceled"
+        );
+        assert_eq!(body["task_id"], "task_cancel_test");
+    }
+
+    #[tokio::test]
+    async fn recent_events_returns_json_array() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "events-token");
+
+        let app = AppBootstrap::build_router(state);
+        let body = get_json(app, "/v1/events/recent?limit=10", "events-token").await;
+
+        // Must have items array and count field, even when empty.
+        assert!(body["items"].is_array(), "items must be a JSON array");
+        assert!(body["count"].is_number(), "count must be a number");
+        let count = body["count"].as_u64().unwrap_or(0);
+        let items_len = body["items"].as_array().unwrap().len() as u64;
+        assert_eq!(count, items_len, "count must match items length");
+        assert!(body["limit"].as_u64().unwrap_or(0) > 0, "limit must be positive");
+    }
+
+    #[tokio::test]
+    async fn recent_events_with_activity_returns_events() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "events2-token");
+
+        // Create some state to generate events.
+        let project    = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let session_id = SessionId::new("sess_events_test");
+        state.runtime.sessions.create(&project, session_id).await.unwrap();
+
+        let app = AppBootstrap::build_router(state);
+        let body = get_json(app, "/v1/events/recent?limit=50", "events2-token").await;
+
+        let items = body["items"].as_array().unwrap();
+        assert!(!items.is_empty(), "must have at least one event after session create");
+
+        // Each item must have required fields.
+        let first = &items[0];
+        assert!(first["event_type"].is_string(), "event_type must be a string");
+        assert!(first["stored_at"].is_number(), "stored_at must be a number");
+        assert!(first["position"].is_number(), "position must be a number");
+    }
+
+    #[tokio::test]
+    async fn stats_endpoint_returns_all_required_fields() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "stats-token");
+
+        let app = AppBootstrap::build_router(state);
+        let body = get_json(app, "/v1/stats", "stats-token").await;
+
+        // All fields must be present and non-negative.
+        for field in &[
+            "total_events", "total_sessions", "total_runs",
+            "total_tasks", "active_runs", "pending_approvals", "uptime_seconds",
+        ] {
+            assert!(
+                body[field].is_number(),
+                "field '{}' must be a number, got: {:?}",
+                field, body[field]
+            );
+            assert!(
+                body[field].as_u64().is_some(),
+                "field '{}' must be >= 0",
+                field
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn stats_endpoint_reflects_created_sessions_and_runs() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "stats2-token");
+
+        let project    = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let session_id = SessionId::new("sess_stats_test");
+        let run_id     = RunId::new("run_stats_test");
+
+        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
+        state.runtime.runs.start(&project, &session_id, run_id, None).await.unwrap();
+
+        let app = AppBootstrap::build_router(state);
+        let body = get_json(app, "/v1/stats", "stats2-token").await;
+
+        assert!(
+            body["total_events"].as_u64().unwrap_or(0) >= 2,
+            "at least 2 events expected (session + run create)"
+        );
+        assert!(
+            body["total_sessions"].as_u64().unwrap_or(0) >= 1,
+            "at least 1 session expected"
+        );
+        assert!(
+            body["active_runs"].as_u64().unwrap_or(0) >= 1,
+            "at least 1 active run expected"
+        );
+    }
+
+
 }
