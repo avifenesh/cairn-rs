@@ -12,7 +12,7 @@
 #   docker run -p 3000:3000 -e CAIRN_DB=sqlite -v /data:/data cairn-rs
 #
 # Team mode (requires auth token):
-#   docker run -p 3000:3000 -e CAIRN_ADMIN_TOKEN=<token> cairn-rs --mode team
+#   docker run -p 3000:3000 -e CAIRN_ADMIN_TOKEN=<token> -e CAIRN_MODE=team cairn-rs
 
 # ── Stage 1: builder ──────────────────────────────────────────────────────────
 FROM rust:1.82-bookworm AS builder
@@ -64,12 +64,19 @@ RUN cargo build --release --bin cairn-app
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
-# Install ca-certificates (for TLS outbound calls to LLM providers) and
-# libssl (required by rustls/openssl-sys at runtime on some builds).
+LABEL org.opencontainers.image.title="Cairn" \
+      org.opencontainers.image.description="Self-hostable control plane for production AI agents" \
+      org.opencontainers.image.source="https://github.com/avifenesh/cairn-rs"
+
+# Install runtime dependencies:
+#   ca-certificates — TLS outbound calls to LLM providers
+#   libssl3         — rustls/openssl-sys runtime requirement
+#   curl            — HEALTHCHECK probe
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
-        libssl3 && \
+        libssl3 \
+        curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Non-root user for defence in depth.
@@ -77,31 +84,40 @@ RUN useradd --system --no-create-home --shell /usr/sbin/nologin cairn
 
 WORKDIR /app
 
+# Copy only the release binary — no debug artifacts, no build cache.
 COPY --from=builder /build/target/release/cairn-app /app/cairn-app
-
-# Ensure the binary is executable.
-RUN chmod +x /app/cairn-app
 
 USER cairn
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-# CAIRN_PORT   — HTTP listen port (cairn-app reads --port from CLI; this env
-#                var is used by the ENTRYPOINT shell form below).
+# CAIRN_PORT        — HTTP listen port.
 ENV CAIRN_PORT=3000
 
-# CAIRN_DB     — Storage backend: "memory" (default) or "sqlite".
-ENV CAIRN_DB=memory
-
-# CAIRN_ADDR   — Bind address. 0.0.0.0 binds all interfaces (Docker default).
+# CAIRN_ADDR        — Bind address. 0.0.0.0 binds all interfaces (Docker default).
 ENV CAIRN_ADDR=0.0.0.0
+
+# CAIRN_MODE        — Startup mode: "local" (no auth) or "team" (requires CAIRN_ADMIN_TOKEN).
+ENV CAIRN_MODE=local
+
+# CAIRN_ADMIN_TOKEN — Bearer token for the admin account. Required in team mode.
+ENV CAIRN_ADMIN_TOKEN=dev-admin-token
+
+# CAIRN_DB          — Storage backend: "memory" (default) or path to SQLite file.
+ENV CAIRN_DB=memory
 
 EXPOSE 3000
 
-# Use shell form so ENV vars expand.  The app also supports --mode, --port,
-# and --addr flags; pass them as CMD overrides:
-#   docker run cairn-rs --mode team --port 8080
-ENTRYPOINT ["/app/cairn-app", "--addr", "0.0.0.0", "--port", "3000"]
+# Health check against the liveness endpoint.
+# --start-period gives the process time to initialise before failures count.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS "http://localhost:${CAIRN_PORT}/health" || exit 1
 
-# Default CMD: local in-memory mode (no auth required).
-CMD ["--mode", "local"]
+# Shell-form ENTRYPOINT so ENV vars expand into the command.
+# Users can append flags via CMD: docker run cairn-rs --mode team --port 8080
+ENTRYPOINT ["/bin/sh", "-c", \
+    "exec /app/cairn-app --addr \"$CAIRN_ADDR\" --port \"$CAIRN_PORT\" --mode \"$CAIRN_MODE\" \"$@\"", \
+    "--"]
+
+# Default CMD: empty (all defaults come from ENV above).
+CMD []
