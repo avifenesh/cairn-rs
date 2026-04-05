@@ -9,6 +9,7 @@ import { ProvidersPage } from './pages/ProvidersPage';
 import { RunsPage } from './pages/RunsPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { TracesPage } from './pages/TracesPage';
 import { getStoredToken } from './lib/api';
 
 export default function App() {
