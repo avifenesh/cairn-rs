@@ -11313,34 +11313,15 @@ async fn get_eval_asset_export_handler(
     Path(asset_id): Path<String>,
 ) -> impl IntoResponse {
     let prompt_asset_id = PromptAssetId::new(asset_id);
-    // Export all completed runs for this asset (filter by asset_id).
+    // Export runs for this asset, filtered by project_id from query params.
     let project_id = ProjectId::new(query.project_id.as_str());
-    let all_runs = state.evals.export_runs(&project_id, 10000);
-    let runs: Vec<_> = if all_runs.is_empty() {
-        // Fallback: filter by asset across all project_ids using trend data
-        state.evals.get_trend("", &prompt_asset_id, "task_success_rate".into(), 9999)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|_| ())
-            .collect()
-    } else {
-        all_runs.iter().filter(|r| r.prompt_asset_id.as_ref() == Some(&prompt_asset_id)).map(|_| ()).collect()
-    };
-    let _ = runs;
-
-    // Build CSV from completed runs for this asset_id.
-    let runs_for_asset = {
-        let mut v: Vec<_> = state.evals.export_runs(&ProjectId::new("project_alpha"), 10000)
-            .into_iter()
-            .chain(state.evals.export_runs(&project_id, 10000))
-            .filter(|r| r.prompt_asset_id.as_ref() == Some(&prompt_asset_id))
-            .map(|r| (r.eval_run_id.as_str().to_owned(), r))
-            .collect::<std::collections::HashMap<_, _>>() // dedup by run_id
-            .into_values()
-            .collect();
-        v.sort_by_key(|r: &cairn_evals::scorecards::EvalRun| r.eval_run_id.as_str().to_owned());
-        v
-    };
+    let mut runs_for_asset: Vec<cairn_evals::scorecards::EvalRun> = state
+        .evals
+        .export_runs(&project_id, 10000)
+        .into_iter()
+        .filter(|r| r.prompt_asset_id.as_ref() == Some(&prompt_asset_id))
+        .collect();
+    runs_for_asset.sort_by_key(|r| r.eval_run_id.as_str().to_owned());
 
     if query.format.as_deref() == Some("csv") {
         let mut csv = String::from(
