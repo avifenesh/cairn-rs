@@ -148,6 +148,21 @@ impl DefaultFeatureGate {
                 required_entitlement: None,
                 flag: FeatureFlag::GeneralAvailability,
             },
+            CapabilityMapping {
+                feature_name: "eval_matrices".to_owned(),
+                required_entitlement: None,
+                flag: FeatureFlag::GeneralAvailability,
+            },
+            CapabilityMapping {
+                feature_name: "multi_provider".to_owned(),
+                required_entitlement: None,
+                flag: FeatureFlag::GeneralAvailability,
+            },
+            CapabilityMapping {
+                feature_name: "credential_management".to_owned(),
+                required_entitlement: None,
+                flag: FeatureFlag::GeneralAvailability,
+            },
         ])
     }
 }

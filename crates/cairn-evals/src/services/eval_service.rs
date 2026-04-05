@@ -267,13 +267,26 @@ impl EvalRunService {
             .collect()
     }
 
-    /// Record a score for a run (alias of complete_run with no plugin metrics).
+    /// Record a score for a run without completing it.
     pub fn record_score(
         &self,
         eval_run_id: &EvalRunId,
         metrics: crate::matrices::EvalMetrics,
     ) -> Result<EvalRun, EvalError> {
-        self.complete_run(eval_run_id, metrics, None)
+        let mut state = self.state.lock().unwrap();
+        let run = state
+            .runs
+            .get_mut(eval_run_id.as_str())
+            .ok_or_else(|| EvalError::NotFound(eval_run_id.to_string()))?;
+        if run.status != crate::EvalRunStatus::Running {
+            return Err(EvalError::InvalidTransition {
+                from: run.status,
+                to: crate::EvalRunStatus::Running,
+            });
+        }
+        // Update metrics only — do not change status.
+        run.metrics = metrics;
+        Ok(run.clone())
     }
 
     /// Stub: returns an async provider routing matrix.

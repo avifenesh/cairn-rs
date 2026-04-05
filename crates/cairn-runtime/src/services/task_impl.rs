@@ -392,4 +392,8 @@ where
     ) -> Result<Vec<TaskRecord>, RuntimeError> {
         Ok(self.store.list_expired_leases(now, limit).await?)
     }
+
+    async fn release_lease(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+        self.transition_task(task_id, TaskState::Queued, None).await
+    }
 }

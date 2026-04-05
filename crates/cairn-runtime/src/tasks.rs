@@ -121,6 +121,9 @@ pub trait TaskService: Send + Sync {
         now: u64,
         limit: usize,
     ) -> Result<Vec<TaskRecord>, RuntimeError>;
+
+    /// Release a task lease (leased -> queued), clearing lease_owner.
+    async fn release_lease(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
 }
 
 #[cfg(test)]

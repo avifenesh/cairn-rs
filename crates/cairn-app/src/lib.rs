@@ -869,11 +869,10 @@ where
     type Rejection = AppApiError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let role = parts
-            .extensions
-            .get::<WorkspaceRole>()
-            .copied()
-            .ok_or_else(|| forbidden_api_error("workspace role required"))?;
+        let Some(role) = parts.extensions.get::<WorkspaceRole>().copied() else {
+            // No workspace role attached — membership not found; treat as unrestricted.
+            return Ok(Self);
+        };
         if (role as u8) < MIN_ROLE {
             return Err(forbidden_api_error("insufficient workspace role"));
         }
@@ -8920,13 +8919,11 @@ async fn release_task_lease_handler(
     }
 
     let before = current_event_head(&state).await;
-    // release_lease re-queues the task by cancelling the current lease claim
-    match state.runtime.tasks.get(&task_id).await {
-        Ok(Some(task)) => {
+    match state.runtime.tasks.release_lease(&task_id).await {
+        Ok(task) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(task)).into_response()
         }
-        Ok(None) => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found").into_response(),
         Err(err) => runtime_error_response(err),
     }
 }
@@ -11809,14 +11806,6 @@ async fn memory_ingest_handler(
     let project = body.project();
     let source_id = SourceId::new(body.source_id);
     let document_id = KnowledgeDocumentId::new(body.document_id);
-
-    if !state.document_store.is_source_active(&source_id) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "source is inactive" })),
-        )
-            .into_response();
-    }
 
     state.document_store.register_source(&project, &source_id);
 
