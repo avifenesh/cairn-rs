@@ -3636,34 +3636,33 @@ impl AppBootstrap {
             // Dynamic-path POST/PUT/DELETE routes that cannot go through the catalog fold
             // because catalog_path_to_axum(:id → {id}) produces a static literal in matchit 0.7.
             .route("/v1/admin/tenants/:id/compact-event-log", post(compact_event_log_handler))
-            .route("/v1/admin/tenants/:id/snapshot", post(create_tenant_snapshot_handler))
-            .route("/v1/admin/tenants/:id/restore", post(restore_tenant_snapshot_handler))
+            .route("/v1/admin/tenants/:id/snapshot", post(create_snapshot_handler))
+            .route("/v1/admin/tenants/:id/restore", post(restore_from_snapshot_handler))
             .route("/v1/admin/tenants/:tenant_id/workspaces", post(create_workspace_handler))
             .route("/v1/admin/tenants/:tenant_id/operator-profiles", post(create_operator_profile_handler))
             .route("/v1/admin/tenants/:tenant_id/credentials", post(store_credential_handler))
-            .route("/v1/admin/tenants/:tenant_id/credentials/:id", delete(delete_credential_handler))
+            .route("/v1/admin/tenants/:tenant_id/credentials/:id", delete(revoke_credential_handler))
             .route("/v1/admin/workspaces/:workspace_id/projects", post(create_project_handler))
             .route("/v1/admin/workspaces/:workspace_id/members", post(add_workspace_member_handler))
             .route("/v1/admin/workspaces/:workspace_id/members/:id", delete(remove_workspace_member_handler))
-            .route("/v1/admin/workspaces/:id/shares", post(share_resource_handler))
-            .route("/v1/admin/workspaces/:id/shares/:share_id", delete(revoke_resource_share_handler))
-            .route("/v1/admin/operators/:id/notifications", post(send_notification_handler))
+            .route("/v1/admin/workspaces/:id/shares", post(create_workspace_share_handler))
+            .route("/v1/admin/workspaces/:id/shares/:share_id", delete(revoke_workspace_share_handler))
+            .route("/v1/admin/operators/:id/notifications", post(set_operator_notifications_handler))
             .route("/v1/admin/notifications/:id/retry", post(retry_notification_handler))
             .route("/v1/settings/defaults/:scope/:scope_id/:key", put(set_default_setting_handler).delete(clear_default_setting_handler))
             .route("/v1/prompts/assets/:id/versions", post(create_prompt_version_handler))
             .route("/v1/prompts/releases/:id/transition", post(transition_prompt_release_handler))
             .route("/v1/prompts/releases/:id/activate", post(activate_prompt_release_handler))
             .route("/v1/prompts/releases/:id/rollback", post(rollback_prompt_release_handler))
-            .route("/v1/prompts/releases/:id/rollout", post(start_rollout_handler))
-            .route("/v1/prompts/releases/:id/request-approval", post(request_approval_for_release_handler))
-            .route("/v1/approval-policies", post(create_guardrail_policy_handler))
+            .route("/v1/prompts/releases/:id/rollout", post(start_prompt_rollout_handler))
+            .route("/v1/prompts/releases/:id/request-approval", post(request_approval_handler))
             .route("/v1/approvals/:id/delegate", post(delegate_approval_handler))
-            .route("/v1/approvals/:id/reject", post(deny_approval_handler))
+            .route("/v1/approvals/:id/reject", post(reject_approval_handler))
             .route("/v1/runs/:id/cost-alert", post(set_run_cost_alert_handler))
             .route("/v1/runs/:id/sla", post(set_run_sla_handler))
             .route("/v1/runs/:id/diagnose", post(diagnose_run_handler))
             .route("/v1/runs/:id/intervene", post(intervene_run_handler))
-            .route("/v1/runs/:id/checkpoint", post(record_checkpoint_handler))
+            .route("/v1/runs/:id/checkpoint", post(save_checkpoint_handler))
             .route("/v1/tool-invocations/:id/cancel", post(cancel_tool_invocation_handler))
             .route("/v1/plugins/:id/eval-score", post(plugin_eval_score_handler))
             .route("/v1/plugins/:id", delete(unregister_plugin_handler))
@@ -3678,7 +3677,7 @@ impl AppBootstrap {
             .route("/v1/ingest/jobs/:id/fail", post(fail_ingest_job_handler))
             .route("/v1/channels/:id/send", post(send_channel_message_handler))
             .route("/v1/channels/:id/consume", post(consume_channel_message_handler))
-            .route("/v1/providers/:id/health-check", post(check_provider_health_handler))
+            .route("/v1/providers/:id/health-check", post(manual_provider_health_check_handler))
             .route("/v1/providers/:id/recover", post(recover_provider_handler))
             .route("/v1/providers/pools/:id/connections", post(add_pool_connection_handler))
             .route("/v1/providers/pools/:id/connections/:conn_id", delete(remove_pool_connection_handler))
@@ -13908,6 +13907,31 @@ where
 {
     bootstrap.start(config)
 }
+
+// ── Stub handlers for routes added to catalog but not yet implemented ───────
+
+macro_rules! stub_handler {
+    ($name:ident) => {
+        async fn $name() -> impl IntoResponse {
+            (StatusCode::NOT_IMPLEMENTED, Json(serde_json::json!({"error": "not_implemented", "message": stringify!($name)})))
+        }
+    };
+}
+
+stub_handler!(check_provider_health_handler);
+stub_handler!(compare_eval_run_baseline_handler);
+stub_handler!(create_tenant_snapshot_handler);
+stub_handler!(delete_credential_handler);
+stub_handler!(deny_approval_handler);
+stub_handler!(record_checkpoint_handler);
+stub_handler!(request_approval_for_release_handler);
+stub_handler!(restore_tenant_snapshot_handler);
+stub_handler!(revoke_resource_share_handler);
+stub_handler!(score_eval_run_with_rubric_handler);
+stub_handler!(send_notification_handler);
+stub_handler!(share_resource_handler);
+stub_handler!(start_rollout_handler);
+stub_handler!(unregister_plugin_handler);
 
 #[cfg(test)]
 mod tests {
