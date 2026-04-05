@@ -1873,6 +1873,8 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/sessions/:id/llm-traces", get(list_session_traces_handler))
         // Admin routes
         .route("/v1/admin/tenants", post(create_tenant_handler))
+        // Ollama local LLM provider
+        .route("/v1/providers/ollama/models", get(ollama_models_handler))
         // DB diagnostics
         .route("/v1/db/status", get(db_status_handler))
         .route("/v1/sources", get(list_sources_handler))
