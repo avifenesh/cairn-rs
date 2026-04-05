@@ -1513,11 +1513,55 @@ impl CreateProviderBindingRequest {
     }
 }
 
+/// Flexible rule shape accepted by the create-route-policy endpoint.
+///
+/// The API accepts both the canonical `RoutePolicyRule` format (rule_id,
+/// policy_id, priority) and a richer business-logic shape that operators
+/// send from the UI/CLI (capability, preferred_model_ids, etc.).
+/// Unknown fields are silently ignored so both shapes deserialize correctly.
+#[derive(Clone, Debug, serde::Deserialize)]
+struct CreateRoutePolicyRuleRequest {
+    #[serde(default)]
+    rule_id: String,
+    #[serde(default)]
+    policy_id: String,
+    #[serde(default)]
+    priority: u32,
+    #[serde(default)]
+    description: Option<String>,
+    // Richer operator-facing fields (ignored in domain mapping but must not cause parse failures).
+    #[serde(default)]
+    capability: Option<String>,
+    #[serde(default)]
+    preferred_model_ids: Vec<String>,
+    #[serde(default)]
+    fallback_model_ids: Vec<String>,
+    #[serde(default)]
+    max_cost_micros: Option<u64>,
+    #[serde(default)]
+    require_provider_ids: Vec<String>,
+}
+
+impl From<CreateRoutePolicyRuleRequest> for RoutePolicyRule {
+    fn from(r: CreateRoutePolicyRuleRequest) -> Self {
+        Self {
+            rule_id: if r.rule_id.is_empty() {
+                r.capability.clone().unwrap_or_else(|| "rule".to_owned())
+            } else {
+                r.rule_id
+            },
+            policy_id: r.policy_id,
+            priority: r.priority,
+            description: r.description.or_else(|| r.capability),
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Deserialize)]
 struct CreateRoutePolicyRequest {
     tenant_id: String,
     name: String,
-    rules: Vec<RoutePolicyRule>,
+    rules: Vec<CreateRoutePolicyRuleRequest>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -12522,21 +12566,25 @@ async fn memory_related_documents_handler(
         }
     };
 
-    let related = related_documents_for::<InMemoryRetrieval>(&cairn_domain::KnowledgeDocumentId::new(&document_id), 20).await;
+    // Query the graph for document nodes linked to this seed document.
+    let neighbors = state
+        .graph
+        .neighbors(&document_id, None, TraversalDirection::Upstream, 20)
+        .await
+        .unwrap_or_default();
+
     let documents = state.document_store.exportable_documents();
     let by_id: HashMap<String, cairn_memory::in_memory::ExportableDocument> = documents
         .into_iter()
         .map(|doc| (doc.document_id.to_string(), doc))
         .collect();
 
-    let items = related
+    let items = neighbors
         .into_iter()
-        .filter_map(|related_id: cairn_domain::KnowledgeDocumentId| {
-            let doc = by_id.get(related_id.as_str())?;
-            Some(memory_item_from_exportable_document(
-                doc,
-                None,
-            ))
+        .filter_map(|(edge, node)| {
+            let doc = by_id.get(&node.node_id)?;
+            let relationship = Some(format!("{:?}", edge.kind).to_lowercase());
+            Some(memory_item_from_exportable_document(doc, relationship))
         })
         .collect::<Vec<_>>();
 
@@ -13206,10 +13254,11 @@ async fn create_route_policy_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateRoutePolicyRequest>,
 ) -> impl IntoResponse {
+    let domain_rules: Vec<RoutePolicyRule> = body.rules.into_iter().map(Into::into).collect();
     match state
         .runtime
         .route_policies
-        .create(TenantId::new(body.tenant_id), body.name, body.rules)
+        .create(TenantId::new(body.tenant_id), body.name, domain_rules)
         .await
     {
         Ok(record) => (StatusCode::CREATED, Json(record)).into_response(),
