@@ -16,6 +16,8 @@ import { SettingsPage } from './pages/SettingsPage';
 import { TasksPage } from './pages/TasksPage';
 import { TracesPage } from './pages/TracesPage';
 import { EvalsPage } from './pages/EvalsPage';
+import { PluginsPage } from './pages/PluginsPage';
+import { SourcesPage } from './pages/SourcesPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { GraphPage }   from './pages/GraphPage';
 import { ApiDocsPage } from './pages/ApiDocsPage';
@@ -49,6 +51,8 @@ function renderRoute(route: Route): React.ReactNode {
     case 'costs':      return <Guarded name="Costs"><CostsPage /></Guarded>;
     case 'traces':     return <Guarded name="Traces"><TracesPage /></Guarded>;
     case 'evals':      return <Guarded name="Evaluations"><EvalsPage /></Guarded>;
+    case 'plugins':    return <Guarded name="Plugins"><PluginsPage /></Guarded>;
+    case 'sources':    return <Guarded name="Sources"><SourcesPage /></Guarded>;
     case 'graph':      return <Guarded name="Graph"><GraphPage /></Guarded>;
     case 'api-docs':   return <Guarded name="API Docs"><ApiDocsPage /></Guarded>;
     case 'audit-log':  return <Guarded name="Audit Log"><AuditLogPage /></Guarded>;

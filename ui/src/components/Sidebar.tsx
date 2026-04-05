@@ -9,6 +9,7 @@ import {
   BookOpen,
   Network,
   Play,
+  Puzzle,
   Settings,
   Shield,
   Square,
@@ -31,7 +32,9 @@ export type NavPage =
   | 'memory'
   | 'costs'
   | 'graph'
+  | 'sources'
   | 'providers'
+  | 'plugins'
   | 'playground'
   | 'audit-log'
   | 'evals'
@@ -72,6 +75,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'traces',    label: 'Traces',    icon: Waves         },
       { id: 'memory',    label: 'Memory',    icon: Database      },
+      { id: 'sources',   label: 'Sources',   icon: Database      },
       { id: 'costs',     label: 'Costs',     icon: Coins         },
       { id: 'evals',     label: 'Evals',     icon: FlaskConical  },
       { id: 'graph',     label: 'Graph',     icon: Network       },
@@ -82,6 +86,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Infrastructure',
     items: [
       { id: 'providers',  label: 'Providers',  icon: Zap      },
+      { id: 'plugins',    label: 'Plugins',    icon: Puzzle   },
       { id: 'playground', label: 'Playground', icon: Terminal },
       { id: 'api-docs',   label: 'API Docs',   icon: BookOpen },
       { id: 'settings',   label: 'Settings',   icon: Settings },

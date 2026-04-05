@@ -87,12 +87,13 @@ async function apiFetch<T>(
 // ── API client factory ────────────────────────────────────────────────────────
 
 export function createApiClient(config: ApiClientConfig) {
-  const get = <T>(path: string) => apiFetch<T>(config, path, { method: "GET" });
+  const get  = <T>(path: string) => apiFetch<T>(config, path, { method: "GET" });
   const post = <T>(path: string, body?: unknown) =>
     apiFetch<T>(config, path, {
       method: "POST",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+  const del  = <T>(path: string) => apiFetch<T>(config, path, { method: "DELETE" });
 
   return {
     // ── Health (public — no auth needed but token is included anyway) ─────────
@@ -346,6 +347,28 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/sources/:id/quality — quality metrics for a single source. */
     getSourceQuality: (sourceId: string): Promise<import("./types").SourceQualityRecord> =>
       get(`/v1/sources/${encodeURIComponent(sourceId)}/quality`),
+
+    // ── Plugins ───────────────────────────────────────────────────────────────
+
+    /** GET /v1/plugins — list all registered plugins. */
+    getPlugins: (): Promise<import("./types").ListResponse<import("./types").PluginManifest>> =>
+      get("/v1/plugins"),
+
+    /** GET /v1/plugins/:id — full plugin detail with lifecycle + metrics. */
+    getPlugin: (id: string): Promise<import("./types").PluginDetailResponse> =>
+      get(`/v1/plugins/${encodeURIComponent(id)}`),
+
+    /** POST /v1/plugins — register a new plugin from a manifest. */
+    registerPlugin: (manifest: Record<string, unknown>): Promise<import("./types").PluginManifest> =>
+      post("/v1/plugins", manifest),
+
+    /** DELETE /v1/plugins/:id — unregister a plugin. */
+    deletePlugin: (id: string): Promise<{ ok: boolean }> =>
+      del(`/v1/plugins/${encodeURIComponent(id)}`),
+
+    /** GET /v1/plugins/:id/logs — recent log entries for a plugin. */
+    getPluginLogs: (id: string): Promise<{ entries: import("./types").PluginLogEntry[] }> =>
+      get(`/v1/plugins/${encodeURIComponent(id)}/logs`),
   };
 }
 

@@ -4,6 +4,7 @@ import { defaultApi } from '../lib/api';
 import type { SystemStatus } from '../lib/types';
 import { clsx } from 'clsx';
 import { useTheme, type Theme } from '../hooks/useTheme';
+import { Breadcrumb, type BreadcrumbItem } from './Breadcrumb';
 
 function formatUptime(secs: number): string {
   if (secs < 60)   return `${secs}s`;
@@ -34,11 +35,11 @@ const THEME_NEXT_LABEL: Record<Theme, string> = {
 };
 
 interface TopBarProps {
-  title: string;
+  breadcrumbs: BreadcrumbItem[];
   onMenuClick?: () => void;
 }
 
-export function TopBar({ title, onMenuClick }: TopBarProps) {
+export function TopBar({ breadcrumbs, onMenuClick }: TopBarProps) {
   const [status, setStatus]   = useState<SystemStatus | null>(null);
   const [healthy, setHealthy] = useState<boolean | null>(null);
   const { theme, cycleTheme } = useTheme();
@@ -61,7 +62,7 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
   const ThemeIcon = THEME_ICON[theme];
 
   return (
-    <header className="flex items-center h-11 px-4 bg-white dark:bg-zinc-950 border-b border-gray-200 dark:border-zinc-800 shrink-0 gap-3">
+    <header className="flex items-center h-11 px-4 bg-white dark:bg-zinc-950 border-b border-gray-200 dark:border-zinc-800 shrink-0 gap-3 min-w-0">
       {/* Hamburger — visible on tablet/mobile only */}
       <button
         onClick={onMenuClick}
@@ -71,7 +72,8 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
         <Menu size={16} />
       </button>
 
-      <h1 className="text-[13px] font-medium text-gray-900 dark:text-zinc-200 truncate">{title}</h1>
+      {/* Breadcrumb — replaces the plain title */}
+      <Breadcrumb items={breadcrumbs} className="flex-1 min-w-0" />
 
       <div className="ml-auto flex items-center gap-3 shrink-0">
         {/* Theme toggle */}
