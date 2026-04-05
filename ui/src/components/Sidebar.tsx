@@ -7,6 +7,7 @@ import {
   MonitorPlay,
   Play,
   Settings,
+  Shield,
   Square,
   Terminal,
   Waves,
@@ -28,6 +29,7 @@ export type NavPage =
   | 'costs'
   | 'providers'
   | 'playground'
+  | 'audit-log'
   | 'settings';
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
@@ -62,9 +64,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Observability',
     items: [
-      { id: 'traces', label: 'Traces', icon: Waves    },
-      { id: 'memory', label: 'Memory', icon: Database },
-      { id: 'costs',  label: 'Costs',  icon: Coins    },
+      { id: 'traces',    label: 'Traces',    icon: Waves    },
+      { id: 'memory',    label: 'Memory',    icon: Database },
+      { id: 'costs',     label: 'Costs',     icon: Coins    },
+      { id: 'audit-log', label: 'Audit Log', icon: Shield   },
     ],
   },
   {

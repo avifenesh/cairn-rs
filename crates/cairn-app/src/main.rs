@@ -1203,6 +1203,39 @@ async fn create_tenant_handler(
     }
 }
 
+// ── Audit log handler ─────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct AuditLogQuery {
+    limit:    Option<usize>,
+    since_ms: Option<u64>,
+}
+
+/// `GET /v1/admin/audit-log?limit=100` — list audit log entries for the operator's tenant.
+async fn list_audit_log_handler(
+    State(state): State<AppState>,
+    Query(query): Query<AuditLogQuery>,
+) -> impl axum::response::IntoResponse {
+    let limit = query.limit.unwrap_or(100).min(500);
+    // Use the default tenant scope for the production router.
+    let tenant_id = cairn_domain::TenantId::new("default_tenant");
+    match AuditLogReadModel::list_by_tenant(
+        state.runtime.store.as_ref(),
+        &tenant_id,
+        query.since_ms,
+        limit,
+    )
+    .await
+    {
+        Ok(items) => (
+            axum::http::StatusCode::OK,
+            axum::Json(serde_json::json!({ "items": items, "has_more": items.len() >= limit })),
+        )
+            .into_response(),
+        Err(e) => internal_error(e.to_string()).into_response(),
+    }
+}
+
 // ── Run lifecycle write handlers ──────────────────────────────────────────────
 
 #[derive(serde::Deserialize, Default)]

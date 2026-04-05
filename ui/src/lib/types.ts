@@ -303,3 +303,25 @@ export interface LlmCallTrace {
 export interface TracesResponse {
   traces: LlmCallTrace[];
 }
+
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+
+export type AuditOutcome = 'success' | 'failure';
+
+/** One entry from GET /v1/admin/audit-log */
+export interface AuditRecord {
+  entry_id: string;
+  tenant_id: string;
+  actor_id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  outcome: AuditOutcome;
+  occurred_at_ms: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface AuditLogResponse {
+  items: AuditRecord[];
+  has_more: boolean;
+}

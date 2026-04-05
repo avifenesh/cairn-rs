@@ -15,6 +15,7 @@ import { PlaygroundPage } from './pages/PlaygroundPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TasksPage } from './pages/TasksPage';
 import { TracesPage } from './pages/TracesPage';
+import { AuditLogPage } from './pages/AuditLogPage';
 import { getStoredToken } from './lib/api';
 import type { NavPage } from './components/Sidebar';
 import type { Route } from './components/Layout';
