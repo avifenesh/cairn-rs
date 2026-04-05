@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
+import { GanttView } from "../components/TimelineView";
 import { defaultApi } from "../lib/api";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -191,6 +192,17 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
             sub={cost && cost.provider_calls > 0 ? `${cost.provider_calls} provider call${cost.provider_calls !== 1 ? "s" : ""}` : undefined}
           />
         </div>
+
+        {/* Task Gantt chart */}
+        {tasks && tasks.length > 0 && run && (
+          <Section title="Task Execution Timeline">
+            <GanttView
+              runStart={run.created_at}
+              runEnd={run && ["completed","failed","canceled"].includes(run.state) ? run.updated_at : undefined}
+              tasks={tasks}
+            />
+          </Section>
+        )}
 
         {/* Tasks table */}
         <Section title="Tasks">

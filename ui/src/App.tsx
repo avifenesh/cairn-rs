@@ -2,6 +2,7 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { RequestLogProvider } from './components/RequestLogContext';
 import { LoginPage } from './pages/LoginPage';
 // ── Eagerly-loaded pages (always needed on first paint) ───────────────────────
 import { DashboardPage } from './pages/DashboardPage';
@@ -194,5 +195,9 @@ export default function App() {
     return <LoginPage onLogin={() => setAuthState('authenticated')} />;
   }
 
-  return <Layout routeRenderer={renderRoute} onLogout={handleLogout} />;
+  return (
+    <RequestLogProvider>
+      <Layout routeRenderer={renderRoute} onLogout={handleLogout} />
+    </RequestLogProvider>
+  );
 }

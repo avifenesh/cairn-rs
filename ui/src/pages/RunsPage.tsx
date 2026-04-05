@@ -1,13 +1,16 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { X, RefreshCw, ChevronRight, Download } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { X, RefreshCw, ChevronRight, Download, Plus, Loader2, LayoutList, GanttChart } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
 import { DataTable } from "../components/DataTable";
 import { useTableKeyboard } from "../hooks/useTableKeyboard";
+import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import type { RunRecord, RunState } from "../lib/types";
+import { TimelineView, ZoomSelector } from "../components/TimelineView";
+import type { ZoomLevel } from "../components/TimelineView";
 
 function fmtTime(ms: number) {
   return new Date(ms).toLocaleString(undefined, {
@@ -118,11 +121,124 @@ function Skeleton() {
   </div>;
 }
 
+// ── Batch create modal ────────────────────────────────────────────────────────
+
+interface BatchCreateModalProps {
+  onClose: () => void;
+  onDone: () => void;
+}
+
+function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
+  const [count, setCount]       = useState(3);
+  const [sessionId, setSession] = useState("session_1");
+  const [prefix, setPrefix]     = useState("run_batch_");
+  const toast = useToast();
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const runs = Array.from({ length: count }, (_, i) => ({
+        session_id:   sessionId.trim() || "session_1",
+        run_id:       prefix.trim() ? `${prefix.trim()}${i + 1}` : undefined,
+      }));
+      return defaultApi.batchCreateRuns(runs);
+    },
+    onSuccess: result => {
+      const ok  = result.results.filter(r => r.ok).length;
+      const bad = result.results.filter(r => !r.ok).length;
+      if (ok > 0)  toast.success(`Created ${ok} run${ok !== 1 ? "s" : ""}.`);
+      if (bad > 0) toast.error(`${bad} run${bad !== 1 ? "s" : ""} failed to create.`);
+      onDone();
+    },
+    onError: () => toast.error("Batch create failed."),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="w-full max-w-sm rounded-lg bg-zinc-900 border border-zinc-800 shadow-xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <h2 className="text-[13px] font-medium text-zinc-200">Batch Create Runs</h2>
+          <button onClick={onClose} className="p-1 rounded text-zinc-600 hover:text-zinc-300 transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Form */}
+        <div className="px-4 py-4 space-y-4">
+          <div>
+            <label className="block text-[11px] text-zinc-500 mb-1">Number of runs</label>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={count}
+              onChange={e => setCount(Math.max(1, Math.min(50, Number(e.target.value))))}
+              className="w-full rounded border border-zinc-700 bg-zinc-800 text-zinc-200 text-[13px]
+                         px-3 py-2 focus:outline-none focus:border-indigo-500"
+            />
+            <p className="mt-1 text-[10px] text-zinc-600">Maximum 50 per batch</p>
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-zinc-500 mb-1">Session ID</label>
+            <input
+              type="text"
+              value={sessionId}
+              onChange={e => setSession(e.target.value)}
+              placeholder="session_1"
+              className="w-full rounded border border-zinc-700 bg-zinc-800 text-zinc-200 text-[13px]
+                         px-3 py-2 focus:outline-none focus:border-indigo-500 font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-zinc-500 mb-1">Run ID prefix (optional)</label>
+            <input
+              type="text"
+              value={prefix}
+              onChange={e => setPrefix(e.target.value)}
+              placeholder="run_batch_"
+              className="w-full rounded border border-zinc-700 bg-zinc-800 text-zinc-200 text-[13px]
+                         px-3 py-2 focus:outline-none focus:border-indigo-500 font-mono"
+            />
+            <p className="mt-1 text-[10px] text-zinc-600">
+              Runs will be named {prefix || "auto"}{prefix ? "1" : ""} through {prefix || "auto"}{prefix ? count : ""}
+            </p>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-zinc-800">
+          <button
+            onClick={onClose}
+            className="rounded border border-zinc-700 text-zinc-400 text-[12px] px-3 py-1.5 hover:text-zinc-200 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending || count < 1}
+            className="flex items-center gap-1.5 rounded bg-indigo-600 hover:bg-indigo-500
+                       text-white text-[12px] font-medium px-3 py-1.5 disabled:opacity-40 transition-colors"
+          >
+            {mutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+            Create {count} run{count !== 1 ? "s" : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function RunsPage() {
-  const [filter, setFilter] = useState<RunState | "all">("all");
-  const [selected, setSelected] = useState<RunRecord | null>(null);
+  const [filter, setFilter]         = useState<RunState | "all">("all");
+  const [selected, setSelected]     = useState<RunRecord | null>(null);
+  const [viewMode, setViewMode]     = useState<"table" | "timeline">("table");
+  const [zoom, setZoom]             = useState<ZoomLevel>("6h");
+  const [showBatchCreate, setShowBatchCreate] = useState(false);
+  const qc = useQueryClient();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["runs"],
@@ -179,6 +295,22 @@ export function RunsPage() {
           <option value="all">All states</option>
           {ALL_STATES.map(s => <option key={s} value={s}>{STATE_LABEL[s]}</option>)}
         </select>
+        {/* View toggle */}
+        <div className="flex items-center rounded border border-zinc-700 overflow-hidden">
+          <button onClick={() => setViewMode("table")} title="Table view"
+            className={clsx("flex items-center gap-1 px-2.5 py-1 text-[11px] transition-colors",
+              viewMode === "table" ? "bg-zinc-700 text-zinc-200" : "text-zinc-500 hover:text-zinc-300")}>
+            <LayoutList size={12} /> Table
+          </button>
+          <button onClick={() => setViewMode("timeline")} title="Timeline view"
+            className={clsx("flex items-center gap-1 px-2.5 py-1 text-[11px] border-l border-zinc-700 transition-colors",
+              viewMode === "timeline" ? "bg-zinc-700 text-zinc-200" : "text-zinc-500 hover:text-zinc-300")}>
+            <GanttChart size={12} /> Timeline
+          </button>
+        </div>
+        {viewMode === "timeline" && (
+          <ZoomSelector value={zoom} onChange={setZoom} />
+        )}
         <div className="ml-auto flex items-center gap-2">
           {selCount > 0 && (
             <button
@@ -193,6 +325,13 @@ export function RunsPage() {
               Clear
             </button>
           )}
+          <button
+            onClick={() => setShowBatchCreate(true)}
+            className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-900 text-zinc-400 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:border-indigo-600 transition-colors"
+            title="Create multiple runs at once"
+          >
+            <Plus size={11} /> Batch Create
+          </button>
           <button onClick={() => void refetch()} disabled={isFetching}
             className="flex items-center gap-1.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-500 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 transition-colors">
             <RefreshCw size={11} className={clsx(isFetching && "animate-spin")}/>Refresh
@@ -200,6 +339,11 @@ export function RunsPage() {
         </div>
       </div>
       {/* Content */}
+      {viewMode === "timeline" ? (
+        <div className="flex-1 overflow-y-auto bg-zinc-950">
+          <TimelineView runs={filtered} zoom={zoom} />
+        </div>
+      ) : (
       <div className="flex flex-1 overflow-hidden">
         <div
           {...kbd.containerProps}
@@ -229,6 +373,16 @@ export function RunsPage() {
         </div>
         {selected && <DetailPanel run={selected} onClose={() => setSelected(null)} />}
       </div>
+      )}
+      {showBatchCreate && (
+        <BatchCreateModal
+          onClose={() => setShowBatchCreate(false)}
+          onDone={() => {
+            setShowBatchCreate(false);
+            void qc.invalidateQueries({ queryKey: ["runs"] });
+          }}
+        />
+      )}
     </div>
   );
 
