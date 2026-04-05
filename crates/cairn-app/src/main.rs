@@ -7,6 +7,7 @@
 //!   cairn-app --addr 0.0.0.0          # bind all interfaces
 //!
 mod sse_hooks;
+mod openapi_spec;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -3080,6 +3081,24 @@ async fn list_session_traces_handler(
     }
 }
 
+// ── OpenAPI spec + Swagger UI ─────────────────────────────────────────────────
+
+/// `GET /v1/openapi.json` — OpenAPI 3.0 specification.
+async fn openapi_json_handler() -> impl IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        openapi_spec::OPENAPI_JSON,
+    )
+}
+
+/// `GET /v1/docs` — Swagger UI (CDN-hosted, points at /v1/openapi.json).
+async fn swagger_ui_handler() -> impl IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        openapi_spec::SWAGGER_UI_HTML,
+    )
+}
+
 // ── Embedded frontend (ui/dist/) ──────────────────────────────────────────────
 //
 // In debug builds rust-embed reads files from disk at request time so you can
@@ -3398,6 +3417,9 @@ fn build_router(state: AppState) -> Router {
         // Metrics
         .route("/v1/metrics",            get(metrics_json_handler))
         .route("/v1/metrics/prometheus", get(metrics_prometheus_handler))
+        // ── OpenAPI spec + Swagger UI (public, no auth) ───────────────────
+        .route("/v1/openapi.json", get(openapi_json_handler))
+        .route("/v1/docs",         get(swagger_ui_handler))
         // ── Embedded frontend (SPA fallback) ──────────────────────────────
         // Any path not matched by an API route above is handled by the React
         // app.  Static assets (JS/CSS/icons) are served with the correct MIME
