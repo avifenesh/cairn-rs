@@ -8,7 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist/ is committed so cairn-app can embed it at compile time without Node
+# dist
 dist-ssr
 *.local
 
