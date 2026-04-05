@@ -104,3 +104,6 @@ pub use resource_sharing_impl::ResourceSharingServiceImpl;
 
 pub mod ollama_provider;
 pub use ollama_provider::{OllamaModel, OllamaProvider, OllamaTagsResponse};
+
+pub mod ollama_embedding;
+pub use ollama_embedding::OllamaEmbeddingProvider;
