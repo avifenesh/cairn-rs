@@ -1,479 +1,226 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  ListChecks,
-  RefreshCw,
-  ServerCrash,
-  Cpu,
-  ChevronRight,
-  X,
-  Play,
-  Unlock,
-  Clock,
-  AlertCircle,
-} from "lucide-react";
+import { RefreshCw, Loader2, ServerCrash, Inbox } from "lucide-react";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
+import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
-import type { TaskRecord, TaskState, RunState } from "../lib/types";
+import type { TaskRecord, TaskState } from "../lib/types";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtTime(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
+const fmtTime = (ms: number) =>
+  new Date(ms).toLocaleString(undefined, {
     month: "short", day: "numeric",
     hour: "2-digit", minute: "2-digit", second: "2-digit",
   });
-}
 
-function shortId(id: string): string {
-  return id.length > 20 ? `${id.slice(0, 8)}\u2026${id.slice(-5)}` : id;
-}
+const shortId = (id: string) =>
+  id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
 
-// Reuse StateBadge's colour set for TaskState — the states overlap enough
-// that we can cast safely.
-function TaskStateBadge({ state, compact }: { state: TaskState; compact?: boolean }) {
-  // Map task-only states to the closest RunState analogue.
-  const mapped: Record<TaskState, RunState> = {
-    queued:               "pending",
-    leased:               "running",
-    running:              "running",
-    completed:            "completed",
-    failed:               "failed",
-    canceled:             "canceled",
-    paused:               "paused",
-    waiting_dependency:   "waiting_dependency" as RunState,
-    retryable_failed:     "failed",
-    dead_lettered:        "failed",
-  };
-  return <StateBadge state={mapped[state] ?? ("pending" as RunState)} compact={compact} />;
-}
-
-// ── State filter options ──────────────────────────────────────────────────────
-
-const ALL_TASK_STATES: TaskState[] = [
-  "queued", "leased", "running", "completed",
-  "failed", "canceled", "paused",
-  "waiting_dependency", "retryable_failed", "dead_lettered",
+const ACTIVE_STATES: TaskState[] = [
+  "queued", "leased", "running", "paused", "waiting_dependency",
 ];
-const TASK_STATE_LABELS: Record<TaskState, string> = {
-  queued:              "Queued",
-  leased:              "Leased",
-  running:             "Running",
-  completed:           "Completed",
-  failed:              "Failed",
-  canceled:            "Canceled",
-  paused:              "Paused",
-  waiting_dependency:  "Waiting",
-  retryable_failed:    "Retryable Failed",
-  dead_lettered:       "Dead Letter",
-};
 
-// ── Detail panel ──────────────────────────────────────────────────────────────
+const ALL_STATES: (TaskState | "all")[] = [
+  "all", "queued", "leased", "running", "completed", "failed",
+  "canceled", "paused", "waiting_dependency", "retryable_failed", "dead_lettered",
+];
 
-interface DetailPanelProps {
-  task: TaskRecord;
-  onClose: () => void;
-  onClaim: (taskId: string) => void;
-  onRelease: (taskId: string) => void;
-  claiming: boolean;
-  releasing: boolean;
-}
+// ── Row actions ────────────────────────────────────────────────────────────────
 
-function DetailPanel({ task, onClose, onClaim, onRelease, claiming, releasing }: DetailPanelProps) {
-  const [workerId, setWorkerId] = useState("operator-1");
+function RowActions({ task }: { task: TaskRecord }) {
+  const qc    = useQueryClient();
+  const toast = useToast();
+
+  const claim = useMutation({
+    mutationFn: () => defaultApi.claimTask(task.task_id, "operator", 60_000),
+    onSuccess: () => { toast.success("Task claimed."); void qc.invalidateQueries({ queryKey: ["tasks"] }); },
+    onError:   () => toast.error("Failed to claim task."),
+  });
+
+  const release = useMutation({
+    mutationFn: () => defaultApi.releaseLease(task.task_id),
+    onSuccess: () => { toast.success("Lease released."); void qc.invalidateQueries({ queryKey: ["tasks"] }); },
+    onError:   () => toast.error("Failed to release lease."),
+  });
+
   const canClaim   = task.state === "queued";
-  const canRelease = task.state === "leased";
+  const canRelease = (task.state === "leased" || task.state === "running") && !!task.lease_owner;
+
+  if (!canClaim && !canRelease) return null;
 
   return (
-    <aside className="flex flex-col w-88 shrink-0 border-l border-zinc-800 bg-zinc-900 h-full overflow-y-auto">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-5 py-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
-        <ChevronRight size={14} className="text-zinc-500 shrink-0" />
-        <span className="text-sm font-semibold font-mono text-zinc-100 truncate flex-1">
-          {shortId(task.task_id)}
-        </span>
+    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      {canClaim && (
         <button
-          onClick={onClose}
-          className="rounded p-1 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-          aria-label="Close"
+          onClick={e => { e.stopPropagation(); claim.mutate(); }}
+          disabled={claim.isPending}
+          className="px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-900/60 text-indigo-300
+                     hover:bg-indigo-900 border border-indigo-800/50 transition-colors disabled:opacity-40"
         >
-          <X size={15} />
+          {claim.isPending ? <Loader2 size={10} className="animate-spin inline" /> : "Claim"}
         </button>
-      </div>
-
-      <div className="flex-1 p-4 space-y-5">
-        {/* State */}
-        <div>
-          <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">State</p>
-          <TaskStateBadge state={task.state} />
-        </div>
-
-        {/* Actions */}
-        {(canClaim || canRelease) && (
-          <div className="space-y-3">
-            <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Actions</p>
-
-            {canClaim && (
-              <div className="space-y-2">
-                <input
-                  value={workerId}
-                  onChange={(e) => setWorkerId(e.target.value)}
-                  placeholder="Worker ID"
-                  className="w-full rounded-md bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 placeholder-zinc-600"
-                />
-                <button
-                  onClick={() => onClaim(task.task_id)}
-                  disabled={claiming || !workerId.trim()}
-                  className="w-full flex items-center justify-center gap-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs px-3 py-2 transition-colors"
-                >
-                  {claiming ? (
-                    <RefreshCw size={12} className="animate-spin" />
-                  ) : (
-                    <Play size={12} />
-                  )}
-                  Claim task
-                </button>
-              </div>
-            )}
-
-            {canRelease && (
-              <button
-                onClick={() => onRelease(task.task_id)}
-                disabled={releasing}
-                className="w-full flex items-center justify-center gap-2 rounded-md bg-amber-700/60 hover:bg-amber-700 disabled:opacity-40 text-amber-200 text-xs px-3 py-2 transition-colors ring-1 ring-amber-700"
-              >
-                {releasing ? (
-                  <RefreshCw size={12} className="animate-spin" />
-                ) : (
-                  <Unlock size={12} />
-                )}
-                Release lease
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* IDs */}
-        <Section title="Identifiers">
-          <Field label="Task ID"       value={task.task_id}           mono />
-          {task.parent_run_id  && <Field label="Run ID"       value={task.parent_run_id}  mono />}
-          {task.parent_task_id && <Field label="Parent Task"  value={task.parent_task_id} mono />}
-        </Section>
-
-        {/* Project */}
-        <Section title="Project">
-          <Field label="Tenant"    value={task.project.tenant_id} />
-          <Field label="Workspace" value={task.project.workspace_id} />
-          <Field label="Project"   value={task.project.project_id} />
-        </Section>
-
-        {/* Lease */}
-        {(task.lease_owner || task.lease_expires_at) && (
-          <Section title="Lease">
-            {task.lease_owner && (
-              <Field label="Held by" value={task.lease_owner} mono />
-            )}
-            {task.lease_expires_at && (
-              <Field label="Expires" value={fmtTime(task.lease_expires_at)} />
-            )}
-          </Section>
-        )}
-
-        {/* Failure */}
-        {task.failure_class && (
-          <Section title="Failure">
-            <Field label="Class" value={task.failure_class} />
-          </Section>
-        )}
-
-        {/* Timestamps */}
-        <Section title="Timestamps">
-          <Field label="Created" value={fmtTime(task.created_at)} />
-          <Field label="Updated" value={fmtTime(task.updated_at)} />
-          <Field label="Version" value={String(task.version)} />
-        </Section>
-      </div>
-    </aside>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">{title}</p>
-      <div className="rounded-lg bg-zinc-800/50 ring-1 ring-zinc-700/50 divide-y divide-zinc-700/40">
-        {children}
-      </div>
+      )}
+      {canRelease && (
+        <button
+          onClick={e => { e.stopPropagation(); release.mutate(); }}
+          disabled={release.isPending}
+          className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-800 text-zinc-400
+                     hover:bg-zinc-700 border border-zinc-700 transition-colors disabled:opacity-40"
+        >
+          {release.isPending ? <Loader2 size={10} className="animate-spin inline" /> : "Release"}
+        </button>
+      )}
     </div>
   );
 }
 
-function Field({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-start justify-between px-3 py-2 gap-3">
-      <span className="text-xs text-zinc-500 shrink-0 pt-0.5">{label}</span>
-      <span className={clsx("text-xs text-zinc-300 text-right break-all", mono && "font-mono")}>
-        {value}
-      </span>
+// ── Table ─────────────────────────────────────────────────────────────────────
+
+const TH = ({ ch, right }: { ch: React.ReactNode; right?: boolean }) => (
+  <th className={clsx(
+    "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-zinc-800",
+    right ? "text-right" : "text-left",
+  )}>
+    {ch}
+  </th>
+);
+
+function TasksTable({ tasks }: { tasks: TaskRecord[] }) {
+  if (tasks.length === 0) return (
+    <div className="flex flex-col items-center justify-center py-16 gap-2 text-zinc-700">
+      <Inbox size={26} />
+      <p className="text-[13px]">No tasks match this filter</p>
     </div>
   );
-}
-
-// ── Tasks table ───────────────────────────────────────────────────────────────
-
-interface TableProps {
-  tasks: TaskRecord[];
-  selectedId: string | null;
-  onSelect: (t: TaskRecord) => void;
-}
-
-function TasksTable({ tasks, selectedId, onSelect }: TableProps) {
-  if (tasks.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
-        <Cpu size={36} className="text-zinc-700" />
-        <p className="text-sm text-zinc-400">No tasks match this filter</p>
-        <p className="text-xs text-zinc-600">Select a different state or clear the filter</p>
-      </div>
-    );
-  }
 
   return (
-    <table className="min-w-full text-sm">
-      <thead className="sticky top-0 z-10 bg-zinc-950">
-        <tr className="border-b border-zinc-800">
-          {[
-            { label: "Task ID",     cls: "text-left"  },
-            { label: "Run ID",      cls: "text-left"  },
-            { label: "State",       cls: "text-left"  },
-            { label: "Lease Owner", cls: "text-left"  },
-            { label: "Created",     cls: "text-right" },
-          ].map(({ label, cls }) => (
-            <th key={label} className={clsx(
-              "px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-widest whitespace-nowrap",
-              cls,
-            )}>
-              {label}
-            </th>
-          ))}
+    <table className="min-w-full text-[13px]">
+      <thead className="bg-zinc-900 sticky top-0 z-10">
+        <tr>
+          <TH ch="Task ID" />
+          <TH ch="Run" />
+          <TH ch="Status" />
+          <TH ch="Worker" />
+          <TH ch="Queued At" />
+          <TH ch="Started At" />
+          <TH ch="" right />
         </tr>
       </thead>
-      <tbody className="divide-y divide-zinc-800/60">
-        {tasks.map((task) => {
-          const selected = task.task_id === selectedId;
-          const leaseExpired = task.lease_expires_at != null && task.lease_expires_at < Date.now();
-          return (
-            <tr
-              key={task.task_id}
-              onClick={() => onSelect(task)}
-              className={clsx(
-                "cursor-pointer transition-colors",
-                selected ? "bg-zinc-800" : "hover:bg-zinc-900/60",
-              )}
-            >
-              <td className="px-4 py-3 font-mono text-zinc-300 whitespace-nowrap text-xs">
-                <span className="flex items-center gap-1.5">
-                  {selected && <ChevronRight size={11} className="text-indigo-400 shrink-0" />}
-                  {shortId(task.task_id)}
-                </span>
-              </td>
-              <td className="px-4 py-3 font-mono text-zinc-500 whitespace-nowrap text-xs">
-                {task.parent_run_id ? shortId(task.parent_run_id) : <span className="text-zinc-700">—</span>}
-              </td>
-              <td className="px-4 py-3 whitespace-nowrap">
-                <TaskStateBadge state={task.state} compact />
-              </td>
-              <td className="px-4 py-3 whitespace-nowrap">
-                {task.lease_owner ? (
-                  <span className={clsx(
-                    "inline-flex items-center gap-1.5 text-xs font-mono",
-                    leaseExpired ? "text-red-400" : "text-zinc-400",
-                  )}>
-                    {leaseExpired && <AlertCircle size={11} />}
-                    {task.lease_owner}
-                  </span>
-                ) : (
-                  <span className="text-zinc-700 text-xs">—</span>
-                )}
-              </td>
-              <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap text-right">
-                <span className="flex items-center justify-end gap-1">
-                  <Clock size={11} className="text-zinc-700" />
-                  {fmtTime(task.created_at)}
-                </span>
-              </td>
-            </tr>
-          );
-        })}
+      <tbody className="divide-y divide-zinc-800/50">
+        {tasks.map((task, i) => (
+          <tr key={task.task_id}
+            className={clsx(
+              "group transition-colors",
+              i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
+              "hover:bg-zinc-800/70",
+            )}>
+            <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap">
+              {shortId(task.task_id)}
+            </td>
+            <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px]">
+              {task.parent_run_id
+                ? shortId(task.parent_run_id)
+                : <span className="text-zinc-700">—</span>}
+            </td>
+            <td className="px-3 py-1.5 whitespace-nowrap">
+              <StateBadge state={task.state as Parameters<typeof StateBadge>[0]["state"]} compact />
+            </td>
+            <td className="px-3 py-1.5 font-mono text-[12px] whitespace-nowrap">
+              {task.lease_owner
+                ? <span className="text-zinc-400">{shortId(task.lease_owner)}</span>
+                : <span className="text-zinc-700">—</span>}
+            </td>
+            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums">
+              {fmtTime(task.created_at)}
+            </td>
+            <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">
+              {task.lease_expires_at
+                ? <span className="text-zinc-400">{fmtTime(task.updated_at)}</span>
+                : <span className="text-zinc-700">—</span>}
+            </td>
+            <td className="px-3 py-1.5 whitespace-nowrap">
+              <RowActions task={task} />
+            </td>
+          </tr>
+        ))}
       </tbody>
     </table>
   );
 }
 
-// ── Skeleton ──────────────────────────────────────────────────────────────────
-
-function SkeletonRows() {
-  return (
-    <div className="divide-y divide-zinc-800/60">
-      {Array.from({ length: 10 }).map((_, i) => (
-        <div key={i} className="flex items-center gap-3 px-4 py-3.5 animate-pulse">
-          <div className="h-3 w-36 rounded bg-zinc-800" />
-          <div className="h-3 w-28 rounded bg-zinc-800" />
-          <div className="h-5 w-20 rounded-full bg-zinc-800" />
-          <div className="h-3 w-24 rounded bg-zinc-800" />
-          <div className="ml-auto h-3 w-32 rounded bg-zinc-800" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export function TasksPage() {
-  const qc = useQueryClient();
-  const [stateFilter, setStateFilter] = useState<TaskState | "all">("all");
-  const [selectedTask, setSelectedTask] = useState<TaskRecord | null>(null);
+  const [filter, setFilter] = useState<TaskState | "all">("all");
 
-  // Fetch all tasks
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["tasks"],
     queryFn: () => defaultApi.getAllTasks({ limit: 500 }),
     refetchInterval: 15_000,
-    select: (tasks) =>
-      [...tasks].sort((a, b) => b.created_at - a.created_at),
   });
 
-  // Claim mutation
-  const [claimWorker] = useState("operator-1");
-  const claimMut = useMutation({
-    mutationFn: ({ taskId, workerId }: { taskId: string; workerId: string }) =>
-      defaultApi.claimTask(taskId, workerId),
-    onSuccess: (updated) => {
-      void qc.invalidateQueries({ queryKey: ["tasks"] });
-      setSelectedTask(updated);
-    },
-  });
+  const tasks     = data ?? [];
+  const filtered  = filter === "all" ? tasks : tasks.filter(t => t.state === filter);
+  const activeCnt = tasks.filter(t => ACTIVE_STATES.includes(t.state)).length;
 
-  // Release mutation
-  const releaseMut = useMutation({
-    mutationFn: (taskId: string) => defaultApi.releaseLease(taskId),
-    onSuccess: (updated) => {
-      void qc.invalidateQueries({ queryKey: ["tasks"] });
-      setSelectedTask(updated);
-    },
-  });
-
-  const tasks = data ?? [];
-  const filtered =
-    stateFilter === "all" ? tasks : tasks.filter((t) => t.state === stateFilter);
-
-  const leasedCount = tasks.filter((t) => t.state === "leased").length;
-  const queuedCount = tasks.filter((t) => t.state === "queued").length;
-
-  function handleSelect(t: TaskRecord) {
-    setSelectedTask((prev) => (prev?.task_id === t.task_id ? null : t));
-  }
-
-  if (isError) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-64 gap-3 text-center p-8">
-        <ServerCrash size={40} className="text-red-500" />
-        <p className="text-zinc-300 font-medium">Failed to load tasks</p>
-        <p className="text-sm text-zinc-500">
-          {error instanceof Error ? error.message : "Unknown error"}
-        </p>
-        <button
-          onClick={() => void refetch()}
-          className="mt-2 px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm hover:bg-zinc-700 transition-colors"
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
+  if (isError) return (
+    <div className="flex flex-col items-center justify-center min-h-64 gap-3 p-8 text-center">
+      <ServerCrash size={32} className="text-red-500" />
+      <p className="text-[13px] text-zinc-300 font-medium">Failed to load tasks</p>
+      <p className="text-[12px] text-zinc-500">{error instanceof Error ? error.message : "Unknown"}</p>
+      <button onClick={() => refetch()}
+        className="mt-1 px-3 py-1.5 rounded bg-zinc-800 text-zinc-300 text-[12px] hover:bg-zinc-700 transition-colors">
+        Retry
+      </button>
+    </div>
+  );
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
-      {/* ── Toolbar ───────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800 shrink-0">
-        <ListChecks size={15} className="text-indigo-400 shrink-0" />
-        <h2 className="text-sm font-semibold text-zinc-200">
+    <div className="flex flex-col h-full bg-zinc-900">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
+        <span className="text-[13px] font-medium text-zinc-200">
           Tasks
           {!isLoading && (
-            <span className="ml-2 text-xs text-zinc-500 font-normal">
+            <span className="ml-2 text-[12px] text-zinc-500 font-normal">
               {filtered.length}
-              {stateFilter !== "all" ? ` / ${tasks.length} total` : ""}
+              {filter !== "all" && ` / ${tasks.length} total`}
+              {activeCnt > 0 && filter === "all" && (
+                <span className="ml-1.5 text-indigo-400">{activeCnt} active</span>
+              )}
             </span>
           )}
-        </h2>
+        </span>
 
-        {/* Quick-stat pills */}
-        {!isLoading && (
-          <>
-            {queuedCount > 0 && (
-              <button
-                onClick={() => setStateFilter("queued")}
-                className="inline-flex items-center gap-1 rounded-full bg-zinc-800 ring-1 ring-zinc-700 text-zinc-400 text-[10px] px-2 py-0.5 hover:ring-indigo-600 hover:text-indigo-300 transition-colors"
-              >
-                {queuedCount} queued
-              </button>
-            )}
-            {leasedCount > 0 && (
-              <button
-                onClick={() => setStateFilter("leased")}
-                className="inline-flex items-center gap-1 rounded-full bg-blue-950 ring-1 ring-blue-800 text-blue-300 text-[10px] px-2 py-0.5 hover:ring-blue-500 transition-colors"
-              >
-                {leasedCount} leased
-              </button>
-            )}
-          </>
-        )}
-
-        {/* State filter */}
         <select
-          value={stateFilter}
-          onChange={(e) => setStateFilter(e.target.value as TaskState | "all")}
-          className="rounded-md bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          value={filter}
+          onChange={e => setFilter(e.target.value as TaskState | "all")}
+          className="ml-auto rounded border border-zinc-700 bg-zinc-800 text-[12px] text-zinc-300
+                     px-2 py-1 focus:outline-none focus:border-indigo-500 transition-colors"
         >
-          <option value="all">All states</option>
-          {ALL_TASK_STATES.map((s) => (
-            <option key={s} value={s}>{TASK_STATE_LABELS[s]}</option>
+          {ALL_STATES.map(s => (
+            <option key={s} value={s}>
+              {s === "all" ? "All states" : s.replace(/_/g, " ")}
+            </option>
           ))}
         </select>
 
-        <button
-          onClick={() => void refetch()}
-          disabled={isFetching}
-          className="ml-auto flex items-center gap-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs px-2.5 py-1.5 hover:text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 transition-colors"
-        >
-          <RefreshCw size={12} className={clsx(isFetching && "animate-spin")} />
+        <button onClick={() => refetch()} disabled={isFetching}
+          className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors">
+          <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
           Refresh
         </button>
       </div>
 
-      {/* ── Content: table + detail panel ─────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Table */}
-        <div className={clsx("flex-1 overflow-y-auto", selectedTask && "border-r border-zinc-800")}>
-          {isLoading
-            ? <SkeletonRows />
-            : <TasksTable tasks={filtered} selectedId={selectedTask?.task_id ?? null} onSelect={handleSelect} />
-          }
-        </div>
-
-        {/* Detail panel */}
-        {selectedTask && (
-          <DetailPanel
-            task={selectedTask}
-            onClose={() => setSelectedTask(null)}
-            onClaim={(id) => claimMut.mutate({ taskId: id, workerId: claimWorker })}
-            onRelease={(id) => releaseMut.mutate(id)}
-            claiming={claimMut.isPending}
-            releasing={releaseMut.isPending}
-          />
-        )}
+      {/* Content */}
+      <div className="flex-1 overflow-x-auto overflow-y-auto">
+        {isLoading
+          ? <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+              <Loader2 size={16} className="animate-spin" />
+              <span className="text-[13px]">Loading…</span>
+            </div>
+          : <TasksTable tasks={filtered} />
+        }
       </div>
     </div>
   );
