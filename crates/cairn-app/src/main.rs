@@ -466,6 +466,68 @@ async fn list_sessions_handler(
     }
 }
 
+// ── Session + Run write handlers ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct CreateSessionBody {
+    tenant_id:    Option<String>,
+    workspace_id: Option<String>,
+    project_id:   Option<String>,
+    session_id:   Option<String>,
+}
+
+/// `POST /v1/sessions` — create a new session.
+async fn create_session_handler(
+    State(state): State<AppState>,
+    Json(body): Json<CreateSessionBody>,
+) -> impl axum::response::IntoResponse {
+    let project = ProjectKey::new(
+        body.tenant_id.as_deref().unwrap_or("default"),
+        body.workspace_id.as_deref().unwrap_or("default"),
+        body.project_id.as_deref().unwrap_or("default"),
+    );
+    let session_id = cairn_domain::SessionId::new(
+        body.session_id.as_deref().unwrap_or("session_1"),
+    );
+    match SessionService::create(&state.runtime.sessions, &project, session_id).await {
+        Ok(record) => (StatusCode::CREATED, Json(serde_json::json!(record))).into_response(),
+        Err(e) => internal_error(e.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateRunBody {
+    tenant_id:    Option<String>,
+    workspace_id: Option<String>,
+    project_id:   Option<String>,
+    session_id:   Option<String>,
+    run_id:       Option<String>,
+    parent_run_id: Option<String>,
+}
+
+/// `POST /v1/runs` — start a new run within a session.
+async fn create_run_handler(
+    State(state): State<AppState>,
+    Json(body): Json<CreateRunBody>,
+) -> impl axum::response::IntoResponse {
+    let project = ProjectKey::new(
+        body.tenant_id.as_deref().unwrap_or("default"),
+        body.workspace_id.as_deref().unwrap_or("default"),
+        body.project_id.as_deref().unwrap_or("default"),
+    );
+    let session_id = cairn_domain::SessionId::new(
+        body.session_id.as_deref().unwrap_or("session_1"),
+    );
+    let run_id = RunId::new(
+        body.run_id.as_deref().unwrap_or("run_1"),
+    );
+    let parent_run_id = body.parent_run_id.as_deref().map(RunId::new);
+    match RunService::start(&state.runtime.runs, &project, &session_id, run_id, parent_run_id).await {
+        Ok(record) => (StatusCode::CREATED, Json(serde_json::json!(record))).into_response(),
+        Err(e) => internal_error(e.to_string()).into_response(),
+    }
+}
+
 // ── Approval handlers ─────────────────────────────────────────────────────────
 
 /// `GET /v1/approvals/pending` — list pending approvals.
@@ -1244,14 +1306,14 @@ fn build_router(state: AppState) -> Router {
         // ── Protected /v1/* routes ────────────────────────────────────────
         .route("/v1/status", get(status_handler))
         .route("/v1/dashboard", get(dashboard_handler))
-        .route("/v1/runs", get(list_runs_handler))
+        .route("/v1/runs", get(list_runs_handler).post(create_run_handler))
         .route("/v1/runs/:id", get(get_run_handler))
         .route("/v1/runs/:id/cost", get(get_run_cost_handler))
         .route("/v1/runs/:id/events", get(list_run_events_handler))
         .route("/v1/runs/:id/tool-invocations", get(list_run_tool_invocations_handler))
         .route("/v1/runs/:id/tasks",     get(list_run_tasks_handler))
         .route("/v1/runs/:id/approvals", get(list_run_approvals_handler))
-        .route("/v1/sessions", get(list_sessions_handler))
+        .route("/v1/sessions", get(list_sessions_handler).post(create_session_handler))
         .route("/v1/sessions/:id/events", get(list_session_events_handler))
         .route("/v1/sessions/:id/runs",   get(list_session_runs_handler))
         .route("/v1/approvals/pending", get(list_pending_approvals_handler))
