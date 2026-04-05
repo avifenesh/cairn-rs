@@ -136,6 +136,8 @@ struct AppState {
     metrics: Arc<std::sync::RwLock<AppMetrics>>,
     /// Per-key sliding-window rate-limit buckets.
     rate_limits: RateLimitTable,
+    /// Structured request log ring buffer — written by the tracing middleware.
+    request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
 }
 
 // ── Request metrics ──────────────────────────────────────────────────────────
