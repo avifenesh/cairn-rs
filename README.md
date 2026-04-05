@@ -23,6 +23,26 @@ Cairn is the control plane that handles all of this. Your agents focus on produc
 
 ## Quick start
 
+```bash
+# 1. Build the binary
+cargo build -p cairn-app
+
+# 2. Run with a custom admin token (omit CAIRN_ADMIN_TOKEN for dev-admin-token default)
+CAIRN_ADMIN_TOKEN=secret cargo run -p cairn-app
+
+# 3. Verify it's alive
+curl localhost:3000/health
+# → {"ok":true}
+```
+
+Or with Docker:
+
+```bash
+docker compose up
+```
+
+---
+
 ### Cargo (local dev — zero config)
 
 ```bash
