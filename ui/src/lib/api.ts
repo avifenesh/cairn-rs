@@ -207,10 +207,34 @@ export function createApiClient(config: ApiClientConfig) {
   };
 }
 
-/** Default export: create a client pointing at the local dev server. */
-export const defaultApi = createApiClient({
-  baseUrl: import.meta.env.VITE_API_URL ?? "",
-  token: import.meta.env.VITE_API_TOKEN ?? "cairn-demo-token",
+// ── Token persistence ─────────────────────────────────────────────────────────
+
+export const TOKEN_KEY = 'cairn_token';
+
+export function getStoredToken(): string {
+  return localStorage.getItem(TOKEN_KEY) ?? import.meta.env.VITE_API_TOKEN ?? '';
+}
+
+export function setStoredToken(token: string) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearStoredToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+/**
+ * Dynamic default client: reads the token from localStorage on every call
+ * so that post-login requests use the newly saved token without re-importing.
+ */
+export const defaultApi = new Proxy({} as ReturnType<typeof createApiClient>, {
+  get(_target, prop) {
+    const client = createApiClient({
+      baseUrl: import.meta.env.VITE_API_URL ?? '',
+      token: getStoredToken(),
+    });
+    return (client as Record<string, unknown>)[prop as string];
+  },
 });
 
 export type ApiClient = ReturnType<typeof createApiClient>;
