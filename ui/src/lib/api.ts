@@ -209,8 +209,8 @@ export function createApiClient(config: ApiClientConfig) {
 
 /** Default export: create a client pointing at the local dev server. */
 export const defaultApi = createApiClient({
-  baseUrl: import.meta.env.VITE_API_URL ?? "http://localhost:3000",
-  token: import.meta.env.VITE_API_TOKEN ?? "dev-admin-token",
+  baseUrl: import.meta.env.VITE_API_URL ?? "",
+  token: import.meta.env.VITE_API_TOKEN ?? "cairn-demo-token",
 });
 
 export type ApiClient = ReturnType<typeof createApiClient>;
