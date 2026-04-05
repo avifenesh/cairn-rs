@@ -4,7 +4,6 @@ import {
   Waves,
   RefreshCw,
   ServerCrash,
-  Inbox,
   ChevronRight,
   ChevronDown,
   AlertCircle,

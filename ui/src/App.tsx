@@ -31,6 +31,7 @@ export default function App() {
           case 'providers': return <ProvidersPage />;
           case 'memory':    return <MemoryPage />;
           case 'costs':     return <CostsPage />;
+          case 'traces':    return <TracesPage />;
           case 'settings':  return <SettingsPage />;
           default:          return null;
         }
