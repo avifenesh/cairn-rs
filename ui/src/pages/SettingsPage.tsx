@@ -5,7 +5,7 @@ import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { usePreferences } from "../hooks/usePreferences";
 import { useWebSocket } from "../hooks/useWebSocket";
-import type { DeploymentSettings } from "../lib/types";
+import type { DeploymentSettings, SystemInfo } from "../lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +80,97 @@ function Section({ title, children }: { title: string; children: React.ReactNode
         {children}
       </div>
     </div>
+  );
+}
+
+// ── System info sections ──────────────────────────────────────────────────────
+
+function FeatureRow({ label, value, enabled }: { label: string; value?: string | number; enabled?: boolean }) {
+  return (
+    <div className="flex items-center justify-between py-2.5 border-b border-zinc-800 last:border-0">
+      <span className="text-[12px] text-zinc-500">{label}</span>
+      <span className="flex items-center gap-2">
+        {enabled !== undefined && (
+          <span className={clsx(
+            "inline-flex items-center justify-center w-3.5 h-3.5 rounded-full",
+            enabled ? "bg-emerald-500/20 text-emerald-400" : "bg-zinc-800 text-zinc-600",
+          )}>
+            {enabled ? <Check size={9} strokeWidth={3} /> : <X size={9} strokeWidth={2} />}
+          </span>
+        )}
+        {value !== undefined && (
+          <span className="text-[12px] text-zinc-300 font-mono">{value}</span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function SystemInfoSections({ info }: { info: SystemInfo }) {
+  return (
+    <>
+      {/* Version */}
+      <Section title="Build Information">
+        <KV label="Version"     value={<span className="font-mono text-indigo-300">v{info.version}</span>} />
+        <KV label="OS / Arch"   value={`${info.os} / ${info.arch}`} mono />
+        <KV label="Git Commit"  value={
+          <span className="font-mono text-[12px] text-zinc-400">
+            {info.git_commit === 'dev' ? (
+              <span className="text-amber-400">dev build</span>
+            ) : info.git_commit.slice(0, 12)}
+          </span>
+        } />
+        <KV label="Build"       value={<span className="text-[12px] text-zinc-500">{info.build_date}</span>} />
+      </Section>
+
+      {/* Features */}
+      <Section title="Features">
+        <FeatureRow label="WebSocket transport"      enabled={info.features.websocket_enabled} />
+        <FeatureRow label="Ollama connected"         enabled={info.features.ollama_connected} />
+        <FeatureRow label="PostgreSQL backend"       enabled={info.features.postgres_enabled} />
+        <FeatureRow label="SQLite backend"           enabled={info.features.sqlite_enabled} />
+        <FeatureRow label="Store type"               value={info.features.store_type} />
+        <FeatureRow label="SSE ring buffer"          value={`${info.features.sse_buffer_size.toLocaleString()} events`} />
+        <FeatureRow label="Notification buffer"      value={`${info.features.notification_buffer} entries`} />
+        <FeatureRow label="Rate limit (token)"       value={`${info.features.rate_limit_per_minute} req/min`} />
+        <FeatureRow label="Rate limit (IP)"          value={`${info.features.ip_rate_limit_per_minute} req/min`} />
+        <FeatureRow label="Max body size"            value={`${info.features.max_body_size_mb} MB`} />
+      </Section>
+
+      {/* Environment */}
+      <Section title="Environment">
+        <KV label="Deployment mode" value={<span className="font-mono text-[12px]">{info.environment.deployment_mode}</span>} />
+        <KV
+          label="Admin token"
+          value={
+            info.environment.admin_token_set ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 rounded px-2 py-0.5">
+                <Check size={10} strokeWidth={2.5} /> Set
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-400 bg-amber-950/50 border border-amber-800/40 rounded px-2 py-0.5">
+                <X size={10} strokeWidth={2} /> Not set
+              </span>
+            )
+          }
+        />
+        <KV
+          label="Ollama host"
+          value={
+            <span className="font-mono text-[12px] text-zinc-400 truncate max-w-[200px]" title={info.environment.ollama_host}>
+              {info.environment.ollama_host}
+            </span>
+          }
+        />
+        <KV label="Uptime"      value={(() => {
+          const s = info.environment.uptime_seconds;
+          if (s < 60)   return `${s}s`;
+          if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+          const h = Math.floor(s / 3600);
+          return `${h}h ${Math.floor((s % 3600) / 60)}m`;
+        })()} mono />
+      </Section>
+    </>
   );
 }
 
@@ -188,6 +279,13 @@ export function SettingsPage() {
     staleTime: 60_000,
   });
 
+  const { data: sysInfo, isLoading: sysLoading } = useQuery({
+    queryKey: ["system-info"],
+    queryFn: () => defaultApi.getSystemInfo(),
+    staleTime: 60_000,
+    retry: false,
+  });
+
   const s: DeploymentSettings | undefined = data;
 
   if (isError) return <ErrorFallback error={error} resource="settings" onRetry={() => void refetch()} />;
@@ -287,6 +385,22 @@ export function SettingsPage() {
 
             {/* Transport */}
             <TransportSection />
+
+            {/* System info — version, features, environment */}
+            {sysLoading ? (
+              <div className="flex items-center gap-2 py-4 text-zinc-600">
+                <Loader2 size={13} className="animate-spin" />
+                <span className="text-[12px]">Loading system info…</span>
+              </div>
+            ) : sysInfo ? (
+              <SystemInfoSections info={sysInfo} />
+            ) : (
+              <Section title="Build Information">
+                <div className="py-3 text-[12px] text-zinc-600 italic">
+                  System info unavailable — upgrade cairn-app for this endpoint.
+                </div>
+              </Section>
+            )}
 
           </div>
         ) : null}

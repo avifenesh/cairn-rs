@@ -1,5 +1,6 @@
 import {
   Bell,
+  Cpu,
   Coins,
   Database,
   FileText,
@@ -31,6 +32,7 @@ export type NavPage =
   | 'sessions'
   | 'runs'
   | 'tasks'
+  | 'workers'
   | 'approvals'
   | 'prompts'
   | 'traces'
@@ -76,6 +78,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'sessions',  label: 'Sessions',  icon: MonitorPlay },
       { id: 'runs',      label: 'Runs',      icon: Play        },
       { id: 'tasks',     label: 'Tasks',     icon: ListChecks  },
+      { id: 'workers',   label: 'Workers',   icon: Cpu         },
       { id: 'approvals', label: 'Approvals', icon: CheckSquare },
       { id: 'prompts',   label: 'Prompts',   icon: FileText    },
     ],

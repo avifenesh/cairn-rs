@@ -1,10 +1,24 @@
+/**
+ * TracesPage — LLM call trace browser with virtual scrolling.
+ *
+ * Uses useVirtualScroll to render only the visible slice of potentially
+ * thousands of trace rows.  Two spacer <tr> elements pad the table top/bottom
+ * so the scrollbar thumb matches the full data size.
+ */
+
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Loader2, ServerCrash, AlertTriangle, CheckCircle2 } from "lucide-react";
-import { DataTable } from "../components/DataTable";
+import {
+  RefreshCw, Loader2, AlertTriangle, CheckCircle2,
+  Search, X, Download,
+} from "lucide-react";
+import { clsx } from "clsx";
+import { ErrorFallback } from "../components/ErrorFallback";
 import { defaultApi } from "../lib/api";
+import { useVirtualScroll, DEFAULT_ROW_HEIGHT } from "../hooks/useVirtualScroll";
 import type { LlmCallTrace } from "../lib/types";
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const fmtTime = (ms: number) =>
   new Date(ms).toLocaleString(undefined, {
@@ -24,7 +38,6 @@ const fmtLatency = (ms: number) =>
 const fmtCost = (micros: number) =>
   micros === 0 ? "—" : `$${(micros / 1_000_000).toFixed(5)}`;
 
-/** Extract a short provider name from the model ID (e.g. "gpt-4" → "OpenAI"). */
 function inferProvider(modelId: string): string {
   const m = modelId.toLowerCase();
   if (m.startsWith("gpt") || m.startsWith("o1") || m.startsWith("o3")) return "OpenAI";
@@ -36,7 +49,7 @@ function inferProvider(modelId: string): string {
   return "—";
 }
 
-// ── Stat cards ────────────────────────────────────────────────────────────────
+// ── Stat card ─────────────────────────────────────────────────────────────────
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
@@ -48,41 +61,138 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
   );
 }
 
-// ── Table ─────────────────────────────────────────────────────────────────────
+// ── Column config ─────────────────────────────────────────────────────────────
 
+const TH = ({ ch, right, hide }: { ch: string; right?: boolean; hide?: string }) => (
+  <th className={clsx(
+    "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap",
+    "border-b border-zinc-800 bg-zinc-900 sticky top-0 z-10",
+    right ? "text-right" : "text-left",
+    hide,
+  )}>
+    {ch}
+  </th>
+);
 
+// ── Virtual trace row ─────────────────────────────────────────────────────────
+
+function TraceRow({ trace, even }: { trace: LlmCallTrace; even: boolean }) {
+  return (
+    <tr
+      style={{ height: DEFAULT_ROW_HEIGHT }}
+      className={clsx(
+        "border-b border-zinc-800/50 transition-colors hover:bg-white/5",
+        even ? "bg-zinc-900" : "bg-zinc-900/50",
+      )}
+    >
+      <td className="px-3 font-mono text-zinc-400 whitespace-nowrap text-[11px] hidden sm:table-cell"
+          title={trace.session_id ?? ''}>
+        {shortId(trace.session_id ?? '—')}
+      </td>
+      <td className="px-3 text-xs text-zinc-300 whitespace-nowrap">
+        {trace.model_id}
+      </td>
+      <td className="px-3 text-[11px] text-zinc-500 whitespace-nowrap hidden sm:table-cell">
+        {inferProvider(trace.model_id)}
+      </td>
+      <td className={clsx(
+        "px-3 text-[11px] whitespace-nowrap tabular-nums text-right",
+        trace.latency_ms > 5_000 ? "text-amber-400" : "text-zinc-400",
+      )}>
+        {fmtLatency(trace.latency_ms)}
+      </td>
+      <td className="px-3 text-[11px] text-zinc-400 tabular-nums text-right whitespace-nowrap hidden md:table-cell">
+        {fmtTokens(trace.prompt_tokens)} / {fmtTokens(trace.completion_tokens)}
+      </td>
+      <td className="px-3 text-[11px] text-zinc-500 tabular-nums text-right whitespace-nowrap hidden sm:table-cell">
+        {fmtCost(trace.cost_micros)}
+      </td>
+      <td className="px-3 whitespace-nowrap">
+        {trace.is_error ? (
+          <span className="inline-flex items-center gap-1 text-[10px] text-red-400">
+            <AlertTriangle size={10} /> error
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400">
+            <CheckCircle2 size={10} /> ok
+          </span>
+        )}
+      </td>
+      <td className="px-3 text-[11px] text-zinc-600 tabular-nums whitespace-nowrap hidden sm:table-cell">
+        {fmtTime(trace.created_at_ms)}
+      </td>
+    </tr>
+  );
+}
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+
+function exportCsv(traces: LlmCallTrace[]) {
+  const header = 'Session ID,Model,Provider,Latency (ms),Input Tokens,Output Tokens,Cost (µUSD),Error,Timestamp\n';
+  const rows = traces.map(r =>
+    [r.session_id ?? '', r.model_id, inferProvider(r.model_id),
+     r.latency_ms, r.prompt_tokens, r.completion_tokens,
+     r.cost_micros, r.is_error ? 'error' : '', r.created_at_ms]
+    .map(v => `"${String(v).replace(/"/g, '""')}"`)
+    .join(',')
+  ).join('\n');
+  const blob = new Blob([header + rows], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'traces.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function TracesPage() {
+  const [filterQuery, setFilterQuery] = useState('');
+
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["traces"],
-    queryFn: () => defaultApi.getTraces(500),
+    queryFn:  () => defaultApi.getTraces(500),
     refetchInterval: 30_000,
   });
 
   const traces = data?.traces ?? [];
 
-  // Aggregate stats.
+  // ── Client-side filter ────────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    const q = filterQuery.trim().toLowerCase();
+    if (!q) return traces;
+    return traces.filter(t =>
+      t.model_id.toLowerCase().includes(q) ||
+      (t.session_id ?? '').includes(q) ||
+      inferProvider(t.model_id).toLowerCase().includes(q) ||
+      (t.is_error ? 'error' : 'ok').includes(q),
+    );
+  }, [traces, filterQuery]);
+
+  // ── Aggregate stats ───────────────────────────────────────────────────────
   const totalTokens = traces.reduce((s, t) => s + t.prompt_tokens + t.completion_tokens, 0);
   const totalCost   = traces.reduce((s, t) => s + t.cost_micros, 0);
   const avgLatency  = traces.length > 0
     ? Math.round(traces.reduce((s, t) => s + t.latency_ms, 0) / traces.length)
     : 0;
-  const errorRate   = traces.length > 0
+  const errorRate = traces.length > 0
     ? ((traces.filter(t => t.is_error).length / traces.length) * 100).toFixed(1)
     : "0.0";
 
+  // ── Virtual scroll ────────────────────────────────────────────────────────
+  const { containerRef, visibleItems, totalHeight, offsetY } = useVirtualScroll({
+    items:     filtered,
+    rowHeight: DEFAULT_ROW_HEIGHT,
+    overscan:  20,
+  });
+
+  const rowHeight = DEFAULT_ROW_HEIGHT;
+  const bottomSpacerHeight = Math.max(
+    0,
+    totalHeight - offsetY - visibleItems.length * rowHeight,
+  );
+
   if (isError) return (
-    <div className="flex flex-col items-center justify-center min-h-64 gap-3 p-8 text-center">
-      <ServerCrash size={32} className="text-red-500" />
-      <p className="text-[13px] text-zinc-300 font-medium">Failed to load traces</p>
-      <p className="text-[12px] text-zinc-500">{error instanceof Error ? error.message : "Unknown"}</p>
-      <button onClick={() => refetch()}
-        className="mt-1 px-3 py-1.5 rounded bg-zinc-800 text-zinc-300 text-[12px] hover:bg-zinc-700 transition-colors">
-        Retry
-      </button>
-    </div>
+    <ErrorFallback error={error} resource="traces" onRetry={() => void refetch()} />
   );
 
   return (
@@ -92,11 +202,50 @@ export function TracesPage() {
         <span className="text-[13px] font-medium text-zinc-200">
           LLM Traces
           {!isLoading && (
-            <span className="ml-2 text-[12px] text-zinc-500 font-normal">{traces.length}</span>
+            <span className="ml-2 text-[12px] text-zinc-500 font-normal">
+              {filterQuery ? `${filtered.length} / ${traces.length}` : traces.length}
+              {filtered.length > 0 && (
+                <span className="ml-1.5 text-[10px] text-indigo-500">
+                  virtual
+                </span>
+              )}
+            </span>
           )}
         </span>
-        <button onClick={() => refetch()} disabled={isFetching}
-          className="ml-auto flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors">
+
+        {/* Search filter */}
+        <div className="relative flex-1 max-w-xs">
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+          <input
+            value={filterQuery}
+            onChange={e => setFilterQuery(e.target.value)}
+            placeholder="Filter by model, session, provider…"
+            className="w-full h-7 rounded border border-zinc-800 bg-zinc-950 text-[12px] text-zinc-300
+                       placeholder-zinc-600 pl-7 pr-7 focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+          {filterQuery && (
+            <button
+              onClick={() => setFilterQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
+            >
+              <X size={11} />
+            </button>
+          )}
+        </div>
+
+        <button
+          onClick={() => exportCsv(filtered)}
+          disabled={filtered.length === 0}
+          title="Export filtered traces as CSV"
+          className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-30 transition-colors"
+        >
+          <Download size={11} />
+        </button>
+
+        <button
+          onClick={() => refetch()} disabled={isFetching}
+          className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
+        >
           <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
           Refresh
         </button>
@@ -105,43 +254,70 @@ export function TracesPage() {
       {/* Stat strip */}
       {!isLoading && traces.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-6 gap-y-3 px-5 py-3 border-b border-zinc-800 bg-zinc-900 shrink-0">
-          <StatCard label="Calls"        value={traces.length}       />
+          <StatCard label="Calls"        value={traces.length} />
           <StatCard label="Total tokens" value={fmtTokens(totalTokens)} sub="prompt + completion" />
           <StatCard label="Avg latency"  value={fmtLatency(avgLatency)} />
-          <StatCard label="Total cost"   value={fmtCost(totalCost)}  />
-          <StatCard label="Error rate"   value={`${errorRate}%`}    />
+          <StatCard label="Total cost"   value={fmtCost(totalCost)} />
+          <StatCard label="Error rate"   value={`${errorRate}%`} />
         </div>
       )}
 
-      {/* Table */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto">
-        {isLoading
-          ? <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
-              <Loader2 size={16} className="animate-spin" />
-              <span className="text-[13px]">Loading…</span>
-            </div>
-          : (
-          <DataTable<LlmCallTrace>
-            data={traces}
-            columns={[
-              { key: 'session',    header: 'Session',   render: r => <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{shortId(r.session_id ?? '')}</span>,      sortValue: r => r.session_id ?? '' },
-              { key: 'model',      header: 'Model',     render: r => <span className="text-xs text-zinc-300 whitespace-nowrap">{r.model_id}</span>,                             sortValue: r => r.model_id },
-              { key: 'provider',   header: 'Provider',  render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap">{inferProvider(r.model_id)}</span> },
-              { key: 'latency',    header: 'Latency',   render: r => <span className={`text-[11px] tabular-nums ${r.latency_ms > 5000 ? 'text-amber-400' : 'text-zinc-400'}`}>{fmtLatency(r.latency_ms)}</span>, sortValue: r => r.latency_ms },
-              { key: 'tokens',     header: 'Tokens',    render: r => <span className="text-[11px] text-zinc-400 tabular-nums whitespace-nowrap">{fmtTokens(r.prompt_tokens)} / {fmtTokens(r.completion_tokens)}</span>, sortValue: r => (r.prompt_tokens + r.completion_tokens) },
-              { key: 'cost',       header: 'Cost',      render: r => <span className="text-[11px] text-zinc-500 tabular-nums">{fmtCost(r.cost_micros)}</span>,                  sortValue: r => r.cost_micros },
-              { key: 'status',     header: 'Status',    render: r => r.is_error ? <span className="inline-flex items-center gap-1 text-[10px] text-red-400"><AlertTriangle size={10}/>error</span> : <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400"><CheckCircle2 size={10}/>ok</span>, sortValue: r => r.is_error ? 1 : 0 },
-              { key: 'timestamp',  header: 'Timestamp', render: r => <span className="text-[11px] text-zinc-600 tabular-nums whitespace-nowrap">{fmtTime(r.created_at_ms)}</span>,  sortValue: r => r.created_at_ms },
-            ]}
-            filterFn={(r, q) => r.model_id.toLowerCase().includes(q) || (r.session_id ?? '').includes(q) || inferProvider(r.model_id).toLowerCase().includes(q)}
-            csvRow={r => [(r.session_id ?? ''), r.model_id, inferProvider(r.model_id), r.latency_ms, r.prompt_tokens, r.completion_tokens, r.cost_micros, r.is_error ? 'error' : '', r.created_at_ms]}
-            csvHeaders={['Session ID', 'Model', 'Provider', 'Latency (ms)', 'Input Tokens', 'Output Tokens', 'Cost (µUSD)', 'Error', 'Timestamp']}
-            filename="traces"
-            emptyText="No traces recorded yet"
-          />
-        )
-        }
-      </div>
+      {/* Virtualized table */}
+      {isLoading ? (
+        <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+          <Loader2 size={16} className="animate-spin" />
+          <span className="text-[13px]">Loading…</span>
+        </div>
+      ) : (
+        // containerRef attaches to the scrollable div — useVirtualScroll tracks its scrollTop
+        <div
+          ref={containerRef}
+          className="flex-1 overflow-y-auto overflow-x-auto"
+          aria-rowcount={filtered.length}
+        >
+          <table className="w-full min-w-[600px] text-[13px] border-collapse">
+            <thead>
+              <tr>
+                <TH ch="Session"   hide="hidden sm:table-cell" />
+                <TH ch="Model" />
+                <TH ch="Provider"  hide="hidden sm:table-cell" />
+                <TH ch="Latency"   right />
+                <TH ch="Tokens"    right hide="hidden md:table-cell" />
+                <TH ch="Cost"      right hide="hidden sm:table-cell" />
+                <TH ch="Status" />
+                <TH ch="Timestamp" hide="hidden sm:table-cell" />
+              </tr>
+            </thead>
+            <tbody>
+              {/* Top spacer — takes up the height of rows above the render window */}
+              {offsetY > 0 && (
+                <tr aria-hidden="true">
+                  <td style={{ height: offsetY }} colSpan={8} />
+                </tr>
+              )}
+
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-12 text-center text-[13px] text-zinc-600">
+                    No traces match this filter
+                  </td>
+                </tr>
+              ) : (
+                visibleItems.map(({ item, index }) => (
+                  <TraceRow key={item.trace_id} trace={item} even={index % 2 === 0} />
+                ))
+              )}
+
+              {/* Bottom spacer — takes up the height of rows below the render window */}
+              {bottomSpacerHeight > 0 && (
+                <tr aria-hidden="true">
+                  <td style={{ height: bottomSpacerHeight }} colSpan={8} />
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

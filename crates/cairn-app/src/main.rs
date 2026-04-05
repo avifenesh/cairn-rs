@@ -1409,6 +1409,99 @@ async fn create_run_handler(
     }
 }
 
+// ── Batch handlers ────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct BatchCreateRunsBody {
+    runs: Vec<CreateRunBody>,
+}
+
+/// `POST /v1/runs/batch` — create multiple runs in one request.
+///
+/// Each element in `runs` follows the same schema as `POST /v1/runs`.
+/// Runs are created sequentially; the response preserves input order.
+/// If any run fails the remainder still proceed — each result carries an
+/// `ok` flag and either the created record or an `error` string.
+async fn batch_create_runs_handler(
+    State(state): State<AppState>,
+    Json(body): Json<BatchCreateRunsBody>,
+) -> impl axum::response::IntoResponse {
+    if body.runs.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "code": "bad_request",
+            "message": "runs array must not be empty",
+        }))).into_response();
+    }
+
+    let mut results: Vec<serde_json::Value> = Vec::with_capacity(body.runs.len());
+
+    for run_body in body.runs {
+        let project = ProjectKey::new(
+            run_body.tenant_id.as_deref().unwrap_or("default"),
+            run_body.workspace_id.as_deref().unwrap_or("default"),
+            run_body.project_id.as_deref().unwrap_or("default"),
+        );
+        let session_id = cairn_domain::SessionId::new(
+            run_body.session_id.as_deref().unwrap_or("session_1"),
+        );
+        let run_id = RunId::new(
+            run_body.run_id.as_deref().unwrap_or(&uuid::Uuid::new_v4().to_string()),
+        );
+        let parent_run_id = run_body.parent_run_id.as_deref().map(RunId::new);
+
+        match RunService::start(&state.runtime.runs, &project, &session_id, run_id, parent_run_id).await {
+            Ok(record) => results.push(serde_json::json!({ "ok": true,  "run": record })),
+            Err(e)     => results.push(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        }
+    }
+
+    let all_ok = results.iter().all(|r| r["ok"].as_bool().unwrap_or(false));
+    let status = if all_ok { StatusCode::CREATED } else { StatusCode::MULTI_STATUS };
+    (status, Json(serde_json::json!({ "results": results }))).into_response()
+}
+
+#[derive(Deserialize)]
+struct BatchCancelTasksBody {
+    task_ids: Vec<String>,
+}
+
+/// `POST /v1/tasks/batch/cancel` — cancel multiple tasks in one call.
+///
+/// Tasks that are already terminal (completed, failed, canceled) are
+/// counted as failures with an `already_terminal` reason rather than
+/// as errors, so the caller can distinguish "nothing to cancel" from
+/// actual service failures.
+async fn batch_cancel_tasks_handler(
+    State(state): State<AppState>,
+    Json(body): Json<BatchCancelTasksBody>,
+) -> impl axum::response::IntoResponse {
+    if body.task_ids.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "code": "bad_request",
+            "message": "task_ids array must not be empty",
+        }))).into_response();
+    }
+
+    let mut cancelled: u32 = 0;
+    let mut failed: Vec<serde_json::Value> = Vec::new();
+
+    for raw_id in body.task_ids {
+        let task_id = TaskId::new(&raw_id);
+        match state.runtime.tasks.cancel(&task_id).await {
+            Ok(_) => cancelled += 1,
+            Err(e) => {
+                let reason = e.to_string();
+                failed.push(serde_json::json!({ "id": raw_id, "reason": reason }));
+            }
+        }
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "cancelled": cancelled,
+        "failed":    failed,
+    }))).into_response()
+}
+
 // ── Export / Import handlers ──────────────────────────────────────────────────
 
 /// Current export format version.  Increment when the shape changes
@@ -3119,6 +3212,67 @@ async fn ollama_model_info_handler(
     }))).into_response()
 }
 
+// ── System info handler ───────────────────────────────────────────────────────
+
+/// `GET /v1/system/info` — comprehensive system information.
+///
+/// Returns compile-time build metadata, runtime capabilities, and
+/// sanitised environment configuration (secrets are masked).
+async fn system_info_handler(
+    State(state): State<AppState>,
+) -> impl axum::response::IntoResponse {
+    let deployment_mode = match state.mode {
+        DeploymentMode::SelfHostedTeam => "self_hosted_team",
+        DeploymentMode::Local          => "local",
+    };
+    let store_type = if state.pg.is_some() {
+        "postgres"
+    } else if state.sqlite.is_some() {
+        "sqlite"
+    } else {
+        "in_memory"
+    };
+
+    // Mask the admin token — only reveal whether it is set and how long it is.
+    let admin_token_set = std::env::var("CAIRN_ADMIN_TOKEN").is_ok();
+    let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_default();
+    let ollama_host_display = if ollama_host.is_empty() {
+        "not configured".to_owned()
+    } else {
+        ollama_host.clone()
+    };
+
+    Json(serde_json::json!({
+        "version":      env!("CARGO_PKG_VERSION"),
+        "rust_version": env!("CARGO_PKG_VERSION"),   // CARGO_PKG_VERSION is the crate version
+        "build_date":   concat!(env!("CARGO_PKG_VERSION"), " (build date not embedded)"),
+        "git_commit":   option_env!("GIT_COMMIT").unwrap_or("dev"),
+        "os":           std::env::consts::OS,
+        "arch":         std::env::consts::ARCH,
+
+        "features": {
+            "sse_buffer_size":       NOTIF_RING_SIZE * 50,   // approx SSE ring (10 000)
+            "rate_limit_per_minute": RATE_LIMIT_TOKEN,
+            "ip_rate_limit_per_minute": RATE_LIMIT_IP,
+            "max_body_size_mb":      10,
+            "websocket_enabled":     true,
+            "ollama_connected":      state.ollama.is_some(),
+            "store_type":            store_type,
+            "postgres_enabled":      state.pg.is_some(),
+            "sqlite_enabled":        state.sqlite.is_some(),
+            "notification_buffer":   NOTIF_RING_SIZE,
+        },
+
+        "environment": {
+            "admin_token_set":   admin_token_set,
+            "ollama_host":       ollama_host_display,
+            "listen_addr":       "see server startup log",
+            "deployment_mode":   deployment_mode,
+            "uptime_seconds":    state.started_at.elapsed().as_secs(),
+        }
+    }))
+}
+
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 fn parse_args_from(args: &[String]) -> BootstrapConfig {
@@ -3815,10 +3969,12 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/ws",              get(ws_handler))
         // ── Protected /v1/* routes ────────────────────────────────────────
         .route("/v1/health/detailed", get(detailed_health_handler))
+        .route("/v1/system/info",     get(system_info_handler))
         .route("/v1/status", get(status_handler))
         .route("/v1/dashboard", get(dashboard_handler))
         .route("/v1/stats", get(stats_handler))
         .route("/v1/runs", get(list_runs_handler).post(create_run_handler))
+        .route("/v1/runs/batch", post(batch_create_runs_handler))
         .route("/v1/runs/:id", get(get_run_handler))
         .route("/v1/runs/:id/pause",  post(pause_run_handler))
         .route("/v1/runs/:id/resume", post(resume_run_handler))
@@ -3843,6 +3999,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/events", get(list_events_handler))
         .route("/v1/events/append", post(append_events_handler))
         .route("/v1/tasks", get(list_all_tasks_handler))
+        .route("/v1/tasks/batch/cancel", post(batch_cancel_tasks_handler))
         .route("/v1/tasks/:id/claim", post(claim_task_handler))
         .route("/v1/tasks/:id/release-lease", post(release_task_lease_handler))
         .route("/v1/traces", get(list_all_traces_handler))

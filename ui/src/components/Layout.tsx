@@ -9,7 +9,7 @@ import { type BreadcrumbItem } from './Breadcrumb';
 // All top-level pages — must match NavPage union in Sidebar.tsx
 const VALID_PAGES: NavPage[] = [
   'dashboard',
-  'sessions', 'runs', 'tasks', 'approvals', 'prompts',
+  'sessions', 'runs', 'tasks', 'workers', 'approvals', 'prompts',
   'traces', 'memory', 'sources', 'costs', 'evals', 'graph', 'audit-log', 'logs',
   'providers', 'plugins', 'credentials', 'channels', 'playground', 'api-docs', 'settings', 'profile',
 ];
@@ -52,6 +52,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   sessions:    'Sessions',
   runs:        'Runs',
   tasks:       'Tasks',
+  workers:     'Workers',
   approvals:   'Approvals',
   prompts:     'Prompts',
   traces:      'Traces',
@@ -76,6 +77,7 @@ const PAGE_GROUP: Partial<Record<NavPage, string>> = {
   sessions:    'Operations',
   runs:        'Operations',
   tasks:       'Operations',
+  workers:     'Operations',
   approvals:   'Operations',
   prompts:     'Operations',
   traces:      'Observability',

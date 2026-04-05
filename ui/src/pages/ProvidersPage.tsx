@@ -78,10 +78,16 @@ function ProviderRow({ entry, even }: { entry: ProviderHealthEntry; even: boolea
 // ── Model info panel ──────────────────────────────────────────────────────────
 
 function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }) {
+  // `enabled: true` is explicit here but redundant — the parent only mounts
+  // this panel when the user clicks the expand chevron, so the query fires
+  // lazily on demand, never on page load.  gcTime: Infinity keeps the result
+  // cached across close/reopen cycles for the lifetime of the page.
   const { data, isLoading, isError } = useQuery({
     queryKey: ["ollama-model-info", name],
     queryFn:  () => defaultApi.getOllamaModelInfo(name),
-    staleTime: 120_000,
+    staleTime: 300_000,   // 5 min — model metadata rarely changes
+    gcTime:    Infinity,  // keep in cache after panel closes; avoids refetch on reopen
+    enabled:   !!name,    // guard against empty string (belt-and-suspenders)
     retry: false,
   });
 

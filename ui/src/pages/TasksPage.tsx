@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2, Unlock } from "lucide-react";
+import {
+  RefreshCw, Loader2, Unlock, LayoutList, LayoutGrid,
+  ChevronDown, ChevronRight, XCircle,
+} from "lucide-react";
+import { clsx } from "clsx";
 import { useTableKeyboard } from "../hooks/useTableKeyboard";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { HelpTooltip } from "../components/HelpTooltip";
@@ -10,6 +14,8 @@ import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import type { TaskRecord, TaskState } from "../lib/types";
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 const fmtTime = (ms: number) =>
   new Date(ms).toLocaleString(undefined, {
     month: "short", day: "numeric",
@@ -18,6 +24,14 @@ const fmtTime = (ms: number) =>
 
 const shortId = (id: string) =>
   id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
+
+const fmtAge = (ms: number): string => {
+  const d = Date.now() - ms;
+  if (d < 60_000)      return `${Math.floor(d / 1_000)}s`;
+  if (d < 3_600_000)   return `${Math.floor(d / 60_000)}m`;
+  if (d < 86_400_000)  return `${Math.floor(d / 3_600_000)}h`;
+  return `${Math.floor(d / 86_400_000)}d`;
+};
 
 const fmtRelative = (ms: number): string => {
   const d = Date.now() - ms;
@@ -37,7 +51,387 @@ const ALL_STATES: (TaskState | "all")[] = [
   "canceled", "paused", "waiting_dependency", "retryable_failed", "dead_lettered",
 ];
 
-// ── Row actions ────────────────────────────────────────────────────────────────
+// ── State visual config ───────────────────────────────────────────────────────
+
+interface StateConfig {
+  label:      string;
+  dot:        string;
+  badge:      string;
+  cardBorder: string;
+  cardBg:     string;
+  headBg:     string;
+  headText:   string;
+}
+
+const STATE_CONFIG: Partial<Record<TaskState, StateConfig>> = {
+  queued: {
+    label: "Queued", dot: "bg-amber-400",
+    badge: "text-amber-400 bg-amber-400/10",
+    cardBorder: "border-amber-800/40", cardBg: "bg-zinc-900",
+    headBg: "bg-amber-950/30", headText: "text-amber-400",
+  },
+  leased: {
+    label: "Claimed", dot: "bg-indigo-400",
+    badge: "text-indigo-400 bg-indigo-400/10",
+    cardBorder: "border-indigo-800/40", cardBg: "bg-zinc-900",
+    headBg: "bg-indigo-950/30", headText: "text-indigo-400",
+  },
+  running: {
+    label: "Running", dot: "bg-blue-400 animate-pulse",
+    badge: "text-blue-400 bg-blue-400/10",
+    cardBorder: "border-blue-800/40", cardBg: "bg-zinc-900",
+    headBg: "bg-blue-950/30", headText: "text-blue-400",
+  },
+  paused: {
+    label: "Paused", dot: "bg-zinc-500",
+    badge: "text-zinc-400 bg-zinc-800",
+    cardBorder: "border-zinc-700/40", cardBg: "bg-zinc-900/60",
+    headBg: "bg-zinc-800/50", headText: "text-zinc-400",
+  },
+  waiting_dependency: {
+    label: "Waiting", dot: "bg-purple-400",
+    badge: "text-purple-400 bg-purple-400/10",
+    cardBorder: "border-purple-800/40", cardBg: "bg-zinc-900",
+    headBg: "bg-purple-950/30", headText: "text-purple-400",
+  },
+  completed: {
+    label: "Completed", dot: "bg-emerald-500",
+    badge: "text-emerald-400 bg-emerald-400/10",
+    cardBorder: "border-emerald-900/40", cardBg: "bg-zinc-900/60",
+    headBg: "bg-emerald-950/20", headText: "text-emerald-400",
+  },
+  failed: {
+    label: "Failed", dot: "bg-red-500",
+    badge: "text-red-400 bg-red-400/10",
+    cardBorder: "border-red-900/40", cardBg: "bg-zinc-900/60",
+    headBg: "bg-red-950/20", headText: "text-red-400",
+  },
+  canceled: {
+    label: "Cancelled", dot: "bg-zinc-600",
+    badge: "text-zinc-500 bg-zinc-800/60",
+    cardBorder: "border-zinc-800/30", cardBg: "bg-zinc-900/40",
+    headBg: "bg-zinc-800/30", headText: "text-zinc-500",
+  },
+};
+
+const BOARD_COLUMNS: TaskState[] = [
+  "queued", "leased", "running", "paused", "waiting_dependency",
+  "completed", "failed", "canceled",
+];
+
+// ── Lifecycle diagram (pure SVG) ──────────────────────────────────────────────
+
+function LifecycleDiagram() {
+  const W = 640, H = 110;
+  // Node layout: x-center, y-center, label, color
+  const nodes: { x: number; y: number; label: string; color: string; state: string }[] = [
+    { x:  56, y: 38, label: "Queued",    color: "#f59e0b", state: "queued"    },
+    { x: 176, y: 38, label: "Claimed",   color: "#818cf8", state: "leased"    },
+    { x: 296, y: 38, label: "Running",   color: "#60a5fa", state: "running"   },
+    { x: 432, y: 20, label: "Completed", color: "#34d399", state: "completed" },
+    { x: 432, y: 58, label: "Failed",    color: "#f87171", state: "failed"    },
+    { x: 576, y: 38, label: "Cancelled", color: "#71717a", state: "canceled"  },
+  ];
+
+  const nW = 72, nH = 22, r = 5;
+
+  // Edge definitions: [fromIdx, toIdx, label?, dashed?]
+  const edges: [number, number, string?, boolean?][] = [
+    [0, 1],                       // queued → claimed
+    [1, 2],                       // claimed → running
+    [2, 3],                       // running → completed
+    [2, 4],                       // running → failed
+    [1, 0, "release", true],      // claimed → queued (release)
+    [4, 0, "retry", true],        // failed → queued (retry)
+    [3, 5],                       // completed → cancelled (cancel)
+    [4, 5],                       // failed → cancelled
+  ];
+
+  function nodeCenter(idx: number): [number, number] {
+    const n = nodes[idx];
+    return [n.x, n.y];
+  }
+
+  function edgePath(from: number, to: number): string {
+    const [fx, fy] = nodeCenter(from);
+    const [tx, ty] = nodeCenter(to);
+    const dx = tx - fx;
+    const dy = ty - fy;
+
+    // straight right
+    if (Math.abs(dy) < 4) {
+      const sx = fx + nW / 2;
+      const ex = tx - nW / 2;
+      return `M ${sx} ${fy} L ${ex} ${ty}`;
+    }
+    // curved (going down or up between nodes)
+    const sx = fx + (dx > 0 ? nW / 2 : -nW / 2);
+    const ex = tx + (dx > 0 ? -nW / 2 : nW / 2);
+    const cy = (fy + ty) / 2;
+    return `M ${sx} ${fy} C ${sx} ${cy}, ${ex} ${cy}, ${ex} ${ty}`;
+  }
+
+  return (
+    <svg
+      width="100%"
+      viewBox={`0 0 ${W} ${H}`}
+      className="overflow-visible"
+      aria-label="Task lifecycle state machine"
+    >
+      <defs>
+        <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L6,3 z" fill="#52525b" />
+        </marker>
+        <marker id="arrow-retry" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L6,3 z" fill="#3f3f46" />
+        </marker>
+      </defs>
+
+      {/* Edges */}
+      {edges.map(([f, t, label, dashed], i) => {
+        const path = edgePath(f, t);
+        const stroke = dashed ? "#3f3f46" : "#52525b";
+        return (
+          <g key={i}>
+            <path
+              d={path}
+              fill="none"
+              stroke={stroke}
+              strokeWidth={1.2}
+              strokeDasharray={dashed ? "3 2" : undefined}
+              markerEnd={`url(#${dashed ? "arrow-retry" : "arrow"})`}
+            />
+            {label && (() => {
+              // Label midpoint — rough center of path
+              const [fx, fy] = nodeCenter(f);
+              const [tx, ty] = nodeCenter(t);
+              const mx = (fx + tx) / 2;
+              const my = (fy + ty) / 2 - 5;
+              return (
+                <text
+                  x={mx} y={my}
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#52525b"
+                  fontFamily="monospace"
+                >
+                  {label}
+                </text>
+              );
+            })()}
+          </g>
+        );
+      })}
+
+      {/* Nodes */}
+      {nodes.map((n, i) => (
+        <g key={i}>
+          <rect
+            x={n.x - nW / 2}
+            y={n.y - nH / 2}
+            width={nW}
+            height={nH}
+            rx={r}
+            fill={n.color + "18"}
+            stroke={n.color + "60"}
+            strokeWidth={1}
+          />
+          <circle cx={n.x - nW / 2 + 10} cy={n.y} r={3} fill={n.color} opacity={0.9} />
+          <text
+            x={n.x + 2}
+            y={n.y + 4}
+            textAnchor="middle"
+            fontSize="9.5"
+            fontFamily="ui-monospace, monospace"
+            fill={n.color}
+            fontWeight="500"
+          >
+            {n.label}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function LifecycleBanner() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-b border-zinc-800 shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-zinc-900/40 transition-colors"
+      >
+        {open
+          ? <ChevronDown  size={11} className="text-zinc-600 shrink-0" />
+          : <ChevronRight size={11} className="text-zinc-600 shrink-0" />
+        }
+        <span className="text-[11px] font-medium text-zinc-600 uppercase tracking-wider">
+          Task Lifecycle
+        </span>
+        {!open && (
+          <span className="text-[10px] text-zinc-700 ml-1">
+            queued → claimed → running → completed / failed
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="px-4 pb-3 bg-zinc-950/40">
+          <LifecycleDiagram />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Kanban task card ──────────────────────────────────────────────────────────
+
+function TaskCard({ task, cfg }: { task: TaskRecord; cfg: StateConfig }) {
+  function handleClick() {
+    if (task.parent_run_id) {
+      window.location.hash = `run/${task.parent_run_id}`;
+    }
+  }
+
+  return (
+    <div
+      onClick={task.parent_run_id ? handleClick : undefined}
+      className={clsx(
+        "rounded-md border px-2.5 py-2 space-y-1.5 select-none",
+        cfg.cardBorder, cfg.cardBg,
+        task.parent_run_id ? "cursor-pointer hover:brightness-110 transition-all" : "",
+      )}
+    >
+      {/* Task ID */}
+      <p className="text-[11px] font-mono text-zinc-300 truncate" title={task.task_id}>
+        {shortId(task.task_id)}
+      </p>
+
+      {/* Run ID link */}
+      {task.parent_run_id && (
+        <p className="text-[10px] font-mono text-zinc-600 truncate" title={task.parent_run_id}>
+          run: {shortId(task.parent_run_id)}
+        </p>
+      )}
+
+      {/* Worker */}
+      {task.lease_owner && (
+        <p className="text-[10px] font-mono text-zinc-500 truncate" title={task.lease_owner}>
+          ◎ {shortId(task.lease_owner)}
+        </p>
+      )}
+
+      {/* Age */}
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-zinc-700 tabular-nums">
+          {fmtAge(task.created_at)} old
+        </span>
+        {task.failure_class && (
+          <span className="text-[9px] font-mono text-red-600 truncate max-w-[72px]" title={task.failure_class}>
+            {task.failure_class}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Kanban column ─────────────────────────────────────────────────────────────
+
+const MAX_CARDS = 20;
+
+function KanbanColumn({ state, tasks }: { state: TaskState; tasks: TaskRecord[] }) {
+  const cfg = STATE_CONFIG[state];
+  if (!cfg) return null;
+
+  const shown  = tasks.slice(0, MAX_CARDS);
+  const hidden = tasks.length - shown.length;
+
+  return (
+    <div className="flex flex-col min-w-[180px] max-w-[200px] shrink-0 rounded-lg border border-zinc-800 overflow-hidden">
+      {/* Column header */}
+      <div className={clsx("flex items-center gap-2 px-3 py-2 shrink-0", cfg.headBg)}>
+        <span className={clsx("w-2 h-2 rounded-full shrink-0", cfg.dot)} />
+        <span className={clsx("text-[11px] font-medium flex-1", cfg.headText)}>
+          {cfg.label}
+        </span>
+        <span className={clsx(
+          "text-[10px] font-mono tabular-nums rounded-full px-1.5 py-0.5 min-w-[20px] text-center",
+          cfg.badge,
+        )}>
+          {tasks.length}
+        </span>
+      </div>
+
+      {/* Cards */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-1.5 bg-zinc-950/30 min-h-[80px]">
+        {shown.length === 0 ? (
+          <div className="flex items-center justify-center h-12">
+            <span className="text-[10px] text-zinc-800">empty</span>
+          </div>
+        ) : (
+          <>
+            {shown.map(t => (
+              <TaskCard key={t.task_id} task={t} cfg={cfg} />
+            ))}
+            {hidden > 0 && (
+              <p className="text-[10px] text-zinc-700 text-center py-1">
+                +{hidden} more
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Board view ────────────────────────────────────────────────────────────────
+
+function BoardView({ tasks }: { tasks: TaskRecord[] }) {
+  const byState: Partial<Record<TaskState, TaskRecord[]>> = {};
+  for (const col of BOARD_COLUMNS) byState[col] = [];
+
+  for (const t of tasks) {
+    if (BOARD_COLUMNS.includes(t.state as TaskState)) {
+      byState[t.state as TaskState]!.push(t);
+    }
+  }
+
+  // Sort within each column: most recent first for terminal states, oldest first for active
+  for (const [state, col] of Object.entries(byState) as [TaskState, TaskRecord[]][]) {
+    const terminal = state === "completed" || state === "failed" || state === "canceled";
+    col.sort((a, b) => terminal
+      ? b.updated_at - a.updated_at
+      : a.created_at - b.created_at,
+    );
+  }
+
+  const totalVisible = BOARD_COLUMNS.reduce((s, c) => s + (byState[c]?.length ?? 0), 0);
+
+  return (
+    <div className="flex-1 overflow-x-auto overflow-y-hidden p-3">
+      {totalVisible === 0 ? (
+        <div className="flex items-center justify-center h-full text-zinc-700 text-[13px]">
+          No tasks
+        </div>
+      ) : (
+        <div className="flex gap-2.5 h-full">
+          {BOARD_COLUMNS.map(state => (
+            <KanbanColumn
+              key={state}
+              state={state}
+              tasks={byState[state] ?? []}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Row actions ───────────────────────────────────────────────────────────────
 
 function RowActions({ task }: { task: TaskRecord }) {
   const qc    = useQueryClient();
@@ -92,20 +486,19 @@ function RowActions({ task }: { task: TaskRecord }) {
   );
 }
 
-// ── Table ─────────────────────────────────────────────────────────────────────
-
-
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+type ViewMode = "table" | "board";
+
 export function TasksPage() {
-  const [filter, setFilter] = useState<TaskState | "all">("all");
+  const [filter,   setFilter]   = useState<TaskState | "all">("all");
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
   const qc    = useQueryClient();
   const toast = useToast();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["tasks"],
-    queryFn: () => defaultApi.getAllTasks({ limit: 500 }),
+    queryFn:  () => defaultApi.getAllTasks({ limit: 500 }),
     refetchInterval: 15_000,
   });
 
@@ -116,38 +509,59 @@ export function TasksPage() {
   const kbd = useTableKeyboard({
     items:  filtered,
     getKey: t => t.task_id,
-    // tasks don't have a detail page, just navigate to the tasks list focused
   });
 
   const releaseSelected = useMutation({
     mutationFn: async () => {
-      const toRelease = filtered.filter(t => kbd.selectedKeys.has(t.task_id) &&
-        (t.state === 'leased' || t.state === 'running') && t.lease_owner);
+      const toRelease = filtered.filter(t =>
+        kbd.selectedKeys.has(t.task_id) &&
+        (t.state === "leased" || t.state === "running") &&
+        t.lease_owner,
+      );
       await Promise.all(toRelease.map(t => defaultApi.releaseLease(t.task_id)));
       return toRelease.length;
     },
     onSuccess: n => {
-      toast.success(`Released ${n} task lease${n !== 1 ? 's' : ''}.`);
+      toast.success(`Released ${n} task lease${n !== 1 ? "s" : ""}.`);
       kbd.clearSelection();
-      void qc.invalidateQueries({ queryKey: ['tasks'] });
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
     },
-    onError: () => toast.error('Failed to release some leases.'),
+    onError: () => toast.error("Failed to release some leases."),
+  });
+
+  const cancelSelected = useMutation({
+    mutationFn: async () => {
+      const ids = filtered
+        .filter(t => kbd.selectedKeys.has(t.task_id) && !["completed","failed","canceled","dead_lettered"].includes(t.state))
+        .map(t => t.task_id);
+      if (ids.length === 0) return { cancelled: 0, failed: [] };
+      return defaultApi.batchCancelTasks(ids);
+    },
+    onSuccess: result => {
+      const { cancelled, failed } = result;
+      if (cancelled > 0) toast.success(`Cancelled ${cancelled} task${cancelled !== 1 ? "s" : ""}.`);
+      if (failed.length > 0) toast.error(`${failed.length} task${failed.length !== 1 ? "s" : ""} could not be cancelled.`);
+      kbd.clearSelection();
+      void qc.invalidateQueries({ queryKey: ["tasks"] });
+    },
+    onError: () => toast.error("Batch cancel failed."),
   });
 
   if (isError) return (
     <ErrorFallback error={error} resource="tasks" onRetry={() => void refetch()} />
   );
 
-  const selCount = kbd.selectedKeys.size;
+  const selCount   = kbd.selectedKeys.size;
   const releasable = filtered.filter(t =>
     kbd.selectedKeys.has(t.task_id) &&
-    (t.state === 'leased' || t.state === 'running') && t.lease_owner
+    (t.state === "leased" || t.state === "running") &&
+    t.lease_owner,
   ).length;
 
   return (
     <div className="flex flex-col h-full bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
+      <div className="flex items-center gap-2 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
         <span className="text-[13px] font-medium text-zinc-200">
           Tasks
           {!isLoading && (
@@ -160,82 +574,138 @@ export function TasksPage() {
             </span>
           )}
         </span>
+
         {selCount > 0 && (
           <span className="text-[11px] text-indigo-400 font-medium">{selCount} selected</span>
         )}
 
-        <select
-          value={filter}
-          onChange={e => setFilter(e.target.value as TaskState | "all")}
-          className="ml-auto rounded border border-zinc-700 bg-zinc-800 text-[12px] text-zinc-300
-                     px-2 py-1 focus:outline-none focus:border-indigo-500 transition-colors"
-        >
-          {ALL_STATES.map(s => (
-            <option key={s} value={s}>
-              {s === "all" ? "All states" : s.replace(/_/g, " ")}
-            </option>
-          ))}
-        </select>
-
-        {releasable > 0 && (
+        {/* View toggle */}
+        <div className="flex items-center rounded border border-zinc-700 overflow-hidden ml-2">
           <button
-            onClick={() => releaseSelected.mutate()}
-            disabled={releaseSelected.isPending}
-            className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-900
-                       text-zinc-400 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:border-zinc-600
-                       disabled:opacity-40 transition-colors"
+            onClick={() => setViewMode("table")}
+            title="Table view"
+            className={clsx(
+              "flex items-center gap-1 px-2.5 py-1 text-[11px] transition-colors",
+              viewMode === "table"
+                ? "bg-zinc-700 text-zinc-200"
+                : "text-zinc-500 hover:text-zinc-300",
+            )}
           >
-            <Unlock size={11} />
-            Release {releasable}
+            <LayoutList size={12} /> Table
           </button>
-        )}
-        {selCount > 0 && (
-          <button onClick={kbd.clearSelection} className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors">
-            Clear
+          <button
+            onClick={() => setViewMode("board")}
+            title="Board view"
+            className={clsx(
+              "flex items-center gap-1 px-2.5 py-1 text-[11px] border-l border-zinc-700 transition-colors",
+              viewMode === "board"
+                ? "bg-zinc-700 text-zinc-200"
+                : "text-zinc-500 hover:text-zinc-300",
+            )}
+          >
+            <LayoutGrid size={12} /> Board
           </button>
+        </div>
+
+        {/* State filter — only shown in table mode */}
+        {viewMode === "table" && (
+          <select
+            value={filter}
+            onChange={e => setFilter(e.target.value as TaskState | "all")}
+            className="ml-1 rounded border border-zinc-700 bg-zinc-800 text-[12px] text-zinc-300
+                       px-2 py-1 focus:outline-none focus:border-indigo-500 transition-colors"
+          >
+            {ALL_STATES.map(s => (
+              <option key={s} value={s}>
+                {s === "all" ? "All states" : s.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
         )}
 
-        <button onClick={() => refetch()} disabled={isFetching}
-          className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors">
-          <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {releasable > 0 && viewMode === "table" && (
+            <button
+              onClick={() => releaseSelected.mutate()}
+              disabled={releaseSelected.isPending}
+              className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-900
+                         text-zinc-400 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:border-zinc-600
+                         disabled:opacity-40 transition-colors"
+            >
+              <Unlock size={11} />
+              Release {releasable}
+            </button>
+          )}
+          {selCount > 0 && viewMode === "table" && (
+            <button
+              onClick={() => cancelSelected.mutate()}
+              disabled={cancelSelected.isPending}
+              title="Cancel all selected non-terminal tasks"
+              className="flex items-center gap-1.5 rounded border border-red-900/60 bg-red-950/30
+                         text-red-400 text-[12px] px-2.5 py-1 hover:bg-red-950/60 hover:border-red-800
+                         disabled:opacity-40 transition-colors"
+            >
+              <XCircle size={11} />
+              Cancel {selCount}
+            </button>
+          )}
+          {selCount > 0 && viewMode === "table" && (
+            <button
+              onClick={kbd.clearSelection}
+              className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+            >
+              Clear
+            </button>
+          )}
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
+          >
+            <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
       </div>
 
+      {/* Lifecycle diagram */}
+      <LifecycleBanner />
+
       {/* Content */}
-      <div
-        {...kbd.containerProps}
-        className={`flex-1 overflow-x-auto overflow-y-auto ${kbd.containerProps.className}`}
-      >
-        {isLoading
-          ? <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
-              <Loader2 size={16} className="animate-spin" />
-              <span className="text-[13px]">Loading…</span>
-            </div>
-          : (
+      {isLoading ? (
+        <div className="flex items-center justify-center flex-1 gap-2 text-zinc-600">
+          <Loader2 size={16} className="animate-spin" />
+          <span className="text-[13px]">Loading…</span>
+        </div>
+      ) : viewMode === "board" ? (
+        <BoardView tasks={tasks} />
+      ) : (
+        <div
+          {...kbd.containerProps}
+          className={`flex-1 overflow-x-auto overflow-y-auto ${kbd.containerProps.className}`}
+        >
           <DataTable<TaskRecord>
             data={filtered}
             activeIndex={kbd.activeIndex}
             selectedIds={kbd.selectedKeys}
             getRowId={t => t.task_id}
             columns={[
-              { key: 'task_id',    header: 'Task ID',   render: r => <span className="font-mono text-xs text-zinc-300 whitespace-nowrap" title={r.task_id}>{shortId(r.task_id)}</span>,               sortValue: r => r.task_id },
-              { key: 'run',        header: 'Run',        render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-zinc-700">—</span> },
-              { key: 'state',      header: 'Status',     render: r => <StateBadge state={r.state as Parameters<typeof StateBadge>[0]["state"]} compact />, sortValue: r => r.state },
-              { key: 'worker',     header: 'Worker',     render: r => r.lease_owner ? <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{shortId(r.lease_owner)}</span> : <span className="text-zinc-700">—</span> },
-              { key: 'queued_at',  header: 'Queued',     render: r => <span className="text-[11px] text-zinc-500 tabular-nums whitespace-nowrap" title={fmtTime(r.created_at)}>{fmtRelative(r.created_at)}</span>,   sortValue: r => r.created_at },
-              { key: 'started_at', header: 'Started At', render: r => r.lease_expires_at ? <span className="text-[11px] text-zinc-400 tabular-nums whitespace-nowrap">{fmtTime(r.updated_at)}</span> : <span className="text-zinc-700">—</span>, sortValue: r => r.updated_at },
-              { key: 'actions',    header: '',            render: r => <RowActions task={r} /> },
+              { key: "task_id",    header: "Task ID",    render: r => <span className="font-mono text-xs text-zinc-300 whitespace-nowrap" title={r.task_id}>{shortId(r.task_id)}</span>,                sortValue: r => r.task_id },
+              { key: "run",        header: "Run",         render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-zinc-700">—</span> },
+              { key: "state",      header: "Status",      render: r => <StateBadge state={r.state as Parameters<typeof StateBadge>[0]["state"]} compact />, sortValue: r => r.state },
+              { key: "worker",     header: "Worker",      render: r => r.lease_owner ? <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{shortId(r.lease_owner)}</span> : <span className="text-zinc-700">—</span> },
+              { key: "queued_at",  header: "Queued",      render: r => <span className="text-[11px] text-zinc-500 tabular-nums whitespace-nowrap" title={fmtTime(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
+              { key: "started_at", header: "Started At",  render: r => r.lease_expires_at ? <span className="text-[11px] text-zinc-400 tabular-nums whitespace-nowrap">{fmtTime(r.updated_at)}</span> : <span className="text-zinc-700">—</span>, sortValue: r => r.updated_at },
+              { key: "actions",    header: "",             render: r => <RowActions task={r} /> },
             ]}
-            filterFn={(r, q) => r.task_id.includes(q) || r.state.includes(q) || (r.parent_run_id ?? '').includes(q) || (r.lease_owner ?? '').includes(q)}
-            csvRow={r => [r.task_id, r.parent_run_id ?? '', r.state, r.lease_owner ?? '', r.created_at, r.updated_at]}
-            csvHeaders={['Task ID', 'Run ID', 'State', 'Worker', 'Queued At', 'Updated At']}
+            filterFn={(r, q) => r.task_id.includes(q) || r.state.includes(q) || (r.parent_run_id ?? "").includes(q) || (r.lease_owner ?? "").includes(q)}
+            csvRow={r => [r.task_id, r.parent_run_id ?? "", r.state, r.lease_owner ?? "", r.created_at, r.updated_at]}
+            csvHeaders={["Task ID", "Run ID", "State", "Worker", "Queued At", "Updated At"]}
             filename="tasks"
             emptyText="No tasks match this filter"
           />
-        )
-        }
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -15,6 +15,7 @@ const RunDetailPage      = lazy(() => import('./pages/RunDetailPage').then(m => 
 const SessionDetailPage  = lazy(() => import('./pages/SessionDetailPage').then(m => ({ default: m.SessionDetailPage })));
 const EvalComparisonPage = lazy(() => import('./pages/EvalComparisonPage').then(m => ({ default: m.EvalComparisonPage })));
 const PlaygroundPage     = lazy(() => import('./pages/PlaygroundPage').then(m => ({ default: m.PlaygroundPage })));
+const WorkersPage        = lazy(() => import('./pages/WorkersPage').then(m => ({ default: m.WorkersPage })));
 const ApiDocsPage        = lazy(() => import('./pages/ApiDocsPage').then(m => ({ default: m.ApiDocsPage })));
 const GraphPage          = lazy(() => import('./pages/GraphPage').then(m => ({ default: m.GraphPage })));
 const PromptsPage        = lazy(() => import('./pages/PromptsPage').then(m => ({ default: m.PromptsPage })));
@@ -101,6 +102,7 @@ function renderRoute(route: Route): React.ReactNode {
   // Lazy pages — wrapped in Suspense.
   const lazy_page = (() => {
     switch (page) {
+      case 'workers':     return <WorkersPage />;
       case 'prompts':     return <PromptsPage />;
       case 'providers':   return <ProvidersPage />;
       case 'memory':      return <MemoryPage />;

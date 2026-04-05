@@ -613,3 +613,37 @@ export interface NotifListResponse {
   notifications: Notification[];
   unread_count:  number;
 }
+
+// ── System Info (GET /v1/system/info) ─────────────────────────────────────────
+
+export interface SystemInfoFeatures {
+  sse_buffer_size:           number;
+  rate_limit_per_minute:     number;
+  ip_rate_limit_per_minute:  number;
+  max_body_size_mb:          number;
+  websocket_enabled:         boolean;
+  ollama_connected:          boolean;
+  store_type:                string;
+  postgres_enabled:          boolean;
+  sqlite_enabled:            boolean;
+  notification_buffer:       number;
+}
+
+export interface SystemInfoEnvironment {
+  admin_token_set:   boolean;
+  ollama_host:       string;
+  listen_addr:       string;
+  deployment_mode:   string;
+  uptime_seconds:    number;
+}
+
+export interface SystemInfo {
+  version:      string;
+  rust_version: string;
+  build_date:   string;
+  git_commit:   string;
+  os:           string;
+  arch:         string;
+  features:     SystemInfoFeatures;
+  environment:  SystemInfoEnvironment;
+}

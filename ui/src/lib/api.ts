@@ -132,6 +132,9 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/health/detailed — per-subsystem health with latency, memory, Ollama info. */
     getDetailedHealth: (): Promise<import("./types").DetailedHealth> => get("/v1/health/detailed"),
 
+    /** GET /v1/system/info — version, build metadata, features, environment. */
+    getSystemInfo: (): Promise<import("./types").SystemInfo> => get("/v1/system/info"),
+
     // ── Overview ─────────────────────────────────────────────────────────────
 
     /** GET /v1/overview — combined deployment info and health. */
@@ -210,6 +213,10 @@ export function createApiClient(config: ApiClientConfig) {
     releaseLease: (taskId: string): Promise<import("./types").TaskRecord> =>
       post(`/v1/tasks/${taskId}/release-lease`),
 
+    /** POST /v1/tasks/batch/cancel — cancel multiple tasks at once. */
+    batchCancelTasks: (taskIds: string[]): Promise<{ cancelled: number; failed: { id: string; reason: string }[] }> =>
+      post('/v1/tasks/batch/cancel', { task_ids: taskIds }),
+
     /** GET /v1/runs/:id/tasks — tasks belonging to a run. */
     getRunTasks: (runId: string): Promise<import("./types").TaskRecord[]> =>
       get(`/v1/runs/${runId}/tasks`),
@@ -235,6 +242,16 @@ export function createApiClient(config: ApiClientConfig) {
       run_id?: string;
       parent_run_id?: string;
     }): Promise<RunRecord> => post("/v1/runs", body),
+
+    /** POST /v1/runs/batch — create multiple runs at once. */
+    batchCreateRuns: (runs: Array<{
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+      session_id?: string;
+      run_id?: string;
+    }>): Promise<{ results: Array<{ ok: boolean; run?: RunRecord; error?: string }> }> =>
+      post('/v1/runs/batch', { runs }),
 
     // ── Approvals ─────────────────────────────────────────────────────────────
 
