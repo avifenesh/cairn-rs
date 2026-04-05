@@ -2530,13 +2530,23 @@ mod tests {
                 ),
             },
         );
-        AppState {
-            runtime: Arc::new(InMemoryServices::new()),
-            started_at: Arc::new(Instant::now()),
-            tokens,
-            pg: None,
-            sqlite: None,
-            mode: DeploymentMode::Local,
+        {
+            let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
+            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+            let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
+                doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
+            AppState {
+                runtime: Arc::new(InMemoryServices::new()),
+                started_at: Arc::new(Instant::now()),
+                tokens,
+                pg: None,
+                sqlite: None,
+                mode: DeploymentMode::Local,
+                document_store: doc_store,
+                retrieval,
+                ingest,
+                ollama: None,
+            }
         }
     }
 
@@ -4122,6 +4132,10 @@ mod tests {
                 tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new("t2")),
             },
         );
+        let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
+        let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+        let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
+            doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
         let state = AppState {
             runtime: Arc::new(InMemoryServices::new()),
             started_at: Arc::new(Instant::now()),
@@ -4129,6 +4143,10 @@ mod tests {
             pg: None,
             sqlite: None,
             mode: DeploymentMode::Local,
+            document_store: doc_store,
+            retrieval,
+            ingest,
+            ollama: None,
         };
         let app = build_router(state);
 
@@ -4645,13 +4663,23 @@ mod run_events_tests {
                 ),
             },
         );
-        AppState {
-            runtime: Arc::new(InMemoryServices::new()),
-            started_at: Arc::new(std::time::Instant::now()),
-            tokens,
-            pg: None,
-            sqlite: None,
-            mode: DeploymentMode::Local,
+        {
+            let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
+            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+            let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
+                doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
+            AppState {
+                runtime: Arc::new(InMemoryServices::new()),
+                started_at: Arc::new(std::time::Instant::now()),
+                tokens,
+                pg: None,
+                sqlite: None,
+                mode: DeploymentMode::Local,
+                document_store: doc_store,
+                retrieval,
+                ingest,
+                ollama: None,
+            }
         }
     }
 
@@ -4816,13 +4844,23 @@ mod tool_invocations_tests {
                 ),
             },
         );
-        AppState {
-            runtime: Arc::new(InMemoryServices::new()),
-            started_at: Arc::new(std::time::Instant::now()),
-            tokens,
-            pg: None,
-            sqlite: None,
-            mode: DeploymentMode::Local,
+        {
+            let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
+            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+            let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
+                doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
+            AppState {
+                runtime: Arc::new(InMemoryServices::new()),
+                started_at: Arc::new(std::time::Instant::now()),
+                tokens,
+                pg: None,
+                sqlite: None,
+                mode: DeploymentMode::Local,
+                document_store: doc_store,
+                retrieval,
+                ingest,
+                ollama: None,
+            }
         }
     }
 
@@ -5018,13 +5056,23 @@ mod provider_health_tests {
                 tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new("t_ph")),
             },
         );
-        AppState {
-            runtime: Arc::new(InMemoryServices::new()),
-            started_at: Arc::new(std::time::Instant::now()),
-            tokens,
-            pg: None,
-            sqlite: None,
-            mode: DeploymentMode::Local,
+        {
+            let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
+            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+            let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
+                doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
+            AppState {
+                runtime: Arc::new(InMemoryServices::new()),
+                started_at: Arc::new(std::time::Instant::now()),
+                tokens,
+                pg: None,
+                sqlite: None,
+                mode: DeploymentMode::Local,
+                document_store: doc_store,
+                retrieval,
+                ingest,
+                ollama: None,
+            }
         }
     }
 
