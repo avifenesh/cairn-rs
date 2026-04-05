@@ -5,6 +5,7 @@ import type { SystemStatus } from '../lib/types';
 import { clsx } from 'clsx';
 import { useTheme, type Theme } from '../hooks/useTheme';
 import { Breadcrumb, type BreadcrumbItem } from './Breadcrumb';
+import { TenantSelector } from './TenantSelector';
 
 function formatUptime(secs: number): string {
   if (secs < 60)   return `${secs}s`;
@@ -73,7 +74,12 @@ export function TopBar({ breadcrumbs, onMenuClick }: TopBarProps) {
       </button>
 
       {/* Breadcrumb — replaces the plain title */}
-      <Breadcrumb items={breadcrumbs} className="flex-1 min-w-0" />
+      <Breadcrumb items={breadcrumbs} className="min-w-0" />
+
+      {/* Scope selector — tenant / workspace / project */}
+      <div className="hidden sm:block shrink-0">
+        <TenantSelector />
+      </div>
 
       <div className="ml-auto flex items-center gap-3 shrink-0">
         {/* Theme toggle */}

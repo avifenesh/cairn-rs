@@ -18,6 +18,7 @@ import type {
   SessionRecord,
   SystemStatus,
 } from "./types";
+import { getStoredScope } from "../hooks/useScope";
 
 // ── Client config ─────────────────────────────────────────────────────────────
 
@@ -26,6 +27,12 @@ export interface ApiClientConfig {
   baseUrl: string;
   /** Bearer token for the admin account. */
   token: string;
+  /**
+   * Current tenant/workspace/project scope.  When set, list and create
+   * endpoints automatically inject these values as defaults (explicit call-site
+   * params always override).
+   */
+  scope?: import("../hooks/useScope").ProjectScope;
 }
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -95,6 +102,22 @@ export function createApiClient(config: ApiClientConfig) {
     });
   const del  = <T>(path: string) => apiFetch<T>(config, path, { method: "DELETE" });
 
+  /**
+   * Merge the configured scope (as defaults) with any explicit override params.
+   * Explicit params always win; scope fills in undefined values only.
+   */
+  function withScope<T extends { tenant_id?: string; workspace_id?: string; project_id?: string }>(
+    explicit?: T,
+  ): { tenant_id?: string; workspace_id?: string; project_id?: string } & Omit<T, 'tenant_id' | 'workspace_id' | 'project_id'> {
+    const s = config.scope;
+    return {
+      tenant_id:    s?.tenant_id,
+      workspace_id: s?.workspace_id,
+      project_id:   s?.project_id,
+      ...explicit,
+    } as { tenant_id?: string; workspace_id?: string; project_id?: string } & Omit<T, 'tenant_id' | 'workspace_id' | 'project_id'>;
+  }
+
   return {
     // ── Health (public — no auth needed but token is included anyway) ─────────
 
@@ -122,10 +145,14 @@ export function createApiClient(config: ApiClientConfig) {
     // ── Sessions ──────────────────────────────────────────────────────────────
 
     /** GET /v1/sessions — list active sessions, most recent first. */
-    getSessions: (params?: { limit?: number; offset?: number }): Promise<SessionRecord[]> => {
+    getSessions: (params?: { limit?: number; offset?: number; tenant_id?: string; workspace_id?: string; project_id?: string }): Promise<SessionRecord[]> => {
+      const merged = withScope(params);
       const qs = new URLSearchParams();
-      if (params?.limit !== undefined) qs.set("limit", String(params.limit));
-      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      if (merged.tenant_id)                  qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id)               qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)                 qs.set("project_id",   merged.project_id);
+      if (params?.limit  !== undefined)      qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined)      qs.set("offset", String(params.offset));
       const query = qs.toString() ? `?${qs}` : "";
       return get(`/v1/sessions${query}`);
     },
@@ -148,11 +175,12 @@ export function createApiClient(config: ApiClientConfig) {
       limit?: number;
       offset?: number;
     }): Promise<RunRecord[]> => {
+      const merged = withScope(params);
       const qs = new URLSearchParams();
-      if (params?.tenant_id) qs.set("tenant_id", params.tenant_id);
-      if (params?.workspace_id) qs.set("workspace_id", params.workspace_id);
-      if (params?.project_id) qs.set("project_id", params.project_id);
-      if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+      if (merged.tenant_id)             qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id)          qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)            qs.set("project_id",   merged.project_id);
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
       if (params?.offset !== undefined) qs.set("offset", String(params.offset));
       const query = qs.toString() ? `?${qs}` : "";
       return get(`/v1/runs${query}`);
@@ -216,10 +244,11 @@ export function createApiClient(config: ApiClientConfig) {
       workspace_id?: string;
       project_id?: string;
     }): Promise<ApprovalRecord[]> => {
+      const merged = withScope(params);
       const qs = new URLSearchParams();
-      if (params?.tenant_id) qs.set("tenant_id", params.tenant_id);
-      if (params?.workspace_id) qs.set("workspace_id", params.workspace_id);
-      if (params?.project_id) qs.set("project_id", params.project_id);
+      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)   qs.set("project_id",   merged.project_id);
       const query = qs.toString() ? `?${qs}` : "";
       return get(`/v1/approvals/pending${query}`);
     },
@@ -324,11 +353,13 @@ export function createApiClient(config: ApiClientConfig) {
       project_id?: string;
       limit?: number;
     }): Promise<import("./types").MemorySearchResponse> => {
+      const merged = withScope(params);
+      const s = config.scope;
       const qs = new URLSearchParams();
       qs.set("query_text",   params.query_text);
-      qs.set("tenant_id",    params.tenant_id    ?? "default_tenant");
-      qs.set("workspace_id", params.workspace_id ?? "default_workspace");
-      qs.set("project_id",   params.project_id   ?? "default_project");
+      qs.set("tenant_id",    merged.tenant_id    ?? s?.tenant_id    ?? "default_tenant");
+      qs.set("workspace_id", merged.workspace_id ?? s?.workspace_id ?? "default_workspace");
+      qs.set("project_id",   merged.project_id   ?? s?.project_id   ?? "default_project");
       if (params.limit !== undefined) qs.set("limit", String(params.limit));
       return get(`/v1/memory/search?${qs}`);
     },
@@ -339,10 +370,11 @@ export function createApiClient(config: ApiClientConfig) {
       workspace_id?: string;
       project_id?: string;
     }): Promise<import("./types").SourceRecord[]> => {
+      const merged = withScope(params);
       const qs = new URLSearchParams();
-      if (params?.tenant_id)    qs.set("tenant_id",    params.tenant_id);
-      if (params?.workspace_id) qs.set("workspace_id", params.workspace_id);
-      if (params?.project_id)   qs.set("project_id",   params.project_id);
+      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)   qs.set("project_id",   merged.project_id);
       const query = qs.toString() ? `?${qs}` : "";
       return get(`/v1/sources${query}`);
     },
@@ -571,14 +603,16 @@ export function clearStoredToken() {
 }
 
 /**
- * Dynamic default client: reads the token from localStorage on every call
- * so that post-login requests use the newly saved token without re-importing.
+ * Dynamic default client: reads the token AND scope from localStorage on every
+ * call so that post-login requests use the newly saved token without
+ * re-importing, and scope changes are reflected immediately.
  */
 export const defaultApi = new Proxy({} as ReturnType<typeof createApiClient>, {
   get(_target, prop) {
     const client = createApiClient({
       baseUrl: import.meta.env.VITE_API_URL ?? '',
-      token: getStoredToken(),
+      token:   getStoredToken(),
+      scope:   getStoredScope(),
     });
     return (client as Record<string, unknown>)[prop as string];
   },
