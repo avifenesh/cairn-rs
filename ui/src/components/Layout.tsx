@@ -3,35 +3,41 @@ import { Sidebar, type NavPage } from './Sidebar';
 import { TopBar } from './TopBar';
 import { CommandPalette } from './CommandPalette';
 
+// All 11 pages — must match NavPage union in Sidebar.tsx
+const VALID_PAGES: NavPage[] = [
+  'dashboard',
+  'sessions', 'runs', 'tasks', 'approvals',
+  'traces', 'memory', 'costs',
+  'providers', 'playground', 'settings',
+];
+
 function readPage(): NavPage {
   const hash = window.location.hash.replace('#', '') as NavPage;
-  const valid: NavPage[] = [
-    'dashboard', 'runs', 'tasks', 'sessions', 'approvals',
-    'providers', 'costs', 'traces', 'memory', 'settings',
-  ];
-  return valid.includes(hash) ? hash : 'dashboard';
+  return VALID_PAGES.includes(hash) ? hash : 'dashboard';
 }
 
 export const PAGE_TITLES: Record<NavPage, string> = {
-  dashboard: 'Dashboard',
-  runs:      'Runs',
-  tasks:     'Tasks',
-  sessions:  'Sessions',
-  approvals: 'Approvals',
-  providers: 'Providers',
-  costs:     'Costs',
-  traces:    'Traces',
-  memory:    'Memory',
-  settings:  'Settings',
+  // Overview
+  dashboard:  'Dashboard',
+  // Operations
+  sessions:   'Sessions',
+  runs:       'Runs',
+  tasks:      'Tasks',
+  approvals:  'Approvals',
+  // Observability
+  traces:     'Traces',
+  memory:     'Memory',
+  costs:      'Costs',
+  // Infrastructure
+  providers:  'Providers',
   playground: 'Playground',
+  settings:   'Settings',
 };
 
 function PlaceholderPage({ page }: { page: NavPage }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-2 text-zinc-700">
-      <span className="text-2xl font-semibold text-zinc-600">
-        {PAGE_TITLES[page]}
-      </span>
+      <span className="text-xl font-semibold text-zinc-600">{PAGE_TITLES[page]}</span>
       <p className="text-[13px]">Coming soon.</p>
     </div>
   );
