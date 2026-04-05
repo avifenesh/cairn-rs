@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { Sidebar, type NavPage } from './Sidebar';
 import { TopBar } from './TopBar';
+import { CommandPalette } from './CommandPalette';
 
 // ── Lightweight hash router ────────────────────────────────────────────────────
 // No react-router-dom dependency — reads/writes window.location.hash.
@@ -79,6 +80,9 @@ export function Layout({ children }: LayoutProps) {
           {children ? children(page) : <PlaceholderPage page={page} />}
         </main>
       </div>
+
+      {/* Command palette — Cmd+K / Ctrl+K — mounted at root to overlay everything */}
+      <CommandPalette onNavigate={navigate} />
     </div>
   );
 }

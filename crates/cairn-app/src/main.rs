@@ -40,7 +40,7 @@ use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tenants::TenantService;
 use cairn_runtime::InMemoryServices;
-use cairn_store::projections::{ApprovalReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
+use cairn_store::projections::{ApprovalReadModel, LlmCallTraceReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
 use cairn_store::{EventLog, EventPosition, StoredEvent};
 use cairn_store::DbAdapter;
 use cairn_store::pg::{PgAdapter, PgEventLog};
@@ -1545,6 +1545,45 @@ async fn overview_handler(
     })))
 }
 
+// ── LLM trace handlers (GAP-010) ─────────────────────────────────────────────
+
+/// `GET /v1/traces` — all recent LLM call traces (operator view, limit 500).
+async fn list_all_traces_handler(
+    State(state): State<AppState>,
+    Query(q): Query<PaginationQuery>,
+) -> impl axum::response::IntoResponse {
+    let limit = q.limit.min(500);
+    match LlmCallTraceReadModel::list_all_traces(state.runtime.store.as_ref(), limit).await {
+        Ok(traces) => Ok(Json(serde_json::json!({ "traces": traces }))),
+        Err(e) => Err(internal_error(e.to_string())),
+    }
+}
+
+/// `GET /v1/sessions/:id/llm-traces` — per-session LLM call traces (GAP-010).
+async fn list_session_traces_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<PaginationQuery>,
+) -> impl axum::response::IntoResponse {
+    let session_id = cairn_domain::SessionId::new(&id);
+    match SessionReadModel::get(state.runtime.store.as_ref(), &session_id).await {
+        Ok(None) => return Err(not_found(format!("session {id} not found"))),
+        Err(e)   => return Err(internal_error(e.to_string())),
+        Ok(Some(_)) => {}
+    }
+    let limit = q.limit.min(500);
+    match LlmCallTraceReadModel::list_by_session(
+        state.runtime.store.as_ref(),
+        &session_id,
+        limit,
+    )
+    .await
+    {
+        Ok(traces) => Ok(Json(serde_json::json!({ "traces": traces }))),
+        Err(e)     => Err(internal_error(e.to_string())),
+    }
+}
+
 // ── Embedded frontend (ui/dist/) ──────────────────────────────────────────────
 //
 // In debug builds rust-embed reads files from disk at request time so you can
@@ -1741,6 +1780,8 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/providers/health", get(provider_health_handler))
         .route("/v1/events", get(list_events_handler))
         .route("/v1/events/append", post(append_events_handler))
+        .route("/v1/traces", get(list_all_traces_handler))
+        .route("/v1/sessions/:id/llm-traces", get(list_session_traces_handler))
         // Admin routes
         .route("/v1/admin/tenants", post(create_tenant_handler))
         // DB diagnostics

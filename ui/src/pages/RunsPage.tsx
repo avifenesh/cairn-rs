@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { X, RefreshCw, ServerCrash, Inbox, ChevronRight } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  X, RefreshCw, ServerCrash, Inbox, ChevronRight,
+  Pause, Play, Loader2, Clock, ListChecks, DollarSign, Activity,
+} from "lucide-react";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
 import { defaultApi } from "../lib/api";
-import type { RunRecord, RunState } from "../lib/types";
+import type { RunRecord, RunState, TaskRecord, TaskState } from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

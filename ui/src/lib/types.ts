@@ -101,6 +101,43 @@ export interface RunRecord {
   updated_at: number; // unix ms
 }
 
+// ── Run sub-resources ─────────────────────────────────────────────────────────
+
+/** One entry from GET /v1/runs/:id/events */
+export interface RunEventSummary {
+  position: number;
+  stored_at: number;
+  event_type: string;
+}
+
+/** GET /v1/runs/:id/cost */
+export interface RunCostRecord {
+  run_id: string;
+  total_cost_micros: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  provider_calls: number;
+}
+
+/** Task state mirrors cairn_domain::TaskState */
+export type TaskState =
+  | 'queued' | 'leased' | 'running' | 'completed'
+  | 'failed' | 'canceled' | 'paused'
+  | 'waiting_dependency' | 'retryable_failed' | 'dead_lettered';
+
+/** One record from GET /v1/runs/:id/tasks */
+export interface TaskRecord {
+  task_id: string;
+  project: { tenant_id: string; workspace_id: string; project_id: string };
+  parent_run_id: string | null;
+  parent_task_id: string | null;
+  state: TaskState;
+  failure_class: string | null;
+  version: number;
+  created_at: number;
+  updated_at: number;
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 /** System health aggregate (RFC 014) */

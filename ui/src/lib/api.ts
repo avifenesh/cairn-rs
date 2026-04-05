@@ -157,6 +157,26 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/runs/:id — fetch a single run by ID. */
     getRun: (runId: string): Promise<RunRecord> => get(`/v1/runs/${runId}`),
 
+    /** GET /v1/runs/:id/events — event timeline for a run. */
+    getRunEvents: (runId: string, limit = 100): Promise<import("./types").RunEventSummary[]> =>
+      get(`/v1/runs/${runId}/events?limit=${limit}`),
+
+    /** GET /v1/runs/:id/tasks — tasks belonging to a run. */
+    getRunTasks: (runId: string): Promise<import("./types").TaskRecord[]> =>
+      get(`/v1/runs/${runId}/tasks`),
+
+    /** GET /v1/runs/:id/cost — accumulated cost for a run. */
+    getRunCost: (runId: string): Promise<import("./types").RunCostRecord> =>
+      get(`/v1/runs/${runId}/cost`),
+
+    /** POST /v1/runs/:id/pause — pause a running run. */
+    pauseRun: (runId: string, detail?: string): Promise<RunRecord> =>
+      post(`/v1/runs/${runId}/pause`, { detail }),
+
+    /** POST /v1/runs/:id/resume — resume a paused run. */
+    resumeRun: (runId: string): Promise<RunRecord> =>
+      post(`/v1/runs/${runId}/resume`, {}),
+
     /** POST /v1/runs — start a new run in a session. */
     createRun: (body: {
       tenant_id?: string;
