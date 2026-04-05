@@ -3,7 +3,7 @@ import { Sidebar, type NavPage } from './Sidebar';
 import { TopBar } from './TopBar';
 import { CommandPalette } from './CommandPalette';
 
-// All 11 pages — must match NavPage union in Sidebar.tsx
+// All top-level pages — must match NavPage union in Sidebar.tsx
 const VALID_PAGES: NavPage[] = [
   'dashboard',
   'sessions', 'runs', 'tasks', 'approvals',
@@ -11,28 +11,52 @@ const VALID_PAGES: NavPage[] = [
   'providers', 'playground', 'settings',
 ];
 
-function readPage(): NavPage {
-  const hash = window.location.hash.replace('#', '') as NavPage;
-  return VALID_PAGES.includes(hash) ? hash : 'dashboard';
+// ── Route descriptor ──────────────────────────────────────────────────────────
+
+/** A parsed hash route: either a named page or a dynamic segment. */
+export type Route =
+  | { kind: 'page'; page: NavPage }
+  | { kind: 'run-detail'; runId: string };
+
+export function parseRoute(hash: string): Route {
+  const h = hash.replace(/^#/, '');
+  // Dynamic: #run/<runId>
+  if (h.startsWith('run/') && h.length > 4) {
+    return { kind: 'run-detail', runId: h.slice(4) };
+  }
+  const page = h as NavPage;
+  return { kind: 'page', page: VALID_PAGES.includes(page) ? page : 'dashboard' };
 }
 
+export function currentRoute(): Route {
+  return parseRoute(window.location.hash);
+}
+
+// ── Page metadata ─────────────────────────────────────────────────────────────
+
 export const PAGE_TITLES: Record<NavPage, string> = {
-  // Overview
   dashboard:  'Dashboard',
-  // Operations
   sessions:   'Sessions',
   runs:       'Runs',
   tasks:      'Tasks',
   approvals:  'Approvals',
-  // Observability
   traces:     'Traces',
   memory:     'Memory',
   costs:      'Costs',
-  // Infrastructure
   providers:  'Providers',
   playground: 'Playground',
   settings:   'Settings',
 };
+
+function routeTitle(route: Route): string {
+  if (route.kind === 'run-detail') return `Run ${route.runId.slice(0, 12)}…`;
+  return PAGE_TITLES[route.page];
+}
+
+function activePage(route: Route): NavPage {
+  if (route.kind === 'run-detail') return 'runs';
+  return route.page;
+}
 
 function PlaceholderPage({ page }: { page: NavPage }) {
   return (
@@ -43,34 +67,53 @@ function PlaceholderPage({ page }: { page: NavPage }) {
   );
 }
 
+// ── Layout ────────────────────────────────────────────────────────────────────
+
 interface LayoutProps {
+  /** Render prop receives the current named page (for top-level nav). */
   children?: (page: NavPage) => ReactNode;
+  /** Render prop for dynamic routes (run detail, etc.). */
+  routeRenderer?: (route: Route) => ReactNode;
 }
 
-export function Layout({ children }: LayoutProps) {
-  const [page, setPage] = useState<NavPage>(readPage);
+export function Layout({ children, routeRenderer }: LayoutProps) {
+  const [route, setRoute] = useState<Route>(currentRoute);
 
   useEffect(() => {
-    const onHashChange = () => setPage(readPage());
+    const onHashChange = () => setRoute(currentRoute());
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
   function navigate(next: NavPage) {
     window.location.hash = next;
-    setPage(next);
+    setRoute({ kind: 'page', page: next });
   }
+
+  const page = activePage(route);
+
+  let content: ReactNode;
+  if (routeRenderer) {
+    const dynamic = routeRenderer(route);
+    if (dynamic !== null) {
+      content = dynamic;
+    } else if (children) {
+      content = route.kind === 'page' ? children(route.page) : null;
+    }
+  } else if (children) {
+    content = route.kind === 'page' ? children(route.page) : null;
+  }
+  content ??= <PlaceholderPage page={page} />;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-200">
       <Sidebar current={page} onNavigate={navigate} />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <TopBar title={PAGE_TITLES[page]} />
+        <TopBar title={routeTitle(route)} />
 
-        {/* Pages own their own scroll and padding */}
         <main className="flex-1 overflow-hidden bg-zinc-950">
-          {children ? children(page) : <PlaceholderPage page={page} />}
+          {content}
         </main>
       </div>
 

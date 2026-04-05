@@ -210,7 +210,9 @@ export function RunsPage() {
       {/* Content */}
       <div className="flex flex-1 overflow-hidden">
         <div className={clsx("flex-1 overflow-y-auto", selected && "border-r border-zinc-800")}>
-          {isLoading ? <Skeleton /> : <RunsTable runs={filtered} selectedId={selected?.run_id ?? null} onSelect={r => setSelected(p => p?.run_id===r.run_id ? null : r)} />}
+          {isLoading ? <Skeleton /> : <RunsTable runs={filtered} selectedId={selected?.run_id ?? null} onSelect={r => {
+          window.location.hash = `run/${r.run_id}`;
+        }} />}
         </div>
         {selected && <DetailPanel run={selected} onClose={() => setSelected(null)} />}
       </div>
