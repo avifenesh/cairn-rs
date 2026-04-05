@@ -1581,6 +1581,100 @@ async fn ollama_stream_handler(
         .into_response()
 }
 
+// ── Ollama model management handlers ─────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct OllamaModelNameRequest {
+    /// Model name, e.g. `"qwen3:8b"` or `"nomic-embed-text"`.
+    model: String,
+}
+
+/// `POST /v1/providers/ollama/pull` — pull (download) a model into Ollama.
+///
+/// Body: `{ "model": "qwen3:8b" }`
+///
+/// Proxies to `POST OLLAMA_HOST/api/pull` with `stream: false`.
+/// Returns `200 { "status": "success" }` on completion, `4xx`/`5xx` on error.
+async fn ollama_pull_handler(
+    State(state): State<AppState>,
+    Json(body): Json<OllamaModelNameRequest>,
+) -> impl IntoResponse {
+    let Some(provider) = &state.ollama else {
+        return (StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "Ollama not configured"}))).into_response();
+    };
+    let url = format!("{}/api/pull", provider.host());
+    let client = reqwest::Client::builder()
+        // Pulling large models can take many minutes — long timeout.
+        .timeout(std::time::Duration::from_secs(3600))
+        .build()
+        .unwrap_or_default();
+
+    match client.post(&url)
+        .json(&serde_json::json!({"name": body.model, "stream": false}))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            if status.is_success() {
+                (StatusCode::OK,
+                 axum::Json(serde_json::json!({"status": "success", "model": body.model})))
+                    .into_response()
+            } else {
+                (StatusCode::BAD_GATEWAY,
+                 axum::Json(serde_json::json!({"error": body_text}))).into_response()
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// `POST /v1/providers/ollama/delete` — delete a model from the local Ollama registry.
+///
+/// Body: `{ "model": "qwen3:8b" }`
+///
+/// Proxies to `DELETE OLLAMA_HOST/api/delete`.
+/// Returns `200` on success, `404` when the model is not found.
+async fn ollama_delete_model_handler(
+    State(state): State<AppState>,
+    Json(body): Json<OllamaModelNameRequest>,
+) -> impl IntoResponse {
+    let Some(provider) = &state.ollama else {
+        return (StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "Ollama not configured"}))).into_response();
+    };
+    let url = format!("{}/api/delete", provider.host());
+    let client = reqwest::Client::new();
+
+    match client.delete(&url)
+        .json(&serde_json::json!({"name": body.model}))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() || status == reqwest::StatusCode::OK {
+                (StatusCode::OK,
+                 axum::Json(serde_json::json!({"status": "deleted", "model": body.model})))
+                    .into_response()
+            } else {
+                let msg = resp.text().await.unwrap_or_default();
+                let code = if msg.contains("not found") {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::BAD_GATEWAY
+                };
+                (code, axum::Json(serde_json::json!({"error": msg}))).into_response()
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 fn parse_args_from(args: &[String]) -> BootstrapConfig {
@@ -2196,6 +2290,8 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/providers/ollama/models",   get(ollama_models_handler))
         .route("/v1/providers/ollama/generate", post(ollama_generate_handler))
         .route("/v1/providers/ollama/stream",   post(ollama_stream_handler))
+        .route("/v1/providers/ollama/pull",     post(ollama_pull_handler))
+        .route("/v1/providers/ollama/delete",   post(ollama_delete_model_handler))
         .route("/v1/memory/embed",              post(ollama_embed_handler))
         // DB diagnostics
         .route("/v1/db/status", get(db_status_handler))

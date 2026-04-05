@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Cpu, CheckCircle2, XCircle, AlertTriangle, Clock,
   RefreshCw, ServerCrash, Plug, Activity,
-  Bot, Send, Loader2, Layers, Zap,
+  Bot, Send, Loader2, Layers, Zap, Trash2, Download, Plus,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";

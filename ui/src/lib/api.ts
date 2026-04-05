@@ -246,6 +246,14 @@ export function createApiClient(config: ApiClientConfig) {
     getOllamaModels: (): Promise<{ host: string; models: string[]; count: number }> =>
       get("/v1/providers/ollama/models"),
 
+    /** POST /v1/providers/ollama/pull — download a model into Ollama. */
+    pullOllamaModel: (model: string): Promise<{ status: string; model: string }> =>
+      post("/v1/providers/ollama/pull", { model }),
+
+    /** POST /v1/providers/ollama/delete — remove a model from the local registry. */
+    deleteOllamaModel: (model: string): Promise<{ status: string; model: string }> =>
+      post("/v1/providers/ollama/delete", { model }),
+
     /** POST /v1/providers/ollama/generate — run a prompt through Ollama. */
     ollamaGenerate: (body: {
       prompt: string;
