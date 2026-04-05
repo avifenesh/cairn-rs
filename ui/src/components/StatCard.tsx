@@ -1,4 +1,5 @@
 import { clsx } from "clsx";
+import { HelpTooltip } from "./HelpTooltip";
 
 export type StatCardVariant = "default" | "success" | "warning" | "danger" | "info";
 
@@ -9,6 +10,8 @@ interface StatCardProps {
   variant?: StatCardVariant;
   loading?: boolean;
   icon?: unknown;
+  /** Optional inline help text shown as a (?) tooltip next to the label. */
+  help?: string;
 }
 
 const ACCENT: Record<StatCardVariant, string> = {
@@ -27,7 +30,7 @@ const VALUE: Record<StatCardVariant, string> = {
   info:    "text-indigo-600 dark:text-indigo-400",
 };
 
-export function StatCard({ label, value, description, variant = "default", loading = false }: StatCardProps) {
+export function StatCard({ label, value, description, variant = "default", loading = false, help }: StatCardProps) {
   if (loading) {
     return (
       <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-gray-300 dark:border-l-zinc-700 rounded-lg p-4 animate-pulse">
@@ -44,8 +47,9 @@ export function StatCard({ label, value, description, variant = "default", loadi
       "border-l-2 rounded-lg p-4",
       ACCENT[variant],
     )}>
-      <p className="text-[11px] font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2 truncate">
-        {label}
+      <p className="text-[11px] font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1.5 truncate">
+        <span className="truncate">{label}</span>
+        {help && <HelpTooltip text={help} placement="top" className="shrink-0" />}
       </p>
       <p className={clsx("text-xl font-semibold tabular-nums leading-none", VALUE[variant])}>
         {value}

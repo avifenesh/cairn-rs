@@ -6,6 +6,7 @@ import { clsx } from 'clsx';
 import { useTheme, type Theme } from '../hooks/useTheme';
 import { Breadcrumb, type BreadcrumbItem } from './Breadcrumb';
 import { TenantSelector } from './TenantSelector';
+import { NotificationCenter } from './NotificationCenter';
 
 function formatUptime(secs: number): string {
   if (secs < 60)   return `${secs}s`;
@@ -82,6 +83,9 @@ export function TopBar({ breadcrumbs, onMenuClick }: TopBarProps) {
       </div>
 
       <div className="ml-auto flex items-center gap-3 shrink-0">
+        {/* Notifications */}
+        <NotificationCenter />
+
         {/* Theme toggle */}
         <button
           onClick={cycleTheme}

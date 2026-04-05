@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Loader2, Inbox, Check, X } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
+import { HelpTooltip } from "../components/HelpTooltip";
 import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
@@ -80,6 +81,10 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
 
   return (
     <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <HelpTooltip
+        text="Approve: allows the run or task to continue past this gate."
+        placement="top"
+      />
       <button
         onClick={e => { e.stopPropagation(); resolve.mutate("approved"); }}
         disabled={resolve.isPending}
@@ -93,6 +98,7 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
         disabled={resolve.isPending}
         className="px-2 py-0.5 rounded text-[11px] font-medium bg-red-900/40 text-red-400
                    hover:bg-red-900/70 border border-red-800/40 transition-colors disabled:opacity-40"
+        title="Reject: blocks the run and records a rejection decision."
       >
         Reject
       </button>

@@ -583,6 +583,20 @@ export function createApiClient(config: ApiClientConfig) {
       const q = qs.toString() ? `?${qs}` : "";
       return get(`/v1/admin/logs${q}`);
     },
+
+    // ── Notifications ─────────────────────────────────────────────────────────
+
+    /** GET /v1/notifications?limit=50 — list recent notifications with unread count. */
+    getNotifications: (limit = 50): Promise<import("./types").NotifListResponse> =>
+      get(`/v1/notifications?limit=${limit}`),
+
+    /** POST /v1/notifications/:id/read — mark one notification as read. */
+    markNotificationRead: (id: string): Promise<void> =>
+      post(`/v1/notifications/${encodeURIComponent(id)}/read`, {}),
+
+    /** POST /v1/notifications/read-all — mark all notifications as read. */
+    markAllNotificationsRead: (): Promise<void> =>
+      post("/v1/notifications/read-all", {}),
   };
 }
 

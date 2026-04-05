@@ -20,6 +20,8 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
 import { EventLog } from "../components/EventLog";
+import { MiniChart } from "../components/MiniChart";
+import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
 import type { StatCardVariant } from "../components/StatCard";
 import type { HealthCheckEntry, RunRecord } from "../lib/types";
@@ -694,10 +696,10 @@ export function DashboardPage() {
         <div>
           <SectionLabel>Activity</SectionLabel>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Active Runs"       value={runs}      variant={runVariant}  loading={isLoading} />
-            <StatCard label="Active Tasks"      value={tasks}     variant={taskVariant} loading={isLoading} />
-            <StatCard label="Pending Approvals" value={approvals} variant={aprVariant}  loading={isLoading} />
-            <StatCard label="Failed (24h)"      value={failed}    variant={failVariant} loading={isLoading} />
+            <StatCard label="Active Runs"       value={runs}      variant={runVariant}  loading={isLoading} help="Agent runs currently in pending, running, paused, or waiting state." />
+            <StatCard label="Active Tasks"      value={tasks}     variant={taskVariant} loading={isLoading} help="Work items queued, leased, or running across all agent tasks." />
+            <StatCard label="Pending Approvals" value={approvals} variant={aprVariant}  loading={isLoading} help="Human-in-the-loop gates waiting for an operator approve or reject decision." />
+            <StatCard label="Failed (24h)"      value={failed}    variant={failVariant} loading={isLoading} help="Runs that transitioned to the 'failed' state in the last 24 hours." />
           </div>
         </div>
 
@@ -705,10 +707,10 @@ export function DashboardPage() {
         <div>
           <SectionLabel>Infrastructure</SectionLabel>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Providers"   value={data?.active_providers ?? 0} loading={isLoading} />
-            <StatCard label="Plugins"     value={data?.active_plugins   ?? 0} loading={isLoading} />
-            <StatCard label="Memory Docs" value={data?.memory_doc_count  ?? 0} loading={isLoading} />
-            <StatCard label="Evals Today" value={data?.eval_runs_today   ?? 0} loading={isLoading} />
+            <StatCard label="Providers"   value={data?.active_providers ?? 0} loading={isLoading} help="Registered LLM provider connections (e.g. Ollama, OpenAI)." />
+            <StatCard label="Plugins"     value={data?.active_plugins   ?? 0} loading={isLoading} help="Active cairn plugins — external tools and skill extensions." />
+            <StatCard label="Memory Docs" value={data?.memory_doc_count  ?? 0} loading={isLoading} help="Total document chunks indexed in the knowledge base for retrieval." />
+            <StatCard label="Evals Today" value={data?.eval_runs_today   ?? 0} loading={isLoading} help="Evaluation runs completed today across all prompt releases." />
           </div>
         </div>
 

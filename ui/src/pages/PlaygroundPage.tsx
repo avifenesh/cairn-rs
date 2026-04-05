@@ -249,8 +249,7 @@ function parseInline(text: string, depth = 0): React.ReactNode {
   type Rule = { re: RegExp; render: (m: RegExpExecArray) => React.ReactNode };
   const rules: Rule[] = [
     // Inline code: `code`
-    { re: /`([^`
-]+)`/,
+    { re: /`([^`\n]+)`/,
       render: (m) => (
         <code className="font-mono text-[11.5px] bg-zinc-700/70 text-amber-300 px-1 py-px rounded mx-0.5">
           {m[1]}
@@ -258,13 +257,11 @@ function parseInline(text: string, depth = 0): React.ReactNode {
       ),
     },
     // Bold: **text**
-    { re: /\*\*([^*
-]+)\*\*/,
+    { re: /\*\*([^*\n]+)\*\*/,
       render: (m) => <strong className="font-semibold text-zinc-100">{parseInline(m[1], depth + 1)}</strong>,
     },
     // Italic: *text* (not ** or ***)
-    { re: /(?<!\*)\*(?!\*)([^*
-]+)(?<!\*)\*(?!\*)/,
+    { re: /(?<!\*)\*(?!\*)([^*\n]+)(?<!\*)\*(?!\*)/,
       render: (m) => <em className="italic text-zinc-300">{parseInline(m[1], depth + 1)}</em>,
     },
     // Link: [text](url)
