@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Loader2, RefreshCw, Plus } from 'lucide-react';
+import { ChevronRight, RefreshCw, Plus } from 'lucide-react';
+import { DataTable } from '../components/DataTable';
 import { useToast } from '../components/Toast';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
@@ -63,51 +64,11 @@ function StatCard({ label, value, sub, accent = 'default' }: {
 
 // ── Session row ───────────────────────────────────────────────────────────────
 
-function SessionRow({ session, runCount, even }: {
-  session: SessionRecord; runCount: number; even: boolean;
-}) {
-  return (
-    <tr
-      onClick={() => { window.location.hash = `session/${session.session_id}`; }}
-      className={clsx(
-        'cursor-pointer border-b border-zinc-800/50 select-none transition-colors',
-        even ? 'bg-zinc-900/50 hover:bg-white/5' : 'bg-zinc-900 hover:bg-white/5',
-      )}
-    >
-      <td className="pl-3 pr-1 w-7">
-        <ChevronRight size={13} className="text-zinc-700 group-hover:text-zinc-500" />
-      </td>
-      <td className="px-3 h-9 font-mono text-xs text-zinc-200 whitespace-nowrap">
-        {mono(session.session_id, 22)}
-      </td>
-      <td className="px-3 h-9 font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden md:table-cell">
-        {session.project.tenant_id}
-      </td>
-      <td className="px-3 h-9 font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden lg:table-cell">
-        {session.project.workspace_id}
-      </td>
-      <td className="px-3 h-9 font-mono text-[11px] text-zinc-400 whitespace-nowrap">
-        {mono(session.project.project_id, 16)}
-      </td>
-      <td className="px-3 h-9">
-        <SessionPill state={session.state} />
-      </td>
-      <td className="px-3 h-9 text-center">
-        {runCount > 0
-          ? <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-zinc-800 text-zinc-400 text-[10px] font-medium tabular-nums">{runCount}</span>
-          : <span className="text-zinc-700 text-[11px]">—</span>}
-      </td>
-      <td className="px-3 h-9 text-[11px] text-zinc-500 whitespace-nowrap font-mono">
-        {fmtTs(session.created_at)}
-      </td>
-    </tr>
-  );
-}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function SessionsPage() {
-  const { data: sessions, isLoading, isError, error, refetch, isFetching } = useQuery({
+  const { data: sessions, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['sessions'],
     queryFn:  () => defaultApi.getSessions({ limit: 100 }),
     refetchInterval: 30_000,
@@ -151,49 +112,24 @@ export function SessionsPage() {
           <p className="text-sm text-zinc-400">{error instanceof Error ? error.message : 'Failed to load sessions'}</p>
         </div>
       ) : (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-          {/* Column headers */}
-          <div className="border-b border-zinc-800">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-zinc-950">
-                  <th className="pl-3 pr-1 w-7" />
-                  <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Session ID</th>
-                  <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider hidden md:table-cell">Tenant</th>
-                  <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider hidden lg:table-cell">Workspace</th>
-                  <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Project</th>
-                  <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Status</th>
-                  <th className="px-3 h-8 text-center text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Runs</th>
-                  <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Created</th>
-                </tr>
-              </thead>
-            </table>
-          </div>
-
-          {/* Body */}
-          {isLoading ? (
-            <div className="flex items-center gap-2 px-4 h-12 text-zinc-600 text-xs">
-              <Loader2 size={12} className="animate-spin" /> Loading sessions…
-            </div>
-          ) : list.length === 0 ? (
-            <div className="px-4 py-10 text-center text-xs text-zinc-600">
-              No sessions yet — POST to /v1/sessions to create one
-            </div>
-          ) : (
-            <table className="w-full">
-              <tbody>
-                {list.map((session, i) => (
-                  <SessionRow
-                    key={session.session_id}
-                    session={session}
-                    runCount={runCountFor(session.session_id)}
-                    even={i % 2 === 0}
-                  />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        <DataTable<SessionRecord>
+          data={list}
+          columns={[
+            { key: 'arrow',      header: '',           render: _r => <ChevronRight size={13} className="text-zinc-700" /> },
+            { key: 'session_id', header: 'Session ID', render: r => <span className="font-mono text-xs text-zinc-200 whitespace-nowrap">{mono(r.session_id, 22)}</span>,         sortValue: r => r.session_id },
+            { key: 'tenant',     header: 'Tenant',     render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden md:block">{r.project.tenant_id}</span> },
+            { key: 'workspace',  header: 'Workspace',  render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden lg:block">{r.project.workspace_id}</span> },
+            { key: 'project',    header: 'Project',    render: r => <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{mono(r.project.project_id, 16)}</span> },
+            { key: 'state',      header: 'Status',     render: r => <SessionPill state={r.state} />,                      sortValue: r => r.state },
+            { key: 'runs',       header: 'Runs',       render: r => { const n = runCountFor(r.session_id); return n > 0 ? <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-zinc-800 text-zinc-400 text-[10px] font-medium tabular-nums">{n}</span> : <span className="text-zinc-700 text-[11px]">—</span>; } },
+            { key: 'created',    header: 'Created',    render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap">{fmtTs(r.created_at)}</span>,       sortValue: r => r.created_at },
+          ]}
+          filterFn={(r, q) => r.session_id.includes(q) || r.project.project_id.includes(q) || r.project.tenant_id.includes(q) || r.state.includes(q)}
+          csvRow={r => [r.session_id, r.project.tenant_id, r.project.workspace_id, r.project.project_id, r.state, r.created_at]}
+          csvHeaders={['Session ID', 'Tenant', 'Workspace', 'Project', 'State', 'Created At']}
+          filename="sessions"
+          emptyText="No sessions yet"
+        />
       )}
     </div>
   );

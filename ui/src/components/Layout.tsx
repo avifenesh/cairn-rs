@@ -84,10 +84,14 @@ interface LayoutProps {
 }
 
 export function Layout({ children, routeRenderer }: LayoutProps) {
-  const [route, setRoute] = useState<Route>(currentRoute);
+  const [route, setRoute]           = useState<Route>(currentRoute);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const onHashChange = () => setRoute(currentRoute());
+    const onHashChange = () => {
+      setRoute(currentRoute());
+      setSidebarOpen(false); // close on any hash navigation (back button, row clicks)
+    };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
@@ -95,6 +99,7 @@ export function Layout({ children, routeRenderer }: LayoutProps) {
   function navigate(next: NavPage) {
     window.location.hash = next;
     setRoute({ kind: 'page', page: next });
+    setSidebarOpen(false);
   }
 
   const page = activePage(route);
@@ -114,10 +119,15 @@ export function Layout({ children, routeRenderer }: LayoutProps) {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-200">
-      <Sidebar current={page} onNavigate={navigate} />
+      <Sidebar
+        current={page}
+        onNavigate={navigate}
+        mobileOpen={sidebarOpen}
+        onMobileClose={() => setSidebarOpen(false)}
+      />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <TopBar title={routeTitle(route)} />
+        <TopBar title={routeTitle(route)} onMenuClick={() => setSidebarOpen(v => !v)} />
 
         <main className="flex-1 overflow-hidden bg-zinc-950">
           {content}

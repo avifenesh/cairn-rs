@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Loader2, ServerCrash, Inbox, AlertTriangle, CheckCircle2 } from "lucide-react";
-import { clsx } from "clsx";
+import { RefreshCw, Loader2, ServerCrash, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { DataTable } from "../components/DataTable";
 import { defaultApi } from "../lib/api";
 import type { LlmCallTrace } from "../lib/types";
 
@@ -50,90 +50,7 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
 
 // ── Table ─────────────────────────────────────────────────────────────────────
 
-const TH = ({ ch, right }: { ch: React.ReactNode; right?: boolean }) => (
-  <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-zinc-800",
-    right ? "text-right" : "text-left",
-  )}>
-    {ch}
-  </th>
-);
 
-function TracesTable({ traces }: { traces: LlmCallTrace[] }) {
-  if (traces.length === 0) return (
-    <div className="flex flex-col items-center justify-center py-16 gap-2 text-zinc-700">
-      <Inbox size={26} />
-      <p className="text-[13px]">No traces recorded yet</p>
-    </div>
-  );
-
-  return (
-    <table className="min-w-full text-[13px]">
-      <thead className="bg-zinc-900 sticky top-0 z-10">
-        <tr>
-          <TH ch="Trace ID" />
-          <TH ch="Model" />
-          <TH ch="Provider" />
-          <TH ch="Status" />
-          <TH ch="Tokens In" right />
-          <TH ch="Tokens Out" right />
-          <TH ch="Latency" right />
-          <TH ch="Cost" right />
-          <TH ch="Timestamp" />
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-zinc-800/50">
-        {traces.map((trace, i) => (
-          <tr key={trace.trace_id}
-            className={clsx(
-              "group transition-colors",
-              i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
-              "hover:bg-zinc-800/70",
-            )}>
-            <td className="px-3 py-1.5 font-mono text-zinc-400 whitespace-nowrap text-[12px]">
-              {shortId(trace.trace_id)}
-            </td>
-            <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap">
-              {trace.model_id}
-            </td>
-            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">
-              {inferProvider(trace.model_id)}
-            </td>
-            <td className="px-3 py-1.5 whitespace-nowrap">
-              {trace.is_error ? (
-                <span className="inline-flex items-center gap-1 text-[11px] text-red-400">
-                  <AlertTriangle size={11} /> Error
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
-                  <CheckCircle2 size={11} /> OK
-                </span>
-              )}
-            </td>
-            <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px]">
-              {fmtTokens(trace.prompt_tokens)}
-            </td>
-            <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px]">
-              {fmtTokens(trace.completion_tokens)}
-            </td>
-            <td className={clsx(
-              "px-3 py-1.5 whitespace-nowrap tabular-nums text-right font-mono text-[12px]",
-              trace.latency_ms > 5_000 ? "text-amber-400" : "text-zinc-400",
-            )}>
-              {fmtLatency(trace.latency_ms)}
-            </td>
-            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums text-right font-mono text-[12px]">
-              {fmtCost(trace.cost_micros)}
-            </td>
-            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums">
-              {fmtTime(trace.created_at_ms)}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -187,7 +104,7 @@ export function TracesPage() {
 
       {/* Stat strip */}
       {!isLoading && traces.length > 0 && (
-        <div className="flex items-center gap-8 px-5 py-3 border-b border-zinc-800 bg-zinc-900 shrink-0">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-6 gap-y-3 px-5 py-3 border-b border-zinc-800 bg-zinc-900 shrink-0">
           <StatCard label="Calls"        value={traces.length}       />
           <StatCard label="Total tokens" value={fmtTokens(totalTokens)} sub="prompt + completion" />
           <StatCard label="Avg latency"  value={fmtLatency(avgLatency)} />
@@ -203,7 +120,26 @@ export function TracesPage() {
               <Loader2 size={16} className="animate-spin" />
               <span className="text-[13px]">Loading…</span>
             </div>
-          : <TracesTable traces={traces} />
+          : (
+          <DataTable<LlmCallTrace>
+            data={traces}
+            columns={[
+              { key: 'session',    header: 'Session',   render: r => <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{shortId(r.session_id ?? '')}</span>,      sortValue: r => r.session_id ?? '' },
+              { key: 'model',      header: 'Model',     render: r => <span className="text-xs text-zinc-300 whitespace-nowrap">{r.model_id}</span>,                             sortValue: r => r.model_id },
+              { key: 'provider',   header: 'Provider',  render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap">{inferProvider(r.model_id)}</span> },
+              { key: 'latency',    header: 'Latency',   render: r => <span className={`text-[11px] tabular-nums ${r.latency_ms > 5000 ? 'text-amber-400' : 'text-zinc-400'}`}>{fmtLatency(r.latency_ms)}</span>, sortValue: r => r.latency_ms },
+              { key: 'tokens',     header: 'Tokens',    render: r => <span className="text-[11px] text-zinc-400 tabular-nums whitespace-nowrap">{fmtTokens(r.prompt_tokens)} / {fmtTokens(r.completion_tokens)}</span>, sortValue: r => (r.prompt_tokens + r.completion_tokens) },
+              { key: 'cost',       header: 'Cost',      render: r => <span className="text-[11px] text-zinc-500 tabular-nums">{fmtCost(r.cost_micros)}</span>,                  sortValue: r => r.cost_micros },
+              { key: 'status',     header: 'Status',    render: r => r.is_error ? <span className="inline-flex items-center gap-1 text-[10px] text-red-400"><AlertTriangle size={10}/>error</span> : <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400"><CheckCircle2 size={10}/>ok</span>, sortValue: r => r.is_error ? 1 : 0 },
+              { key: 'timestamp',  header: 'Timestamp', render: r => <span className="text-[11px] text-zinc-600 tabular-nums whitespace-nowrap">{fmtTime(r.created_at_ms)}</span>,  sortValue: r => r.created_at_ms },
+            ]}
+            filterFn={(r, q) => r.model_id.toLowerCase().includes(q) || (r.session_id ?? '').includes(q) || inferProvider(r.model_id).toLowerCase().includes(q)}
+            csvRow={r => [(r.session_id ?? ''), r.model_id, inferProvider(r.model_id), r.latency_ms, r.prompt_tokens, r.completion_tokens, r.cost_micros, r.is_error ? 'error' : '', r.created_at_ms]}
+            csvHeaders={['Session ID', 'Model', 'Provider', 'Latency (ms)', 'Input Tokens', 'Output Tokens', 'Cost (µUSD)', 'Error', 'Timestamp']}
+            filename="traces"
+            emptyText="No traces recorded yet"
+          />
+        )
         }
       </div>
     </div>

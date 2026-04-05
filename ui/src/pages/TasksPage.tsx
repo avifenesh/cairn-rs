@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2, ServerCrash, Inbox } from "lucide-react";
-import { clsx } from "clsx";
+import { RefreshCw, Loader2, ServerCrash } from "lucide-react";
 import { StateBadge } from "../components/StateBadge";
+import { DataTable } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import type { TaskRecord, TaskState } from "../lib/types";
@@ -76,77 +76,7 @@ function RowActions({ task }: { task: TaskRecord }) {
 
 // ── Table ─────────────────────────────────────────────────────────────────────
 
-const TH = ({ ch, right }: { ch: React.ReactNode; right?: boolean }) => (
-  <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-zinc-800",
-    right ? "text-right" : "text-left",
-  )}>
-    {ch}
-  </th>
-);
 
-function TasksTable({ tasks }: { tasks: TaskRecord[] }) {
-  if (tasks.length === 0) return (
-    <div className="flex flex-col items-center justify-center py-16 gap-2 text-zinc-700">
-      <Inbox size={26} />
-      <p className="text-[13px]">No tasks match this filter</p>
-    </div>
-  );
-
-  return (
-    <table className="min-w-full text-[13px]">
-      <thead className="bg-zinc-900 sticky top-0 z-10">
-        <tr>
-          <TH ch="Task ID" />
-          <TH ch="Run" />
-          <TH ch="Status" />
-          <TH ch="Worker" />
-          <TH ch="Queued At" />
-          <TH ch="Started At" />
-          <TH ch="" right />
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-zinc-800/50">
-        {tasks.map((task, i) => (
-          <tr key={task.task_id}
-            className={clsx(
-              "group transition-colors",
-              i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
-              "hover:bg-zinc-800/70",
-            )}>
-            <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap">
-              {shortId(task.task_id)}
-            </td>
-            <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px]">
-              {task.parent_run_id
-                ? shortId(task.parent_run_id)
-                : <span className="text-zinc-700">—</span>}
-            </td>
-            <td className="px-3 py-1.5 whitespace-nowrap">
-              <StateBadge state={task.state as Parameters<typeof StateBadge>[0]["state"]} compact />
-            </td>
-            <td className="px-3 py-1.5 font-mono text-[12px] whitespace-nowrap">
-              {task.lease_owner
-                ? <span className="text-zinc-400">{shortId(task.lease_owner)}</span>
-                : <span className="text-zinc-700">—</span>}
-            </td>
-            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums">
-              {fmtTime(task.created_at)}
-            </td>
-            <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">
-              {task.lease_expires_at
-                ? <span className="text-zinc-400">{fmtTime(task.updated_at)}</span>
-                : <span className="text-zinc-700">—</span>}
-            </td>
-            <td className="px-3 py-1.5 whitespace-nowrap">
-              <RowActions task={task} />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -219,7 +149,25 @@ export function TasksPage() {
               <Loader2 size={16} className="animate-spin" />
               <span className="text-[13px]">Loading…</span>
             </div>
-          : <TasksTable tasks={filtered} />
+          : (
+          <DataTable<TaskRecord>
+            data={filtered}
+            columns={[
+              { key: 'task_id',    header: 'Task ID',   render: r => <span className="font-mono text-xs text-zinc-300 whitespace-nowrap">{shortId(r.task_id)}</span>,               sortValue: r => r.task_id },
+              { key: 'run',        header: 'Run',        render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap">{shortId(r.parent_run_id)}</span> : <span className="text-zinc-700">—</span> },
+              { key: 'state',      header: 'Status',     render: r => <StateBadge state={r.state as Parameters<typeof StateBadge>[0]["state"]} compact />, sortValue: r => r.state },
+              { key: 'worker',     header: 'Worker',     render: r => r.lease_owner ? <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{shortId(r.lease_owner)}</span> : <span className="text-zinc-700">—</span> },
+              { key: 'queued_at',  header: 'Queued At',  render: r => <span className="text-[11px] text-zinc-500 tabular-nums whitespace-nowrap">{fmtTime(r.created_at)}</span>,   sortValue: r => r.created_at },
+              { key: 'started_at', header: 'Started At', render: r => r.lease_expires_at ? <span className="text-[11px] text-zinc-400 tabular-nums whitespace-nowrap">{fmtTime(r.updated_at)}</span> : <span className="text-zinc-700">—</span>, sortValue: r => r.updated_at },
+              { key: 'actions',    header: '',            render: r => <RowActions task={r} /> },
+            ]}
+            filterFn={(r, q) => r.task_id.includes(q) || r.state.includes(q) || (r.parent_run_id ?? '').includes(q) || (r.lease_owner ?? '').includes(q)}
+            csvRow={r => [r.task_id, r.parent_run_id ?? '', r.state, r.lease_owner ?? '', r.created_at, r.updated_at]}
+            csvHeaders={['Task ID', 'Run ID', 'State', 'Worker', 'Queued At', 'Updated At']}
+            filename="tasks"
+            emptyText="No tasks match this filter"
+          />
+        )
         }
       </div>
     </div>

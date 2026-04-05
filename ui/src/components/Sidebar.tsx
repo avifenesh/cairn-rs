@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { clearStoredToken } from '../lib/api';
+import type { ReactNode } from 'react';
 
 export type NavPage =
   | 'dashboard'
@@ -81,17 +82,35 @@ const NAV_GROUPS: NavGroup[] = [
 interface SidebarProps {
   current: NavPage;
   onNavigate: (page: NavPage) => void;
+  /** Whether the sidebar overlay is open on mobile/tablet. */
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export function Sidebar({ current, onNavigate }: SidebarProps) {
+export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose }: SidebarProps): ReactNode {
   const server = (import.meta.env.VITE_API_URL ?? 'localhost:3000')
     .replace(/^https?:\/\//, '');
 
   return (
-    <aside
-      className="flex flex-col shrink-0 bg-zinc-950 border-r border-zinc-800 h-screen"
-      style={{ width: 220 }}
-    >
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          onClick={onMobileClose}
+        />
+      )}
+
+      <aside
+        className={clsx(
+          'flex flex-col bg-zinc-950 border-r border-zinc-800 h-screen',
+          // Always fixed so it can slide; lg: reset to static so it participates in flex layout
+          'fixed inset-y-0 left-0 z-50 transition-transform duration-200 ease-in-out',
+          'lg:static lg:z-auto lg:shrink-0',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+        )}
+        style={{ width: 220 }}
+      >
       {/* Wordmark */}
       <div className="flex items-center gap-2.5 px-4 h-11 border-b border-zinc-800 shrink-0">
         <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-indigo-500 shrink-0">
@@ -154,5 +173,6 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
         </button>
       </div>
     </aside>
+    </>
   );
 }

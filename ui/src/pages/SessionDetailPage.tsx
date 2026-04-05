@@ -90,10 +90,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-const TH = ({ ch, right }: { ch: React.ReactNode; right?: boolean }) => (
+const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
   <th className={clsx(
     "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-zinc-800",
     right ? "text-right" : "text-left",
+    hide,
   )}>{ch}</th>
 );
 
@@ -167,7 +168,7 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
         </div>
 
         {/* Stat cards */}
-        <div className="flex items-start gap-8 py-3 px-4 rounded-lg border border-zinc-800 bg-zinc-900/60">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 py-3 px-4 rounded-lg border border-zinc-800 bg-zinc-900/60">
           <StatCard
             label="Runs"
             value={runsLoading ? "—" : runs.length}
@@ -208,10 +209,10 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                   <tr>
                     <TH ch="Run ID" />
                     <TH ch="State" />
-                    <TH ch="Parent" />
-                    <TH ch="Prompt" />
+                    <TH ch="Parent"  hide="hidden sm:table-cell" />
+                    <TH ch="Prompt"  hide="hidden md:table-cell" />
                     <TH ch="Created" />
-                    <TH ch="Updated" />
+                    <TH ch="Updated" hide="hidden md:table-cell" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/50">
@@ -231,16 +232,16 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                       <td className="px-3 py-1.5 whitespace-nowrap">
                         <StateBadge state={run.state} compact />
                       </td>
-                      <td className="px-3 py-1.5 font-mono text-zinc-600 text-[11px] whitespace-nowrap">
+                      <td className="px-3 py-1.5 font-mono text-zinc-600 text-[11px] whitespace-nowrap hidden sm:table-cell">
                         {run.parent_run_id ? shortId(run.parent_run_id) : <span className="text-zinc-700">—</span>}
                       </td>
-                      <td className="px-3 py-1.5 font-mono text-zinc-600 text-[11px] whitespace-nowrap">
+                      <td className="px-3 py-1.5 font-mono text-zinc-600 text-[11px] whitespace-nowrap hidden md:table-cell">
                         {run.prompt_release_id ? shortId(run.prompt_release_id) : <span className="text-zinc-700">—</span>}
                       </td>
                       <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap text-[12px] tabular-nums">
                         {fmtTime(run.created_at)}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap text-[12px] tabular-nums">
+                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap text-[12px] tabular-nums hidden md:table-cell">
                         {fmtTime(run.updated_at)}
                       </td>
                     </tr>
@@ -267,15 +268,15 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
               <table className="min-w-full text-[13px]">
                 <thead className="bg-zinc-900">
                   <tr>
-                    <TH ch="Trace ID" />
+                    <TH ch="Trace ID" hide="hidden sm:table-cell" />
                     <TH ch="Model" />
-                    <TH ch="Provider" />
+                    <TH ch="Provider" hide="hidden sm:table-cell" />
                     <TH ch="Status" />
-                    <TH ch="In" right />
-                    <TH ch="Out" right />
+                    <TH ch="In"      right hide="hidden md:table-cell" />
+                    <TH ch="Out"     right hide="hidden md:table-cell" />
                     <TH ch="Latency" right />
-                    <TH ch="Cost" right />
-                    <TH ch="Time" />
+                    <TH ch="Cost"    right hide="hidden sm:table-cell" />
+                    <TH ch="Time"          hide="hidden sm:table-cell" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/50">
@@ -285,13 +286,13 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                       i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
                       "hover:bg-zinc-800/60",
                     )}>
-                      <td className="px-3 py-1.5 font-mono text-zinc-400 whitespace-nowrap text-[12px]">
+                      <td className="px-3 py-1.5 font-mono text-zinc-400 whitespace-nowrap text-[12px] hidden sm:table-cell">
                         {shortId(trace.trace_id)}
                       </td>
                       <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap text-[12px]">
                         {trace.model_id}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap text-[12px]">
+                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap text-[12px] hidden sm:table-cell">
                         {inferProvider(trace.model_id)}
                       </td>
                       <td className="px-3 py-1.5 whitespace-nowrap">
@@ -305,10 +306,10 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px]">
+                      <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px] hidden md:table-cell">
                         {fmtTokens(trace.prompt_tokens)}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px]">
+                      <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px] hidden md:table-cell">
                         {fmtTokens(trace.completion_tokens)}
                       </td>
                       <td className={clsx(
@@ -317,10 +318,10 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                       )}>
                         {fmtLatency(trace.latency_ms)}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums text-right font-mono text-[12px]">
+                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums text-right font-mono text-[12px] hidden sm:table-cell">
                         {fmtCost(trace.cost_micros)}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums text-[12px]">
+                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums text-[12px] hidden sm:table-cell">
                         {fmtTime(trace.created_at_ms)}
                       </td>
                     </tr>

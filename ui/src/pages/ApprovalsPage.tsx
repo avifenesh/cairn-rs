@@ -92,10 +92,11 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
 
 // ── Table ─────────────────────────────────────────────────────────────────────
 
-const TH = ({ ch, right }: { ch: React.ReactNode; right?: boolean }) => (
+const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
   <th className={clsx(
     "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-zinc-800",
     right ? "text-right" : "text-left",
+    hide,
   )}>{ch}</th>
 );
 
@@ -112,11 +113,11 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
       <thead className="bg-zinc-900 sticky top-0 z-10">
         <tr>
           <TH ch="ID" />
-          <TH ch="Run" />
-          <TH ch="Task" />
-          <TH ch="Policy" />
+          <TH ch="Run"          hide="hidden sm:table-cell" />
+          <TH ch="Task"         hide="hidden md:table-cell" />
+          <TH ch="Policy"       hide="hidden sm:table-cell" />
           <TH ch="Status" />
-          <TH ch="Requested At" />
+          <TH ch="Requested At" hide="hidden md:table-cell" />
           <TH ch="" right />
         </tr>
       </thead>
@@ -131,13 +132,13 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
             <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap">
               {shortId(a.approval_id)}
             </td>
-            <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px]">
+            <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px] hidden sm:table-cell">
               {a.run_id ? shortId(a.run_id) : <span className="text-zinc-700">—</span>}
             </td>
-            <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px]">
+            <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px] hidden md:table-cell">
               {a.task_id ? shortId(a.task_id) : <span className="text-zinc-700">—</span>}
             </td>
-            <td className="px-3 py-1.5 whitespace-nowrap">
+            <td className="px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">
               <span className={clsx(
                 "text-[11px] font-medium rounded px-1.5 py-0.5",
                 a.requirement === "required"
@@ -150,7 +151,7 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
             <td className="px-3 py-1.5 whitespace-nowrap">
               <DecisionBadge decision={a.decision} />
             </td>
-            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums">
+            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums hidden md:table-cell">
               {fmtTime(a.created_at)}
             </td>
             <td className="px-3 py-1.5 whitespace-nowrap">
@@ -212,7 +213,7 @@ export function ApprovalsPage() {
     <div className="flex flex-col h-full bg-zinc-900">
       {/* Stat strip */}
       {!isLoading && (
-        <div className="flex items-center gap-8 px-5 py-3 border-b border-zinc-800 bg-zinc-900 shrink-0">
+        <div className="grid grid-cols-3 gap-x-6 gap-y-3 px-5 py-3 border-b border-zinc-800 bg-zinc-900 shrink-0">
           <StatCard
             label="Pending"
             value={pending.length}

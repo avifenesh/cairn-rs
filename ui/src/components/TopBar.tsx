@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Menu } from 'lucide-react';
 import { defaultApi } from '../lib/api';
 import type { SystemStatus } from '../lib/types';
 import { clsx } from 'clsx';
@@ -19,7 +20,13 @@ function Dot({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-export function TopBar({ title }: { title: string }) {
+interface TopBarProps {
+  title: string;
+  /** Callback to open/close the sidebar on mobile/tablet. */
+  onMenuClick?: () => void;
+}
+
+export function TopBar({ title, onMenuClick }: TopBarProps) {
   const [status, setStatus]   = useState<SystemStatus | null>(null);
   const [healthy, setHealthy] = useState<boolean | null>(null);
 
@@ -39,16 +46,35 @@ export function TopBar({ title }: { title: string }) {
   }, []);
 
   return (
-    <header className="flex items-center h-11 px-5 bg-zinc-950 border-b border-zinc-800 shrink-0 gap-4">
-      <h1 className="text-[13px] font-medium text-zinc-200">{title}</h1>
-      <div className="ml-auto flex items-center gap-4">
+    <header className="flex items-center h-11 px-4 bg-zinc-950 border-b border-zinc-800 shrink-0 gap-3">
+      {/* Hamburger — visible on tablet/mobile only */}
+      <button
+        onClick={onMenuClick}
+        className="lg:hidden -ml-1 p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors shrink-0"
+        aria-label="Open menu"
+      >
+        <Menu size={16} />
+      </button>
+
+      <h1 className="text-[13px] font-medium text-zinc-200 truncate">{title}</h1>
+
+      <div className="ml-auto flex items-center gap-3 shrink-0">
+        {/* Compact single dot on mobile */}
+        {healthy !== null && (
+          <span className={clsx(
+            'lg:hidden w-2 h-2 rounded-full shrink-0',
+            healthy ? 'bg-emerald-500' : 'bg-red-500 animate-pulse',
+          )} />
+        )}
+
+        {/* Full health breakdown on desktop */}
         {healthy === null ? (
-          <span className="flex items-center gap-1.5 text-[11px] text-zinc-600">
+          <span className="hidden lg:flex items-center gap-1.5 text-[11px] text-zinc-600">
             <span className="w-1.5 h-1.5 rounded-full bg-zinc-700 animate-pulse inline-block" />
             connecting
           </span>
         ) : (
-          <>
+          <div className="hidden lg:flex items-center gap-4">
             <Dot ok={healthy}              label={healthy ? 'ok' : 'degraded'} />
             {status && <Dot ok={status.runtime_ok} label="runtime" />}
             {status && <Dot ok={status.store_ok}   label="store"   />}
@@ -57,7 +83,7 @@ export function TopBar({ title }: { title: string }) {
                 {formatUptime(status.uptime_secs)}
               </span>
             )}
-          </>
+          </div>
         )}
       </div>
     </header>

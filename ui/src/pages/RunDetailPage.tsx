@@ -62,10 +62,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-const TH = ({ ch, right }: { ch: React.ReactNode; right?: boolean }) => (
+const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
   <th className={clsx(
     "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-zinc-800",
     right ? "text-right" : "text-left",
+    hide,
   )}>{ch}</th>
 );
 
@@ -150,7 +151,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
         </div>
 
         {/* Stat cards */}
-        <div className="flex items-start gap-8 py-3 px-4 rounded-lg border border-zinc-800 bg-zinc-900/60">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 py-3 px-4 rounded-lg border border-zinc-800 bg-zinc-900/60">
           <StatCard
             label="Duration"
             value={duration}
@@ -187,8 +188,8 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                   <tr>
                     <TH ch="Task ID" />
                     <TH ch="Status" />
-                    <TH ch="Worker" />
-                    <TH ch="Started" />
+                    <TH ch="Worker"  hide="hidden sm:table-cell" />
+                    <TH ch="Started" hide="hidden sm:table-cell" />
                     <TH ch="Updated" />
                   </tr>
                 </thead>
@@ -205,10 +206,10 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                       <td className="px-3 py-1.5 whitespace-nowrap">
                         <StateBadge state={t.state as Parameters<typeof StateBadge>[0]["state"]} compact />
                       </td>
-                      <td className="px-3 py-1.5 font-mono text-zinc-500 text-[12px] whitespace-nowrap">
+                      <td className="px-3 py-1.5 font-mono text-zinc-500 text-[12px] whitespace-nowrap hidden sm:table-cell">
                         {t.lease_owner ? shortId(t.lease_owner) : <span className="text-zinc-700">—</span>}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums">
+                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums hidden sm:table-cell">
                         {fmtTime(t.created_at)}
                       </td>
                       <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">

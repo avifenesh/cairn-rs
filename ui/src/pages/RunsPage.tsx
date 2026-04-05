@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { X, RefreshCw, ServerCrash, ChevronRight } from "lucide-react";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
+import { DataTable } from "../components/DataTable";
 import { defaultApi } from "../lib/api";
 import type { RunRecord, RunState } from "../lib/types";
 
@@ -107,12 +108,11 @@ function RunsTable({ runs, selectedId, onSelect }: {
     <table className="min-w-full">
       <thead className="sticky top-0 z-10 bg-zinc-950">
         <tr className="border-b border-zinc-800">
-          {["Run ID","Session","State","Created","Updated"].map((h, i) => (
-            <th key={h} className={clsx(
-              "px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap",
-              i >= 3 ? "text-right" : "text-left",
-            )}>{h}</th>
-          ))}
+          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-left">Run ID</th>
+          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-left hidden sm:table-cell">Session</th>
+          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-left">State</th>
+          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-right hidden sm:table-cell">Created</th>
+          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-right hidden md:table-cell">Updated</th>
         </tr>
       </thead>
       <tbody>
@@ -129,16 +129,16 @@ function RunsTable({ runs, selectedId, onSelect }: {
                   {shortId(run.run_id)}
                 </span>
               </td>
-              <td className="px-4 py-0 font-mono text-[11px] text-zinc-500 whitespace-nowrap">
+              <td className="px-4 py-0 font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden sm:table-cell">
                 {shortId(run.session_id)}
               </td>
               <td className="px-4 py-0 whitespace-nowrap">
                 <StateBadge state={run.state} compact />
               </td>
-              <td className="px-4 py-0 text-[11px] text-zinc-500 whitespace-nowrap text-right">
+              <td className="px-4 py-0 text-[11px] text-zinc-500 whitespace-nowrap text-right hidden sm:table-cell">
                 {fmtTime(run.created_at)}
               </td>
-              <td className="px-4 py-0 text-[11px] text-zinc-500 whitespace-nowrap text-right">
+              <td className="px-4 py-0 text-[11px] text-zinc-500 whitespace-nowrap text-right hidden md:table-cell">
                 {fmtTime(run.updated_at)}
               </td>
             </tr>
@@ -210,7 +210,26 @@ export function RunsPage() {
       {/* Content */}
       <div className="flex flex-1 overflow-hidden">
         <div className={clsx("flex-1 overflow-y-auto", selected && "border-r border-zinc-800")}>
-          {isLoading ? <Skeleton /> : <RunsTable runs={filtered} selectedId={selected?.run_id ?? null} onSelect={r => {
+          {isLoading ? <Skeleton /> : (
+          <DataTable<RunRecord>
+            data={filtered}
+            columns={[
+              { key: 'run_id',    header: 'Run ID',    render: r => <span className="flex items-center gap-1.5 font-mono text-[12px] text-zinc-300 whitespace-nowrap">{selected?.run_id===r.run_id&&<ChevronRight size={11} className="text-indigo-400 shrink-0"/>}{shortId(r.run_id)}</span>, sortValue: r => r.run_id },
+              { key: 'session',   header: 'Session',   render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap">{shortId(r.session_id)}</span> },
+              { key: 'state',     header: 'State',     render: r => <StateBadge state={r.state} compact />,   sortValue: r => r.state },
+              { key: 'created',   header: 'Created',   render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap tabular-nums text-right">{fmtTime(r.created_at)}</span>, sortValue: r => r.created_at, headClass:'text-right', cellClass:'text-right' },
+              { key: 'updated',   header: 'Updated',   render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap tabular-nums text-right">{fmtTime(r.updated_at)}</span>, sortValue: r => r.updated_at, headClass:'text-right', cellClass:'text-right' },
+            ]}
+            filterFn={(r, q) => r.run_id.includes(q) || r.session_id.includes(q) || r.state.includes(q)}
+            csvRow={r => [r.run_id, r.session_id, r.state, r.parent_run_id??'', r.created_at, r.updated_at]}
+            csvHeaders={['Run ID','Session ID','State','Parent Run','Created At','Updated At']}
+            filename="runs"
+            emptyText="No runs match this filter"
+            className="cursor-pointer"
+          />
+        )}
+        {/* Hidden click handler preserved for row selection */}
+        {false && <RunsTable runs={filtered} selectedId={selected?.run_id ?? null} onSelect={r => {
           window.location.hash = `run/${r.run_id}`;
         }} />}
         </div>
