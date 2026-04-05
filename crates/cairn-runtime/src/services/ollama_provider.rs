@@ -28,6 +28,16 @@ use cairn_domain::providers::{
 
 // ── Request / response shapes (OpenAI-compatible) ────────────────────────────
 
+/// Ollama-specific options block passed alongside the OpenAI-compat request.
+///
+/// Ollama forwards these to the underlying model runner.  `think: false`
+/// disables Qwen3's chain-of-thought reasoning pass when set.
+#[derive(Serialize)]
+struct OllamaOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    think: Option<bool>,
+}
+
 #[derive(Serialize)]
 struct ChatRequest<'a> {
     model:    &'a str,
@@ -37,6 +47,9 @@ struct ChatRequest<'a> {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    /// Ollama-specific options forwarded to the model runner.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<OllamaOptions>,
 }
 
 #[derive(Deserialize)]
@@ -154,37 +167,6 @@ impl OllamaProvider {
     }
 }
 
-// ── Qwen3 thinking-mode suppression ──────────────────────────────────────────
-
-/// Append `/no_think` to the last user message in the conversation.
-///
-/// Qwen3 models activate chain-of-thought reasoning by default, which adds
-/// several seconds of latency and consumes extra output tokens.  The model
-/// honours `/no_think` at the end of any user turn to skip thinking and
-/// return a direct answer — equivalent to the `think=false` API parameter
-/// in newer Ollama builds.
-///
-/// The function is a no-op when there are no user messages.
-fn patch_qwen3_no_think(mut messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
-    // Walk backwards to find the last user turn.
-    for msg in messages.iter_mut().rev() {
-        if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
-            if let Some(content) = msg.get_mut("content") {
-                if let Some(text) = content.as_str() {
-                    // Only append when not already present.
-                    if !text.contains("/no_think") {
-                        *content = serde_json::Value::String(
-                            format!("{text} /no_think")
-                        );
-                    }
-                }
-            }
-            break;
-        }
-    }
-    messages
-}
-
 // ── GenerationProvider impl ───────────────────────────────────────────────────
 
 #[async_trait::async_trait]
@@ -202,23 +184,25 @@ impl GenerationProvider for OllamaProvider {
             .temperature_milli
             .map(|m| m as f32 / 1_000.0);
 
-        // Qwen3 models default to "thinking" mode, which adds significant latency
-        // and token overhead.  Appending `/no_think` to the last user message
-        // disables the reasoning pass and returns direct responses.
-        let messages_patched: Vec<serde_json::Value>;
-        let effective_messages: &[serde_json::Value] = if model_id.contains("qwen3") {
-            messages_patched = patch_qwen3_no_think(messages.clone());
-            &messages_patched
+        // Qwen3 models default to chain-of-thought reasoning, which adds several
+        // seconds of latency and hundreds of extra output tokens.  Passing
+        // `options: { think: false }` via Ollama's extension field disables the
+        // thinking pass and returns direct answers.  This is the documented API
+        // approach; the `/no_think` suffix only works on the native `/api/chat`
+        // endpoint, not on the OpenAI-compat `/v1/chat/completions` path.
+        let options = if model_id.contains("qwen3") {
+            Some(OllamaOptions { think: Some(false) })
         } else {
-            &messages
+            None
         };
 
         let body = ChatRequest {
             model:       model_id,
-            messages:    effective_messages,
+            messages:    &messages,
             stream:      false,
             temperature,
             max_tokens:  settings.max_output_tokens,
+            options,
         };
 
         let http_resp = self
