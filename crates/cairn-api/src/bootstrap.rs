@@ -25,15 +25,14 @@ pub enum ServerRole {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageBackend {
+    InMemory,
     Sqlite { path: String },
     Postgres { connection_url: String },
 }
 
 impl Default for StorageBackend {
     fn default() -> Self {
-        StorageBackend::Sqlite {
-            path: "cairn.db".to_owned(),
-        }
+        StorageBackend::InMemory
     }
 }
 

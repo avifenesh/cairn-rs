@@ -14096,6 +14096,7 @@ fn deployment_mode_label(mode: DeploymentMode) -> &'static str {
 
 fn storage_backend_label(storage: &StorageBackend) -> &'static str {
     match storage {
+        StorageBackend::InMemory => "memory",
         StorageBackend::Sqlite { .. } => "sqlite",
         StorageBackend::Postgres { .. } => "postgres",
     }
