@@ -4,6 +4,7 @@ import {
   Cpu, CheckCircle2, XCircle, AlertTriangle, Clock,
   RefreshCw, ServerCrash, Plug, Activity,
   Bot, Send, Loader2, Layers, Zap, Trash2, Download, Plus,
+  ChevronDown, ChevronRight, HardDrive, Cpu as CpuIcon, Hash, FileType,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
@@ -88,6 +89,66 @@ function ProviderCard({ entry }: { entry: ProviderHealthEntry }) {
 }
 
 // ── Ollama section ────────────────────────────────────────────────────────────
+
+// ── Model info panel (fetched on click) ───────────────────────────────────────
+
+function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["ollama-model-info", name],
+    queryFn: () => defaultApi.getOllamaModelInfo(name),
+    staleTime: 120_000,
+    retry: false,
+  });
+
+  function fmt(n: number | null | undefined): string {
+    if (!n) return "—";
+    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+    if (n >= 1_000_000)     return `${(n / 1_000_000).toFixed(0)}M`;
+    return String(n);
+  }
+
+  return (
+    <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 mt-2 space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold text-zinc-300 font-mono">{name}</p>
+        <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 transition-colors">
+          <XCircle size={12} />
+        </button>
+      </div>
+
+      {isLoading && (
+        <div className="flex items-center gap-1.5 text-[11px] text-zinc-600">
+          <Loader2 size={10} className="animate-spin" /> Loading info…
+        </div>
+      )}
+
+      {isError && (
+        <p className="text-[11px] text-red-400">Could not load model info.</p>
+      )}
+
+      {data && (
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          {[
+            { icon: Hash,     label: "Parameters",    value: data.parameter_size },
+            { icon: CpuIcon,  label: "Quantization",  value: data.quantization_level },
+            { icon: HardDrive,label: "Size on disk",  value: data.size_human },
+            { icon: FileType, label: "Family / Format",value: `${data.family} · ${data.format.toUpperCase()}` },
+            ...(data.context_length ? [{ icon: Layers, label: "Context", value: `${(data.context_length / 1024).toFixed(0)}K tokens` }] : []),
+            ...(data.parameter_count ? [{ icon: Hash,  label: "Param count", value: fmt(data.parameter_count) }] : []),
+          ].map(({ icon: Icon, label, value }) => (
+            <div key={label} className="flex items-start gap-1.5">
+              <Icon size={10} className="text-zinc-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-[10px] text-zinc-600">{label}</p>
+                <p className="text-[11px] text-zinc-300 font-mono">{value}</p>
+              </div>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
 
 function OllamaSection() {
   const toast = useToast();

@@ -246,6 +246,20 @@ export function createApiClient(config: ApiClientConfig) {
     getOllamaModels: (): Promise<{ host: string; models: string[]; count: number }> =>
       get("/v1/providers/ollama/models"),
 
+    /** GET /v1/providers/ollama/models/:name/info — detailed info for one model. */
+    getOllamaModelInfo: (name: string): Promise<{
+      name: string;
+      family: string;
+      format: string;
+      parameter_size: string;
+      parameter_count: number | null;
+      quantization_level: string;
+      context_length: number | null;
+      embedding_length: number | null;
+      size_bytes: number | null;
+      size_human: string;
+    }> => get(`/v1/providers/ollama/models/${encodeURIComponent(name)}/info`),
+
     /** POST /v1/providers/ollama/pull — download a model into Ollama. */
     pullOllamaModel: (model: string): Promise<{ status: string; model: string }> =>
       post("/v1/providers/ollama/pull", { model }),

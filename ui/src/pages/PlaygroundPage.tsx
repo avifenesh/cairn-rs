@@ -97,7 +97,7 @@ function streamGenerate(
             if (parsed.text !== undefined)
               onToken(String(parsed.text));
             else if (parsed.latency_ms !== undefined)
-              onDone({ latency_ms: Number(parsed.latency_ms), model: String(parsed.model ?? model) });
+              onDone({ latency_ms: Number(parsed.latency_ms), model: String(parsed.model ?? params.model) });
             else if (parsed.error !== undefined)
               onError(String(parsed.error));
           } catch { /* ignore malformed */ }
@@ -556,6 +556,15 @@ export function PlaygroundPage() {
         onChange={setSystemPrompt}
         open={systemOpen}
         onToggle={toggleSystemOpen}
+        disabled={streaming}
+      />
+
+      {/* ── Generation settings ───────────────────────────────────────── */}
+      <ModelSettings
+        temperature={temperature}
+        onTemperature={setTemperature}
+        maxTokens={maxTokens}
+        onMaxTokens={setMaxTokens}
         disabled={streaming}
       />
 
