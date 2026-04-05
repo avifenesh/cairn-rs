@@ -3,6 +3,7 @@ import { Coins,
   Play,
   MonitorPlay,
   CheckSquare,
+  Waves,
   Zap,
   Database,
   Settings,
@@ -17,6 +18,7 @@ export type NavPage =
   | 'approvals'
   | 'providers'
   | 'costs'
+  | 'traces'
   | 'memory'
   | 'settings';
 
@@ -33,6 +35,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'approvals',  label: 'Approvals',   icon: CheckSquare     },
   { id: 'providers',  label: 'Providers',   icon: Zap             },
   { id: 'costs',      label: 'Costs',       icon: Coins           },
+  { id: 'traces',     label: 'Traces',      icon: Waves           },
   { id: 'memory',     label: 'Memory',      icon: Database        },
   { id: 'settings',   label: 'Settings',    icon: Settings        },
 ];

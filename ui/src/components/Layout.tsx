@@ -9,7 +9,7 @@ import { CommandPalette } from './CommandPalette';
 function readPage(): NavPage {
   const hash = window.location.hash.replace('#', '') as NavPage;
   const valid: NavPage[] = [
-    'dashboard', 'runs', 'sessions', 'approvals', 'providers', 'costs', 'memory', 'settings',
+    'dashboard', 'runs', 'sessions', 'approvals', 'providers', 'costs', 'traces', 'memory', 'settings',
   ];
   return valid.includes(hash) ? hash : 'dashboard';
 }
@@ -21,6 +21,7 @@ const PAGE_TITLES: Record<NavPage, string> = {
   approvals:  'Approvals',
   providers:  'Providers',
   costs:      'Costs',
+  traces:     'Traces',
   memory:     'Memory',
   settings:   'Settings',
 };

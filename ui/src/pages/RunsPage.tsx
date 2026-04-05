@@ -49,6 +49,30 @@ const STATE_FILTER_LABEL: Record<RunState, string> = {
   canceled:           "Canceled",
 };
 
+// ── Task state badge (reuses colour logic) ────────────────────────────────────
+
+const TASK_STATE_STYLE: Record<string, string> = {
+  queued:              'bg-zinc-800 text-zinc-400 ring-zinc-700',
+  leased:              'bg-sky-950 text-sky-300 ring-sky-800',
+  running:             'bg-blue-950 text-blue-300 ring-blue-800',
+  completed:           'bg-emerald-950 text-emerald-400 ring-emerald-800',
+  failed:              'bg-red-950 text-red-400 ring-red-800',
+  canceled:            'bg-zinc-900 text-zinc-500 ring-zinc-700',
+  paused:              'bg-amber-950 text-amber-300 ring-amber-800',
+  waiting_dependency:  'bg-violet-950 text-violet-300 ring-violet-800',
+  retryable_failed:    'bg-orange-950 text-orange-300 ring-orange-800',
+  dead_lettered:       'bg-red-950 text-red-500 ring-red-800',
+};
+
+function TaskBadge({ state }: { state: TaskState }) {
+  const style = TASK_STATE_STYLE[state] ?? TASK_STATE_STYLE.queued;
+  return (
+    <span className={clsx('inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ring-1', style)}>
+      {state.replace(/_/g, ' ')}
+    </span>
+  );
+}
+
 // ── Detail panel ─────────────────────────────────────────────────────────────
 
 interface DetailPanelProps {
@@ -57,94 +81,187 @@ interface DetailPanelProps {
 }
 
 function DetailPanel({ run, onClose }: DetailPanelProps) {
+  const qc = useQueryClient();
+
+  // Sub-resource queries.
+  const { data: events, isLoading: eventsLoading } = useQuery({
+    queryKey: ['run-events', run.run_id],
+    queryFn: () => defaultApi.getRunEvents(run.run_id, 50),
+    refetchInterval: 10_000,
+  });
+
+  const { data: tasks, isLoading: tasksLoading } = useQuery({
+    queryKey: ['run-tasks', run.run_id],
+    queryFn: () => defaultApi.getRunTasks(run.run_id),
+    retry: false, // 404 when run has no tasks yet
+  });
+
+  const { data: cost } = useQuery({
+    queryKey: ['run-cost', run.run_id],
+    queryFn: () => defaultApi.getRunCost(run.run_id),
+    refetchInterval: 15_000,
+  });
+
+  // Pause / resume mutations.
+  const pause = useMutation({
+    mutationFn: () => defaultApi.pauseRun(run.run_id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['runs'] }),
+  });
+
+  const resume = useMutation({
+    mutationFn: () => defaultApi.resumeRun(run.run_id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['runs'] }),
+  });
+
+  const canPause  = run.state === 'running' || run.state === 'pending';
+  const canResume = run.state === 'paused';
+
   return (
-    <aside className="flex flex-col w-96 shrink-0 border-l border-zinc-800 bg-zinc-900 h-full overflow-y-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
+    <aside className="flex flex-col w-[26rem] shrink-0 border-l border-zinc-800 bg-zinc-900 h-full overflow-y-auto">
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
         <div className="flex items-center gap-2 min-w-0">
           <ChevronRight size={14} className="text-zinc-500 shrink-0" />
           <span className="text-sm font-semibold text-zinc-100 font-mono truncate">
             {shortId(run.run_id)}
           </span>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-md p-1 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-          aria-label="Close panel"
-        >
+        <button onClick={onClose} className="rounded-md p-1 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
           <X size={16} />
         </button>
       </div>
 
-      {/* Body */}
       <div className="flex-1 p-5 space-y-5">
-        {/* State */}
-        <div>
-          <label className="text-xs text-zinc-500 uppercase tracking-widest">State</label>
-          <div className="mt-1.5">
+
+        {/* ── (1) State — large badge + pause/resume ─────────────────────── */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">State</p>
             <StateBadge state={run.state} />
+          </div>
+          <div className="flex gap-2">
+            {canPause && (
+              <button
+                onClick={() => pause.mutate()}
+                disabled={pause.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-900/50 ring-1 ring-amber-700/60 text-amber-300 text-xs font-medium hover:bg-amber-900 disabled:opacity-50 transition-colors"
+              >
+                {pause.isPending ? <Loader2 size={11} className="animate-spin" /> : <Pause size={11} />}
+                Pause
+              </button>
+            )}
+            {canResume && (
+              <button
+                onClick={() => resume.mutate()}
+                disabled={resume.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-900/50 ring-1 ring-emerald-700/60 text-emerald-300 text-xs font-medium hover:bg-emerald-900 disabled:opacity-50 transition-colors"
+              >
+                {resume.isPending ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                Resume
+              </button>
+            )}
           </div>
         </div>
 
-        {/* IDs */}
-        <Section title="Identifiers">
-          <Field label="Run ID"     value={run.run_id} mono />
-          <Field label="Session"    value={run.session_id} mono />
-          {run.parent_run_id && (
-            <Field label="Parent Run" value={run.parent_run_id} mono />
+        {/* ── (4) Cost breakdown ─────────────────────────────────────────── */}
+        <Section title={<><DollarSign size={12} className="text-zinc-500" /> Cost</>}>
+          {cost ? (
+            <div className="grid grid-cols-2 gap-0 divide-y divide-x divide-zinc-700/40">
+              <CostCell label="Total cost" value={`$${(cost.total_cost_micros / 1_000_000).toFixed(6)}`} />
+              <CostCell label="Provider calls" value={String(cost.provider_calls)} />
+              <CostCell label="Tokens in" value={cost.total_tokens_in.toLocaleString()} />
+              <CostCell label="Tokens out" value={cost.total_tokens_out.toLocaleString()} />
+            </div>
+          ) : (
+            <p className="px-3 py-2 text-xs text-zinc-600 italic">No cost data yet.</p>
           )}
         </Section>
 
-        {/* Project */}
-        <Section title="Project">
-          <Field label="Tenant"    value={run.project.tenant_id} />
-          <Field label="Workspace" value={run.project.workspace_id} />
-          <Field label="Project"   value={run.project.project_id} />
+        {/* ── (3) Tasks ──────────────────────────────────────────────────── */}
+        <Section title={<><ListChecks size={12} className="text-zinc-500" /> Tasks ({tasks?.length ?? '…'})</>}>
+          {tasksLoading ? (
+            <SkeletonLines n={2} />
+          ) : !tasks || tasks.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-zinc-600 italic">No tasks.</p>
+          ) : (
+            <div className="divide-y divide-zinc-700/40">
+              {tasks.map((t) => (
+                <div key={t.task_id} className="flex items-center justify-between px-3 py-2 gap-3">
+                  <span className="text-[11px] font-mono text-zinc-400 truncate">{shortId(t.task_id)}</span>
+                  <TaskBadge state={t.state} />
+                </div>
+              ))}
+            </div>
+          )}
         </Section>
 
-        {/* Prompt / Agent */}
-        {(run.prompt_release_id || run.agent_role_id) && (
-          <Section title="Prompt &amp; Agent">
-            {run.prompt_release_id && (
-              <Field label="Prompt Release" value={run.prompt_release_id} mono />
-            )}
-            {run.agent_role_id && (
-              <Field label="Agent Role" value={run.agent_role_id} mono />
-            )}
-          </Section>
-        )}
-
-        {/* Failure info */}
-        {(run.failure_class || run.pause_reason) && (
-          <Section title="Status Details">
-            {run.failure_class && (
-              <Field label="Failure Class" value={run.failure_class} />
-            )}
-            {run.pause_reason && (
-              <Field label="Pause Reason" value={run.pause_reason} />
-            )}
-            {run.resume_trigger && (
-              <Field label="Resume Trigger" value={run.resume_trigger} />
-            )}
-          </Section>
-        )}
-
-        {/* Timestamps */}
-        <Section title="Timestamps">
-          <Field label="Created" value={fmtTime(run.created_at)} />
-          <Field label="Updated" value={fmtTime(run.updated_at)} />
-          <Field label="Version" value={String(run.version)} />
+        {/* ── (2) Event timeline ─────────────────────────────────────────── */}
+        <Section title={<><Clock size={12} className="text-zinc-500" /> Timeline ({events?.length ?? '…'})</>}>
+          {eventsLoading ? (
+            <SkeletonLines n={4} />
+          ) : !events || events.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-zinc-600 italic">No events recorded yet.</p>
+          ) : (
+            <div className="divide-y divide-zinc-700/30 max-h-72 overflow-y-auto">
+              {events.map((ev) => (
+                <div key={ev.position} className="flex items-center gap-3 px-3 py-1.5">
+                  <span className="text-[10px] text-zinc-600 font-mono tabular-nums shrink-0 w-14 text-right">
+                    #{ev.position}
+                  </span>
+                  <span className="text-[11px] font-mono text-indigo-400 truncate flex-1">
+                    {ev.event_type}
+                  </span>
+                  <span className="text-[10px] text-zinc-600 shrink-0">
+                    {new Date(ev.stored_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </Section>
+
+        {/* ── Identifiers / metadata ─────────────────────────────────────── */}
+        <Section title={<><Activity size={12} className="text-zinc-500" /> Details</>}>
+          <Field label="Run ID"     value={run.run_id} mono />
+          <Field label="Session"    value={run.session_id} mono />
+          {run.parent_run_id && <Field label="Parent" value={run.parent_run_id} mono />}
+          <Field label="Created"    value={fmtTime(run.created_at)} />
+          <Field label="Updated"    value={fmtTime(run.updated_at)} />
+          {run.failure_class && <Field label="Failure" value={run.failure_class} />}
+        </Section>
+
       </div>
     </aside>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function CostCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="px-3 py-2">
+      <p className="text-[10px] text-zinc-500">{label}</p>
+      <p className="text-xs text-zinc-200 font-mono mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+function SkeletonLines({ n }: { n: number }) {
+  return (
+    <div className="divide-y divide-zinc-700/40 animate-pulse">
+      {Array.from({ length: n }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 px-3 py-2">
+          <div className="h-2.5 w-24 rounded bg-zinc-800" />
+          <div className="h-2.5 w-16 rounded bg-zinc-800 ml-auto" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs text-zinc-500 uppercase tracking-widest mb-2">{title}</p>
-      <div className="rounded-lg bg-zinc-800/50 ring-1 ring-zinc-700/50 divide-y divide-zinc-700/40">
+      <p className="flex items-center gap-1.5 text-[10px] text-zinc-500 uppercase tracking-widest mb-2">{title}</p>
+      <div className="rounded-lg bg-zinc-800/50 ring-1 ring-zinc-700/50 overflow-hidden">
         {children}
       </div>
     </div>
