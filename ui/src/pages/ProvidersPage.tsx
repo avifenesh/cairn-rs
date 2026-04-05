@@ -93,6 +93,7 @@ function OllamaSection() {
   const toast = useToast();
   const [prompt, setPrompt] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
+  const [pullName, setPullName] = useState("");
   const [result, setResult] = useState<{
     text: string; model: string; tokens_in: number | null;
     tokens_out: number | null; latency_ms: number;
@@ -114,6 +115,28 @@ function OllamaSection() {
       defaultApi.ollamaGenerate({ prompt, model }),
     onSuccess: (data) => setResult(data),
     onError: (e) => toast.error(`Generation failed: ${e instanceof Error ? e.message : "unknown error"}`),
+  });
+
+  const pullModel = useMutation({
+    mutationFn: (model: string) => defaultApi.pullOllamaModel(model),
+    onSuccess: (_, model) => {
+      toast.success(`Model "${model}" downloaded successfully.`);
+      setPullName("");
+      void refetch();
+    },
+    onError: (e, model) =>
+      toast.error(`Failed to pull "${model}": ${e instanceof Error ? e.message : "error"}`),
+  });
+
+  const deleteModel = useMutation({
+    mutationFn: (model: string) => defaultApi.deleteOllamaModel(model),
+    onSuccess: (_, model) => {
+      toast.success(`Model "${model}" deleted.`);
+      if (selectedModel === model) setSelectedModel("");
+      void refetch();
+    },
+    onError: (e, model) =>
+      toast.error(`Failed to delete "${model}": ${e instanceof Error ? e.message : "error"}`),
   });
 
   function handleSubmit(e: FormEvent) {
@@ -179,29 +202,103 @@ function OllamaSection() {
         </span>
       </div>
 
-      {/* ── Model list ────────────────────────────────────────────────── */}
-      {connected && models.length > 0 && (
-        <div className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-4">
-          <p className="text-xs font-medium text-zinc-400 flex items-center gap-1.5 mb-3">
-            <Layers size={11} className="text-zinc-500" />
-            Available models
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {models.map((m) => (
-              <button
-                key={m}
-                onClick={() => setSelectedModel(m)}
-                className={clsx(
-                  "px-2.5 py-1 rounded-lg text-xs font-mono font-medium ring-1 transition-colors",
-                  activeModel === m
-                    ? "bg-indigo-950 text-indigo-300 ring-indigo-700"
-                    : "bg-zinc-800 text-zinc-400 ring-zinc-700 hover:bg-zinc-700 hover:text-zinc-200",
-                )}
-              >
-                {m}
-              </button>
-            ))}
+      {/* ── Model management ──────────────────────────────────────────── */}
+      {connected && (
+        <div className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-4 space-y-4">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+              <Layers size={11} className="text-zinc-500" />
+              Models
+              {models.length > 0 && <span className="text-zinc-600">({models.length})</span>}
+            </p>
           </div>
+
+          {/* Installed model list with delete buttons */}
+          {models.length > 0 ? (
+            <div className="space-y-1.5">
+              {models.map((m) => {
+                const isDeleting = deleteModel.isPending && deleteModel.variables === m;
+                return (
+                  <div key={m}
+                    className={clsx(
+                      "flex items-center justify-between rounded-lg px-3 py-2 ring-1 transition-colors",
+                      activeModel === m
+                        ? "bg-indigo-950/50 ring-indigo-800/60"
+                        : "bg-zinc-800/50 ring-zinc-700/50",
+                    )}
+                  >
+                    <button
+                      onClick={() => setSelectedModel(m)}
+                      className="text-xs font-mono text-zinc-300 hover:text-zinc-100 transition-colors"
+                    >
+                      {m}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete "${m}"? This removes it from Ollama.`)) {
+                          deleteModel.mutate(m);
+                        }
+                      }}
+                      disabled={isDeleting || deleteModel.isPending}
+                      title={`Delete ${m}`}
+                      className="flex items-center gap-1 text-zinc-600 hover:text-red-400
+                                 disabled:opacity-30 transition-colors ml-3"
+                    >
+                      {isDeleting
+                        ? <Loader2 size={12} className="animate-spin" />
+                        : <Trash2 size={12} />
+                      }
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-zinc-600 italic">No models installed yet.</p>
+          )}
+
+          {/* Pull model form */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = pullName.trim();
+              if (name) pullModel.mutate(name);
+            }}
+            className="flex gap-2 pt-1 border-t border-zinc-800"
+          >
+            <div className="relative flex-1">
+              <Plus size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+              <input
+                value={pullName}
+                onChange={(e) => setPullName(e.target.value)}
+                placeholder="Pull model, e.g. llama3.2"
+                disabled={pullModel.isPending}
+                className="w-full rounded-lg bg-zinc-800 border border-zinc-700 pl-7 pr-3 py-2
+                           text-xs text-zinc-200 placeholder-zinc-600
+                           focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500
+                           disabled:opacity-50 transition-colors"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!pullName.trim() || pullModel.isPending}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500
+                         disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium
+                         transition-colors whitespace-nowrap"
+            >
+              {pullModel.isPending
+                ? <><Loader2 size={12} className="animate-spin" /> Pulling…</>
+                : <><Download size={12} /> Pull</>
+              }
+            </button>
+          </form>
+          {pullModel.isPending && (
+            <p className="text-[11px] text-indigo-400 flex items-center gap-1.5 animate-pulse">
+              <Loader2 size={10} className="animate-spin" />
+              Downloading "{pullModel.variables}" — this may take several minutes…
+            </p>
+          )}
         </div>
       )}
 
