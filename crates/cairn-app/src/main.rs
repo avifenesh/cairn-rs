@@ -1437,6 +1437,136 @@ async fn ollama_embed_handler(
     }
 }
 
+
+/// `POST /v1/providers/ollama/stream` — stream tokens from Ollama via SSE.
+///
+/// Body: `{ "model": "qwen3:8b", "prompt": "..." }`
+/// Emits SSE events:
+///   - `event: token`  data: `{"text": "word "}`
+///   - `event: done`   data: `{"latency_ms": N, "model": "..."}`
+///   - `event: error`  data: `{"error": "..."}`
+///
+/// Clients read via `fetch()` + `ReadableStream` — no EventSource needed.
+async fn ollama_stream_handler(
+    State(state): State<AppState>,
+    Json(body): Json<OllamaGenerateRequest>,
+) -> impl IntoResponse {
+    let Some(provider) = state.ollama.clone() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "error": "Ollama provider not configured — set OLLAMA_HOST to enable"
+            })),
+        ).into_response();
+    };
+
+    let model_id = body.model.as_deref().unwrap_or("llama3").to_owned();
+    let prompt   = body.prompt.clone();
+
+    // Spawn a task that calls Ollama with stream=true and forwards chunks via channel.
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
+
+    tokio::spawn(async move {
+        let start   = std::time::Instant::now();
+        let host    = provider.host().to_owned();
+        let client  = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(180))
+            .build()
+            .expect("reqwest client");
+
+        let url = format!("{host}/v1/chat/completions");
+        let req_body = serde_json::json!({
+            "model":    model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream":   true,
+        });
+
+        let resp = match client.post(&url).json(&req_body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = tx.send(Ok(Event::default()
+                    .event("error")
+                    .data(serde_json::json!({"error": e.to_string()}).to_string())
+                )).await;
+                return;
+            }
+        };
+
+        if !resp.status().is_success() {
+            let msg = resp.text().await.unwrap_or_default();
+            let _ = tx.send(Ok(Event::default()
+                .event("error")
+                .data(serde_json::json!({"error": msg}).to_string())
+            )).await;
+            return;
+        }
+
+        let mut stream = resp.bytes_stream();
+        let mut buf = String::new();
+
+        while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
+            let bytes = match chunk {
+                Ok(b) => b,
+                Err(e) => {
+                    let _ = tx.send(Ok(Event::default()
+                        .event("error")
+                        .data(serde_json::json!({"error": e.to_string()}).to_string())
+                    )).await;
+                    return;
+                }
+            };
+
+            buf.push_str(&String::from_utf8_lossy(&bytes[..]));
+
+            // Process complete SSE lines from buffer.
+            while let Some(nl) = buf.find('\n') {
+                let line = buf[..nl].trim().to_owned();
+                buf = buf[nl + 1..].to_owned();
+
+                // Ollama SSE lines start with "data: "
+                let Some(data) = line.strip_prefix("data: ") else {
+                    continue;
+                };
+                if data == "[DONE]" {
+                    break;
+                }
+
+                let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) else {
+                    continue;
+                };
+
+                // Extract delta text from choices[0].delta.content
+                if let Some(text) = parsed
+                    .get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("delta"))
+                    .and_then(|d| d.get("content"))
+                    .and_then(|c| c.as_str())
+                {
+                    if !text.is_empty() {
+                        let _ = tx.send(Ok(Event::default()
+                            .event("token")
+                            .data(serde_json::json!({"text": text}).to_string())
+                        )).await;
+                    }
+                }
+            }
+        }
+
+        // Emit done event with timing.
+        let latency_ms = start.elapsed().as_millis() as u64;
+        let _ = tx.send(Ok(Event::default()
+            .event("done")
+            .data(serde_json::json!({"latency_ms": latency_ms, "model": model_id}).to_string())
+        )).await;
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 fn parse_args_from(args: &[String]) -> BootstrapConfig {
@@ -2051,6 +2181,7 @@ fn build_router(state: AppState) -> Router {
         // Ollama local LLM provider
         .route("/v1/providers/ollama/models",   get(ollama_models_handler))
         .route("/v1/providers/ollama/generate", post(ollama_generate_handler))
+        .route("/v1/providers/ollama/stream",   post(ollama_stream_handler))
         .route("/v1/memory/embed",              post(ollama_embed_handler))
         // DB diagnostics
         .route("/v1/db/status", get(db_status_handler))
