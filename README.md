@@ -242,6 +242,56 @@ This repository uses a manager + worker coordination model. Active work is track
 
 ---
 
+## Test Coverage
+
+29 end-to-end integration test files across 3 crates, each targeting a specific RFC contract.
+
+### `crates/cairn-runtime/tests/`
+
+| File | What it tests |
+|------|--------------|
+| `approval_blocking_e2e.rs` | Run pauses on approval gate; unblocks on approve/reject |
+| `audit_log_e2e.rs` | AuditLogEntryRecorded events for create/run/complete; tenant isolation; failure outcomes |
+| `checkpoint_recovery_e2e.rs` | Checkpoint creation, lease expiry detection, run recovery pipeline |
+| `credential_lifecycle_e2e.rs` | Credential store, rotation, revocation, KEK version tracking |
+| `defaults_resolution_e2e.rs` | Default settings scoped by tenant/workspace/project; precedence chain |
+| `external_worker_e2e.rs` | Worker registration, task claim/heartbeat/report lifecycle |
+| `feature_gate_e2e.rs` | RFC 014 fail-closed gating; tier-based entitlement (Local/Team/Enterprise) |
+| `guardrail_evaluation_e2e.rs` | Policy evaluation with allow/block outcomes |
+| `ingest_job_lifecycle_e2e.rs` | Ingest job submit → complete → chunk projection |
+| `mailbox_messaging_e2e.rs` | Append with RFC 002 fields; list by run; mark delivered; deferred delivery |
+| `notification_preference_e2e.rs` | Operator notification channel preferences; delivery routing |
+| `operator_profile_e2e.rs` | Create/retrieve/update profile; list by tenant; tenant isolation; preferences gate |
+| `prompt_comparison_e2e.rs` | Two-release scorecard via EvalRunService; winner by task_success_rate |
+| `prompt_lifecycle_e2e.rs` | Draft→approved→active release transitions; selector resolution |
+| `provider_budget_pool_e2e.rs` | Budget set/enforce; alert threshold; pool configuration |
+| `provider_routing_e2e.rs` | Binding selection, fallback chain, route decision recording |
+| `resource_sharing_e2e.rs` | Cross-workspace share create/revoke/list; gating on version permission |
+| `retention_policy_e2e.rs` | Retention policy set; apply-retention event emission |
+| `route_policy_lifecycle_e2e.rs` | Route policy create/update; rule evaluation |
+| `run_cost_tracking_e2e.rs` | ProviderCallCompleted accumulates cost/tokens at run and session level |
+| `session_lifecycle_e2e.rs` | Open→Archived lifecycle; cost accumulation; closeable-state derivation |
+| `signal_routing_e2e.rs` | Subscribe, ingest, route to mailbox; filter expressions; fan-out; project isolation |
+| `task_lifecycle_e2e.rs` | Queued→Leased→Running→Completed state machine; lease expiry |
+| `tenant_workspace_e2e.rs` | Tenant/workspace/project hierarchy; membership CRUD; pagination |
+| `week4_e2e.rs` | Cross-RFC scenario: cost alerts, SLA breaches, policy enforcement |
+| `workspace_rbac_e2e.rs` | Role hierarchy (Viewer/Member/Admin/Owner); write gate; role upgrade |
+
+### `crates/cairn-memory/tests/`
+
+| File | What it tests |
+|------|--------------|
+| `deep_search_e2e.rs` | Multi-hop retrieval; quality gates; deduplication; hop diagnostics |
+| `retrieval_pipeline_e2e.rs` | Ingest→chunk→lexical retrieval; metadata filters; source quality |
+
+### `crates/cairn-api/tests/`
+
+| File | What it tests |
+|------|--------------|
+| `onboarding_flow_e2e.rs` | First-run onboarding: tenant provision, template apply, first-project creation |
+
+---
+
 ## License
 
 Proprietary. All rights reserved.
