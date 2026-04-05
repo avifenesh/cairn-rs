@@ -37,8 +37,9 @@ cairn-rs is designed for teams that want the reliability of purpose-built infras
 
 ## Quick start
 
+### Cargo (local dev)
+
 ```bash
-# Clone and run (in-memory, no config required)
 git clone https://github.com/avifenesh/cairn-rs
 cd cairn-rs
 cargo run -p cairn-app
@@ -53,7 +54,35 @@ OLLAMA_HOST=http://localhost:11434 cargo run -p cairn-app
 
 Default bearer token: `dev-admin-token`. Set `CAIRN_ADMIN_TOKEN` to override.
 
-The embedded operator dashboard is available at **http://localhost:3000** — no separate frontend server needed.
+### Docker
+
+```bash
+# One command — starts cairn-app + Postgres + Ollama
+docker compose up --build
+
+# Background
+docker compose up -d --build
+
+# Override the admin token
+echo 'CAIRN_ADMIN_TOKEN=my-secret-token' > .env
+docker compose up -d
+```
+
+Schema migrations run automatically on first boot. Ollama models are cached in
+a Docker volume; pull additional models with:
+
+```bash
+docker compose exec ollama ollama pull qwen3:8b
+```
+
+### After startup
+
+| URL | Description |
+|-----|-------------|
+| `http://localhost:3000` | Operator dashboard |
+| `http://localhost:3000/v1/docs` | Interactive API explorer (Swagger UI) |
+| `http://localhost:3000/v1/openapi.json` | OpenAPI 3.0 spec |
+| `http://localhost:3000/health` | Liveness probe |
 
 ---
 
@@ -214,6 +243,14 @@ Cairn's behaviour is specified by RFCs in `docs/design/rfcs/`. Each RFC has a co
 | 009 | Provider routing and cost tracking |
 | 013 | Bundle import/export, eval rubrics |
 | 014 | Commercial tiers and feature gating |
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, development
+workflow, testing instructions, code style requirements, and the pull-request
+process.
 
 ---
 
