@@ -92,7 +92,7 @@ impl OllamaProvider {
         Self {
             host:   host.into(),
             client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_secs(300))
                 .build()
                 .expect("failed to build reqwest client"),
         }
@@ -154,6 +154,37 @@ impl OllamaProvider {
     }
 }
 
+// ── Qwen3 thinking-mode suppression ──────────────────────────────────────────
+
+/// Append `/no_think` to the last user message in the conversation.
+///
+/// Qwen3 models activate chain-of-thought reasoning by default, which adds
+/// several seconds of latency and consumes extra output tokens.  The model
+/// honours `/no_think` at the end of any user turn to skip thinking and
+/// return a direct answer — equivalent to the `think=false` API parameter
+/// in newer Ollama builds.
+///
+/// The function is a no-op when there are no user messages.
+fn patch_qwen3_no_think(mut messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    // Walk backwards to find the last user turn.
+    for msg in messages.iter_mut().rev() {
+        if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
+            if let Some(content) = msg.get_mut("content") {
+                if let Some(text) = content.as_str() {
+                    // Only append when not already present.
+                    if !text.contains("/no_think") {
+                        *content = serde_json::Value::String(
+                            format!("{text} /no_think")
+                        );
+                    }
+                }
+            }
+            break;
+        }
+    }
+    messages
+}
+
 // ── GenerationProvider impl ───────────────────────────────────────────────────
 
 #[async_trait::async_trait]
@@ -171,9 +202,20 @@ impl GenerationProvider for OllamaProvider {
             .temperature_milli
             .map(|m| m as f32 / 1_000.0);
 
+        // Qwen3 models default to "thinking" mode, which adds significant latency
+        // and token overhead.  Appending `/no_think` to the last user message
+        // disables the reasoning pass and returns direct responses.
+        let messages_patched: Vec<serde_json::Value>;
+        let effective_messages: &[serde_json::Value] = if model_id.contains("qwen3") {
+            messages_patched = patch_qwen3_no_think(messages.clone());
+            &messages_patched
+        } else {
+            &messages
+        };
+
         let body = ChatRequest {
             model:       model_id,
-            messages:    &messages,
+            messages:    effective_messages,
             stream:      false,
             temperature,
             max_tokens:  settings.max_output_tokens,
