@@ -1,126 +1,80 @@
 import { useState, useRef, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import {
-  Search, Database, FileText, Star, Activity,
-  Loader2, ServerCrash, Inbox, BarChart2, X,
-} from 'lucide-react';
+import { Search, Loader2, X, RefreshCw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
-import type { MemoryChunkResult, SourceQualityRecord, SourceRecord } from '../lib/types';
+import type { MemoryChunkResult, SourceRecord } from '../lib/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function scoreBar(score: number) {
-  const pct = Math.round(Math.min(score, 1) * 100);
-  const color =
-    pct >= 70 ? 'bg-emerald-500' :
-    pct >= 40 ? 'bg-amber-500'  : 'bg-red-500';
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 h-1.5 rounded-full bg-zinc-800">
-        <div className={clsx('h-1.5 rounded-full transition-all', color)} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs tabular-nums text-zinc-400 w-8 text-right">{pct}%</span>
-    </div>
-  );
-}
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n)}…` : s;
 }
 
-// ── Source quality panel ──────────────────────────────────────────────────────
+function fmtScore(n: number) {
+  return `${Math.round(Math.min(n, 1) * 100)}%`;
+}
 
-function SourceQualityPanel({ sourceId }: { sourceId: string }) {
-  const { data, isLoading } = useQuery<SourceQualityRecord>({
-    queryKey: ['source-quality', sourceId],
-    queryFn: () => defaultApi.getSourceQuality(sourceId),
-    staleTime: 60_000,
-    retry: false,
-  });
+// ── Score bar — compact 4px height ───────────────────────────────────────────
 
-  if (isLoading) return (
-    <div className="flex items-center gap-1.5 text-xs text-zinc-600 py-2">
-      <Loader2 size={11} className="animate-spin" /> Loading quality…
-    </div>
-  );
-  if (!data) return null;
-
+function ScoreBar({ score }: { score: number }) {
+  const pct  = Math.round(Math.min(score, 1) * 100);
+  const color = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-500';
   return (
-    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-      <div className="rounded-lg bg-zinc-800/60 px-3 py-2">
-        <p className="text-zinc-500 mb-1">Credibility</p>
-        {scoreBar(data.credibility_score)}
+    <div className="flex items-center gap-2">
+      <div className="w-20 h-1 rounded-full bg-zinc-800">
+        <div className={clsx('h-1 rounded-full', color)} style={{ width: `${pct}%` }} />
       </div>
-      <div className="rounded-lg bg-zinc-800/60 px-3 py-2">
-        <p className="text-zinc-500 mb-1">Avg rating</p>
-        <p className="text-zinc-200 font-medium">
-          {data.avg_rating !== null ? data.avg_rating.toFixed(1) : '—'}
-          <span className="text-zinc-500 font-normal"> / 5</span>
-        </p>
-      </div>
-      <div className="rounded-lg bg-zinc-800/60 px-3 py-2">
-        <p className="text-zinc-500 mb-1">Retrievals</p>
-        <p className="text-zinc-200 font-medium">{data.total_retrievals.toLocaleString()}</p>
-      </div>
-      <div className="rounded-lg bg-zinc-800/60 px-3 py-2">
-        <p className="text-zinc-500 mb-1">Chunks</p>
-        <p className="text-zinc-200 font-medium">{data.chunk_count.toLocaleString()}</p>
-      </div>
+      <span className="text-[11px] tabular-nums text-zinc-500 w-7 text-right">{pct}%</span>
     </div>
   );
 }
 
-// ── Search result card ────────────────────────────────────────────────────────
+// ── Result row ────────────────────────────────────────────────────────────────
 
-function ResultCard({ result, rank }: { result: MemoryChunkResult; rank: number }) {
+function ResultRow({ result, rank, even }: { result: MemoryChunkResult; rank: number; even: boolean }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-4 space-y-3">
-      {/* Header row */}
-      <div className="flex items-start justify-between gap-3">
+    <div className={clsx("px-4 py-3 border-b border-zinc-800/50 last:border-0", even ? "bg-zinc-900" : "bg-zinc-900/50")}>
+      {/* Top row: rank + source + score */}
+      <div className="flex items-start justify-between gap-4 mb-1.5">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="shrink-0 w-5 h-5 rounded-full bg-indigo-900 text-indigo-300 text-[10px] font-bold flex items-center justify-center">
-            {rank}
+          <span className="shrink-0 text-[10px] font-mono text-zinc-600 w-4 tabular-nums">{rank}</span>
+          <span className="text-[11px] font-mono text-zinc-500 truncate" title={result.chunk.source_id}>
+            {truncate(result.chunk.source_id, 32)}
           </span>
-          <span className="text-xs font-mono text-zinc-400 truncate" title={result.chunk.source_id}>
-            {truncate(result.chunk.source_id, 28)}
+          <span className="text-[10px] text-zinc-700 font-mono shrink-0">
+            ·pos {result.chunk.position}
           </span>
         </div>
-        <div className="shrink-0 flex items-center gap-2">
-          <span className="text-xs text-zinc-500 font-mono">
-            pos {result.chunk.position}
-          </span>
-          {scoreBar(result.score)}
-        </div>
+        <ScoreBar score={result.score} />
       </div>
 
-      {/* Chunk text */}
+      {/* Text snippet */}
       <p
-        className={clsx(
-          'text-sm text-zinc-300 leading-relaxed cursor-pointer',
-          !expanded && 'line-clamp-3',
-        )}
-        onClick={() => setExpanded((v) => !v)}
+        className={clsx("text-xs text-zinc-300 leading-relaxed cursor-pointer", !expanded && "line-clamp-2")}
+        onClick={() => setExpanded(v => !v)}
       >
         {result.chunk.text}
       </p>
-      {result.chunk.text.length > 180 && (
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="text-xs text-indigo-400 hover:text-indigo-300"
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
 
-      {/* Score breakdown */}
-      <div className="flex gap-4 text-[11px] text-zinc-500">
-        <span>lexical <span className="text-zinc-300">{(result.breakdown.lexical_relevance * 100).toFixed(0)}%</span></span>
-        <span>freshness <span className="text-zinc-300">{(result.breakdown.freshness * 100).toFixed(0)}%</span></span>
-        {result.breakdown.source_credibility > 0 && (
-          <span>credibility <span className="text-zinc-300">{(result.breakdown.source_credibility * 100).toFixed(0)}%</span></span>
+      {/* Breakdown + expand */}
+      <div className="flex items-center justify-between mt-1.5">
+        <div className="flex gap-3 text-[10px] text-zinc-600">
+          <span>lex <span className="text-zinc-500">{fmtScore(result.breakdown.lexical_relevance)}</span></span>
+          <span>fresh <span className="text-zinc-500">{fmtScore(result.breakdown.freshness)}</span></span>
+          {result.breakdown.source_credibility > 0 && (
+            <span>cred <span className="text-zinc-500">{fmtScore(result.breakdown.source_credibility)}</span></span>
+          )}
+        </div>
+        {result.chunk.text.length > 120 && (
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="text-[10px] text-indigo-500 hover:text-indigo-400 transition-colors"
+          >
+            {expanded ? 'collapse' : 'expand'}
+          </button>
         )}
       </div>
     </div>
@@ -129,40 +83,23 @@ function ResultCard({ result, rank }: { result: MemoryChunkResult; rank: number 
 
 // ── Source row ────────────────────────────────────────────────────────────────
 
-function SourceRow({ source }: { source: SourceRecord }) {
-  const [showQuality, setShowQuality] = useState(false);
-
+function SourceRow({ source, even }: { source: SourceRecord; even: boolean }) {
   return (
-    <div className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <Database size={14} className="text-zinc-500 shrink-0" />
-          <span className="text-sm font-mono text-zinc-200 truncate" title={source.source_id}>
-            {source.source_id}
+    <div className={clsx("flex items-center justify-between px-4 h-9 hover:bg-white/5 transition-colors", even ? "bg-zinc-900" : "bg-zinc-900/50")}>
+      <span className="text-xs font-mono text-zinc-300 truncate" title={source.source_id}>
+        {source.source_id}
+      </span>
+      <div className="flex items-center gap-4 shrink-0 text-[11px] text-zinc-500">
+        <span><span className="text-zinc-300 tabular-nums">{source.document_count}</span> docs</span>
+        {source.avg_quality_score > 0 && (
+          <span>score <span className="text-zinc-300 tabular-nums">{(source.avg_quality_score * 100).toFixed(0)}%</span></span>
+        )}
+        {source.last_ingested_at_ms != null && source.last_ingested_at_ms > 0 && (
+          <span className="font-mono text-zinc-600">
+            {new Date(source.last_ingested_at_ms).toLocaleDateString()}
           </span>
-        </div>
-        <div className="flex items-center gap-4 shrink-0">
-          <span className="text-xs text-zinc-500">
-            <span className="text-zinc-300">{source.document_count}</span> docs
-          </span>
-          {source.avg_quality_score > 0 && (
-            <span className="text-xs text-zinc-500">
-              score <span className="text-zinc-300">{(source.avg_quality_score * 100).toFixed(0)}%</span>
-            </span>
-          )}
-          <button
-            onClick={() => setShowQuality((v) => !v)}
-            className={clsx(
-              'flex items-center gap-1 text-xs transition-colors',
-              showQuality ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300',
-            )}
-          >
-            <BarChart2 size={12} />
-            {showQuality ? 'Hide' : 'Quality'}
-          </button>
-        </div>
+        )}
       </div>
-      {showQuality && <SourceQualityPanel sourceId={source.source_id} />}
     </div>
   );
 }
@@ -170,23 +107,18 @@ function SourceRow({ source }: { source: SourceRecord }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function MemoryPage() {
-  const [query, setQuery] = useState('');
+  const [query, setQuery]       = useState('');
   const [submitted, setSubmitted] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const {
-    data: searchData,
-    isFetching,
-    isError: isSearchError,
-    error: searchError,
-  } = useQuery({
+  const { data: searchData, isFetching, isError: isSearchError, error: searchError } = useQuery({
     queryKey: ['memory-search', submitted],
     queryFn: () => defaultApi.searchMemory({ query_text: submitted, limit: 20 }),
     enabled: submitted.length > 0,
     staleTime: 30_000,
   });
 
-  const { data: sources, isError: isSourcesError } = useQuery({
+  const { data: sources, isError: isSourcesError, refetch: refetchSources } = useQuery({
     queryKey: ['sources'],
     queryFn: () => defaultApi.getSources(),
     staleTime: 60_000,
@@ -205,121 +137,126 @@ export function MemoryPage() {
   }
 
   const results = searchData?.results ?? [];
-  const hasResults = results.length > 0;
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-5">
       {/* ── Search bar ──────────────────────────────────────────────────── */}
       <form onSubmit={handleSearch} className="flex gap-2">
         <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={e => setQuery(e.target.value)}
             placeholder="Search knowledge store…"
-            className="w-full rounded-lg bg-zinc-900 ring-1 ring-zinc-800 pl-8 pr-8 py-2.5
-                       text-sm text-zinc-100 placeholder-zinc-600
-                       focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
+            className="w-full rounded-md bg-zinc-900 border border-zinc-800 pl-8 pr-8 h-9
+                       text-sm text-zinc-200 placeholder-zinc-600
+                       focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500
+                       transition-colors"
           />
           {query && (
-            <button
-              type="button"
-              onClick={clearSearch}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
-            >
-              <X size={13} />
+            <button type="button" onClick={clearSearch}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400">
+              <X size={12} />
             </button>
           )}
         </div>
-        <button
-          type="submit"
-          disabled={!query.trim() || isFetching}
-          className="px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500
-                     disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-sm font-medium
-                     flex items-center gap-2 transition"
-        >
-          {isFetching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+        <button type="submit" disabled={!query.trim() || isFetching}
+          className="h-9 px-4 rounded-md bg-indigo-600 hover:bg-indigo-500
+                     disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium
+                     flex items-center gap-1.5 transition-colors">
+          {isFetching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
           Search
         </button>
       </form>
 
       {/* ── Search results ──────────────────────────────────────────────── */}
       {submitted && (
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-semibold text-zinc-400 flex items-center gap-2">
-              <FileText size={13} className="text-indigo-400" />
-              Results for <span className="text-zinc-200">"{submitted}"</span>
-              {hasResults && (
-                <span className="text-zinc-600 font-normal">({results.length})</span>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 h-9 border-b border-zinc-800 bg-zinc-900">
+            <div className="flex items-center gap-2">
+              <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                Results
+              </p>
+              <span className="text-[11px] text-zinc-700">for</span>
+              <span className="text-[11px] font-mono text-zinc-400">"{submitted}"</span>
+              {!isFetching && (
+                <span className="text-[11px] text-zinc-700">({results.length})</span>
               )}
-            </h2>
+            </div>
             {searchData?.diagnostics && (
-              <span className="text-[11px] text-zinc-600 font-mono">
+              <span className="text-[10px] font-mono text-zinc-700">
                 {searchData.diagnostics.latency_ms}ms · {searchData.diagnostics.mode_used}
               </span>
             )}
           </div>
 
-          {isSearchError ? (
-            <div className="flex items-center gap-3 rounded-xl bg-red-950/40 ring-1 ring-red-800/40 p-4">
-              <ServerCrash size={18} className="text-red-400 shrink-0" />
-              <p className="text-sm text-red-300">
-                {searchError instanceof Error ? searchError.message : 'Search failed'}
-              </p>
+          {/* Content */}
+          {isFetching ? (
+            <div className="flex items-center gap-2 px-4 h-12 text-zinc-600 text-xs">
+              <Loader2 size={12} className="animate-spin" /> Searching…
             </div>
-          ) : !isFetching && !hasResults ? (
-            <div className="flex flex-col items-center justify-center py-10 gap-2 text-zinc-700">
-              <Inbox size={28} />
-              <p className="text-sm">No results for "{submitted}"</p>
+          ) : isSearchError ? (
+            <div className="px-4 py-3 text-xs text-red-400">
+              {searchError instanceof Error ? searchError.message : 'Search failed'}
+            </div>
+          ) : results.length === 0 ? (
+            <div className="px-4 py-8 text-center text-xs text-zinc-600">
+              No results for "{submitted}"
             </div>
           ) : (
-            <div className="space-y-3">
+            <div>
+              {/* Column headers */}
+              <div className="flex items-center justify-between px-4 h-8 border-b border-zinc-800 bg-zinc-950">
+                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Source · Snippet</span>
+                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Score</span>
+              </div>
               {results.map((r, i) => (
-                <ResultCard key={r.chunk.chunk_id} result={r} rank={i + 1} />
+                <ResultRow key={r.chunk.chunk_id} result={r} rank={i + 1} even={i % 2 === 0} />
               ))}
             </div>
           )}
-        </section>
+        </div>
       )}
 
-      {/* ── Sources section ─────────────────────────────────────────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-zinc-400 flex items-center gap-2 mb-3">
-          <Database size={13} className="text-zinc-500" />
-          Sources
-          {sources && sources.length > 0 && (
-            <span className="text-zinc-600 font-normal">({sources.length})</span>
-          )}
-        </h2>
+      {/* ── Sources panel ───────────────────────────────────────────────── */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between px-4 h-9 border-b border-zinc-800">
+          <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+            Sources
+            {sources && sources.length > 0 && (
+              <span className="ml-1.5 text-zinc-700 normal-case tracking-normal font-normal">
+                ({sources.length})
+              </span>
+            )}
+          </p>
+          <button onClick={() => refetchSources()}
+            className="flex items-center gap-1 text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors">
+            <RefreshCw size={11} /> Refresh
+          </button>
+        </div>
+
+        {/* Column headers */}
+        <div className="flex items-center justify-between px-4 h-8 border-b border-zinc-800 bg-zinc-950">
+          <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Source ID</span>
+          <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Docs · Score · Ingested</span>
+        </div>
 
         {isSourcesError ? (
-          <p className="text-sm text-zinc-600 italic">Could not load sources.</p>
+          <div className="px-4 py-3 text-xs text-zinc-600 italic">Could not load sources.</div>
         ) : !sources || sources.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 gap-2 text-zinc-700 rounded-xl ring-1 ring-zinc-800">
-            <Activity size={24} />
-            <p className="text-sm">No sources registered</p>
-            <p className="text-xs text-zinc-600">
-              POST to /v1/memory/ingest to add documents.
-            </p>
+          <div className="px-4 py-8 text-center text-xs text-zinc-600">
+            No sources registered — POST to /v1/memory/ingest to add documents
           </div>
         ) : (
-          <div className="space-y-2">
-            {sources.map((s) => (
-              <SourceRow key={s.source_id} source={s} />
+          <div>
+            {sources.map((s, i) => (
+              <SourceRow key={s.source_id} source={s} even={i % 2 === 0} />
             ))}
           </div>
         )}
-      </section>
-
-      {/* ── Source quality hint ─────────────────────────────────────────── */}
-      {sources && sources.length > 0 && (
-        <p className="text-[11px] text-zinc-700 flex items-center gap-1">
-          <Star size={10} />
-          Click "Quality" on any source to see credibility score, avg rating, and retrieval counts.
-        </p>
-      )}
+      </div>
     </div>
   );
 }
