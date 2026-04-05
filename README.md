@@ -1,325 +1,222 @@
-# Cairn
+# cairn-rs
 
-**Self-hostable control plane for production AI agents.**
+**Self-hostable Rust control plane for production AI agent deployments.**
 
-Cairn gives your team the infrastructure layer that sits between your LLM calls and your users: event-sourced task orchestration, multi-provider routing, operator approval workflows, real-time streaming, and full cost accountability — all in a single self-hosted binary written in Rust.
+![Rust](https://img.shields.io/badge/rust-1.83%2B-orange?logo=rust)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Status](https://img.shields.io/badge/status-active-brightgreen)
 
 ---
 
-## Why Cairn
+## What is cairn-rs
 
-Running AI agents in production means more than calling an LLM. You need:
+cairn-rs is an open-source operator control plane that sits between your AI agents and your infrastructure. It handles the operational concerns — event sourcing, task orchestration, approval gates, provider routing, cost metering, and real-time observability — so your agent code stays focused on product logic.
 
-- **Audit trails** — every decision, tool call, and approval in an immutable event log
-- **Human-in-the-loop** — approval gates that block task progression until an operator acts
-- **Multi-provider resilience** — fallback chains across OpenAI, Anthropic, Bedrock, and OpenRouter
-- **Cost visibility** — per-run token counts and USD micros tracked to the call level
-- **Real-time observability** — operators see live run state via SSE without polling
-- **Replay durability** — reconnecting clients pick up missed events from a durable log
+The architecture is fully event-sourced: every agent action, LLM call, approval decision, and checkpoint is appended to an immutable log. The current state of any entity is derived by replaying its events. This gives you a complete audit trail, deterministic replay, and idempotent command handling out of the box.
 
-Cairn is the control plane that handles all of this. Your agents focus on product logic; Cairn handles the infrastructure contract.
+cairn-rs is designed for teams that want the reliability of purpose-built infrastructure without the complexity of a hosted platform. It runs as a single binary, stores events in Postgres (or SQLite for local dev), and ships a React operator dashboard that works without additional configuration.
+
+<!-- TODO: add screenshot -->
+
+---
+
+## Key features
+
+- **Event-sourced runtime** — 56+ domain event types; append-only log with monotonically increasing positions; idempotent command dispatch via causation-id deduplication
+- **Real-time SSE streaming** — live event feed at `GET /v1/stream`; reconnecting clients replay up to 1 000 missed events via `Last-Event-ID`; no polling required
+- **Multi-tenant isolation** — tenant / workspace / project hierarchy; RBAC (Viewer, Member, Admin, Owner) per workspace; every query scoped by tenant
+- **Approval workflows** — human-in-the-loop gates that block run or task progression until an operator resolves; full decision audit trail
+- **LLM provider abstraction** — unified generation interface over OpenAI, Anthropic, Bedrock, OpenRouter, Azure, and any OpenAI-compatible endpoint; priority-ranked fallback chains
+- **Built-in eval framework** — eval runs, scoring rubrics, locked baselines, regression detection, multi-armed bandit (EpsilonGreedy / UCB1) for live traffic steering
+- **Operator dashboard** — embedded React + TypeScript UI served from the binary; sessions, runs, tasks, approvals, traces, costs, memory, and playground views
+- **Local LLM support** — first-class Ollama integration; `OLLAMA_HOST` env var; `options.think=false` for Qwen3 chain-of-thought suppression
+- **Cost tracking and token metering** — per-call token counts and USD micros; run-level and session-level aggregation; `GET /v1/costs` for operator-facing totals
+- **Knowledge and memory retrieval** — document ingestion pipeline with chunking, deduplication, and multi-factor scoring (lexical relevance, freshness, credibility, graph proximity)
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Build the binary
-cargo build -p cairn-app
-
-# 2. Run with a custom admin token (omit CAIRN_ADMIN_TOKEN for dev-admin-token default)
-CAIRN_ADMIN_TOKEN=secret cargo run -p cairn-app
-
-# 3. Verify it's alive
-curl localhost:3000/health
-# → {"ok":true}
-```
-
-Or with Docker:
-
-```bash
-docker compose up
-```
-
-## Operator Dashboard
-
-```bash
-cd ui && npm install && npm run dev
-```
-
-Open **http://localhost:5173** — enter your admin token to log in.
-
----
-
-### Cargo (local dev — zero config)
-
-```bash
-git clone https://github.com/your-org/cairn-rs
+# Clone and run (in-memory, no config required)
+git clone https://github.com/avifenesh/cairn-rs
 cd cairn-rs
 cargo run -p cairn-app
-```
 
-The server starts on `http://127.0.0.1:3000`. Data is in-memory and resets on restart. The default bearer token is `dev-admin-token`.
-
-```bash
-# Health check (no auth required)
+# Health check
 curl http://localhost:3000/health
-# → {"ok":true}
+# {"ok":true}
 
-# Operator status
-curl -H "Authorization: Bearer dev-admin-token" \
-     http://localhost:3000/v1/status
-# → {"runtime_ok":true,"store_ok":true,"uptime_secs":4}
+# With Ollama for local LLM support
+OLLAMA_HOST=http://localhost:11434 cargo run -p cairn-app
 ```
 
-### Docker Compose (recommended)
+Default bearer token: `dev-admin-token`. Set `CAIRN_ADMIN_TOKEN` to override.
 
-```bash
-docker compose up --build
-```
-
-This starts Cairn with a Postgres backend on port 3000. Schema migrations run automatically on first boot.
-
-### Postgres persistence
-
-```bash
-export CAIRN_ADMIN_TOKEN="$(openssl rand -hex 32)"
-
-cargo run -p cairn-app -- \
-  --mode team \
-  --db postgres://cairn:cairn@localhost/cairn \
-  --addr 0.0.0.0 \
-  --port 3000
-```
-
-On first start, Cairn applies all schema migrations and confirms readiness at `GET /v1/db/status`.
-
----
-
-## Features
-
-### Event-sourced runtime (RFC 002)
-Every run, task, approval, and provider call is appended to an immutable, append-only log with monotonically increasing positions. Commands carry a `causation_id` so retries are idempotent — re-delivering the same command returns the original position without re-appending. Operators can replay any window of the log via `GET /v1/events?after=<position>`.
-
-### Multi-provider routing (RFC 009)
-Provider bindings are ranked by priority. The resolver walks the fallback chain, checks capability requirements (streaming, structured output, tool use), and records a durable `RouteDecisionRecord` with `fallback_used: true` when the primary was unavailable. Cost is tracked per binding in USD micros at call granularity.
-
-### Approval workflows (RFC 005)
-Runs and tasks can be gated on operator approval before proceeding. Pending approvals surface in `GET /v1/approvals/pending`. A `POST /v1/approvals/:id/resolve` with `"approved"` or `"rejected"` unblocks the run atomically. The approval record version-increments on each decision for optimistic-concurrency safety.
-
-### Real-time SSE stream (RFC 002)
-`GET /v1/stream` delivers live events to operators and frontends without polling. On connect, a `connected` event carries the current head position. Reconnecting clients send `Last-Event-ID` and receive a replay of up to 1 000 missed events before rejoining the live feed. Auth-exempt so browser `EventSource` works without custom headers.
-
-### Cost tracking (RFC 009)
-Every `ProviderCallCompleted` event accumulates token counts and USD micros at the run level. `GET /v1/costs` returns the aggregate across all runs. Per-binding cost stats support provider comparison dashboards. Zero-cost and `None`-cost calls count toward call totals but never inflate cost figures — the arithmetic is pure integer (no floating-point loss).
-
-### Knowledge retrieval (RFC 003)
-Documents are ingested through a chunking, scoring, and deduplication pipeline. Retrieval scores results across lexical relevance, semantic relevance, freshness decay, staleness penalty, source credibility, corroboration, and graph proximity. The diagnostics surface exposes per-source quality metrics and index status for operator review.
-
-### Eval and baselines (RFC 004, RFC 013)
-Prompt releases are evaluated against rubrics and scored across `task_success_rate`, `latency_p50_ms`, and `cost_per_run`. Baselines lock the best-known metrics. Regressions beyond a 5 % tolerance are automatically flagged. Multi-armed bandit experimentation (EpsilonGreedy and UCB1) steers live traffic toward the best-performing release.
-
-### Commercial feature gating (RFC 014)
-Features are classified as `GeneralAvailability`, `Preview`, or `EntitlementGated`. Unknown feature names always return `Denied` (fail-closed — an unrecognized name is never silently allowed). The three product tiers — `LocalEval`, `TeamSelfHosted`, `EnterpriseSelfHosted` — control which gated capabilities are accessible.
-
-### Checkpoint and recovery (RFC 004)
-Agents record checkpoints at safe replay points. The recovery pipeline detects expired leases and re-queues tasks. `RecoveryAttempted` and `RecoveryCompleted` events form a complete audit trail. The latest checkpoint per run is surfaced for operator inspection and automated recovery targeting.
+The embedded operator dashboard is available at **http://localhost:3000** — no separate frontend server needed.
 
 ---
 
 ## Architecture
 
-Cairn is a **12-crate Rust workspace**. Each crate owns a single bounded context with no circular dependencies.
+cairn-rs is a 13-crate Rust workspace. Each crate owns one bounded context with no circular dependencies.
 
 ```
-cairn-domain      — pure domain types, events, lifecycle rules, RFC contracts
-cairn-store       — append-only event log + synchronous projections (InMemory + Postgres)
-cairn-runtime     — service implementations: runs, tasks, sessions, approvals, routing
-cairn-api         — HTTP types, SSE payloads, auth, bootstrap config, API error shapes
-cairn-app         — executable: axum HTTP server, startup wiring, all route handlers
-cairn-memory      — knowledge pipeline: ingest, chunking, retrieval, diagnostics
-cairn-graph       — entity relationship graph: nodes, edges, proximity scoring
-cairn-evals       — eval runs, scoring rubrics, baselines, bandit experiment matrices
-cairn-tools       — tool invocation contracts, plugin capability verification
-cairn-signal      — signal ingestion and routing between agents
-cairn-channels    — async message channels between agents
-cairn-plugin-proto — plugin protocol types and capability declarations
+cairn-domain       pure domain types, events, lifecycle rules, RFC contracts
+cairn-store        append-only event log + synchronous projections (InMemory / Postgres / SQLite)
+cairn-runtime      service implementations: sessions, runs, tasks, approvals, routing, evals
+cairn-api          HTTP types, SSE payloads, auth, bootstrap config, API error shapes
+cairn-app          axum HTTP server, startup wiring, all route handlers, embedded React UI
+cairn-memory       knowledge pipeline: ingest, chunking, retrieval, graph-backed expansion
+cairn-graph        entity relationship graph: nodes, edges, traversal, proximity scoring
+cairn-evals        eval runs, rubrics, baselines, scorecard matrices, bandit experiments
+cairn-tools        tool invocation, plugin host (stdio JSON-RPC), capability verification
+cairn-agent        agent orchestration loop, reflection, hook pipeline
+cairn-signal       signal ingestion and routing between agents
+cairn-channels     async message channels between agents
+cairn-plugin-proto plugin wire protocol types and capability declarations
 ```
 
-### Event log and projections
-
-Cairn's entire state is derived from the event log. Every mutation is an append; every read is a projection query. The same `apply_projection` function that populates in-memory read models also drives the Postgres synchronous projection applier — there is no dual-implementation drift.
+### Data flow
 
 ```
-append(events)
-  ├──► apply_projection ──► current-state read models
-  ├──► persist to Postgres (when --db postgres://... is set)
-  └──► broadcast channel  ──► live SSE stream
+HTTP request
+  └─► Command handler
+        ├─► append(events) ──► InMemoryStore projections ──► read models
+        │                  ──► Postgres event log          (when --db postgres://...)
+        │                  ──► broadcast channel           ──► SSE subscribers
+        └─► HTTP response  (returns latest projected state)
 ```
 
-When Postgres is configured, cairn-app dual-writes: each append goes to both Postgres (durability) and the in-memory store (read models, SSE broadcast). The Postgres event log serves cursor-based replay for `GET /v1/events`.
-
-### Durability classes (RFC 002)
-
-| Entity | Class | Reason |
-|--------|-------|--------|
-| Session, Run, Task | `FullHistory` | Core state machines require full replay |
-| Approval, Checkpoint | `CurrentStatePlusAudit` | Current state + audit trail is sufficient |
-| All other entities | `CurrentStatePlusAudit` | Operational visibility only |
+State is always derived from the log. Postgres stores events for durability and cursor-based replay; the in-memory store drives read models and the SSE broadcast. There is no separate synchronization step.
 
 ---
 
-## Test suite
+## Configuration
 
-The test suite is the executable specification of the RFC contracts.
-
-```
-796 lib tests         — 0 failures  (cargo test --workspace --exclude cairn-app --lib)
-~230 integration tests — 0 failures  (store, runtime, memory, evals, api, domain)
-```
-
-```bash
-# Full suite (excludes cairn-app lib due to pre-existing in-progress handlers)
-cargo test --workspace --exclude cairn-app
-
-# Workspace build
-cargo build --workspace
-```
-
-The integration tests include an explicit RFC compliance summary (`crates/cairn-store/tests/rfc_compliance_summary.rs`) with one test per RFC verifying the core MUST requirement against the real store backend.
-
----
-
-## API reference
-
-Full endpoint documentation: **[docs/api-reference.md](./docs/api-reference.md)**
-
-Includes: method, path, auth requirements, query params, request/response shapes, curl examples, error codes, and server configuration reference.
-
-### Route summary
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/health` | No | Liveness probe |
-| `GET` | `/v1/stream` | No | Real-time SSE event stream |
-| `GET` | `/v1/status` | Yes | Runtime + store health |
-| `GET` | `/v1/dashboard` | Yes | Operator overview (runs, tasks, costs) |
-| `GET` | `/v1/runs` | Yes | List runs (paginated) |
-| `GET` | `/v1/runs/:id` | Yes | Get run by ID |
-| `GET` | `/v1/sessions` | Yes | List active sessions |
-| `GET` | `/v1/approvals/pending` | Yes | List pending approvals |
-| `POST` | `/v1/approvals/:id/resolve` | Yes | Approve or reject |
-| `GET` | `/v1/prompts/assets` | Yes | List prompt assets |
-| `GET` | `/v1/prompts/releases` | Yes | List prompt releases |
-| `GET` | `/v1/costs` | Yes | Aggregate cost summary |
-| `GET` | `/v1/providers` | Yes | List provider bindings |
-| `GET` | `/v1/events` | Yes | Replay event log (cursor-based) |
-| `POST` | `/v1/events/append` | Yes | Append events (idempotent) |
-| `GET` | `/v1/db/status` | Yes | Postgres health + migration state |
-
----
-
-## Deployment
-
-Full guide: **[docs/deployment.md](./docs/deployment.md)**
-
-Covers Docker Compose, Postgres setup, environment variables, team vs. local mode, TLS configuration, and production hardening.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CAIRN_ADMIN_TOKEN` | `dev-admin-token` | Bearer token for the admin account. Required in team mode. |
+| `OLLAMA_HOST` | _(unset)_ | Ollama base URL, e.g. `http://localhost:11434`. Enables local LLM endpoints. |
 
 ### CLI flags
 
 ```
 cairn-app [OPTIONS]
 
-  --mode  team       Bind to 0.0.0.0 (requires CAIRN_ADMIN_TOKEN)
-  --port  <port>     Listen port (default: 3000)
-  --addr  <addr>     Bind address (default: 127.0.0.1)
-  --db    <url>      postgres://... or path/to/db.sqlite
-                     Omit for in-memory (local dev only)
+  --addr   <addr>   Bind address              (default: 127.0.0.1)
+  --port   <port>   Listen port               (default: 3000)
+  --mode   team     Bind 0.0.0.0, require token, enable team features
+  --db     <url>    postgres://... or sqlite:path.db
+                    Omit to use ephemeral in-memory store (local dev)
 ```
 
-### Key environment variables
+### Persistence backends
 
-| Variable | Description |
-|----------|-------------|
-| `CAIRN_ADMIN_TOKEN` | Bearer token for the admin account. Required in team mode. Defaults to `dev-admin-token` in local mode. |
-
----
-
-## RFCs
-
-Cairn's behaviour is defined by RFCs in [`docs/design/rfcs/`](./docs/design/rfcs/README.md). Each RFC specifies a contract that the implementation must satisfy; the integration test suite provides the compliance proof.
-
-| RFC | Scope | Status |
-|-----|-------|--------|
-| RFC 002 | Event-log durability, idempotency, SSE replay | ✓ |
-| RFC 003 | Memory retrieval pipeline | ✓ |
-| RFC 004 | Checkpoint, eval system, baselines | ✓ |
-| RFC 005 | Approval blocking | ✓ |
-| RFC 006 | Prompt release lifecycle | ✓ |
-| RFC 007 | Provider connection health | ✓ |
-| RFC 008 | Multi-tenant isolation | ✓ |
-| RFC 009 | Provider routing and cost tracking | ✓ |
-| RFC 013 | Bundle import/export, eval rubrics | ✓ |
-| RFC 014 | Commercial tiers and feature gating | ✓ |
+| Backend | Flag | Notes |
+|---------|------|-------|
+| In-memory | _(default)_ | Resets on restart. Local development only. |
+| SQLite | `--db cairn.db` | Durable single-file store. Single-writer. |
+| Postgres | `--db postgres://user:pass@host/db` | Full durability. Concurrent writers. Schema migrations run on startup. |
 
 ---
 
-## Contributing
+## API overview
 
-This repository uses a manager + worker coordination model. Active work is tracked in [`.coordination/`](./.coordination/). See [AGENTS.md](./AGENTS.md) for the coordination protocol.
+All `/v1/` routes require `Authorization: Bearer <token>`. `/health` and `/v1/stream` are public.
+
+| Group | Endpoints |
+|-------|-----------|
+| **Health** | `GET /health`, `GET /v1/status`, `GET /v1/dashboard`, `GET /v1/overview` |
+| **Sessions** | `GET/POST /v1/sessions`, `GET /v1/sessions/:id`, `GET /v1/sessions/:id/runs` |
+| **Runs** | `GET/POST /v1/runs`, `GET /v1/runs/:id`, `POST /v1/runs/:id/pause`, `POST /v1/runs/:id/resume`, `GET /v1/runs/:id/events`, `GET /v1/runs/:id/cost` |
+| **Tasks** | `GET /v1/tasks`, `POST /v1/tasks/:id/claim`, `POST /v1/tasks/:id/complete`, `POST /v1/tasks/:id/cancel`, `POST /v1/tasks/:id/release-lease` |
+| **Approvals** | `GET /v1/approvals/pending`, `POST /v1/approvals/:id/resolve`, `POST /v1/approvals/:id/deny` |
+| **Prompts** | `GET /v1/prompts/assets`, `GET /v1/prompts/releases`, `POST /v1/prompts/releases/:id/transition`, `POST /v1/prompts/releases/:id/activate` |
+| **Events** | `GET /v1/events` (cursor replay), `POST /v1/events/append` (idempotent write), `GET /v1/stream` (SSE live feed) |
+| **Providers** | `GET /v1/providers`, `GET /v1/providers/health`, `POST /v1/providers/connections`, `POST /v1/providers/bindings` |
+| **Ollama** | `GET /v1/providers/ollama/models`, `POST /v1/providers/ollama/generate`, `POST /v1/providers/ollama/stream` |
+| **Memory** | `POST /v1/memory/ingest`, `GET /v1/memory/search`, `POST /v1/memory/deep-search`, `POST /v1/memory/feedback` |
+| **Evals** | `POST /v1/evals/runs`, `POST /v1/evals/runs/:id/start`, `POST /v1/evals/runs/:id/complete`, `GET /v1/evals/scorecard/:asset_id` |
+| **Costs** | `GET /v1/costs`, `GET /v1/traces`, `GET /v1/sessions/:id/llm-traces` |
+| **Admin** | `POST /v1/admin/tenants`, `GET /v1/settings`, `GET /v1/db/status` |
 
 ---
 
-## Test Coverage
+## Development
 
-29 end-to-end integration test files across 3 crates, each targeting a specific RFC contract.
+### Prerequisites
 
-### `crates/cairn-runtime/tests/`
+- Rust 1.83+ (`rustup update stable`)
+- Node.js 20+ (for the UI only)
 
-| File | What it tests |
-|------|--------------|
-| `approval_blocking_e2e.rs` | Run pauses on approval gate; unblocks on approve/reject |
-| `audit_log_e2e.rs` | AuditLogEntryRecorded events for create/run/complete; tenant isolation; failure outcomes |
-| `checkpoint_recovery_e2e.rs` | Checkpoint creation, lease expiry detection, run recovery pipeline |
-| `credential_lifecycle_e2e.rs` | Credential store, rotation, revocation, KEK version tracking |
-| `defaults_resolution_e2e.rs` | Default settings scoped by tenant/workspace/project; precedence chain |
-| `external_worker_e2e.rs` | Worker registration, task claim/heartbeat/report lifecycle |
-| `feature_gate_e2e.rs` | RFC 014 fail-closed gating; tier-based entitlement (Local/Team/Enterprise) |
-| `guardrail_evaluation_e2e.rs` | Policy evaluation with allow/block outcomes |
-| `ingest_job_lifecycle_e2e.rs` | Ingest job submit → complete → chunk projection |
-| `mailbox_messaging_e2e.rs` | Append with RFC 002 fields; list by run; mark delivered; deferred delivery |
-| `notification_preference_e2e.rs` | Operator notification channel preferences; delivery routing |
-| `operator_profile_e2e.rs` | Create/retrieve/update profile; list by tenant; tenant isolation; preferences gate |
-| `prompt_comparison_e2e.rs` | Two-release scorecard via EvalRunService; winner by task_success_rate |
-| `prompt_lifecycle_e2e.rs` | Draft→approved→active release transitions; selector resolution |
-| `provider_budget_pool_e2e.rs` | Budget set/enforce; alert threshold; pool configuration |
-| `provider_routing_e2e.rs` | Binding selection, fallback chain, route decision recording |
-| `resource_sharing_e2e.rs` | Cross-workspace share create/revoke/list; gating on version permission |
-| `retention_policy_e2e.rs` | Retention policy set; apply-retention event emission |
-| `route_policy_lifecycle_e2e.rs` | Route policy create/update; rule evaluation |
-| `run_cost_tracking_e2e.rs` | ProviderCallCompleted accumulates cost/tokens at run and session level |
-| `session_lifecycle_e2e.rs` | Open→Archived lifecycle; cost accumulation; closeable-state derivation |
-| `signal_routing_e2e.rs` | Subscribe, ingest, route to mailbox; filter expressions; fan-out; project isolation |
-| `task_lifecycle_e2e.rs` | Queued→Leased→Running→Completed state machine; lease expiry |
-| `tenant_workspace_e2e.rs` | Tenant/workspace/project hierarchy; membership CRUD; pagination |
-| `week4_e2e.rs` | Cross-RFC scenario: cost alerts, SLA breaches, policy enforcement |
-| `workspace_rbac_e2e.rs` | Role hierarchy (Viewer/Member/Admin/Owner); write gate; role upgrade |
+### Build and test
 
-### `crates/cairn-memory/tests/`
+```bash
+# Full workspace build
+cargo build --workspace
 
-| File | What it tests |
-|------|--------------|
-| `deep_search_e2e.rs` | Multi-hop retrieval; quality gates; deduplication; hop diagnostics |
-| `retrieval_pipeline_e2e.rs` | Ingest→chunk→lexical retrieval; metadata filters; source quality |
+# Run the server (in-memory, local mode)
+cargo run -p cairn-app
 
-### `crates/cairn-api/tests/`
+# Run all tests (excluding cairn-app integration tests)
+cargo test --workspace --exclude cairn-app
 
-| File | What it tests |
-|------|--------------|
-| `onboarding_flow_e2e.rs` | First-run onboarding: tenant provision, template apply, first-project creation |
+# Run the bootstrap integration tests
+cargo test -p cairn-app --test bootstrap_server
+
+# UI development server (proxies /v1/* to localhost:3000)
+cd ui && npm install && npm run dev
+# Opens at http://localhost:5173
+
+# Rebuild UI and embed it in the binary
+cd ui && npm run build
+cargo build -p cairn-app   # picks up ui/dist/ via rust-embed
+```
+
+### Project structure
+
+```
+crates/
+  cairn-app/       HTTP server binary + embedded React UI (ui/dist/)
+  cairn-domain/    Domain types, events, RFC contracts
+  cairn-store/     Event log, projections, Postgres/SQLite adapters
+  cairn-runtime/   Service layer (sessions, runs, tasks, approvals, routing)
+  cairn-api/       HTTP API types, SSE, auth, bootstrap
+  cairn-memory/    Knowledge retrieval pipeline
+  cairn-graph/     Entity graph (nodes, edges, traversal)
+  cairn-evals/     Eval framework, rubrics, bandit experiments
+  cairn-tools/     Tool invocation, plugin host
+  cairn-agent/     Agent orchestration loop
+  cairn-signal/    Signal routing
+  cairn-channels/  Agent message channels
+  cairn-plugin-proto/ Plugin wire protocol
+ui/                React + TypeScript operator dashboard
+docs/
+  design/rfcs/     RFC specifications (002–014)
+  api-reference.md Full endpoint reference
+  deployment.md    Docker, Postgres, TLS, production hardening
+```
+
+### RFC compliance
+
+Cairn's behaviour is specified by RFCs in `docs/design/rfcs/`. Each RFC has a corresponding integration test that serves as the compliance proof.
+
+| RFC | Scope |
+|-----|-------|
+| 002 | Event-log durability, idempotency, SSE replay |
+| 003 | Memory retrieval pipeline |
+| 004 | Checkpoints, eval system, baselines |
+| 005 | Approval blocking |
+| 006 | Prompt release lifecycle |
+| 007 | Provider connection health |
+| 008 | Multi-tenant isolation, RBAC |
+| 009 | Provider routing and cost tracking |
+| 013 | Bundle import/export, eval rubrics |
+| 014 | Commercial tiers and feature gating |
 
 ---
 
 ## License
 
-Proprietary. All rights reserved.
+MIT — see [LICENSE](./LICENSE).
