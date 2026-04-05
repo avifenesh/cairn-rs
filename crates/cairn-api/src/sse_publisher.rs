@@ -12,8 +12,7 @@ use crate::sse::{SseEventName, SseFrame};
 pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
     match event {
         RuntimeEvent::SessionCreated(_) | RuntimeEvent::SessionStateChanged(_) => None,
-        // RunCreated is internal state — no SSE surface per the event contract.
-        RuntimeEvent::RunCreated(_) => None,
+        RuntimeEvent::RunCreated(_) => Some(SseEventName::AgentProgress),
         RuntimeEvent::RunStateChanged(_) => None,
         RuntimeEvent::TaskCreated(_)
         | RuntimeEvent::TaskStateChanged(_)
@@ -45,7 +44,6 @@ pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
         | RuntimeEvent::ProjectCreated(_)
         | RuntimeEvent::RouteDecisionMade(_)
         | RuntimeEvent::ProviderCallCompleted(_) => None,
-        _ => None,
         _ => None,
     }
 }
