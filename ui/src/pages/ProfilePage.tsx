@@ -28,6 +28,8 @@ import {
   applyTheme,
   type Preferences,
 } from '../hooks/usePreferences';
+import { useLocale } from '../hooks/useLocale';
+import { LOCALE_LABELS, type Locale } from '../lib/i18n';
 
 // ── Small components ──────────────────────────────────────────────────────────
 
@@ -221,6 +223,7 @@ const THEME_OPTIONS: { value: Preferences['theme']; icon: typeof Sun; label: str
 
 function PreferencesSection() {
   const [prefs, setPrefs] = usePreferences();
+  const { locale, setLocale } = useLocale();
 
   function handleTheme(theme: Preferences['theme']) {
     setPrefs({ theme });
@@ -308,6 +311,15 @@ function PreferencesSection() {
             setPrefs({ autoRefresh: v });
             try { localStorage.setItem('cairn_refresh_global', String(v)); } catch { /* ignore */ }
           }}
+        />
+      </Row>
+      <Row label="Language" hint="UI display language">
+        <SelectField<Locale>
+          value={locale}
+          onChange={setLocale}
+          options={(Object.entries(LOCALE_LABELS) as [Locale, string][]).map(
+            ([value, label]) => ({ value, label }),
+          )}
         />
       </Row>
     </SectionCard>
