@@ -119,9 +119,10 @@ use cairn_store::projections::{
 };
 use cairn_store::{EntityRef, EventLog, EventPosition, StoredEvent};
 use cairn_tools::{
+    build_eval_score_request, build_initialize_request,
     cancel_plugin_invocation, execute_eval_score, InMemoryPluginRegistry, PluginCapability,
     PluginCapabilityVerification, PluginHost, PluginLifecycleSnapshot, PluginLogEntry,
-    PluginManifest, PluginMetrics, PluginRegistry, PluginToolDescriptor, StdioPluginHost,
+    PluginManifest, PluginMetrics, PluginRegistry, PluginState, PluginToolDescriptor, StdioPluginHost,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -9654,20 +9655,63 @@ async fn plugin_eval_score_handler(
     Path(id): Path<String>,
     Json(body): Json<PluginEvalScoreRequest>,
 ) -> impl IntoResponse {
-    if state.plugin_registry.get(&id).is_none() {
-        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found")
-            .into_response();
-    }
+    let manifest = match state.plugin_registry.get(&id) {
+        Some(m) => m,
+        None => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found").into_response(),
+    };
 
-    match execute_eval_score(
-        state.plugin_registry.as_ref(),
-        &id,
-        body.input,
-        body.expected,
-        body.actual,
-    )
+    // Run the plugin synchronously (blocking on the Mutex since plugin I/O is synchronous).
+    let result: Result<cairn_tools::EvalScoreResult, String> = tokio::task::spawn_blocking({
+        let manifest = manifest.clone();
+        let id = id.clone();
+        let expected = body.expected.clone();
+        let actual = body.actual.clone();
+        let plugin_host = state.plugin_host.clone();
+
+        move || -> Result<cairn_tools::EvalScoreResult, String> {
+            let mut host = plugin_host.lock().map_err(|e| e.to_string())?;
+
+            // Register and spawn the plugin if not already running.
+            if host.state(&id).is_none() {
+                host.register(manifest).map_err(|e| e.to_string())?;
+            }
+
+            if host.state(&id) == Some(PluginState::Discovered) {
+                host.spawn(&id).map_err(|e| e.to_string())?;
+            }
+
+            if host.state(&id) == Some(PluginState::Spawning)
+                || host.state(&id) == Some(PluginState::Handshaking)
+            {
+                host.handshake(&id).map_err(|e| e.to_string())?;
+            }
+
+            // Build the eval.score request.
+            // target = { "actual": actual_output }
+            // samples = [{ "expected": expected_output }]
+            let target = serde_json::json!({ "actual": actual });
+            let sample = serde_json::json!({ "expected": expected });
+            let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+            let req = build_eval_score_request("eval_1", "inv_1", &project, target, vec![sample]);
+
+            let response = host.send_request(&id, &req).map_err(|e| e.to_string())?;
+
+            // Shut down the plugin after the call.
+            let _ = host.shutdown(&id);
+
+            // Parse result.score and result.passed from the JSON-RPC result.
+            let score = response.result.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let passed = response.result.get("passed").and_then(|v| v.as_bool()).unwrap_or(false);
+            let reasoning = response.result.get("feedback").and_then(|v| v.as_str()).map(str::to_owned);
+
+            Ok(cairn_tools::EvalScoreResult { score, passed, reasoning })
+        }
+    })
     .await
-    {
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+
+    match result {
         Ok(result) => (StatusCode::OK, Json(serde_json::json!({
             "score": result.score,
             "passed": result.passed,
