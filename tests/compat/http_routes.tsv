@@ -84,3 +84,33 @@ POST	/v1/providers/connections	preserve	-	-
 POST	/v1/providers/run-health-checks	preserve	-	-
 POST	/v1/providers/bindings	preserve	-	-
 POST	/v1/providers/policies	preserve	-	-
+GET	/v1/admin/audit-log	preserve	-	audit log entries
+GET	/v1/admin/notifications/failed	preserve	-	failed notification records
+GET	/v1/approval-policies	preserve	-	{ items }
+GET	/v1/checkpoints	preserve	query: run_id	{ items }
+GET	/v1/evals/matrices/guardrail	preserve	-	{ rows }
+GET	/v1/evals/matrices/memory-quality	preserve	-	{ rows }
+GET	/v1/evals/matrices/permissions	preserve	-	{ rows }
+GET	/v1/evals/matrices/prompt-comparison	preserve	-	{ rows }
+GET	/v1/evals/matrices/skill-health	preserve	-	{ rows }
+GET	/v1/ingest/jobs	preserve	query: limit?	{ items }
+GET	/v1/memory/diagnostics	preserve	-	index status
+GET	/v1/memory/search	preserve	query: q, limit?	{ results }
+GET	/v1/onboarding/status	preserve	-	onboarding progress
+GET	/v1/onboarding/templates	preserve	-	{ items }
+GET	/v1/plugins	preserve	-	{ items }
+GET	/v1/providers/bindings	preserve	query: limit?	{ items }
+GET	/v1/providers/bindings/cost-ranking	preserve	-	{ items }
+GET	/v1/providers/budget	preserve	-	budget summary
+GET	/v1/providers/connections	preserve	query: limit?	{ items }
+GET	/v1/providers/policies	preserve	query: limit?	{ items }
+GET	/v1/providers/pools	preserve	-	{ items }
+GET	/v1/runs/cost-alerts	preserve	-	{ items }
+GET	/v1/runs/escalated	preserve	-	{ items }
+GET	/v1/runs/resume-due	preserve	-	{ items }
+GET	/v1/runs/sla-breached	preserve	-	{ items }
+GET	/v1/runs/stalled	preserve	-	{ items }
+GET	/v1/settings/tls	preserve	-	TLS config
+GET	/v1/streams/runtime	preserve	query: token?	SSE runtime stream
+GET	/v1/tasks/expired	preserve	-	{ items }
+GET	/v1/tool-invocations	preserve	query: run_id?, limit?	{ items }
