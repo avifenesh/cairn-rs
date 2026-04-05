@@ -1,0 +1,79 @@
+import { useState, useEffect, type ReactNode } from 'react';
+import { Sidebar, type NavPage } from './Sidebar';
+import { TopBar } from './TopBar';
+
+// ── Lightweight hash router ────────────────────────────────────────────────────
+// No react-router-dom dependency — reads/writes window.location.hash.
+
+function readPage(): NavPage {
+  const hash = window.location.hash.replace('#', '') as NavPage;
+  const valid: NavPage[] = [
+    'dashboard', 'runs', 'sessions', 'approvals', 'providers', 'memory', 'settings',
+  ];
+  return valid.includes(hash) ? hash : 'dashboard';
+}
+
+const PAGE_TITLES: Record<NavPage, string> = {
+  dashboard:  'Dashboard',
+  runs:       'Runs',
+  sessions:   'Sessions',
+  approvals:  'Approvals',
+  providers:  'Providers',
+  memory:     'Memory',
+  settings:   'Settings',
+};
+
+// ── Page placeholder ──────────────────────────────────────────────────────────
+
+function PlaceholderPage({ page }: { page: NavPage }) {
+  return (
+    <div className="flex flex-col items-center justify-center flex-1 gap-3 text-zinc-600">
+      <span className="text-4xl font-bold tracking-tight text-zinc-800">
+        {PAGE_TITLES[page]}
+      </span>
+      <p className="text-sm">This view is coming soon.</p>
+    </div>
+  );
+}
+
+// ── Layout ────────────────────────────────────────────────────────────────────
+
+interface LayoutProps {
+  /** Override the content area; defaults to a placeholder when omitted. */
+  children?: (page: NavPage) => ReactNode;
+}
+
+export function Layout({ children }: LayoutProps) {
+  const [page, setPage] = useState<NavPage>(readPage);
+
+  // Keep hash in sync when the user navigates back/forward.
+  useEffect(() => {
+    function onHashChange() {
+      setPage(readPage());
+    }
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  function navigate(next: NavPage) {
+    window.location.hash = next;
+    setPage(next);
+  }
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100">
+      {/* Left sidebar */}
+      <Sidebar current={page} onNavigate={navigate} />
+
+      {/* Right panel: top bar + content */}
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <TopBar title={PAGE_TITLES[page]} />
+
+        {/* Scrollable content area */}
+        <main className="flex-1 overflow-y-auto p-6 bg-zinc-950">
+          {children ? children(page) : <PlaceholderPage page={page} />}
+        </main>
+      </div>
+    </div>
+  );
+}

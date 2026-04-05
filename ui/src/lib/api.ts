@@ -17,7 +17,6 @@ import type {
   RunRecord,
   SessionRecord,
   SystemStatus,
-  ListResponse,
 } from "./types";
 
 // ── Client config ─────────────────────────────────────────────────────────────
@@ -32,13 +31,13 @@ export interface ApiClientConfig {
 // ── Error type ────────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    message: string
-  ) {
+  readonly status: number;
+  readonly code: string;
+  constructor(status: number, code: string, message: string) {
     super(message);
     this.name = "ApiError";
+    this.status = status;
+    this.code = code;
   }
 }
 
