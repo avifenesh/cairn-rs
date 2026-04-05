@@ -14340,6 +14340,101 @@ where
     bootstrap.start(config)
 }
 
+// ── check_provider_health_handler ────────────────────────────────────────────
+
+/// `GET /v1/providers/check-health` — run a synchronous health sweep across
+/// all provider connections that have a due schedule, then return the current
+/// health records for all connections visible in this deployment.
+///
+/// Unlike `POST /v1/providers/run-health-checks` (which only runs *due*
+/// scheduled checks), this endpoint always runs and returns a full snapshot.
+async fn check_provider_health_handler(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Run any overdue scheduled checks so the snapshot is fresh.
+    let _ = state.runtime.provider_health.run_due_health_checks().await;
+
+    // Return the current health for all connections in this deployment.
+    let tenant_id = TenantId::new(DEFAULT_TENANT_ID);
+    match state
+        .runtime
+        .provider_health
+        .list(&tenant_id, 1000, 0)
+        .await
+    {
+        Ok(records) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "items":    records,
+                "has_more": false,
+                "checked_at_ms": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64,
+            })),
+        )
+            .into_response(),
+        Err(err) => runtime_error_response(err),
+    }
+}
+
+// ── send_notification_handler ────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct SendNotificationRequest {
+    /// Target operator ID. Defaults to "system" for broadcast notifications.
+    #[serde(default = "default_operator_id")]
+    operator_id: String,
+    /// Free-form event type string, e.g. `"alert.custom"` or `"run.failed"`.
+    event_type: String,
+    /// Human-readable message (stored in the payload).
+    message: String,
+    /// Optional severity tag: "info" | "warning" | "error". Stored in payload.
+    #[serde(default = "default_severity")]
+    severity: String,
+}
+
+fn default_operator_id() -> String { "system".to_owned() }
+fn default_severity()    -> String { "info".to_owned() }
+
+/// `POST /v1/notifications/send` — dispatch an ad-hoc notification through
+/// the operator notification service.
+///
+/// Calls `notify_if_applicable` so only operators subscribed to `event_type`
+/// receive the notification. Returns the list of dispatched records.
+async fn send_notification_handler(
+    State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
+    Json(body): Json<SendNotificationRequest>,
+) -> impl IntoResponse {
+    let payload = serde_json::json!({
+        "message":  body.message,
+        "severity": body.severity,
+        "operator_id": body.operator_id,
+    });
+
+    match state
+        .runtime
+        .notifications
+        .notify_if_applicable(tenant_scope.tenant_id(), &body.event_type, payload)
+        .await
+    {
+        Ok(records) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "dispatched": records.len(),
+                "records":    records,
+            })),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 // ── Stub handlers for routes added to catalog but not yet implemented ───────
 
 macro_rules! stub_handler {
@@ -14375,16 +14470,106 @@ async fn start_rollout_handler(
     start_prompt_rollout_handler(state, path, body).await
 }
 
-stub_handler!(compare_eval_run_baseline_handler);
-stub_handler!(create_tenant_snapshot_handler);
+
+/// `POST /v1/admin/tenants/:id/snapshot` — create a tenant state snapshot.
+/// Delegates to create_snapshot_handler (catalog-compatibility alias).
+async fn create_tenant_snapshot_handler(
+    state: State<Arc<AppState>>,
+    path: Path<String>,
+) -> impl IntoResponse {
+    create_snapshot_handler(state, path).await
+}
+
+/// `POST /v1/admin/tenants/:id/restore` — restore tenant state from latest snapshot.
+/// Delegates to restore_from_snapshot_handler (catalog-compatibility alias).
+async fn restore_tenant_snapshot_handler(
+    state: State<Arc<AppState>>,
+    path: Path<String>,
+) -> impl IntoResponse {
+    restore_from_snapshot_handler(state, path).await
+}
+
+/// `POST /v1/prompts/releases/:id/request-approval` — request approval for a release.
+/// Delegates to request_prompt_release_approval_handler (catalog-compatibility alias).
+async fn request_approval_for_release_handler(
+    state: State<Arc<AppState>>,
+    path: Path<String>,
+) -> impl IntoResponse {
+    request_prompt_release_approval_handler(state, path).await
+}
+
+/// `GET /v1/export/:format` — export tenant data in the requested format.
+///
+/// Format-aware bundle serialization is not yet implemented.
+/// Returns 501 so callers get a clear error rather than 404.
+/// Planned formats: json, yaml, csv.
+async fn export_bundle_by_format_handler(
+    Path(format): Path<String>,
+) -> impl IntoResponse {
+    AppApiError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "not_implemented",
+        format!(
+            "Export format '{}' is not yet implemented. Planned: json, yaml, csv.",
+            format
+        ),
+    )
+}
+
 stub_handler!(delete_credential_handler);
-stub_handler!(request_approval_for_release_handler);
-stub_handler!(restore_tenant_snapshot_handler);
 stub_handler!(revoke_resource_share_handler);
-stub_handler!(score_eval_run_with_rubric_handler);
 stub_handler!(share_resource_handler);
-stub_handler!(unregister_plugin_handler);
-stub_handler!(export_bundle_by_format_handler);
+
+/// `POST /v1/evals/runs/:id/compare-baseline`
+/// Compare an eval run against the locked baseline for its prompt asset.
+/// Optionally accepts `{baseline_run_id}` in the body; if omitted the service
+/// selects the canonical baseline automatically.
+#[derive(serde::Deserialize, Default)]
+struct CompareEvalBaselineRequest {
+    #[allow(dead_code)]
+    baseline_run_id: Option<String>, // reserved for future explicit-baseline support
+}
+
+async fn compare_eval_run_baseline_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    body: Option<Json<CompareEvalBaselineRequest>>,
+) -> impl IntoResponse {
+    // `baseline_run_id` in the body is accepted for forward-compat but the
+    // service currently selects the baseline from the locked asset record.
+    let _ = body; // suppress unused warning until explicit-baseline is wired
+    match state.eval_baselines.compare_to_baseline(&EvalRunId::new(id)) {
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /v1/evals/runs/:id/score-rubric`
+/// Score an eval run against a rubric. Identical contract to
+/// `score_eval_rubric_handler`; this is the REST-style alias registered at
+/// `/v1/evals/runs/:id/score-rubric`.
+async fn score_eval_run_with_rubric_handler(
+    state: State<Arc<AppState>>,
+    path: Path<String>,
+    body: Json<ScoreEvalRubricRequest>,
+) -> impl IntoResponse {
+    score_eval_rubric_handler(state, path, body).await
+}
+
+/// `DELETE /v1/plugins/:id`
+/// Unregister a plugin — shuts down its host process and removes it from the
+/// registry. Identical to `delete_plugin_handler`; this is the semantic alias
+/// used by the route catalog.
+async fn unregister_plugin_handler(
+    state: State<Arc<AppState>>,
+    path: Path<String>,
+) -> impl IntoResponse {
+    delete_plugin_handler(state, path).await
+}
 
 
 #[cfg(test)]
