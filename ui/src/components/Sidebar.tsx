@@ -1,5 +1,7 @@
 import {
+  Activity,
   Coins,
+  GitBranch,
   LayoutDashboard,
   Play,
   MonitorPlay,
@@ -20,6 +22,8 @@ export type NavPage =
   | 'providers'
   | 'costs'
   | 'memory'
+  | 'tasks'
+  | 'traces'
   | 'settings';
 
 interface NavItem {
@@ -32,6 +36,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
   { id: 'runs',       label: 'Runs',        icon: Play            },
   { id: 'sessions',   label: 'Sessions',    icon: MonitorPlay     },
+  { id: 'tasks',      label: 'Tasks',       icon: GitBranch       },
+  { id: 'traces',     label: 'Traces',      icon: Activity        },
   { id: 'approvals',  label: 'Approvals',   icon: CheckSquare     },
   { id: 'providers',  label: 'Providers',   icon: Zap             },
   { id: 'costs',      label: 'Costs',       icon: Coins           },

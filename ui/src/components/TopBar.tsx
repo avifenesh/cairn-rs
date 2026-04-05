@@ -4,83 +4,60 @@ import type { SystemStatus } from '../lib/types';
 import { clsx } from 'clsx';
 
 function formatUptime(secs: number): string {
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  return `${h}h ${m}m`;
+  if (secs < 60)   return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
 }
 
-interface StatusDotProps {
-  healthy: boolean;
-  label: string;
-}
-
-function StatusDot({ healthy, label }: StatusDotProps) {
+function Dot({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <span className="flex items-center gap-1.5">
-      <span
-        className={clsx(
-          'inline-block w-1.5 h-1.5 rounded-full shrink-0',
-          healthy ? 'bg-emerald-400' : 'bg-red-400',
-        )}
-      />
-      <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
-        {label}
-      </span>
+    <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+      <span className={clsx('inline-block w-1.5 h-1.5 rounded-full shrink-0',
+        ok ? 'bg-emerald-500' : 'bg-red-500')} />
+      {label}
     </span>
   );
 }
 
-interface TopBarProps {
-  title: string;
-}
-
-export function TopBar({ title }: TopBarProps) {
-  const [status, setStatus] = useState<SystemStatus | null>(null);
+export function TopBar({ title }: { title: string }) {
+  const [status, setStatus]   = useState<SystemStatus | null>(null);
   const [healthy, setHealthy] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function poll() {
       try {
-        const [health, sys] = await Promise.all([
-          defaultApi.getHealth(),
-          defaultApi.getStatus(),
-        ]);
-        if (!cancelled) { setHealthy(health.ok); setStatus(sys); }
+        const [h, s] = await Promise.all([defaultApi.getHealth(), defaultApi.getStatus()]);
+        if (!cancelled) { setHealthy(h.ok); setStatus(s); }
       } catch {
         if (!cancelled) { setHealthy(false); setStatus(null); }
       }
     }
     poll();
-    const interval = setInterval(poll, 15_000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const t = setInterval(poll, 15_000);
+    return () => { cancelled = true; clearInterval(t); };
   }, []);
 
   return (
-    <header className="flex items-center justify-between h-12 px-5 bg-zinc-950 border-b border-zinc-800 shrink-0">
-      <h1 className="text-sm font-medium text-zinc-200">{title}</h1>
-      <div className="flex items-center gap-4">
-        {healthy !== null && (
-          <StatusDot healthy={healthy} label={healthy ? 'Healthy' : 'Degraded'} />
-        )}
-        {status && (
-          <>
-            <StatusDot healthy={status.runtime_ok} label="Runtime" />
-            <StatusDot healthy={status.store_ok}   label="Store" />
-            <span className="text-[11px] text-zinc-600 font-mono tabular-nums">
-              up {formatUptime(status.uptime_secs)}
-            </span>
-          </>
-        )}
-        {healthy === null && (
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-zinc-700 animate-pulse" />
-            <span className="text-[11px] uppercase tracking-wider text-zinc-600 font-medium">
-              Connecting
-            </span>
+    <header className="flex items-center h-11 px-5 bg-zinc-950 border-b border-zinc-800 shrink-0 gap-4">
+      <h1 className="text-[13px] font-medium text-zinc-200">{title}</h1>
+      <div className="ml-auto flex items-center gap-4">
+        {healthy === null ? (
+          <span className="flex items-center gap-1.5 text-[11px] text-zinc-600">
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-700 animate-pulse inline-block" />
+            connecting
           </span>
+        ) : (
+          <>
+            <Dot ok={healthy}              label={healthy ? 'ok' : 'degraded'} />
+            {status && <Dot ok={status.runtime_ok} label="runtime" />}
+            {status && <Dot ok={status.store_ok}   label="store"   />}
+            {status && (
+              <span className="text-[11px] text-zinc-600 font-mono tabular-nums">
+                {formatUptime(status.uptime_secs)}
+              </span>
+            )}
+          </>
         )}
       </div>
     </header>
