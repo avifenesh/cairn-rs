@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, Loader2, RefreshCw, Plus } from 'lucide-react';
+import { useToast } from '../components/Toast';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import type { SessionRecord, SessionState } from '../lib/types';
@@ -117,6 +118,7 @@ export function SessionsPage() {
     staleTime: 30_000,
   });
 
+  const toast = useToast();
   const list = sessions ?? [];
   const runCountFor = (id: string) => (allRuns ?? []).filter(r => r.session_id === id).length;
   const activeNow   = list.filter(s => s.state === 'open').length;
@@ -130,7 +132,7 @@ export function SessionsPage() {
           <button onClick={() => refetch()} className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 transition-colors">
             <RefreshCw size={11} className={clsx(isFetching && 'animate-spin')} /> Refresh
           </button>
-          <button className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1.5 text-[11px] text-white font-medium transition-colors">
+          <button onClick={() => toast.info("Use POST /v1/sessions to create a session via the API.")} className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1.5 text-[11px] text-white font-medium transition-colors">
             <Plus size={11} /> New Session
           </button>
         </div>
