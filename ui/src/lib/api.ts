@@ -369,6 +369,44 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/plugins/:id/logs — recent log entries for a plugin. */
     getPluginLogs: (id: string): Promise<{ entries: import("./types").PluginLogEntry[] }> =>
       get(`/v1/plugins/${encodeURIComponent(id)}/logs`),
+
+    // ── Credentials (RFC 011) ────────────────────────────────────────────────
+
+    /**
+     * GET /v1/admin/tenants/:tenantId/credentials
+     * Returns credential metadata only — secrets are never returned.
+     */
+    getCredentials: (
+      tenantId: string,
+      params?: { limit?: number; offset?: number },
+    ): Promise<import("./types").ListResponse<import("./types").CredentialSummary>> => {
+      const qs = new URLSearchParams();
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      const q = qs.toString() ? `?${qs}` : "";
+      return get(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/credentials${q}`);
+    },
+
+    /**
+     * POST /v1/admin/tenants/:tenantId/credentials
+     * Creates a new credential. The plaintext_value is transmitted once and
+     * then encrypted at rest; it is never returned again.
+     */
+    storeCredential: (
+      tenantId: string,
+      body: import("./types").StoreCredentialRequest,
+    ): Promise<import("./types").CredentialSummary> =>
+      post(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/credentials`, body),
+
+    /**
+     * DELETE /v1/admin/tenants/:tenantId/credentials/:id
+     * Revokes (soft-deletes) a credential. Record is retained for audit history.
+     */
+    revokeCredential: (
+      tenantId: string,
+      credentialId: string,
+    ): Promise<import("./types").CredentialSummary> =>
+      del(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/credentials/${encodeURIComponent(credentialId)}`),
   };
 }
 

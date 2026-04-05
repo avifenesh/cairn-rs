@@ -10,8 +10,8 @@ import { type BreadcrumbItem } from './Breadcrumb';
 const VALID_PAGES: NavPage[] = [
   'dashboard',
   'sessions', 'runs', 'tasks', 'approvals',
-  'traces', 'memory', 'costs', 'evals', 'graph', 'audit-log',
-  'providers', 'playground', 'api-docs', 'settings',
+  'traces', 'memory', 'sources', 'costs', 'evals', 'graph', 'audit-log',
+  'providers', 'plugins', 'playground', 'api-docs', 'settings',
 ];
 
 // ── Route descriptor ──────────────────────────────────────────────────────────
@@ -48,12 +48,14 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   approvals:   'Approvals',
   traces:      'Traces',
   memory:      'Memory',
+  sources:     'Sources',
   costs:       'Costs',
   evals:       'Evaluations',
   graph:       'Knowledge Graph',
   'audit-log': 'Audit Log',
   'api-docs':  'API Reference',
   providers:   'Providers',
+  plugins:     'Plugins',
   playground:  'Playground',
   settings:    'Settings',
 };
@@ -65,11 +67,13 @@ const PAGE_GROUP: Partial<Record<NavPage, string>> = {
   approvals:   'Operations',
   traces:      'Observability',
   memory:      'Observability',
+  sources:     'Observability',
   costs:       'Observability',
   evals:       'Observability',
   graph:       'Observability',
   'audit-log': 'Observability',
   providers:   'Infrastructure',
+  plugins:     'Infrastructure',
   playground:  'Infrastructure',
   'api-docs':  'Infrastructure',
   settings:    'Infrastructure',

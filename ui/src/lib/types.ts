@@ -403,3 +403,33 @@ export interface PluginDetailResponse {
   lifecycle: PluginLifecycleSnapshot;
   metrics: PluginMetrics;
 }
+
+// ── Credentials (RFC 011) ──────────────────────────────────────────────────────
+
+/**
+ * Credential metadata returned by GET /v1/admin/tenants/:id/credentials.
+ * The actual encrypted_value is NEVER returned by the API — only metadata.
+ */
+export interface CredentialSummary {
+  id: string;
+  tenant_id: string;
+  provider_id: string;
+  name: string;
+  /** e.g. "api_key", "oauth_token", "connection_string" */
+  credential_type: string;
+  key_version: string | null;
+  key_id: string | null;
+  /** unix ms when encryption was applied; null = stored in plaintext (dev only) */
+  encrypted_at_ms: number | null;
+  active: boolean;
+  revoked_at_ms: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/** POST /v1/admin/tenants/:id/credentials */
+export interface StoreCredentialRequest {
+  provider_id: string;
+  plaintext_value: string;
+  key_id?: string;
+}
