@@ -436,7 +436,6 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
         RouteEntry { method: Get,  path: "/v1/streams/runtime".into(),                      classification: Preserve },
         RouteEntry { method: Get,  path: "/v1/tasks/expired".into(),                        classification: Preserve },
         RouteEntry { method: Get,  path: "/v1/tool-invocations".into(),                     classification: Preserve },
-        RouteEntry { method: Post, path: "/v1/approval-policies".into(),                    classification: Preserve },
         // ── Static POST/PUT/DELETE routes added to catalog so their fold match arms fire.
         //    Dynamic-path routes (:id, etc.) are NOT added here — catalog_path_to_axum()
         //    converts :id to {id} which matchit 0.7 treats as a static literal.
