@@ -244,38 +244,46 @@ export function Layout({ children, routeRenderer, onLogout }: LayoutProps) {
   content ??= <PlaceholderPage page={page} />;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-200">
+    <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-200 print-reflow">
       {/* Skip-to-content for keyboard users */}
-      <a href="#main-content" className="skip-to-content">Skip to content</a>
+      <a href="#main-content" className="skip-to-content no-print">Skip to content</a>
       {/* Global loading bar — fixed, above everything */}
       <LoadingBar />
 
-      <Sidebar
-        current={page}
-        onNavigate={navigate}
-        mobileOpen={sidebarOpen}
-        onMobileClose={() => setSidebarOpen(false)}
-        onLogout={onLogout}
-      />
-
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <TopBar
-          breadcrumbs={buildBreadcrumbs(route)}
-          onMenuClick={() => setSidebarOpen(v => !v)}
+      {/* Sidebar — hidden when printing */}
+      <div className="no-print">
+        <Sidebar
+          current={page}
+          onNavigate={navigate}
+          mobileOpen={sidebarOpen}
+          onMobileClose={() => setSidebarOpen(false)}
+          onLogout={onLogout}
         />
+      </div>
+
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden print-full">
+        {/* TopBar — hidden when printing */}
+        <div className="no-print">
+          <TopBar
+            breadcrumbs={buildBreadcrumbs(route)}
+            onMenuClick={() => setSidebarOpen(v => !v)}
+          />
+        </div>
 
         <main
           id="main-content"
           ref={mainRef}
-          className="flex-1 overflow-hidden bg-gray-50 dark:bg-zinc-950 page-enter"
+          className="flex-1 overflow-hidden bg-gray-50 dark:bg-zinc-950 page-enter print-full"
           tabIndex={-1}
         >
           {content}
         </main>
       </div>
 
-      <CommandPalette onNavigate={navigate} />
-      <ConnectionStatus />
+      <div className="no-print">
+        <CommandPalette onNavigate={navigate} />
+        <ConnectionStatus />
+      </div>
     </div>
   );
 }

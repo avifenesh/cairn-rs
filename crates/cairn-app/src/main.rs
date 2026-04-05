@@ -1085,6 +1085,33 @@ async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+/// `GET /v1/events/recent?limit=50` — last N events as a JSON array.
+///
+/// Complements the SSE stream: suitable for seeding the UI event log on first
+/// page load without opening a persistent connection.
+async fn recent_events_handler(
+    State(state): State<AppState>,
+    Query(q): Query<PaginationQuery>,
+) -> impl IntoResponse {
+    let limit = q.limit.min(500);
+    let events = match state.runtime.store.read_stream(None, limit).await {
+        Ok(v) => v,
+        Err(e) => return internal_error(e.to_string()).into_response(),
+    };
+    let items: Vec<serde_json::Value> = events
+        .iter()
+        .rev()
+        .take(limit)
+        .map(|ev| serde_json::json!({
+            "seq":         ev.position.0,
+            "event_type":  event_type_name(&ev.envelope.payload),
+            "data":        &ev.envelope.payload,
+            "timestamp":   ev.stored_at.to_string(),
+        }))
+        .collect();
+    Json(serde_json::json!({ "items": items, "count": items.len(), "limit": limit })).into_response()
+}
+
 /// `GET /v1/stream` — Real-time SSE event stream (RFC 002).
 ///
 /// Protocol:
@@ -4113,6 +4140,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/providers", get(list_providers_handler))
         .route("/v1/providers/health", get(provider_health_handler))
         .route("/v1/events", get(list_events_handler))
+        .route("/v1/events/recent", get(recent_events_handler))
         .route("/v1/events/append", post(append_events_handler))
         .route("/v1/tasks", get(list_all_tasks_handler))
         .route("/v1/tasks/batch/cancel", post(batch_cancel_tasks_handler))

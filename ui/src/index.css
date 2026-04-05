@@ -119,3 +119,82 @@ body {
 
 .loading-bar-grow   { animation: loadingGrow   3s ease-out forwards; }
 .loading-bar-finish { animation: loadingFinish 400ms ease-in forwards; }
+
+/* ── Print styles ───────────────────────────────────────────────────────────── */
+/*
+ * Applied when the user prints (Ctrl/Cmd+P) or uses the "Export → Print"
+ * button on the Dashboard page.  Hides all navigation chrome and renders
+ * the main content area in a clean single-column layout.
+ */
+
+@media print {
+  /* Reset page margins */
+  @page {
+    margin: 12mm 14mm;
+    size: A4 portrait;
+  }
+
+  /* Force white background + black text for readability */
+  * {
+    background: #fff !important;
+    color: #111 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide nav chrome */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Remove fixed/absolute positioning so layout reflows for print */
+  .print-reflow {
+    position: static !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Make the main content area full-width */
+  .print-full {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Dashboard-specific: show the print header */
+  .print-header {
+    display: block !important;
+  }
+
+  /* Card borders visible in print */
+  .bg-zinc-900,
+  .bg-zinc-950,
+  [class*="bg-zinc"] {
+    border: 1px solid #e5e7eb !important;
+    border-radius: 6px !important;
+  }
+
+  /* Avoid page breaks inside cards */
+  .avoid-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Link URLs shown after text */
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 10px;
+    color: #6b7280;
+  }
+  /* ...except anchor links */
+  a[href^="#"]::after { content: ""; }
+
+  /* Animations off */
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

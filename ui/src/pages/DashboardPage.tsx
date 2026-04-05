@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -16,6 +16,9 @@ import {
   Timer,
   Radio,
   RefreshCw,
+  Download,
+  Printer,
+  ChevronDown,
 } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
@@ -819,6 +822,139 @@ function OnboardingBanner() {
 const DASH_TABS = ['Overview', 'Runs', 'Tasks', 'Activity'] as const;
 type DashTab = typeof DASH_TABS[number];
 
+// ── Export helpers ────────────────────────────────────────────────────────────
+
+function triggerDownload(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+interface DashboardSnapshot {
+  exported_at:       string;
+  system_healthy:    boolean;
+  active_runs:       number;
+  active_tasks:      number;
+  pending_approvals: number;
+  failed_runs_24h:   number;
+  total_events:      number;
+  total_sessions:    number;
+  total_runs:        number;
+  uptime_seconds:    number;
+  active_providers:  number;
+  active_plugins:    number;
+  memory_doc_count:  number;
+  eval_runs_today:   number;
+}
+
+function buildSnapshot(
+  stats: import("../lib/types").SystemStats | undefined,
+  data:  import("../lib/types").DashboardOverview | undefined,
+): DashboardSnapshot {
+  return {
+    exported_at:       new Date().toISOString(),
+    system_healthy:    data?.system_healthy    ?? true,
+    active_runs:       stats?.active_runs       ?? data?.active_runs       ?? 0,
+    active_tasks:      stats?.total_tasks       ?? data?.active_tasks      ?? 0,
+    pending_approvals: stats?.pending_approvals ?? data?.pending_approvals ?? 0,
+    failed_runs_24h:   data?.failed_runs_24h    ?? 0,
+    total_events:      stats?.total_events      ?? 0,
+    total_sessions:    stats?.total_sessions    ?? 0,
+    total_runs:        stats?.total_runs        ?? 0,
+    uptime_seconds:    stats?.uptime_seconds    ?? 0,
+    active_providers:  data?.active_providers   ?? 0,
+    active_plugins:    data?.active_plugins     ?? 0,
+    memory_doc_count:  data?.memory_doc_count   ?? 0,
+    eval_runs_today:   data?.eval_runs_today    ?? 0,
+  };
+}
+
+function exportJson(snap: DashboardSnapshot) {
+  triggerDownload(
+    JSON.stringify(snap, null, 2),
+    `cairn-dashboard-${new Date().toISOString().slice(0, 10)}.json`,
+    "application/json",
+  );
+}
+
+function exportCsv(snap: DashboardSnapshot) {
+  const rows = [
+    ["Metric", "Value"],
+    ["Exported at",       snap.exported_at],
+    ["System healthy",    String(snap.system_healthy)],
+    ["Active runs",       String(snap.active_runs)],
+    ["Active tasks",      String(snap.active_tasks)],
+    ["Pending approvals", String(snap.pending_approvals)],
+    ["Failed runs (24h)", String(snap.failed_runs_24h)],
+    ["Total events",      String(snap.total_events)],
+    ["Total sessions",    String(snap.total_sessions)],
+    ["Total runs",        String(snap.total_runs)],
+    ["Uptime (seconds)",  String(snap.uptime_seconds)],
+    ["Active providers",  String(snap.active_providers)],
+    ["Active plugins",    String(snap.active_plugins)],
+    ["Memory docs",       String(snap.memory_doc_count)],
+    ["Eval runs today",   String(snap.eval_runs_today)],
+  ];
+  const csv = rows.map(r => r.map(v => `"${v.replace(/"/g, '""')}"`).join(",")).join("\n");
+  triggerDownload(
+    csv,
+    `cairn-dashboard-${new Date().toISOString().slice(0, 10)}.csv`,
+    "text/csv;charset=utf-8;",
+  );
+}
+
+
+// ── Export menu ───────────────────────────────────────────────────────────────
+
+function ExportMenu({ onJson, onCsv, onPrint }: {
+  onJson:  () => void;
+  onCsv:   () => void;
+  onPrint: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 h-7 px-2.5 rounded border border-zinc-700 bg-zinc-900
+                   text-[11px] text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors"
+      >
+        <Download size={11} />
+        Export
+        <ChevronDown size={10} className={clsx("transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-20 min-w-[148px] rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl py-1 overflow-hidden">
+            <button onClick={() => { onJson(); setOpen(false); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-zinc-300 hover:bg-zinc-800 transition-colors">
+              <Download size={11} className="text-zinc-500 shrink-0" />
+              Export JSON
+            </button>
+            <button onClick={() => { onCsv(); setOpen(false); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-zinc-300 hover:bg-zinc-800 transition-colors">
+              <Download size={11} className="text-zinc-500 shrink-0" />
+              Export CSV
+            </button>
+            <div className="h-px bg-zinc-800 my-1" />
+            <button onClick={() => { onPrint(); setOpen(false); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-zinc-300 hover:bg-zinc-800 transition-colors">
+              <Printer size={11} className="text-zinc-500 shrink-0" />
+              Print / Save PDF
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
 export function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashTab>('Overview');
   const { ms: refreshMs, setOption: setRefreshOption, interval: refreshInterval } = useAutoRefresh("dashboard", "15s");
@@ -922,7 +1058,27 @@ export function DashboardPage() {
                 <span className="hidden sm:inline">Refresh</span>
               </button>
             </div>
+            {/* Export menu — hidden in print */}
+            <div className="no-print">
+              <ExportMenu
+                onJson={() => exportJson(buildSnapshot(stats, data))}
+                onCsv={() => exportCsv(buildSnapshot(stats, data))}
+                onPrint={() => window.print()}
+              />
+            </div>
           </div>
+        </div>
+
+        {/* Print header — only visible when printing */}
+        <div className="print-header hidden">
+          <h1 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>
+            cairn — Dashboard Export
+          </h1>
+          <p style={{ fontSize: 12, color: '#6b7280' }}>
+            Exported at {new Date().toLocaleString()} ·{' '}
+            {data?.system_healthy ? '✓ All systems operational' : '⚠ Degraded'}
+          </p>
+          <hr style={{ margin: '10px 0', borderColor: '#e5e7eb' }} />
         </div>
 
         {/* Degraded banner */}
