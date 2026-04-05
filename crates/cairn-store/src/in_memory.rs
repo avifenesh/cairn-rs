@@ -4666,14 +4666,23 @@ impl InMemoryStore {
     /// List runs with optional filters.
     pub async fn list_runs_filtered(
         &self,
-        _query: &cairn_domain::tenancy::ProjectKey,
-        _session_id: Option<&cairn_domain::SessionId>,
-        _status: Option<cairn_domain::RunState>,
+        query: &cairn_domain::tenancy::ProjectKey,
+        session_id: Option<&cairn_domain::SessionId>,
+        status: Option<cairn_domain::RunState>,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::RunRecord>, crate::StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.runs.values().skip(offset).take(limit).cloned().collect())
+        Ok(state
+            .runs
+            .values()
+            .filter(|r| r.project == *query)
+            .filter(|r| session_id.map_or(true, |s| r.session_id == *s))
+            .filter(|r| status.map_or(true, |st| r.state == st))
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     /// List tasks with optional filters.
