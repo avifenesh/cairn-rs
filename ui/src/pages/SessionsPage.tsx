@@ -1,10 +1,8 @@
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, Loader2, RefreshCw, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
-import { StateBadge } from '../components/StateBadge';
-import type { RunRecord, SessionRecord, SessionState } from '../lib/types';
+import type { SessionRecord, SessionState } from '../lib/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -62,110 +60,52 @@ function StatCard({ label, value, sub, accent = 'default' }: {
   );
 }
 
-// ── Runs sub-table ────────────────────────────────────────────────────────────
-
-function RunsSubTable({ sessionId }: { sessionId: string }) {
-  const { data: allRuns, isLoading } = useQuery({
-    queryKey: ['runs'],
-    queryFn:  () => defaultApi.getRuns(),
-    staleTime: 30_000,
-  });
-  const runs: RunRecord[] = (allRuns ?? []).filter(r => r.session_id === sessionId);
-
-  if (isLoading) return (
-    <div className="flex items-center gap-2 px-10 h-8 text-[11px] text-zinc-600">
-      <Loader2 size={11} className="animate-spin" /> Loading…
-    </div>
-  );
-  if (runs.length === 0) return (
-    <p className="px-10 h-8 flex items-center text-[11px] text-zinc-600 italic">No runs</p>
-  );
-
-  return (
-    <table className="w-full">
-      <thead>
-        <tr className="border-b border-zinc-800/50">
-          <th className="pl-10 pr-4 h-7 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Run ID</th>
-          <th className="px-4 h-7 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">State</th>
-          <th className="px-4 h-7 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider hidden sm:table-cell">Parent</th>
-          <th className="px-4 h-7 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Created</th>
-        </tr>
-      </thead>
-      <tbody>
-        {runs.map((run, i) => (
-          <tr key={run.run_id} className={clsx('hover:bg-white/5 transition-colors', i % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-900/50')}>
-            <td className="pl-10 pr-4 h-8 font-mono text-[11px] text-zinc-400">{mono(run.run_id, 20)}</td>
-            <td className="px-4 h-8"><StateBadge state={run.state} compact /></td>
-            <td className="px-4 h-8 font-mono text-[11px] text-zinc-600 hidden sm:table-cell">
-              {run.parent_run_id ? mono(run.parent_run_id, 14) : '—'}
-            </td>
-            <td className="px-4 h-8 text-[11px] text-zinc-500">{fmtTs(run.created_at)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
 // ── Session row ───────────────────────────────────────────────────────────────
 
-function SessionRow({ session, runCount, expanded, onToggle, even }: {
-  session: SessionRecord; runCount: number; expanded: boolean; onToggle: () => void; even: boolean;
+function SessionRow({ session, runCount, even }: {
+  session: SessionRecord; runCount: number; even: boolean;
 }) {
   return (
-    <>
-      <tr
-        onClick={() => { window.location.hash = `session/${session.session_id}`; }}
-        className={clsx(
-          'cursor-pointer border-b border-zinc-800/50 select-none transition-colors',
-          expanded ? 'bg-white/5' : even ? 'bg-zinc-900/50 hover:bg-white/5' : 'bg-zinc-900 hover:bg-white/5',
-        )}
-      >
-        <td className="pl-3 pr-1 w-7">
-          {expanded
-            ? <ChevronDown  size={13} className="text-zinc-500" />
-            : <ChevronRight size={13} className="text-zinc-600" />}
-        </td>
-        <td className="px-3 h-9 font-mono text-xs text-zinc-200 whitespace-nowrap">
-          {mono(session.session_id, 22)}
-        </td>
-        <td className="px-3 h-9 font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden md:table-cell">
-          {session.project.tenant_id}
-        </td>
-        <td className="px-3 h-9 font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden lg:table-cell">
-          {session.project.workspace_id}
-        </td>
-        <td className="px-3 h-9 font-mono text-[11px] text-zinc-400 whitespace-nowrap">
-          {mono(session.project.project_id, 16)}
-        </td>
-        <td className="px-3 h-9">
-          <SessionPill state={session.state} />
-        </td>
-        <td className="px-3 h-9 text-center">
-          {runCount > 0
-            ? <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-zinc-800 text-zinc-400 text-[10px] font-medium tabular-nums">{runCount}</span>
-            : <span className="text-zinc-700 text-[11px]">—</span>}
-        </td>
-        <td className="px-3 h-9 text-[11px] text-zinc-500 whitespace-nowrap font-mono">
-          {fmtTs(session.created_at)}
-        </td>
-      </tr>
-      {expanded && (
-        <tr className="border-b border-zinc-800/50 bg-zinc-950/60">
-          <td colSpan={8} className="py-0">
-            <RunsSubTable sessionId={session.session_id} />
-          </td>
-        </tr>
+    <tr
+      onClick={() => { window.location.hash = `session/${session.session_id}`; }}
+      className={clsx(
+        'cursor-pointer border-b border-zinc-800/50 select-none transition-colors',
+        even ? 'bg-zinc-900/50 hover:bg-white/5' : 'bg-zinc-900 hover:bg-white/5',
       )}
-    </>
+    >
+      <td className="pl-3 pr-1 w-7">
+        <ChevronRight size={13} className="text-zinc-700 group-hover:text-zinc-500" />
+      </td>
+      <td className="px-3 h-9 font-mono text-xs text-zinc-200 whitespace-nowrap">
+        {mono(session.session_id, 22)}
+      </td>
+      <td className="px-3 h-9 font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden md:table-cell">
+        {session.project.tenant_id}
+      </td>
+      <td className="px-3 h-9 font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden lg:table-cell">
+        {session.project.workspace_id}
+      </td>
+      <td className="px-3 h-9 font-mono text-[11px] text-zinc-400 whitespace-nowrap">
+        {mono(session.project.project_id, 16)}
+      </td>
+      <td className="px-3 h-9">
+        <SessionPill state={session.state} />
+      </td>
+      <td className="px-3 h-9 text-center">
+        {runCount > 0
+          ? <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-zinc-800 text-zinc-400 text-[10px] font-medium tabular-nums">{runCount}</span>
+          : <span className="text-zinc-700 text-[11px]">—</span>}
+      </td>
+      <td className="px-3 h-9 text-[11px] text-zinc-500 whitespace-nowrap font-mono">
+        {fmtTs(session.created_at)}
+      </td>
+    </tr>
   );
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function SessionsPage() {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-
   const { data: sessions, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['sessions'],
     queryFn:  () => defaultApi.getSessions({ limit: 100 }),
@@ -180,7 +120,6 @@ export function SessionsPage() {
   const list = sessions ?? [];
   const runCountFor = (id: string) => (allRuns ?? []).filter(r => r.session_id === id).length;
   const activeNow   = list.filter(s => s.state === 'open').length;
-  const toggle = (id: string) => setExpandedId(p => p === id ? null : id);
 
   return (
     <div className="p-6 space-y-5">
@@ -246,8 +185,6 @@ export function SessionsPage() {
                     key={session.session_id}
                     session={session}
                     runCount={runCountFor(session.session_id)}
-                    expanded={expandedId === session.session_id}
-                    onToggle={() => toggle(session.session_id)}
                     even={i % 2 === 0}
                   />
                 ))}
