@@ -73,6 +73,7 @@ async fn create_release_stack(
                     name: format!("{asset_id} prompt"),
                     kind: "system".to_owned(),
                     created_at: ts,
+                    workspace_id: project().workspace_id.clone(),
                 }),
             ),
             evt(
@@ -83,6 +84,7 @@ async fn create_release_stack(
                     prompt_asset_id: PromptAssetId::new(asset_id),
                     content_hash: format!("sha256:{version_id}"),
                     created_at: ts + 1,
+                    workspace_id: project().workspace_id.clone(),
                 }),
             ),
             evt(

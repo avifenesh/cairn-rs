@@ -52,12 +52,14 @@ fn create_asset(
     name: &str,
     ts: u64,
 ) -> EventEnvelope<RuntimeEvent> {
+    let ws_id = proj.workspace_id.clone();
     evt(evt_id, RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
         project:         proj,
         prompt_asset_id: PromptAssetId::new(asset_id),
         name:            name.to_owned(),
         kind:            "system".to_owned(),
         created_at:      ts,
+        workspace_id:    ws_id,
     }))
 }
 
@@ -179,6 +181,7 @@ async fn release_inherits_asset_project() {
             prompt_asset_id:   PromptAssetId::new("asset_rel"),
             content_hash:      "sha256:release_test".to_owned(),
             created_at:        ts + 1,
+            workspace_id: proj_a().workspace_id,
         })),
         evt("e3", RuntimeEvent::PromptReleaseCreated(PromptReleaseCreated {
             project:           proj_a(),
@@ -253,6 +256,7 @@ async fn version_carries_parent_asset_project() {
             prompt_asset_id:   PromptAssetId::new("ast_va"),
             content_hash:      "sha256:va".to_owned(),
             created_at:        ts + 2,
+            workspace_id: proj_a().workspace_id,
         })),
         evt("e4", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
             project:           proj_b(),
@@ -260,6 +264,7 @@ async fn version_carries_parent_asset_project() {
             prompt_asset_id:   PromptAssetId::new("ast_vb"),
             content_hash:      "sha256:vb".to_owned(),
             created_at:        ts + 3,
+            workspace_id: proj_b().workspace_id,
         })),
     ]).await.unwrap();
 

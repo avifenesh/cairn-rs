@@ -90,14 +90,14 @@ async fn rfc006_prompt_release_draft_to_active() {
     let store = Arc::new(InMemoryStore::new());
 
     store.append(&[
-        ev("rc", RuntimeEvent::PromptReleaseCreated(PromptReleaseCreated { project: project("t1"), prompt_release_id: PromptReleaseId::new("rel_1"), prompt_asset_id: PromptAssetId::new("asset_1"), prompt_version_id: PromptVersionId::new("ver_1"), created_at: 1_000 })),
+        ev("rc", RuntimeEvent::PromptReleaseCreated(PromptReleaseCreated { project: project("t1"), prompt_release_id: PromptReleaseId::new("rel_1"), prompt_asset_id: PromptAssetId::new("asset_1"), prompt_version_id: PromptVersionId::new("ver_1"), created_at: 1_000, created_by: None, release_tag: None })),
     ]).await.unwrap();
 
     let draft = PromptReleaseReadModel::get(store.as_ref(), &PromptReleaseId::new("rel_1")).await.unwrap().unwrap();
     assert_eq!(draft.state, "draft", "RFC 006: release must start in 'draft' state");
 
     store.append(&[
-        ev("rt", RuntimeEvent::PromptReleaseTransitioned(PromptReleaseTransitioned { project: project("t1"), prompt_release_id: PromptReleaseId::new("rel_1"), from_state: "draft".to_owned(), to_state: "active".to_owned(), transitioned_at: 2_000 })),
+        ev("rt", RuntimeEvent::PromptReleaseTransitioned(PromptReleaseTransitioned { project: project("t1"), prompt_release_id: PromptReleaseId::new("rel_1"), from_state: "draft".to_owned(), to_state: "active".to_owned(), transitioned_at: 2_000, actor: None, reason: None })),
     ]).await.unwrap();
 
     let active = PromptReleaseReadModel::get(store.as_ref(), &PromptReleaseId::new("rel_1")).await.unwrap().unwrap();

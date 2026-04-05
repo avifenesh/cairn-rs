@@ -75,6 +75,7 @@ async fn create_prompt_asset_is_stored() {
                 name:           "greeting-prompt".to_owned(),
                 kind:           "system".to_owned(),
                 created_at:     ts,
+            workspace_id: default_project().workspace_id,
             }),
         )])
         .await
@@ -102,6 +103,7 @@ async fn create_version_v1_with_hello_world() {
             evt("e1", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: default_project(), prompt_asset_id: asset_id.clone(),
                 name: "greeting".to_owned(), kind: "system".to_owned(), created_at: ts,
+            workspace_id: default_project().workspace_id,
             })),
             evt("e2", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
                 project:          default_project(),
@@ -109,6 +111,7 @@ async fn create_version_v1_with_hello_world() {
                 prompt_asset_id:  asset_id.clone(),
                 content_hash:     hash_v1.clone(),
                 created_at:       ts + 1,
+            workspace_id: default_project().workspace_id,
             })),
         ])
         .await
@@ -139,16 +142,19 @@ async fn create_version_v2_with_different_content() {
             evt("e1", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: default_project(), prompt_asset_id: asset_id.clone(),
                 name: "greeting".to_owned(), kind: "system".to_owned(), created_at: ts,
+            workspace_id: default_project().workspace_id,
             })),
             evt("e2", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
                 project: default_project(), prompt_version_id: v1_id.clone(),
                 prompt_asset_id: asset_id.clone(), content_hash: hash_v1.clone(),
                 created_at: ts + 1,
+            workspace_id: default_project().workspace_id,
             })),
             evt("e3", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
                 project: default_project(), prompt_version_id: v2_id.clone(),
                 prompt_asset_id: asset_id.clone(), content_hash: hash_v2.clone(),
                 created_at: ts + 2,
+            workspace_id: default_project().workspace_id,
             })),
         ])
         .await
@@ -175,18 +181,21 @@ async fn both_versions_are_retrievable() {
             evt("e1", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: default_project(), prompt_asset_id: asset_id.clone(),
                 name: "both".to_owned(), kind: "system".to_owned(), created_at: ts,
+            workspace_id: default_project().workspace_id,
             })),
             evt("e2", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
                 project: default_project(), prompt_version_id: v1_id.clone(),
                 prompt_asset_id: asset_id.clone(),
                 content_hash: content_hash("Hello world"),
                 created_at: ts + 1,
+            workspace_id: default_project().workspace_id,
             })),
             evt("e3", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
                 project: default_project(), prompt_version_id: v2_id.clone(),
                 prompt_asset_id: asset_id.clone(),
                 content_hash: content_hash("Hello brave world"),
                 created_at: ts + 2,
+            workspace_id: default_project().workspace_id,
             })),
         ])
         .await
@@ -216,6 +225,7 @@ async fn list_by_asset_returns_versions_in_created_at_order() {
         .append(&[evt("e0", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
             project: default_project(), prompt_asset_id: asset_id.clone(),
             name: "ordered".to_owned(), kind: "system".to_owned(), created_at: ts,
+            workspace_id: default_project().workspace_id,
         }))])
         .await.unwrap();
 
@@ -229,6 +239,7 @@ async fn list_by_asset_returns_versions_in_created_at_order() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: content_hash(content),
                     created_at: ts + (i as u64 + 1) * 10,
+                    workspace_id: default_project().workspace_id,
                 }),
             )])
             .await.unwrap();
@@ -262,6 +273,7 @@ async fn version_number_auto_increments_per_asset() {
         .append(&[evt("e0", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
             project: default_project(), prompt_asset_id: asset_id.clone(),
             name: "incrementing".to_owned(), kind: "system".to_owned(), created_at: ts,
+            workspace_id: default_project().workspace_id,
         }))])
         .await.unwrap();
 
@@ -275,6 +287,7 @@ async fn version_number_auto_increments_per_asset() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: format!("sha256:content_{i}"),
                     created_at: ts + i as u64 * 10,
+                    workspace_id: default_project().workspace_id,
                 }),
             )])
             .await.unwrap();
@@ -312,6 +325,7 @@ async fn content_hash_differs_between_versions() {
         .append(&[evt("e0", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
             project: default_project(), prompt_asset_id: asset_id.clone(),
             name: "hashing".to_owned(), kind: "system".to_owned(), created_at: ts,
+            workspace_id: default_project().workspace_id,
         }))])
         .await.unwrap();
 
@@ -325,6 +339,7 @@ async fn content_hash_differs_between_versions() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: hash.to_string(),
                     created_at: ts + (i as u64 + 1) * 5,
+                    workspace_id: default_project().workspace_id,
                 }),
             )])
             .await.unwrap();
@@ -365,6 +380,7 @@ async fn versions_are_isolated_by_workspace() {
             evt("e1", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: proj_ws_a.clone(), prompt_asset_id: asset_a.clone(),
                 name: "alpha-prompt".to_owned(), kind: "system".to_owned(), created_at: ts,
+            workspace_id: proj_ws_a.workspace_id.clone(),
             })),
             evt("e2", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
                 project: proj_ws_a.clone(),
@@ -372,6 +388,7 @@ async fn versions_are_isolated_by_workspace() {
                 prompt_asset_id: asset_a.clone(),
                 content_hash: "sha256:alpha_v1".to_owned(),
                 created_at: ts + 1,
+            workspace_id: proj_ws_a.workspace_id.clone(),
             })),
             evt("e3", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
                 project: proj_ws_a.clone(),
@@ -379,10 +396,12 @@ async fn versions_are_isolated_by_workspace() {
                 prompt_asset_id: asset_a.clone(),
                 content_hash: "sha256:alpha_v2".to_owned(),
                 created_at: ts + 2,
+            workspace_id: proj_ws_a.workspace_id.clone(),
             })),
             evt("e4", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: proj_ws_b.clone(), prompt_asset_id: asset_b.clone(),
                 name: "beta-prompt".to_owned(), kind: "system".to_owned(), created_at: ts + 10,
+            workspace_id: proj_ws_b.workspace_id.clone(),
             })),
             evt("e5", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
                 project: proj_ws_b.clone(),
@@ -390,6 +409,7 @@ async fn versions_are_isolated_by_workspace() {
                 prompt_asset_id: asset_b.clone(),
                 content_hash: "sha256:beta_v1".to_owned(),
                 created_at: ts + 11,
+            workspace_id: proj_ws_b.workspace_id.clone(),
             })),
         ])
         .await
@@ -431,10 +451,12 @@ async fn version_numbers_are_per_asset_not_global() {
             evt("e1", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: default_project(), prompt_asset_id: asset_x.clone(),
                 name: "x".to_owned(), kind: "system".to_owned(), created_at: ts,
+            workspace_id: default_project().workspace_id,
             })),
             evt("e2", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: default_project(), prompt_asset_id: asset_y.clone(),
                 name: "y".to_owned(), kind: "system".to_owned(), created_at: ts + 1,
+            workspace_id: default_project().workspace_id,
             })),
             // Version 1 for asset_x.
             evt("e3", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
@@ -443,6 +465,7 @@ async fn version_numbers_are_per_asset_not_global() {
                 prompt_asset_id: asset_x.clone(),
                 content_hash: "sha256:x1".to_owned(),
                 created_at: ts + 2,
+            workspace_id: default_project().workspace_id,
             })),
             // Version 1 for asset_y — independent counter.
             evt("e4", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
@@ -451,6 +474,7 @@ async fn version_numbers_are_per_asset_not_global() {
                 prompt_asset_id: asset_y.clone(),
                 content_hash: "sha256:y1".to_owned(),
                 created_at: ts + 3,
+            workspace_id: default_project().workspace_id,
             })),
             // Version 2 for asset_x.
             evt("e5", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
@@ -459,6 +483,7 @@ async fn version_numbers_are_per_asset_not_global() {
                 prompt_asset_id: asset_x.clone(),
                 content_hash: "sha256:x2".to_owned(),
                 created_at: ts + 4,
+            workspace_id: default_project().workspace_id,
             })),
             // Version 2 for asset_y.
             evt("e6", RuntimeEvent::PromptVersionCreated(PromptVersionCreated {
@@ -467,6 +492,7 @@ async fn version_numbers_are_per_asset_not_global() {
                 prompt_asset_id: asset_y.clone(),
                 content_hash: "sha256:y2".to_owned(),
                 created_at: ts + 5,
+            workspace_id: default_project().workspace_id,
             })),
         ])
         .await
@@ -500,14 +526,17 @@ async fn list_by_project_returns_only_project_assets() {
             evt("e1", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: proj_x.clone(), prompt_asset_id: PromptAssetId::new("ax1"),
                 name: "x-asset-1".to_owned(), kind: "system".to_owned(), created_at: ts,
+            workspace_id: proj_x.workspace_id.clone(),
             })),
             evt("e2", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: proj_x.clone(), prompt_asset_id: PromptAssetId::new("ax2"),
                 name: "x-asset-2".to_owned(), kind: "system".to_owned(), created_at: ts + 1,
+            workspace_id: proj_x.workspace_id.clone(),
             })),
             evt("e3", RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
                 project: proj_y.clone(), prompt_asset_id: PromptAssetId::new("ay1"),
                 name: "y-asset-1".to_owned(), kind: "system".to_owned(), created_at: ts + 2,
+            workspace_id: proj_y.workspace_id.clone(),
             })),
         ])
         .await

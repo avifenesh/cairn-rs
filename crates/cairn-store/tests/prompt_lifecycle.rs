@@ -58,6 +58,7 @@ async fn create_prompt_asset_produces_asset_record() {
                 name: "main-system-prompt".to_owned(),
                 kind: "system".to_owned(),
                 created_at: now_ms(),
+            workspace_id: project().workspace_id,
             }),
         )])
         .await
@@ -94,6 +95,7 @@ async fn create_prompt_version_produces_version_record() {
                     name: "search-prompt".to_owned(),
                     kind: "user_template".to_owned(),
                     created_at: ts,
+            workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -104,6 +106,7 @@ async fn create_prompt_version_produces_version_record() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:aabbcc".to_owned(),
                     created_at: ts + 1,
+            workspace_id: project().workspace_id,
                 }),
             ),
         ])
@@ -141,6 +144,7 @@ async fn create_prompt_release_starts_in_draft() {
                     name: "critic-prompt".to_owned(),
                     kind: "critic".to_owned(),
                     created_at: ts,
+            workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -151,6 +155,7 @@ async fn create_prompt_release_starts_in_draft() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:001".to_owned(),
                     created_at: ts + 1,
+            workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -202,6 +207,7 @@ async fn prompt_release_transitions_draft_to_approved_to_active() {
                     name: "router-prompt".to_owned(),
                     kind: "router".to_owned(),
                     created_at: ts,
+            workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -212,6 +218,7 @@ async fn prompt_release_transitions_draft_to_approved_to_active() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:router-v1".to_owned(),
                     created_at: ts + 1,
+            workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -298,6 +305,7 @@ async fn active_release_is_returned_by_selector_query() {
                     name: "tool-prompt".to_owned(),
                     kind: "tool_prompt".to_owned(),
                     created_at: ts,
+            workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -308,6 +316,7 @@ async fn active_release_is_returned_by_selector_query() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:tool-v1".to_owned(),
                     created_at: ts + 1,
+            workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -395,6 +404,7 @@ async fn second_version_has_incremented_version_number() {
                     name: "iterating-prompt".to_owned(),
                     kind: "system".to_owned(),
                     created_at: ts,
+            workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -405,6 +415,7 @@ async fn second_version_has_incremented_version_number() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:v1".to_owned(),
                     created_at: ts + 1,
+            workspace_id: project().workspace_id,
                 }),
             ),
         ])
@@ -427,6 +438,7 @@ async fn second_version_has_incremented_version_number() {
                 prompt_asset_id: asset_id.clone(),
                 content_hash: "sha256:v2".to_owned(),
                 created_at: ts + 2,
+            workspace_id: project().workspace_id,
             }),
         )])
         .await
@@ -470,6 +482,7 @@ async fn list_by_project_returns_all_project_releases() {
                         name: format!("prompt-{n}"),
                         kind: "system".to_owned(),
                         created_at: ts + n as u64,
+                        workspace_id: project().workspace_id,
                     }),
                 ),
                 evt(
@@ -480,6 +493,7 @@ async fn list_by_project_returns_all_project_releases() {
                         prompt_asset_id: asset_id.clone(),
                         content_hash: format!("sha256:{n}"),
                         created_at: ts + n as u64 + 10,
+                        workspace_id: project().workspace_id,
                     }),
                 ),
                 evt(

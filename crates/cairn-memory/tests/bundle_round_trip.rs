@@ -11,7 +11,8 @@
 use std::collections::HashMap;
 
 use cairn_memory::bundles::{
-    ArtifactEntry, ArtifactKind, BundleEnvelope, BundleProvenance, BundleType,
+    ArtifactEntry, ArtifactKind, ArtifactPayload, ArtifactProvenance,
+    BundleEnvelope, BundleProvenance, BundleType,
     ConflictResolutionStrategy, ImportOutcome, ImportPlan, ImportPlanEntry, SourceScope,
     validate_bundle_schema_version,
 };
@@ -48,13 +49,14 @@ fn prompt_asset_artifact(logical_id: &str, name: &str, content_hash: &str) -> Ar
         source_bundle_id: "bundle_prompt_lib_001".to_owned(),
         origin_timestamp: 1_700_000_000,
         metadata: HashMap::new(),
-        payload: serde_json::json!({
+        payload: ArtifactPayload::InlineJson(serde_json::json!({
             "name": name,
             "kind": "assistant",
             "status": "published",
             "library_scope_hint": "workspace",
             "metadata": {}
-        }),
+        })),
+        provenance: ArtifactProvenance { origin: None, production_method: None, created_at: None },
         lineage: Some(format!("origin::{logical_id}")),
         tags: vec!["prompt".to_owned(), "assistant".to_owned()],
     }
@@ -71,7 +73,7 @@ fn two_artifact_prompt_bundle(bundle_type: BundleType) -> BundleEnvelope {
         bundle_id: "bundle_prompt_lib_001".to_owned(),
         bundle_name: "Prompt Library Bundle".to_owned(),
         created_at: 1_700_000_000,
-        created_by: "operator_test".to_owned(),
+        created_by: Some("operator_test".to_owned()),
         source_deployment_id: Some("deploy_001".to_owned()),
         source_scope: source_scope(),
         artifact_count: artifacts.len(),

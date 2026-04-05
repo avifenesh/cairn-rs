@@ -81,6 +81,11 @@ fn call(
         error_class,
         raw_error_message: None,
         retry_count:    0,
+        task_id:        None,
+        prompt_release_id: None,
+        fallback_position: 0,
+        started_at:     0,
+        finished_at:    0,
     }))
 }
 

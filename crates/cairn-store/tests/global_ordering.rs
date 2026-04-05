@@ -398,6 +398,11 @@ async fn derived_events_do_not_break_monotonicity() {
             error_class:            None,
             raw_error_message:      None,
             retry_count:            0,
+            task_id:                None,
+            prompt_release_id:      None,
+            fallback_position:      0,
+            started_at:             999_000,
+            finished_at:            1_000_000,
         }),
     )]).await.unwrap();
 
