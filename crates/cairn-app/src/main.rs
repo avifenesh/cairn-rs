@@ -1310,8 +1310,14 @@ async fn ollama_models_handler(
 /// unreachable, 500 on model errors.
 #[derive(serde::Deserialize)]
 struct OllamaGenerateRequest {
-    model:  Option<String>,
-    prompt: String,
+    model:    Option<String>,
+    /// Single-turn prompt (used when `messages` is absent).
+    #[serde(default)]
+    prompt:   String,
+    /// Multi-turn conversation history. When present, `prompt` is ignored.
+    /// Each element must be `{"role": "user"|"assistant"|"system", "content": "..."}`.
+    #[serde(default)]
+    messages: Option<Vec<serde_json::Value>>,
 }
 
 async fn ollama_generate_handler(
@@ -1461,7 +1467,10 @@ async fn ollama_stream_handler(
     };
 
     let model_id = body.model.as_deref().unwrap_or("llama3").to_owned();
-    let prompt   = body.prompt.clone();
+    // Use full message history when provided; fall back to single-turn prompt.
+    let messages: Vec<serde_json::Value> = body.messages.unwrap_or_else(|| {
+        vec![serde_json::json!({"role": "user", "content": body.prompt})]
+    });
 
     // Spawn a task that calls Ollama with stream=true and forwards chunks via channel.
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
@@ -1475,11 +1484,16 @@ async fn ollama_stream_handler(
             .expect("reqwest client");
 
         let url = format!("{host}/v1/chat/completions");
-        let req_body = serde_json::json!({
+        // Disable Qwen3's chain-of-thought reasoning pass via Ollama's options
+        // extension field — same approach as OllamaProvider::generate().
+        let mut req_body = serde_json::json!({
             "model":    model_id,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "stream":   true,
         });
+        if model_id.contains("qwen3") {
+            req_body["options"] = serde_json::json!({ "think": false });
+        }
 
         let resp = match client.post(&url).json(&req_body).send().await {
             Ok(r) => r,
