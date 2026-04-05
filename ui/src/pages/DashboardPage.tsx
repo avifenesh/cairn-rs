@@ -3,8 +3,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  ServerCrash,
 } from "lucide-react";
+import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
 import { EventLog } from "../components/EventLog";
@@ -90,7 +90,7 @@ export function DashboardPage() {
   });
 
   // Fallback: richer dashboard payload (15s refresh) for fields not in stats.
-  const { data, isLoading, isError, error, dataUpdatedAt } = useQuery({
+  const { data, isLoading, isError, error, dataUpdatedAt, refetch: refetchDashboard } = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => defaultApi.getDashboard(),
     refetchInterval: 15_000,
@@ -106,13 +106,11 @@ export function DashboardPage() {
 
   if (isError && !stats) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-8">
-        <ServerCrash size={32} className="text-red-500" />
-        <p className="text-[13px] font-medium text-zinc-300">Failed to load dashboard</p>
-        <p className="text-[13px] text-zinc-600">
-          {error instanceof Error ? error.message : "Unknown error"}
-        </p>
-      </div>
+      <ErrorFallback
+        error={error}
+        resource="dashboard"
+        onRetry={() => void refetchDashboard()}
+      />
     );
   }
 

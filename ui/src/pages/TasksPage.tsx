@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2, ServerCrash } from "lucide-react";
+import { RefreshCw, Loader2 } from "lucide-react";
+import { ErrorFallback } from "../components/ErrorFallback";
 import { StateBadge } from "../components/StateBadge";
 import { DataTable } from "../components/DataTable";
 import { useToast } from "../components/Toast";
@@ -94,15 +95,7 @@ export function TasksPage() {
   const activeCnt = tasks.filter(t => ACTIVE_STATES.includes(t.state)).length;
 
   if (isError) return (
-    <div className="flex flex-col items-center justify-center min-h-64 gap-3 p-8 text-center">
-      <ServerCrash size={32} className="text-red-500" />
-      <p className="text-[13px] text-zinc-300 font-medium">Failed to load tasks</p>
-      <p className="text-[12px] text-zinc-500">{error instanceof Error ? error.message : "Unknown"}</p>
-      <button onClick={() => refetch()}
-        className="mt-1 px-3 py-1.5 rounded bg-zinc-800 text-zinc-300 text-[12px] hover:bg-zinc-700 transition-colors">
-        Retry
-      </button>
-    </div>
+    <ErrorFallback error={error} resource="tasks" onRetry={() => void refetch()} />
   );
 
   return (

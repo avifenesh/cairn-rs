@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { X, RefreshCw, ServerCrash, ChevronRight } from "lucide-react";
+import { X, RefreshCw, ChevronRight } from "lucide-react";
+import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
 import { DataTable } from "../components/DataTable";
@@ -179,12 +180,7 @@ export function RunsPage() {
   const filtered = filter === "all" ? runs : runs.filter(r => r.state === filter);
 
   if (isError) return (
-    <div className="flex flex-col items-center justify-center h-full gap-3 p-8 text-center">
-      <ServerCrash size={32} className="text-red-500"/>
-      <p className="text-[13px] font-medium text-zinc-300">Failed to load runs</p>
-      <p className="text-[13px] text-zinc-600">{error instanceof Error ? error.message : "Unknown error"}</p>
-      <button onClick={() => void refetch()} className="mt-1 px-3 py-1.5 rounded bg-zinc-800 text-[13px] text-zinc-300 hover:bg-zinc-700 transition-colors">Retry</button>
-    </div>
+    <ErrorFallback error={error} resource="runs" onRetry={() => void refetch()} />
   );
 
   return (
