@@ -8993,6 +8993,44 @@ async fn release_task_lease_handler(
     }
 }
 
+async fn cancel_task_handler(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let task_id = TaskId::new(id);
+    let task = match state.runtime.tasks.get(&task_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
+                .into_response()
+        }
+        Err(err) => return runtime_error_response(err),
+    };
+
+    let before = current_event_head(&state).await;
+    match state.runtime.tasks.cancel(&task_id).await {
+        Ok(record) => {
+            let _ = state
+                .runtime
+                .audit
+                .record(
+                    task.project.tenant_id.clone(),
+                    audit_actor_id(&principal),
+                    "cancel_task".to_owned(),
+                    "task".to_owned(),
+                    task_id.to_string(),
+                    AuditOutcome::Success,
+                    serde_json::json!({ "previous_state": format!("{:?}", task.state) }),
+                )
+                .await;
+            publish_runtime_frames_since(&state, before).await;
+            (StatusCode::OK, Json(record)).into_response()
+        }
+        Err(err) => runtime_error_response(err),
+    }
+}
+
 async fn complete_task_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -10557,6 +10595,42 @@ async fn reject_approval_handler(
                 record.approval_id.to_string(),
                 AuditOutcome::Success,
                 serde_json::json!({ "decision": "rejected" }),
+            )
+            .await
+        {
+            Ok(_) => {
+                publish_runtime_frames_since(&state, before).await;
+                (StatusCode::OK, Json(record)).into_response()
+            }
+            Err(err) => runtime_error_response(err),
+        },
+        Err(err) => runtime_error_response(err),
+    }
+}
+
+async fn deny_approval_handler(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let before = current_event_head(&state).await;
+    match state
+        .runtime
+        .approvals
+        .resolve(&ApprovalId::new(id), ApprovalDecision::Rejected)
+        .await
+    {
+        Ok(record) => match state
+            .runtime
+            .audit
+            .record(
+                record.project.tenant_id.clone(),
+                audit_actor_id(&principal),
+                "resolve_approval".to_owned(),
+                "approval".to_owned(),
+                record.approval_id.to_string(),
+                AuditOutcome::Success,
+                serde_json::json!({ "decision": "denied" }),
             )
             .await
         {
@@ -14276,21 +14350,42 @@ macro_rules! stub_handler {
     };
 }
 
+
+/// `POST /v1/runs/:id/checkpoint` — record a checkpoint for a run.
+///
+/// Alias for `save_checkpoint_handler`; provides the `record_checkpoint_handler`
+/// name expected by the preserved route catalog and audit tests.
+async fn record_checkpoint_handler(
+    state: State<Arc<AppState>>,
+    path: Path<String>,
+    body: Json<SaveCheckpointRequest>,
+) -> impl IntoResponse {
+    save_checkpoint_handler(state, path, body).await
+}
+
+/// `POST /v1/prompts/releases/:id/rollout` — start a gradual rollout for a release.
+///
+/// Alias for `start_prompt_rollout_handler`; provides the `start_rollout_handler`
+/// name expected by the preserved route catalog and SSE integration tests.
+async fn start_rollout_handler(
+    state: State<Arc<AppState>>,
+    path: Path<String>,
+    body: Json<StartRolloutRequest>,
+) -> impl IntoResponse {
+    start_prompt_rollout_handler(state, path, body).await
+}
+
 stub_handler!(check_provider_health_handler);
 stub_handler!(compare_eval_run_baseline_handler);
 stub_handler!(create_tenant_snapshot_handler);
 stub_handler!(delete_credential_handler);
-stub_handler!(deny_approval_handler);
-stub_handler!(record_checkpoint_handler);
 stub_handler!(request_approval_for_release_handler);
 stub_handler!(restore_tenant_snapshot_handler);
 stub_handler!(revoke_resource_share_handler);
 stub_handler!(score_eval_run_with_rubric_handler);
 stub_handler!(send_notification_handler);
 stub_handler!(share_resource_handler);
-stub_handler!(start_rollout_handler);
 stub_handler!(unregister_plugin_handler);
-stub_handler!(cancel_task_handler);
 stub_handler!(export_bundle_by_format_handler);
 
 
