@@ -218,6 +218,8 @@ export function Layout({ children, routeRenderer, onLogout }: LayoutProps) {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-200">
+      {/* Skip-to-content for keyboard users */}
+      <a href="#main-content" className="skip-to-content">Skip to content</a>
       {/* Global loading bar — fixed, above everything */}
       <LoadingBar />
 
@@ -236,8 +238,10 @@ export function Layout({ children, routeRenderer, onLogout }: LayoutProps) {
         />
 
         <main
+          id="main-content"
           ref={mainRef}
           className="flex-1 overflow-hidden bg-gray-50 dark:bg-zinc-950 page-enter"
+          tabIndex={-1}
         >
           {content}
         </main>

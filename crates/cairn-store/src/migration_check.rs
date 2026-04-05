@@ -2,7 +2,6 @@
 ///
 /// This module validates that migration files in the `migrations/` directory
 /// follow the naming convention and are properly ordered.
-
 /// Validate migration file names match `V{NNN}__{description}.sql` pattern
 /// and versions are sequential starting from 1.
 pub fn validate_migration_files(files: &[(&str, &str)]) -> Result<(), MigrationCheckError> {

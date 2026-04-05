@@ -38,7 +38,10 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
                 {item.label}
               </a>
             ) : isLast ? (
-              <span className="text-gray-900 dark:text-zinc-200 font-medium truncate">
+              <span
+                className="text-gray-900 dark:text-zinc-200 font-medium truncate"
+                aria-current="page"
+              >
                 {item.label}
               </span>
             ) : (

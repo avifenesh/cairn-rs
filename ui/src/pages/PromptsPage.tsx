@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   FileText, ChevronRight, ChevronDown, RefreshCw, Plus,
@@ -428,7 +428,7 @@ function AssetItem({
             ) : versions.length === 0 ? (
               <p className="text-[12px] text-zinc-700 italic py-2">No versions yet.</p>
             ) : (
-              <div className="rounded-lg border border-zinc-800 overflow-hidden divide-y divide-zinc-800/50">
+              <div className="rounded-lg border border-zinc-800 overflow-x-auto divide-y divide-zinc-800/50">
                 {versions.map((v, i) => (
                   <VersionRow
                     key={v.prompt_version_id}
@@ -477,6 +477,13 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
   const [id,   setId]   = useState("");
   const [name, setName] = useState("");
   const [kind, setKind] = useState("system");
+
+  // Close on Escape
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const create = useMutation({
     mutationFn: () => defaultApi.createPromptAsset({ prompt_asset_id: id.trim(), name: name.trim(), kind }),

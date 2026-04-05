@@ -3,6 +3,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Database,
+  Cpu,
+  Zap,
+  Activity,
 } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
@@ -10,6 +14,7 @@ import { StatCard } from "../components/StatCard";
 import { EventLog } from "../components/EventLog";
 import { defaultApi } from "../lib/api";
 import type { StatCardVariant } from "../components/StatCard";
+import type { HealthCheckEntry } from "../lib/types";
 
 // ── Section header ────────────────────────────────────────────────────────────
 
@@ -31,6 +36,155 @@ function Panel({ children, className }: { children: React.ReactNode; className?:
   );
 }
 
+// ── System health card ────────────────────────────────────────────────────────
+
+const STATUS_DOT: Record<string, string> = {
+  healthy:      "bg-emerald-500",
+  degraded:     "bg-amber-500 animate-pulse",
+  unhealthy:    "bg-red-500 animate-pulse",
+  unconfigured: "bg-zinc-600",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  healthy:      "Healthy",
+  degraded:     "Degraded",
+  unhealthy:    "Unhealthy",
+  unconfigured: "Not configured",
+};
+
+function CheckRow({
+  icon: Icon, label, check,
+}: {
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  label: string;
+  check: HealthCheckEntry;
+}) {
+  return (
+    <div className="flex items-center gap-3 py-2 border-b border-zinc-800/60 last:border-0">
+      <Icon size={13} className="text-zinc-600 shrink-0" />
+      <span className="text-[12px] text-zinc-400 flex-1">{label}</span>
+      <div className="flex items-center gap-2">
+        {check.models !== undefined && (
+          <span className="text-[10px] text-zinc-600 font-mono">{check.models} model{check.models !== 1 ? "s" : ""}</span>
+        )}
+        {check.latency_ms !== undefined && (
+          <span className="text-[10px] text-zinc-700 font-mono tabular-nums">{check.latency_ms}ms</span>
+        )}
+        <span className="flex items-center gap-1.5 text-[11px] font-medium">
+          <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", STATUS_DOT[check.status] ?? "bg-zinc-600")} />
+          <span className={clsx(
+            check.status === "healthy"      ? "text-emerald-400" :
+            check.status === "unconfigured" ? "text-zinc-600"    :
+            check.status === "degraded"     ? "text-amber-400"   : "text-red-400",
+          )}>
+            {STATUS_LABEL[check.status] ?? check.status}
+          </span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function UsageBar({ value, max, color }: { value: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+        <div className={clsx("h-full rounded-full transition-all", color)} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[10px] text-zinc-600 tabular-nums font-mono w-8 text-right shrink-0">
+        {pct.toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
+function SystemHealthCard() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["detailed-health"],
+    queryFn: () => defaultApi.getDetailedHealth(),
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  const fmtUptime = (secs: number) => {
+    if (secs < 60)    return `${secs}s`;
+    if (secs < 3600)  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    return `${h}h ${m}m`;
+  };
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between mb-3">
+        <SectionLabel>System Health</SectionLabel>
+        {data && (
+          <span className={clsx(
+            "inline-flex items-center gap-1.5 text-[10px] font-medium rounded px-1.5 py-0.5",
+            data.status === "healthy"
+              ? "bg-emerald-500/10 text-emerald-400"
+              : data.status === "degraded"
+              ? "bg-amber-500/10 text-amber-400"
+              : "bg-red-500/10 text-red-400",
+          )}>
+            <span className={clsx("w-1.5 h-1.5 rounded-full", STATUS_DOT[data.status])} />
+            {data.status}
+          </span>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2 animate-pulse">
+          {[1, 2, 3].map(i => <div key={i} className="h-8 rounded bg-zinc-800" />)}
+        </div>
+      ) : !data ? (
+        <p className="text-[12px] text-zinc-600 italic py-2">
+          Health endpoint unavailable — upgrade cairn-app to v0.1.1+
+        </p>
+      ) : (
+        <div className="space-y-0">
+          <CheckRow icon={Database} label="Store"  check={data.checks.store} />
+          <CheckRow icon={Zap}      label="Ollama" check={data.checks.ollama} />
+          <CheckRow icon={Activity} label="Events" check={data.checks.event_buffer} />
+
+          {/* Memory usage */}
+          {(data.checks.memory.rss_mb ?? 0) > 0 && (
+            <div className="pt-2 mt-1 border-t border-zinc-800/60 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Cpu size={13} className="text-zinc-600 shrink-0" />
+                <span className="text-[12px] text-zinc-400 flex-1">Memory (RSS)</span>
+                <span className="text-[11px] text-zinc-500 font-mono tabular-nums">
+                  {data.checks.memory.rss_mb} MB
+                </span>
+              </div>
+              <UsageBar
+                value={data.checks.memory.rss_mb ?? 0}
+                max={512}
+                color={
+                  (data.checks.memory.rss_mb ?? 0) > 400 ? "bg-red-500" :
+                  (data.checks.memory.rss_mb ?? 0) > 256 ? "bg-amber-500" :
+                  "bg-emerald-500"
+                }
+              />
+            </div>
+          )}
+
+          {/* Uptime + version footer */}
+          <div className="flex items-center justify-between pt-2 mt-1 border-t border-zinc-800/60">
+            <span className="text-[10px] text-zinc-700 font-mono">
+              v{data.version}
+            </span>
+            <span className="text-[10px] text-zinc-700 font-mono tabular-nums">
+              up {fmtUptime(data.uptime_seconds)}
+            </span>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 // ── Critical events ───────────────────────────────────────────────────────────
 
 function CriticalEvents({ events }: { events: string[] }) {
@@ -48,7 +202,7 @@ function CriticalEvents({ events }: { events: string[] }) {
       ) : (
         <ul className="space-y-1.5">
           {events.map((evt, i) => (
-            <li key={i} className="flex items-start gap-2 rounded bg-zinc-800/50 px-3 py-2">
+            <li key={`evt-${i}-${evt.slice(0, 20)}`} className="flex items-start gap-2 rounded bg-zinc-800/50 px-3 py-2">
               <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-500" />
               <span className="text-[13px] text-zinc-300 break-words">{evt}</span>
             </li>
@@ -186,8 +340,9 @@ export function DashboardPage() {
         </div>
 
         {/* Lower row */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <CriticalEvents events={data?.recent_critical_events ?? []} />
+          <SystemHealthCard />
           <Panel>
             <SectionLabel>Live event stream</SectionLabel>
             <EventLog

@@ -203,7 +203,7 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
           ) : runs.length === 0 ? (
             <p className="text-[13px] text-zinc-600 italic py-4">No runs in this session.</p>
           ) : (
-            <div className="rounded-lg border border-zinc-800 overflow-hidden">
+            <div className="rounded-lg border border-zinc-800 overflow-x-auto">
               <table className="min-w-full text-[13px]">
                 <thead className="bg-zinc-900">
                   <tr>

@@ -298,12 +298,14 @@ struct DashboardActivityItem {
     run_id: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, serde::Serialize)]
 struct PluginCapabilityStatusItem {
     capability: PluginCapability,
     verified: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, serde::Serialize)]
 struct PluginCapabilitiesResponse {
     plugin_id: String,
@@ -507,6 +509,7 @@ struct AppState {
     evals: Arc<ProductEvalRunService>,
     eval_baselines: Arc<EvalBaselineServiceImpl>,
     eval_datasets: Arc<EvalDatasetServiceImpl>,
+    #[allow(dead_code)]
     model_comparisons: Arc<ModelComparisonServiceImpl>,
     eval_rubrics: Arc<EvalRubricServiceImpl>,
     runtime_sse_tx: broadcast::Sender<SseFrame>,
@@ -732,6 +735,7 @@ impl TenantScope {
 }
 
 struct WorkspaceRoleGuard<const MIN_ROLE: u8>;
+#[allow(dead_code)]
 type MemberRoleGuard = WorkspaceRoleGuard<1>;
 type ReviewerRoleGuard = WorkspaceRoleGuard<2>;
 type AdminRoleGuard = WorkspaceRoleGuard<3>;
@@ -739,11 +743,13 @@ type AdminRoleGuard = WorkspaceRoleGuard<3>;
 #[derive(Clone, Debug)]
 struct ProjectScope<T> {
     tenant: TenantScope,
+    #[allow(dead_code)]
     project: ProjectKey,
     value: T,
 }
 
 impl<T> ProjectScope<T> {
+    #[allow(dead_code)]
     fn project(&self) -> &ProjectKey {
         &self.project
     }
@@ -761,11 +767,13 @@ impl<T> ProjectScope<T> {
 #[derive(Clone, Debug)]
 struct ProjectJson<T> {
     tenant: TenantScope,
+    #[allow(dead_code)]
     project: ProjectKey,
     value: T,
 }
 
 impl<T> ProjectJson<T> {
+    #[allow(dead_code)]
     fn project(&self) -> &ProjectKey {
         &self.project
     }
@@ -5082,7 +5090,6 @@ fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::ProviderPoolConnectionRemoved(_) => "provider_pool_connection_removed",
         RuntimeEvent::ResourceShared(_) => "resource_shared",
         RuntimeEvent::ResourceShareRevoked(_) => "resource_share_revoked",
-        RuntimeEvent::SnapshotCreated(_) => "snapshot_created",
         RuntimeEvent::RunSlaBreached(_) => "run_sla_breached",
         RuntimeEvent::UserMessageAppended(_) => "user_message_appended",
         RuntimeEvent::IngestJobStarted(_) => "ingest_job_started",
@@ -5133,38 +5140,13 @@ fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::RouteDecisionMade(_) => "route_decision_made",
         RuntimeEvent::ProviderCallCompleted(_) => "provider_call_completed",
         RuntimeEvent::ProviderModelRegistered(_) => "provider_model_registered",
-        RuntimeEvent::ProviderPoolCreated(_) => "provider_pool_created",
-        RuntimeEvent::ProviderPoolConnectionAdded(_) => "provider_pool_connection_added",
-        RuntimeEvent::ProviderPoolConnectionRemoved(_) => "provider_pool_connection_removed",
-        RuntimeEvent::ResourceShared(_) => "resource_shared",
-        RuntimeEvent::ResourceShareRevoked(_) => "resource_share_revoked",
-        RuntimeEvent::SnapshotCreated(_) => "snapshot_created",
         RuntimeEvent::RunCostAlertSet(_) => "run_cost_alert_set",
         RuntimeEvent::RunCostAlertTriggered(_) => "run_cost_alert_triggered",
-        RuntimeEvent::RunSlaSet(_) => "run_sla_set",
-        RuntimeEvent::EventLogCompacted(_) => "event_log_compacted",
-        RuntimeEvent::ProviderPoolCreated(_) => "provider_pool_created",
-        RuntimeEvent::ProviderPoolConnectionAdded(_) => "provider_pool_connection_added",
-        RuntimeEvent::ProviderPoolConnectionRemoved(_) => "provider_pool_connection_removed",
-        RuntimeEvent::ResourceShared(_) => "resource_shared",
-        RuntimeEvent::ResourceShareRevoked(_) => "resource_share_revoked",
-        RuntimeEvent::SnapshotCreated(_) => "snapshot_created",
-        RuntimeEvent::RunSlaBreached(_) => "run_sla_breached",
         RuntimeEvent::NotificationPreferenceSet(_) => "notification_preference_set",
         RuntimeEvent::NotificationSent(_) => "notification_sent",
         RuntimeEvent::PromptRolloutStarted(_) => "prompt_rollout_started",
         RuntimeEvent::TaskPriorityChanged(_) => "task_priority_changed",
         RuntimeEvent::TaskLeaseExpired(_) => "task_lease_expired",
-        RuntimeEvent::RecoveryEscalated(_) => "recovery_escalated",
-        RuntimeEvent::RunSlaSet(_) => "run_sla_set",
-        RuntimeEvent::EventLogCompacted(_) => "event_log_compacted",
-        RuntimeEvent::ProviderPoolCreated(_) => "provider_pool_created",
-        RuntimeEvent::ProviderPoolConnectionAdded(_) => "provider_pool_connection_added",
-        RuntimeEvent::ProviderPoolConnectionRemoved(_) => "provider_pool_connection_removed",
-        RuntimeEvent::ResourceShared(_) => "resource_shared",
-        RuntimeEvent::ResourceShareRevoked(_) => "resource_share_revoked",
-        RuntimeEvent::SnapshotCreated(_) => "snapshot_created",
-        RuntimeEvent::RunSlaBreached(_) => "run_sla_breached",
         RuntimeEvent::ProviderRetryPolicySet(_) => "provider_retry_policy_set",
         RuntimeEvent::SoulPatchProposed(_) => "soul_patch_proposed",
         RuntimeEvent::SoulPatchApplied(_) => "soul_patch_applied",
@@ -5524,9 +5506,6 @@ fn event_message(event: &RuntimeEvent) -> String {
         RuntimeEvent::ApprovalPolicyCreated(policy) => {
             format!("Approval policy {} created", policy.policy_id)
         }
-        RuntimeEvent::AuditLogEntryRecorded(entry) => {
-            format!("Audit log entry {} recorded", entry.entry_id)
-        }
         RuntimeEvent::RunCostAlertSet(e) => {
             format!("Run cost alert set for run {}", e.run_id)
         }
@@ -5566,12 +5545,10 @@ fn event_message(event: &RuntimeEvent) -> String {
                 e.percent)
         }
         RuntimeEvent::TaskPriorityChanged(_) | RuntimeEvent::TaskLeaseExpired(_) | RuntimeEvent::ProviderModelRegistered(_)
-            | RuntimeEvent::RecoveryEscalated(_)
             | RuntimeEvent::ProviderRetryPolicySet(_) | RuntimeEvent::NotificationPreferenceSet(_) | RuntimeEvent::NotificationSent(_)
             | RuntimeEvent::ProviderPoolCreated(_) | RuntimeEvent::ProviderPoolConnectionAdded(_) | RuntimeEvent::ProviderPoolConnectionRemoved(_)
             | RuntimeEvent::ResourceShared(_)
             | RuntimeEvent::ResourceShareRevoked(_)
-            | RuntimeEvent::SnapshotCreated(_)
             | RuntimeEvent::SoulPatchProposed(_)
             | RuntimeEvent::SoulPatchApplied(_)
             | RuntimeEvent::SpendAlertTriggered(_) => "unknown".to_string(),

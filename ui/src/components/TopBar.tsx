@@ -80,6 +80,7 @@ export function TopBar({ breadcrumbs, onMenuClick }: TopBarProps) {
         <button
           onClick={cycleTheme}
           title={THEME_NEXT_LABEL[theme]}
+          aria-label={THEME_NEXT_LABEL[theme]}
           className="p-1.5 rounded text-gray-400 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
         >
           <ThemeIcon size={14} />

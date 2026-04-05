@@ -251,8 +251,14 @@ function ShortcutsHelp({ onClose }: { onClose: () => void }) {
       className="fixed inset-0 z-50 flex items-center justify-center px-4"
       style={{ background: 'rgba(0,0,0,0.70)', backdropFilter: 'blur(3px)' }}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      aria-hidden="false"
     >
-      <div className="w-full max-w-md rounded-xl bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden">
+      <div
+        className="w-full max-w-md rounded-xl bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <div className="flex items-center gap-2">
@@ -261,6 +267,7 @@ function ShortcutsHelp({ onClose }: { onClose: () => void }) {
           </div>
           <button
             onClick={onClose}
+            aria-label="Close shortcuts"
             className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
           >
             <X size={14} />
@@ -472,7 +479,12 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
           style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(2px)' }}
           onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
         >
-          <div className="w-full max-w-lg rounded-xl bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden">
+          <div
+            className="w-full max-w-lg rounded-xl bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Command palette"
+          >
             {/* Search row */}
             <div className="flex items-center gap-3 px-3.5 py-3 border-b border-zinc-800">
               <Search size={15} className="shrink-0 text-zinc-500" />
@@ -482,11 +494,16 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
                 onChange={(e) => { setQuery(e.target.value); setActiveIdx(0); }}
                 onKeyDown={handleKeyDown}
                 placeholder="Go to page or run a command…"
+                aria-label="Command search"
+                aria-autocomplete="list"
+                aria-expanded={allOptions.length > 0}
+                role="combobox"
                 className="flex-1 bg-transparent text-[13px] text-zinc-100 placeholder-zinc-600 outline-none"
               />
               {query ? (
                 <button
                   onClick={() => { setQuery(''); setActiveIdx(0); inputRef.current?.focus(); }}
+                  aria-label="Clear search"
                   className="shrink-0 p-0.5 rounded text-zinc-600 hover:text-zinc-400 transition-colors"
                 >
                   <X size={13} />

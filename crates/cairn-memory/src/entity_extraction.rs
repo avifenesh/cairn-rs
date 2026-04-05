@@ -263,9 +263,9 @@ fn extract_capitalized_spans(tokens: &[Token]) -> Vec<Vec<String>> {
     for (i, token) in tokens.iter().enumerate() {
         if honorifics.contains(&token.text.as_str()) {
             let mut span = vec![token.text.clone()];
-            for j in (i + 1)..(i + 4).min(tokens.len()) {
-                if is_title_case(&tokens[j].text) && !is_stopword(&tokens[j].text) {
-                    span.push(tokens[j].text.clone());
+            for tok in &tokens[(i + 1)..(i + 4).min(tokens.len())] {
+                if is_title_case(&tok.text) && !is_stopword(&tok.text) {
+                    span.push(tok.text.clone());
                 } else {
                     break;
                 }
@@ -392,9 +392,9 @@ fn extract_locations(text: &str, tokens: &[Token]) -> Vec<String> {
         if SPATIAL_PREPOSITIONS.contains(&lower.as_str()) {
             // Capture up to 3 following Title Case tokens as a location phrase.
             let mut loc_tokens = Vec::new();
-            for j in (i + 1)..(i + 4).min(tokens.len()) {
-                if is_title_case(&tokens[j].text) {
-                    loc_tokens.push(tokens[j].text.clone());
+            for tok in &tokens[(i + 1)..(i + 4).min(tokens.len())] {
+                if is_title_case(&tok.text) {
+                    loc_tokens.push(tok.text.clone());
                 } else {
                     break;
                 }

@@ -333,8 +333,6 @@ impl PgSyncProjection {
             | RuntimeEvent::RetentionPolicySet(_)
             | RuntimeEvent::RunCostAlertSet(_)
             | RuntimeEvent::RunCostAlertTriggered(_)
-            | RuntimeEvent::WorkspaceMemberAdded(_)
-            | RuntimeEvent::WorkspaceMemberRemoved(_)
             | RuntimeEvent::ApprovalDelegated(_)
             | RuntimeEvent::AuditLogEntryRecorded(_)
             | RuntimeEvent::CheckpointStrategySet(_)

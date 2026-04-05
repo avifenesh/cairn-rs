@@ -182,7 +182,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
           ) : !tasks || tasks.length === 0 ? (
             <p className="text-[13px] text-zinc-600 py-4 text-center">No tasks for this run.</p>
           ) : (
-            <div className="rounded-lg border border-zinc-800 overflow-hidden">
+            <div className="rounded-lg border border-zinc-800 overflow-x-auto">
               <table className="min-w-full text-[13px]">
                 <thead className="bg-zinc-900">
                   <tr>

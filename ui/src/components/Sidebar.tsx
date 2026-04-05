@@ -126,10 +126,12 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
         <div
           className="fixed inset-0 z-40 bg-black/60 lg:hidden"
           onClick={onMobileClose}
+          aria-hidden="true"
         />
       )}
 
       <aside
+        aria-label="Main navigation"
         className={clsx(
           'flex flex-col h-screen',
           'bg-white dark:bg-zinc-950',

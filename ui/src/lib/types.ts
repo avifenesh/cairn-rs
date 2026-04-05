@@ -11,6 +11,33 @@ export interface HealthResponse {
   ok: boolean;
 }
 
+// ── Detailed health (GET /v1/health/detailed) ─────────────────────────────────
+
+export interface HealthCheckEntry {
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'unconfigured';
+  latency_ms?: number;
+  models?: number;
+  size?: number;
+  capacity?: number;
+  rss_mb?: number;
+  heap_mb?: number;
+}
+
+export interface DetailedHealthChecks {
+  store: HealthCheckEntry;
+  ollama: HealthCheckEntry;
+  event_buffer: HealthCheckEntry;
+  memory: HealthCheckEntry;
+}
+
+export interface DetailedHealth {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  checks: DetailedHealthChecks;
+  uptime_seconds: number;
+  version: string;
+  started_at: string;
+}
+
 // ── System status ─────────────────────────────────────────────────────────────
 
 /** GET /v1/status */

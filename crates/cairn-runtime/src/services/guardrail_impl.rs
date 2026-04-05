@@ -119,7 +119,6 @@ where
                     decision: match rule.effect {
                         GuardrailRuleEffect::Allow => GuardrailDecisionKind::Allowed,
                         GuardrailRuleEffect::Deny | GuardrailRuleEffect::Block | GuardrailRuleEffect::Redact | GuardrailRuleEffect::Log | GuardrailRuleEffect::Alert => GuardrailDecisionKind::Denied,
-                        _ => GuardrailDecisionKind::Warned,
                     },
                     policy_id: Some(policy.policy_id.clone()),
                     reason: Some(format!(
@@ -127,7 +126,6 @@ where
                         match rule.effect {
                             GuardrailRuleEffect::Allow => "allow",
                             GuardrailRuleEffect::Deny | GuardrailRuleEffect::Block | GuardrailRuleEffect::Redact | GuardrailRuleEffect::Log | GuardrailRuleEffect::Alert => "deny",
-                            _ => "warn",
                         },
                         action
                     )),

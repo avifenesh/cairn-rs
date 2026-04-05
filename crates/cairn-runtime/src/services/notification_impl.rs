@@ -27,31 +27,8 @@ fn now_millis() -> u64 {
         .as_millis() as u64
 }
 
-/// Attempt an HTTP POST to a webhook URL. Returns Ok(()) on 2xx, Err with message otherwise.
-#[cfg(feature = "webhook")]
-async fn post_webhook(
-    url: &str,
-    body: &serde_json::Value,
-) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .post(url)
-        .json(body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if resp.status().is_success() {
-        Ok(())
-    } else {
-        Err(format!("HTTP {}", resp.status()))
-    }
-}
-
-/// Fallback when reqwest feature is not enabled.
-#[cfg(not(feature = "webhook"))]
+/// Attempt an HTTP POST to a webhook URL.
+/// The webhook feature is not enabled; returns an error indicating this.
 async fn post_webhook(
     _url: &str,
     _body: &serde_json::Value,

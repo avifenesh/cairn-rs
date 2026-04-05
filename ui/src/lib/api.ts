@@ -106,6 +106,9 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/status — runtime + store health with uptime. */
     getStatus: (): Promise<SystemStatus> => get("/v1/status"),
 
+    /** GET /v1/health/detailed — per-subsystem health with latency, memory, Ollama info. */
+    getDetailedHealth: (): Promise<import("./types").DetailedHealth> => get("/v1/health/detailed"),
+
     // ── Overview ─────────────────────────────────────────────────────────────
 
     /** GET /v1/overview — combined deployment info and health. */

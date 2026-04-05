@@ -235,6 +235,7 @@ impl WorktreeService for WorktreeServiceImpl {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+#[cfg(test)]
 fn make_record(
     id: &str,
     task_id: &str,
