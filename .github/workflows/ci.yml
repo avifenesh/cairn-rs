@@ -8,86 +8,128 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Prevent sqlx from trying to connect to a database at compile time.
-  SQLX_OFFLINE: "true"
+  SQLX_OFFLINE: "true"   # never probe a live DB at compile time
+
+# Cancel in-flight runs for the same branch when a new push arrives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  ci:
-    name: Check / Lint / Test / Build
+  # ── Shared cache priming ─────────────────────────────────────────────────────
+  # All Rust jobs depend on the same registry + build caches; they restore
+  # from the keys written here on the first run of each lock-file revision.
+
+  # ── 1. Format ────────────────────────────────────────────────────────────────
+  fmt:
+    name: fmt
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # Install the exact toolchain declared in rust-toolchain.toml (stable).
-      # dtolnay/rust-toolchain reads rust-toolchain.toml automatically.
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
 
-      # Cache both the cargo registry (downloaded crates) and the compiled
-      # target artefacts so incremental builds are fast on subsequent runs.
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+  # ── 2. Check ─────────────────────────────────────────────────────────────────
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry-
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: cargo check --workspace
+        run: cargo check --workspace
 
-      - name: Cache cargo build artefacts
-        uses: actions/cache@v4
+  # ── 3. Clippy ────────────────────────────────────────────────────────────────
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          path: target
-          key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}-
-            ${{ runner.os }}-cargo-target-
-
-      # Format ----------------------------------------------------------------
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      # Lint: lib crates with hard-error warnings --------------------------------
-      # cairn-app is excluded: it accumulates in-progress handler warnings that
-      # are tracked separately and do not indicate correctness problems.
-      - name: Clippy (lib crates, deny warnings)
+          components: clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      # Library crates: hard-fail on every warning.
+      - name: clippy (lib crates, -D warnings)
         run: >
           cargo clippy
           --workspace --exclude cairn-app
           --all-targets
           -- -D warnings
+      # Application crate: warn-only; in-progress stubs are expected.
+      # Allow the three categories that routinely appear during development.
+      - name: clippy (cairn-app)
+        run: >
+          cargo clippy -p cairn-app --all-targets
+          -- -A dead_code -A unused_variables -A unused_imports
 
-      # Lint: cairn-app (allow warnings) ----------------------------------------
-      # Run clippy on the app crate without denying warnings so the step passes
-      # while in-progress handler stubs are still being wired up.
-      - name: Clippy (cairn-app, warn only)
-        run: cargo clippy -p cairn-app --all-targets
-        continue-on-error: true
-
-      # Library tests -----------------------------------------------------------
-      # Excludes cairn-app lib to avoid in-progress handler compile noise;
-      # integration tests for cairn-app are run separately below.
-      - name: Library tests (workspace, exclude cairn-app)
-        run: cargo test --workspace --exclude cairn-app --lib
-
-      # Full workspace build ----------------------------------------------------
-      # Ensures the entire workspace (including cairn-app) compiles cleanly.
-      - name: Build workspace
-        run: cargo build --workspace
-
-      # Integration tests -------------------------------------------------------
-      # Run all non-app integration tests (store, runtime, memory, evals, api).
-      - name: Integration tests (workspace, exclude cairn-app)
+  # ── 4. Test ──────────────────────────────────────────────────────────────────
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      # Unit tests (all crates)
+      - name: cargo test --lib
+        run: cargo test --workspace --lib
+        timeout-minutes: 8
+      # Integration tests (exclude cairn-app — needs full HTTP server scaffold)
+      - name: cargo test --tests (non-app)
         run: cargo test --workspace --exclude cairn-app --tests
-
-      # Bootstrap server integration tests -------------------------------------
-      # 51/51 bootstrap_server tests must pass: these are the end-to-end HTTP
-      # surface tests that validate the full routing, handler, and service stack.
-      - name: Bootstrap server tests (51/51)
+        timeout-minutes: 8
+      # Bootstrap server tests (51/51 HTTP surface gate)
+      - name: bootstrap server tests
         run: cargo test -p cairn-app --test bootstrap_server
+        timeout-minutes: 6
+
+  # ── 5. UI build ──────────────────────────────────────────────────────────────
+  ui-build:
+    name: ui-build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: tsc --noEmit
+        run: npx tsc --noEmit
+      - name: npm run build
+        run: npm run build

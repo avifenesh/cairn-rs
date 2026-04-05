@@ -1,27 +1,50 @@
-# cairn-rs production Dockerfile
+# cairn-rs — multi-stage production build
 #
-# Multi-stage build:
-#   builder — compiles the full Rust workspace in release mode
-#   runtime — minimal Debian image with only the binary
+# Stages:
+#   ui-builder  — Node 22 slim: npm ci && npm run build
+#   builder     — Rust 1.82 slim: cargo build --release (embeds ui/dist via rust-embed)
+#   runtime     — Debian bookworm-slim: minimal image with only the final binary
 #
 # Usage:
 #   docker build -t cairn-rs .
-#   docker run -p 3000:3000 cairn-rs
+#   docker run -p 3000:3000 -e CAIRN_ADMIN_TOKEN=secret cairn-rs
 #
-# With a persistent SQLite store:
-#   docker run -p 3000:3000 -e CAIRN_DB=sqlite -v /data:/data cairn-rs
+# With SQLite persistence:
+#   docker run -p 3000:3000 -v /data:/data cairn-rs --db /data/cairn.db
 #
-# Team mode (requires auth token):
-#   docker run -p 3000:3000 -e CAIRN_ADMIN_TOKEN=<token> -e CAIRN_MODE=team cairn-rs
+# With Ollama:
+#   docker run -p 3000:3000 -e OLLAMA_HOST=http://host.docker.internal:11434 cairn-rs
 
-# ── Stage 1: builder ──────────────────────────────────────────────────────────
-FROM rust:1.82-bookworm AS builder
+# ── Stage 0: UI builder ───────────────────────────────────────────────────────
+FROM node:22-slim AS ui-builder
+
+WORKDIR /ui
+
+# Install dependencies — separate layer so it's cached when only sources change.
+COPY ui/package.json ui/package-lock.json* ./
+RUN npm ci --prefer-offline
+
+# Build the SPA.
+COPY ui/ ./
+RUN npm run build
+
+# ── Stage 1: Rust builder ─────────────────────────────────────────────────────
+FROM rust:1.82-slim AS builder
+
+# Build dependencies needed by sqlx, openssl-sys, and rustls.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        pkg-config \
+        libssl-dev \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
-# Cache dependency compilation separately from source changes.
-# Copy manifests first so the cargo fetch/build layer is reused when only
-# src files change.
+# ── Dependency cache layer ────────────────────────────────────────────────────
+# Copy workspace manifests first.  Cargo stubs each crate's entry-point so
+# the dependency graph can be resolved and pre-compiled without the real source.
+# This layer is reused on source-only changes.
 COPY Cargo.toml Cargo.lock ./
 COPY crates/cairn-domain/Cargo.toml       crates/cairn-domain/Cargo.toml
 COPY crates/cairn-store/Cargo.toml        crates/cairn-store/Cargo.toml
@@ -37,9 +60,7 @@ COPY crates/cairn-api/Cargo.toml          crates/cairn-api/Cargo.toml
 COPY crates/cairn-plugin-proto/Cargo.toml crates/cairn-plugin-proto/Cargo.toml
 COPY crates/cairn-app/Cargo.toml          crates/cairn-app/Cargo.toml
 
-# Stub all lib/main entry-points so cargo can resolve and fetch deps without
-# needing the full source tree. Each stub is replaced when the real src is
-# copied below.
+# Stub all crate entry-points so cargo can resolve and fetch deps.
 RUN for d in cairn-domain cairn-store cairn-runtime cairn-tools cairn-memory \
              cairn-graph cairn-agent cairn-evals cairn-signal cairn-channels \
              cairn-api cairn-plugin-proto; do \
@@ -48,15 +69,20 @@ RUN for d in cairn-domain cairn-store cairn-runtime cairn-tools cairn-memory \
     mkdir -p crates/cairn-app/src && \
     echo "fn main() {}" > crates/cairn-app/src/main.rs
 
-# Pre-fetch and compile all dependencies (cached layer).
-# SQLX_OFFLINE=true avoids database connectivity at build time.
+# Stub ui/dist so rust-embed doesn't abort the deps build.
+RUN mkdir -p ui/dist && touch ui/dist/.keep
+
+# Pre-compile dependencies (failures are expected due to stubs — suppressed).
 ENV SQLX_OFFLINE=true
 RUN cargo build --release --bin cairn-app 2>/dev/null || true
 
-# Now copy the real sources and rebuild. Only changed crates are recompiled.
+# ── Real source build ─────────────────────────────────────────────────────────
 COPY crates/ crates/
 
-# Touch main.rs so Cargo sees the binary source changed.
+# Inject the production UI assets so rust-embed bakes them into the binary.
+COPY --from=ui-builder /ui/dist /build/ui/dist
+
+# Touch binary crate source so Cargo knows it changed.
 RUN touch crates/cairn-app/src/main.rs
 
 RUN cargo build --release --bin cairn-app
@@ -66,58 +92,51 @@ FROM debian:bookworm-slim AS runtime
 
 LABEL org.opencontainers.image.title="Cairn" \
       org.opencontainers.image.description="Self-hostable control plane for production AI agents" \
-      org.opencontainers.image.source="https://github.com/avifenesh/cairn-rs"
+      org.opencontainers.image.source="https://github.com/avifenesh/cairn-rs" \
+      org.opencontainers.image.version="0.1.0" \
+      maintainer="Avi Fenesh <avifenesh@users.noreply.github.com>"
 
-# Install runtime dependencies:
-#   ca-certificates — TLS outbound calls to LLM providers
-#   libssl3         — rustls/openssl-sys runtime requirement
+# Runtime dependencies:
+#   ca-certificates — TLS for outbound LLM provider calls
 #   curl            — HEALTHCHECK probe
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
-        libssl3 \
         curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Non-root user for defence in depth.
+# Non-root user for defence-in-depth.
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin cairn
 
 WORKDIR /app
 
-# Copy only the release binary — no debug artifacts, no build cache.
 COPY --from=builder /build/target/release/cairn-app /app/cairn-app
 
 USER cairn
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── Environment defaults ──────────────────────────────────────────────────────
 
-# CAIRN_PORT        — HTTP listen port.
+# HTTP bind address and port.
+ENV CAIRN_ADDR=0.0.0.0
 ENV CAIRN_PORT=3000
 
-# CAIRN_ADDR        — Bind address. 0.0.0.0 binds all interfaces (Docker default).
-ENV CAIRN_ADDR=0.0.0.0
-
-# CAIRN_MODE        — Startup mode: "local" (no auth) or "team" (requires CAIRN_ADMIN_TOKEN).
+# Deployment mode: "local" (no auth) or "team" (requires CAIRN_ADMIN_TOKEN).
 ENV CAIRN_MODE=local
 
-# CAIRN_ADMIN_TOKEN — Bearer token for the admin account. Required in team mode.
+# Admin bearer token — always override in production.
 ENV CAIRN_ADMIN_TOKEN=dev-admin-token
 
-# CAIRN_DB          — Storage backend: "memory" (default) or path to SQLite file.
-ENV CAIRN_DB=memory
+# Ollama base URL — override to connect to a local or remote Ollama instance.
+ENV OLLAMA_HOST=
 
 EXPOSE 3000
 
-# Health check against the liveness endpoint.
-# --start-period gives the process time to initialise before failures count.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS "http://localhost:${CAIRN_PORT}/health" || exit 1
 
-# Shell-form ENTRYPOINT so ENV vars expand into the command.
-# Users can append flags via CMD: docker run cairn-rs --mode team --port 8080
+# Shell ENTRYPOINT so ENV vars expand; extra args are forwarded from CMD.
 ENTRYPOINT ["/bin/sh", "-c", \
     "exec /app/cairn-app --addr \"$CAIRN_ADDR\" --port \"$CAIRN_PORT\" --mode \"$CAIRN_MODE\" \"$@\"", \
     "--"]
 
-# Default CMD: empty (all defaults come from ENV above).
 CMD []
