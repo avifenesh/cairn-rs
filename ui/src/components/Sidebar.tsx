@@ -1,4 +1,5 @@
 import {
+  Bell,
   Coins,
   Database,
   FileText,
@@ -40,6 +41,7 @@ export type NavPage =
   | 'providers'
   | 'plugins'
   | 'credentials'
+  | 'channels'
   | 'playground'
   | 'audit-log'
   | 'evals'
@@ -95,6 +97,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'providers',   label: 'Providers',   icon: Zap      },
       { id: 'plugins',     label: 'Plugins',     icon: Puzzle   },
       { id: 'credentials', label: 'Credentials', icon: KeyRound },
+      { id: 'channels',     label: 'Channels',     icon: Bell     },
       { id: 'playground',  label: 'Playground',  icon: Terminal },
       { id: 'api-docs',    label: 'API Docs',    icon: BookOpen },
       { id: 'settings',    label: 'Settings',    icon: Settings },
