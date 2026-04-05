@@ -17,6 +17,7 @@ const SessionDetailPage  = lazy(() => import('./pages/SessionDetailPage').then(m
 const EvalComparisonPage = lazy(() => import('./pages/EvalComparisonPage').then(m => ({ default: m.EvalComparisonPage })));
 const PlaygroundPage     = lazy(() => import('./pages/PlaygroundPage').then(m => ({ default: m.PlaygroundPage })));
 const WorkersPage        = lazy(() => import('./pages/WorkersPage').then(m => ({ default: m.WorkersPage })));
+const MetricsPage        = lazy(() => import('./pages/MetricsPage').then(m => ({ default: m.MetricsPage })));
 const OrchestrationPage  = lazy(() => import('./pages/OrchestrationPage').then(m => ({ default: m.OrchestrationPage })));
 const DeploymentPage     = lazy(() => import('./pages/DeploymentPage').then(m => ({ default: m.DeploymentPage })));
 const ApiDocsPage        = lazy(() => import('./pages/ApiDocsPage').then(m => ({ default: m.ApiDocsPage })));
@@ -120,6 +121,7 @@ function renderRoute(route: Route): React.ReactNode {
       case 'credentials': return <CredentialsPage />;
       case 'channels':    return <ChannelsPage />;
       case 'logs':        return <LogsPage />;
+      case 'metrics':     return <MetricsPage />;
       case 'graph':       return <GraphPage />;
       case 'api-docs':    return <ApiDocsPage />;
       case 'audit-log':   return <AuditLogPage />;

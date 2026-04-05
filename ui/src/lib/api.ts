@@ -282,6 +282,20 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/costs — aggregate token and cost totals. */
     getCosts: (): Promise<CostSummary> => get("/v1/costs"),
 
+    // ── API metrics ──────────────────────────────────────────────────────────
+
+    /** GET /v1/metrics — rolling request metrics from the tracing middleware. */
+    getMetrics: (): Promise<{
+      total_requests:   number;
+      requests_by_path: Record<string, number>;
+      avg_latency_ms:   number;
+      p50_latency_ms:   number;
+      p95_latency_ms:   number;
+      p99_latency_ms:   number;
+      error_rate:       number;
+      errors_by_status: Record<string, number>;
+    }> => get("/v1/metrics"),
+
     // ── Settings ─────────────────────────────────────────────────────────────
 
     /** GET /v1/settings — deployment configuration. */

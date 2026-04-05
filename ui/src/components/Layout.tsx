@@ -4,13 +4,14 @@ import { clsx } from 'clsx';
 import { Sidebar, type NavPage } from './Sidebar';
 import { TopBar } from './TopBar';
 import { CommandPalette } from './CommandPalette';
+import { ConnectionStatus } from './ConnectionStatus';
 import { type BreadcrumbItem } from './Breadcrumb';
 
 // All top-level pages — must match NavPage union in Sidebar.tsx
 const VALID_PAGES: NavPage[] = [
   'dashboard',
   'sessions', 'runs', 'tasks', 'workers', 'orchestration', 'approvals', 'prompts',
-  'traces', 'memory', 'sources', 'costs', 'cost-calc', 'evals', 'graph', 'audit-log', 'logs',
+  'traces', 'memory', 'sources', 'costs', 'cost-calc', 'evals', 'graph', 'audit-log', 'logs', 'metrics',
   'providers', 'plugins', 'credentials', 'channels', 'deployment', 'playground', 'api-docs', 'settings', 'profile',
 ];
 
@@ -65,6 +66,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   graph:       'Knowledge Graph',
   'audit-log': 'Audit Log',
   logs:        'Request Logs',
+  metrics:     'API Metrics',
   'api-docs':  'API Reference',
   providers:   'Providers',
   plugins:     'Plugins',
@@ -93,6 +95,7 @@ const PAGE_GROUP: Partial<Record<NavPage, string>> = {
   graph:       'Observability',
   'audit-log': 'Observability',
   logs:        'Observability',
+  metrics:     'Observability',
   providers:   'Infrastructure',
   plugins:      'Infrastructure',
   credentials:  'Infrastructure',
@@ -266,6 +269,7 @@ export function Layout({ children, routeRenderer, onLogout }: LayoutProps) {
       </div>
 
       <CommandPalette onNavigate={navigate} />
+      <ConnectionStatus />
     </div>
   );
 }

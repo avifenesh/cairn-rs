@@ -351,21 +351,23 @@ function AboutSection() {
 // ── Changelog ─────────────────────────────────────────────────────────────────
 
 function ChangelogSection() {
-  const { data: entries = [], isLoading } = useQuery<ChangelogEntry[]>({
+  const { data: entries, isLoading } = useQuery({
     queryKey: ['changelog'],
-    queryFn:  () => defaultApi.getChangelog(),
+    queryFn:  (): Promise<ChangelogEntry[]> => defaultApi.getChangelog(),
     staleTime: Infinity,
   });
+
+  const list = entries ?? [];
 
   return (
     <SectionCard title="Changelog" icon={ListOrdered}>
       {isLoading ? (
         <p className="text-[12px] text-zinc-600">Loading…</p>
-      ) : entries.length === 0 ? (
+      ) : list.length === 0 ? (
         <p className="text-[12px] text-zinc-600">No changelog entries.</p>
       ) : (
         <div className="space-y-5">
-          {entries.map((entry) => (
+          {list.map((entry: ChangelogEntry) => (
             <div key={entry.version}>
               <div className="flex items-baseline gap-3 mb-2">
                 <span className="text-[13px] font-semibold text-zinc-100 font-mono">
@@ -374,7 +376,7 @@ function ChangelogSection() {
                 <span className="text-[11px] text-zinc-600">{entry.date}</span>
               </div>
               <ul className="space-y-1">
-                {entry.changes.map((change, i) => (
+                {entry.changes.map((change: string, i: number) => (
                   <li key={i} className="flex items-start gap-2 text-[12px] text-zinc-400">
                     <span className="mt-1.5 h-1 w-1 rounded-full bg-zinc-600 shrink-0" />
                     {change}

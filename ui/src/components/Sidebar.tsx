@@ -22,6 +22,7 @@ import {
   Shield,
   Terminal,
   User,
+  BarChart2,
   Waves,
   Zap,
   CheckSquare,
@@ -53,6 +54,7 @@ export type NavPage =
   | 'playground'
   | 'audit-log'
   | 'logs'
+  | 'metrics'
   | 'evals'
   | 'api-docs'
   | 'settings'
@@ -103,6 +105,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'graph',     label: 'Graph',     icon: Network       },
       { id: 'audit-log', label: 'Audit Log', icon: Shield        },
       { id: 'logs',      label: 'Logs',      icon: ScrollText    },
+      { id: 'metrics',   label: 'Metrics',   icon: BarChart2     },
     ],
   },
   {
