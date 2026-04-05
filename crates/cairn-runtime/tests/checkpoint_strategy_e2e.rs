@@ -56,6 +56,9 @@ async fn set_strategy_and_verify_retrievable() {
                 description: "Checkpoint every 30s, retain up to 5".to_owned(),
                 set_at_ms: 1_700_000_000_000,
                 run_id: Some(run()),
+                interval_ms: 30_000,
+                max_checkpoints: 5,
+                trigger_on_task_complete: false,
             }),
         )])
         .await
@@ -184,6 +187,9 @@ async fn strategy_update_replaces_previous() {
                 description: "Initial strategy".to_owned(),
                 set_at_ms: 1_700_000_000_000,
                 run_id: Some(run2.clone()),
+                interval_ms: 0,
+                max_checkpoints: 10,
+                trigger_on_task_complete: false,
             }),
         )])
         .await
@@ -205,6 +211,9 @@ async fn strategy_update_replaces_previous() {
                 description: "Updated: 5 max checkpoints".to_owned(),
                 set_at_ms: 1_700_000_001_000,
                 run_id: Some(run2.clone()),
+                interval_ms: 0,
+                max_checkpoints: 10,
+                trigger_on_task_complete: false,
             }),
         )])
         .await
