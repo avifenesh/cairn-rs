@@ -39,10 +39,10 @@ function RequirementBadge({ requirement }: { requirement: string }) {
   return (
     <span
       className={clsx(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1",
+        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border",
         isRequired
-          ? "bg-violet-950 text-violet-300 ring-violet-800"
-          : "bg-zinc-800 text-zinc-400 ring-zinc-700"
+          ? "bg-violet-500/10 text-violet-400 border-violet-500/20"
+          : "bg-zinc-800 text-zinc-500 border-zinc-700"
       )}
     >
       {isRequired ? (
@@ -88,7 +88,7 @@ interface PendingCardProps {
 
 function PendingCard({ approval, onApprove, onReject, isPending }: PendingCardProps) {
   return (
-    <div className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-5 flex flex-col gap-4 transition-all hover:ring-violet-800/50 hover:shadow-lg hover:shadow-black/30">
+    <div className="rounded-lg bg-zinc-900 border border-zinc-800 p-4 flex flex-col gap-3 transition-colors hover:border-zinc-700">
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -105,14 +105,14 @@ function PendingCard({ approval, onApprove, onReject, isPending }: PendingCardPr
         </div>
 
         {/* Pending indicator */}
-        <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-amber-950 px-2.5 py-1 text-xs font-semibold text-amber-300 ring-1 ring-amber-800">
+        <span className="shrink-0 inline-flex items-center gap-1.5 rounded bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400 border border-amber-500/20">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
           Pending
         </span>
       </div>
 
       {/* Detail fields */}
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
         {approval.run_id && (
           <>
             <dt className="text-zinc-500">Run</dt>
@@ -137,9 +137,9 @@ function PendingCard({ approval, onApprove, onReject, isPending }: PendingCardPr
           onClick={() => onApprove(approval.approval_id)}
           disabled={isPending}
           className={clsx(
-            "flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold",
-            "bg-emerald-900/60 text-emerald-300 ring-1 ring-emerald-800",
-            "hover:bg-emerald-800/60 hover:ring-emerald-700 transition-all",
+            "flex-1 flex items-center justify-center gap-1.5 rounded-md px-3 h-8 text-xs font-medium",
+            "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+            "hover:bg-emerald-500/20 transition-colors",
             "disabled:opacity-40 disabled:cursor-not-allowed"
           )}
         >
@@ -154,9 +154,9 @@ function PendingCard({ approval, onApprove, onReject, isPending }: PendingCardPr
           onClick={() => onReject(approval.approval_id)}
           disabled={isPending}
           className={clsx(
-            "flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold",
-            "bg-red-950/60 text-red-400 ring-1 ring-red-900",
-            "hover:bg-red-900/60 hover:ring-red-800 transition-all",
+            "flex-1 flex items-center justify-center gap-1.5 rounded-md px-3 h-8 text-xs font-medium",
+            "bg-red-500/10 text-red-400 border border-red-500/20",
+            "hover:bg-red-500/20 transition-colors",
             "disabled:opacity-40 disabled:cursor-not-allowed"
           )}
         >
@@ -176,7 +176,7 @@ function PendingCard({ approval, onApprove, onReject, isPending }: PendingCardPr
 
 function ResolvedCard({ approval }: { approval: ApprovalRecord }) {
   return (
-    <div className="rounded-xl bg-zinc-900/60 ring-1 ring-zinc-800/60 p-4 flex items-center justify-between gap-4 opacity-70">
+    <div className="rounded-lg bg-zinc-950 border border-zinc-800/60 px-4 h-10 flex items-center justify-between gap-4 opacity-60">
       <div className="min-w-0 flex items-center gap-3">
         <span className="font-mono text-sm text-zinc-400 truncate">
           {shortId(approval.approval_id)}
@@ -259,7 +259,7 @@ export function ApprovalsPage() {
         </p>
         <button
           onClick={() => refetch()}
-          className="mt-2 flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
+          className="mt-2 flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:bg-white/5 transition-colors"
         >
           <RefreshCw size={13} /> Retry
         </button>
@@ -268,18 +268,10 @@ export function ApprovalsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-50 p-6 space-y-8">
+    <div className="p-6 space-y-6">
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-100 flex items-center gap-2">
-            <CheckCircle2 size={20} className="text-violet-400" />
-            Approvals
-          </h1>
-          <p className="text-xs text-zinc-500 mt-0.5">
-            Review and act on pending operator approvals
-          </p>
-        </div>
+        <h1 className="text-sm font-medium text-zinc-200">Approvals</h1>
         <div className="flex items-center gap-3">
           {pending.length > 0 && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-950 px-2.5 py-1 text-xs font-semibold text-amber-300 ring-1 ring-amber-800">
@@ -289,7 +281,7 @@ export function ApprovalsPage() {
           )}
           <button
             onClick={() => refetch()}
-            className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 hover:text-zinc-300 transition-colors"
           >
             <RefreshCw size={12} /> Refresh
           </button>
@@ -298,7 +290,7 @@ export function ApprovalsPage() {
 
       {/* ── Pending approvals ───────────────────────────────────────────── */}
       <section>
-        <h2 className="text-sm font-semibold text-zinc-400 mb-3 uppercase tracking-wider">
+        <h2 className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-3">
           Pending ({pending.length})
         </h2>
 
@@ -308,7 +300,7 @@ export function ApprovalsPage() {
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-5 animate-pulse"
+                className="rounded-lg bg-zinc-900 border border-zinc-800 p-4 animate-pulse"
               >
                 <div className="flex justify-between mb-4">
                   <div className="h-4 w-32 rounded bg-zinc-700" />
@@ -326,7 +318,7 @@ export function ApprovalsPage() {
             ))}
           </div>
         ) : pending.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center rounded-xl bg-zinc-900/50 ring-1 ring-zinc-800/50">
+          <div className="flex flex-col items-center justify-center py-16 text-center rounded-lg border border-zinc-800">
             <Inbox size={36} className="text-zinc-700 mb-3" />
             <p className="text-zinc-400 font-medium">Inbox clear</p>
             <p className="text-sm text-zinc-600 mt-1">
@@ -353,7 +345,7 @@ export function ApprovalsPage() {
       {/* ── Resolved approvals ──────────────────────────────────────────── */}
       {resolvedWithDecision.length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-zinc-500 mb-3 uppercase tracking-wider">
+          <h2 className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-3">
             Resolved ({resolvedWithDecision.length})
           </h2>
           <div className="space-y-2">

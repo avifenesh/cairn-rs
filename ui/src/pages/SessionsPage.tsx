@@ -40,7 +40,7 @@ const SESSION_BADGE: Record<SessionState, string> = {
 function SessionStateBadge({ state }: { state: SessionState }) {
   return (
     <span className={clsx(
-      'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap',
+      'inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap',
       SESSION_BADGE[state] ?? SESSION_BADGE.open,
     )}>
       <span className={clsx(
@@ -69,7 +69,7 @@ function RunsSubTable({ sessionId }: { sessionId: string }) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 px-6 py-3 text-xs text-zinc-500">
+      <div className="flex items-center gap-2 px-6 py-2 text-xs text-zinc-500">
         <Loader2 size={12} className="animate-spin" />
         Loading runs…
       </div>
@@ -78,13 +78,13 @@ function RunsSubTable({ sessionId }: { sessionId: string }) {
 
   if (isError) {
     return (
-      <p className="px-6 py-3 text-xs text-red-400">Failed to load runs.</p>
+      <p className="px-6 py-2 text-xs text-red-400">Failed to load runs.</p>
     );
   }
 
   if (runs.length === 0) {
     return (
-      <p className="px-6 py-3 text-xs text-zinc-600 italic">
+      <p className="px-6 py-2 text-xs text-zinc-600 italic">
         No runs for this session.
       </p>
     );
@@ -139,11 +139,11 @@ function SessionRow({ session, runCount, expanded, onToggle }: SessionRowProps) 
         onClick={onToggle}
         className={clsx(
           'cursor-pointer border-b border-zinc-800 transition-colors select-none',
-          expanded ? 'bg-zinc-900' : 'hover:bg-zinc-900/60',
+          expanded ? 'bg-white/5' : 'hover:bg-white/5',
         )}
       >
         {/* Expand toggle */}
-        <td className="pl-4 pr-2 py-3 w-8">
+        <td className="pl-4 pr-2 py-2 w-8">
           {expanded
             ? <ChevronDown  size={14} className="text-zinc-400" />
             : <ChevronRight size={14} className="text-zinc-500" />
@@ -151,12 +151,12 @@ function SessionRow({ session, runCount, expanded, onToggle }: SessionRowProps) 
         </td>
 
         {/* Session ID */}
-        <td className="px-3 py-3 font-mono text-sm text-zinc-200">
+        <td className="px-3 py-2 font-mono text-sm text-zinc-200">
           {truncate(session.session_id, 20)}
         </td>
 
         {/* Project */}
-        <td className="px-3 py-3 text-sm text-zinc-400 font-mono">
+        <td className="px-3 py-2 text-sm text-zinc-400 font-mono">
           <span title={`${session.project.tenant_id}/${session.project.workspace_id}/${session.project.project_id}`}>
             {truncate(session.project.project_id, 16)}
           </span>
@@ -168,9 +168,9 @@ function SessionRow({ session, runCount, expanded, onToggle }: SessionRowProps) 
         </td>
 
         {/* Run count */}
-        <td className="px-3 py-3 text-center">
+        <td className="px-3 py-2 text-center">
           {runCount > 0 ? (
-            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-zinc-800 text-zinc-300 text-xs font-medium">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-zinc-800 text-zinc-400 text-[10px] font-medium">
               {runCount}
             </span>
           ) : (
@@ -179,7 +179,7 @@ function SessionRow({ session, runCount, expanded, onToggle }: SessionRowProps) 
         </td>
 
         {/* Created At */}
-        <td className="px-3 py-3 text-sm text-zinc-500">
+        <td className="px-3 py-2 text-sm text-zinc-500">
           {formatTs(session.created_at)}
         </td>
       </tr>
@@ -278,10 +278,10 @@ export function SessionsPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl ring-1 ring-zinc-800 overflow-hidden">
+      <div className="rounded-lg border border-zinc-800 overflow-hidden">
         <table className="w-full">
           <thead className="bg-zinc-900 border-b border-zinc-800">
-            <tr className="text-xs font-medium text-zinc-500">
+            <tr className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
               <th className="pl-4 pr-2 py-2.5 w-8" />
               <th className="px-3 py-2.5 text-left">Session ID</th>
               <th className="px-3 py-2.5 text-left">Project</th>

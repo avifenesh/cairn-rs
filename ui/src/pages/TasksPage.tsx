@@ -102,7 +102,7 @@ function DetailPanel({ task, onClose, onClaim, onRelease, claiming, releasing }:
         </button>
       </div>
 
-      <div className="flex-1 p-5 space-y-5">
+      <div className="flex-1 p-4 space-y-5">
         {/* State */}
         <div>
           <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1.5">State</p>
@@ -317,7 +317,7 @@ function SkeletonRows() {
   return (
     <div className="divide-y divide-zinc-800/60">
       {Array.from({ length: 10 }).map((_, i) => (
-        <div key={i} className="flex items-center gap-4 px-4 py-3.5 animate-pulse">
+        <div key={i} className="flex items-center gap-3 px-4 py-3.5 animate-pulse">
           <div className="h-3 w-36 rounded bg-zinc-800" />
           <div className="h-3 w-28 rounded bg-zinc-800" />
           <div className="h-5 w-20 rounded-full bg-zinc-800" />

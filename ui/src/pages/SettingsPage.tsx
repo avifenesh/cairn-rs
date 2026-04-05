@@ -48,7 +48,7 @@ function Card({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-5 space-y-4">
+    <div className="rounded-lg bg-zinc-900 border border-zinc-800 p-4 space-y-4">
       <div className="flex items-center gap-2">
         <Icon size={16} className={iconColor} />
         <h2 className="text-sm font-semibold text-zinc-200">{title}</h2>
@@ -362,7 +362,7 @@ export function SettingsPage() {
 
         {/* ── Error state ─────────────────────────────────────────────── */}
         {isError && (
-          <div className="flex flex-col items-center justify-center min-h-48 gap-3 text-center rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-8">
+          <div className="flex flex-col items-center justify-center min-h-48 gap-3 text-center rounded-lg bg-zinc-900 border border-zinc-800 p-8">
             <ServerCrash size={36} className="text-red-500" />
             <p className="text-zinc-300 font-medium">Failed to load settings</p>
             <p className="text-sm text-zinc-500">
@@ -379,11 +379,11 @@ export function SettingsPage() {
 
         {/* ── Loading skeleton ─────────────────────────────────────────── */}
         {isLoading && !isError && (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {Array.from({ length: 4 }).map((_, i) => (
               <div
                 key={i}
-                className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-5 space-y-3 animate-pulse"
+                className="rounded-lg bg-zinc-900 border border-zinc-800 p-4 space-y-3 animate-pulse"
               >
                 <div className="h-4 w-32 rounded bg-zinc-800" />
                 <div className="h-10 w-40 rounded-lg bg-zinc-800" />
@@ -399,7 +399,7 @@ export function SettingsPage() {
 
         {/* ── Cards grid ───────────────────────────────────────────────── */}
         {data && (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <DeploymentModeCard  mode={data.deployment_mode} />
             <StorageBackendCard  backend={data.store_backend} pluginCount={data.plugin_count} />
             <SystemHealthCard    health={data.system_health} />
