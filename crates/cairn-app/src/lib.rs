@@ -3633,8 +3633,22 @@ impl AppBootstrap {
             )
             .route("/openapi.json", get(openapi_json_handler))
             .route("/docs", get(swagger_docs_handler))
-            // Dynamic-path POST/PUT/DELETE routes that cannot go through the catalog fold
-            // because catalog_path_to_axum(:id → {id}) produces a static literal in matchit 0.7.
+            // ── Dynamic-path routes ──────────────────────────────────────────────────
+            // catalog_path_to_axum(:id → {id}) produces a static literal in matchit 0.7,
+            // so ALL dynamic-param routes must be registered here with :param syntax.
+            // ── Admin GET ────────────────────────────────────────────────────────────
+            .route("/v1/admin/audit-log/:resource_type/:resource_id", get(list_audit_log_for_resource_handler))
+            .route("/v1/admin/tenants/:id", get(get_tenant_handler))
+            .route("/v1/admin/tenants/:id/overview", get(get_tenant_overview_handler))
+            .route("/v1/admin/tenants/:id/snapshots", get(list_snapshots_handler))
+            .route("/v1/admin/tenants/:tenant_id/credentials", get(list_credentials_handler))
+            .route("/v1/admin/tenants/:tenant_id/operator-profiles", get(list_operator_profiles_handler))
+            .route("/v1/admin/tenants/:tenant_id/workspaces", get(list_workspaces_handler))
+            .route("/v1/admin/workspaces/:workspace_id/members", get(list_workspace_members_handler))
+            .route("/v1/admin/workspaces/:workspace_id/projects", get(list_projects_handler))
+            .route("/v1/admin/workspaces/:id/shares", get(list_workspace_shares_handler))
+            .route("/v1/admin/operators/:id/notifications", get(get_operator_notifications_handler))
+            // ── Admin POST/DELETE ─────────────────────────────────────────────────────
             .route("/v1/admin/tenants/:id/compact-event-log", post(compact_event_log_handler))
             .route("/v1/admin/tenants/:id/snapshot", post(create_snapshot_handler))
             .route("/v1/admin/tenants/:id/restore", post(restore_from_snapshot_handler))
@@ -3649,41 +3663,96 @@ impl AppBootstrap {
             .route("/v1/admin/workspaces/:id/shares/:share_id", delete(revoke_workspace_share_handler))
             .route("/v1/admin/operators/:id/notifications", post(set_operator_notifications_handler))
             .route("/v1/admin/notifications/:id/retry", post(retry_notification_handler))
+            // ── Settings ──────────────────────────────────────────────────────────────
+            .route("/v1/settings/defaults/resolve/:key", get(resolve_default_setting_handler))
             .route("/v1/settings/defaults/:scope/:scope_id/:key", put(set_default_setting_handler).delete(clear_default_setting_handler))
+            // ── Approvals ─────────────────────────────────────────────────────────────
+            .route("/v1/approvals/:id/approve", post(approve_approval_handler))
+            .route("/v1/approvals/:id/deny", post(deny_approval_handler))
+            .route("/v1/approvals/:id/delegate", post(delegate_approval_handler))
+            .route("/v1/approvals/:id/reject", post(reject_approval_handler))
+            // ── Prompts ───────────────────────────────────────────────────────────────
+            .route("/v1/prompts/assets/:id/versions", get(list_prompt_versions_handler))
             .route("/v1/prompts/assets/:id/versions", post(create_prompt_version_handler))
             .route("/v1/prompts/releases/:id/transition", post(transition_prompt_release_handler))
             .route("/v1/prompts/releases/:id/activate", post(activate_prompt_release_handler))
             .route("/v1/prompts/releases/:id/rollback", post(rollback_prompt_release_handler))
             .route("/v1/prompts/releases/:id/rollout", post(start_prompt_rollout_handler))
             .route("/v1/prompts/releases/:id/request-approval", post(request_approval_handler))
-            .route("/v1/approvals/:id/delegate", post(delegate_approval_handler))
-            .route("/v1/approvals/:id/reject", post(reject_approval_handler))
+            // ── Feed ──────────────────────────────────────────────────────────────────
+            .route("/v1/feed/:id/read", post(mark_feed_item_read_handler))
+            // ── Runs ──────────────────────────────────────────────────────────────────
+            .route("/v1/runs/:id", get(get_run_handler))
             .route("/v1/runs/:id/cost-alert", post(set_run_cost_alert_handler))
-            .route("/v1/runs/:id/sla", post(set_run_sla_handler))
+            .route("/v1/runs/:id/sla", get(get_run_sla_handler).post(set_run_sla_handler))
+            .route("/v1/runs/:id/interventions", get(list_run_interventions_handler))
             .route("/v1/runs/:id/diagnose", post(diagnose_run_handler))
             .route("/v1/runs/:id/intervene", post(intervene_run_handler))
             .route("/v1/runs/:id/checkpoint", post(save_checkpoint_handler))
-            .route("/v1/tool-invocations/:id/cancel", post(cancel_tool_invocation_handler))
-            .route("/v1/plugins/:id/eval-score", post(plugin_eval_score_handler))
-            .route("/v1/plugins/:id", delete(unregister_plugin_handler))
+            // ── Tasks ─────────────────────────────────────────────────────────────────
+            .route("/v1/tasks/:id/cancel", post(cancel_task_handler))
             .route("/v1/tasks/:id/release-lease", post(release_task_lease_handler))
             .route("/v1/tasks/:id/priority", post(set_task_priority_handler))
+            // ── Tool invocations ──────────────────────────────────────────────────────
+            .route("/v1/tool-invocations/:id", get(get_tool_invocation_handler))
+            .route("/v1/tool-invocations/:id/progress", get(get_tool_invocation_progress_handler))
+            .route("/v1/tool-invocations/:id/cancel", post(cancel_tool_invocation_handler))
+            // ── Checkpoints ───────────────────────────────────────────────────────────
+            .route("/v1/checkpoints/:id", get(get_checkpoint_handler))
+            // ── Plugins ───────────────────────────────────────────────────────────────
+            .route("/v1/plugins/:id", get(get_plugin_handler).delete(unregister_plugin_handler))
+            .route("/v1/plugins/:id/health", get(plugin_health_handler))
+            .route("/v1/plugins/:id/metrics", get(plugin_metrics_handler))
+            .route("/v1/plugins/:id/logs", get(plugin_logs_handler))
+            .route("/v1/plugins/:id/pending-signals", get(plugin_pending_signals_handler))
+            .route("/v1/plugins/:id/eval-score", post(plugin_eval_score_handler))
+            // ── Evals ─────────────────────────────────────────────────────────────────
+            .route("/v1/evals/datasets/:id", get(get_eval_dataset_handler))
             .route("/v1/evals/datasets/:id/entries", post(add_eval_dataset_entry_handler))
+            .route("/v1/evals/baselines/:id", get(get_eval_baseline_handler))
+            .route("/v1/evals/rubrics/:id", get(get_eval_rubric_handler))
+            .route("/v1/evals/runs/:id", get(get_eval_run_handler))
             .route("/v1/evals/runs/:id/score-rubric", post(score_eval_run_with_rubric_handler))
             .route("/v1/evals/runs/:id/compare-baseline", post(compare_eval_run_baseline_handler))
-            .route("/v1/sources/:id", put(update_source_handler).delete(delete_source_handler))
-            .route("/v1/sources/:id/refresh-schedule", post(create_source_refresh_schedule_handler))
+            .route("/v1/evals/scorecard/:asset_id", get(get_scorecard_handler))
+            .route("/v1/evals/assets/:asset_id/report", get(get_eval_asset_report_handler))
+            .route("/v1/evals/assets/:asset_id/trend", get(get_eval_asset_trend_handler))
+            .route("/v1/evals/assets/:asset_id/winner", get(get_eval_asset_winner_handler))
+            .route("/v1/evals/assets/:asset_id/export", get(get_eval_asset_export_handler))
+            // ── Sources / Ingest ──────────────────────────────────────────────────────
+            .route("/v1/sources/:id", get(get_source_handler).put(update_source_handler).delete(delete_source_handler))
+            .route("/v1/sources/:id/chunks", get(list_source_chunks_handler))
+            .route("/v1/sources/:id/quality", get(source_quality_handler))
+            .route("/v1/sources/:id/refresh-schedule", get(get_source_refresh_schedule_handler).post(create_source_refresh_schedule_handler))
+            .route("/v1/ingest/jobs/:id", get(get_ingest_job_handler))
             .route("/v1/ingest/jobs/:id/complete", post(complete_ingest_job_handler))
             .route("/v1/ingest/jobs/:id/fail", post(fail_ingest_job_handler))
+            // ── Channels ──────────────────────────────────────────────────────────────
+            .route("/v1/channels/:id/messages", get(list_channel_messages_handler))
             .route("/v1/channels/:id/send", post(send_channel_message_handler))
             .route("/v1/channels/:id/consume", post(consume_channel_message_handler))
+            // ── Sessions ──────────────────────────────────────────────────────────────
+            .route("/v1/sessions/:id/llm-traces", get(get_session_llm_traces_handler))
+            // ── Graph ─────────────────────────────────────────────────────────────────
+            .route("/v1/graph/execution-trace/:run_id", get(execution_trace_handler))
+            .route("/v1/graph/dependency-path/:run_id", get(dependency_path_handler))
+            .route("/v1/graph/prompt-provenance/:release_id", get(prompt_provenance_handler))
+            .route("/v1/graph/retrieval-provenance/:run_id", get(retrieval_provenance_handler))
+            .route("/v1/graph/provenance/:node_id", get(graph_provenance_handler))
+            // ── Memory ────────────────────────────────────────────────────────────────
+            .route("/v1/memory/provenance/:document_id", get(memory_provenance_handler))
+            // ── Providers ─────────────────────────────────────────────────────────────
             .route("/v1/providers/:id/health-check", post(manual_provider_health_check_handler))
             .route("/v1/providers/:id/recover", post(recover_provider_handler))
             .route("/v1/providers/pools/:id/connections", post(add_pool_connection_handler))
             .route("/v1/providers/pools/:id/connections/:conn_id", delete(remove_pool_connection_handler))
-            .route("/v1/providers/connections/:id/models", post(register_provider_model_handler))
-            .route("/v1/providers/connections/:id/health-schedule", post(set_provider_health_schedule_handler))
+            .route("/v1/providers/bindings/:id/cost-stats", get(get_binding_cost_stats_handler))
+            .route("/v1/providers/connections/:id/models", get(list_provider_models_handler).post(register_provider_model_handler))
+            .route("/v1/providers/connections/:id/health-schedule", get(get_provider_health_schedule_handler).post(set_provider_health_schedule_handler))
             .route("/v1/providers/connections/:id/retry-policy", put(set_provider_retry_policy_handler))
+            // ── Trace / Export ────────────────────────────────────────────────────────
+            .route("/v1/trace/:trace_id", get(get_trace_handler))
+            .route("/v1/export/:format", get(export_bundle_by_format_handler))
             .fallback(not_found_handler)
             .with_state(state.clone())
             .layer(from_fn_with_state(state.clone(), auth_middleware))
@@ -13932,6 +14001,9 @@ stub_handler!(send_notification_handler);
 stub_handler!(share_resource_handler);
 stub_handler!(start_rollout_handler);
 stub_handler!(unregister_plugin_handler);
+stub_handler!(cancel_task_handler);
+stub_handler!(export_bundle_by_format_handler);
+
 
 #[cfg(test)]
 mod tests {
