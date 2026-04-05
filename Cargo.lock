@@ -450,6 +450,7 @@ dependencies = [
  "aes-gcm",
  "async-trait",
  "cairn-domain",
+ "cairn-evals",
  "cairn-store",
  "serde",
  "serde_json",

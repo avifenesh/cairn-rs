@@ -21,6 +21,7 @@ sha2 = "0.10"
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
 cairn-store = { path = "../cairn-store", features = ["sqlite"] }
+cairn-evals = { path = "../cairn-evals" }
 
 [features]
 default = []
