@@ -1,16 +1,17 @@
 import { useState, type FormEvent } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
-  Cpu, CheckCircle2, XCircle, AlertTriangle, Clock,
-  RefreshCw, ServerCrash, Plug, Activity,
-  Bot, Send, Loader2, Layers, Zap, Trash2, Download, Plus,
-  ChevronDown, ChevronRight, HardDrive, Cpu as CpuIcon, Hash, FileType,
+  RefreshCw, ServerCrash, Loader2,
+  Download, Trash2, Plus,
+  ChevronDown, ChevronRight,
+  HardDrive, Cpu as CpuIcon, Hash, FileType, Layers,
+  XCircle,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
 
-// ── Provider health type ──────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ProviderHealthEntry {
   connection_id: string;
@@ -30,72 +31,59 @@ function fmtTime(ms: number): string {
   });
 }
 
-function shortId(id: string): string {
-  return id.length > 28 ? `${id.slice(0, 10)}\u2026${id.slice(-8)}` : id;
-}
+// ── Stat card (left-border, no icon) ─────────────────────────────────────────
 
-// ── Status badge ──────────────────────────────────────────────────────────────
-
-function StatusBadge({ healthy, status }: { healthy: boolean; status: string }) {
+function StatCard({ label, value, sub, accent = "default" }: {
+  label: string; value: string | number; sub?: string;
+  accent?: "default" | "emerald" | "blue" | "red";
+}) {
+  const borders = { default: "border-l-zinc-700", emerald: "border-l-emerald-500", blue: "border-l-indigo-500", red: "border-l-red-500" };
+  const values  = { default: "text-zinc-100", emerald: "text-emerald-400", blue: "text-indigo-400", red: "text-red-400" };
   return (
-    <span className={clsx(
-      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
-      healthy
-        ? "bg-emerald-950 text-emerald-400 ring-emerald-800"
-        : "bg-red-950 text-red-400 ring-red-800",
-    )}>
-      {healthy ? <CheckCircle2 size={11} strokeWidth={2.5} /> : <XCircle size={11} strokeWidth={2.5} />}
-      {status || (healthy ? "Healthy" : "Unhealthy")}
-    </span>
-  );
-}
-
-// ── Provider card ─────────────────────────────────────────────────────────────
-
-function ProviderCard({ entry }: { entry: ProviderHealthEntry }) {
-  return (
-    <div className={clsx(
-      "rounded-xl bg-zinc-900 ring-1 p-5 space-y-4 transition-all",
-      entry.healthy ? "ring-zinc-800 hover:ring-zinc-700" : "ring-red-900/60 hover:ring-red-800/80",
-    )}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className={clsx(
-            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
-            entry.healthy ? "bg-emerald-950 text-emerald-400" : "bg-red-950 text-red-400",
-          )}>
-            <Cpu size={16} strokeWidth={2} />
-          </div>
-          <p className="font-mono text-sm font-medium text-zinc-200 truncate">{shortId(entry.connection_id)}</p>
-        </div>
-        <StatusBadge healthy={entry.healthy} status={entry.status} />
-      </div>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <dt className="text-zinc-500 flex items-center gap-1"><Clock size={11} /> Last check</dt>
-        <dd className="text-zinc-300 text-xs">{fmtTime(entry.last_checked_at)}</dd>
-        <dt className="text-zinc-500 flex items-center gap-1"><Activity size={11} /> Failures</dt>
-        <dd className={clsx("text-xs font-semibold", entry.consecutive_failures === 0 ? "text-emerald-400" : "text-red-400")}>
-          {entry.consecutive_failures} consecutive
-        </dd>
-      </dl>
-      {entry.error_message && (
-        <div className="flex items-start gap-2 rounded-lg bg-red-950/40 px-3 py-2 text-xs ring-1 ring-red-900/40">
-          <AlertTriangle size={12} className="mt-0.5 shrink-0 text-red-400" />
-          <span className="text-red-300 break-words">{entry.error_message}</span>
-        </div>
-      )}
+    <div className={clsx("bg-zinc-900 border border-zinc-800 border-l-2 rounded-lg p-4", borders[accent])}>
+      <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
+      <p className={clsx("text-2xl font-semibold tabular-nums", values[accent])}>{value}</p>
+      {sub && <p className="mt-1 text-[11px] text-zinc-600">{sub}</p>}
     </div>
   );
 }
 
-// ── Ollama section ────────────────────────────────────────────────────────────
+// ── Provider health table row ─────────────────────────────────────────────────
 
-// ── Model info panel (fetched on click) ───────────────────────────────────────
+function ProviderRow({ entry, even }: { entry: ProviderHealthEntry; even: boolean }) {
+  return (
+    <tr className={clsx("border-b border-zinc-800/50 hover:bg-white/5 transition-colors", even ? "bg-zinc-900" : "bg-zinc-900/50")}>
+      <td className="px-4 h-9">
+        <div className="flex items-center gap-1.5">
+          <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0",
+            entry.healthy ? "bg-emerald-400" : "bg-red-400 animate-pulse")} />
+          <span className={clsx("text-[11px] font-medium", entry.healthy ? "text-emerald-400" : "text-red-400")}>
+            {entry.healthy ? "Healthy" : entry.status || "Unhealthy"}
+          </span>
+        </div>
+      </td>
+      <td className="px-4 h-9 font-mono text-xs text-zinc-300 max-w-[200px] truncate" title={entry.connection_id}>
+        {entry.connection_id.length > 24 ? `${entry.connection_id.slice(0, 10)}…${entry.connection_id.slice(-8)}` : entry.connection_id}
+      </td>
+      <td className="px-4 h-9 text-[11px] text-zinc-500 font-mono">{fmtTime(entry.last_checked_at)}</td>
+      <td className="px-4 h-9 text-[11px] tabular-nums">
+        <span className={entry.consecutive_failures > 0 ? "text-red-400" : "text-zinc-600"}>
+          {entry.consecutive_failures}
+        </span>
+      </td>
+      <td className="px-4 h-9 text-[11px] text-red-400 font-mono truncate max-w-[160px]">
+        {entry.error_message ?? "—"}
+      </td>
+    </tr>
+  );
+}
+
+// ── Model info panel ──────────────────────────────────────────────────────────
 
 function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["ollama-model-info", name],
-    queryFn: () => defaultApi.getOllamaModelInfo(name),
+    queryFn:  () => defaultApi.getOllamaModelInfo(name),
     staleTime: 120_000,
     retry: false,
   });
@@ -108,34 +96,25 @@ function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }
   }
 
   return (
-    <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 mt-2 space-y-2">
+    <div className="bg-zinc-950 border border-zinc-800 rounded-md p-3 mt-1 space-y-2">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold text-zinc-300 font-mono">{name}</p>
+        <span className="text-[11px] font-mono text-zinc-400">{name}</span>
         <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 transition-colors">
           <XCircle size={12} />
         </button>
       </div>
-
-      {isLoading && (
-        <div className="flex items-center gap-1.5 text-[11px] text-zinc-600">
-          <Loader2 size={10} className="animate-spin" /> Loading info…
-        </div>
-      )}
-
-      {isError && (
-        <p className="text-[11px] text-red-400">Could not load model info.</p>
-      )}
-
+      {isLoading && <p className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading…</p>}
+      {isError   && <p className="text-[11px] text-red-400">Could not load model info.</p>}
       {data && (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
           {[
-            { icon: Hash,     label: "Parameters",    value: data.parameter_size },
-            { icon: CpuIcon,  label: "Quantization",  value: data.quantization_level },
-            { icon: HardDrive,label: "Size on disk",  value: data.size_human },
-            { icon: FileType, label: "Family / Format",value: `${data.family} · ${data.format.toUpperCase()}` },
-            ...(data.context_length ? [{ icon: Layers, label: "Context", value: `${(data.context_length / 1024).toFixed(0)}K tokens` }] : []),
-            ...(data.parameter_count ? [{ icon: Hash,  label: "Param count", value: fmt(data.parameter_count) }] : []),
-          ].map(({ icon: Icon, label, value }) => (
+            { Icon: Hash,      label: "Parameters",   value: data.parameter_size },
+            { Icon: CpuIcon,   label: "Quantization", value: data.quantization_level },
+            { Icon: HardDrive, label: "Size on disk",  value: data.size_human },
+            { Icon: FileType,  label: "Family/Format", value: `${data.family} · ${data.format.toUpperCase()}` },
+            ...(data.context_length  ? [{ Icon: Layers, label: "Context",    value: `${(data.context_length / 1024).toFixed(0)}K` }] : []),
+            ...(data.parameter_count ? [{ Icon: Hash,   label: "Param count", value: fmt(data.parameter_count) }] : []),
+          ].map(({ Icon, label, value }) => (
             <div key={label} className="flex items-start gap-1.5">
               <Icon size={10} className="text-zinc-600 mt-0.5 shrink-0" />
               <div>
@@ -150,326 +129,175 @@ function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }
   );
 }
 
+// ── Ollama section ────────────────────────────────────────────────────────────
+
 function OllamaSection() {
   const toast = useToast();
-  const [prompt, setPrompt] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
   const [expandedInfo, setExpandedInfo] = useState<string | null>(null);
-  const [pullName, setPullName] = useState("");
-  const [result, setResult] = useState<{
-    text: string; model: string; tokens_in: number | null;
-    tokens_out: number | null; latency_ms: number;
-  } | null>(null);
+  const [pullName, setPullName]         = useState("");
 
   const { data: ollamaData, isLoading: ollamaLoading, error: ollamaError, refetch } = useQuery({
     queryKey: ["ollama-models"],
-    queryFn: () => defaultApi.getOllamaModels(),
-    retry: false,
-    staleTime: 30_000,
+    queryFn:  () => defaultApi.getOllamaModels(),
+    retry: false, staleTime: 30_000,
   });
 
   const connected = !!ollamaData && !ollamaError;
   const models: string[] = ollamaData?.models ?? [];
-  const activeModel = selectedModel || models[0] || "";
-
-  const generate = useMutation({
-    mutationFn: ({ prompt, model }: { prompt: string; model: string }) =>
-      defaultApi.ollamaGenerate({ prompt, model }),
-    onSuccess: (data) => setResult(data),
-    onError: (e) => toast.error(`Generation failed: ${e instanceof Error ? e.message : "unknown error"}`),
-  });
 
   const pullModel = useMutation({
     mutationFn: (model: string) => defaultApi.pullOllamaModel(model),
-    onSuccess: (_, model) => {
-      toast.success(`Model "${model}" downloaded successfully.`);
-      setPullName("");
-      void refetch();
-    },
-    onError: (e, model) =>
-      toast.error(`Failed to pull "${model}": ${e instanceof Error ? e.message : "error"}`),
+    onSuccess: (_, model) => { toast.success(`"${model}" downloaded.`); setPullName(""); void refetch(); },
+    onError:   (e, model) => toast.error(`Failed to pull "${model}": ${e instanceof Error ? e.message : "error"}`),
   });
 
   const deleteModel = useMutation({
     mutationFn: (model: string) => defaultApi.deleteOllamaModel(model),
-    onSuccess: (_, model) => {
-      toast.success(`Model "${model}" deleted.`);
-      if (selectedModel === model) setSelectedModel("");
-      void refetch();
-    },
-    onError: (e, model) =>
-      toast.error(`Failed to delete "${model}": ${e instanceof Error ? e.message : "error"}`),
+    onSuccess: (_, model) => { toast.success(`"${model}" deleted.`); void refetch(); },
+    onError:   (e, model) => toast.error(`Failed to delete "${model}": ${e instanceof Error ? e.message : "error"}`),
   });
 
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!prompt.trim() || !activeModel) return;
-    setResult(null);
-    generate.mutate({ prompt: prompt.trim(), model: activeModel });
-  }
+  // Derived stat card values
+  const embedModel   = models.find(m => m.includes("embed")) ?? null;
+  const ollamaStatus = ollamaLoading ? "checking" : connected ? "connected" : "offline";
+  const statusAccent = ollamaStatus === "connected" ? "emerald" : ollamaStatus === "checking" ? "default" : "red";
 
   return (
     <section className="space-y-4">
-      {/* ── Section header ─────────────────────────────────────────────── */}
+      {/* Section header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
-          <Bot size={15} className="text-indigo-400" />
-          Ollama — Local LLM
-        </h2>
-        <button
-          onClick={() => refetch()}
-          className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-        >
+        <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Ollama — Local LLM</p>
+        <button onClick={() => refetch()}
+          className="flex items-center gap-1 text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors">
           <RefreshCw size={11} /> Refresh
         </button>
       </div>
 
-      {/* ── Connection status card ────────────────────────────────────── */}
-      <div className={clsx(
-        "rounded-xl ring-1 p-4 flex items-center justify-between gap-4",
-        connected ? "bg-zinc-900 ring-zinc-800" : "bg-zinc-900/50 ring-zinc-800/50",
-      )}>
-        <div className="flex items-center gap-3">
-          <div className={clsx(
-            "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-            connected ? "bg-indigo-950 text-indigo-400" : "bg-zinc-800 text-zinc-600",
-          )}>
-            <Bot size={15} />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-zinc-200">
-              {ollamaLoading ? "Checking Ollama…" : connected ? "Connected" : "Not available"}
-            </p>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              {ollamaLoading ? (
-                "Probing OLLAMA_HOST…"
-              ) : connected ? (
-                <><span className="font-mono">{ollamaData.host}</span> · {models.length} model{models.length !== 1 ? "s" : ""}</>
-              ) : (
-                "Set OLLAMA_HOST env var and restart the server"
-              )}
-            </p>
-          </div>
-        </div>
-        <span className={clsx(
-          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 shrink-0",
-          connected
-            ? "bg-indigo-950 text-indigo-300 ring-indigo-800"
-            : "bg-zinc-800 text-zinc-500 ring-zinc-700",
-        )}>
-          {connected
-            ? <><Zap size={10} className="text-indigo-400" /> Connected</>
-            : <><XCircle size={10} /> Disconnected</>
-          }
-        </span>
+      {/* Stat cards */}
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard label="Ollama Status"    value={ollamaStatus}     accent={statusAccent as "default" | "emerald" | "blue" | "red"} sub={connected ? ollamaData.host : "Set OLLAMA_HOST"} />
+        <StatCard label="Models Available" value={models.length}    accent={models.length > 0 ? "blue" : "default"} />
+        <StatCard label="Embedding Model"  value={embedModel ? "yes" : "none"} accent={embedModel ? "emerald" : "default"} sub={embedModel ?? "no embed model"} />
       </div>
 
-      {/* ── Model management ──────────────────────────────────────────── */}
+      {/* Connection info row */}
+      <div className={clsx(
+        "bg-zinc-900 border rounded-lg px-4 h-10 flex items-center justify-between",
+        connected ? "border-zinc-800" : "border-zinc-800/50",
+      )}>
+        <div className="flex items-center gap-2">
+          <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", connected ? "bg-emerald-400" : "bg-red-400")} />
+          <span className="text-xs text-zinc-400 font-medium">{connected ? "Connected" : "Not available"}</span>
+          {connected && (
+            <span className="text-[11px] font-mono text-zinc-600 ml-1">{ollamaData.host}</span>
+          )}
+        </div>
+        {connected && (
+          <span className="text-[11px] text-zinc-600">
+            {models.length} model{models.length !== 1 ? "s" : ""} installed
+          </span>
+        )}
+        {!connected && !ollamaLoading && (
+          <span className="text-[11px] text-zinc-600">Set OLLAMA_HOST env var and restart</span>
+        )}
+      </div>
+
+      {/* Model list */}
       {connected && (
-        <div className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-4 space-y-4">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
-              <Layers size={11} className="text-zinc-500" />
-              Models
-              {models.length > 0 && <span className="text-zinc-600">({models.length})</span>}
-            </p>
+          <div className="flex items-center justify-between px-4 h-9 border-b border-zinc-800 bg-zinc-950">
+            <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Installed Models</p>
+            <p className="text-[10px] text-zinc-700 uppercase tracking-wider">Info · Delete</p>
           </div>
 
-          {/* Installed model list with delete buttons */}
-          {models.length > 0 ? (
-            <div className="space-y-1.5">
-              {models.map((m) => {
-                const isDeleting  = deleteModel.isPending && deleteModel.variables === m;
-                const isExpanded  = expandedInfo === m;
+          {models.length === 0 ? (
+            <p className="px-4 py-3 text-[11px] text-zinc-600 italic">No models installed.</p>
+          ) : (
+            <div>
+              {models.map((m, i) => {
+                const isDeleting = deleteModel.isPending && deleteModel.variables === m;
+                const isExpanded = expandedInfo === m;
                 return (
-                  <div key={m}>
-                    <div className={clsx(
-                      "flex items-center justify-between rounded-lg px-3 py-2 ring-1 transition-colors",
-                      activeModel === m
-                        ? "bg-indigo-950/50 ring-indigo-800/60"
-                        : "bg-zinc-800/50 ring-zinc-700/50",
-                    )}>
-                      {/* Model name — click to select */}
-                      <button
-                        onClick={() => setSelectedModel(m)}
-                        className="text-xs font-mono text-zinc-300 hover:text-zinc-100 transition-colors flex-1 text-left"
-                      >
-                        {m}
-                      </button>
-
-                      {/* Info expand toggle */}
+                  <div key={m} className={clsx("border-b border-zinc-800/50 last:border-0", i % 2 === 0 ? "bg-zinc-900" : "bg-zinc-900/50")}>
+                    <div className="flex items-center justify-between px-4 h-9 hover:bg-white/5 transition-colors">
+                      <span className="text-xs font-mono text-zinc-300 truncate flex-1">{m}</span>
+                      {/* Info toggle */}
                       <button
                         onClick={() => setExpandedInfo(isExpanded ? null : m)}
+                        className="text-zinc-600 hover:text-zinc-400 transition-colors ml-3"
                         title="Show model info"
-                        className="text-zinc-600 hover:text-zinc-300 transition-colors ml-2"
                       >
-                        {isExpanded
-                          ? <ChevronDown size={13} />
-                          : <ChevronRight size={13} />
-                        }
+                        {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                       </button>
-
                       {/* Delete */}
                       <button
                         onClick={() => {
-                          if (confirm(`Delete "${m}"? This removes it from Ollama.`)) {
-                            deleteModel.mutate(m);
-                          }
+                          if (confirm(`Delete "${m}"?`)) deleteModel.mutate(m);
                         }}
                         disabled={isDeleting || deleteModel.isPending}
                         title={`Delete ${m}`}
-                        className="flex items-center gap-1 text-zinc-600 hover:text-red-400
-                                   disabled:opacity-30 transition-colors ml-1.5"
+                        className="text-zinc-600 hover:text-red-400 disabled:opacity-30 transition-colors ml-2"
                       >
-                        {isDeleting
-                          ? <Loader2 size={12} className="animate-spin" />
-                          : <Trash2 size={12} />
-                        }
+                        {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                       </button>
                     </div>
-
-                    {/* Inline info panel */}
                     {isExpanded && (
-                      <ModelInfoPanel
-                        name={m}
-                        onClose={() => setExpandedInfo(null)}
-                      />
+                      <div className="px-4 pb-3">
+                        <ModelInfoPanel name={m} onClose={() => setExpandedInfo(null)} />
+                      </div>
                     )}
                   </div>
                 );
               })}
             </div>
-          ) : (
-            <p className="text-xs text-zinc-600 italic">No models installed yet.</p>
           )}
 
-          {/* Pull model form */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const name = pullName.trim();
-              if (name) pullModel.mutate(name);
-            }}
-            className="flex gap-2 pt-1 border-t border-zinc-800"
-          >
-            <div className="relative flex-1">
-              <Plus size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
-              <input
-                value={pullName}
-                onChange={(e) => setPullName(e.target.value)}
-                placeholder="Pull model, e.g. llama3.2"
-                disabled={pullModel.isPending}
-                className="w-full rounded-lg bg-zinc-800 border border-zinc-700 pl-7 pr-3 py-2
-                           text-xs text-zinc-200 placeholder-zinc-600
-                           focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500
-                           disabled:opacity-50 transition-colors"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={!pullName.trim() || pullModel.isPending}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500
-                         disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium
-                         transition-colors whitespace-nowrap"
+          {/* Pull form */}
+          <div className="border-t border-zinc-800 px-4 py-3">
+            <form
+              onSubmit={(e: FormEvent) => {
+                e.preventDefault();
+                const name = pullName.trim();
+                if (name) pullModel.mutate(name);
+              }}
+              className="flex gap-2"
             >
-              {pullModel.isPending
-                ? <><Loader2 size={12} className="animate-spin" /> Pulling…</>
-                : <><Download size={12} /> Pull</>
-              }
-            </button>
-          </form>
-          {pullModel.isPending && (
-            <p className="text-[11px] text-indigo-400 flex items-center gap-1.5 animate-pulse">
-              <Loader2 size={10} className="animate-spin" />
-              Downloading "{pullModel.variables}" — this may take several minutes…
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* ── Chat test input ───────────────────────────────────────────── */}
-      {connected && (
-        <div className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-4 space-y-3">
-          <p className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
-            <Send size={11} className="text-zinc-500" />
-            Test prompt
-            {activeModel && (
-              <span className="ml-auto font-mono text-zinc-600">{activeModel}</span>
+              <div className="relative flex-1">
+                <Plus size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                <input
+                  value={pullName}
+                  onChange={e => setPullName(e.target.value)}
+                  placeholder="Pull model, e.g. llama3.2"
+                  disabled={pullModel.isPending}
+                  className="w-full rounded-md bg-zinc-950 border border-zinc-800 pl-7 pr-3 h-8
+                             text-xs text-zinc-200 placeholder-zinc-600
+                             focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500
+                             disabled:opacity-50 transition-colors"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={!pullName.trim() || pullModel.isPending}
+                className="flex items-center gap-1.5 px-3 h-8 rounded-md bg-indigo-600 hover:bg-indigo-500
+                           disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium
+                           transition-colors whitespace-nowrap"
+              >
+                {pullModel.isPending
+                  ? <><Loader2 size={11} className="animate-spin" /> Pulling…</>
+                  : <><Download size={11} /> Pull</>}
+              </button>
+            </form>
+            {pullModel.isPending && (
+              <p className="mt-1.5 text-[11px] text-indigo-400 flex items-center gap-1.5 animate-pulse">
+                <Loader2 size={10} className="animate-spin" />
+                Downloading "{pullModel.variables}" — may take several minutes…
+              </p>
             )}
-          </p>
-
-          <form onSubmit={handleSubmit} className="flex gap-2">
-            <input
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Type a prompt and press Send…"
-              disabled={generate.isPending}
-              className="flex-1 rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm
-                         text-zinc-100 placeholder-zinc-600 focus:outline-none
-                         focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
-            />
-            <button
-              type="submit"
-              disabled={!prompt.trim() || !activeModel || generate.isPending}
-              className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500
-                         disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-sm
-                         flex items-center gap-1.5 transition"
-            >
-              {generate.isPending
-                ? <Loader2 size={14} className="animate-spin" />
-                : <Send size={14} />
-              }
-              {generate.isPending ? "Generating…" : "Send"}
-            </button>
-          </form>
-
-          {/* Response */}
-          {result && (
-            <div className="space-y-2">
-              <div className="rounded-lg bg-zinc-800/60 px-4 py-3 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap">
-                {result.text}
-              </div>
-              <div className="flex gap-4 text-[11px] text-zinc-600 font-mono">
-                <span>model: <span className="text-zinc-400">{result.model}</span></span>
-                <span>latency: <span className="text-zinc-400">{result.latency_ms}ms</span></span>
-                {result.tokens_in != null && (
-                  <span>tokens: <span className="text-zinc-400">{result.tokens_in}→{result.tokens_out}</span></span>
-                )}
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       )}
     </section>
-  );
-}
-
-// ── Summary strip ─────────────────────────────────────────────────────────────
-
-function SummaryStrip({ entries }: { entries: ProviderHealthEntry[] }) {
-  const healthy = entries.filter((e) => e.healthy).length;
-  const unhealthy = entries.length - healthy;
-  return (
-    <div className="flex items-center gap-6 rounded-xl bg-zinc-900 ring-1 ring-zinc-800 px-5 py-3">
-      <div className="flex items-center gap-2">
-        <span className="h-2 w-2 rounded-full bg-emerald-400" />
-        <span className="text-sm text-zinc-300">
-          <span className="font-semibold text-emerald-400">{healthy}</span> healthy
-        </span>
-      </div>
-      {unhealthy > 0 && (
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-red-400" />
-          <span className="text-sm text-zinc-300">
-            <span className="font-semibold text-red-400">{unhealthy}</span> degraded
-          </span>
-        </div>
-      )}
-      <div className="ml-auto text-xs text-zinc-600">
-        {entries.length} connection{entries.length !== 1 ? "s" : ""} total
-      </div>
-    </div>
   );
 }
 
@@ -478,73 +306,84 @@ function SummaryStrip({ entries }: { entries: ProviderHealthEntry[] }) {
 export function ProvidersPage() {
   const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["providers-health"],
-    queryFn: () => defaultApi.getProviderHealth() as Promise<ProviderHealthEntry[]>,
+    queryFn:  () => defaultApi.getProviderHealth() as Promise<ProviderHealthEntry[]>,
     refetchInterval: 20_000,
   });
 
   const entries: ProviderHealthEntry[] = Array.isArray(data) ? data : [];
+  const healthy   = entries.filter(e => e.healthy).length;
+  const unhealthy = entries.length - healthy;
   const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : null;
 
   return (
-    <div className="space-y-8">
-      {/* ── Cairn provider health ──────────────────────────────────────── */}
+    <div className="p-6 space-y-6">
+      {/* ── Cairn provider connections ────────────────────────────────── */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
-            <Cpu size={15} className="text-blue-400" />
-            Provider Health
-            <span className="text-zinc-600 font-normal text-xs">({entries.length})</span>
-          </h2>
-          <div className="flex items-center gap-3">
-            {lastUpdated && (
-              <span className="text-xs text-zinc-600 flex items-center gap-1">
-                <Clock size={11} /> {lastUpdated}
-              </span>
-            )}
-            <button
-              onClick={() => refetch()}
-              className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
-            >
-              <RefreshCw size={12} /> Refresh
+          <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+            Provider Connections
+            {entries.length > 0 && <span className="ml-1.5 normal-case tracking-normal font-normal text-zinc-700">({entries.length})</span>}
+          </p>
+          <div className="flex items-center gap-2">
+            {lastUpdated && <span className="text-[11px] font-mono text-zinc-700">{lastUpdated}</span>}
+            <button onClick={() => refetch()}
+              className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 transition-colors">
+              <RefreshCw size={11} /> Refresh
             </button>
           </div>
         </div>
 
-        {isError && (
-          <div className="flex flex-col items-center justify-center min-h-32 gap-3 p-8 text-center rounded-xl ring-1 ring-zinc-800">
-            <ServerCrash size={32} className="text-red-500" />
-            <p className="text-sm text-zinc-400">{error instanceof Error ? error.message : "Failed to load"}</p>
+        {/* Stat cards */}
+        {!isLoading && entries.length > 0 && (
+          <div className="grid grid-cols-3 gap-3">
+            <StatCard label="Total"    value={entries.length} />
+            <StatCard label="Healthy"  value={healthy}   accent="emerald" />
+            <StatCard label="Degraded" value={unhealthy}  accent={unhealthy > 0 ? "red" : "default"} />
           </div>
         )}
 
-        {isLoading && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {[1, 2].map((i) => (
-              <div key={i} className="rounded-xl bg-zinc-900 ring-1 ring-zinc-800 p-5 animate-pulse space-y-3 h-32" />
-            ))}
+        {/* Table */}
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+          <div className="border-b border-zinc-800 bg-zinc-950">
+            <table className="w-full">
+              <thead>
+                <tr>
+                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Status</th>
+                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Connection ID</th>
+                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Last Check</th>
+                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Failures</th>
+                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Error</th>
+                </tr>
+              </thead>
+            </table>
           </div>
-        )}
 
-        {!isLoading && !isError && entries.length > 0 && (
-          <>
-            <SummaryStrip entries={entries} />
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {entries.map((entry) => (
-                <ProviderCard key={entry.connection_id} entry={entry} />
-              ))}
+          {isError ? (
+            <div className="flex items-center gap-3 px-4 py-4 text-sm">
+              <ServerCrash size={16} className="text-red-500 shrink-0" />
+              <span className="text-zinc-400">{error instanceof Error ? error.message : "Failed to load"}</span>
             </div>
-          </>
-        )}
-
-        {!isLoading && !isError && entries.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-center rounded-xl ring-1 ring-zinc-800/50">
-            <Plug size={32} className="text-zinc-700 mb-3" />
-            <p className="text-sm text-zinc-500">No provider connections registered</p>
-          </div>
-        )}
+          ) : isLoading ? (
+            <div className="flex items-center gap-2 px-4 h-10 text-[11px] text-zinc-600">
+              <Loader2 size={11} className="animate-spin" /> Loading…
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="px-4 py-8 text-center text-[11px] text-zinc-600">
+              No provider connections registered
+            </div>
+          ) : (
+            <table className="w-full">
+              <tbody>
+                {entries.map((entry, i) => (
+                  <ProviderRow key={entry.connection_id} entry={entry} even={i % 2 === 0} />
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </section>
 
-      {/* ── Ollama local LLM ──────────────────────────────────────────── */}
+      {/* ── Ollama section ────────────────────────────────────────────── */}
       <OllamaSection />
     </div>
   );
