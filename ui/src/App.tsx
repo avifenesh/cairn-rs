@@ -15,6 +15,7 @@ import { PlaygroundPage } from './pages/PlaygroundPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TasksPage } from './pages/TasksPage';
 import { TracesPage } from './pages/TracesPage';
+import { EvalsPage } from './pages/EvalsPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { GraphPage }   from './pages/GraphPage';
 import { ApiDocsPage } from './pages/ApiDocsPage';
@@ -47,6 +48,7 @@ function renderRoute(route: Route): React.ReactNode {
     case 'memory':     return <Guarded name="Memory"><MemoryPage /></Guarded>;
     case 'costs':      return <Guarded name="Costs"><CostsPage /></Guarded>;
     case 'traces':     return <Guarded name="Traces"><TracesPage /></Guarded>;
+    case 'evals':      return <Guarded name="Evaluations"><EvalsPage /></Guarded>;
     case 'graph':      return <Guarded name="Graph"><GraphPage /></Guarded>;
     case 'api-docs':   return <Guarded name="API Docs"><ApiDocsPage /></Guarded>;
     case 'audit-log':  return <Guarded name="Audit Log"><AuditLogPage /></Guarded>;

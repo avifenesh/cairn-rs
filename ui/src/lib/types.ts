@@ -325,3 +325,81 @@ export interface AuditLogResponse {
   items: AuditRecord[];
   has_more: boolean;
 }
+
+// ── Eval Runs ─────────────────────────────────────────────────────────────────
+
+export type EvalRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled';
+
+/** One record from GET /v1/evals/runs */
+export interface EvalRunRecord {
+  eval_run_id: string;
+  project: { tenant_id: string; workspace_id: string; project_id: string };
+  subject_kind: string;
+  evaluator_type: string;
+  success: boolean | null;
+  error_message: string | null;
+  started_at: number;    // unix ms
+  completed_at: number | null;
+}
+
+export interface EvalRunsResponse {
+  items: EvalRunRecord[];
+  has_more: boolean;
+}
+
+// ── Plugins ───────────────────────────────────────────────────────────────────
+
+/** Discriminated union matching cairn_tools::PluginCapability */
+export type PluginCapability =
+  | { type: 'tool_provider';    tools: string[] }
+  | { type: 'signal_source';    signals: string[] }
+  | { type: 'channel_provider'; channels: string[] }
+  | { type: 'post_turn_hook' }
+  | { type: 'policy_hook' }
+  | { type: 'eval_scorer' }
+  | { type: 'mcp_server';       endpoint: unknown };
+
+/** GET /v1/plugins — array item (manifest only, no lifecycle state) */
+export interface PluginManifest {
+  id: string;
+  name: string;
+  version: string;
+  command: string[];
+  capabilities: PluginCapability[];
+  permissions: unknown;
+  limits: { max_concurrency?: number; default_timeout_ms?: number } | null;
+  execution_class: string;
+  description: string | null;
+  homepage: string | null;
+}
+
+/** Lifecycle snapshot included in GET /v1/plugins/:id */
+export interface PluginLifecycleSnapshot {
+  plugin_id: string;
+  /** PluginState variants: discovered | spawning | handshaking | ready | draining | stopped | failed */
+  state: string;
+  uptime_ms: number;
+}
+
+/** Performance metrics included in GET /v1/plugins/:id */
+export interface PluginMetrics {
+  plugin_id: string;
+  invocation_count: number;
+  error_count: number;
+  avg_latency_ms: number;
+}
+
+/** One log entry from GET /v1/plugins/:id/logs */
+export interface PluginLogEntry {
+  plugin_id: string;
+  level: string;
+  message: string;
+  timestamp_ms: number;
+}
+
+/** GET /v1/plugins/:id */
+export interface PluginDetailResponse {
+  manifest: PluginManifest;
+  lifecycle: PluginLifecycleSnapshot;
+  metrics: PluginMetrics;
+}

@@ -298,6 +298,12 @@ export function createApiClient(config: ApiClientConfig) {
     getSessionTraces: (sessionId: string, limit = 200): Promise<import("./types").TracesResponse> =>
       get(`/v1/sessions/${sessionId}/llm-traces?limit=${limit}`),
 
+    // ── Evals ────────────────────────────────────────────────────────────────
+
+    /** GET /v1/evals/runs — list eval runs (operator view). */
+    getEvalRuns: (limit = 100): Promise<import("./types").EvalRunsResponse> =>
+      get(`/v1/evals/runs?limit=${limit}`),
+
     // ── Audit Log ────────────────────────────────────────────────────────────
 
     /** GET /v1/admin/audit-log — list audit log entries (most recent first). */

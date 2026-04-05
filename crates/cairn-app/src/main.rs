@@ -42,7 +42,7 @@ use cairn_runtime::tasks::TaskService;
 use cairn_runtime::tenants::TenantService;
 use cairn_runtime::{InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider};
 use cairn_domain::providers::EmbeddingProvider as _;
-use cairn_store::projections::{ApprovalReadModel, AuditLogReadModel, LlmCallTraceReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
+use cairn_store::projections::{ApprovalReadModel, AuditLogReadModel, EvalRunReadModel, LlmCallTraceReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
 use cairn_store::{EventLog, EventPosition, StoredEvent};
 use cairn_store::DbAdapter;
 use cairn_store::pg::{PgAdapter, PgEventLog};
@@ -1330,6 +1330,32 @@ async fn list_audit_log_handler(
         )
             .into_response(),
         Err(e) => internal_error(e.to_string()).into_response(),
+    }
+}
+
+// ── Eval runs handler ─────────────────────────────────────────────────────────
+
+/// `GET /v1/evals/runs?project_id=...&limit=100` — list eval runs (operator view).
+///
+/// Returns the most-recent eval runs for a project, or all runs when no
+/// project_id is supplied (scans the full store, limit 200).
+async fn list_evals_handler(
+    State(state): State<AppState>,
+    Query(q): Query<PaginationQuery>,
+) -> impl axum::response::IntoResponse {
+    let project = cairn_domain::ProjectKey::new(
+        "default_tenant",
+        "default_workspace",
+        "default_project",
+    );
+    let limit  = q.limit.min(200);
+    let offset = q.offset;
+    match EvalRunReadModel::list_by_project(state.runtime.store.as_ref(), &project, limit, offset).await {
+        Ok(items) => Ok(axum::Json(serde_json::json!({
+            "items": items,
+            "has_more": items.len() >= limit,
+        }))),
+        Err(e) => Err(internal_error(e.to_string())),
     }
 }
 
@@ -2625,6 +2651,7 @@ fn build_router(state: AppState) -> Router {
         // Admin routes
         .route("/v1/admin/tenants", post(create_tenant_handler))
         .route("/v1/admin/audit-log", get(list_audit_log_handler))
+        .route("/v1/evals/runs", get(list_evals_handler))
         // Ollama local LLM provider
         .route("/v1/providers/ollama/models",          get(ollama_models_handler))
         .route("/v1/providers/ollama/models/:name/info", get(ollama_model_info_handler))

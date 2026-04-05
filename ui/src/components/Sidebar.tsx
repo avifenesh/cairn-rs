@@ -1,6 +1,7 @@
 import {
   Coins,
   Database,
+  FlaskConical,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -33,6 +34,7 @@ export type NavPage =
   | 'providers'
   | 'playground'
   | 'audit-log'
+  | 'evals'
   | 'api-docs'
   | 'settings';
 
@@ -68,11 +70,12 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Observability',
     items: [
-      { id: 'traces',    label: 'Traces',    icon: Waves    },
-      { id: 'memory',    label: 'Memory',    icon: Database },
-      { id: 'costs',     label: 'Costs',     icon: Coins    },
-      { id: 'graph',     label: 'Graph',     icon: Network  },
-      { id: 'audit-log', label: 'Audit Log', icon: Shield   },
+      { id: 'traces',    label: 'Traces',    icon: Waves         },
+      { id: 'memory',    label: 'Memory',    icon: Database      },
+      { id: 'costs',     label: 'Costs',     icon: Coins         },
+      { id: 'evals',     label: 'Evals',     icon: FlaskConical  },
+      { id: 'graph',     label: 'Graph',     icon: Network       },
+      { id: 'audit-log', label: 'Audit Log', icon: Shield        },
     ],
   },
   {

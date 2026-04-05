@@ -7,7 +7,7 @@ import { CommandPalette } from './CommandPalette';
 const VALID_PAGES: NavPage[] = [
   'dashboard',
   'sessions', 'runs', 'tasks', 'approvals',
-  'traces', 'memory', 'costs', 'graph', 'audit-log',
+  'traces', 'memory', 'costs', 'evals', 'graph', 'audit-log',
   'providers', 'playground', 'api-docs', 'settings',
 ];
 
@@ -48,6 +48,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   traces:     'Traces',
   memory:     'Memory',
   costs:      'Costs',
+  evals:       'Evaluations',
   graph:       'Knowledge Graph',
   'audit-log': 'Audit Log',
   'api-docs':  'API Reference',
