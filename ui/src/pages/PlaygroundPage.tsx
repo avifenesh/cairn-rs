@@ -2,10 +2,18 @@ import { useState, useRef, useEffect, type FormEvent, type KeyboardEvent } from 
 import { useQuery } from "@tanstack/react-query";
 import {
   Terminal, Send, Loader2, AlertTriangle,
-  Clock, Zap, ChevronDown, Trash2, Square, Bot, User,
+  Clock, Zap, ChevronDown, ChevronRight, Trash2, Square, Bot, User, Settings2,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const DEFAULT_SYSTEM_PROMPT =
+  "You are a helpful AI assistant running on cairn-rs, a self-hostable control plane for AI agents.";
+
+const LS_SYSTEM_PROMPT = "cairn_playground_system_prompt";
+const LS_SYSTEM_OPEN   = "cairn_playground_system_open";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -14,18 +22,15 @@ type Role = "user" | "assistant";
 interface Message {
   role: Role;
   content: string;
-  /** Populated for assistant messages after streaming completes. */
   meta?: { latency_ms: number; model: string };
-  /** Populated when streaming failed. */
   error?: string;
-  /** True while streaming is in progress for this message. */
   streaming?: boolean;
 }
 
 // ── Streaming helper ──────────────────────────────────────────────────────────
 
-const API_BASE  = import.meta.env.VITE_API_URL ?? "";
-const getToken  = () => localStorage.getItem("cairn_token") ?? import.meta.env.VITE_API_TOKEN ?? "";
+const API_BASE = import.meta.env.VITE_API_URL ?? "";
+const getToken = () => localStorage.getItem("cairn_token") ?? import.meta.env.VITE_API_TOKEN ?? "";
 
 function streamGenerate(
   model: string,
@@ -73,10 +78,12 @@ function streamGenerate(
           if (!data) continue;
           try {
             const parsed = JSON.parse(data) as Record<string, unknown>;
-            if (parsed.text !== undefined)      onToken(String(parsed.text));
+            if (parsed.text !== undefined)
+              onToken(String(parsed.text));
             else if (parsed.latency_ms !== undefined)
               onDone({ latency_ms: Number(parsed.latency_ms), model: String(parsed.model ?? model) });
-            else if (parsed.error !== undefined) onError(String(parsed.error));
+            else if (parsed.error !== undefined)
+              onError(String(parsed.error));
           } catch { /* ignore malformed */ }
         }
       }
@@ -96,16 +103,93 @@ function ModelSelector({ value, onChange, models, disabled }: {
 }) {
   return (
     <div className="relative">
-      <select value={value} onChange={(e) => onChange(e.target.value)}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         disabled={disabled || models.length === 0}
-        className="appearance-none w-full rounded-md border border-zinc-800 bg-zinc-900
-                   text-sm text-zinc-300 px-3 py-2 pr-8
-                   focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500
-                   disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-        {models.length === 0 && <option value="">No models available</option>}
+        className="appearance-none w-full rounded border border-zinc-800 bg-zinc-900
+                   text-[13px] text-zinc-300 px-2.5 py-1.5 pr-7
+                   focus:outline-none focus:border-indigo-500
+                   disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        {models.length === 0 && <option value="">No models</option>}
         {models.map((m) => <option key={m} value={m}>{m}</option>)}
       </select>
-      <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+      <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+    </div>
+  );
+}
+
+// ── System prompt panel ───────────────────────────────────────────────────────
+
+interface SystemPromptPanelProps {
+  value: string;
+  onChange: (v: string) => void;
+  open: boolean;
+  onToggle: () => void;
+  disabled: boolean;
+}
+
+function SystemPromptPanel({ value, onChange, open, onToggle, disabled }: SystemPromptPanelProps) {
+  const isDefault = value === DEFAULT_SYSTEM_PROMPT;
+
+  return (
+    <div className="border-b border-zinc-800 shrink-0">
+      {/* Header row — always visible */}
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-zinc-900/40 transition-colors"
+      >
+        {open
+          ? <ChevronDown size={12} className="text-zinc-500 shrink-0" />
+          : <ChevronRight size={12} className="text-zinc-500 shrink-0" />
+        }
+        <Settings2 size={12} className="text-zinc-500 shrink-0" />
+        <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+          System Prompt
+        </span>
+        {!isDefault && (
+          <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" title="Custom prompt" />
+        )}
+        {/* Collapsed preview */}
+        {!open && (
+          <span className="ml-2 text-[11px] text-zinc-600 truncate max-w-xs">
+            {value || <em>empty</em>}
+          </span>
+        )}
+      </button>
+
+      {/* Expanded editor */}
+      {open && (
+        <div className="px-4 pb-3 space-y-2">
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            disabled={disabled}
+            rows={3}
+            className="w-full rounded border border-zinc-800 bg-zinc-900 text-[13px] text-zinc-300
+                       placeholder-zinc-600 px-3 py-2 resize-none
+                       focus:outline-none focus:border-indigo-500
+                       disabled:opacity-50 transition-colors"
+            placeholder="System instructions for the model…"
+          />
+          <div className="flex items-center gap-3">
+            {!isDefault && (
+              <button
+                type="button"
+                onClick={() => onChange(DEFAULT_SYSTEM_PROMPT)}
+                className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+              >
+                Reset to default
+              </button>
+            )}
+            <span className="ml-auto text-[11px] text-zinc-700">
+              {value.length} chars · prepended as <code className="text-zinc-600">system</code> role
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -117,43 +201,40 @@ function ChatBubble({ msg }: { msg: Message }) {
 
   return (
     <div className={clsx("flex gap-2.5 max-w-[85%]", isUser ? "ml-auto flex-row-reverse" : "mr-auto")}>
-      {/* Avatar */}
       <div className={clsx(
-        "shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5",
-        isUser ? "bg-indigo-900 text-indigo-300" : "bg-zinc-800 text-zinc-400",
+        "shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5",
+        isUser ? "bg-indigo-900/60 text-indigo-400" : "bg-zinc-800 text-zinc-500",
       )}>
-        {isUser ? <User size={13} /> : <Bot size={13} />}
+        {isUser ? <User size={12} /> : <Bot size={12} />}
       </div>
 
-      {/* Bubble */}
       <div className="flex flex-col gap-1 min-w-0">
         <div className={clsx(
-          "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
+          "rounded-xl px-3.5 py-2 text-[13px] leading-relaxed",
           isUser
             ? "rounded-tr-sm bg-indigo-600 text-white"
             : clsx(
-              "rounded-tl-sm bg-zinc-800 text-zinc-200",
-              msg.error && "bg-red-950/60 text-red-300 border border-red-800/40",
+              "rounded-tl-sm bg-zinc-900 border border-zinc-800 text-zinc-200",
+              msg.error && "bg-red-950/40 border-red-800/40 text-red-300",
             ),
         )}>
           {msg.error ? (
             <span className="flex items-start gap-1.5">
-              <AlertTriangle size={13} className="shrink-0 mt-0.5 text-red-400" />
+              <AlertTriangle size={12} className="shrink-0 mt-0.5 text-red-400" />
               {msg.error}
             </span>
           ) : (
             <pre className="whitespace-pre-wrap break-words font-sans">
               {msg.content}
               {msg.streaming && (
-                <span className="inline-block w-0.5 h-3.5 bg-zinc-400 ml-0.5 animate-pulse align-text-bottom" />
+                <span className="inline-block w-0.5 h-3 bg-zinc-400 ml-0.5 animate-pulse align-text-bottom" />
               )}
             </pre>
           )}
         </div>
 
-        {/* Metadata below assistant bubble */}
         {msg.meta && !msg.streaming && (
-          <div className="flex items-center gap-3 px-1 text-[10px] text-zinc-600">
+          <div className="flex items-center gap-2 px-1 text-[10px] text-zinc-700">
             <Clock size={9} />
             {msg.meta.latency_ms >= 1000
               ? `${(msg.meta.latency_ms / 1000).toFixed(1)}s`
@@ -176,13 +257,15 @@ function ChatBubble({ msg }: { msg: Message }) {
 function EmptyChat({ model }: { model: string }) {
   return (
     <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center py-12">
-      <div className="w-12 h-12 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-        <Bot size={20} className="text-zinc-600" />
+      <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+        <Bot size={18} className="text-zinc-600" />
       </div>
       <div>
-        <p className="text-sm font-medium text-zinc-400">Start a conversation</p>
-        <p className="text-xs text-zinc-600 mt-1">
-          {model ? <>Chatting with <span className="font-mono text-zinc-500">{model}</span></> : "Select a model to begin"}
+        <p className="text-[13px] font-medium text-zinc-400">Start a conversation</p>
+        <p className="text-[11px] text-zinc-600 mt-1">
+          {model
+            ? <>Model: <span className="font-mono text-zinc-500">{model}</span></>
+            : "Select a model to begin"}
         </p>
       </div>
     </div>
@@ -192,10 +275,29 @@ function EmptyChat({ model }: { model: string }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function PlaygroundPage() {
-  const [messages, setMessages]           = useState<Message[]>([]);
-  const [input, setInput]                 = useState("");
+  const [messages, setMessages]     = useState<Message[]>([]);
+  const [input, setInput]           = useState("");
   const [selectedModel, setSelectedModel] = useState("");
-  const [streaming, setStreaming]         = useState(false);
+  const [streaming, setStreaming]   = useState(false);
+
+  // System prompt — persisted in localStorage
+  const [systemPrompt, setSystemPromptRaw] = useState<string>(
+    () => localStorage.getItem(LS_SYSTEM_PROMPT) ?? DEFAULT_SYSTEM_PROMPT
+  );
+  const [systemOpen, setSystemOpen] = useState<boolean>(
+    () => localStorage.getItem(LS_SYSTEM_OPEN) === "true"
+  );
+
+  function setSystemPrompt(v: string) {
+    setSystemPromptRaw(v);
+    localStorage.setItem(LS_SYSTEM_PROMPT, v);
+  }
+  function toggleSystemOpen() {
+    const next = !systemOpen;
+    setSystemOpen(next);
+    localStorage.setItem(LS_SYSTEM_OPEN, String(next));
+  }
+
   const abortRef    = useRef<AbortController | null>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -210,7 +312,6 @@ export function PlaygroundPage() {
   const ollamaDown  = !!modelsError;
   const activeModel = selectedModel || models[0] || "";
 
-  // Auto-scroll to latest message.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -220,24 +321,23 @@ export function PlaygroundPage() {
     const trimmed = input.trim();
     if (!trimmed || !activeModel || streaming) return;
 
-    // Append the user message.
-    const userMsg: Message = { role: "user", content: trimmed };
+    const userMsg: Message    = { role: "user",      content: trimmed };
     const placeholder: Message = { role: "assistant", content: "", streaming: true };
 
     setMessages((prev) => [...prev, userMsg, placeholder]);
     setInput("");
     setStreaming(true);
 
-    // Build the history to send (all previous turns + new user message).
-    const history = [...messages, userMsg].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    // Build history: system prompt first, then conversation turns, then new user message.
+    const history: { role: string; content: string }[] = [];
+    if (systemPrompt.trim()) {
+      history.push({ role: "system", content: systemPrompt.trim() });
+    }
+    [...messages, userMsg].forEach((m) => history.push({ role: m.role, content: m.content }));
 
     abortRef.current = streamGenerate(
       activeModel,
       history,
-      // onToken: append to the last (placeholder) assistant message
       (token) => {
         setMessages((prev) => {
           const next = [...prev];
@@ -248,7 +348,6 @@ export function PlaygroundPage() {
           return next;
         });
       },
-      // onDone: mark complete with metadata
       (meta) => {
         setMessages((prev) => {
           const next = [...prev];
@@ -260,7 +359,6 @@ export function PlaygroundPage() {
         });
         setStreaming(false);
       },
-      // onError: replace placeholder with error bubble
       (msg) => {
         setMessages((prev) => {
           const next = [...prev];
@@ -277,13 +375,10 @@ export function PlaygroundPage() {
 
   function handleStop() {
     abortRef.current?.abort();
-    // Mark the streaming message as stopped.
     setMessages((prev) => {
       const next = [...prev];
       const last = next[next.length - 1];
-      if (last?.streaming) {
-        next[next.length - 1] = { ...last, streaming: false };
-      }
+      if (last?.streaming) next[next.length - 1] = { ...last, streaming: false };
       return next;
     });
     setStreaming(false);
@@ -293,7 +388,7 @@ export function PlaygroundPage() {
     handleStop();
     setMessages([]);
     setInput("");
-    textareaRef.current?.focus();
+    setTimeout(() => textareaRef.current?.focus(), 50);
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -303,22 +398,24 @@ export function PlaygroundPage() {
     }
   }
 
+  const turnCount = messages.filter((m) => m.role === "user").length;
+
   return (
     <div className="flex flex-col h-full bg-zinc-950">
-      {/* ── Toolbar ──────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800 shrink-0">
-        <Terminal size={14} className="text-indigo-400 shrink-0" />
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 px-4 h-11 border-b border-zinc-800 shrink-0">
+        <Terminal size={13} className="text-indigo-400 shrink-0" />
         <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
           LLM Playground
         </span>
 
-        {messages.length > 0 && (
+        {turnCount > 0 && (
           <span className="text-[10px] text-zinc-700">
-            {messages.filter(m => m.role === "user").length} turn{messages.filter(m => m.role === "user").length !== 1 ? "s" : ""}
+            {turnCount} turn{turnCount !== 1 ? "s" : ""}
           </span>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-3">
           {modelsLoading ? (
             <span className="text-[11px] text-zinc-600 flex items-center gap-1">
               <Loader2 size={10} className="animate-spin" /> Checking…
@@ -326,24 +423,47 @@ export function PlaygroundPage() {
           ) : ollamaDown ? (
             <span className="text-[11px] text-amber-600">Ollama offline</span>
           ) : (
-            <span className="text-[11px] text-zinc-600 flex items-center gap-1">
+            <span className="text-[11px] text-zinc-600 flex items-center gap-1.5">
               <Zap size={10} className="text-emerald-500" />
               {models.length} model{models.length !== 1 ? "s" : ""}
             </span>
           )}
-          <div className="w-48">
-            <ModelSelector value={activeModel} onChange={setSelectedModel} models={models} disabled={streaming} />
+
+          <div className="w-44">
+            <ModelSelector
+              value={activeModel}
+              onChange={setSelectedModel}
+              models={models}
+              disabled={streaming}
+            />
           </div>
+
+          {/* Clear conversation — always visible when there are messages */}
           {messages.length > 0 && (
-            <button onClick={handleClear} disabled={streaming}
-              className="flex items-center gap-1 text-[11px] text-zinc-600 hover:text-zinc-400 disabled:opacity-30 transition-colors">
-              <Trash2 size={11} /> Clear
+            <button
+              onClick={handleClear}
+              disabled={streaming}
+              title="Clear conversation"
+              className="flex items-center gap-1.5 text-[11px] text-zinc-600 hover:text-red-400
+                         disabled:opacity-30 transition-colors px-1.5 py-1 rounded hover:bg-zinc-900"
+            >
+              <Trash2 size={12} />
+              Clear
             </button>
           )}
         </div>
       </div>
 
-      {/* ── Chat messages ────────────────────────────────────────────── */}
+      {/* ── System prompt (collapsible) ───────────────────────────────── */}
+      <SystemPromptPanel
+        value={systemPrompt}
+        onChange={setSystemPrompt}
+        open={systemOpen}
+        onToggle={toggleSystemOpen}
+        disabled={streaming}
+      />
+
+      {/* ── Chat messages ─────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
         {messages.length === 0
           ? <EmptyChat model={activeModel} />
@@ -352,7 +472,7 @@ export function PlaygroundPage() {
         <div ref={bottomRef} />
       </div>
 
-      {/* ── Input bar ────────────────────────────────────────────────── */}
+      {/* ── Input bar ─────────────────────────────────────────────────── */}
       <div className="shrink-0 px-4 py-3 border-t border-zinc-800">
         <form onSubmit={handleSubmit} className="flex gap-2 items-end">
           <textarea
@@ -361,12 +481,16 @@ export function PlaygroundPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={streaming || ollamaDown || !activeModel}
-            placeholder={ollamaDown ? "Ollama offline" : !activeModel ? "No model selected" : "Message… (⌘↵ to send)"}
+            placeholder={
+              ollamaDown      ? "Ollama offline" :
+              !activeModel    ? "No model selected" :
+                                "Message… (⌘↵ to send)"
+            }
             rows={1}
             style={{ maxHeight: "120px" }}
-            className="flex-1 rounded-xl border border-zinc-800 bg-zinc-900 text-sm text-zinc-200
+            className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900 text-[13px] text-zinc-200
                        placeholder-zinc-600 px-3 py-2.5 resize-none overflow-y-auto
-                       focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500
+                       focus:outline-none focus:border-indigo-500
                        disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             onInput={(e) => {
               const el = e.currentTarget;
@@ -374,25 +498,32 @@ export function PlaygroundPage() {
               el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
             }}
           />
+
           {streaming ? (
-            <button type="button" onClick={handleStop}
-              className="shrink-0 flex items-center gap-1.5 rounded-xl px-3 h-10 text-xs font-medium
-                         bg-red-900/50 border border-red-800/50 text-red-400
-                         hover:bg-red-900/80 transition-colors">
-              <Square size={12} /> Stop
+            <button
+              type="button"
+              onClick={handleStop}
+              className="shrink-0 flex items-center gap-1.5 rounded-lg px-3 h-10 text-[12px] font-medium
+                         bg-red-900/40 border border-red-800/50 text-red-400
+                         hover:bg-red-900/70 transition-colors"
+            >
+              <Square size={11} /> Stop
             </button>
           ) : (
-            <button type="submit"
+            <button
+              type="submit"
               disabled={!input.trim() || !activeModel || ollamaDown}
-              className="shrink-0 w-10 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white
+              className="shrink-0 w-10 h-10 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white
                          disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed
-                         flex items-center justify-center transition-colors">
-              <Send size={15} />
+                         flex items-center justify-center transition-colors"
+            >
+              <Send size={14} />
             </button>
           )}
         </form>
+
         <p className="text-[10px] text-zinc-700 mt-1.5 text-center">
-          ⌘↵ to send · conversation history is sent with each message
+          ⌘↵ to send · system prompt + full history sent with each message
         </p>
       </div>
     </div>
