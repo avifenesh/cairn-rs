@@ -403,6 +403,12 @@ pub struct AppendMailboxMessage {
     pub message_id: MailboxMessageId,
     pub run_id: Option<RunId>,
     pub task_id: Option<TaskId>,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub from_run_id: Option<RunId>,
+    #[serde(default)]
+    pub deliver_at_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

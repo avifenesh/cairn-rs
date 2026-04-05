@@ -170,7 +170,7 @@ async fn task_submit_claim_start_complete_lifecycle() {
 
     // Submit
     let task = task_svc
-        .submit(&project, TaskId::new("task_1"), None, None)
+        .submit(&project, TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     assert_eq!(task.state, TaskState::Queued);
@@ -201,7 +201,7 @@ async fn task_claim_requires_queued_state() {
     let project = test_project();
 
     task_svc
-        .submit(&project, TaskId::new("task_1"), None, None)
+        .submit(&project, TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     task_svc
@@ -223,7 +223,7 @@ async fn task_lease_expired_failure_is_retryable() {
     let project = test_project();
 
     task_svc
-        .submit(&project, TaskId::new("task_1"), None, None)
+        .submit(&project, TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     task_svc
@@ -285,6 +285,7 @@ async fn full_session_run_task_lifecycle() {
             TaskId::new("task_1"),
             Some(RunId::new("run_1")),
             None,
+            0,
         )
         .await
         .unwrap();

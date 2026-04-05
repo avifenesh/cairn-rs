@@ -16,6 +16,7 @@ use cairn_store::event_log::{EntityRef, EventLog, EventPosition, StoredEvent};
 use cairn_store::projections::*;
 use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog, SqliteSyncProjection};
 use cairn_store::StoreError;
+use cairn_domain::TenantId;
 
 /// Combined SQLite store implementing EventLog + all ReadModel traits.
 struct SqliteStore {
@@ -104,6 +105,9 @@ impl SessionReadModel for SqliteStore {
     ) -> Result<Vec<SessionRecord>, StoreError> {
         self.adapter.list_by_project(p, l, o).await
     }
+    async fn list_active(&self, limit: usize) -> Result<Vec<SessionRecord>, StoreError> {
+        self.adapter.list_active(limit).await
+    }
 }
 
 #[async_trait]
@@ -180,7 +184,7 @@ impl ApprovalReadModel for SqliteStore {
         l: usize,
         o: usize,
     ) -> Result<Vec<ApprovalRecord>, StoreError> {
-        self.adapter.list_pending(p, l, o).await
+        ApprovalReadModel::list_pending(&self.adapter, p, l, o).await
     }
 }
 
@@ -218,6 +222,48 @@ impl MailboxReadModel for SqliteStore {
     ) -> Result<Vec<MailboxRecord>, StoreError> {
         MailboxReadModel::list_by_task(&self.adapter, t, l, o).await
     }
+    async fn list_pending(&self, now_ms: u64, limit: usize) -> Result<Vec<MailboxRecord>, StoreError> {
+        MailboxReadModel::list_pending(&self.adapter, now_ms, limit).await
+    }
+}
+
+#[async_trait]
+impl TaskDependencyReadModel for SqliteStore {
+    async fn list_blocking(
+        &self,
+        _task_id: &TaskId,
+    ) -> Result<Vec<TaskDependencyRecord>, StoreError> {
+        Ok(vec![])
+    }
+    async fn list_unresolved(
+        &self,
+        _project: &ProjectKey,
+    ) -> Result<Vec<TaskDependencyRecord>, StoreError> {
+        Ok(vec![])
+    }
+    async fn insert_dependency(
+        &self,
+        _record: TaskDependencyRecord,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+    async fn resolve_dependency(
+        &self,
+        _prerequisite_task_id: &TaskId,
+        _resolved_at_ms: u64,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl QuotaReadModel for SqliteStore {
+    async fn get_quota(
+        &self,
+        _tenant_id: &TenantId,
+    ) -> Result<Option<cairn_domain::TenantQuota>, StoreError> {
+        Ok(None)
+    }
 }
 
 fn project() -> ProjectKey {
@@ -249,7 +295,7 @@ async fn sqlite_session_run_task_lifecycle() {
         .unwrap();
 
     task_svc
-        .submit(&p, TaskId::new("t1"), Some(RunId::new("r1")), None)
+        .submit(&p, TaskId::new("t1"), Some(RunId::new("r1")), None, 0)
         .await
         .unwrap();
     task_svc
@@ -319,7 +365,7 @@ async fn sqlite_external_worker_seam() {
     let worker_svc = ExternalWorkerServiceImpl::new(store.clone());
 
     task_svc
-        .submit(&project(), TaskId::new("t1"), None, None)
+        .submit(&project(), TaskId::new("t1"), None, None, 0)
         .await
         .unwrap();
     task_svc
@@ -371,7 +417,7 @@ async fn sqlite_resolve_stale_dependencies_e2e() {
         .unwrap();
 
     task_svc
-        .submit(&p, TaskId::new("child"), Some(RunId::new("parent")), None)
+        .submit(&p, TaskId::new("child"), Some(RunId::new("parent")), None, 0)
         .await
         .unwrap();
 

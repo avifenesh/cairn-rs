@@ -62,7 +62,7 @@ where
 
         let event = make_envelope(RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
             workspace_key: workspace_key.clone(),
-            member_id: member_id.clone(),
+            member_id: cairn_domain::OperatorId::new(member_id.clone()),
             role,
             added_at_ms: now_ms(),
         }));
@@ -70,6 +70,11 @@ where
 
         WorkspaceMembershipReadModel::get_member(self.store.as_ref(), &workspace_key, &member_id)
             .await?
+            .map(|rec| WorkspaceMembership {
+                workspace_id: workspace_key.workspace_id.clone(),
+                operator_id: cairn_domain::OperatorId::new(rec.operator_id),
+                role: rec.role,
+            })
             .ok_or_else(|| {
                 RuntimeError::Internal("workspace membership not found after add".to_owned())
             })
@@ -90,8 +95,15 @@ where
         }
 
         Ok(
-            WorkspaceMembershipReadModel::list_by_workspace(self.store.as_ref(), workspace_key)
-                .await?,
+            WorkspaceMembershipReadModel::list_workspace_members(self.store.as_ref(), workspace_key.workspace_id.as_str())
+                .await?
+                .into_iter()
+                .map(|rec| WorkspaceMembership {
+                    workspace_id: workspace_key.workspace_id.clone(),
+                    operator_id: cairn_domain::OperatorId::new(rec.operator_id),
+                    role: rec.role,
+                })
+                .collect(),
         )
     }
 
@@ -123,7 +135,7 @@ where
         let event = make_envelope(RuntimeEvent::WorkspaceMemberRemoved(
             WorkspaceMemberRemoved {
                 workspace_key,
-                member_id,
+                member_id: cairn_domain::OperatorId::new(member_id),
                 removed_at_ms: now_ms(),
             },
         ));

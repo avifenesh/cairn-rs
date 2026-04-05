@@ -8,7 +8,7 @@ pub enum AuditOutcome {
     Failure,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditLogEntry {
     pub entry_id: String,
     pub tenant_id: TenantId,

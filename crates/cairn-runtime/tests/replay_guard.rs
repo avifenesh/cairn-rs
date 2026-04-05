@@ -49,7 +49,7 @@ async fn replay_preserves_current_state_reads() {
 
     // Task with tool invocation
     task_svc
-        .submit(&p, TaskId::new("t1"), Some(RunId::new("r1")), None)
+        .submit(&p, TaskId::new("t1"), Some(RunId::new("r1")), None, 0)
         .await
         .unwrap();
     task_svc
@@ -86,7 +86,7 @@ async fn replay_preserves_current_state_reads() {
 
     // Task with external worker
     task_svc
-        .submit(&p, TaskId::new("t2"), Some(RunId::new("r1")), None)
+        .submit(&p, TaskId::new("t2"), Some(RunId::new("r1")), None, 0)
         .await
         .unwrap();
     task_svc

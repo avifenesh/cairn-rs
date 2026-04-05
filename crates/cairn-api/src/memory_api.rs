@@ -91,6 +91,85 @@ pub trait MemoryEndpoints: Send + Sync {
     async fn reject(&self, memory_id: &str) -> Result<(), Self::Error>;
 }
 
+// ---------------------------------------------------------------------------
+// Corpus management types (RFC 003)
+// ---------------------------------------------------------------------------
+
+/// Request body for POST /v1/memory/corpora.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateCorpusRequest {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// Request body for POST /v1/memory/corpora/:id/documents.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AddDocumentToCorpusRequest {
+    pub document_id: String,
+}
+
+/// Corpus record returned by CRUD operations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CorpusRecord {
+    pub corpus_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub document_count: u32,
+}
+
+/// Corpus endpoint boundaries.
+#[async_trait]
+pub trait CorpusEndpoints: Send + Sync {
+    type Error;
+
+    async fn create_corpus(
+        &self,
+        project: &ProjectKey,
+        request: &CreateCorpusRequest,
+    ) -> Result<CorpusRecord, Self::Error>;
+
+    async fn get_corpus(&self, corpus_id: &str) -> Result<Option<CorpusRecord>, Self::Error>;
+
+    async fn list_corpora(&self, project: &ProjectKey) -> Result<Vec<CorpusRecord>, Self::Error>;
+
+    async fn add_document_to_corpus(
+        &self,
+        corpus_id: &str,
+        request: &AddDocumentToCorpusRequest,
+    ) -> Result<(), Self::Error>;
+}
+
+// ---------------------------------------------------------------------------
+// Source tagging types (RFC 003)
+// ---------------------------------------------------------------------------
+
+/// Request body for POST /v1/sources/:id/tags.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AddSourceTagsRequest {
+    pub tags: Vec<String>,
+}
+
+/// Response for GET/POST /v1/sources/:id/tags.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceTagsResponse {
+    pub source_id: String,
+    pub tags: Vec<String>,
+}
+
+/// Source tags endpoint boundaries.
+#[async_trait]
+pub trait SourceTagsEndpoints: Send + Sync {
+    type Error;
+
+    async fn get_source_tags(&self, source_id: &str) -> Result<SourceTagsResponse, Self::Error>;
+
+    async fn add_source_tags(
+        &self,
+        source_id: &str,
+        request: &AddSourceTagsRequest,
+    ) -> Result<SourceTagsResponse, Self::Error>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

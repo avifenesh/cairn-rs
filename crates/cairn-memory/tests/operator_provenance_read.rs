@@ -85,6 +85,10 @@ async fn operator_search_result_has_traceable_provenance() {
             source_type: SourceType::Markdown,
             project: project.clone(),
             content: "# Deploy Runbook\n\nRun kubectl apply to deploy the service.".to_owned(),
+            import_id: None,
+            corpus_id: None,
+            bundle_source_id: None,
+            tags: vec![],
         })
         .await
         .unwrap();

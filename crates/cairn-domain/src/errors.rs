@@ -5,6 +5,22 @@ use crate::ids::{
 use crate::tenancy::OwnershipKey;
 use serde::{Deserialize, Serialize};
 
+/// RFC 002 durability classification for entities.
+///
+/// Mirrors `cairn_store::event_log::DurabilityClass` but defined here so that
+/// domain logic and tests can reason about durability without depending on the
+/// store crate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityDurabilityClass {
+    /// Every accepted event is retained; entity state is fully reconstructable
+    /// from history replay. Required for Session, Run, and Task.
+    FullHistory,
+    /// Durable current state with audit events; full replay is not required.
+    /// Used for Approval, Checkpoint, and other audit-trail entities.
+    CurrentStatePlusAudit,
+}
+
 /// Runtime-critical entities that participate in command validation and conflict handling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -17,11 +33,30 @@ pub enum RuntimeEntityKind {
     MailboxMessage,
     Signal,
     ToolInvocation,
+    /// RFC 002: tool result as a first-class entity in error and correlation contexts.
+    ToolResult,
     IngestJob,
     EvalRun,
     PromptAsset,
     PromptVersion,
     PromptRelease,
+}
+
+impl RuntimeEntityKind {
+    /// RFC 002 durability class for this entity kind.
+    ///
+    /// - `Session`, `Run`, `Task` → `FullHistory`: these are the core operational
+    ///   state machines; operators must be able to replay the full event history.
+    /// - All other entities → `CurrentStatePlusAudit`: durable current state plus
+    ///   an audit trail is sufficient.
+    pub fn durability_class(self) -> EntityDurabilityClass {
+        match self {
+            RuntimeEntityKind::Session
+            | RuntimeEntityKind::Run
+            | RuntimeEntityKind::Task => EntityDurabilityClass::FullHistory,
+            _ => EntityDurabilityClass::CurrentStatePlusAudit,
+        }
+    }
 }
 
 /// Shared runtime entity identifier envelope for API/runtime/store error reporting.
@@ -36,6 +71,9 @@ pub enum RuntimeEntityRef {
     MailboxMessage { message_id: MailboxMessageId },
     Signal { signal_id: SignalId },
     ToolInvocation { invocation_id: ToolInvocationId },
+    /// RFC 002: tool result reference — enables tool results to be cited in
+    /// error contexts and event correlation chains.
+    ToolResult { invocation_id: ToolInvocationId, tool_name: String },
     IngestJob { job_id: IngestJobId },
     EvalRun { eval_run_id: EvalRunId },
     PromptAsset { prompt_asset_id: PromptAssetId },
@@ -54,6 +92,7 @@ impl RuntimeEntityRef {
             RuntimeEntityRef::MailboxMessage { .. } => RuntimeEntityKind::MailboxMessage,
             RuntimeEntityRef::Signal { .. } => RuntimeEntityKind::Signal,
             RuntimeEntityRef::ToolInvocation { .. } => RuntimeEntityKind::ToolInvocation,
+            RuntimeEntityRef::ToolResult { .. } => RuntimeEntityKind::ToolResult,
             RuntimeEntityRef::IngestJob { .. } => RuntimeEntityKind::IngestJob,
             RuntimeEntityRef::EvalRun { .. } => RuntimeEntityKind::EvalRun,
             RuntimeEntityRef::PromptAsset { .. } => RuntimeEntityKind::PromptAsset,

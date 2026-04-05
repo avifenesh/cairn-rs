@@ -102,6 +102,12 @@ impl ProjectKey {
     }
 }
 
+impl Default for ProjectKey {
+    fn default() -> Self {
+        Self::new("", "", "")
+    }
+}
+
 impl OperatorProfileKey {
     pub fn new(tenant_id: impl Into<TenantId>, operator_id: impl Into<OperatorId>) -> Self {
         Self {
@@ -144,11 +150,12 @@ impl From<ProjectKey> for OwnershipKey {
 ///
 /// Hierarchy (ascending privilege): Viewer < Member < Admin < Owner.
 /// Use `has_at_least` to enforce minimum-role checks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceRole {
     Owner,
     Admin,
+    #[default]
     Member,
     Viewer,
 }

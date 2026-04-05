@@ -256,6 +256,10 @@ mod tests {
                           The borrow checker validates references at compile time.\n\n\
                           Lifetimes ensure references remain valid."
                     .to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();
@@ -270,6 +274,10 @@ mod tests {
                           Zero-cost abstractions in systems programming.\n\n\
                           Fearless concurrency through ownership."
                     .to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();

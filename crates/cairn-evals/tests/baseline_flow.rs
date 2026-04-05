@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use cairn_domain::{EvalRunId, EvalSubjectKind, ProjectId, PromptAssetId, TenantId};
-use cairn_evals::{EvalBaselineServiceImpl, EvalMetrics, EvalRunService};
+use cairn_domain::{EvalRunId, ProjectId, PromptAssetId, TenantId};
+use cairn_evals::{EvalBaselineServiceImpl, EvalMetrics, EvalRunService, EvalSubjectKind};
 
 #[test]
 fn baseline_comparison_flags_task_success_regression() {
@@ -26,7 +26,6 @@ fn baseline_comparison_flags_task_success_regression() {
         EvalSubjectKind::PromptRelease,
         "llm_judge".to_owned(),
         Some(prompt_asset_id),
-        None,
         None,
         None,
         None,

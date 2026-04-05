@@ -298,6 +298,8 @@ mod tests {
                 default_timeout_ms: Some(10_000),
             }),
             execution_class: ExecutionClass::SupervisedProcess,
+            description: None,
+            homepage: None,
         };
 
         let (record, config, rpc_json) = build_plugin_pipeline_request(
@@ -343,6 +345,8 @@ mod tests {
             permissions: DeclaredPermissions::default(),
             limits: None,
             execution_class: ExecutionClass::SupervisedProcess,
+            description: None,
+            homepage: None,
         };
 
         let (record, config, _) = build_plugin_pipeline_request(

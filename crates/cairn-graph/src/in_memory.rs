@@ -458,6 +458,7 @@ mod tests {
                     run_id: RunId::new("run"),
                     parent_run_id: None,
                     prompt_release_id: None,
+                    agent_role_id: None,
                 })),
                 make_stored(RuntimeEvent::TaskCreated(TaskCreated {
                     project: ProjectKey::new("t", "w", "p"),
@@ -635,5 +636,22 @@ mod tests {
             node.project.as_ref().unwrap().project_id.as_str(),
             "docs"
         );
+    }
+}
+
+#[async_trait::async_trait]
+impl GraphQueryService for std::sync::Arc<InMemoryGraphStore> {
+    async fn query(&self, query: GraphQuery) -> Result<Subgraph, GraphQueryError> {
+        GraphQueryService::query(self.as_ref(), query).await
+    }
+
+    async fn neighbors(
+        &self,
+        node_id: &str,
+        edge_filter: Option<crate::projections::EdgeKind>,
+        direction: crate::queries::TraversalDirection,
+        limit: usize,
+    ) -> Result<Vec<(crate::projections::GraphEdge, crate::projections::GraphNode)>, GraphQueryError> {
+        GraphQueryService::neighbors(self.as_ref(), node_id, edge_filter, direction, limit).await
     }
 }

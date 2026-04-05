@@ -109,6 +109,10 @@ async fn test_ingest_empty_knowledge_pack_content_produces_no_chunks() {
             source_type: SourceType::KnowledgePack,
             project: project.clone(),
             content: "".to_owned(),
+            import_id: None,
+            corpus_id: None,
+            bundle_source_id: None,
+            tags: vec![],
         })
         .await;
 

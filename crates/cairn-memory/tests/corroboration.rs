@@ -33,11 +33,7 @@ fn make_chunk(id: &str, source: &str, text: &str, embedding: Option<Vec<f32>>) -
         graph_linkage: None,
         embedding,
         content_hash: None,
-        superseded: false,
-        tags: vec![],
-        last_retrieved_at_ms: None,
-        retrieval_count: 0,
-        quality_score: None,
+        entities: vec![],
     }
 }
 
@@ -88,7 +84,7 @@ async fn corroboration_three_sources_confirm_same_fact() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "Rust ownership safety".to_owned(),
-            query_embedding: None,
+
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 10,
@@ -177,7 +173,7 @@ async fn corroboration_is_symmetric_between_two_sources() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "Rust ownership memory safety".to_owned(),
-            query_embedding: None,
+
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 10,
@@ -239,7 +235,7 @@ async fn corroboration_same_source_does_not_corroborate() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "Rust ownership memory safety".to_owned(),
-            query_embedding: None,
+
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 10,
@@ -285,7 +281,7 @@ async fn corroboration_embedding_cosine_similarity() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "topic description".to_owned(),
-            query_embedding: None,
+
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 10,

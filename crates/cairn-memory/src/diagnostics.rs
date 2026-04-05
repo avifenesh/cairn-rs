@@ -13,6 +13,14 @@ pub struct SourceQualityRecord {
     pub freshness_score: f64,
     pub credibility_score: f64,
     pub last_ingested_at: u64,
+    #[serde(default)]
+    pub avg_rating: f64,
+    #[serde(default)]
+    pub retrieval_count: u64,
+    #[serde(default)]
+    pub query_hit_rate: f64,
+    #[serde(default)]
+    pub error_rate: f64,
 }
 
 /// Embedding and index status for operator surfaces.

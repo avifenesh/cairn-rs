@@ -1,7 +1,47 @@
-use crate::ids::{RunId, TaskId, WorkerId};
+use crate::ids::{TenantId, RunId, TaskId, WorkerId};
 use crate::lifecycle::{FailureClass, PauseReason};
 use crate::tenancy::ProjectKey;
 use serde::{Deserialize, Serialize};
+
+// ── Worker health / fleet types ───────────────────────────────────────────
+
+/// Live health snapshot for a registered external worker (GAP-005).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerHealth {
+    /// Epoch-ms of the last received heartbeat (0 if no heartbeat yet).
+    pub last_heartbeat_ms: u64,
+    /// True when the worker sent a heartbeat within the configured TTL window.
+    pub is_alive: bool,
+    /// Number of tasks currently leased to this worker.
+    pub active_task_count: u32,
+}
+
+impl Default for WorkerHealth {
+    fn default() -> Self {
+        Self {
+            last_heartbeat_ms: 0,
+            is_alive: false,
+            active_task_count: 0,
+        }
+    }
+}
+
+/// Persistent record for a registered external worker (GAP-005).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalWorkerRecord {
+    pub worker_id: WorkerId,
+    pub tenant_id: TenantId,
+    pub display_name: String,
+    /// Worker status: "active" | "suspended" | "offline"
+    pub status: String,
+    pub registered_at: u64,
+    pub updated_at: u64,
+    #[serde(default)]
+    pub health: WorkerHealth,
+    /// The task currently leased to this worker (if any).
+    #[serde(default)]
+    pub current_task_id: Option<TaskId>,
+}
 
 /// Canonical leased task record shared across runtime, store, and external workers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

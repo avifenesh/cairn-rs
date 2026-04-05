@@ -3,12 +3,14 @@ use axum::{
     http::{Request, StatusCode},
     response::Response,
 };
+use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
+use cairn_domain::tenancy::TenantKey;
 use cairn_domain::{
-    ApprovalId, ApprovalRequirement, EventEnvelope, EventId, EventSource, ProjectKey,
+    ApprovalId, ApprovalRequirement, EventEnvelope, EventId, EventSource, OperatorId, ProjectKey,
     ProviderBindingId, ProviderCallCompleted, ProviderCallId, ProviderConnectionId,
-    ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, RuntimeEvent, TenantId,
+    ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, RuntimeEvent,
     ToolInvocationId, ToolInvocationProgressUpdated,
 };
 use cairn_graph::projections::{EdgeKind, GraphEdge, GraphProjection};
@@ -149,7 +151,7 @@ async fn tls_settings_route_reports_disabled_by_default() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
         .await
         .unwrap();
-    tokens.register("tls-token", TenantId::new("default_tenant"));
+    tokens.register("tls-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let response = send_empty_request(&app, "GET", "/v1/settings/tls", "tls-token").await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -231,7 +233,7 @@ async fn dashboard_and_activity_routes_report_overview() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("dashboard-token", TenantId::new("default_tenant"));
+    tokens.register("dashboard-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let session_response = send_json_request(
         &app,
@@ -294,7 +296,7 @@ async fn eval_and_graph_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("tenant_http"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_http") });
 
     for (eval_run_id, task_success_rate) in [("eval_http_1", 0.71), ("eval_http_2", 0.93)] {
         let create_response = send_json_request(
@@ -401,7 +403,7 @@ async fn eval_trend_and_winner_routes_return_best_run() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("eval-trend-token", TenantId::new("tenant_http"));
+    tokens.register("eval-trend-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_http") });
 
     for (eval_run_id, prompt_version_id, prompt_release_id, task_success_rate) in [
         ("eval_trend_http_1", "ver_trend_1", "rel_trend_1", 0.7),
@@ -487,7 +489,7 @@ async fn eval_matrix_routes_return_real_rows() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("eval-matrix-token", TenantId::new("default_tenant"));
+    tokens.register("eval-matrix-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     for (eval_run_id, prompt_version_id, prompt_release_id, task_success_rate) in [
         ("eval_matrix_http_1", "ver_matrix_1", "rel_matrix_1", 0.61),
@@ -611,7 +613,7 @@ async fn eval_report_and_export_routes_cover_improving_runs() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("eval-report-token", TenantId::new("tenant_http"));
+    tokens.register("eval-report-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_http") });
 
     for (eval_run_id, prompt_version_id, prompt_release_id, task_success_rate) in [
         ("eval_report_http_1", "ver_report_1", "rel_report_1", 0.6),
@@ -707,7 +709,7 @@ async fn run_triage_diagnose_and_release_lease_flow() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("run-triage-token", TenantId::new("default_tenant"));
+    tokens.register("run-triage-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let session_response = send_json_request(
         &app,
@@ -838,7 +840,7 @@ async fn onboarding_templates_and_settings_routes_return_200() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("tenant_http"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_http") });
 
     let templates_response = app
         .clone()
@@ -876,7 +878,7 @@ async fn bundle_import_export_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("bundle-token", TenantId::new("default_tenant"));
+    tokens.register("bundle-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let bundle = valid_bundle_body();
 
@@ -968,7 +970,7 @@ async fn sessions_and_runs_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("tenant_http"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_http") });
 
     let create_session_response = app
         .clone()
@@ -1027,7 +1029,11 @@ async fn sessions_and_runs_routes_round_trip() {
         )
         .await
         .unwrap();
-    assert_eq!(get_run_response.status(), StatusCode::OK);
+    if get_run_response.status() != StatusCode::OK {
+        let s = get_run_response.status();
+        let b = to_bytes(get_run_response.into_body(), usize::MAX).await.unwrap();
+        panic!("GET /v1/runs/run_http_1 returned {} body={}", s, String::from_utf8_lossy(&b));
+    }
 
     let get_run_body = to_bytes(get_run_response.into_body(), usize::MAX)
         .await
@@ -1043,7 +1049,7 @@ async fn run_replay_routes_return_events_and_final_state() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("run-replay-token", TenantId::new("tenant_replay_http"));
+    tokens.register("run-replay-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_replay_http") });
 
     let create_session_response = send_json_request(
         &app,
@@ -1150,7 +1156,7 @@ async fn pause_scheduled_run_resumes_through_http() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("pause-token", TenantId::new("tenant_pause_http"));
+    tokens.register("pause-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_pause_http") });
 
     let create_session_response = send_json_request(
         &app,
@@ -1249,10 +1255,7 @@ async fn intervention_force_fail_records_intervention() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register(
-        "intervention-token",
-        TenantId::new("tenant_intervention_http"),
-    );
+    tokens.register("intervention-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_intervention_http") });
 
     let create_session_response = send_json_request(
         &app,
@@ -1325,8 +1328,8 @@ async fn tenant_isolation_hides_other_tenant_runs() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("tenant-a-token", TenantId::new("default_tenant"));
-    tokens.register("tenant-b-token", TenantId::new("tenant_b_http"));
+    tokens.register("tenant-a-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
+    tokens.register("tenant-b-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_b_http") });
 
     let tenant_response = send_json_request(
         &app,
@@ -1425,7 +1428,7 @@ async fn signals_feed_and_worker_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let signal_response = app
         .clone()
@@ -1491,7 +1494,7 @@ async fn mailbox_and_recovery_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let session_response = send_json_request(
         &app,
@@ -1587,7 +1590,7 @@ async fn session_cost_route_accumulates_provider_call_totals() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let session_response = send_json_request(
         &app,
@@ -1636,6 +1639,7 @@ async fn session_cost_route_accumulates_provider_call_totals() {
                     provider_connection_id: ProviderConnectionId::new("conn_http"),
                     provider_model_id: ProviderModelId::new("model_http"),
                     run_id: Some(RunId::new("run_cost_http")),
+                    session_id: None,
                     operation_kind: cairn_domain::providers::OperationKind::Generate,
                     status: cairn_domain::providers::ProviderCallStatus::Succeeded,
                     latency_ms: Some(5),
@@ -1645,6 +1649,11 @@ async fn session_cost_route_accumulates_provider_call_totals() {
                     error_class: None,
                     raw_error_message: None,
                     retry_count: 0,
+                    task_id: None,
+                    prompt_release_id: None,
+                    fallback_position: 0,
+                    started_at: 0,
+                    finished_at: 0,
                     completed_at: 50,
                 }),
             ),
@@ -1660,6 +1669,7 @@ async fn session_cost_route_accumulates_provider_call_totals() {
                     provider_connection_id: ProviderConnectionId::new("conn_http"),
                     provider_model_id: ProviderModelId::new("model_http"),
                     run_id: Some(RunId::new("run_cost_http")),
+                    session_id: None,
                     operation_kind: cairn_domain::providers::OperationKind::Generate,
                     status: cairn_domain::providers::ProviderCallStatus::Succeeded,
                     latency_ms: Some(6),
@@ -1669,6 +1679,11 @@ async fn session_cost_route_accumulates_provider_call_totals() {
                     error_class: None,
                     raw_error_message: None,
                     retry_count: 0,
+                    task_id: None,
+                    prompt_release_id: None,
+                    fallback_position: 0,
+                    started_at: 0,
+                    finished_at: 0,
                     completed_at: 60,
                 }),
             ),
@@ -1697,7 +1712,7 @@ async fn run_cost_route_accumulates_provider_call_totals() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let session_response = send_json_request(
         &app,
@@ -1746,6 +1761,7 @@ async fn run_cost_route_accumulates_provider_call_totals() {
                     provider_connection_id: ProviderConnectionId::new("conn_http"),
                     provider_model_id: ProviderModelId::new("model_http"),
                     run_id: Some(RunId::new("run_cost_http_route")),
+                    session_id: None,
                     operation_kind: cairn_domain::providers::OperationKind::Generate,
                     status: cairn_domain::providers::ProviderCallStatus::Succeeded,
                     latency_ms: Some(5),
@@ -1755,6 +1771,11 @@ async fn run_cost_route_accumulates_provider_call_totals() {
                     error_class: None,
                     raw_error_message: None,
                     retry_count: 0,
+                    task_id: None,
+                    prompt_release_id: None,
+                    fallback_position: 0,
+                    started_at: 0,
+                    finished_at: 0,
                     completed_at: 50,
                 }),
             ),
@@ -1770,6 +1791,7 @@ async fn run_cost_route_accumulates_provider_call_totals() {
                     provider_connection_id: ProviderConnectionId::new("conn_http"),
                     provider_model_id: ProviderModelId::new("model_http"),
                     run_id: Some(RunId::new("run_cost_http_route")),
+                    session_id: None,
                     operation_kind: cairn_domain::providers::OperationKind::Generate,
                     status: cairn_domain::providers::ProviderCallStatus::Succeeded,
                     latency_ms: Some(6),
@@ -1779,6 +1801,11 @@ async fn run_cost_route_accumulates_provider_call_totals() {
                     error_class: None,
                     raw_error_message: None,
                     retry_count: 0,
+                    task_id: None,
+                    prompt_release_id: None,
+                    fallback_position: 0,
+                    started_at: 0,
+                    finished_at: 0,
                     completed_at: 60,
                 }),
             ),
@@ -1806,7 +1833,7 @@ async fn channel_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("channel-token", TenantId::new("default_tenant"));
+    tokens.register("channel-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let create_response = send_json_request(
         &app,
@@ -1883,7 +1910,7 @@ async fn prompt_assets_and_approvals_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("tenant_e2e_http"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_e2e_http") });
 
     let project = ProjectKey::new("default_tenant", "default_workspace", "default_project");
     runtime
@@ -1894,7 +1921,6 @@ async fn prompt_assets_and_approvals_routes_round_trip() {
             None,
             None,
             ApprovalRequirement::Required,
-            None,
         )
         .await
         .unwrap();
@@ -1954,7 +1980,7 @@ async fn audit_log_records_prompt_release_activation() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("audit-token", TenantId::new("default_tenant"));
+    tokens.register("audit-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     assert_eq!(
         send_json_request(
@@ -2064,7 +2090,7 @@ async fn prompt_compare_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("prompt-compare-token", TenantId::new("default_tenant"));
+    tokens.register("prompt-compare-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let asset_response = send_json_request(
         &app,
@@ -2201,7 +2227,7 @@ async fn prompt_template_routes_render_and_validate_required_vars() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("prompt-template-token", TenantId::new("default_tenant"));
+    tokens.register("prompt-template-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let asset_response = send_json_request(
         &app,
@@ -2292,7 +2318,7 @@ async fn task_dependency_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("task-dependency-token", TenantId::new("default_tenant"));
+    tokens.register("task-dependency-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     for task_id in ["task_dep_a", "task_dep_b"] {
         let response = send_json_request(
@@ -2376,7 +2402,7 @@ async fn auto_checkpoint_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("auto-checkpoint-token", TenantId::new("default_tenant"));
+    tokens.register("auto-checkpoint-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let session_response = send_json_request(
         &app,
@@ -2516,7 +2542,7 @@ async fn protected_route_accepts_registered_bearer_token() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("auth-ok-token", TenantId::new("default_tenant"));
+    tokens.register("auth-ok-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let response = app
         .oneshot(
@@ -2538,7 +2564,7 @@ async fn nonexistent_run_returns_canonical_api_error() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("error-token", TenantId::new("default_tenant"));
+    tokens.register("error-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let response = send_empty_request(&app, "GET", "/v1/runs/nonexistent-id", "error-token").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -2554,7 +2580,7 @@ async fn malformed_run_create_returns_validation_api_error() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("error-token", TenantId::new("default_tenant"));
+    tokens.register("error-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let response = app
         .oneshot(
@@ -2587,7 +2613,7 @@ async fn unknown_path_returns_canonical_not_found_api_error() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("error-token", TenantId::new("default_tenant"));
+    tokens.register("error-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let response = send_empty_request(&app, "GET", "/v1/unknown-path", "error-token").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -2603,7 +2629,7 @@ async fn deep_search_and_graph_provenance_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("memory-token", TenantId::new("default_tenant"));
+    tokens.register("memory-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let ingest_response = send_json_request(
         &app,
@@ -2668,7 +2694,7 @@ async fn memory_graph_expansion_finds_related_documents_and_route() {
         AppBootstrap::router_with_runtime_graph_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("memory-graph-token", TenantId::new("default_tenant"));
+    tokens.register("memory-graph-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let seed_ingest = send_json_request(
         &app,
@@ -2767,7 +2793,7 @@ async fn ingest_job_and_source_chunk_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("ingest-token", TenantId::new("default_tenant"));
+    tokens.register("ingest-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let start_response = send_json_request(
         &app,
@@ -2851,7 +2877,7 @@ async fn runtime_stream_emits_frame_after_run_creation() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("sse-token", TenantId::new("default_tenant"));
+    tokens.register("sse-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let create_session_response = app
         .clone()
@@ -2889,17 +2915,19 @@ async fn runtime_stream_emits_frame_after_run_creation() {
         .unwrap();
     assert_eq!(stream_response.status(), StatusCode::OK);
 
-    let mut stream_body = stream_response.into_body();
+    let stream_body = stream_response.into_body();
     let read_stream = tokio::spawn(async move {
+        use http_body_util::BodyExt as _;
+        let mut stream_body = stream_body;
         loop {
             let Some(frame) = stream_body.frame().await else {
-                return None;
+                return None::<String>;
             };
             let Ok(frame) = frame else {
                 return None;
             };
             if let Ok(data) = frame.into_data() {
-                let text = String::from_utf8_lossy(&data).to_string();
+                let text = String::from_utf8_lossy(data.as_ref()).to_string();
                 if !text.trim().is_empty() {
                     return Some(text);
                 }
@@ -2944,7 +2972,7 @@ async fn memory_and_provider_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let ingest_response = app
         .clone()
@@ -3014,7 +3042,7 @@ async fn memory_feedback_adjusts_source_quality_and_scores() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("memory-feedback-token", TenantId::new("default_tenant"));
+    tokens.register("memory-feedback-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let ingest_response = send_json_request(
         &app,
@@ -3141,7 +3169,7 @@ async fn admin_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let tenant_response = app
         .clone()
@@ -3171,7 +3199,7 @@ async fn tool_invocation_checkpoint_and_plugin_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let session_response = app
         .clone()
@@ -3328,7 +3356,7 @@ async fn tool_invocation_progress_route_returns_latest_progress() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let tool_response = send_json_request(
         &app,
@@ -3357,7 +3385,7 @@ async fn tool_invocation_progress_route_returns_latest_progress() {
             EventSource::Runtime,
             RuntimeEvent::ToolInvocationProgressUpdated(ToolInvocationProgressUpdated {
                 invocation_id: ToolInvocationId::new("inv_http_progress"),
-                percent: 42.5,
+                progress_pct: 42,
                 message: Some("warming cache".to_owned()),
                 updated_at_ms: 1_710_000_000,
             }),
@@ -3445,7 +3473,7 @@ async fn plugin_eval_score_route_returns_exact_match_score() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let script_path = write_eval_scorer_plugin_script();
     let register_plugin_response = send_json_request(
@@ -3497,7 +3525,7 @@ async fn full_workspace_operator_journey_over_http() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("tenant_e2e_http"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_e2e_http") });
 
     let tenant_response = send_json_request(
         &app,
@@ -3686,7 +3714,7 @@ async fn middleware_adds_request_id_limits_body_and_enables_local_cors() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("test-token", TenantId::new("default_tenant"));
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let health_response = app
         .clone()
@@ -3761,7 +3789,7 @@ async fn run_subagent_spawn_and_children_routes_round_trip() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register("subagent-token", TenantId::new("default_tenant"));
+    tokens.register("subagent-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let parent_session_response = send_json_request(
         &app,
@@ -3934,4 +3962,195 @@ async fn request_health(addr: std::net::SocketAddr) -> String {
     }
 
     panic!("server did not accept a /health connection in time");
+}
+
+// ── GAP-010: LLM Observability traces route ───────────────────────────────────
+
+#[tokio::test]
+async fn llm_traces_route_returns_traces_for_session() {
+    let (app, runtime, tokens) =
+        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
+            .await
+            .unwrap();
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
+
+    // Create session.
+    let sess_resp = send_json_request(
+        &app,
+        "POST",
+        "/v1/sessions",
+        "test-token",
+        serde_json::json!({
+            "tenant_id": "default_tenant",
+            "workspace_id": "default_workspace",
+            "project_id": "default_project",
+            "session_id": "sess_traces"
+        }),
+    )
+    .await;
+    assert_eq!(sess_resp.status(), StatusCode::CREATED);
+
+    // Create a run so we have a run_id for the provider call.
+    let run_resp = send_json_request(
+        &app,
+        "POST",
+        "/v1/runs",
+        "test-token",
+        serde_json::json!({
+            "tenant_id": "default_tenant",
+            "workspace_id": "default_workspace",
+            "project_id": "default_project",
+            "session_id": "sess_traces",
+            "run_id": "run_traces"
+        }),
+    )
+    .await;
+    assert_eq!(run_resp.status(), StatusCode::CREATED);
+
+    // Append a ProviderCallCompleted event — this is projected into LlmCallTrace.
+    let project = ProjectKey::new("default_tenant", "default_workspace", "default_project");
+    runtime
+        .store
+        .append(&[EventEnvelope::for_runtime_event(
+            EventId::new("evt_traces_1"),
+            EventSource::Runtime,
+            RuntimeEvent::ProviderCallCompleted(ProviderCallCompleted {
+                project,
+                provider_call_id: ProviderCallId::new("pc_traces_1"),
+                route_decision_id: RouteDecisionId::new("rd_traces_1"),
+                route_attempt_id: RouteAttemptId::new("ra_traces_1"),
+                provider_binding_id: ProviderBindingId::new("binding_traces"),
+                provider_connection_id: ProviderConnectionId::new("conn_traces"),
+                provider_model_id: ProviderModelId::new("claude-sonnet-4-6"),
+                session_id: Some(cairn_domain::SessionId::new("sess_traces")),
+                run_id: Some(RunId::new("run_traces")),
+                operation_kind: cairn_domain::providers::OperationKind::Generate,
+                status: cairn_domain::providers::ProviderCallStatus::Succeeded,
+                latency_ms: Some(350),
+                input_tokens: Some(200),
+                output_tokens: Some(80),
+                cost_micros: Some(2_100),
+                error_class: None,
+                raw_error_message: None,
+                retry_count: 0,
+                task_id: None,
+                prompt_release_id: None,
+                fallback_position: 0,
+                started_at: 0,
+                finished_at: 0,
+                completed_at: 9000,
+            }),
+        )])
+        .await
+        .unwrap();
+
+    // GET /v1/sessions/sess_traces/llm-traces
+    let response = send_empty_request(
+        &app,
+        "GET",
+        "/v1/sessions/sess_traces/llm-traces",
+        "test-token",
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+
+    // The traces array must contain one entry matching the appended call.
+    let traces = json["traces"].as_array().expect("traces must be an array");
+    assert_eq!(traces.len(), 1, "exactly one trace expected");
+
+    let trace = &traces[0];
+    assert_eq!(trace["trace_id"], "pc_traces_1");
+    assert_eq!(trace["model_id"], "claude-sonnet-4-6");
+    assert_eq!(trace["latency_ms"], 350);
+    assert_eq!(trace["prompt_tokens"], 200);
+    assert_eq!(trace["completion_tokens"], 80);
+    assert_eq!(trace["cost_micros"], 2100);
+}
+
+#[tokio::test]
+async fn llm_traces_route_returns_empty_for_session_with_no_calls() {
+    let (app, _runtime, tokens) =
+        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
+            .await
+            .unwrap();
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
+
+    // Create a session but make no provider calls.
+    let sess_resp = send_json_request(
+        &app,
+        "POST",
+        "/v1/sessions",
+        "test-token",
+        serde_json::json!({
+            "tenant_id": "default_tenant",
+            "workspace_id": "default_workspace",
+            "project_id": "default_project",
+            "session_id": "sess_no_traces"
+        }),
+    )
+    .await;
+    assert_eq!(sess_resp.status(), StatusCode::CREATED);
+
+    let response = send_empty_request(
+        &app,
+        "GET",
+        "/v1/sessions/sess_no_traces/llm-traces",
+        "test-token",
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    let traces = json["traces"].as_array().expect("traces must be array");
+    assert!(traces.is_empty(), "no traces for session with no provider calls");
+}
+
+#[tokio::test]
+async fn llm_traces_route_returns_404_for_unknown_session() {
+    let (app, _runtime, tokens) =
+        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
+            .await
+            .unwrap();
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
+
+    let response = send_empty_request(
+        &app,
+        "GET",
+        "/v1/sessions/nonexistent_session/llm-traces",
+        "test-token",
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn minimal_route_test() {
+    let (app, _runtime, tokens) =
+        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
+            .await
+            .unwrap();
+    tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_test") });
+
+    // Test a simple GET to /health (no auth needed)
+    let resp = app.clone().oneshot(
+        Request::builder().uri("/health").body(Body::empty()).unwrap()
+    ).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "health check should work");
+
+    // Test GET /v1/runs/{id} 
+    let resp = app.oneshot(
+        Request::builder()
+            .uri("/v1/runs/some_run_id")
+            .header("authorization", "Bearer test-token")
+            .body(Body::empty())
+            .unwrap()
+    ).await.unwrap();
+    let status = resp.status();
+    let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    eprintln!("GET /v1/runs/some_run_id: {} body={}", status, String::from_utf8_lossy(&body));
+    // We expect 404 from the handler (run not found), NOT from the router
+    assert_ne!(status, StatusCode::METHOD_NOT_ALLOWED, "route should exist");
 }

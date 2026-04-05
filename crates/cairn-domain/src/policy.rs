@@ -97,6 +97,28 @@ pub struct ApprovalPolicy {
     pub mode: ApprovalMode,
 }
 
+
+/// The kind of decision made by a guardrail rule evaluation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardrailDecisionKind {
+    Allowed,
+    Denied,
+    Warned,
+}
+
+/// The effect that fires when a guardrail rule matches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardrailRuleEffect {
+    Allow,
+    Deny,
+    Block,
+    Redact,
+    Log,
+    Alert,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ApprovalMode, ApprovalRequirement, PolicyEffect, PolicyVerdict};
@@ -108,6 +130,45 @@ mod tests {
         assert_eq!(verdict.effect, PolicyEffect::Hold);
         assert_eq!(verdict.requirement, ApprovalRequirement::Required);
     }
+}
+
+/// Subject type for a guardrail policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardrailSubjectType {
+    Run,
+    Task,
+    Session,
+    Tool,
+    Provider,
+}
+
+/// A single guardrail rule definition.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuardrailRule {
+    pub subject_type: GuardrailSubjectType,
+    /// None means "any subject ID".
+    pub subject_id: Option<String>,
+    pub action: String,
+    pub effect: GuardrailRuleEffect,
+    pub conditions: Vec<String>,
+}
+
+/// A guardrail policy consisting of one or more rules.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuardrailPolicy {
+    pub policy_id: String,
+    pub name: String,
+    pub rules: Vec<GuardrailRule>,
+    pub enabled: bool,
+}
+
+/// The outcome of evaluating a guardrail — carries the verdict + which policy matched.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuardrailDecision {
+    pub decision: GuardrailDecisionKind,
+    pub policy_id: Option<String>,
+    pub reason: Option<String>,
 }
 
 /// Tenant-scoped configurable approval workflow record (RFC 006).

@@ -48,6 +48,9 @@ impl RetrievalService for SqliteRetrievalService {
                 candidates_generated: results.len(),
                 results_returned: results.len(),
                 latency_ms: elapsed,
+                stages_used: vec![],
+                scoring_dimensions_used: vec![],
+                effective_policy: None,
             },
         })
     }
@@ -115,6 +118,7 @@ impl ChunkSearchRow {
             credibility_score: None,
             graph_linkage: None,
             embedding: None,
+            content_hash: None,
         };
 
         // bm25() returns negative values (more negative = better match).

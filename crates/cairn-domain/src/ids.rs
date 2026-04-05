@@ -40,6 +40,12 @@ macro_rules! define_id {
                 f.write_str(self.as_str())
             }
         }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self(String::new())
+            }
+        }
     };
 }
 

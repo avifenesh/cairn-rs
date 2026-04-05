@@ -228,6 +228,67 @@ pub enum PluginNotification {
     },
 }
 
+/// Per-invocation progress state, updated by `progress.update` notifications.
+pub struct ProgressStore {
+    /// Last reported progress percent per invocation ID (0–100).
+    percentages: std::collections::HashMap<String, u32>,
+}
+
+impl ProgressStore {
+    pub fn new() -> Self {
+        Self {
+            percentages: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Record a progress update for an invocation.
+    pub fn set(&mut self, invocation_id: impl Into<String>, percent: u32) {
+        self.percentages.insert(invocation_id.into(), percent);
+    }
+
+    /// Return the last reported percent for an invocation, if any.
+    pub fn get(&self, invocation_id: &str) -> Option<u32> {
+        self.percentages.get(invocation_id).copied()
+    }
+}
+
+impl Default for ProgressStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Consume a parsed notification: print logs to stderr and store progress updates.
+///
+/// `plugin_name` is used as a label in log lines.  `progress` is updated
+/// in-place for `Progress` notifications so callers can query current state.
+/// `Event` notifications are currently a no-op — the caller can inspect
+/// `PluginNotification::Event` directly if needed.
+pub fn handle_notification(
+    plugin_name: &str,
+    notification: &PluginNotification,
+    progress: &mut ProgressStore,
+) {
+    match notification {
+        PluginNotification::Log { level, message, .. } => {
+            eprintln!("[plugin:{plugin_name}] {level}: {message}");
+        }
+        PluginNotification::Progress { invocation_id, percent, message } => {
+            if let Some(pct) = percent {
+                progress.set(invocation_id.clone(), *pct);
+            }
+            // Also surface as a stderr line so operators see real-time progress.
+            let pct_str = percent
+                .map(|p| format!(" ({p}%)"))
+                .unwrap_or_default();
+            eprintln!("[plugin:{plugin_name}] progress{pct_str}: {message}");
+        }
+        PluginNotification::Event { .. } => {
+            // Callers that need event.emit payloads inspect the enum directly.
+        }
+    }
+}
+
 /// Parse a JSON-RPC notification into a typed PluginNotification.
 pub fn parse_notification(
     method: &str,
@@ -276,6 +337,8 @@ mod tests {
                 default_timeout_ms: Some(5000),
             }),
             execution_class: ExecutionClass::SupervisedProcess,
+            description: None,
+            homepage: None,
         }
     }
 
@@ -438,5 +501,51 @@ mod tests {
     fn parse_unknown_notification_returns_none() {
         let params = serde_json::json!({});
         assert!(parse_notification("unknown.method", &params).is_none());
+    }
+
+    #[test]
+    fn handle_log_notification_prints_to_stderr() {
+        // Just verify it doesn't panic and the notification is consumed.
+        let notif = PluginNotification::Log {
+            invocation_id: "inv_1".to_owned(),
+            level: "warn".to_owned(),
+            message: "disk almost full".to_owned(),
+        };
+        let mut progress = ProgressStore::new();
+        handle_notification("my-plugin", &notif, &mut progress);
+        // Progress store should be unaffected by log notifications.
+        assert!(progress.get("inv_1").is_none());
+    }
+
+    #[test]
+    fn handle_progress_notification_stores_percent() {
+        let notif = PluginNotification::Progress {
+            invocation_id: "inv_2".to_owned(),
+            message: "halfway there".to_owned(),
+            percent: Some(50),
+        };
+        let mut progress = ProgressStore::new();
+        handle_notification("my-plugin", &notif, &mut progress);
+        assert_eq!(progress.get("inv_2"), Some(50));
+    }
+
+    #[test]
+    fn handle_progress_notification_without_percent_leaves_store_empty() {
+        let notif = PluginNotification::Progress {
+            invocation_id: "inv_3".to_owned(),
+            message: "starting".to_owned(),
+            percent: None,
+        };
+        let mut progress = ProgressStore::new();
+        handle_notification("my-plugin", &notif, &mut progress);
+        assert!(progress.get("inv_3").is_none());
+    }
+
+    #[test]
+    fn progress_store_tracks_latest_percent() {
+        let mut store = ProgressStore::new();
+        store.set("inv_1", 25);
+        store.set("inv_1", 75);
+        assert_eq!(store.get("inv_1"), Some(75));
     }
 }

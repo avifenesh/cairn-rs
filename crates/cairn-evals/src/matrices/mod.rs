@@ -43,7 +43,7 @@ pub struct PromptComparisonRow {
 /// A single row in the provider routing matrix.
 ///
 /// Canonical subject: `route_decision`
-/// Canonical row grain: one row per route_decision_id.
+/// Canonical row grain: one row per provider binding.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProviderRoutingRow {
     pub project_id: ProjectId,
@@ -51,6 +51,12 @@ pub struct ProviderRoutingRow {
     pub provider_binding_id: Option<ProviderBindingId>,
     pub eval_run_id: EvalRunId,
     pub metrics: EvalMetrics,
+    /// Accumulated cost across all provider calls for this binding (in micros).
+    #[serde(default)]
+    pub total_cost_micros: u64,
+    /// Fraction of provider calls that succeeded (0.0–1.0).
+    #[serde(default)]
+    pub success_rate: f64,
 }
 
 /// RFC 004: aggregated provider routing matrix for a project.
@@ -114,20 +120,8 @@ pub struct GuardrailPolicyRow {
 /// Built-in canonical metrics required for operator comparison.
 ///
 /// Per RFC 004: plugin-defined supplemental metrics may extend but
-/// not replace these.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct EvalMetrics {
-    pub task_success_rate: Option<f64>,
-    pub latency_p50_ms: Option<u64>,
-    pub latency_p99_ms: Option<u64>,
-    pub cost_per_run: Option<f64>,
-    pub policy_pass_rate: Option<f64>,
-    pub retrieval_hit_at_k: Option<f64>,
-    pub citation_coverage: Option<f64>,
-    pub source_diversity: Option<f64>,
-    pub retrieval_latency_ms: Option<u64>,
-    pub retrieval_cost: Option<f64>,
-}
+/// not replace these. Re-exported from cairn_domain to keep a single canonical type.
+pub use cairn_domain::EvalMetrics;
 
 /// Supplemental plugin-defined metric.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -173,4 +167,38 @@ mod tests {
         assert!(m.task_success_rate.is_none());
         assert!(m.latency_p50_ms.is_none());
     }
+}
+
+// ── Matrix container types ─────────────────────────────────────────────────
+// These wrap the existing *Row types into named matrix responses used by
+// the operator API.
+
+/// Matrix of prompt comparison results across releases.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PromptComparisonMatrix {
+    pub rows: Vec<PromptComparisonRow>,
+}
+
+/// Matrix of permission-policy eval results.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PermissionMatrix {
+    pub rows: Vec<PermissionRow>,
+}
+
+/// Matrix of skill health eval results.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SkillHealthMatrix {
+    pub rows: Vec<SkillHealthRow>,
+}
+
+/// Matrix of guardrail policy eval results.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct GuardrailMatrix {
+    pub rows: Vec<GuardrailPolicyRow>,
+}
+
+/// Matrix of memory source quality eval results.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemorySourceQualityMatrix {
+    pub rows: Vec<MemorySourceQualityRow>,
 }

@@ -54,6 +54,7 @@ where
             policy_id: policy_id.clone(),
             name,
             rules,
+            enabled: true,
         }));
         self.store.append(&[event]).await?;
 

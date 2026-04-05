@@ -122,6 +122,21 @@ impl SessionReadModel for SqliteAdapter {
 
         rows.into_iter().map(SessionRow::into_record).collect()
     }
+
+    async fn list_active(&self, limit: usize) -> Result<Vec<SessionRecord>, StoreError> {
+        let rows = sqlx::query_as::<_, SessionRow>(
+            "SELECT session_id, tenant_id, workspace_id, project_id, state, version, created_at, updated_at
+             FROM sessions
+             WHERE state = 'open'
+             ORDER BY updated_at DESC
+             LIMIT $1",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        rows.into_iter().map(SessionRow::into_record).collect()
+    }
 }
 
 #[async_trait]
@@ -538,6 +553,11 @@ impl MailboxReadModel for SqliteAdapter {
 
         rows.into_iter().map(MailboxRow::into_record).collect()
     }
+
+    async fn list_pending(&self, _now_ms: u64, _limit: usize) -> Result<Vec<MailboxRecord>, StoreError> {
+        // SQLite migration for deliver_at_ms column is out of scope; stub returns empty.
+        Ok(vec![])
+    }
 }
 
 #[async_trait]
@@ -701,6 +721,7 @@ impl RunRow {
             project,
             state: parse_string_enum::<RunState>(&self.state)?,
             prompt_release_id: None,
+            agent_role_id: None,
             failure_class: self
                 .failure_class
                 .as_deref()
@@ -846,6 +867,15 @@ impl MailboxRow {
             project,
             run_id: self.run_id.map(RunId::new),
             task_id: self.task_id.map(TaskId::new),
+            from_task_id: None,
+            content: String::new(),
+            from_run_id: None,
+            deliver_at_ms: 0,
+            sender: None,
+            recipient: None,
+            body: None,
+            sent_at: None,
+            delivery_status: None,
             version: self.version as u64,
             created_at: self.created_at as u64,
         })

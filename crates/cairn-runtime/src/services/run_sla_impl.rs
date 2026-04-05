@@ -155,6 +155,7 @@ mod tests {
                 run_id: run_id.clone(),
                 parent_run_id: None,
                 prompt_release_id: None,
+            agent_role_id: None,
             }))])
             .await
             .unwrap();

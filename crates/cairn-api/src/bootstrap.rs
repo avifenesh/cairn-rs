@@ -66,6 +66,13 @@ pub struct BootstrapConfig {
     pub roles: Vec<ServerRole>,
     pub storage: StorageBackend,
     pub encryption_key: EncryptionKeySource,
+    /// TLS configuration (optional; None disables TLS).
+    #[serde(default)]
+    pub tls_enabled: bool,
+    #[serde(default)]
+    pub tls_cert_path: Option<String>,
+    #[serde(default)]
+    pub tls_key_path: Option<String>,
 }
 
 impl Default for BootstrapConfig {
@@ -82,6 +89,9 @@ impl Default for BootstrapConfig {
             ],
             storage: StorageBackend::default(),
             encryption_key: EncryptionKeySource::LocalAuto,
+            tls_enabled: false,
+            tls_cert_path: None,
+            tls_key_path: None,
         }
     }
 }
@@ -103,6 +113,9 @@ impl BootstrapConfig {
                 connection_url: connection_url.into(),
             },
             encryption_key: EncryptionKeySource::None,
+            tls_enabled: false,
+            tls_cert_path: None,
+            tls_key_path: None,
         }
     }
 

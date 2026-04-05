@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{TaskReadModel, TaskRecord};
+use cairn_store::projections::{TaskDependencyReadModel, TaskDependencyRecord, TaskReadModel, TaskRecord};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -19,7 +19,7 @@ impl<S> TaskServiceImpl<S> {
     }
 }
 
-impl<S: EventLog + TaskReadModel + 'static> TaskServiceImpl<S> {
+impl<S: EventLog + TaskReadModel + TaskDependencyReadModel + 'static> TaskServiceImpl<S> {
     async fn get_task(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
         TaskReadModel::get(self.store.as_ref(), task_id)
             .await?
@@ -65,7 +65,7 @@ impl<S: EventLog + TaskReadModel + 'static> TaskServiceImpl<S> {
 #[async_trait]
 impl<S> TaskService for TaskServiceImpl<S>
 where
-    S: EventLog + TaskReadModel + 'static,
+    S: EventLog + TaskReadModel + TaskDependencyReadModel + 'static,
 {
     async fn submit(
         &self,
@@ -73,6 +73,7 @@ where
         task_id: TaskId,
         parent_run_id: Option<RunId>,
         parent_task_id: Option<TaskId>,
+        _priority: u32,
     ) -> Result<TaskRecord, RuntimeError> {
         let event = make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
             project: project.clone(),
@@ -173,8 +174,97 @@ where
     }
 
     async fn complete(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        self.transition_task(task_id, TaskState::Completed, None)
+        let result = self.transition_task(task_id, TaskState::Completed, None).await?;
+        // Mark all dependencies with this task as prerequisite as resolved.
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let _ = TaskDependencyReadModel::resolve_dependency(
+            self.store.as_ref(),
+            task_id,
+            now_ms,
+        ).await;
+        Ok(result)
+    }
+
+    async fn declare_dependency(
+        &self,
+        dependent_task_id: &TaskId,
+        prerequisite_task_id: &TaskId,
+    ) -> Result<TaskDependencyRecord, RuntimeError> {
+        // Look up the dependent task to get its project.
+        let task = self.get_task(dependent_task_id).await?;
+
+        // Transition dependent task to WaitingDependency.
+        if can_transition_task_state(task.state, TaskState::WaitingDependency) {
+            let event = make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
+                project: task.project.clone(),
+                task_id: dependent_task_id.clone(),
+                transition: StateTransition {
+                    from: Some(task.state),
+                    to: TaskState::WaitingDependency,
+                },
+                failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
+            }));
+            self.store.append(&[event]).await?;
+        }
+
+        // Store the dependency record.
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let dep = cairn_domain::TaskDependency {
+            dependent_task_id: dependent_task_id.clone(),
+            depends_on_task_id: prerequisite_task_id.clone(),
+            project: task.project.clone(),
+            created_at_ms: now_ms,
+        };
+        let record = TaskDependencyRecord {
+            dependency: dep,
+            resolved_at_ms: None,
+        };
+        TaskDependencyReadModel::insert_dependency(
+            self.store.as_ref(),
+            record.clone(),
+        ).await.map_err(RuntimeError::Store)?;
+        Ok(record)
+    }
+
+    async fn check_dependencies(
+        &self,
+        task_id: &TaskId,
+    ) -> Result<Vec<TaskDependencyRecord>, RuntimeError> {
+        let deps = TaskDependencyReadModel::list_blocking(self.store.as_ref(), task_id)
             .await
+            .map_err(RuntimeError::Store)?;
+        let unresolved: Vec<TaskDependencyRecord> = deps
+            .into_iter()
+            .filter(|d| d.resolved_at_ms.is_none())
+            .collect();
+        // If all resolved, transition to Queued.
+        if unresolved.is_empty() {
+            if let Ok(task) = self.get_task(task_id).await {
+                if can_transition_task_state(task.state, TaskState::Queued) {
+                    let event = make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
+                        project: task.project.clone(),
+                        task_id: task_id.clone(),
+                        transition: StateTransition {
+                            from: Some(task.state),
+                            to: TaskState::Queued,
+                        },
+                        failure_class: None,
+                        pause_reason: None,
+                        resume_trigger: None,
+                    }));
+                    let _ = self.store.append(&[event]).await;
+                }
+            }
+        }
+        Ok(unresolved)
     }
 
     async fn fail(

@@ -41,6 +41,7 @@ mod sqlite_parity {
             run_id: RunId::new(run_id),
             parent_run_id: None,
             prompt_release_id: None,
+            agent_role_id: None,
         }))
     }
 
@@ -649,6 +650,15 @@ mod sqlite_parity {
                     message_id: MailboxMessageId::new(id),
                     run_id: Some(RunId::new("r1")),
                     task_id: None,
+                    content: String::new(),
+                    from_run_id: None,
+                    from_task_id: None,
+                    deliver_at_ms: 0,
+                                          sender: None,
+                     recipient: None,
+                     body: None,
+                     sent_at: None,
+                     delivery_status: None,
                 },
             ))])
             .await

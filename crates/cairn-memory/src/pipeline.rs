@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use crate::entity_extraction::{EntityExtractionRequest, EntityExtractor};
 use crate::ingest::{
     ChunkRecord, IngestError, IngestPackRequest, IngestRequest, IngestService, IngestStatus,
     SourceType,
@@ -94,8 +95,13 @@ impl Chunker for ParagraphChunker {
                     ));
                     position += 1;
                     current.clear();
+                    // Buffer was just cleared: do NOT append '\n' or we'd create
+                    // a whitespace-only ghost chunk on the next line.
+                } else {
+                    // Paragraph too short to emit yet; preserve the blank-line
+                    // separator so adjacent paragraphs stay readable if merged.
+                    current.push('\n');
                 }
-                current.push('\n');
                 continue;
             }
 
@@ -135,8 +141,46 @@ impl Chunker for ParagraphChunker {
     }
 }
 
+/// Convert a `BundleSourceType` (or `None`) to an ingest `SourceType`.
+///
+/// Used by import service to map bundle artifact source types to the
+/// ingest pipeline source types.
+pub fn bundle_source_type_to_ingest(
+    bundle_source_type: Option<crate::bundles::BundleSourceType>,
+) -> crate::ingest::SourceType {
+    use crate::bundles::BundleSourceType;
+    use crate::ingest::SourceType;
+    match bundle_source_type {
+        Some(BundleSourceType::TextMarkdown) => SourceType::Markdown,
+        Some(BundleSourceType::TextHtml) => SourceType::Html,
+        Some(BundleSourceType::JsonStructured) => SourceType::StructuredJson,
+        Some(BundleSourceType::ExternalRef) => SourceType::PlainText,
+        Some(BundleSourceType::TextPlain) | None => SourceType::PlainText,
+    }
+}
+
+/// Extract the text content from a bundle artifact's JSON payload.
+///
+/// Handles `DocumentContent::InlineText`, `InlineJson`, and falls back to
+/// a raw string conversion. Returns `None` if no text content can be extracted.
+pub fn extract_document_content_text(payload: &serde_json::Value) -> Option<String> {
+    // Try `content.text` for InlineText variant.
+    if let Some(text) = payload.get("content").and_then(|c| c.get("text")).and_then(|t| t.as_str()) {
+        return Some(text.to_owned());
+    }
+    // Try top-level `text` field.
+    if let Some(text) = payload.get("text").and_then(|t| t.as_str()) {
+        return Some(text.to_owned());
+    }
+    // Try `content.value` for InlineJson variant.
+    if let Some(value) = payload.get("content").and_then(|c| c.get("value")) {
+        return Some(value.to_string());
+    }
+    None
+}
+
 /// Compute a stable content hash for deduplication.
-fn compute_content_hash(text: &str) -> String {
+pub fn compute_content_hash(text: &str) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
@@ -178,6 +222,7 @@ fn make_chunk(
         graph_linkage: None,
         embedding: None,
         content_hash: Some(content_hash),
+        entities: Vec::new(),
     }
 }
 
@@ -187,7 +232,7 @@ fn make_chunk(
 /// owned retrieval documents rather than keeping parser-specific blobs.
 pub fn normalize(content: &str, source_type: SourceType) -> String {
     match source_type {
-        SourceType::PlainText | SourceType::KnowledgePack => content.to_owned(),
+        SourceType::PlainText | SourceType::KnowledgePack | SourceType::JsonStructured => content.to_owned(),
         SourceType::Html => strip_html(content),
         SourceType::Markdown => strip_markdown(content),
         SourceType::StructuredJson => extract_json_text(content),
@@ -481,11 +526,12 @@ impl<T: DocumentStore> DocumentStore for std::sync::Arc<T> {
     }
 }
 
-/// Concrete ingest pipeline that coordinates parse -> chunk -> embed -> persist.
+/// Concrete ingest pipeline that coordinates parse -> chunk -> embed -> extract -> persist.
 pub struct IngestPipeline<S: DocumentStore, C: Chunker> {
     store: S,
     chunker: C,
     embedder: Arc<dyn EmbeddingProvider>,
+    extractor: Option<Arc<dyn EntityExtractor>>,
 }
 
 impl<S: DocumentStore, C: Chunker> IngestPipeline<S, C> {
@@ -494,6 +540,7 @@ impl<S: DocumentStore, C: Chunker> IngestPipeline<S, C> {
             store,
             chunker,
             embedder: Arc::new(NoOpEmbeddingProvider),
+            extractor: None,
         }
     }
 
@@ -501,6 +548,13 @@ impl<S: DocumentStore, C: Chunker> IngestPipeline<S, C> {
     /// embeddings for each chunk during ingest.
     pub fn with_embedder(mut self, embedder: Arc<dyn EmbeddingProvider>) -> Self {
         self.embedder = embedder;
+        self
+    }
+
+    /// Set an entity extractor. When set, the pipeline runs entity extraction
+    /// on each chunk and populates `ChunkRecord::entities`.
+    pub fn with_extractor(mut self, extractor: Arc<dyn EntityExtractor>) -> Self {
+        self.extractor = Some(extractor);
         self
     }
 }
@@ -539,15 +593,73 @@ impl<S: DocumentStore + 'static, C: Chunker + 'static> IngestService for IngestP
             &request.project,
         );
 
-        // 4. Dedup: remove chunks whose content hash already exists in this project.
+        // 3b. Propagate corpus_id, tags, external_ref, and retrieval hints from IngestRequest
+        //     into chunk provenance_metadata.
+        //
+        //     Tags prefixed with "__hint:" are decoded into provenance_metadata.hints rather
+        //     than stored as plain tags; this lets submit_pack pass hints without adding a new
+        //     field to IngestRequest.
+        let plain_tags: Vec<&str> = request
+            .tags
+            .iter()
+            .filter(|t| !t.starts_with("__hint:"))
+            .map(String::as_str)
+            .collect();
+        let hints: Vec<&str> = request
+            .tags
+            .iter()
+            .filter_map(|t| t.strip_prefix("__hint:"))
+            .collect();
+
+        let needs_meta = request.corpus_id.is_some()
+            || request.bundle_source_id.is_some()
+            || !plain_tags.is_empty()
+            || !hints.is_empty();
+
+        if needs_meta {
+            for chunk in &mut chunks {
+                let mut meta = chunk
+                    .provenance_metadata
+                    .clone()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                if let Some(obj) = meta.as_object_mut() {
+                    if let Some(ref cid) = request.corpus_id {
+                        obj.insert("corpus_id".to_owned(), serde_json::json!(cid));
+                    }
+                    // bundle_source_id carries the external_ref URI from submit_pack.
+                    if let Some(ref ext_ref) = request.bundle_source_id {
+                        obj.insert("external_ref".to_owned(), serde_json::json!(ext_ref));
+                    }
+                    if !plain_tags.is_empty() {
+                        obj.insert("tags".to_owned(), serde_json::json!(plain_tags));
+                    }
+                    if !hints.is_empty() {
+                        obj.insert("hints".to_owned(), serde_json::json!(hints));
+                    }
+                }
+                chunk.provenance_metadata = Some(meta);
+            }
+        }
+
+        // 4. Dedup: remove chunks whose content hash already exists in this project
+        //    (cross-batch) or that appeared earlier in this same batch (within-batch).
         let existing_hashes = self
             .store
             .chunk_hashes_for_project(&request.project)
             .await?;
+        let mut batch_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         chunks.retain(|c| {
-            c.content_hash
-                .as_ref()
-                .map_or(true, |h| !existing_hashes.contains(h))
+            match c.content_hash.as_ref() {
+                None => true,
+                Some(h) => {
+                    if existing_hashes.contains(h) || batch_seen.contains(h) {
+                        false
+                    } else {
+                        batch_seen.insert(h.clone());
+                        true
+                    }
+                }
+            }
         });
 
         // 5. Generate embeddings for each chunk.
@@ -559,6 +671,18 @@ impl<S: DocumentStore + 'static, C: Chunker + 'static> IngestService for IngestP
             let embedding = self.embedder.embed(&chunk.text).await?;
             if !embedding.is_empty() {
                 chunk.embedding = Some(embedding);
+            }
+        }
+
+        // 5b. Run entity extraction on each chunk when an extractor is configured.
+        if let Some(extractor) = &self.extractor {
+            for chunk in &mut chunks {
+                let req = EntityExtractionRequest::all(
+                    chunk.text.clone(),
+                    request.project.clone(),
+                );
+                let result = extractor.extract(&req);
+                chunk.entities = result.all_entities();
             }
         }
 
@@ -594,17 +718,64 @@ impl<S: DocumentStore + 'static, C: Chunker + 'static> IngestService for IngestP
                 continue;
             }
 
-            let content = artifact.payload["content"]["text"].as_str().unwrap_or("");
+            // Try to deserialize the artifact payload as the typed struct so we can access
+            // all content variants (InlineText, InlineJson, ExternalRef) and retrieval hints.
+            let typed: Option<crate::bundles::KnowledgeDocumentPayload> =
+                serde_json::from_value(artifact.payload.as_value()).ok();
+
+            // Determine content text and external_ref URI from the typed payload.
+            // Falls back to raw JSON field access for backward compatibility.
+            let (content, external_ref_uri) = if let Some(ref kd) = typed {
+                match &kd.content {
+                    crate::bundles::DocumentContent::InlineText { text } => {
+                        (text.clone(), None)
+                    }
+                    crate::bundles::DocumentContent::InlineJson { value } => {
+                        (value.to_string(), None)
+                    }
+                    crate::bundles::DocumentContent::ExternalRef { uri, .. } => {
+                        // Use the URI as a minimal text placeholder so the chunk
+                        // records where the content lives; full content is in provenance.
+                        (uri.clone(), Some(uri.clone()))
+                    }
+                }
+            } else {
+                // Legacy raw-JSON fallback.
+                let pv = artifact.payload.as_value();
+                let text = pv["content"]["text"].as_str().unwrap_or("").to_owned();
+                (text, None)
+            };
+
             if content.is_empty() {
                 continue;
             }
 
-            let source_type = match artifact.payload["source_type"].as_str().unwrap_or("") {
-                "text_plain" => SourceType::PlainText,
-                "text_markdown" => SourceType::Markdown,
-                "text_html" => SourceType::Html,
-                "json_structured" => SourceType::StructuredJson,
-                _ => SourceType::PlainText,
+            // Retrieval hints from the typed payload, encoded as prefixed tags so that
+            // step 3b can write them to provenance_metadata.hints without requiring a
+            // new field on IngestRequest.
+            let mut tags: Vec<String> = vec![];
+            if let Some(ref kd) = typed {
+                for hint in &kd.retrieval_hints {
+                    tags.push(format!("__hint:{hint}"));
+                }
+            }
+
+            let source_type = if let Some(ref kd) = typed {
+                match kd.source_type {
+                    crate::bundles::BundleSourceType::TextMarkdown => SourceType::Markdown,
+                    crate::bundles::BundleSourceType::TextHtml => SourceType::Html,
+                    crate::bundles::BundleSourceType::JsonStructured => SourceType::StructuredJson,
+                    _ => SourceType::PlainText,
+                }
+            } else {
+                let pv = artifact.payload.as_value();
+                match pv["source_type"].as_str().unwrap_or("") {
+                    "text_plain" => SourceType::PlainText,
+                    "text_markdown" => SourceType::Markdown,
+                    "text_html" => SourceType::Html,
+                    "json_structured" => SourceType::StructuredJson,
+                    _ => SourceType::PlainText,
+                }
             };
 
             self.submit(IngestRequest {
@@ -612,7 +783,13 @@ impl<S: DocumentStore + 'static, C: Chunker + 'static> IngestService for IngestP
                 source_id: cairn_domain::SourceId::new(&bundle.bundle_id),
                 source_type,
                 project: request.project.clone(),
-                content: content.to_owned(),
+                content,
+                import_id: None,
+                corpus_id: None,
+                // bundle_source_id carries the external_ref URI when present so that
+                // step 3b can write it to provenance_metadata.external_ref.
+                bundle_source_id: external_ref_uri,
+                tags,
             })
             .await?;
         }
@@ -715,6 +892,10 @@ mod tests {
             project: ProjectKey::new("t", "w", "p"),
             content: "Hello world.\n\nThis is a test document.\n\nIt has multiple paragraphs."
                 .to_owned(),
+            import_id: None,
+            corpus_id: None,
+            bundle_source_id: None,
+            tags: vec![],
         };
 
         pipeline.submit(request).await.unwrap();
@@ -841,6 +1022,10 @@ mod tests {
                 source_type: SourceType::Html,
                 project: ProjectKey::new("t", "w", "p"),
                 content: "<h1>Guide</h1><p>Step one: &amp; do this.</p>".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();

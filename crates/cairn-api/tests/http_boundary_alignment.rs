@@ -178,6 +178,15 @@ fn dashboard_overview_shape_stays_minimum_contract_stable() {
         pending_approvals: 2,
         failed_runs_24h: 1,
         system_healthy: true,
+        latency_p50_ms: None,
+        latency_p95_ms: None,
+        error_rate_24h: 0.0,
+        degraded_components: vec![],
+        recent_critical_events: vec![],
+        active_providers: 0,
+        active_plugins: 0,
+        memory_doc_count: 0,
+        eval_runs_today: 0,
     };
     let json = serde_json::to_value(&overview).unwrap();
     let keys = keys_of(&json);
@@ -188,6 +197,15 @@ fn dashboard_overview_shape_stays_minimum_contract_stable() {
         "pending_approvals".to_owned(),
         "failed_runs_24h".to_owned(),
         "system_healthy".to_owned(),
+        "latency_p50_ms".to_owned(),
+        "latency_p95_ms".to_owned(),
+        "error_rate_24h".to_owned(),
+        "degraded_components".to_owned(),
+        "recent_critical_events".to_owned(),
+        "active_providers".to_owned(),
+        "active_plugins".to_owned(),
+        "memory_doc_count".to_owned(),
+        "eval_runs_today".to_owned(),
     ]);
 
     assert_eq!(

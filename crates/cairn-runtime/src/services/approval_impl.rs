@@ -79,6 +79,40 @@ where
 
         self.store.append(&[event]).await?;
 
+        // TODO(RFC-010): Signal the blocked run/task after approval resolution.
+        //
+        // Current gap: `ApprovalResolved` is appended to the event log but the
+        // associated run remains suspended indefinitely — nothing unblocks it.
+        //
+        // Intended flow (requires access to a RunService or direct store writes):
+        //
+        //   if let Some(run_id) = &approval.run_id {
+        //       match decision {
+        //           ApprovalDecision::Approved => {
+        //               // Transition the run from Paused → Running via RunStateChanged
+        //               // with ResumeTrigger::OperatorResume so downstream workers
+        //               // know the run is cleared to continue.
+        //               run_service
+        //                   .transition_run(run_id, RunState::Running, Some(ResumeTrigger::OperatorResume), None)
+        //                   .await?;
+        //           }
+        //           ApprovalDecision::Rejected => {
+        //               // Transition the run to Failed with FailureClass::ApprovalRejected
+        //               // so it surfaces in the operator error inbox and is not retried.
+        //               run_service
+        //                   .transition_run(run_id, RunState::Failed, None, Some(FailureClass::ApprovalRejected))
+        //                   .await?;
+        //           }
+        //       }
+        //   }
+        //
+        // Blocking factor: `ApprovalServiceImpl` holds only a store handle (`Arc<S>`),
+        // not a RunService reference. Options to resolve:
+        //   (a) Inject `Arc<dyn RunService>` alongside the store here, or
+        //   (b) Handle the cascade in a domain-event reactor that subscribes to
+        //       `ApprovalResolved` and drives the run state machine separately.
+        // Option (b) keeps this service single-responsibility and avoids circular deps.
+
         ApprovalReadModel::get(self.store.as_ref(), approval_id)
             .await?
             .ok_or_else(|| RuntimeError::Internal("approval not found after resolve".into()))

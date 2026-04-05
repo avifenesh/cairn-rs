@@ -210,8 +210,36 @@ impl EvalBaselineServiceImpl {
         Ok(BaselineComparison {
             run_id: run.eval_run_id.to_string(),
             baseline_id: baseline.baseline_id.clone(),
-            run_metrics: run.metrics.clone(),
-            baseline_metrics: baseline.metrics.clone(),
+            run_metrics: {
+                let m = &run.metrics;
+                cairn_domain::EvalMetrics {
+                    task_success_rate: m.task_success_rate,
+                    latency_p50_ms: m.latency_p50_ms,
+                    latency_p99_ms: m.latency_p99_ms,
+                    cost_per_run: m.cost_per_run,
+                    policy_pass_rate: m.policy_pass_rate,
+                    retrieval_hit_at_k: m.retrieval_hit_at_k,
+                    citation_coverage: m.citation_coverage,
+                    source_diversity: m.source_diversity,
+                    retrieval_latency_ms: m.retrieval_latency_ms,
+                    retrieval_cost: m.retrieval_cost,
+                }
+            },
+            baseline_metrics: {
+                let m = &baseline.metrics;
+                cairn_domain::EvalMetrics {
+                    task_success_rate: m.task_success_rate,
+                    latency_p50_ms: m.latency_p50_ms,
+                    latency_p99_ms: m.latency_p99_ms,
+                    cost_per_run: m.cost_per_run,
+                    policy_pass_rate: m.policy_pass_rate,
+                    retrieval_hit_at_k: m.retrieval_hit_at_k,
+                    citation_coverage: m.citation_coverage,
+                    source_diversity: m.source_diversity,
+                    retrieval_latency_ms: m.retrieval_latency_ms,
+                    retrieval_cost: m.retrieval_cost,
+                }
+            },
             regressions,
             improvements,
             passed,

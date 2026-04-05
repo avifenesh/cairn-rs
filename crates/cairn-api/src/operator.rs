@@ -59,6 +59,104 @@ pub struct RunDetail {
     pub tasks: Vec<TaskRecord>,
 }
 
+/// Action to apply across a batch of approvals (RFC 010).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BulkApprovalAction {
+    /// Approve every approval in the batch.
+    ApproveAll,
+    /// Deny every approval in the batch.
+    DenyAll,
+    /// Defer every approval in the batch for later review.
+    DeferAll,
+}
+
+/// Request body for a bulk approval queue action (RFC 010).
+///
+/// Operators use this to drain or defer an entire approval queue in one
+/// call rather than issuing individual approve/deny requests.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct BulkApprovalRequest {
+    /// IDs of the approvals to act on.
+    pub approval_ids: Vec<String>,
+    /// Action to apply uniformly to all listed approvals.
+    pub action: BulkApprovalAction,
+    /// Optional operator-supplied reason recorded on each approval.
+    pub reason: Option<String>,
+}
+
+/// Response for a bulk approval queue action (RFC 010).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct BulkApprovalResponse {
+    /// Number of approvals successfully acted on.
+    pub processed: usize,
+    /// Number of approvals skipped (e.g. already resolved or not found).
+    pub skipped: usize,
+    /// Per-item error messages for any approvals that failed to process.
+    pub errors: Vec<String>,
+}
+
+/// Operator-layer error for approval actions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OperatorError {
+    /// The referenced approval, run, or task was not found.
+    NotFound(String),
+    /// The request was rejected by a policy or validation rule.
+    PolicyDenied(String),
+    /// An unexpected internal failure occurred.
+    Internal(String),
+}
+
+impl std::fmt::Display for OperatorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OperatorError::NotFound(id) => write!(f, "not found: {id}"),
+            OperatorError::PolicyDenied(reason) => write!(f, "policy denied: {reason}"),
+            OperatorError::Internal(msg) => write!(f, "internal error: {msg}"),
+        }
+    }
+}
+
+/// Bulk and deferred approval actions for operator workflows (RFC 010).
+///
+/// Extends `OperatorCommandEndpoints` with high-throughput queue management:
+/// operators can drain or defer entire approval backlogs in a single call.
+#[async_trait]
+pub trait OperatorApprovalActions: Send + Sync {
+    /// Approve multiple approvals in one call.
+    ///
+    /// Default stub — returns a zero-count success response.
+    async fn bulk_approve(
+        &self,
+        _approval_ids: Vec<String>,
+        _reason: Option<String>,
+    ) -> Result<BulkApprovalResponse, OperatorError> {
+        Ok(BulkApprovalResponse { processed: 0, skipped: 0, errors: vec![] })
+    }
+
+    /// Deny multiple approvals in one call.
+    ///
+    /// Default stub — returns a zero-count success response.
+    async fn bulk_deny(
+        &self,
+        _approval_ids: Vec<String>,
+        _reason: Option<String>,
+    ) -> Result<BulkApprovalResponse, OperatorError> {
+        Ok(BulkApprovalResponse { processed: 0, skipped: 0, errors: vec![] })
+    }
+
+    /// Defer a single approval until a specified wall-clock time (ms since epoch).
+    ///
+    /// Default stub — always succeeds without side effects.
+    async fn defer_approval(
+        &self,
+        _approval_id: String,
+        _defer_until: u64,
+    ) -> Result<(), OperatorError> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +175,7 @@ mod tests {
                 project: ProjectKey::new("t", "w", "p"),
                 state: RunState::Running,
                 prompt_release_id: None,
+            agent_role_id: None,
                 failure_class: None,
                 pause_reason: None,
                 resume_trigger: None,

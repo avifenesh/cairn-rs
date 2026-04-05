@@ -3,9 +3,11 @@ use axum::{
     http::{Request, StatusCode},
     response::Response,
 };
+use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
-use cairn_domain::TenantId;
+use cairn_domain::OperatorId;
+use cairn_domain::tenancy::TenantKey;
 use tower::ServiceExt;
 
 const TOKEN: &str = "full-workspace-token";
@@ -99,7 +101,7 @@ async fn app_with_token() -> axum::Router {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register(TOKEN, TenantId::new("default_tenant"));
+    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
     app
 }
 

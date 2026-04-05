@@ -32,6 +32,15 @@ pub struct ExportableDocument {
     pub tags: Vec<String>,
     pub corpus_id: Option<String>,
     pub created_at_ms: u64,
+    /// Alias for `created_at_ms` used by export filters.
+    #[serde(default)]
+    pub created_at: u64,
+    /// Document title, if available.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Raw provenance metadata from the ingest pipeline.
+    #[serde(default)]
+    pub provenance_metadata: Option<serde_json::Value>,
 }
 
 pub struct InMemoryDocumentStore {
@@ -51,6 +60,135 @@ impl InMemoryDocumentStore {
     pub fn all_chunks(&self) -> Vec<ChunkRecord> {
         self.chunks.lock().unwrap().clone()
     }
+
+    /// Get mutable access to stored chunks (for retroactive metadata updates).
+    pub fn chunks_mut(&self) -> std::sync::MutexGuard<'_, Vec<ChunkRecord>> {
+        self.chunks.lock().unwrap()
+    }
+
+    /// Return document IDs whose content hash matches the given hash.
+    pub fn document_ids_by_hash(&self, content_hash: &str) -> Vec<KnowledgeDocumentId> {
+        let chunks = self.chunks.lock().unwrap();
+        chunks
+            .iter()
+            .filter(|c| c.content_hash.as_deref() == Some(content_hash))
+            .map(|c| c.document_id.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// Return all documents as `ExportableDocument` records (for export operations).
+    pub fn exportable_documents(&self) -> Vec<ExportableDocument> {
+        let docs = self.docs.lock().unwrap();
+        docs.iter()
+            .map(|(id, (_, project, source_type))| ExportableDocument {
+                document_id: KnowledgeDocumentId::new(id.clone()),
+                source_id: SourceId::new("unknown"),
+                project: project.clone(),
+                source_type: source_type.clone(),
+                text: String::new(),
+                credibility_score: None,
+                provenance: None,
+                tags: vec![],
+                corpus_id: None,
+                created_at_ms: 0,
+                created_at: 0,
+                title: None,
+                provenance_metadata: None,
+            })
+            .collect()
+    }
+
+    /// Remove a document from the store by ID.
+    pub fn remove_document(&self, doc_id: &KnowledgeDocumentId) {
+        self.docs.lock().unwrap().remove(doc_id.as_str());
+        let mut chunks = self.chunks.lock().unwrap();
+        chunks.retain(|c| &c.document_id != doc_id);
+    }
+
+    /// Get all current chunks (alias used by diagnostics and handlers).
+    pub fn all_current_chunks(&self) -> Vec<ChunkRecord> {
+        self.all_chunks()
+    }
+
+    /// List all known sources for a project.
+    pub fn list_sources(&self, project: &cairn_domain::ProjectKey) -> Vec<SourceSummary> {
+        let chunks = self.chunks.lock().unwrap();
+        let mut seen = std::collections::HashSet::new();
+        chunks.iter()
+            .filter(|c| &c.project == project)
+            .filter_map(|c| {
+                if seen.insert(c.source_id.as_str().to_owned()) {
+                    Some(SourceSummary {
+                        source_id: c.source_id.clone(),
+                        document_count: 1,
+                        avg_quality_score: 0.0,
+                        last_ingested_at_ms: Some(c.created_at),
+                    })
+                } else { None }
+            })
+            .collect()
+    }
+
+    /// Register a source (no-op stub; returns a SourceSummary).
+    pub fn register_source(&self, _project: &cairn_domain::ProjectKey, source_id: &cairn_domain::SourceId) -> SourceSummary {
+        SourceSummary {
+            source_id: source_id.clone(),
+            document_count: 0,
+            avg_quality_score: 0.0,
+            last_ingested_at_ms: None,
+        }
+    }
+
+    /// Deactivate a source by removing all its chunks.
+    pub fn deactivate_source(&self, source_id: &cairn_domain::SourceId) -> bool {
+        let mut chunks = self.chunks.lock().unwrap();
+        let before = chunks.len();
+        chunks.retain(|c| &c.source_id != source_id);
+        chunks.len() < before
+    }
+
+    /// Check if a source is active (has any chunks).
+    pub fn is_source_active(&self, source_id: &cairn_domain::SourceId) -> bool {
+        let chunks = self.chunks.lock().unwrap();
+        chunks.iter().any(|c| &c.source_id == source_id)
+    }
+
+    /// Get a refresh schedule for a source (always None in stub).
+    pub fn get_refresh_schedule(&self, _source_id: &cairn_domain::SourceId) -> Option<RefreshSchedule> {
+        None
+    }
+
+    /// Create a refresh schedule for a source.
+    pub fn create_refresh_schedule(
+        &self,
+        source_id: &cairn_domain::SourceId,
+        _project: &cairn_domain::ProjectKey,
+        interval_ms: u64,
+        refresh_url: Option<String>,
+    ) -> RefreshSchedule {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        RefreshSchedule {
+            schedule_id: format!("sched_{}", now),
+            source_id: source_id.clone(),
+            interval_ms,
+            last_refresh_ms: None,
+            enabled: true,
+            refresh_url,
+        }
+    }
+
+    /// List all due refresh schedules (always empty in stub).
+    pub fn list_due_schedules(&self, _now_ms: u64) -> Vec<RefreshSchedule> {
+        vec![]
+    }
+
+    /// Update the last refresh timestamp for a schedule (no-op in stub).
+    pub fn update_last_refresh_ms(&self, _schedule_id: &str, _now_ms: u64) {}
 }
 
 impl Default for InMemoryDocumentStore {
@@ -118,17 +256,46 @@ impl DocumentStore for InMemoryDocumentStore {
     }
 }
 
+#[async_trait]
+impl crate::ingest::DocumentVersionReadModel for InMemoryDocumentStore {
+    async fn list_versions(
+        &self,
+        _document_id: &KnowledgeDocumentId,
+        _limit: usize,
+    ) -> Result<Vec<crate::ingest::DocumentVersion>, IngestError> {
+        Ok(vec![])
+    }
+}
+
 /// In-memory retrieval service using simple substring matching.
 ///
 /// Not production-grade — this is for testing and local dev only.
 /// Uses case-insensitive substring matching for lexical search.
 pub struct InMemoryRetrieval {
     store: std::sync::Arc<InMemoryDocumentStore>,
+    graph: Option<std::sync::Arc<cairn_graph::in_memory::InMemoryGraphStore>>,
 }
 
 impl InMemoryRetrieval {
     pub fn new(store: std::sync::Arc<InMemoryDocumentStore>) -> Self {
-        Self { store }
+        Self { store, graph: None }
+    }
+
+    /// Create with a diagnostics adapter (stub — diagnostics adapter is ignored in in-memory backend).
+    pub fn with_diagnostics(
+        store: std::sync::Arc<InMemoryDocumentStore>,
+        _diagnostics: std::sync::Arc<dyn crate::diagnostics::DiagnosticsService>,
+    ) -> Self {
+        Self { store, graph: None }
+    }
+
+    /// Attach a graph store for graph-proximity scoring.
+    pub fn with_graph(
+        mut self,
+        graph: std::sync::Arc<cairn_graph::in_memory::InMemoryGraphStore>,
+    ) -> Self {
+        self.graph = Some(graph);
+        self
     }
 }
 
@@ -162,9 +329,19 @@ impl RetrievalService for InMemoryRetrieval {
                 query.metadata_filters.iter().all(|f| {
                     c.provenance_metadata
                         .as_ref()
-                        .and_then(|m| m.get(&f.key))
-                        .and_then(|v| v.as_str())
-                        .map_or(false, |v| v == f.value)
+                        .map_or(false, |m| {
+                            // Direct key match: check scalar string value.
+                            if let Some(v) = m.get(&f.key).and_then(|v| v.as_str()) {
+                                return v == f.value;
+                            }
+                            // Tag filter: "tag" checks membership in "tags" array.
+                            if f.key == "tag" {
+                                if let Some(arr) = m.get("tags").and_then(|v| v.as_array()) {
+                                    return arr.iter().any(|v| v.as_str() == Some(&f.value));
+                                }
+                            }
+                            false
+                        })
                 })
             })
             .filter_map(|c| {
@@ -212,6 +389,12 @@ impl RetrievalService for InMemoryRetrieval {
                     lexical_relevance: lexical_score,
                     freshness: fresh,
                     staleness_penalty: stale,
+                    // RFC 003: explicit baseline values for dimensions not yet computed at this
+                    // stage.  graph_proximity is updated below when a graph store is wired;
+                    // corroboration and recency_of_use remain at their baselines for now.
+                    corroboration: 0.0,
+                    graph_proximity: 0.0,
+                    recency_of_use: Some(0.0),
                     ..ScoringBreakdown::default()
                 };
 
@@ -224,6 +407,50 @@ impl RetrievalService for InMemoryRetrieval {
                 }
             })
             .collect();
+
+        // Apply graph proximity: for each result, count how many OTHER result documents
+        // are graph neighbors of this result's document_id. Normalize to [0, 1].
+        if let Some(graph) = &self.graph {
+            use cairn_graph::queries::{GraphQueryService, TraversalDirection};
+            let result_doc_ids: std::collections::HashSet<String> = results
+                .iter()
+                .map(|r| r.chunk.document_id.as_str().to_owned())
+                .collect();
+
+            let total_others = result_doc_ids.len().saturating_sub(1).max(1) as f64;
+
+            for result in &mut results {
+                let doc_id = result.chunk.document_id.as_str();
+                // Query both upstream and downstream neighbors.
+                let downstream = graph
+                    .neighbors(doc_id, None, TraversalDirection::Downstream, 50)
+                    .await
+                    .unwrap_or_default();
+                let upstream = graph
+                    .neighbors(doc_id, None, TraversalDirection::Upstream, 50)
+                    .await
+                    .unwrap_or_default();
+
+                let neighbor_ids: std::collections::HashSet<String> = downstream
+                    .iter()
+                    .map(|(_, n)| n.node_id.clone())
+                    .chain(upstream.iter().map(|(_, n)| n.node_id.clone()))
+                    .collect();
+
+                let overlap = neighbor_ids
+                    .intersection(&result_doc_ids)
+                    .filter(|id| id.as_str() != doc_id) // exclude self
+                    .count();
+
+                if overlap > 0 {
+                    result.breakdown.graph_proximity = (overlap as f64 / total_others).min(1.0);
+                    result.score = retrieval::compute_final_score(&result.breakdown, &policy.weights);
+                }
+            }
+
+            // Re-sort after graph proximity update.
+            results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        }
 
         // Track all dimensions that materially contributed across results.
         if results.iter().any(|r| r.breakdown.lexical_relevance != 0.0) {
@@ -293,6 +520,174 @@ impl RetrievalService for InMemoryRetrieval {
     }
 }
 
+impl InMemoryRetrieval {
+    /// Register a source in the document store.
+    pub fn register_source(&self, project: &cairn_domain::ProjectKey, source_id: &cairn_domain::SourceId) -> SourceSummary {
+        let _ = project;
+        SourceSummary {
+            source_id: source_id.clone(),
+            document_count: 0,
+            avg_quality_score: 0.0,
+            last_ingested_at_ms: None,
+        }
+    }
+
+    /// List all known sources for a project.
+    pub fn list_sources(&self, project: &cairn_domain::ProjectKey) -> Vec<SourceSummary> {
+        let chunks = self.store.chunks.lock().unwrap();
+        let mut seen = std::collections::HashSet::new();
+        chunks.iter()
+            .filter(|c| &c.project == project)
+            .filter_map(|c| {
+                if seen.insert(c.source_id.as_str().to_owned()) {
+                    Some(SourceSummary {
+                        source_id: c.source_id.clone(),
+                        document_count: 1,
+                        avg_quality_score: 0.0,
+                        last_ingested_at_ms: Some(c.created_at),
+                    })
+                } else { None }
+            })
+            .collect()
+    }
+
+    /// Check if a source is active (has any chunks).
+    pub fn is_source_active(&self, source_id: &cairn_domain::SourceId) -> bool {
+        let chunks = self.store.chunks.lock().unwrap();
+        chunks.iter().any(|c| &c.source_id == source_id)
+    }
+
+    /// Deactivate a source (removes all its chunks).
+    pub fn deactivate_source(&self, source_id: &cairn_domain::SourceId) -> bool {
+        let mut chunks = self.store.chunks.lock().unwrap();
+        let before = chunks.len();
+        chunks.retain(|c| &c.source_id != source_id);
+        chunks.len() < before
+    }
+
+    /// Get all chunks (alias for all_chunks used by diagnostics).
+    pub fn all_current_chunks(&self) -> Vec<ChunkRecord> {
+        self.store.all_chunks()
+    }
+
+    /// Create a refresh schedule for a source.
+    pub fn create_refresh_schedule(
+        &self,
+        source_id: &cairn_domain::SourceId,
+        _project: &cairn_domain::ProjectKey,
+        interval_ms: u64,
+        refresh_url: Option<String>,
+    ) -> RefreshSchedule {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        RefreshSchedule {
+            schedule_id: format!("sched_{}", now),
+            source_id: source_id.clone(),
+            interval_ms,
+            last_refresh_ms: None,
+            enabled: true,
+            refresh_url,
+        }
+    }
+
+    /// Get a refresh schedule for a source (always None in stub).
+    pub fn get_refresh_schedule(&self, _source_id: &cairn_domain::SourceId) -> Option<RefreshSchedule> {
+        None
+    }
+
+    /// List all due refresh schedules (always empty in stub).
+    pub fn list_due_schedules(&self, _now_ms: u64) -> Vec<RefreshSchedule> {
+        vec![]
+    }
+
+    /// Update the last refresh timestamp for a schedule (no-op in stub).
+    pub fn update_last_refresh_ms(&self, _schedule_id: &str, _now_ms: u64) {}
+}
+
+/// RFC 003 §6: "why-this-result" explanation for a specific chunk + query pair.
+#[derive(Clone, Debug)]
+pub struct ResultExplanation {
+    pub chunk_id: String,
+    pub query_text: String,
+    pub lexical_relevance: f64,
+    pub freshness: f64,
+    pub quality_score: f64,
+    pub summary: String,
+}
+
+impl InMemoryRetrieval {
+    /// Explain why a specific chunk would be returned for a query.
+    ///
+    /// Returns `None` if the chunk does not exist in this project.
+    pub fn explain_result(
+        &self,
+        chunk_id: &str,
+        query_text: &str,
+        project: &cairn_domain::ProjectKey,
+    ) -> Option<ResultExplanation> {
+        let chunks = self.store.all_chunks();
+        let chunk = chunks
+            .iter()
+            .find(|c| c.chunk_id.as_str() == chunk_id && &c.project == project)?;
+
+        let query_lower = query_text.to_lowercase();
+        let text_lower = chunk.text.to_lowercase();
+        let words: Vec<&str> = query_lower.split_whitespace().collect();
+        let matches = words.iter().filter(|w| text_lower.contains(*w)).count();
+        let lexical_relevance = if words.is_empty() {
+            0.0
+        } else {
+            matches as f64 / words.len() as f64
+        };
+
+        let now = retrieval::now_ms();
+        let freshness = retrieval::freshness_score(chunk.created_at, now, 30.0);
+        let quality_score = chunk.credibility_score.unwrap_or(1.0).clamp(0.0, 1.0);
+
+        let summary = format!(
+            "Chunk '{}' from source '{}': lexical_relevance={:.2}, freshness={:.2}, quality={:.2}",
+            chunk_id,
+            chunk.source_id.as_str(),
+            lexical_relevance,
+            freshness,
+            quality_score
+        );
+
+        Some(ResultExplanation {
+            chunk_id: chunk_id.to_owned(),
+            query_text: query_text.to_owned(),
+            lexical_relevance,
+            freshness,
+            quality_score,
+            summary,
+        })
+    }
+}
+
+/// A scheduled refresh policy for a knowledge source.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RefreshSchedule {
+    pub schedule_id: String,
+    pub source_id: cairn_domain::SourceId,
+    pub interval_ms: u64,
+    pub last_refresh_ms: Option<u64>,
+    pub enabled: bool,
+    pub refresh_url: Option<String>,
+}
+
+/// Aggregate summary of a knowledge source (document count, quality score).
+///
+/// Used by operator-facing source management endpoints.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SourceSummary {
+    pub source_id: cairn_domain::SourceId,
+    pub document_count: u64,
+    pub avg_quality_score: f32,
+    pub last_ingested_at_ms: Option<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +718,10 @@ mod tests {
                            The borrow checker ensures memory safety without garbage collection.\n\n\
                            Cargo is the Rust package manager and build tool."
                         .to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();
@@ -337,6 +736,10 @@ mod tests {
                 content: "# Python\n\nPython is a high-level programming language.\n\n\
                            It has dynamic typing and garbage collection."
                     .to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();
@@ -419,6 +822,10 @@ mod tests {
                     source_type: *source_type,
                     project: ProjectKey::new("t", "w", "p"),
                     content: content.to_string(),
+                    import_id: None,
+                    corpus_id: None,
+                    bundle_source_id: None,
+                    tags: vec![],
                 })
                 .await
                 .unwrap();
@@ -473,6 +880,10 @@ mod tests {
                 source_type: SourceType::PlainText,
                 project: ProjectKey::new("t", "w", "p"),
                 content: "Hybrid mode fallback test content.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();
@@ -517,6 +928,10 @@ mod tests {
                 source_type: SourceType::PlainText,
                 project: ProjectKey::new("t", "w", "p"),
                 content: "Rust ownership model ensures memory safety.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();
@@ -528,6 +943,10 @@ mod tests {
                 source_type: SourceType::Markdown,
                 project: ProjectKey::new("t", "w", "p"),
                 content: "Rust ownership provides fearless concurrency.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();
@@ -588,6 +1007,10 @@ mod tests {
                 source_type: SourceType::PlainText,
                 project: ProjectKey::new("t", "w", "p"),
                 content: "Diagnostics test content for retrieval.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();

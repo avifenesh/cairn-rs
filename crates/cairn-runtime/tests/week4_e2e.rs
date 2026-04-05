@@ -63,6 +63,7 @@ async fn end_to_end_runtime_slice_with_replay() {
             TaskId::new("task_e2e"),
             Some(RunId::new("run_e2e")),
             None,
+            0,
         )
         .await
         .unwrap();
@@ -105,6 +106,9 @@ async fn end_to_end_runtime_slice_with_replay() {
             MailboxMessageId::new("msg_e2e"),
             Some(RunId::new("run_e2e")),
             Some(TaskId::new("task_e2e")),
+            "".to_owned(),
+            None,
+            0,
         )
         .await
         .unwrap();
@@ -231,6 +235,7 @@ async fn subagent_spawn_creates_linked_entities() {
             TaskId::new("child_task"),
             Some(RunId::new("parent_run")),
             None,
+            0,
         )
         .await
         .unwrap();
@@ -320,7 +325,7 @@ async fn recovery_produces_auditable_events() {
     // Create two tasks and claim them with tiny leases
     for i in 1..=2 {
         task_svc
-            .submit(&project, TaskId::new(format!("task_{i}")), None, None)
+            .submit(&project, TaskId::new(format!("task_{i}")), None, None, 0)
             .await
             .unwrap();
         task_svc

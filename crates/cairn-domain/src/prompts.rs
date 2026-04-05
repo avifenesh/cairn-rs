@@ -2,6 +2,14 @@ use crate::ids::{ProjectId, PromptAssetId, PromptReleaseId, PromptVersionId, Rel
 use crate::selectors::RolloutTarget;
 use serde::{Deserialize, Serialize};
 
+/// A named variable placeholder within a prompt template.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptTemplateVar {
+    pub name: String,
+    pub description: Option<String>,
+    pub required: bool,
+}
+
 /// Stable prompt family kinds from RFC 006.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

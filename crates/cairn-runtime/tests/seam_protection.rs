@@ -133,7 +133,7 @@ async fn external_worker_progress_report_emits_event() {
     let worker_svc = ExternalWorkerServiceImpl::new(store.clone());
 
     task_svc
-        .submit(&project(), TaskId::new("task_1"), None, None)
+        .submit(&project(), TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     task_svc
@@ -174,7 +174,7 @@ async fn external_worker_completed_transitions_task() {
     let worker_svc = ExternalWorkerServiceImpl::new(store.clone());
 
     task_svc
-        .submit(&project(), TaskId::new("task_1"), None, None)
+        .submit(&project(), TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     task_svc
@@ -208,7 +208,7 @@ async fn external_worker_report_on_terminal_task_fails() {
     let worker_svc = ExternalWorkerServiceImpl::new(store.clone());
 
     task_svc
-        .submit(&project(), TaskId::new("task_1"), None, None)
+        .submit(&project(), TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     task_svc

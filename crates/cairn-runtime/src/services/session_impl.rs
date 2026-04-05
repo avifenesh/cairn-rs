@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{RunReadModel, SessionReadModel, SessionRecord};
+use cairn_store::projections::{QuotaReadModel, RunReadModel, SessionReadModel, SessionRecord};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
+use super::quota_impl::enforce_session_quota;
 use crate::error::RuntimeError;
 use crate::sessions::SessionService;
 
@@ -22,7 +23,7 @@ impl<S> SessionServiceImpl<S> {
 #[async_trait]
 impl<S> SessionService for SessionServiceImpl<S>
 where
-    S: EventLog + SessionReadModel + 'static,
+    S: EventLog + SessionReadModel + QuotaReadModel + 'static,
 {
     async fn create(
         &self,
@@ -38,6 +39,9 @@ where
                 id: session_id.to_string(),
             });
         }
+
+        // Enforce session quota before creating the session.
+        enforce_session_quota(self.store.as_ref(), &project.tenant_id).await?;
 
         let event = make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
             project: project.clone(),

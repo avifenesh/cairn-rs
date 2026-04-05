@@ -55,7 +55,7 @@ where
             policy_id,
             full_history_days,
             current_state_days,
-            max_events_per_entity,
+            max_events_per_entity: Some(max_events_per_entity as u64),
         }));
         self.store.append(&[event]).await?;
         self.get_policy(&tenant_id).await?.ok_or_else(|| {

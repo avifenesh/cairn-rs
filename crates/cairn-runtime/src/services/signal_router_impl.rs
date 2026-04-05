@@ -66,14 +66,20 @@ where
             }
         }
 
+        let now = now_ms();
         let subscription = SignalSubscription {
-            subscription_id: format!("signal_sub_{}", now_ms()),
+            subscription_id: format!("signal_sub_{now}"),
             project: project.clone(),
             signal_kind: signal_kind.clone(),
             target_run_id: target_run_id.clone(),
             target_mailbox_id: target_mailbox_id.clone(),
             filter_expression: filter_expression.clone(),
-            created_at_ms: now_ms(),
+            created_at_ms: now,
+            signal_type: signal_kind.clone(),
+            target: target_run_id
+                .as_ref()
+                .map(|id| id.as_str().to_owned())
+                .unwrap_or_default(),
         };
 
         self.store
@@ -85,6 +91,7 @@ where
                     target_run_id,
                     target_mailbox_id,
                     filter_expression,
+                    created_at_ms: now,
                 },
             ))])
             .await?;
@@ -98,13 +105,24 @@ where
         limit: usize,
         offset: usize,
     ) -> Result<Vec<SignalSubscription>, RuntimeError> {
-        Ok(SignalSubscriptionReadModel::list_by_project(
+        let records = SignalSubscriptionReadModel::list_by_project(
             self.store.as_ref(),
             project,
             limit,
             offset,
         )
-        .await?)
+        .await?;
+        Ok(records.into_iter().map(|rec| SignalSubscription {
+            subscription_id: rec.subscription_id,
+            signal_type: rec.signal_type.clone(),
+            target: rec.target,
+            created_at_ms: rec.created_at_ms,
+            project: rec.project.unwrap_or_else(|| project.clone()),
+            signal_kind: rec.signal_type,
+            target_run_id: rec.target_run_id,
+            target_mailbox_id: rec.target_mailbox_id,
+            filter_expression: rec.filter_expression,
+        }).collect())
     }
 
     async fn route_signal(
@@ -132,7 +150,8 @@ where
         let delivered_at_ms = now_ms();
 
         for subscription in subscriptions {
-            if subscription.project != signal.project
+            let sub_project = subscription.project.clone().unwrap_or_else(|| signal.project.clone());
+            if sub_project != signal.project
                 || !signal_matches_filter(&signal, subscription.filter_expression.as_deref())
             {
                 continue;
@@ -146,18 +165,23 @@ where
             }
 
             if let Some(target_mailbox_id) = &subscription.target_mailbox_id {
-                let message_id = MailboxMessageId::new(target_mailbox_id.clone());
+                let message_id = MailboxMessageId::new(target_mailbox_id.as_str());
                 mailbox_message_ids.push(message_id.clone());
                 events.push(make_envelope(RuntimeEvent::MailboxMessageAppended(
                     MailboxMessageAppended {
-                        project: subscription.project.clone(),
+                        project: sub_project.clone(),
                         message_id,
                         run_id: subscription.target_run_id.clone(),
                         task_id: None,
-                        sender_id: Some(format!("signal:{}", signal.source)),
-                        body: Some(signal.payload.to_string()),
-                        sent_at_ms: delivered_at_ms,
-                        delivered: true,
+                        from_task_id: None,
+                        from_run_id: None,
+                        content: signal.payload.to_string(),
+                        deliver_at_ms: 0,
+                                                  sender: None,
+                         recipient: None,
+                         body: None,
+                         sent_at: None,
+                         delivery_status: None,
                     },
                 )));
             } else if let Some(run_id) = &subscription.target_run_id {
@@ -169,20 +193,25 @@ where
                 mailbox_message_ids.push(message_id.clone());
                 events.push(make_envelope(RuntimeEvent::MailboxMessageAppended(
                     MailboxMessageAppended {
-                        project: subscription.project.clone(),
+                        project: sub_project.clone(),
                         message_id,
-                        run_id: Some(run_id.clone()),
+                        run_id: Some(RunId::new(run_id.as_str())),
                         task_id: None,
-                        sender_id: Some(format!("signal:{}", signal.source)),
-                        body: Some(signal.payload.to_string()),
-                        sent_at_ms: delivered_at_ms,
-                        delivered: true,
+                        from_task_id: None,
+                        from_run_id: None,
+                        content: signal.payload.to_string(),
+                        deliver_at_ms: 0,
+                                                  sender: None,
+                         recipient: None,
+                         body: None,
+                         sent_at: None,
+                         delivery_status: None,
                     },
                 )));
             }
 
             events.push(make_envelope(RuntimeEvent::SignalRouted(SignalRouted {
-                project: subscription.project.clone(),
+                project: sub_project.clone(),
                 signal_id: signal.id.clone(),
                 subscription_id: subscription.subscription_id.clone(),
                 delivered_at_ms,

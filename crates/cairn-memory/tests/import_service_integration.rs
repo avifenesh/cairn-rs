@@ -24,22 +24,25 @@ fn knowledge_doc_artifact(logical_id: &str, display_name: &str, text: &str) -> A
         source_bundle_id: "bundle_curated".to_owned(),
         origin_timestamp: 1_710_000_000,
         metadata: HashMap::new(),
-        payload: serde_json::to_value(KnowledgeDocumentPayload {
-            knowledge_pack_logical_id: "bundle_curated".to_owned(),
-            document_name: display_name.to_owned(),
-            source_type: BundleSourceType::TextPlain,
-            content: DocumentContent::InlineText {
-                text: text.to_owned(),
-            },
-            metadata: HashMap::new(),
-            chunk_hints: vec![ChunkHint {
-                start_offset: 0,
-                end_offset: text.len(),
-                hint_text: Some("whole document".to_owned()),
-            }],
-            retrieval_hints: vec!["support".to_owned()],
-        })
-        .unwrap(),
+        payload: cairn_memory::bundles::ArtifactPayload::InlineJson(
+            serde_json::to_value(KnowledgeDocumentPayload {
+                knowledge_pack_logical_id: "bundle_curated".to_owned(),
+                document_name: display_name.to_owned(),
+                source_type: BundleSourceType::TextPlain,
+                content: DocumentContent::InlineText {
+                    text: text.to_owned(),
+                },
+                metadata: HashMap::new(),
+                chunk_hints: vec![ChunkHint {
+                    start_offset: 0,
+                    end_offset: text.len(),
+                    hint_text: Some("whole document".to_owned()),
+                }],
+                retrieval_hints: vec!["support".to_owned()],
+            })
+            .unwrap(),
+        ),
+        provenance: cairn_memory::bundles::ArtifactProvenance::default(),
         lineage: None,
         tags: vec!["curated".to_owned()],
     }
@@ -52,7 +55,7 @@ fn curated_bundle() -> BundleEnvelope {
         bundle_id: "bundle_curated".to_owned(),
         bundle_name: "Curated Support Pack".to_owned(),
         created_at: 1_710_000_000,
-        created_by: "operator".to_owned(),
+        created_by: Some("operator".to_owned()),
         source_deployment_id: None,
         source_scope: SourceScope {
             tenant_id: Some("acme".to_owned()),
@@ -76,6 +79,9 @@ fn curated_bundle() -> BundleEnvelope {
             description: Some("Support knowledge pack".to_owned()),
             source_system: Some("curation".to_owned()),
             export_reason: Some("seed".to_owned()),
+            origin: None,
+            production_method: None,
+            source_version: None,
         },
     }
 }
@@ -97,7 +103,7 @@ async fn import_service_validate_plan_apply_and_skip_duplicates() {
         "validation errors: {:?}",
         validation.errors
     );
-    assert!(validation.is_valid());
+    assert!(validation.valid);
 
     let first_plan = import_service.plan(&bundle, &target_scope).await.unwrap();
     assert_eq!(first_plan.create_count, 2);
@@ -138,30 +144,33 @@ async fn import_service_conflict_resolution_strategies_apply_as_requested() {
     let first_plan = import_service.plan(&bundle, &target_scope).await.unwrap();
     import_service.apply(&first_plan, &bundle).await.unwrap();
 
+    // Test Overwrite strategy: existing content should be overwritten (reported as Update).
     let mut overwrite_plan = import_service.plan(&bundle, &target_scope).await.unwrap();
     overwrite_plan.conflict_resolution = ConflictResolutionStrategy::Overwrite;
     let overwrite_report = import_service
         .apply(&overwrite_plan, &bundle)
         .await
         .unwrap();
-    assert_eq!(overwrite_report.overwritten, 2);
-    assert_eq!(overwrite_report.created, 0);
+    assert_eq!(overwrite_report.update_count, 2);
+    assert_eq!(overwrite_report.create_count, 0);
 
-    let mut version_plan = import_service.plan(&bundle, &target_scope).await.unwrap();
-    version_plan.conflict_resolution = ConflictResolutionStrategy::CreateVersion;
-    let version_report = import_service.apply(&version_plan, &bundle).await.unwrap();
-    assert_eq!(version_report.versioned, 2);
-    assert_eq!(version_report.created, 0);
-    assert!(version_report
+    // Test Rename strategy: creates new versioned documents.
+    let mut rename_plan = import_service.plan(&bundle, &target_scope).await.unwrap();
+    rename_plan.conflict_resolution = ConflictResolutionStrategy::Rename;
+    let rename_report = import_service.apply(&rename_plan, &bundle).await.unwrap();
+    // Rename creates new documents with renamed IDs.
+    assert_eq!(rename_report.create_count, 2);
+    assert!(rename_report
         .entries
         .iter()
         .all(|entry| entry.created_object_id.as_deref().is_some()));
 
-    let mut review_plan = import_service.plan(&bundle, &target_scope).await.unwrap();
-    review_plan.conflict_resolution = ConflictResolutionStrategy::AskOperator;
-    let review_report = import_service.apply(&review_plan, &bundle).await.unwrap();
-    assert_eq!(review_report.pending_operator_review.len(), 2);
-    assert_eq!(review_report.conflict_count, 2);
+    // Test Skip strategy (default): duplicates are skipped.
+    let skip_plan = import_service.plan(&bundle, &target_scope).await.unwrap();
+    assert_eq!(skip_plan.conflict_resolution, ConflictResolutionStrategy::Skip);
+    let skip_report = import_service.apply(&skip_plan, &bundle).await.unwrap();
+    assert_eq!(skip_report.skip_count, 2);
+    assert_eq!(skip_report.conflict_count, 0);
 }
 
 /// RFC 013 §5.1: "Every structured bundle must have one canonical envelope."

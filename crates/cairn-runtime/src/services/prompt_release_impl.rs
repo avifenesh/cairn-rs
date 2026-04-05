@@ -62,6 +62,8 @@ where
             prompt_asset_id: asset_id,
             prompt_version_id: version_id,
             created_at: now_millis(),
+            release_tag: None,
+            created_by: None,
         }));
 
         self.store.append(&[event]).await?;
@@ -90,6 +92,8 @@ where
                 from_state: existing.state.clone(),
                 to_state: to_state.to_owned(),
                 transitioned_at: now_millis(),
+                actor: None,
+                reason: None,
             },
         ));
 
@@ -180,6 +184,8 @@ where
                         from_state: "active".to_owned(),
                         to_state: "approved".to_owned(),
                         transitioned_at: now_millis(),
+                        actor: None,
+                        reason: Some("superseded by newer active release".to_owned()),
                     },
                 ));
                 self.store.append(&[deactivate]).await?;
@@ -256,6 +262,7 @@ where
             prompt_release_id: release_id.clone(),
             percent,
             started_at: now_millis(),
+            release_id: Some(release_id.clone()),
         }));
         self.store.append(&[event]).await?;
         PromptReleaseReadModel::get(self.store.as_ref(), release_id)

@@ -44,6 +44,60 @@ pub trait Authorizer {
         -> Result<(), Self::Error>;
 }
 
+/// In-memory registry mapping bearer tokens to principals.
+///
+/// Used by `ServiceTokenAuthenticator` to validate operator service tokens
+/// during local/self-hosted deployments. Uses interior mutability so tokens
+/// can be registered without exclusive access after the registry is shared.
+#[derive(Debug, Default)]
+pub struct ServiceTokenRegistry {
+    tokens: std::sync::RwLock<std::collections::HashMap<String, AuthPrincipal>>,
+}
+
+impl ServiceTokenRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&self, token: String, principal: AuthPrincipal) {
+        self.tokens.write().unwrap().insert(token, principal);
+    }
+
+    pub fn validate(&self, token: &str) -> Option<AuthPrincipal> {
+        self.tokens.read().unwrap().get(token).cloned()
+    }
+
+    pub fn len(&self) -> usize {
+        self.tokens.read().unwrap().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tokens.read().unwrap().is_empty()
+    }
+}
+
+/// `Authenticator` implementation backed by a `ServiceTokenRegistry`.
+#[derive(Clone, Debug)]
+pub struct ServiceTokenAuthenticator {
+    registry: std::sync::Arc<ServiceTokenRegistry>,
+}
+
+impl ServiceTokenAuthenticator {
+    pub fn new(registry: std::sync::Arc<ServiceTokenRegistry>) -> Self {
+        Self { registry }
+    }
+}
+
+impl Authenticator for ServiceTokenAuthenticator {
+    type Error = String;
+
+    fn authenticate(&self, token: &str) -> Result<AuthPrincipal, Self::Error> {
+        self.registry
+            .validate(token)
+            .ok_or_else(|| format!("invalid service token: {token}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

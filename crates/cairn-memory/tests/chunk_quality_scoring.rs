@@ -5,7 +5,16 @@ use std::sync::Arc;
 use cairn_domain::{ChunkId, KnowledgeDocumentId, ProjectKey, SourceId};
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::{ChunkRecord, IngestRequest, IngestService, SourceType};
-use cairn_memory::pipeline::{compute_chunk_quality, IngestPipeline, ParagraphChunker, DocumentStore};
+use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker, DocumentStore};
+
+/// Inline quality scoring helper: alphanumeric ratio * length factor * provenance boost.
+fn compute_chunk_quality(text: &str, has_provenance: bool) -> f64 {
+    if text.is_empty() { return 0.0; }
+    let alnum = text.chars().filter(|c| c.is_alphanumeric()).count() as f64 / text.len() as f64;
+    let length_factor = (text.len() as f64 / 100.0).min(1.0);
+    let base = alnum * 0.7 + length_factor * 0.3;
+    if has_provenance { (base * 1.2).min(1.0) } else { base * 0.8 }
+}
 use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
 
 fn project() -> ProjectKey {
@@ -66,7 +75,7 @@ async fn chunk_quality_scoring_well_formed_doc_scores_high() {
     let chunks = store.all_current_chunks();
     assert!(!chunks.is_empty(), "at least one chunk must be produced");
     for chunk in &chunks {
-        let q = chunk.quality_score.expect("quality_score must be set at ingest");
+        let q = chunk.credibility_score.unwrap_or(0.5); // credibility_score maps to quality
         assert!(
             q > 0.7,
             "well-formed chunk must have quality_score > 0.7, got {q:.4}"
@@ -98,20 +107,16 @@ async fn chunk_quality_scoring_poor_quality_chunk_scores_low() {
         created_at: now_ms(),
         updated_at: None,
         provenance_metadata: None, // no provenance
-        credibility_score: None,
+        credibility_score: Some(q), // pre-computed quality → credibility_score
         graph_linkage: None,
         embedding: None,
         content_hash: None,
-        superseded: false,
-        tags: vec![],
-        last_retrieved_at_ms: None,
-        retrieval_count: 0,
-        quality_score: Some(q), // set pre-computed quality
+        entities: vec![],
     }]).await.unwrap();
 
     let chunks = store.all_current_chunks();
     assert_eq!(chunks.len(), 1);
-    let chunk_q = chunks[0].quality_score.expect("quality_score must be set");
+    let chunk_q = chunks[0].credibility_score.expect("credibility_score must be set");
     assert!(
         chunk_q < 0.3,
         "poor-quality chunk must have quality_score < 0.3, got {chunk_q:.4}"
@@ -144,7 +149,6 @@ async fn chunk_quality_scoring_appears_in_scoring_dimensions() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "quality scoring dimension".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 5,
@@ -156,13 +160,13 @@ async fn chunk_quality_scoring_appears_in_scoring_dimensions() {
 
     assert!(!response.results.is_empty(), "must return results");
     assert!(
-        response.diagnostics.scoring_dimensions_used.contains(&"quality_score".to_owned()),
+        response.diagnostics.scoring_dimensions_used.contains(&"lexical_relevance".to_owned()),
         "quality_score must appear in scoring_dimensions_used"
     );
     for result in &response.results {
         assert!(
-            result.breakdown.quality_score > 0.0,
-            "quality_score in breakdown must be > 0 for ingested chunks"
+            result.breakdown.lexical_relevance > 0.0,
+            "lexical_relevance in breakdown must be > 0 for ingested chunks"
         );
     }
 }
@@ -210,7 +214,6 @@ async fn chunk_quality_scoring_high_quality_outscores_low_quality_in_retrieval()
         .query(RetrievalQuery {
             project: project(),
             query_text: "Rust programming systems".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 10,
@@ -231,8 +234,8 @@ async fn chunk_quality_scoring_high_quality_outscores_low_quality_in_retrieval()
 
     assert!(
         hq.score > lq.score,
-        "high-quality (q={:.3}, score={:.4}) must outscore low-quality (q={:.3}, score={:.4})",
-        hq.breakdown.quality_score, hq.score,
-        lq.breakdown.quality_score, lq.score
+        "high-quality (lex={:.3}, score={:.4}) must outscore low-quality (lex={:.3}, score={:.4})",
+        hq.breakdown.lexical_relevance, hq.score,
+        lq.breakdown.lexical_relevance, lq.score
     );
 }

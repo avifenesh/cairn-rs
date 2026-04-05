@@ -71,8 +71,8 @@ async fn snapshot_create_restore_preserves_run_state() {
 
     // Restore from snapshot
     let report = store.restore_from_snapshot(&snapshot);
-    assert!(report.events_before > 0, "should report events before restore");
-    assert!(report.events_after > 0, "should retain snapshot events");
+    assert!(report["events_before"].as_u64().unwrap_or(0) > 0, "should report events before restore");
+    assert!(report["events_after"].as_u64().unwrap_or(0) > 0, "should retain snapshot events");
 
     // Assert run is back to original Pending state
     let run_restored = RunReadModel::get(store.as_ref(), &run_id).await.unwrap().unwrap();

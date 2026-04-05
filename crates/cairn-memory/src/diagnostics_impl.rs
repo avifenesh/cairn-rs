@@ -36,6 +36,10 @@ impl InMemoryDiagnostics {
             freshness_score: 1.0,
             credibility_score: 1.0,
             last_ingested_at: 0,
+            avg_rating: 0.0,
+            retrieval_count: 0,
+            query_hit_rate: 0.0,
+            error_rate: 0.0,
         });
         entry.total_chunks += chunk_count;
         entry.last_ingested_at = std::time::SystemTime::now()
@@ -126,6 +130,30 @@ impl DiagnosticsService for InMemoryDiagnostics {
             pending_embeddings: 0,
             stale_chunks: 0,
         }))
+    }
+
+}
+
+impl InMemoryDiagnostics {
+    /// Count total documents for a tenant (approximated from source quality records).
+    pub fn total_documents_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u32 {
+        let sources = self.sources.lock().unwrap();
+        sources.values()
+            .filter(|v| v.project.tenant_id == *tenant_id)
+            .count() as u32
+    }
+
+    /// Record retrieval feedback (rating for a specific chunk).
+    pub fn record_retrieval_feedback(
+        &self,
+        source_id: &cairn_domain::SourceId,
+        _chunk_id: &str,
+        was_used: bool,
+        _rating: Option<f64>,
+    ) {
+        if was_used {
+            self.record_retrieval_hit(source_id, 0.7);
+        }
     }
 }
 

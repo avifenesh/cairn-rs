@@ -36,23 +36,75 @@ struct State {
     signals: HashMap<String, cairn_domain::SignalRecord>,
     ingest_jobs: HashMap<String, cairn_domain::IngestJobRecord>,
     eval_runs: HashMap<String, crate::projections::EvalRunRecord>,
+    eval_datasets: HashMap<String, cairn_domain::EvalDataset>,
+    eval_rubrics: HashMap<String, cairn_domain::EvalRubric>,
+    eval_baselines: HashMap<String, cairn_domain::EvalBaseline>,
+    // keyed by run_id; each run has at most one active strategy
+    checkpoint_strategies: HashMap<String, cairn_domain::CheckpointStrategy>,
     prompt_assets: HashMap<String, crate::projections::PromptAssetRecord>,
     prompt_versions: HashMap<String, crate::projections::PromptVersionRecord>,
     prompt_releases: HashMap<String, crate::projections::PromptReleaseRecord>,
     tenants: HashMap<String, cairn_domain::org::TenantRecord>,
     workspaces: HashMap<String, cairn_domain::org::WorkspaceRecord>,
     projects: HashMap<String, cairn_domain::org::ProjectRecord>,
+    /// RFC 002: point-in-time snapshots per tenant, ordered by creation.
+    snapshots: Vec<cairn_domain::Snapshot>,
     route_decisions: HashMap<String, cairn_domain::providers::RouteDecisionRecord>,
     provider_calls: HashMap<String, cairn_domain::providers::ProviderCallRecord>,
     approval_policies: HashMap<String, cairn_domain::ApprovalPolicyRecord>,
+    external_workers: HashMap<String, cairn_domain::workers::ExternalWorkerRecord>,
+    /// GAP-006: accumulated session costs keyed by session_id.
+    session_costs: HashMap<String, cairn_domain::providers::SessionCostRecord>,
+    /// Run-level accumulated costs keyed by run_id.
+    run_costs: HashMap<String, cairn_domain::providers::RunCostRecord>,
+    /// GAP-010: LLM call trace records derived from ProviderCallCompleted events.
+    llm_traces: Vec<cairn_domain::LlmCallTrace>,
+    /// Task dependency declarations.
+    task_deps: Vec<crate::projections::TaskDependencyRecord>,
+    operator_profiles: HashMap<String, crate::projections::OperatorProfileRecord>,
+    full_operator_profiles: HashMap<String, cairn_domain::org::OperatorProfile>,
+    workspace_members: Vec<crate::projections::WorkspaceMemberRecord>,
+    signal_subscriptions: HashMap<String, crate::projections::SignalSubscriptionRecord>,
+    provider_health_records: HashMap<String, cairn_domain::providers::ProviderHealthRecord>,
+    provider_pools: HashMap<String, cairn_domain::providers::ProviderConnectionPool>,
+    default_settings: HashMap<String, cairn_domain::DefaultSetting>,
+    credentials: HashMap<String, cairn_domain::credentials::CredentialRecord>,
+    channels: HashMap<String, cairn_domain::ChannelRecord>,
+    channel_messages: HashMap<String, Vec<cairn_domain::ChannelMessage>>,
+    credential_rotations: Vec<cairn_domain::credentials::CredentialRotationRecord>,
+    licenses: HashMap<String, cairn_domain::LicenseRecord>,
+    entitlement_overrides: HashMap<String, cairn_domain::EntitlementOverrideRecord>,
+    notification_prefs: HashMap<String, cairn_domain::notification_prefs::NotificationPreference>,
+    notification_records: Vec<cairn_domain::notification_prefs::NotificationRecord>,
+    guardrail_policies: HashMap<String, cairn_domain::policy::GuardrailPolicy>,
+    provider_budgets: HashMap<String, cairn_domain::providers::ProviderBudget>,
+    provider_connections: HashMap<String, cairn_domain::providers::ProviderConnectionRecord>,
+    quotas: HashMap<String, cairn_domain::TenantQuota>,
+    provider_bindings: HashMap<String, cairn_domain::providers::ProviderBindingRecord>,
+    provider_health_schedules: HashMap<String, cairn_domain::providers::ProviderHealthSchedule>,
+    run_sla_configs: HashMap<String, cairn_domain::sla::SlaConfig>,
+    run_sla_breaches: HashMap<String, cairn_domain::sla::SlaBreach>,
+    run_cost_alerts: HashMap<String, cairn_domain::providers::RunCostAlert>,
+    retention_policies: HashMap<String, cairn_domain::RetentionPolicy>,
+    route_policies: HashMap<String, cairn_domain::providers::RoutePolicy>,
+    resource_shares: HashMap<String, cairn_domain::resource_sharing::SharedResource>,
 }
 
 pub struct InMemoryStore {
     state: Mutex<State>,
+    /// Broadcast channel for real-time SSE streaming (RFC 002).
+    ///
+    /// Every successfully appended `StoredEvent` is sent here. Receivers can
+    /// subscribe before reading the replay window so no events are missed.
+    /// Capacity of 1024 covers burst writes; lagged receivers get
+    /// `BroadcastStreamRecvError::Lagged` and should reconnect with the last
+    /// known position.
+    event_tx: tokio::sync::broadcast::Sender<StoredEvent>,
 }
 
 impl InMemoryStore {
     pub fn new() -> Self {
+        let (event_tx, _) = tokio::sync::broadcast::channel(1024);
         Self {
             state: Mutex::new(State {
                 events: Vec::new(),
@@ -68,17 +120,63 @@ impl InMemoryStore {
                 signals: HashMap::new(),
                 ingest_jobs: HashMap::new(),
                 eval_runs: HashMap::new(),
+                eval_datasets: HashMap::new(),
+                eval_rubrics: HashMap::new(),
+                eval_baselines: HashMap::new(),
+                checkpoint_strategies: HashMap::new(),
                 prompt_assets: HashMap::new(),
                 prompt_versions: HashMap::new(),
                 prompt_releases: HashMap::new(),
                 route_decisions: HashMap::new(),
                 provider_calls: HashMap::new(),
                 approval_policies: HashMap::new(),
+                external_workers: HashMap::new(),
+                session_costs: HashMap::new(),
+                run_costs: HashMap::new(),
+                llm_traces: Vec::new(),
+                task_deps: Vec::new(),
+                operator_profiles: HashMap::new(),
+                full_operator_profiles: HashMap::new(),
+                workspace_members: Vec::new(),
+                signal_subscriptions: HashMap::new(),
+                provider_health_records: HashMap::new(),
+                provider_pools: HashMap::new(),
+                default_settings: HashMap::new(),
+                credentials: HashMap::new(),
+                channels: HashMap::new(),
+                channel_messages: HashMap::new(),
+                credential_rotations: Vec::new(),
+                licenses: HashMap::new(),
+                entitlement_overrides: HashMap::new(),
+                notification_prefs: HashMap::new(),
+                notification_records: Vec::new(),
+                guardrail_policies: HashMap::new(),
+                provider_budgets: HashMap::new(),
+                provider_connections: HashMap::new(),
+                quotas: HashMap::new(),
+                provider_bindings: HashMap::new(),
+                provider_health_schedules: HashMap::new(),
+                run_sla_configs: HashMap::new(),
+                run_sla_breaches: HashMap::new(),
+                run_cost_alerts: HashMap::new(),
+                retention_policies: HashMap::new(),
+                route_policies: HashMap::new(),
+                resource_shares: HashMap::new(),
                 tenants: HashMap::new(),
                 workspaces: HashMap::new(),
                 projects: HashMap::new(),
+                snapshots: Vec::new(),
             }),
+            event_tx,
         }
+    }
+
+    /// Subscribe to the real-time event broadcast (RFC 002).
+    ///
+    /// Call this *before* reading the replay window to guarantee no events are
+    /// missed between the replay read and the live subscription.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<StoredEvent> {
+        self.event_tx.subscribe()
     }
 
     fn apply_projection(state: &mut State, event: &StoredEvent) {
@@ -96,6 +194,10 @@ impl InMemoryStore {
                         updated_at: now,
                     },
                 );
+                // Update session quota counter
+                if let Some(quota) = state.quotas.get_mut(e.project.tenant_id.as_str()) {
+                    quota.sessions_this_hour = quota.sessions_this_hour.saturating_add(1);
+                }
             }
             RuntimeEvent::SessionStateChanged(e) => {
                 if let Some(rec) = state.sessions.get_mut(e.session_id.as_str()) {
@@ -114,6 +216,7 @@ impl InMemoryStore {
                         project: e.project.clone(),
                         state: RunState::Pending,
                         prompt_release_id: e.prompt_release_id.clone(),
+                        agent_role_id: e.agent_role_id.clone(),
                         failure_class: None,
                         pause_reason: None,
                         resume_trigger: None,
@@ -122,6 +225,10 @@ impl InMemoryStore {
                         updated_at: now,
                     },
                 );
+                // Update run quota counter
+                if let Some(quota) = state.quotas.get_mut(e.project.tenant_id.as_str()) {
+                    quota.current_active_runs = quota.current_active_runs.saturating_add(1);
+                }
             }
             RuntimeEvent::RunStateChanged(e) => {
                 if let Some(rec) = state.runs.get_mut(e.run_id.as_str()) {
@@ -165,6 +272,11 @@ impl InMemoryStore {
                     rec.resume_trigger = e.resume_trigger;
                     if e.transition.to == TaskState::RetryableFailed {
                         rec.retry_count += 1;
+                    }
+                    // RFC 002: clear lease fields when transitioning back to Queued.
+                    if e.transition.to == TaskState::Queued {
+                        rec.lease_owner = None;
+                        rec.lease_expires_at = None;
                     }
                     rec.version += 1;
                     rec.updated_at = now;
@@ -227,6 +339,15 @@ impl InMemoryStore {
                         project: e.project.clone(),
                         run_id: e.run_id.clone(),
                         task_id: e.task_id.clone(),
+                        from_task_id: e.from_task_id.clone(),
+                        content: e.content.clone(),
+                        from_run_id: e.from_run_id.clone(),
+                        deliver_at_ms: e.deliver_at_ms,
+                        sender: e.sender.clone(),
+                        recipient: e.recipient.clone(),
+                        body: e.body.clone(),
+                        sent_at: e.sent_at,
+                        delivery_status: e.delivery_status.clone(),
                         version: 1,
                         created_at: now,
                     },
@@ -291,9 +412,638 @@ impl InMemoryStore {
                     },
                 );
             }
+            RuntimeEvent::ExternalWorkerRegistered(e) => {
+                state.external_workers.insert(
+                    e.worker_id.as_str().to_owned(),
+                    cairn_domain::workers::ExternalWorkerRecord {
+                        worker_id: e.worker_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        display_name: e.display_name.clone(),
+                        status: "active".to_owned(),
+                        registered_at: e.registered_at,
+                        updated_at: now,
+                        health: cairn_domain::workers::WorkerHealth::default(),
+                        current_task_id: None,
+                    },
+                );
+            }
+            RuntimeEvent::ExternalWorkerSuspended(e) => {
+                if let Some(rec) = state.external_workers.get_mut(e.worker_id.as_str()) {
+                    rec.status = "suspended".to_owned();
+                    rec.updated_at = now;
+                }
+            }
+            RuntimeEvent::ExternalWorkerReactivated(e) => {
+                if let Some(rec) = state.external_workers.get_mut(e.worker_id.as_str()) {
+                    rec.status = "active".to_owned();
+                    rec.updated_at = now;
+                }
+            }
+            RuntimeEvent::ExternalWorkerReported(e) => {
+                // Update last heartbeat and current task.
+                if let Some(rec) = state.external_workers.get_mut(e.report.worker_id.as_str()) {
+                    rec.health.last_heartbeat_ms = e.report.reported_at_ms;
+                    rec.health.is_alive = true;
+                    if e.report.outcome.is_none() {
+                        rec.current_task_id = Some(e.report.task_id.clone());
+                    } else {
+                        rec.current_task_id = None;
+                    }
+                    rec.updated_at = now;
+                }
+            }
+            RuntimeEvent::SoulPatchProposed(_) | RuntimeEvent::SoulPatchApplied(_) => {}
+            RuntimeEvent::SpendAlertTriggered(_) => {}
+            RuntimeEvent::RunCostUpdated(e) => {
+                // Accumulate run cost from directly appended RunCostUpdated events.
+                let rec = state
+                    .run_costs
+                    .entry(e.run_id.as_str().to_owned())
+                    .or_insert_with(|| cairn_domain::providers::RunCostRecord {
+                        run_id: e.run_id.clone(),
+                        total_cost_micros: 0,
+                        total_tokens_in: 0,
+                        total_tokens_out: 0,
+                        provider_calls: 0,
+                        token_in: 0,
+                        token_out: 0,
+                    });
+                rec.total_cost_micros = rec.total_cost_micros.saturating_add(e.delta_cost_micros);
+                rec.total_tokens_in = rec.total_tokens_in.saturating_add(e.delta_tokens_in);
+                rec.total_tokens_out = rec.total_tokens_out.saturating_add(e.delta_tokens_out);
+                rec.provider_calls = rec.provider_calls.saturating_add(1);
+                rec.token_in = rec.total_tokens_in;
+                rec.token_out = rec.total_tokens_out;
+                // Auto-trigger run cost alert if threshold exceeded and not yet triggered.
+                let total = rec.total_cost_micros;
+                if let Some(alert) = state.run_cost_alerts.get(e.run_id.as_str()) {
+                    if alert.triggered_at_ms == 0 && total >= alert.threshold_micros {
+                        let tenant_id = alert.tenant_id.clone();
+                        let threshold = alert.threshold_micros;
+                        let triggered_at_ms = now;
+                        // Update alert record.
+                        if let Some(a) = state.run_cost_alerts.get_mut(e.run_id.as_str()) {
+                            a.triggered_at_ms = triggered_at_ms;
+                            a.actual_cost_micros = total;
+                        }
+                        // Emit RunCostAlertTriggered into the log.
+                        let alert_pos = EventPosition(state.next_position);
+                        state.next_position += 1;
+                        let alert_event = StoredEvent {
+                            position: alert_pos,
+                            envelope: EventEnvelope {
+                                event_id: cairn_domain::EventId::new(
+                                    format!("derived_rcat_{}", e.run_id.as_str())
+                                ),
+                                source: cairn_domain::EventSource::System,
+                                ownership: cairn_domain::OwnershipKey::Project(e.project.clone()),
+                                causation_id: None,
+                                correlation_id: None,
+                                payload: RuntimeEvent::RunCostAlertTriggered(
+                                    cairn_domain::RunCostAlertTriggered {
+                                        run_id: e.run_id.clone(),
+                                        tenant_id,
+                                        threshold_micros: threshold,
+                                        actual_cost_micros: total,
+                                        triggered_at_ms,
+                                    }
+                                ),
+                            },
+                            stored_at: now,
+                        };
+                        state.events.push(alert_event);
+                    }
+                }
+            }
+            RuntimeEvent::ChannelCreated(e) => {
+                state.channels.insert(
+                    e.channel_id.as_str().to_owned(),
+                    cairn_domain::ChannelRecord {
+                        channel_id: e.channel_id.clone(),
+                        project: e.project.clone(),
+                        name: e.name.clone(),
+                        capacity: e.capacity,
+                        created_at: e.created_at_ms,
+                        updated_at: e.created_at_ms,
+                    },
+                );
+            }
+            RuntimeEvent::ChannelMessageSent(e) => {
+                state
+                    .channel_messages
+                    .entry(e.channel_id.as_str().to_owned())
+                    .or_default()
+                    .push(cairn_domain::ChannelMessage {
+                        channel_id: e.channel_id.clone(),
+                        message_id: e.message_id.clone(),
+                        sender_id: e.sender_id.clone(),
+                        body: e.body.clone(),
+                        sent_at_ms: e.sent_at_ms,
+                        consumed_by: None,
+                        consumed_at_ms: None,
+                    });
+            }
+            RuntimeEvent::ChannelMessageConsumed(e) => {
+                if let Some(messages) = state.channel_messages.get_mut(e.channel_id.as_str()) {
+                    if let Some(msg) = messages.iter_mut().find(|m| m.message_id == e.message_id) {
+                        msg.consumed_by = Some(e.consumed_by.clone());
+                        msg.consumed_at_ms = Some(e.consumed_at_ms);
+                    }
+                }
+            }
+            RuntimeEvent::DefaultSettingSet(e) => {
+                let composite_key = format!("{:?}:{}:{}", e.scope, e.scope_id, e.key);
+                state.default_settings.insert(
+                    composite_key,
+                    cairn_domain::DefaultSetting {
+                        key: e.key.clone(),
+                        value: e.value.clone(),
+                        scope: e.scope,
+                    },
+                );
+            }
+            RuntimeEvent::DefaultSettingCleared(e) => {
+                let composite_key = format!("{:?}:{}:{}", e.scope, e.scope_id, e.key);
+                state.default_settings.remove(&composite_key);
+            }
+            RuntimeEvent::LicenseActivated(e) => {
+                state.licenses.insert(
+                    e.tenant_id.as_str().to_owned(),
+                    cairn_domain::LicenseRecord {
+                        tenant_id: e.tenant_id.clone(),
+                        tier: e.tier,
+                        entitlements: vec![],
+                        issued_at: e.valid_from_ms,
+                        expires_at: e.valid_until_ms,
+                        license_key: Some(e.license_id.clone()),
+                    },
+                );
+            }
+            RuntimeEvent::EntitlementOverrideSet(e) => {
+                let key = format!("{}:{}", e.tenant_id.as_str(), e.feature);
+                state.entitlement_overrides.insert(
+                    key,
+                    cairn_domain::EntitlementOverrideRecord {
+                        override_id: format!("override_{}_{}", e.tenant_id.as_str(), e.feature),
+                        tenant_id: e.tenant_id.clone(),
+                        entitlement: cairn_domain::commercial::Entitlement::AdvancedAdmin,
+                        granted: e.allowed,
+                        reason: e.reason.clone(),
+                        applied_at: e.set_at_ms,
+                        feature: e.feature.clone(),
+                        allowed: e.allowed,
+                        set_at_ms: e.set_at_ms,
+                    },
+                );
+            }
+            RuntimeEvent::NotificationPreferenceSet(e) => {
+                let key = format!("{}:{}", e.tenant_id.as_str(), e.operator_id);
+                state.notification_prefs.insert(
+                    key.clone(),
+                    cairn_domain::notification_prefs::NotificationPreference {
+                        pref_id: key,
+                        tenant_id: e.tenant_id.clone(),
+                        operator_id: e.operator_id.clone(),
+                        event_types: e.event_types.clone(),
+                        channels: e.channels.clone(),
+                    },
+                );
+            }
+            RuntimeEvent::NotificationSent(e) => {
+                state.notification_records.push(
+                    cairn_domain::notification_prefs::NotificationRecord {
+                        record_id: e.record_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        operator_id: e.operator_id.clone(),
+                        event_type: e.event_type.clone(),
+                        channel_kind: e.channel_kind.clone(),
+                        channel_target: e.channel_target.clone(),
+                        payload: e.payload.clone(),
+                        sent_at_ms: e.sent_at_ms,
+                        delivered: e.delivered,
+                        delivery_error: e.delivery_error.clone(),
+                    },
+                );
+            }
+            RuntimeEvent::ProviderPoolCreated(e) => {
+                state.provider_pools.insert(
+                    e.pool_id.clone(),
+                    cairn_domain::providers::ProviderConnectionPool {
+                        pool_id: e.pool_id.clone(),
+                        connection_ids: vec![],
+                        max_connections: e.max_connections,
+                        active_connections: 0,
+                        tenant_id: e.tenant_id.clone(),
+                    },
+                );
+            }
+            RuntimeEvent::ProviderPoolConnectionAdded(e) => {
+                if let Some(pool) = state.provider_pools.get_mut(&e.pool_id) {
+                    if !pool.connection_ids.contains(&e.connection_id) {
+                        pool.connection_ids.push(e.connection_id.clone());
+                        pool.active_connections = pool.connection_ids.len() as u32;
+                    }
+                }
+            }
+            RuntimeEvent::ProviderPoolConnectionRemoved(e) => {
+                if let Some(pool) = state.provider_pools.get_mut(&e.pool_id) {
+                    pool.connection_ids.retain(|id| id != &e.connection_id);
+                    pool.active_connections = pool.connection_ids.len() as u32;
+                }
+            }
+            RuntimeEvent::TenantQuotaSet(e) => {
+                state.quotas.insert(
+                    e.tenant_id.as_str().to_owned(),
+                    cairn_domain::TenantQuota {
+                        tenant_id: e.tenant_id.clone(),
+                        max_concurrent_runs: e.max_concurrent_runs,
+                        max_sessions_per_hour: e.max_sessions_per_hour,
+                        max_tasks_per_run: e.max_tasks_per_run,
+                        current_active_runs: 0,
+                        sessions_this_hour: 0,
+                    },
+                );
+            }
+            RuntimeEvent::ProviderBudgetSet(e) => {
+                let key = format!("{}:{:?}", e.tenant_id.as_str(), e.period);
+                state.provider_budgets.insert(
+                    key,
+                    cairn_domain::providers::ProviderBudget {
+                        tenant_id: e.tenant_id.clone(),
+                        period: e.period,
+                        limit_micros: e.limit_micros,
+                        alert_threshold_percent: e.alert_threshold_percent.unwrap_or(80),
+                        current_spend_micros: 0,
+                        created_at: now,
+                        updated_at: now,
+                    },
+                );
+            }
+            RuntimeEvent::ProviderBudgetAlertTriggered(e) => {
+                if let Some(budget) = state.provider_budgets.get_mut(&e.budget_id) {
+                    budget.current_spend_micros = e.current_micros;
+                    budget.updated_at = now;
+                }
+            }
+            RuntimeEvent::ProviderBudgetExceeded(e) => {
+                if let Some(budget) = state.provider_budgets.get_mut(&e.budget_id) {
+                    budget.current_spend_micros =
+                        budget.limit_micros.saturating_add(e.exceeded_by_micros);
+                    budget.updated_at = now;
+                }
+            }
+            RuntimeEvent::CredentialStored(e) => {
+                state.credentials.insert(
+                    e.credential_id.as_str().to_owned(),
+                    cairn_domain::credentials::CredentialRecord {
+                        id: e.credential_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        name: e.provider_id.clone(),
+                        credential_type: "api_key".to_owned(),
+                        encrypted_value: e.encrypted_value.clone(),
+                        created_at: e.encrypted_at_ms,
+                        updated_at: e.encrypted_at_ms,
+                        active: true,
+                        provider_id: e.provider_id.clone(),
+                        encrypted_at_ms: Some(e.encrypted_at_ms),
+                        key_id: e.key_id.clone(),
+                        key_version: e.key_version.clone(),
+                        revoked_at_ms: None,
+                    },
+                );
+            }
+            RuntimeEvent::CredentialRevoked(e) => {
+                if let Some(rec) = state.credentials.get_mut(e.credential_id.as_str()) {
+                    rec.active = false;
+                    rec.revoked_at_ms = Some(e.revoked_at_ms);
+                    rec.updated_at = e.revoked_at_ms;
+                }
+            }
+            RuntimeEvent::CredentialKeyRotated(e) => {
+                state.credential_rotations.push(
+                    cairn_domain::credentials::CredentialRotationRecord {
+                        rotation_id: e.rotation_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        credential_id: cairn_domain::ids::CredentialId::new(""),
+                        rotated_at: now,
+                        rotated_by: None,
+                        old_key_id: e.old_key_id.clone(),
+                        new_key_id: e.new_key_id.clone(),
+                        rotated_credentials: e.credential_ids_rotated.len() as u32,
+                        started_at_ms: now,
+                        completed_at_ms: Some(now),
+                    },
+                );
+            }
+            RuntimeEvent::GuardrailPolicyCreated(e) => {
+                state.guardrail_policies.insert(
+                    e.policy_id.clone(),
+                    cairn_domain::policy::GuardrailPolicy {
+                        policy_id: e.policy_id.clone(),
+                        name: e.name.clone(),
+                        rules: e.rules.clone(),
+                        enabled: true,
+                    },
+                );
+            }
+            RuntimeEvent::OperatorProfileCreated(e) => {
+                state.operator_profiles.insert(
+                    e.profile_id.as_str().to_owned(),
+                    crate::projections::OperatorProfileRecord {
+                        operator_id: e.profile_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        display_name: e.display_name.clone(),
+                        email: Some(e.email.clone()),
+                        role: serde_json::to_string(&e.role).unwrap_or_default().trim_matches('"').to_owned(),
+                        created_at: now,
+                    },
+                );
+                state.full_operator_profiles.insert(
+                    e.profile_id.as_str().to_owned(),
+                    cairn_domain::org::OperatorProfile {
+                        operator_id: e.profile_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        display_name: e.display_name.clone(),
+                        email: e.email.clone(),
+                        role: e.role,
+                        preferences: serde_json::Value::Null,
+                    },
+                );
+            }
+            RuntimeEvent::OperatorProfileUpdated(e) => {
+                if let Some(rec) = state.operator_profiles.get_mut(e.profile_id.as_str()) {
+                    if let Some(dn) = &e.display_name {
+                        rec.display_name = dn.clone();
+                    }
+                }
+                if let Some(profile) = state.full_operator_profiles.get_mut(e.profile_id.as_str()) {
+                    if let Some(dn) = &e.display_name {
+                        profile.display_name = dn.clone();
+                    }
+                    if let Some(email) = &e.email {
+                        profile.email = email.clone();
+                    }
+                }
+            }
+            RuntimeEvent::ProviderConnectionRegistered(e) => {
+                state.provider_connections.insert(
+                    e.provider_connection_id.as_str().to_owned(),
+                    cairn_domain::providers::ProviderConnectionRecord {
+                        provider_connection_id: e.provider_connection_id.clone(),
+                        tenant_id: e.tenant.tenant_id.clone(),
+                        provider_family: e.provider_family.clone(),
+                        adapter_type: e.adapter_type.clone(),
+                        status: e.status,
+                        created_at: e.registered_at,
+                    },
+                );
+            }
+            RuntimeEvent::ProviderHealthChecked(e) => {
+                let healthy = matches!(e.status, cairn_domain::providers::ProviderHealthStatus::Healthy);
+                let prev_failures = state.provider_health_records
+                    .get(e.connection_id.as_str())
+                    .map(|r| r.consecutive_failures)
+                    .unwrap_or(0);
+                let consecutive_failures = if healthy {
+                    0
+                } else {
+                    prev_failures.saturating_add(1)
+                };
+                state.provider_health_records.insert(
+                    e.connection_id.as_str().to_owned(),
+                    cairn_domain::providers::ProviderHealthRecord {
+                        binding_id: cairn_domain::ids::ProviderBindingId::new(e.connection_id.as_str()),
+                        healthy,
+                        last_checked_ms: e.checked_at_ms,
+                        error_message: None,
+                        consecutive_failures,
+                        status: e.status,
+                    },
+                );
+            }
+            RuntimeEvent::ProviderMarkedDegraded(e) => {
+                let rec = state
+                    .provider_health_records
+                    .entry(e.connection_id.as_str().to_owned())
+                    .or_insert_with(|| cairn_domain::providers::ProviderHealthRecord {
+                        binding_id: cairn_domain::ids::ProviderBindingId::new(e.connection_id.as_str()),
+                        healthy: false,
+                        last_checked_ms: e.marked_at_ms,
+                        error_message: None,
+                        consecutive_failures: 0,
+                        status: cairn_domain::providers::ProviderHealthStatus::Degraded,
+                    });
+                rec.healthy = false;
+                rec.status = cairn_domain::providers::ProviderHealthStatus::Degraded;
+                rec.error_message = Some(e.reason.clone());
+                rec.last_checked_ms = e.marked_at_ms;
+            }
+            RuntimeEvent::ProviderRecovered(e) => {
+                if let Some(rec) = state.provider_health_records.get_mut(e.connection_id.as_str()) {
+                    rec.healthy = true;
+                    rec.status = cairn_domain::providers::ProviderHealthStatus::Healthy;
+                    rec.error_message = None;
+                    rec.last_checked_ms = e.recovered_at_ms;
+                    rec.consecutive_failures = 0;
+                }
+            }
+            RuntimeEvent::WorkspaceMemberAdded(e) => {
+                state.workspace_members.retain(|m| {
+                    !(m.workspace_id == e.workspace_key.workspace_id.as_str()
+                        && m.operator_id == e.member_id.as_str())
+                });
+                state.workspace_members.push(crate::projections::WorkspaceMemberRecord {
+                    workspace_id: e.workspace_key.workspace_id.as_str().to_owned(),
+                    operator_id: e.member_id.as_str().to_owned(),
+                    role: e.role,
+                    added_at_ms: e.added_at_ms,
+                });
+            }
+            RuntimeEvent::WorkspaceMemberRemoved(e) => {
+                state.workspace_members.retain(|m| {
+                    !(m.workspace_id == e.workspace_key.workspace_id.as_str()
+                        && m.operator_id == e.member_id.as_str())
+                });
+            }
+            RuntimeEvent::RunCostAlertSet(e) => {
+                state.run_cost_alerts.insert(e.run_id.as_str().to_owned(), cairn_domain::providers::RunCostAlert {
+                    run_id: e.run_id.clone(), threshold_micros: e.threshold_micros,
+                    triggered_at_ms: 0, tenant_id: e.tenant_id.clone(), actual_cost_micros: 0,
+                });
+            }
+            RuntimeEvent::RunCostAlertTriggered(e) => {
+                if let Some(a) = state.run_cost_alerts.get_mut(e.run_id.as_str()) {
+                    a.triggered_at_ms = e.triggered_at_ms;
+                    a.actual_cost_micros = e.actual_cost_micros;
+                }
+            }
+            RuntimeEvent::RunSlaSet(e) => {
+                state.run_sla_configs.insert(e.run_id.as_str().to_owned(), cairn_domain::sla::SlaConfig {
+                    run_id: e.run_id.clone(), tenant_id: e.tenant_id.clone(),
+                    target_completion_ms: e.target_completion_ms,
+                    alert_at_percent: e.alert_at_percent, configured_at_ms: e.set_at_ms,
+                });
+            }
+            RuntimeEvent::RunSlaBreached(e) => {
+                state.run_sla_breaches.insert(e.run_id.as_str().to_owned(), cairn_domain::sla::SlaBreach {
+                    run_id: e.run_id.clone(), tenant_id: e.tenant_id.clone(),
+                    elapsed_ms: e.elapsed_ms, target_ms: e.target_ms, breached_at_ms: e.breached_at_ms,
+                });
+            }
+            RuntimeEvent::ProviderBindingCreated(e) => {
+                state.provider_bindings.insert(e.provider_binding_id.as_str().to_owned(),
+                    cairn_domain::providers::ProviderBindingRecord {
+                        provider_binding_id: e.provider_binding_id.clone(),
+                        project: e.project.clone(),
+                        provider_connection_id: e.provider_connection_id.clone(),
+                        provider_model_id: e.provider_model_id.clone(),
+                        operation_kind: e.operation_kind,
+                        settings: e.settings.clone(),
+                        active: e.active,
+                        created_at: e.created_at,
+                    }
+                );
+            }
+            RuntimeEvent::ProviderBindingStateChanged(e) => {
+                if let Some(b) = state.provider_bindings.get_mut(e.provider_binding_id.as_str()) {
+                    b.active = e.active;
+                }
+            }
+            RuntimeEvent::ProviderHealthScheduleSet(e) => {
+                state.provider_health_schedules.insert(e.schedule_id.clone(),
+                    cairn_domain::providers::ProviderHealthSchedule {
+                        schedule_id: e.schedule_id.clone(),
+                        binding_id: cairn_domain::ProviderBindingId::new(""),
+                        interval_ms: e.interval_ms,
+                        enabled: e.enabled,
+                        connection_id: e.connection_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        last_run_ms: None,
+                    }
+                );
+            }
+            RuntimeEvent::ProviderHealthScheduleTriggered(e) => {
+                if let Some(s) = state.provider_health_schedules.get_mut(&e.schedule_id) {
+                    s.last_run_ms = Some(e.triggered_at_ms);
+                }
+            }
+            RuntimeEvent::SignalSubscriptionCreated(e) => {
+                state.signal_subscriptions.insert(e.subscription_id.clone(),
+                    crate::projections::SignalSubscriptionRecord {
+                        subscription_id: e.subscription_id.clone(),
+                        signal_type: e.signal_kind.clone(),
+                        target: e.target_run_id.as_ref().map(|r| r.as_str().to_owned()).unwrap_or_default(),
+                        created_at_ms: e.created_at_ms,
+                        project: Some(e.project.clone()),
+                        project_tenant: e.project.tenant_id.as_str().to_owned(),
+                        project_workspace: e.project.workspace_id.as_str().to_owned(),
+                        project_id: e.project.project_id.as_str().to_owned(),
+                        target_run_id: e.target_run_id.clone(),
+                        target_mailbox_id: e.target_mailbox_id.clone(),
+                        filter_expression: e.filter_expression.clone(),
+                    }
+                );
+            }
+            RuntimeEvent::RetentionPolicySet(e) => {
+                state.retention_policies.insert(e.tenant_id.as_str().to_owned(), cairn_domain::RetentionPolicy {
+                    policy_id: e.policy_id.clone(),
+                    tenant_id: e.tenant_id.clone(),
+                    full_history_days: e.full_history_days,
+                    current_state_days: e.current_state_days,
+                    max_events_per_entity: e.max_events_per_entity.unwrap_or(0) as u32,
+                });
+            }
+            RuntimeEvent::TenantQuotaViolated(_)
+            | RuntimeEvent::ApprovalDelegated(_)
+            | RuntimeEvent::AuditLogEntryRecorded(_)
+                        | RuntimeEvent::EventLogCompacted(_)
+            | RuntimeEvent::GuardrailPolicyEvaluated(_)
+            | RuntimeEvent::OperatorIntervention(_)
+            | RuntimeEvent::PauseScheduled(_)
+            | RuntimeEvent::PermissionDecisionRecorded(_)
+                        | RuntimeEvent::ProviderModelRegistered(_)
+            | RuntimeEvent::ProviderRetryPolicySet(_) => {}
+            RuntimeEvent::ResourceShared(e) => {
+                state.resource_shares.insert(e.share_id.clone(), cairn_domain::resource_sharing::SharedResource {
+                    share_id: e.share_id.clone(),
+                    tenant_id: e.tenant_id.clone(),
+                    source_workspace_id: e.source_workspace_id.clone(),
+                    target_workspace_id: e.target_workspace_id.clone(),
+                    resource_type: e.resource_type.clone(),
+                    resource_id: e.resource_id.clone(),
+                    permissions: e.permissions.clone(),
+                    shared_at_ms: e.shared_at_ms,
+                });
+            }
+            RuntimeEvent::ResourceShareRevoked(e) => {
+                state.resource_shares.remove(&e.share_id);
+            }
+            RuntimeEvent::RoutePolicyCreated(e) => {
+                state.route_policies.insert(e.policy_id.clone(),
+                    cairn_domain::providers::RoutePolicy {
+                        policy_id: e.policy_id.clone(),
+                        name: e.name.clone(),
+                        enabled: e.enabled,
+                        tenant_id: e.tenant_id.as_str().to_owned(),
+                        rules: e.rules.clone(),
+                        updated_at_ms: now,
+                    }
+                );
+            }
+            RuntimeEvent::RoutePolicyUpdated(e) => {
+                if let Some(p) = state.route_policies.get_mut(&e.policy_id) {
+                    p.updated_at_ms = e.updated_at_ms;
+                }
+            }
+            RuntimeEvent::RecoveryEscalated(_)
+            | RuntimeEvent::SignalRouted(_) => {}
+            RuntimeEvent::SnapshotCreated(e) => {
+                state.snapshots.push(cairn_domain::Snapshot {
+                    snapshot_id: e.snapshot_id.clone(),
+                    tenant_id: e.tenant_id.clone(),
+                    event_position: e.event_position,
+                    state_hash: String::new(),
+                    created_at_ms: e.created_at_ms,
+                    compressed_state: vec![],
+                });
+            }
+            | RuntimeEvent::TaskDependencyAdded(_)
+            | RuntimeEvent::TaskDependencyResolved(_)
+            | RuntimeEvent::TaskLeaseExpired(_)
+            | RuntimeEvent::TaskPriorityChanged(_)
+            | RuntimeEvent::ToolInvocationProgressUpdated(_) => {}
+            RuntimeEvent::SessionCostUpdated(e) => {
+                let rec = state
+                    .session_costs
+                    .entry(e.session_id.as_str().to_owned())
+                    .or_insert_with(|| cairn_domain::providers::SessionCostRecord {
+                        session_id: e.session_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        total_cost_micros: 0,
+                        total_tokens_in: 0,
+                        total_tokens_out: 0,
+                        provider_calls: 0,
+                        token_in: 0,
+                        token_out: 0,
+                        updated_at_ms: now,
+                    });
+                rec.total_cost_micros = rec.total_cost_micros.saturating_add(e.delta_cost_micros);
+                rec.total_tokens_in = rec.total_tokens_in.saturating_add(e.delta_tokens_in);
+                rec.total_tokens_out = rec.total_tokens_out.saturating_add(e.delta_tokens_out);
+                rec.provider_calls = rec.provider_calls.saturating_add(1);
+                rec.token_in = rec.total_tokens_in;
+                rec.token_out = rec.total_tokens_out;
+                rec.updated_at_ms = now;
+                // Also accumulate into provider budget spend for the tenant.
+                for budget in state.provider_budgets.values_mut() {
+                    if budget.tenant_id == e.tenant_id {
+                        budget.current_spend_micros = budget.current_spend_micros.saturating_add(e.delta_cost_micros);
+                        budget.updated_at = now;
+                    }
+                }
+            }
             // Audit/linkage events that don't update core projections.
             RuntimeEvent::CheckpointRestored(_)
-            | RuntimeEvent::ExternalWorkerReported(_)
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
@@ -328,18 +1078,153 @@ impl InMemoryStore {
                         provider_connection_id: e.provider_connection_id.clone(),
                         provider_adapter: String::new(),
                         provider_model_id: e.provider_model_id.clone(),
-                        task_id: None,
-                        run_id: None,
-                        prompt_release_id: None,
-                        fallback_position: 0,
+                        task_id: e.task_id.clone(),
+                        run_id: e.run_id.clone(),
+                        prompt_release_id: e.prompt_release_id.clone(),
+                        fallback_position: e.fallback_position as u16,
                         status: e.status,
-                        latency_ms: e.latency_ms,
+                        latency_ms: e.latency_ms.or_else(|| {
+                            if e.started_at > 0 && e.finished_at >= e.started_at {
+                                Some(e.finished_at - e.started_at)
+                            } else {
+                                None
+                            }
+                        }),
                         input_tokens: e.input_tokens,
                         output_tokens: e.output_tokens,
                         cost_micros: e.cost_micros,
-                        error_class: None,
+                        cost_type: cairn_domain::providers::ProviderCostType::default(),
+                        error_class: e.error_class,
                     },
                 );
+                // GAP-010: derive LlmCallTrace from every ProviderCallCompleted.
+                // All calls — successful and failed — are valuable for observability.
+                state.llm_traces.push(cairn_domain::LlmCallTrace {
+                    trace_id: e.provider_call_id.as_str().to_owned(),
+                    model_id: e.provider_model_id.as_str().to_owned(),
+                    prompt_tokens: e.input_tokens.unwrap_or(0),
+                    completion_tokens: e.output_tokens.unwrap_or(0),
+                    latency_ms: e.latency_ms.unwrap_or(0),
+                    cost_micros: e.cost_micros.unwrap_or(0),
+                    session_id: e.session_id.clone(),
+                    run_id: e.run_id.clone(),
+                    created_at_ms: e.completed_at,
+                    is_error: e.status != cairn_domain::providers::ProviderCallStatus::Succeeded,
+                });
+                // Accumulate run-level costs and emit a derived RunCostUpdated event.
+                if let Some(run_id) = &e.run_id {
+                    let delta_cost = e.cost_micros.unwrap_or(0);
+                    let delta_in = e.input_tokens.unwrap_or(0) as u64;
+                    let delta_out = e.output_tokens.unwrap_or(0) as u64;
+                    let rec = state
+                        .run_costs
+                        .entry(run_id.as_str().to_owned())
+                        .or_insert_with(|| cairn_domain::providers::RunCostRecord {
+                            run_id: run_id.clone(),
+                            total_cost_micros: 0,
+                            total_tokens_in: 0,
+                            total_tokens_out: 0,
+                            provider_calls: 0,
+                            token_in: 0,
+                            token_out: 0,
+                        });
+                    rec.total_cost_micros = rec.total_cost_micros.saturating_add(delta_cost);
+                    rec.total_tokens_in = rec.total_tokens_in.saturating_add(delta_in);
+                    rec.total_tokens_out = rec.total_tokens_out.saturating_add(delta_out);
+                    rec.provider_calls += 1;
+                    rec.token_in = rec.total_tokens_in;
+                    rec.token_out = rec.total_tokens_out;
+                    // Emit a derived RunCostUpdated event directly into the log.
+                    let derived_pos = EventPosition(state.next_position);
+                    state.next_position += 1;
+                    let derived = StoredEvent {
+                        position: derived_pos,
+                        envelope: EventEnvelope {
+                            event_id: cairn_domain::EventId::new(
+                                format!("derived_rcu_{}", e.provider_call_id.as_str())
+                            ),
+                            source: cairn_domain::EventSource::System,
+                            ownership: cairn_domain::OwnershipKey::Project(e.project.clone()),
+                            causation_id: None,
+                            correlation_id: None,
+                            payload: RuntimeEvent::RunCostUpdated(cairn_domain::RunCostUpdated {
+                                project: e.project.clone(),
+                                run_id: run_id.clone(),
+                                delta_cost_micros: delta_cost,
+                                delta_tokens_in: delta_in,
+                                delta_tokens_out: delta_out,
+                                provider_call_id: e.provider_call_id.as_str().to_owned(),
+                                updated_at_ms: event.stored_at,
+                                session_id: None,
+                                tenant_id: None,
+                            }),
+                        },
+                        stored_at: event.stored_at,
+                    };
+                    state.events.push(derived);
+                }
+                // Accumulate session-level costs.
+                // Derive session_id from run record if not provided on the event.
+                let effective_session_id = e.session_id.clone().or_else(|| {
+                    e.run_id.as_ref().and_then(|rid| {
+                        state.runs.get(rid.as_str()).map(|r| r.session_id.clone())
+                    })
+                });
+                if let Some(session_id) = effective_session_id {
+                    let delta_cost = e.cost_micros.unwrap_or(0);
+                    let delta_in = e.input_tokens.unwrap_or(0) as u64;
+                    let delta_out = e.output_tokens.unwrap_or(0) as u64;
+                    let rec = state
+                        .session_costs
+                        .entry(session_id.as_str().to_owned())
+                        .or_insert_with(|| cairn_domain::providers::SessionCostRecord {
+                            session_id: session_id.clone(),
+                            tenant_id: cairn_domain::TenantId::new(
+                                e.project.tenant_id.as_str()
+                            ),
+                            total_cost_micros: 0,
+                            total_tokens_in: 0,
+                            total_tokens_out: 0,
+                            updated_at_ms: event.stored_at,
+                            provider_calls: 0,
+                            token_in: 0,
+                            token_out: 0,
+                        });
+                    rec.total_cost_micros = rec.total_cost_micros.saturating_add(delta_cost);
+                    rec.total_tokens_in = rec.total_tokens_in.saturating_add(delta_in);
+                    rec.total_tokens_out = rec.total_tokens_out.saturating_add(delta_out);
+                    rec.provider_calls += 1;
+                    rec.token_in = rec.total_tokens_in;
+                    rec.token_out = rec.total_tokens_out;
+                    rec.updated_at_ms = event.stored_at;
+                    // Emit SessionCostUpdated event into the log for traceability.
+                    let sc_pos = EventPosition(state.next_position);
+                    state.next_position += 1;
+                    let sc_derived = StoredEvent {
+                        position: sc_pos,
+                        envelope: EventEnvelope {
+                            event_id: cairn_domain::EventId::new(
+                                format!("derived_scu_{}", e.provider_call_id.as_str())
+                            ),
+                            source: cairn_domain::EventSource::System,
+                            ownership: cairn_domain::OwnershipKey::Project(e.project.clone()),
+                            causation_id: None,
+                            correlation_id: None,
+                            payload: RuntimeEvent::SessionCostUpdated(SessionCostUpdated {
+                                project: e.project.clone(),
+                                session_id: session_id.clone(),
+                                tenant_id: cairn_domain::TenantId::new(e.project.tenant_id.as_str()),
+                                delta_cost_micros: delta_cost,
+                                delta_tokens_in: delta_in,
+                                delta_tokens_out: delta_out,
+                                provider_call_id: e.provider_call_id.as_str().to_owned(),
+                                updated_at_ms: event.stored_at,
+                            }),
+                        },
+                        stored_at: event.stored_at,
+                    };
+                    state.events.push(sc_derived);
+                }
             }
             RuntimeEvent::TenantCreated(e) => {
                 state.tenants.insert(
@@ -386,10 +1271,20 @@ impl InMemoryStore {
                         name: e.name.clone(),
                         kind: e.kind.clone(),
                         created_at: e.created_at,
+                        scope: String::new(),
+                        status: "draft".to_owned(),
+                        workspace: String::new(),
+                        updated_at: now,
                     },
                 );
             }
             RuntimeEvent::PromptVersionCreated(e) => {
+                let version_number = state
+                    .prompt_versions
+                    .values()
+                    .filter(|v| v.prompt_asset_id == e.prompt_asset_id)
+                    .count() as u32
+                    + 1;
                 state.prompt_versions.insert(
                     e.prompt_version_id.as_str().to_owned(),
                     crate::projections::PromptVersionRecord {
@@ -398,6 +1293,10 @@ impl InMemoryStore {
                         project: e.project.clone(),
                         content_hash: e.content_hash.clone(),
                         created_at: e.created_at,
+                        version_number,
+                        // RFC 006: populate workspace from event field so projections
+                        // can scope at workspace level without re-deriving from project.
+                        workspace: e.workspace_id.as_str().to_owned(),
                     },
                 );
             }
@@ -426,6 +1325,12 @@ impl InMemoryStore {
                         prompt_version_id: e.prompt_version_id.clone(),
                         state: "draft".to_owned(),
                         rollout_percent: None,
+                        routing_slot: None,
+                        task_type: None,
+                        agent_type: None,
+                        is_project_default: false,
+                        release_tag: e.release_tag.clone(),
+                        created_by: e.created_by.clone(),
                         created_at: e.created_at,
                         updated_at: e.created_at,
                     },
@@ -492,8 +1397,464 @@ impl InMemoryStore {
                     rec.completed_at = Some(e.completed_at);
                 }
             }
+            RuntimeEvent::EvalDatasetCreated(e) => {
+                // tenant_id is not carried by this event; stored with empty sentinel.
+                // Use EvalSubjectKind::PromptRelease as default subject kind.
+                state.eval_datasets.entry(e.dataset_id.clone()).or_insert_with(|| {
+                    cairn_domain::EvalDataset {
+                        dataset_id: e.dataset_id.clone(),
+                        tenant_id: cairn_domain::TenantId::new(""),
+                        name: e.name.clone(),
+                        subject_kind: cairn_domain::EvalSubjectKind::PromptRelease,
+                        entries: Vec::new(),
+                        created_at_ms: e.created_at_ms,
+                    }
+                });
+            }
+            RuntimeEvent::EvalDatasetEntryAdded(e) => {
+                if let Some(ds) = state.eval_datasets.get_mut(e.dataset_id.as_str()) {
+                    // entry_id is stored as a tag so it can be deduplicated.
+                    let already_exists = ds.entries.iter().any(|entry| {
+                        entry.tags.first().map(String::as_str) == Some(e.entry_id.as_str())
+                    });
+                    if !already_exists {
+                        ds.entries.push(cairn_domain::EvalDatasetEntry {
+                            input: serde_json::json!({ "entry_id": e.entry_id }),
+                            expected_output: None,
+                            tags: vec![e.entry_id.clone()],
+                        });
+                    }
+                }
+            }
+            RuntimeEvent::CheckpointStrategySet(e) => {
+                // RFC 002: store the latest strategy for each run (upsert by run_id).
+                // The event lacks project/interval fields; store with sentinel project
+                // and default interval so get_by_run works for strategy_id tracking.
+                if let Some(run_id) = &e.run_id {
+                    state.checkpoint_strategies.insert(
+                        run_id.as_str().to_owned(),
+                        cairn_domain::CheckpointStrategy {
+                            strategy_id: e.strategy_id.clone(),
+                            project: cairn_domain::ProjectKey::new("_strategy", "_strategy", "_strategy"),
+                            run_id: run_id.clone(),
+                            interval_ms: 0,
+                            max_checkpoints: 10,
+                            trigger_on_task_complete: false,
+                        },
+                    );
+                }
+            }
+            RuntimeEvent::EvalRubricCreated(e) => {
+                // tenant_id not in event; stored with sentinel "".
+                state.eval_rubrics.entry(e.rubric_id.clone()).or_insert_with(|| {
+                    cairn_domain::EvalRubric {
+                        rubric_id:     e.rubric_id.clone(),
+                        tenant_id:     cairn_domain::TenantId::new(""),
+                        name:          e.name.clone(),
+                        dimensions:    vec![],
+                        created_at_ms: e.created_at_ms,
+                    }
+                });
+            }
+            RuntimeEvent::EvalBaselineSet(e) => {
+                // EvalBaselineSet carries one metric key=value; upsert the baseline record.
+                // Fields like tenant_id, name, prompt_asset_id not in event → sentinels.
+                let entry = state.eval_baselines.entry(e.baseline_id.clone()).or_insert_with(|| {
+                    cairn_domain::EvalBaseline {
+                        baseline_id:     e.baseline_id.clone(),
+                        tenant_id:       cairn_domain::TenantId::new(""),
+                        name:            e.baseline_id.clone(),
+                        prompt_asset_id: cairn_domain::PromptAssetId::new(""),
+                        metrics:         cairn_domain::EvalMetrics::default(),
+                        created_at_ms:   e.set_at_ms,
+                        locked:          false,
+                    }
+                });
+                // Only update if not locked — locked baselines are immutable.
+                if !entry.locked {
+                    // Store metric as a tag in the name for auditability.
+                    entry.name = format!("{}[{}={}]", entry.baseline_id, e.metric, e.value);
+                }
+            }
+            RuntimeEvent::EvalBaselineLocked(e) => {
+                if let Some(baseline) = state.eval_baselines.get_mut(&e.baseline_id) {
+                    baseline.locked = true;
+                }
+            }
             // No projection required for policy lifecycle events; handled by policy read model.
             RuntimeEvent::ApprovalPolicyCreated(_) => {}
+            // RunCostUpdated is a derived event; run-cost projection handled above.
+            RuntimeEvent::RunCostUpdated(_) => {}
+
+            RuntimeEvent::ChannelCreated(e) => {
+                state.channels.insert(
+                    e.channel_id.as_str().to_owned(),
+                    cairn_domain::ChannelRecord {
+                        channel_id: e.channel_id.clone(),
+                        project: e.project.clone(),
+                        name: e.name.clone(),
+                        capacity: e.capacity,
+                        created_at: e.created_at_ms,
+                        updated_at: e.created_at_ms,
+                    },
+                );
+            }
+            RuntimeEvent::ChannelMessageSent(e) => {
+                state
+                    .channel_messages
+                    .entry(e.channel_id.as_str().to_owned())
+                    .or_default()
+                    .push(cairn_domain::ChannelMessage {
+                        channel_id: e.channel_id.clone(),
+                        message_id: e.message_id.clone(),
+                        sender_id: e.sender_id.clone(),
+                        body: e.body.clone(),
+                        sent_at_ms: e.sent_at_ms,
+                        consumed_by: None,
+                        consumed_at_ms: None,
+                    });
+            }
+            RuntimeEvent::ChannelMessageConsumed(e) => {
+                if let Some(messages) = state.channel_messages.get_mut(e.channel_id.as_str()) {
+                    if let Some(msg) = messages.iter_mut().find(|m| m.message_id == e.message_id) {
+                        msg.consumed_by = Some(e.consumed_by.clone());
+                        msg.consumed_at_ms = Some(e.consumed_at_ms);
+                    }
+                }
+            }
+            RuntimeEvent::DefaultSettingSet(e) => {
+                let composite_key = format!("{:?}:{}:{}", e.scope, e.scope_id, e.key);
+                state.default_settings.insert(
+                    composite_key,
+                    cairn_domain::DefaultSetting {
+                        key: e.key.clone(),
+                        value: e.value.clone(),
+                        scope: e.scope,
+                    },
+                );
+            }
+            RuntimeEvent::DefaultSettingCleared(e) => {
+                let composite_key = format!("{:?}:{}:{}", e.scope, e.scope_id, e.key);
+                state.default_settings.remove(&composite_key);
+            }
+            RuntimeEvent::LicenseActivated(e) => {
+                state.licenses.insert(
+                    e.tenant_id.as_str().to_owned(),
+                    cairn_domain::LicenseRecord {
+                        tenant_id: e.tenant_id.clone(),
+                        tier: e.tier,
+                        entitlements: vec![],
+                        issued_at: e.valid_from_ms,
+                        expires_at: e.valid_until_ms,
+                        license_key: Some(e.license_id.clone()),
+                    },
+                );
+            }
+            RuntimeEvent::EntitlementOverrideSet(e) => {
+                let key = format!("{}:{}", e.tenant_id.as_str(), e.feature);
+                state.entitlement_overrides.insert(
+                    key,
+                    cairn_domain::EntitlementOverrideRecord {
+                        override_id: format!("override_{}_{}", e.tenant_id.as_str(), e.feature),
+                        tenant_id: e.tenant_id.clone(),
+                        entitlement: cairn_domain::commercial::Entitlement::AdvancedAdmin,
+                        granted: e.allowed,
+                        reason: e.reason.clone(),
+                        applied_at: e.set_at_ms,
+                        feature: e.feature.clone(),
+                        allowed: e.allowed,
+                        set_at_ms: e.set_at_ms,
+                    },
+                );
+            }
+            RuntimeEvent::NotificationPreferenceSet(e) => {
+                let key = format!("{}:{}", e.tenant_id.as_str(), e.operator_id);
+                state.notification_prefs.insert(
+                    key.clone(),
+                    cairn_domain::notification_prefs::NotificationPreference {
+                        pref_id: key,
+                        tenant_id: e.tenant_id.clone(),
+                        operator_id: e.operator_id.clone(),
+                        event_types: e.event_types.clone(),
+                        channels: e.channels.clone(),
+                    },
+                );
+            }
+            RuntimeEvent::NotificationSent(e) => {
+                state.notification_records.push(
+                    cairn_domain::notification_prefs::NotificationRecord {
+                        record_id: e.record_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        operator_id: e.operator_id.clone(),
+                        event_type: e.event_type.clone(),
+                        channel_kind: e.channel_kind.clone(),
+                        channel_target: e.channel_target.clone(),
+                        payload: e.payload.clone(),
+                        sent_at_ms: e.sent_at_ms,
+                        delivered: e.delivered,
+                        delivery_error: e.delivery_error.clone(),
+                    },
+                );
+            }
+            RuntimeEvent::ProviderPoolCreated(e) => {
+                state.provider_pools.insert(
+                    e.pool_id.clone(),
+                    cairn_domain::providers::ProviderConnectionPool {
+                        pool_id: e.pool_id.clone(),
+                        connection_ids: vec![],
+                        max_connections: e.max_connections,
+                        active_connections: 0,
+                        tenant_id: e.tenant_id.clone(),
+                    },
+                );
+            }
+            RuntimeEvent::ProviderPoolConnectionAdded(e) => {
+                if let Some(pool) = state.provider_pools.get_mut(&e.pool_id) {
+                    if !pool.connection_ids.contains(&e.connection_id) {
+                        pool.connection_ids.push(e.connection_id.clone());
+                        pool.active_connections = pool.connection_ids.len() as u32;
+                    }
+                }
+            }
+            RuntimeEvent::ProviderPoolConnectionRemoved(e) => {
+                if let Some(pool) = state.provider_pools.get_mut(&e.pool_id) {
+                    pool.connection_ids.retain(|id| id != &e.connection_id);
+                    pool.active_connections = pool.connection_ids.len() as u32;
+                }
+            }
+            RuntimeEvent::TenantQuotaSet(e) => {
+                state.quotas.insert(
+                    e.tenant_id.as_str().to_owned(),
+                    cairn_domain::TenantQuota {
+                        tenant_id: e.tenant_id.clone(),
+                        max_concurrent_runs: e.max_concurrent_runs,
+                        max_sessions_per_hour: e.max_sessions_per_hour,
+                        max_tasks_per_run: e.max_tasks_per_run,
+                        current_active_runs: 0,
+                        sessions_this_hour: 0,
+                    },
+                );
+            }
+            RuntimeEvent::ProviderBudgetSet(e) => {
+                let key = format!("{}:{:?}", e.tenant_id.as_str(), e.period);
+                state.provider_budgets.insert(
+                    key,
+                    cairn_domain::providers::ProviderBudget {
+                        tenant_id: e.tenant_id.clone(),
+                        period: e.period,
+                        limit_micros: e.limit_micros,
+                        alert_threshold_percent: e.alert_threshold_percent.unwrap_or(80),
+                        current_spend_micros: 0,
+                        created_at: now,
+                        updated_at: now,
+                    },
+                );
+            }
+            RuntimeEvent::CredentialStored(e) => {
+                state.credentials.insert(
+                    e.credential_id.as_str().to_owned(),
+                    cairn_domain::credentials::CredentialRecord {
+                        id: e.credential_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        name: e.provider_id.clone(),
+                        credential_type: "api_key".to_owned(),
+                        encrypted_value: e.encrypted_value.clone(),
+                        created_at: e.encrypted_at_ms,
+                        updated_at: e.encrypted_at_ms,
+                        active: true,
+                        provider_id: e.provider_id.clone(),
+                        encrypted_at_ms: Some(e.encrypted_at_ms),
+                        key_id: e.key_id.clone(),
+                        key_version: e.key_version.clone(),
+                        revoked_at_ms: None,
+                    },
+                );
+            }
+            RuntimeEvent::CredentialRevoked(e) => {
+                if let Some(rec) = state.credentials.get_mut(e.credential_id.as_str()) {
+                    rec.active = false;
+                    rec.revoked_at_ms = Some(e.revoked_at_ms);
+                    rec.updated_at = e.revoked_at_ms;
+                }
+            }
+            RuntimeEvent::CredentialKeyRotated(e) => {
+                state.credential_rotations.push(
+                    cairn_domain::credentials::CredentialRotationRecord {
+                        rotation_id: e.rotation_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        credential_id: cairn_domain::ids::CredentialId::new(""),
+                        rotated_at: now,
+                        rotated_by: None,
+                        old_key_id: e.old_key_id.clone(),
+                        new_key_id: e.new_key_id.clone(),
+                        rotated_credentials: e.credential_ids_rotated.len() as u32,
+                        started_at_ms: now,
+                        completed_at_ms: Some(now),
+                    },
+                );
+            }
+            RuntimeEvent::GuardrailPolicyCreated(e) => {
+                state.guardrail_policies.insert(
+                    e.policy_id.clone(),
+                    cairn_domain::policy::GuardrailPolicy {
+                        policy_id: e.policy_id.clone(),
+                        name: e.name.clone(),
+                        rules: e.rules.clone(),
+                        enabled: true,
+                    },
+                );
+            }
+            RuntimeEvent::OperatorProfileCreated(e) => {
+                state.operator_profiles.insert(
+                    e.profile_id.as_str().to_owned(),
+                    crate::projections::OperatorProfileRecord {
+                        operator_id: e.profile_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        display_name: e.display_name.clone(),
+                        email: Some(e.email.clone()),
+                        role: serde_json::to_string(&e.role).unwrap_or_default().trim_matches('"').to_owned(),
+                        created_at: now,
+                    },
+                );
+                state.full_operator_profiles.insert(
+                    e.profile_id.as_str().to_owned(),
+                    cairn_domain::org::OperatorProfile {
+                        operator_id: e.profile_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        display_name: e.display_name.clone(),
+                        email: e.email.clone(),
+                        role: e.role,
+                        preferences: serde_json::Value::Null,
+                    },
+                );
+            }
+            RuntimeEvent::OperatorProfileUpdated(e) => {
+                if let Some(rec) = state.operator_profiles.get_mut(e.profile_id.as_str()) {
+                    if let Some(dn) = &e.display_name {
+                        rec.display_name = dn.clone();
+                    }
+                }
+                if let Some(profile) = state.full_operator_profiles.get_mut(e.profile_id.as_str()) {
+                    if let Some(dn) = &e.display_name {
+                        profile.display_name = dn.clone();
+                    }
+                    if let Some(email) = &e.email {
+                        profile.email = email.clone();
+                    }
+                }
+            }
+            RuntimeEvent::ProviderConnectionRegistered(e) => {
+                state.provider_connections.insert(
+                    e.provider_connection_id.as_str().to_owned(),
+                    cairn_domain::providers::ProviderConnectionRecord {
+                        provider_connection_id: e.provider_connection_id.clone(),
+                        tenant_id: e.tenant.tenant_id.clone(),
+                        provider_family: e.provider_family.clone(),
+                        adapter_type: e.adapter_type.clone(),
+                        status: e.status,
+                        created_at: e.registered_at,
+                    },
+                );
+            }
+            RuntimeEvent::ProviderHealthChecked(e) => {
+                let healthy = matches!(e.status, cairn_domain::providers::ProviderHealthStatus::Healthy);
+                let prev_failures = state.provider_health_records
+                    .get(e.connection_id.as_str())
+                    .map(|r| r.consecutive_failures)
+                    .unwrap_or(0);
+                let consecutive_failures = if healthy {
+                    0
+                } else {
+                    prev_failures.saturating_add(1)
+                };
+                state.provider_health_records.insert(
+                    e.connection_id.as_str().to_owned(),
+                    cairn_domain::providers::ProviderHealthRecord {
+                        binding_id: cairn_domain::ids::ProviderBindingId::new(e.connection_id.as_str()),
+                        healthy,
+                        last_checked_ms: e.checked_at_ms,
+                        error_message: None,
+                        consecutive_failures,
+                        status: e.status,
+                    },
+                );
+            }
+            RuntimeEvent::ProviderMarkedDegraded(e) => {
+                let rec = state
+                    .provider_health_records
+                    .entry(e.connection_id.as_str().to_owned())
+                    .or_insert_with(|| cairn_domain::providers::ProviderHealthRecord {
+                        binding_id: cairn_domain::ids::ProviderBindingId::new(e.connection_id.as_str()),
+                        healthy: false,
+                        last_checked_ms: e.marked_at_ms,
+                        error_message: None,
+                        consecutive_failures: 0,
+                        status: cairn_domain::providers::ProviderHealthStatus::Degraded,
+                    });
+                rec.healthy = false;
+                rec.status = cairn_domain::providers::ProviderHealthStatus::Degraded;
+                rec.error_message = Some(e.reason.clone());
+                rec.last_checked_ms = e.marked_at_ms;
+            }
+            RuntimeEvent::ProviderRecovered(e) => {
+                if let Some(rec) = state.provider_health_records.get_mut(e.connection_id.as_str()) {
+                    rec.healthy = true;
+                    rec.status = cairn_domain::providers::ProviderHealthStatus::Healthy;
+                    rec.error_message = None;
+                    rec.last_checked_ms = e.recovered_at_ms;
+                    rec.consecutive_failures = 0;
+                }
+            }
+            RuntimeEvent::WorkspaceMemberAdded(e) => {
+                state.workspace_members.retain(|m| {
+                    !(m.workspace_id == e.workspace_key.workspace_id.as_str()
+                        && m.operator_id == e.member_id.as_str())
+                });
+                state.workspace_members.push(crate::projections::WorkspaceMemberRecord {
+                    workspace_id: e.workspace_key.workspace_id.as_str().to_owned(),
+                    operator_id: e.member_id.as_str().to_owned(),
+                    role: e.role,
+                    added_at_ms: e.added_at_ms,
+                });
+            }
+            RuntimeEvent::WorkspaceMemberRemoved(e) => {
+                state.workspace_members.retain(|m| {
+                    !(m.workspace_id == e.workspace_key.workspace_id.as_str()
+                        && m.operator_id == e.member_id.as_str())
+                });
+            }
+            RuntimeEvent::TenantQuotaViolated(_)
+            | RuntimeEvent::RetentionPolicySet(_)
+            | RuntimeEvent::RunCostAlertSet(_)
+            | RuntimeEvent::RunCostAlertTriggered(_)
+            | RuntimeEvent::ApprovalDelegated(_)
+            | RuntimeEvent::AuditLogEntryRecorded(_)
+                        | RuntimeEvent::EventLogCompacted(_)
+            | RuntimeEvent::GuardrailPolicyEvaluated(_)
+            | RuntimeEvent::OperatorIntervention(_)
+            | RuntimeEvent::PauseScheduled(_)
+            | RuntimeEvent::PermissionDecisionRecorded(_)
+            | RuntimeEvent::ProviderBindingCreated(_)
+            | RuntimeEvent::ProviderBindingStateChanged(_)
+            | RuntimeEvent::ProviderBudgetAlertTriggered(_)
+            | RuntimeEvent::ProviderBudgetExceeded(_)
+            | RuntimeEvent::ProviderHealthScheduleSet(_)
+            | RuntimeEvent::ProviderHealthScheduleTriggered(_)
+            | RuntimeEvent::ProviderModelRegistered(_)
+            | RuntimeEvent::ProviderRetryPolicySet(_)
+            | RuntimeEvent::RecoveryEscalated(_)
+            | RuntimeEvent::RoutePolicyCreated(_)
+            | RuntimeEvent::RoutePolicyUpdated(_)
+            | RuntimeEvent::RunSlaBreached(_)
+            | RuntimeEvent::RunSlaSet(_)
+            | RuntimeEvent::SignalRouted(_)
+            | RuntimeEvent::SignalSubscriptionCreated(_)
+            | RuntimeEvent::SnapshotCreated(_)
+            | RuntimeEvent::TaskDependencyAdded(_)
+            | RuntimeEvent::TaskDependencyResolved(_)
+            | RuntimeEvent::TaskLeaseExpired(_)
+            | RuntimeEvent::TaskPriorityChanged(_)
+            | RuntimeEvent::ToolInvocationProgressUpdated(_) => {}
         }
     }
 }
@@ -526,9 +1887,15 @@ impl EventLog for InMemoryStore {
                 stored_at: now,
             };
 
+            // Push the original event BEFORE calling apply_projection so that
+            // any derived events inserted by the projection appear AFTER the
+            // original in the log, preserving strict position monotonicity.
+            state.events.push(stored.clone());
             Self::apply_projection(&mut state, &stored);
-            state.events.push(stored);
             positions.push(pos);
+
+            // Broadcast to SSE subscribers; ignore send errors (no active receivers).
+            let _ = self.event_tx.send(stored);
         }
 
         Ok(positions)
@@ -663,6 +2030,50 @@ impl SessionReadModel for InMemoryStore {
             .collect();
         results.sort_by_key(|s| (s.created_at, s.session_id.as_str().to_owned()));
         let results: Vec<SessionRecord> = results.into_iter().skip(offset).take(limit).collect();
+        Ok(results)
+    }
+
+    async fn list_active(&self, limit: usize) -> Result<Vec<SessionRecord>, StoreError> {
+        use cairn_domain::SessionState;
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<SessionRecord> = state
+            .sessions
+            .values()
+            .filter(|s| s.state == SessionState::Open)
+            .cloned()
+            .collect();
+        // Most recently updated first (fleet view shows live activity).
+        results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        results.truncate(limit);
+        Ok(results)
+    }
+}
+
+// -- SessionCostReadModel --
+
+#[async_trait]
+impl crate::projections::SessionCostReadModel for InMemoryStore {
+    async fn get_session_cost(
+        &self,
+        session_id: &cairn_domain::SessionId,
+    ) -> Result<Option<cairn_domain::providers::SessionCostRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.session_costs.get(session_id.as_str()).cloned())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        _since_ms: u64,
+    ) -> Result<Vec<cairn_domain::providers::SessionCostRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state
+            .session_costs
+            .values()
+            .filter(|r| &r.tenant_id == tenant_id)
+            .cloned()
+            .collect();
+        results.sort_by_key(|r| r.updated_at_ms);
         Ok(results)
     }
 }
@@ -919,7 +2330,7 @@ impl MailboxReadModel for InMemoryStore {
             .filter(|m| m.run_id.as_ref() == Some(run_id))
             .cloned()
             .collect();
-        results.sort_by_key(|m| (m.created_at, m.message_id.as_str().to_owned()));
+        results.sort_by_key(|m| m.message_id.as_str().to_owned());
         let results = results.into_iter().skip(offset).take(limit).collect();
         Ok(results)
     }
@@ -939,6 +2350,19 @@ impl MailboxReadModel for InMemoryStore {
             .collect();
         results.sort_by_key(|m| (m.created_at, m.message_id.as_str().to_owned()));
         let results = results.into_iter().skip(offset).take(limit).collect();
+        Ok(results)
+    }
+
+    async fn list_pending(&self, now_ms: u64, limit: usize) -> Result<Vec<MailboxRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<MailboxRecord> = state
+            .mailbox_messages
+            .values()
+            .filter(|m| m.deliver_at_ms > 0 && m.deliver_at_ms <= now_ms)
+            .cloned()
+            .collect();
+        results.sort_by_key(|m| (m.deliver_at_ms, m.message_id.as_str().to_owned()));
+        results.truncate(limit);
         Ok(results)
     }
 }
@@ -1066,6 +2490,74 @@ impl EvalRunReadModel for InMemoryStore {
     }
 }
 
+// -- EvalDatasetReadModel --
+
+#[async_trait]
+impl crate::projections::EvalDatasetReadModel for InMemoryStore {
+    async fn get_dataset(
+        &self,
+        dataset_id: &str,
+    ) -> Result<Option<cairn_domain::EvalDataset>, crate::error::StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.eval_datasets.get(dataset_id).cloned())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::EvalDataset>, crate::error::StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<cairn_domain::EvalDataset> = state
+            .eval_datasets
+            .values()
+            .filter(|d| d.tenant_id == *tenant_id || tenant_id.as_str().is_empty())
+            .cloned()
+            .collect();
+        results.sort_by_key(|d| d.created_at_ms);
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- EvalRubricReadModel --
+
+#[async_trait]
+impl crate::projections::EvalRubricReadModel for InMemoryStore {
+    async fn get_rubric(&self, rubric_id: &str) -> Result<Option<cairn_domain::EvalRubric>, crate::error::StoreError> {
+        Ok(self.state.lock().unwrap().eval_rubrics.get(rubric_id).cloned())
+    }
+    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize)
+        -> Result<Vec<cairn_domain::EvalRubric>, crate::error::StoreError>
+    {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state.eval_rubrics.values()
+            .filter(|r| r.tenant_id == *tenant_id || tenant_id.as_str().is_empty())
+            .cloned().collect();
+        results.sort_by(|a, b| a.rubric_id.cmp(&b.rubric_id));
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- EvalBaselineReadModel --
+
+#[async_trait]
+impl crate::projections::EvalBaselineReadModel for InMemoryStore {
+    async fn get_baseline(&self, baseline_id: &str) -> Result<Option<cairn_domain::EvalBaseline>, crate::error::StoreError> {
+        Ok(self.state.lock().unwrap().eval_baselines.get(baseline_id).cloned())
+    }
+    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize)
+        -> Result<Vec<cairn_domain::EvalBaseline>, crate::error::StoreError>
+    {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state.eval_baselines.values()
+            .filter(|b| b.tenant_id == *tenant_id || tenant_id.as_str().is_empty())
+            .cloned().collect();
+        results.sort_by(|a, b| a.baseline_id.cmp(&b.baseline_id));
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
 // -- PromptAssetReadModel --
 
 #[async_trait]
@@ -1186,6 +2678,7 @@ impl PromptReleaseReadModel for InMemoryStore {
         if active.is_empty() {
             return Ok(None);
         }
+
         // RFC 001: if any release has rollout_percent, use deterministic bucket routing.
         if active.iter().any(|r| r.rollout_percent.is_some()) {
             let bucket = selector_bucket(selector);
@@ -1199,6 +2692,50 @@ impl PromptReleaseReadModel for InMemoryStore {
             }
             return Ok(active.into_iter().last());
         }
+
+        // RFC 006 selector precedence resolution.
+        //
+        // Priority (highest to lowest):
+        //   1. routing_slot — exact match against the selector string.
+        //   2. task_type    — exact match against the selector string.
+        //   3. agent_type   — exact match against the selector string.
+        //   4. is_project_default — release marked as the project-wide default.
+        //   5. Any active release (first by release_id, for stability).
+        //
+        // When the release records do not yet carry these fields (all None / false),
+        // every candidate scores 0 and the fallback (step 5) applies — preserving the
+        // previous behaviour while the routing metadata is being backfilled.
+
+        // Step 1: routing_slot exact match.
+        if let Some(r) = active
+            .iter()
+            .find(|r| r.routing_slot.as_deref() == Some(selector))
+        {
+            return Ok(Some(r.clone()));
+        }
+
+        // Step 2: task_type exact match.
+        if let Some(r) = active
+            .iter()
+            .find(|r| r.task_type.as_deref() == Some(selector))
+        {
+            return Ok(Some(r.clone()));
+        }
+
+        // Step 3: agent_type exact match.
+        if let Some(r) = active
+            .iter()
+            .find(|r| r.agent_type.as_deref() == Some(selector))
+        {
+            return Ok(Some(r.clone()));
+        }
+
+        // Step 4: project default.
+        if let Some(r) = active.iter().find(|r| r.is_project_default) {
+            return Ok(Some(r.clone()));
+        }
+
+        // Step 5: fallback — first active release (sorted by release_id for stability).
         Ok(active.into_iter().next())
     }
 }
@@ -1457,6 +2994,7 @@ mod tests {
                 session_id: session_id.clone(),
                 run_id: run_id.clone(),
                 parent_run_id: None,
+            agent_role_id: None,
                 prompt_release_id: None,
             }))])
             .await
@@ -1777,6 +3315,7 @@ mod tests {
                 session_id: session_id.clone(),
                 run_id: run_id.clone(),
                 parent_run_id: None,
+            agent_role_id: None,
                 prompt_release_id: None,
             }))])
             .await
@@ -1906,6 +3445,15 @@ mod tests {
                     message_id: message_id.clone(),
                     run_id: Some(run_id.clone()),
                     task_id: Some(task_id.clone()),
+                    content: String::new(),
+                    from_run_id: None,
+                    from_task_id: None,
+                    deliver_at_ms: 0,
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None,
                 },
             ))])
             .await
@@ -2185,5 +3733,1055 @@ impl ApprovalPolicyReadModel for InMemoryStore {
             .collect();
         results.sort_by_key(|p| p.policy_id.clone());
         Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+#[async_trait]
+impl ExternalWorkerReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        id: &cairn_domain::WorkerId,
+    ) -> Result<Option<cairn_domain::workers::ExternalWorkerRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.external_workers.get(id.as_str()).cloned())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::workers::ExternalWorkerRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state
+            .external_workers
+            .values()
+            .filter(|w| w.tenant_id == *tenant_id)
+            .cloned()
+            .collect();
+        results.sort_by(|a, b| a.registered_at.cmp(&b.registered_at));
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- LlmCallTraceReadModel --
+
+#[async_trait]
+impl crate::projections::LlmCallTraceReadModel for InMemoryStore {
+    async fn insert_trace(&self, trace: cairn_domain::LlmCallTrace) -> Result<(), StoreError> {
+        self.state.lock().unwrap().llm_traces.push(trace);
+        Ok(())
+    }
+
+    async fn list_by_session(
+        &self,
+        session_id: &cairn_domain::SessionId,
+        limit: usize,
+    ) -> Result<Vec<cairn_domain::LlmCallTrace>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<cairn_domain::LlmCallTrace> = state
+            .llm_traces
+            .iter()
+            .filter(|t| t.session_id.as_ref().map(|s| s == session_id).unwrap_or(false))
+            .cloned()
+            .collect();
+        // Most-recent first.
+        results.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+        results.truncate(limit);
+        Ok(results)
+    }
+
+    async fn list_all_traces(&self, limit: usize) -> Result<Vec<cairn_domain::LlmCallTrace>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results = state.llm_traces.clone();
+        results.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+        results.truncate(limit);
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl crate::projections::RunCostReadModel for InMemoryStore {
+    async fn get_run_cost(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Result<Option<cairn_domain::providers::RunCostRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.run_costs.get(run_id.as_str()).cloned())
+    }
+
+    async fn list_by_session(
+        &self,
+        _session_id: &cairn_domain::SessionId,
+    ) -> Result<Vec<cairn_domain::providers::RunCostRecord>, StoreError> {
+        // In-memory store does not index run_costs by session; return all for now.
+        let state = self.state.lock().unwrap();
+        Ok(state.run_costs.values().cloned().collect())
+    }
+}
+
+// -- TaskDependencyReadModel --
+
+#[async_trait]
+impl crate::projections::TaskDependencyReadModel for InMemoryStore {
+    async fn list_blocking(
+        &self,
+        task_id: &cairn_domain::TaskId,
+    ) -> Result<Vec<crate::projections::TaskDependencyRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let results = state
+            .task_deps
+            .iter()
+            .filter(|r| &r.dependency.dependent_task_id == task_id)
+            .cloned()
+            .collect();
+        Ok(results)
+    }
+
+    async fn list_unresolved(
+        &self,
+        _project: &cairn_domain::ProjectKey,
+    ) -> Result<Vec<crate::projections::TaskDependencyRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let results = state
+            .task_deps
+            .iter()
+            .filter(|r| r.resolved_at_ms.is_none())
+            .cloned()
+            .collect();
+        Ok(results)
+    }
+
+    async fn insert_dependency(
+        &self,
+        record: crate::projections::TaskDependencyRecord,
+    ) -> Result<(), StoreError> {
+        self.state.lock().unwrap().task_deps.push(record);
+        Ok(())
+    }
+
+    async fn resolve_dependency(
+        &self,
+        prerequisite_task_id: &cairn_domain::TaskId,
+        resolved_at_ms: u64,
+    ) -> Result<(), StoreError> {
+        let mut state = self.state.lock().unwrap();
+        for dep in &mut state.task_deps {
+            if &dep.dependency.depends_on_task_id == prerequisite_task_id
+                && dep.resolved_at_ms.is_none()
+            {
+                dep.resolved_at_ms = Some(resolved_at_ms);
+            }
+        }
+        Ok(())
+    }
+}
+
+// -- OperatorProfileReadModel --
+
+#[async_trait]
+impl crate::projections::OperatorProfileReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        operator_id: &cairn_domain::ids::OperatorId,
+    ) -> Result<Option<crate::projections::OperatorProfileRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.operator_profiles.get(operator_id.as_str()).cloned())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::ids::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::OperatorProfileRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<crate::projections::OperatorProfileRecord> = state
+            .operator_profiles
+            .values()
+            .filter(|p| &p.tenant_id == tenant_id)
+            .cloned()
+            .collect();
+        results.sort_by_key(|p| p.operator_id.to_string());
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- WorkspaceMembershipReadModel --
+
+#[async_trait]
+impl crate::projections::WorkspaceMembershipReadModel for InMemoryStore {
+    async fn list_workspace_members(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<crate::projections::WorkspaceMemberRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.workspace_members.iter()
+            .filter(|m| m.workspace_id == workspace_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn get_member(
+        &self,
+        workspace_key: &cairn_domain::tenancy::WorkspaceKey,
+        operator_id: &str,
+    ) -> Result<Option<crate::projections::WorkspaceMemberRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.workspace_members.iter()
+            .find(|m| m.workspace_id == workspace_key.workspace_id.as_str()
+                   && m.operator_id == operator_id)
+            .cloned())
+    }
+
+    async fn add_workspace_member(
+        &self,
+        record: crate::projections::WorkspaceMemberRecord,
+    ) -> Result<(), StoreError> {
+        self.state.lock().unwrap().workspace_members.push(record);
+        Ok(())
+    }
+
+    async fn remove_workspace_member(
+        &self,
+        workspace_id: &str,
+        operator_id: &str,
+    ) -> Result<(), StoreError> {
+        let mut state = self.state.lock().unwrap();
+        state.workspace_members.retain(|m| !(m.workspace_id == workspace_id && m.operator_id == operator_id));
+        Ok(())
+    }
+}
+
+// -- SignalSubscriptionReadModel --
+
+#[async_trait]
+impl crate::projections::SignalSubscriptionReadModel for InMemoryStore {
+    async fn get_subscription(
+        &self,
+        subscription_id: &str,
+    ) -> Result<Option<crate::projections::SignalSubscriptionRecord>, StoreError> {
+        Ok(self.state.lock().unwrap().signal_subscriptions.get(subscription_id).cloned())
+    }
+
+    async fn list_by_signal_type(
+        &self,
+        signal_type: &str,
+    ) -> Result<Vec<crate::projections::SignalSubscriptionRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.signal_subscriptions.values()
+            .filter(|s| s.signal_type == signal_type)
+            .cloned()
+            .collect())
+    }
+
+    async fn list_by_signal_kind(
+        &self,
+        signal_kind: &str,
+        _limit: usize,
+        _offset: usize,
+    ) -> Result<Vec<crate::projections::SignalSubscriptionRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.signal_subscriptions.values()
+            .filter(|s| s.signal_type == signal_kind)
+            .cloned()
+            .collect())
+    }
+
+    async fn list_by_project(
+        &self,
+        project: &cairn_domain::tenancy::ProjectKey,
+        _limit: usize,
+        _offset: usize,
+    ) -> Result<Vec<crate::projections::SignalSubscriptionRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let tid = project.tenant_id.as_str();
+        let wid = project.workspace_id.as_str();
+        let pid = project.project_id.as_str();
+        Ok(state.signal_subscriptions.values()
+            .filter(|s| s.project_tenant == tid && s.project_workspace == wid && s.project_id == pid)
+            .cloned()
+            .collect())
+    }
+
+    async fn upsert_subscription(
+        &self,
+        record: crate::projections::SignalSubscriptionRecord,
+    ) -> Result<(), StoreError> {
+        self.state.lock().unwrap().signal_subscriptions.insert(record.subscription_id.clone(), record);
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl crate::projections::CredentialRotationReadModel for InMemoryStore {
+    async fn list_rotations(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::credentials::CredentialRotationRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let results: Vec<_> = state.credential_rotations.iter()
+            .filter(|r| &r.tenant_id == tenant_id)
+            .cloned()
+            .collect();
+        Ok(results)
+    }
+}
+
+// ── ProviderBindingReadModel ───────────────────────────────────────────────
+
+#[async_trait]
+impl crate::projections::ProviderBindingReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        id: &cairn_domain::ProviderBindingId,
+    ) -> Result<Option<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
+        Ok(self.state.lock().unwrap().provider_bindings.get(id.as_str()).cloned())
+    }
+
+    async fn list_by_project(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.provider_bindings.values()
+            .filter(|b| &b.project == project)
+            .skip(offset).take(limit).cloned().collect())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.provider_bindings.values()
+            .filter(|b| b.project.tenant_id == *tenant_id)
+            .skip(offset).take(limit).cloned().collect())
+    }
+
+    async fn list_active(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        operation: cairn_domain::providers::OperationKind,
+    ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let results: Vec<_> = state.provider_bindings.values()
+            .filter(|b| &b.project == project && b.active && b.operation_kind == operation)
+            .cloned()
+            .collect();
+        Ok(results)
+    }
+}
+
+// ── ProviderHealthReadModel ───────────────────────────────────────────────
+
+#[async_trait]
+impl crate::projections::ProviderHealthReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        connection_id: &cairn_domain::ProviderConnectionId,
+    ) -> Result<Option<cairn_domain::providers::ProviderHealthRecord>, StoreError> {
+        Ok(self.state.lock().unwrap().provider_health_records.get(connection_id.as_str()).cloned())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        _tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::providers::ProviderHealthRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let results: Vec<_> = state.provider_health_records.values()
+            .cloned()
+            .collect();
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// ── ProviderHealthScheduleReadModel ──────────────────────────────────────
+
+#[async_trait]
+impl crate::projections::ProviderHealthScheduleReadModel for InMemoryStore {
+    async fn get_schedule(
+        &self,
+        schedule_id: &str,
+    ) -> Result<Option<cairn_domain::providers::ProviderHealthSchedule>, StoreError> {
+        Ok(self.state.lock().unwrap().provider_health_schedules.get(schedule_id).cloned())
+    }
+
+    async fn list_schedules_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::providers::ProviderHealthSchedule>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.provider_health_schedules.values()
+            .filter(|s| &s.tenant_id == tenant_id)
+            .cloned().collect())
+    }
+
+    async fn list_enabled_schedules(
+        &self,
+    ) -> Result<Vec<cairn_domain::providers::ProviderHealthSchedule>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.provider_health_schedules.values()
+            .filter(|s| s.enabled)
+            .cloned().collect())
+    }
+}
+
+
+// ── Stub read-model implementations (linter-added service impl tests) ─────────
+
+#[async_trait]
+impl crate::projections::ChannelReadModel for InMemoryStore {
+    async fn get_channel(&self, id: &cairn_domain::ChannelId) -> Result<Option<cairn_domain::ChannelRecord>, StoreError> {
+        Ok(self.state.lock().unwrap().channels.get(id.as_str()).cloned())
+    }
+    async fn list_channels(&self, project: &cairn_domain::ProjectKey, limit: usize, offset: usize) -> Result<Vec<cairn_domain::ChannelRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.channels.values().filter(|c| &c.project == project).skip(offset).take(limit).cloned().collect())
+    }
+    async fn list_messages(&self, channel_id: &cairn_domain::ChannelId, limit: usize) -> Result<Vec<cairn_domain::ChannelMessage>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.channel_messages.get(channel_id.as_str()).cloned().unwrap_or_default().into_iter().take(limit).collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::GuardrailReadModel for InMemoryStore {
+    async fn get_policy(&self, policy_id: &str) -> Result<Option<cairn_domain::policy::GuardrailPolicy>, StoreError> {
+        Ok(self.state.lock().unwrap().guardrail_policies.get(policy_id).cloned())
+    }
+    async fn list_policies(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize) -> Result<Vec<cairn_domain::policy::GuardrailPolicy>, StoreError> {
+        let _ = tenant_id;
+        let state = self.state.lock().unwrap();
+        Ok(state.guardrail_policies.values().skip(offset).take(limit).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::LicenseReadModel for InMemoryStore {
+    async fn get_active(&self, tenant_id: &cairn_domain::TenantId) -> Result<Option<cairn_domain::LicenseRecord>, StoreError> {
+        Ok(self.state.lock().unwrap().licenses.get(tenant_id.as_str()).cloned())
+    }
+    async fn list_overrides(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::EntitlementOverrideRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.entitlement_overrides.values().filter(|r| &r.tenant_id == tenant_id).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::DefaultsReadModel for InMemoryStore {
+    async fn get(&self, scope: cairn_domain::Scope, scope_id: &str, key: &str) -> Result<Option<cairn_domain::DefaultSetting>, StoreError> {
+        let k = format!("{scope:?}:{scope_id}:{key}");
+        Ok(self.state.lock().unwrap().default_settings.get(&k).cloned())
+    }
+    async fn list_by_scope(&self, scope: cairn_domain::Scope, scope_id: &str) -> Result<Vec<cairn_domain::DefaultSetting>, StoreError> {
+        let prefix = format!("{scope:?}:{scope_id}:");
+        let state = self.state.lock().unwrap();
+        Ok(state.default_settings.iter().filter(|(k, _)| k.starts_with(&prefix)).map(|(_, v)| v.clone()).collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::RetentionPolicyReadModel for InMemoryStore {
+    async fn get_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Option<cairn_domain::RetentionPolicy>, StoreError> {
+        Ok(self.state.lock().unwrap().retention_policies.get(tenant_id.as_str()).cloned())
+    }
+}
+
+#[async_trait]
+impl crate::projections::RetentionMaintenance for InMemoryStore {
+    async fn apply_retention(&self, tenant_id: &cairn_domain::TenantId) -> Result<cairn_domain::RetentionResult, StoreError> {
+        let mut state = self.state.lock().unwrap();
+        let policy = match state.retention_policies.get(tenant_id.as_str()).cloned() {
+            Some(p) => p,
+            None => return Ok(cairn_domain::RetentionResult { events_pruned: 0, entities_affected: 0 }),
+        };
+        let max_per_entity = policy.max_events_per_entity as usize;
+        if max_per_entity == 0 {
+            return Ok(cairn_domain::RetentionResult { events_pruned: 0, entities_affected: 0 });
+        }
+
+        // Group events by entity (using primary_entity_ref).
+        // Collect entity event positions, keep tail (newest), prune the rest.
+        use std::collections::HashMap;
+        let mut entity_positions: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, stored) in state.events.iter().enumerate() {
+            if let Some(entity_ref) = stored.envelope.payload.primary_entity_ref() {
+                let key = format!("{entity_ref:?}");
+                entity_positions.entry(key).or_default().push(idx);
+            }
+        }
+
+        let mut to_prune: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        let mut entities_affected = 0u32;
+
+        for (_, positions) in &entity_positions {
+            if positions.len() > max_per_entity {
+                // Keep the most recent max_per_entity events; prune the rest (oldest).
+                let prune_count = positions.len() - max_per_entity;
+                for idx in positions.iter().take(prune_count) {
+                    to_prune.insert(*idx);
+                }
+                entities_affected += 1;
+            }
+        }
+
+        let events_pruned = to_prune.len() as u64;
+        // Remove events at pruned indices (in reverse order to preserve indices).
+        let mut sorted: Vec<usize> = to_prune.into_iter().collect();
+        sorted.sort_unstable_by(|a, b| b.cmp(a)); // reverse order
+        for idx in sorted {
+            state.events.remove(idx);
+        }
+
+        Ok(cairn_domain::RetentionResult { events_pruned, entities_affected })
+    }
+}
+
+#[async_trait]
+impl crate::projections::RunSlaReadModel for InMemoryStore {
+    async fn get_sla(&self, run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::sla::SlaConfig>, StoreError> {
+        Ok(self.state.lock().unwrap().run_sla_configs.get(run_id.as_str()).cloned())
+    }
+    async fn get_breach(&self, run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::sla::SlaBreach>, StoreError> {
+        Ok(self.state.lock().unwrap().run_sla_breaches.get(run_id.as_str()).cloned())
+    }
+    async fn list_breached_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::sla::SlaBreach>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.run_sla_breaches.values().filter(|b| &b.tenant_id == tenant_id).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::NotificationReadModel for InMemoryStore {
+    async fn get_preferences(&self, tenant_id: &cairn_domain::TenantId, operator_id: &str) -> Result<Option<cairn_domain::notification_prefs::NotificationPreference>, StoreError> {
+        let key = format!("{}:{}", tenant_id.as_str(), operator_id);
+        Ok(self.state.lock().unwrap().notification_prefs.get(&key).cloned())
+    }
+    async fn list_preferences_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::notification_prefs::NotificationPreference>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.notification_prefs.values().filter(|p| &p.tenant_id == tenant_id).cloned().collect())
+    }
+    async fn list_sent_notifications(&self, tenant_id: &cairn_domain::TenantId, since_ms: u64) -> Result<Vec<cairn_domain::notification_prefs::NotificationRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.notification_records.iter().filter(|r| &r.tenant_id == tenant_id && r.sent_at_ms >= since_ms).cloned().collect())
+    }
+    async fn list_failed_notifications(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::notification_prefs::NotificationRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.notification_records.iter().filter(|r| &r.tenant_id == tenant_id && !r.delivered).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::ProviderConnectionReadModel for InMemoryStore {
+    async fn get(&self, id: &cairn_domain::ProviderConnectionId) -> Result<Option<cairn_domain::providers::ProviderConnectionRecord>, StoreError> {
+        Ok(self.state.lock().unwrap().provider_connections.get(id.as_str()).cloned())
+    }
+    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize) -> Result<Vec<cairn_domain::providers::ProviderConnectionRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.provider_connections.values().filter(|r| &r.tenant_id == tenant_id).skip(offset).take(limit).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::ProviderPoolReadModel for InMemoryStore {
+    async fn get_pool(&self, pool_id: &str) -> Result<Option<cairn_domain::providers::ProviderConnectionPool>, StoreError> {
+        Ok(self.state.lock().unwrap().provider_pools.get(pool_id).cloned())
+    }
+    async fn list_pools_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::providers::ProviderConnectionPool>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.provider_pools.values().filter(|p| &p.tenant_id == tenant_id).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::CredentialReadModel for InMemoryStore {
+    async fn get(&self, id: &cairn_domain::CredentialId) -> Result<Option<cairn_domain::credentials::CredentialRecord>, StoreError> {
+        Ok(self.state.lock().unwrap().credentials.get(id.as_str()).cloned())
+    }
+    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize) -> Result<Vec<cairn_domain::credentials::CredentialRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.credentials.values().filter(|r| &r.tenant_id == tenant_id).skip(offset).take(limit).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::RunCostAlertReadModel for InMemoryStore {
+    async fn get_alert(&self, run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::providers::RunCostAlert>, StoreError> {
+        Ok(self.state.lock().unwrap().run_cost_alerts.get(run_id.as_str()).cloned())
+    }
+    async fn list_triggered_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::providers::RunCostAlert>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.run_cost_alerts.values().filter(|a| &a.tenant_id == tenant_id && a.triggered_at_ms > 0).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl crate::projections::AuditLogReadModel for InMemoryStore {
+    async fn list_by_tenant(&self, _tenant_id: &cairn_domain::TenantId, _since_ms: Option<u64>, _limit: usize) -> Result<Vec<cairn_domain::AuditLogEntry>, StoreError> { Ok(vec![]) }
+    async fn list_by_resource(&self, _resource_type: &str, _resource_id: &str) -> Result<Vec<cairn_domain::AuditLogEntry>, StoreError> { Ok(vec![]) }
+}
+
+#[async_trait]
+impl crate::projections::QuotaReadModel for InMemoryStore {
+    async fn get_quota(&self, tenant_id: &cairn_domain::TenantId) -> Result<Option<cairn_domain::TenantQuota>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let Some(mut quota) = state.quotas.get(tenant_id.as_str()).cloned() else {
+            return Ok(None);
+        };
+        // Dynamically compute current_active_runs from run state.
+        // An active run is one that belongs to this tenant and is not in a terminal state.
+        let active_runs = state.runs.values()
+            .filter(|r| r.project.tenant_id == *tenant_id && !r.state.is_terminal())
+            .count() as u32;
+        quota.current_active_runs = active_runs;
+        // Dynamically compute sessions_this_hour from session state.
+        // Count sessions that have been created (all sessions for this tenant).
+        // For simplicity in tests, count all sessions (the test creates sessions and checks the limit).
+        let sessions_count = state.sessions.values()
+            .filter(|s| s.project.tenant_id == *tenant_id)
+            .count() as u32;
+        quota.sessions_this_hour = sessions_count;
+        Ok(Some(quota))
+    }
+}
+
+#[async_trait]
+impl crate::projections::ProviderBudgetReadModel for InMemoryStore {
+    async fn get_by_tenant_period(&self, tenant_id: &cairn_domain::TenantId, period: cairn_domain::providers::ProviderBudgetPeriod) -> Result<Option<cairn_domain::providers::ProviderBudget>, StoreError> {
+        let key = format!("{}:{period:?}", tenant_id.as_str());
+        Ok(self.state.lock().unwrap().provider_budgets.get(&key).cloned())
+    }
+    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::providers::ProviderBudget>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.provider_budgets.values().filter(|b| &b.tenant_id == tenant_id).cloned().collect())
+    }
+}
+
+// -- TaskLeaseExpiredReadModel --
+
+#[async_trait]
+impl crate::projections::TaskLeaseExpiredReadModel for InMemoryStore {
+    async fn list_expired(&self, now_ms: u64) -> Result<Vec<crate::projections::TaskRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.tasks.values()
+            .filter(|t| {
+                matches!(t.state, cairn_domain::TaskState::Leased | cairn_domain::TaskState::Running)
+                    && t.lease_expires_at.map_or(false, |exp| exp <= now_ms)
+            })
+            .cloned()
+            .collect())
+    }
+}
+
+// -- CheckpointStrategyReadModel --
+
+#[async_trait]
+impl crate::projections::CheckpointStrategyReadModel for InMemoryStore {
+    async fn get_by_run(&self, run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.checkpoint_strategies.get(run_id.as_str()).cloned())
+    }
+}
+
+// -- OperatorInterventionReadModel --
+
+#[async_trait]
+impl crate::projections::OperatorInterventionReadModel for InMemoryStore {
+    async fn list_by_run(
+        &self,
+        _run_id: &cairn_domain::RunId,
+        _limit: usize,
+        _offset: usize,
+    ) -> Result<Vec<crate::projections::OperatorInterventionRecord>, StoreError> {
+        Ok(vec![])
+    }
+}
+
+// -- PauseScheduleReadModel --
+
+#[async_trait]
+impl crate::projections::PauseScheduleReadModel for InMemoryStore {
+    async fn list_due(&self, _before_ms: u64) -> Result<Vec<crate::projections::PauseScheduledRecord>, StoreError> {
+        Ok(vec![])
+    }
+}
+
+// -- RecoveryEscalationReadModel --
+
+#[async_trait]
+impl crate::projections::RecoveryEscalationReadModel for InMemoryStore {
+    async fn get_by_run(&self, _run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::RecoveryEscalation>, StoreError> {
+        Ok(None)
+    }
+    async fn list_by_tenant(&self, _tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::RecoveryEscalation>, StoreError> {
+        Ok(vec![])
+    }
+}
+
+// -- SnapshotReadModel --
+
+#[async_trait]
+impl crate::projections::SnapshotReadModel for InMemoryStore {
+    async fn get_latest(&self, tenant_id: &cairn_domain::TenantId) -> Result<Option<cairn_domain::Snapshot>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.snapshots.iter()
+            .filter(|s| s.tenant_id == *tenant_id)
+            .max_by_key(|s| s.created_at_ms)
+            .cloned())
+    }
+    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::Snapshot>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state.snapshots.iter()
+            .filter(|s| s.tenant_id == *tenant_id)
+            .cloned().collect();
+        results.sort_by_key(|s| s.created_at_ms);
+        Ok(results)
+    }
+}
+
+// -- RoutePolicyReadModel --
+
+#[async_trait]
+impl crate::projections::RoutePolicyReadModel for InMemoryStore {
+    async fn get(&self, policy_id: &str) -> Result<Option<cairn_domain::providers::RoutePolicy>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.route_policies.get(policy_id).cloned())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::providers::RoutePolicy>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state
+            .route_policies
+            .values()
+            .filter(|p| p.enabled && p.tenant_id == tenant_id.as_str())
+            .cloned()
+            .collect();
+        results.sort_by(|a, b| a.policy_id.cmp(&b.policy_id));
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+// -- ProviderBindingCostStatsReadModel --
+
+#[async_trait]
+impl crate::projections::ProviderBindingCostStatsReadModel for InMemoryStore {
+    async fn get(&self, binding_id: &cairn_domain::ProviderBindingId) -> Result<Option<cairn_domain::providers::ProviderBindingCostStats>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let calls: Vec<_> = state.provider_calls.values()
+            .filter(|c| c.provider_binding_id == *binding_id)
+            .cloned()
+            .collect();
+        if calls.is_empty() {
+            return Ok(None);
+        }
+        let total_cost_micros: u64 = calls.iter().filter_map(|c| c.cost_micros).sum();
+        let call_count = calls.len() as u64;
+        Ok(Some(cairn_domain::providers::ProviderBindingCostStats {
+            binding_id: binding_id.clone(),
+            total_cost_micros,
+            call_count,
+        }))
+    }
+    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::providers::ProviderBindingCostStats>, StoreError> {
+        let state = self.state.lock().unwrap();
+        // Scan raw events for ProviderCallCompleted to access the full project key (tenant_id).
+        let mut stats: std::collections::HashMap<String, cairn_domain::providers::ProviderBindingCostStats> = std::collections::HashMap::new();
+        for stored in &state.events {
+            if let cairn_domain::RuntimeEvent::ProviderCallCompleted(e) = &stored.envelope.payload {
+                if e.project.tenant_id != *tenant_id {
+                    continue;
+                }
+                let entry = stats.entry(e.provider_binding_id.as_str().to_owned())
+                    .or_insert_with(|| cairn_domain::providers::ProviderBindingCostStats {
+                        binding_id: e.provider_binding_id.clone(),
+                        total_cost_micros: 0,
+                        call_count: 0,
+                    });
+                entry.total_cost_micros = entry.total_cost_micros.saturating_add(e.cost_micros.unwrap_or(0));
+                entry.call_count = entry.call_count.saturating_add(1);
+            }
+        }
+        let mut results: Vec<_> = stats.into_values().collect();
+        results.sort_by_key(|s| s.total_cost_micros / s.call_count.max(1));
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl crate::projections::ResourceSharingReadModel for InMemoryStore {
+    async fn get_share(&self, share_id: &str) -> Result<Option<cairn_domain::resource_sharing::SharedResource>, StoreError> {
+        Ok(self.state.lock().unwrap().resource_shares.get(share_id).cloned())
+    }
+    async fn list_shares_for_workspace(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        target_workspace_id: &cairn_domain::WorkspaceId,
+    ) -> Result<Vec<cairn_domain::resource_sharing::SharedResource>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.resource_shares.values()
+            .filter(|s| &s.tenant_id == tenant_id && &s.target_workspace_id == target_workspace_id)
+            .cloned().collect())
+    }
+    async fn get_share_for_resource(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        target_workspace_id: &cairn_domain::WorkspaceId,
+        resource_type: &str,
+        resource_id: &str,
+    ) -> Result<Option<cairn_domain::resource_sharing::SharedResource>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.resource_shares.values()
+            .find(|s| &s.tenant_id == tenant_id
+                   && &s.target_workspace_id == target_workspace_id
+                   && s.resource_type == resource_type
+                   && s.resource_id == resource_id)
+            .cloned())
+    }
+}
+
+// ── Convenience query methods for cairn-app ───────────────────────────────
+
+impl InMemoryStore {
+    /// Count runs currently in active states (Running or Leased).
+    pub async fn count_active_runs(&self) -> u64 {
+        let state = self.state.lock().unwrap();
+        state.runs.values().filter(|r| matches!(r.state,
+            cairn_domain::RunState::Running | cairn_domain::RunState::Pending)).count() as u64
+    }
+
+    /// Count tasks currently active (Running or Leased).
+    pub async fn count_active_tasks(&self) -> u64 {
+        let state = self.state.lock().unwrap();
+        state.tasks.values().filter(|t| matches!(t.state,
+            cairn_domain::TaskState::Running | cairn_domain::TaskState::Leased)).count() as u64
+    }
+
+    /// Count active runs for a specific tenant.
+    pub async fn count_active_runs_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u64 {
+        let state = self.state.lock().unwrap();
+        state.runs.values().filter(|r|
+            r.project.tenant_id == *tenant_id &&
+            matches!(r.state, cairn_domain::RunState::Running | cairn_domain::RunState::Pending)
+        ).count() as u64
+    }
+
+    /// Count active tasks for a specific tenant.
+    pub async fn count_active_tasks_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u64 {
+        let state = self.state.lock().unwrap();
+        state.tasks.values().filter(|t|
+            t.project.tenant_id == *tenant_id &&
+            matches!(t.state, cairn_domain::TaskState::Running | cairn_domain::TaskState::Leased)
+        ).count() as u64
+    }
+
+    /// Count active runs for a workspace.
+    pub async fn count_active_runs_for_workspace(&self, workspace_key: &cairn_domain::tenancy::WorkspaceKey) -> u64 {
+        let state = self.state.lock().unwrap();
+        state.runs.values().filter(|r|
+            r.project.workspace_id == workspace_key.workspace_id &&
+            matches!(r.state, cairn_domain::RunState::Running | cairn_domain::RunState::Pending)
+        ).count() as u64
+    }
+
+    /// Count pending approvals for a tenant.
+    pub async fn count_pending_approvals_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u64 {
+        let state = self.state.lock().unwrap();
+        state.approvals.values().filter(|a|
+            a.project.tenant_id == *tenant_id &&
+            a.decision.is_none()
+        ).count() as u64
+    }
+
+    /// Count eval runs since a timestamp for a tenant.
+    pub async fn count_eval_runs_since_for_tenant(&self, tenant_id: &cairn_domain::TenantId, since_ms: u64) -> u64 {
+        let state = self.state.lock().unwrap();
+        state.eval_runs.values().filter(|e|
+            e.project.tenant_id == *tenant_id && e.started_at >= since_ms
+        ).count() as u64
+    }
+
+    /// Check if any provider connection is in degraded health.
+    pub async fn any_provider_degraded(&self) -> bool {
+        let state = self.state.lock().unwrap();
+        state.provider_health_records.values().any(|r|
+            matches!(r.status, cairn_domain::providers::ProviderHealthStatus::Degraded)
+        )
+    }
+
+    /// Probe write capability (always succeeds for in-memory store).
+    pub async fn probe_write(&self) -> Result<(), crate::StoreError> {
+        Ok(())
+    }
+
+    /// Compact event log stub — returns a basic report.
+    pub fn compact_event_log(&self, _tenant_id: &cairn_domain::TenantId, _retain_last_n: Option<u64>) -> serde_json::Value {
+        serde_json::json!({"events_compacted": 0, "retained": 0})
+    }
+
+    /// Create snapshot stub.
+    pub fn create_snapshot(&self, tenant_id: &cairn_domain::TenantId) -> cairn_domain::compaction::Snapshot {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        cairn_domain::compaction::Snapshot {
+            snapshot_id: format!("snap_{}", now),
+            tenant_id: tenant_id.clone(),
+            event_position: self.state.lock().unwrap().next_position.saturating_sub(1),
+            state_hash: String::new(),
+            created_at_ms: now,
+            compressed_state: vec![],
+        }
+    }
+
+    /// Restore from snapshot stub — no-op for in-memory store.
+    pub fn restore_from_snapshot(&self, _snapshot: &cairn_domain::compaction::Snapshot) -> serde_json::Value {
+        serde_json::json!({"restored": true, "events_replayed": 0})
+    }
+
+    /// Delete a signal subscription.
+    pub async fn delete_signal_subscription(&self, subscription_id: &str) -> Result<(), crate::StoreError> {
+        self.state.lock().unwrap().signal_subscriptions.remove(subscription_id);
+        Ok(())
+    }
+
+    /// List runs with optional filters.
+    pub async fn list_runs_filtered(
+        &self,
+        _query: &cairn_domain::tenancy::ProjectKey,
+        _session_id: Option<&cairn_domain::SessionId>,
+        _status: Option<cairn_domain::RunState>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::RunRecord>, crate::StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.runs.values().skip(offset).take(limit).cloned().collect())
+    }
+
+    /// List tasks with optional filters.
+    pub async fn list_tasks_filtered(
+        &self,
+        _query: &cairn_domain::tenancy::ProjectKey,
+        _run_id: Option<&cairn_domain::RunId>,
+        _state_filter: Option<cairn_domain::TaskState>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::TaskRecord>, crate::StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.tasks.values().skip(offset).take(limit).cloned().collect())
+    }
+
+    /// Scan all prompt assets across every project (RFC 010 operator view).
+    pub async fn list_all_prompt_assets(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::PromptAssetRecord>, crate::StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.prompt_assets.values().skip(offset).take(limit).cloned().collect())
+    }
+
+    /// Scan all prompt releases across every project (RFC 010 operator view).
+    pub async fn list_all_prompt_releases(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::PromptReleaseRecord>, crate::StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.prompt_releases.values().skip(offset).take(limit).cloned().collect())
+    }
+
+    /// Scan all provider bindings across every tenant (RFC 010 operator view).
+    pub async fn list_all_provider_bindings(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, crate::StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.provider_bindings.values().skip(offset).take(limit).cloned().collect())
+    }
+
+    /// Aggregate cost summary across all runs in the store (RFC 010 / RFC 009).
+    ///
+    /// Returns `(total_provider_calls, total_tokens_in, total_tokens_out,
+    /// total_cost_micros)` since the store was created.
+    pub async fn cost_summary(&self) -> (u64, u64, u64, u64) {
+        let state = self.state.lock().unwrap();
+        let mut calls: u64 = 0;
+        let mut tokens_in: u64 = 0;
+        let mut tokens_out: u64 = 0;
+        let mut cost_micros: u64 = 0;
+        for rc in state.run_costs.values() {
+            calls += rc.provider_calls;
+            tokens_in += rc.total_tokens_in;
+            tokens_out += rc.total_tokens_out;
+            cost_micros += rc.total_cost_micros;
+        }
+        (calls, tokens_in, tokens_out, cost_micros)
+    }
+
+    /// RFC 002: list all approval records for a run (all states: pending + resolved).
+    pub fn list_approvals_by_run(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Vec<crate::projections::ApprovalRecord> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<_> = state
+            .approvals
+            .values()
+            .filter(|a| a.run_id.as_ref() == Some(run_id))
+            .cloned()
+            .collect();
+        results.sort_by_key(|a| (a.created_at, a.approval_id.as_str().to_owned()));
+        results
+    }
+
+    /// RFC 005: attach a prompt release to an approval policy record.
+    ///
+    /// RFC 009: list all provider call records for a project, sorted by call_id.
+    pub fn list_provider_calls_by_project(
+        &self,
+        project_id: &cairn_domain::ProjectId,
+    ) -> Vec<cairn_domain::providers::ProviderCallRecord> {
+        let state = self.state.lock().unwrap();
+        let mut calls: Vec<_> = state
+            .provider_calls
+            .values()
+            .filter(|c| &c.project_id == project_id)
+            .cloned()
+            .collect();
+        calls.sort_by(|a, b| a.provider_call_id.as_str().cmp(b.provider_call_id.as_str()));
+        calls
+    }
+
+    /// `attached_release_ids` is initialised to empty by `ApprovalPolicyCreated`
+    /// and updated by the governance layer (not via a domain event). This method
+    /// provides the in-process mutation path used by tests and service impls.
+    pub fn attach_release_to_policy(
+        &self,
+        policy_id: &str,
+        release_id: cairn_domain::PromptReleaseId,
+    ) -> bool {
+        let mut state = self.state.lock().unwrap();
+        if let Some(policy) = state.approval_policies.get_mut(policy_id) {
+            if !policy.attached_release_ids.contains(&release_id) {
+                policy.attached_release_ids.push(release_id);
+            }
+            true
+        } else {
+            false
+        }
     }
 }

@@ -16,6 +16,9 @@ pub struct RunRecord {
     pub project: ProjectKey,
     pub state: RunState,
     pub prompt_release_id: Option<PromptReleaseId>,
+    /// GAP-011: role attached at run creation (e.g. "researcher", "executor").
+    #[serde(default)]
+    pub agent_role_id: Option<String>,
     pub failure_class: Option<FailureClass>,
     pub pause_reason: Option<PauseReason>,
     pub resume_trigger: Option<ResumeTrigger>,

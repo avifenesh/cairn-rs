@@ -98,6 +98,21 @@ impl SessionReadModel for PgAdapter {
 
         rows.into_iter().map(SessionRow::into_record).collect()
     }
+
+    async fn list_active(&self, limit: usize) -> Result<Vec<SessionRecord>, StoreError> {
+        let rows = sqlx::query_as::<_, SessionRow>(
+            "SELECT session_id, tenant_id, workspace_id, project_id, state, version, created_at, updated_at
+             FROM sessions
+             WHERE state = 'open'
+             ORDER BY updated_at DESC, session_id ASC
+             LIMIT $1",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        rows.into_iter().map(SessionRow::into_record).collect()
+    }
 }
 
 #[async_trait]
@@ -496,6 +511,11 @@ impl MailboxReadModel for PgAdapter {
 
         rows.into_iter().map(MailboxRow::into_record).collect()
     }
+
+    async fn list_pending(&self, _now_ms: u64, _limit: usize) -> Result<Vec<MailboxRecord>, StoreError> {
+        // Postgres migration for deliver_at_ms column is out of scope; stub returns empty.
+        Ok(vec![])
+    }
 }
 
 #[async_trait]
@@ -575,6 +595,7 @@ impl ToolInvocationRow {
             session_id: self.session_id.map(SessionId::new),
             run_id: self.run_id.map(RunId::new),
             task_id: self.task_id.map(TaskId::new),
+            prompt_release_id: None,
             target: serde_json::from_value(self.target)
                 .map_err(|e| StoreError::Serialization(e.to_string()))?,
             execution_class: parse_string_enum(&self.execution_class)?,
@@ -654,11 +675,15 @@ impl RunRow {
             parent_run_id: self.parent_run_id.map(RunId::new),
             project: ProjectKey::new(self.tenant_id, self.workspace_id, self.project_id),
             state: parse_string_enum::<RunState>(&self.state)?,
+            prompt_release_id: None,
+            agent_role_id: None,
             failure_class: self
                 .failure_class
                 .as_deref()
                 .map(parse_string_enum::<FailureClass>)
                 .transpose()?,
+            pause_reason: None,
+            resume_trigger: None,
             version: self.version as u64,
             created_at: self.created_at as u64,
             updated_at: self.updated_at as u64,
@@ -691,11 +716,15 @@ impl TaskRow {
             parent_run_id: self.parent_run_id.map(RunId::new),
             parent_task_id: self.parent_task_id.map(TaskId::new),
             state: parse_string_enum::<TaskState>(&self.state)?,
+            prompt_release_id: None,
             failure_class: self
                 .failure_class
                 .as_deref()
                 .map(parse_string_enum::<FailureClass>)
                 .transpose()?,
+            pause_reason: None,
+            resume_trigger: None,
+            retry_count: 0,
             lease_owner: self.lease_owner,
             lease_expires_at: self.lease_expires_at.map(|value| value as u64),
             title: None,
@@ -763,6 +792,7 @@ impl CheckpointRow {
             project: ProjectKey::new(self.tenant_id, self.workspace_id, self.project_id),
             run_id: RunId::new(self.run_id),
             disposition: parse_string_enum::<CheckpointDisposition>(&self.disposition)?,
+            data: None,
             version: self.version as u64,
             created_at: self.created_at as u64,
         })
@@ -788,6 +818,15 @@ impl MailboxRow {
             project: ProjectKey::new(self.tenant_id, self.workspace_id, self.project_id),
             run_id: self.run_id.map(RunId::new),
             task_id: self.task_id.map(TaskId::new),
+            from_task_id: None,
+            content: String::new(),
+            from_run_id: None,
+            deliver_at_ms: 0,
+            sender: None,
+            recipient: None,
+            body: None,
+            sent_at: None,
+            delivery_status: None,
             version: self.version as u64,
             created_at: self.created_at as u64,
         })

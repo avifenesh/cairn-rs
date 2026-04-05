@@ -50,6 +50,26 @@ impl EvalRunService {
         }
     }
 
+    /// Builder: attach graph integration + event log. Stub — ignored in in-memory impl.
+    pub fn with_graph_and_event_log<G, S>(
+        _graph_integration: std::sync::Arc<G>,
+        _store: std::sync::Arc<S>,
+    ) -> Self
+    where
+        G: Send + Sync + 'static,
+        S: Send + Sync + 'static,
+    {
+        Self::new()
+    }
+
+    /// Builder: attach memory diagnostics. Stub — ignored in in-memory impl.
+    pub fn with_memory_diagnostics<D>(self, _diagnostics: std::sync::Arc<D>) -> Self
+    where
+        D: Send + Sync + 'static,
+    {
+        self
+    }
+
     /// Create a new eval run.
     pub fn create_run(
         &self,
@@ -72,6 +92,7 @@ impl EvalRunService {
             prompt_version_id,
             prompt_release_id,
             evaluator_type,
+            dataset_id: None,
             dataset_source: None,
             metrics: EvalMetrics::default(),
             plugin_metrics: Vec::new(),
@@ -134,6 +155,15 @@ impl EvalRunService {
         Ok(run.clone())
     }
 
+    /// Link a dataset to an existing eval run.
+    pub fn set_dataset_id(&self, eval_run_id: &EvalRunId, dataset_id: String) -> Result<(), EvalError> {
+        let mut state = self.state.lock().unwrap();
+        let run = state.runs.get_mut(eval_run_id.as_str())
+            .ok_or_else(|| EvalError::NotFound(eval_run_id.to_string()))?;
+        run.dataset_id = Some(dataset_id);
+        Ok(())
+    }
+
     /// Get an eval run by ID.
     pub fn get(&self, eval_run_id: &EvalRunId) -> Option<EvalRun> {
         let state = self.state.lock().unwrap();
@@ -172,12 +202,151 @@ impl EvalRunService {
             entries,
         }
     }
+
+    /// List all eval runs for a project.
+    pub fn list_by_project(&self, project_id: &ProjectId) -> Vec<EvalRun> {
+        let state = self.state.lock().unwrap();
+        state
+            .runs
+            .values()
+            .filter(|r| r.project_id == *project_id)
+            .cloned()
+            .collect()
+    }
+
+    /// Stub: build a prompt comparison matrix (returns empty matrix).
+    pub fn build_prompt_comparison_matrix(
+        &self,
+        _project_id: &ProjectId,
+        _prompt_asset_id: &PromptAssetId,
+    ) -> crate::matrices::PromptComparisonMatrix {
+        crate::matrices::PromptComparisonMatrix { rows: vec![] }
+    }
+
+    /// Stub: build a permission matrix.
+    pub async fn build_permission_matrix(
+        &self,
+        _tenant_id: &cairn_domain::TenantId,
+    ) -> Result<crate::matrices::PermissionMatrix, EvalError> {
+        Ok(crate::matrices::PermissionMatrix { rows: vec![] })
+    }
+
+    /// Stub: build a skill health matrix.
+    pub async fn build_skill_health_matrix(
+        &self,
+        _tenant_id: &cairn_domain::TenantId,
+    ) -> Result<crate::matrices::SkillHealthMatrix, EvalError> {
+        Ok(crate::matrices::SkillHealthMatrix { rows: vec![] })
+    }
+
+    /// Stub: build a guardrail matrix.
+    pub async fn build_guardrail_matrix(
+        &self,
+        _tenant_id: &cairn_domain::TenantId,
+    ) -> Result<crate::matrices::GuardrailMatrix, EvalError> {
+        Ok(crate::matrices::GuardrailMatrix { rows: vec![] })
+    }
+
+    /// Stub: build a memory source quality matrix.
+    pub async fn build_memory_quality_matrix(
+        &self,
+        _project: &cairn_domain::ProjectKey,
+    ) -> Result<crate::matrices::MemorySourceQualityMatrix, EvalError> {
+        Ok(crate::matrices::MemorySourceQualityMatrix { rows: vec![] })
+    }
+
+    /// Stub: export runs to a JSON-serialisable list.
+    pub fn export_runs(
+        &self,
+        project_id: &ProjectId,
+        limit: usize,
+    ) -> Vec<EvalRun> {
+        self.list_by_project(project_id)
+            .into_iter()
+            .take(limit)
+            .collect()
+    }
+
+    /// Record a score for a run (alias of complete_run with no plugin metrics).
+    pub fn record_score(
+        &self,
+        eval_run_id: &EvalRunId,
+        metrics: crate::matrices::EvalMetrics,
+    ) -> Result<EvalRun, EvalError> {
+        self.complete_run(eval_run_id, metrics, None)
+    }
+
+    /// Stub: returns an async provider routing matrix.
+    pub async fn build_provider_routing_matrix(
+        &self,
+        _tenant_id: &cairn_domain::TenantId,
+    ) -> Result<crate::matrices::ProviderRoutingMatrix, EvalError> {
+        Ok(crate::matrices::ProviderRoutingMatrix { rows: vec![] })
+    }
+
+    /// Stub: returns trend points for a prompt asset metric.
+    pub fn get_trend(
+        &self,
+        _tenant_id: &str,
+        _asset_id: &cairn_domain::PromptAssetId,
+        _metric: String,
+        _days: u32,
+    ) -> Result<Vec<EvalTrendPoint>, EvalError> {
+        Ok(vec![])
+    }
+
+    /// Stub: generates an eval summary report.
+    pub fn generate_report(
+        &self,
+        _tenant_id: &str,
+        _asset_id: &cairn_domain::PromptAssetId,
+    ) -> EvalReport {
+        EvalReport { summary: String::new(), run_count: 0 }
+    }
+}
+
+/// A single data point in a trend series.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct EvalTrendPoint {
+    pub day: String,
+    pub value: f64,
+}
+
+/// Summary report for an eval asset.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct EvalReport {
+    pub summary: String,
+    pub run_count: usize,
 }
 
 impl Default for EvalRunService {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ── Memory diagnostics source contract ────────────────────────────────────
+
+/// Snapshot of source quality metrics for one knowledge source.
+#[derive(Clone, Debug)]
+pub struct SourceQualitySnapshot {
+    pub source_id: cairn_domain::SourceId,
+    pub total_chunks: u64,
+    pub credibility_score: Option<f64>,
+    pub retrieval_count: u64,
+    pub query_hit_rate: f64,
+    pub error_rate: f64,
+    pub last_ingested_at: Option<u64>,
+}
+
+/// Trait for adapting a memory diagnostics backend to the eval service.
+#[async_trait::async_trait]
+pub trait MemoryDiagnosticsSource: Send + Sync {
+    async fn list_source_quality(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+    ) -> Result<Vec<SourceQualitySnapshot>, String>;
 }
 
 fn now_millis() -> u64 {

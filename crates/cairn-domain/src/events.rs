@@ -105,7 +105,10 @@ pub enum RuntimeEvent {
     ToolInvocationCompleted(ToolInvocationCompleted),
     ToolInvocationFailed(ToolInvocationFailed),
     SignalIngested(SignalIngested),
+    ExternalWorkerRegistered(ExternalWorkerRegistered),
     ExternalWorkerReported(ExternalWorkerReported),
+    ExternalWorkerSuspended(ExternalWorkerSuspended),
+    ExternalWorkerReactivated(ExternalWorkerReactivated),
     SubagentSpawned(SubagentSpawned),
     RecoveryAttempted(RecoveryAttempted),
     RecoveryCompleted(RecoveryCompleted),
@@ -126,6 +129,81 @@ pub enum RuntimeEvent {
     ProjectCreated(ProjectCreated),
     RouteDecisionMade(RouteDecisionMade),
     ProviderCallCompleted(ProviderCallCompleted),
+    SoulPatchProposed(SoulPatchProposed),
+    SoulPatchApplied(SoulPatchApplied),
+    /// GAP-006: session-level accumulated cost updated after a provider call.
+    SessionCostUpdated(SessionCostUpdated),
+    /// Run-level cost updated after a provider call.
+    RunCostUpdated(RunCostUpdated),
+    /// GAP-006: tenant-level spend alert triggered.
+    SpendAlertTriggered(SpendAlertTriggered),
+    ProviderBudgetSet(ProviderBudgetSet),
+    ChannelCreated(ChannelCreated),
+    ChannelMessageSent(ChannelMessageSent),
+    ChannelMessageConsumed(ChannelMessageConsumed),
+    DefaultSettingSet(DefaultSettingSet),
+    DefaultSettingCleared(DefaultSettingCleared),
+    LicenseActivated(LicenseActivated),
+    EntitlementOverrideSet(EntitlementOverrideSet),
+    NotificationPreferenceSet(NotificationPreferenceSet),
+    NotificationSent(NotificationSent),
+    ProviderPoolCreated(ProviderPoolCreated),
+    ProviderPoolConnectionAdded(ProviderPoolConnectionAdded),
+    ProviderPoolConnectionRemoved(ProviderPoolConnectionRemoved),
+    TenantQuotaSet(TenantQuotaSet),
+    TenantQuotaViolated(TenantQuotaViolated),
+    RetentionPolicySet(RetentionPolicySet),
+    RunCostAlertSet(RunCostAlertSet),
+    RunCostAlertTriggered(RunCostAlertTriggered),
+    WorkspaceMemberAdded(WorkspaceMemberAdded),
+    WorkspaceMemberRemoved(WorkspaceMemberRemoved),
+    // ── Second-wave events ──────────────────────────────────────────────────
+    ApprovalDelegated(ApprovalDelegated),
+    AuditLogEntryRecorded(AuditLogEntryRecorded),
+    CheckpointStrategySet(CheckpointStrategySet),
+    CredentialKeyRotated(CredentialKeyRotated),
+    CredentialRevoked(CredentialRevoked),
+    CredentialStored(CredentialStored),
+    EvalBaselineLocked(EvalBaselineLocked),
+    EvalBaselineSet(EvalBaselineSet),
+    EvalDatasetCreated(EvalDatasetCreated),
+    EvalDatasetEntryAdded(EvalDatasetEntryAdded),
+    EvalRubricCreated(EvalRubricCreated),
+    EventLogCompacted(EventLogCompacted),
+    GuardrailPolicyCreated(GuardrailPolicyCreated),
+    GuardrailPolicyEvaluated(GuardrailPolicyEvaluated),
+    OperatorIntervention(OperatorIntervention),
+    OperatorProfileCreated(OperatorProfileCreated),
+    OperatorProfileUpdated(OperatorProfileUpdated),
+    PauseScheduled(PauseScheduled),
+    PermissionDecisionRecorded(PermissionDecisionRecorded),
+    ProviderBindingCreated(ProviderBindingCreated),
+    ProviderBindingStateChanged(ProviderBindingStateChanged),
+    ProviderBudgetAlertTriggered(ProviderBudgetAlertTriggered),
+    ProviderBudgetExceeded(ProviderBudgetExceeded),
+    ProviderConnectionRegistered(ProviderConnectionRegistered),
+    ProviderHealthChecked(ProviderHealthChecked),
+    ProviderHealthScheduleSet(ProviderHealthScheduleSet),
+    ProviderHealthScheduleTriggered(ProviderHealthScheduleTriggered),
+    ProviderMarkedDegraded(ProviderMarkedDegraded),
+    ProviderModelRegistered(ProviderModelRegistered),
+    ProviderRecovered(ProviderRecovered),
+    ProviderRetryPolicySet(ProviderRetryPolicySet),
+    RecoveryEscalated(RecoveryEscalated),
+    ResourceShareRevoked(ResourceShareRevoked),
+    ResourceShared(ResourceShared),
+    RoutePolicyCreated(RoutePolicyCreated),
+    RoutePolicyUpdated(RoutePolicyUpdated),
+    RunSlaBreached(RunSlaBreached),
+    RunSlaSet(RunSlaSet),
+    SignalRouted(SignalRouted),
+    SignalSubscriptionCreated(SignalSubscriptionCreated),
+    SnapshotCreated(SnapshotCreated),
+    TaskDependencyAdded(TaskDependencyAdded),
+    TaskDependencyResolved(TaskDependencyResolved),
+    TaskLeaseExpired(TaskLeaseExpired),
+    TaskPriorityChanged(TaskPriorityChanged),
+    ToolInvocationProgressUpdated(ToolInvocationProgressUpdated),
 }
 
 impl RuntimeEvent {
@@ -148,7 +226,10 @@ impl RuntimeEvent {
             RuntimeEvent::ToolInvocationCompleted(event) => &event.project,
             RuntimeEvent::ToolInvocationFailed(event) => &event.project,
             RuntimeEvent::SignalIngested(event) => &event.project,
+            RuntimeEvent::ExternalWorkerRegistered(event) => &event.sentinel_project,
             RuntimeEvent::ExternalWorkerReported(event) => &event.report.project,
+            RuntimeEvent::ExternalWorkerSuspended(event) => &event.sentinel_project,
+            RuntimeEvent::ExternalWorkerReactivated(event) => &event.sentinel_project,
             RuntimeEvent::SubagentSpawned(event) => &event.project,
             RuntimeEvent::RecoveryAttempted(event) => &event.project,
             RuntimeEvent::RecoveryCompleted(event) => &event.project,
@@ -168,6 +249,86 @@ impl RuntimeEvent {
             RuntimeEvent::ProjectCreated(event) => &event.project,
             RuntimeEvent::RouteDecisionMade(event) => &event.project,
             RuntimeEvent::ProviderCallCompleted(event) => &event.project,
+            RuntimeEvent::SoulPatchProposed(event) => &event.project,
+            RuntimeEvent::SoulPatchApplied(event) => &event.project,
+            RuntimeEvent::SessionCostUpdated(event) => &event.project,
+            RuntimeEvent::RunCostUpdated(event) => &event.project,
+            RuntimeEvent::SpendAlertTriggered(event) => &event.project,
+            RuntimeEvent::ProviderBudgetSet(_)
+            | RuntimeEvent::ChannelCreated(_)
+            | RuntimeEvent::ChannelMessageSent(_)
+            | RuntimeEvent::ChannelMessageConsumed(_)
+            | RuntimeEvent::DefaultSettingSet(_)
+            | RuntimeEvent::DefaultSettingCleared(_)
+            | RuntimeEvent::LicenseActivated(_)
+            | RuntimeEvent::EntitlementOverrideSet(_)
+            | RuntimeEvent::NotificationPreferenceSet(_)
+            | RuntimeEvent::NotificationSent(_)
+            | RuntimeEvent::ProviderPoolCreated(_)
+            | RuntimeEvent::ProviderPoolConnectionAdded(_)
+            | RuntimeEvent::ProviderPoolConnectionRemoved(_)
+            | RuntimeEvent::TenantQuotaSet(_)
+            | RuntimeEvent::TenantQuotaViolated(_)
+            | RuntimeEvent::RetentionPolicySet(_)
+            | RuntimeEvent::RunCostAlertSet(_)
+            | RuntimeEvent::RunCostAlertTriggered(_)
+            | RuntimeEvent::WorkspaceMemberAdded(_)
+            | RuntimeEvent::WorkspaceMemberRemoved(_)
+            | RuntimeEvent::ApprovalDelegated(_)
+            | RuntimeEvent::AuditLogEntryRecorded(_)
+            | RuntimeEvent::CheckpointStrategySet(_)
+            | RuntimeEvent::CredentialKeyRotated(_)
+            | RuntimeEvent::CredentialRevoked(_)
+            | RuntimeEvent::CredentialStored(_)
+            | RuntimeEvent::EvalBaselineLocked(_)
+            | RuntimeEvent::EvalBaselineSet(_)
+            | RuntimeEvent::EvalDatasetCreated(_)
+            | RuntimeEvent::EvalDatasetEntryAdded(_)
+            | RuntimeEvent::EvalRubricCreated(_)
+            | RuntimeEvent::EventLogCompacted(_)
+            | RuntimeEvent::GuardrailPolicyCreated(_)
+            | RuntimeEvent::GuardrailPolicyEvaluated(_)
+            | RuntimeEvent::OperatorIntervention(_)
+            | RuntimeEvent::OperatorProfileCreated(_)
+            | RuntimeEvent::OperatorProfileUpdated(_)
+            | RuntimeEvent::PauseScheduled(_)
+            | RuntimeEvent::PermissionDecisionRecorded(_)
+            | RuntimeEvent::ProviderBindingCreated(_)
+            | RuntimeEvent::ProviderBindingStateChanged(_)
+            | RuntimeEvent::ProviderBudgetAlertTriggered(_)
+            | RuntimeEvent::ProviderBudgetExceeded(_)
+            | RuntimeEvent::ProviderConnectionRegistered(_)
+            | RuntimeEvent::ProviderHealthChecked(_)
+            | RuntimeEvent::ProviderHealthScheduleSet(_)
+            | RuntimeEvent::ProviderHealthScheduleTriggered(_)
+            | RuntimeEvent::ProviderMarkedDegraded(_)
+            | RuntimeEvent::ProviderModelRegistered(_)
+            | RuntimeEvent::ProviderRecovered(_)
+            | RuntimeEvent::ProviderRetryPolicySet(_)
+            | RuntimeEvent::RecoveryEscalated(_)
+            | RuntimeEvent::ResourceShareRevoked(_)
+            | RuntimeEvent::ResourceShared(_)
+            | RuntimeEvent::RoutePolicyCreated(_)
+            | RuntimeEvent::RoutePolicyUpdated(_)
+            | RuntimeEvent::RunSlaBreached(_)
+            | RuntimeEvent::RunSlaSet(_)
+            | RuntimeEvent::SignalRouted(_)
+            | RuntimeEvent::SignalSubscriptionCreated(_)
+            | RuntimeEvent::SnapshotCreated(_)
+            | RuntimeEvent::TaskDependencyAdded(_)
+            | RuntimeEvent::TaskDependencyResolved(_)
+            | RuntimeEvent::TaskLeaseExpired(_)
+            | RuntimeEvent::TaskPriorityChanged(_)
+            | RuntimeEvent::ToolInvocationProgressUpdated(_) => {
+                // These events are tenant-scoped rather than project-scoped.
+                // Return a static placeholder key.
+                static SYSTEM_KEY: std::sync::OnceLock<crate::tenancy::ProjectKey> = std::sync::OnceLock::new();
+                SYSTEM_KEY.get_or_init(|| crate::tenancy::ProjectKey::new(
+                    crate::ids::TenantId::new("_system"),
+                    crate::ids::WorkspaceId::new("_system"),
+                    "_system".to_owned(),
+                ))
+            }
         }
     }
 
@@ -226,9 +387,12 @@ impl RuntimeEvent {
             RuntimeEvent::SignalIngested(event) => Some(RuntimeEntityRef::Signal {
                 signal_id: event.signal_id.clone(),
             }),
+            RuntimeEvent::ExternalWorkerRegistered(_) => None,
             RuntimeEvent::ExternalWorkerReported(event) => Some(RuntimeEntityRef::Task {
                 task_id: event.report.task_id.clone(),
             }),
+            RuntimeEvent::ExternalWorkerSuspended(_) => None,
+            RuntimeEvent::ExternalWorkerReactivated(_) => None,
             RuntimeEvent::SubagentSpawned(event) => Some(RuntimeEntityRef::Task {
                 task_id: event.child_task_id.clone(),
             }),
@@ -288,6 +452,77 @@ impl RuntimeEvent {
             RuntimeEvent::ProjectCreated(_) => None,
             RuntimeEvent::RouteDecisionMade(_) => None,
             RuntimeEvent::ProviderCallCompleted(_) => None,
+            RuntimeEvent::SoulPatchProposed(_) => None,
+            RuntimeEvent::SoulPatchApplied(_) => None,
+            RuntimeEvent::SessionCostUpdated(_) => None,
+            RuntimeEvent::RunCostUpdated(_) => None,
+            RuntimeEvent::SpendAlertTriggered(_) => None,
+            RuntimeEvent::ProviderBudgetSet(_)
+            | RuntimeEvent::ChannelCreated(_)
+            | RuntimeEvent::ChannelMessageSent(_)
+            | RuntimeEvent::ChannelMessageConsumed(_)
+            | RuntimeEvent::DefaultSettingSet(_)
+            | RuntimeEvent::DefaultSettingCleared(_)
+            | RuntimeEvent::LicenseActivated(_)
+            | RuntimeEvent::EntitlementOverrideSet(_)
+            | RuntimeEvent::NotificationPreferenceSet(_)
+            | RuntimeEvent::NotificationSent(_)
+            | RuntimeEvent::ProviderPoolCreated(_)
+            | RuntimeEvent::ProviderPoolConnectionAdded(_)
+            | RuntimeEvent::ProviderPoolConnectionRemoved(_)
+            | RuntimeEvent::TenantQuotaSet(_)
+            | RuntimeEvent::TenantQuotaViolated(_)
+            | RuntimeEvent::RetentionPolicySet(_)
+            | RuntimeEvent::RunCostAlertSet(_)
+            | RuntimeEvent::RunCostAlertTriggered(_)
+            | RuntimeEvent::WorkspaceMemberAdded(_)
+            | RuntimeEvent::WorkspaceMemberRemoved(_)
+            | RuntimeEvent::ApprovalDelegated(_)
+            | RuntimeEvent::AuditLogEntryRecorded(_)
+            | RuntimeEvent::CheckpointStrategySet(_)
+            | RuntimeEvent::CredentialKeyRotated(_)
+            | RuntimeEvent::CredentialRevoked(_)
+            | RuntimeEvent::CredentialStored(_)
+            | RuntimeEvent::EvalBaselineLocked(_)
+            | RuntimeEvent::EvalBaselineSet(_)
+            | RuntimeEvent::EvalDatasetCreated(_)
+            | RuntimeEvent::EvalDatasetEntryAdded(_)
+            | RuntimeEvent::EvalRubricCreated(_)
+            | RuntimeEvent::EventLogCompacted(_)
+            | RuntimeEvent::GuardrailPolicyCreated(_)
+            | RuntimeEvent::GuardrailPolicyEvaluated(_)
+            | RuntimeEvent::OperatorIntervention(_)
+            | RuntimeEvent::OperatorProfileCreated(_)
+            | RuntimeEvent::OperatorProfileUpdated(_)
+            | RuntimeEvent::PauseScheduled(_)
+            | RuntimeEvent::PermissionDecisionRecorded(_)
+            | RuntimeEvent::ProviderBindingCreated(_)
+            | RuntimeEvent::ProviderBindingStateChanged(_)
+            | RuntimeEvent::ProviderBudgetAlertTriggered(_)
+            | RuntimeEvent::ProviderBudgetExceeded(_)
+            | RuntimeEvent::ProviderConnectionRegistered(_)
+            | RuntimeEvent::ProviderHealthChecked(_)
+            | RuntimeEvent::ProviderHealthScheduleSet(_)
+            | RuntimeEvent::ProviderHealthScheduleTriggered(_)
+            | RuntimeEvent::ProviderMarkedDegraded(_)
+            | RuntimeEvent::ProviderModelRegistered(_)
+            | RuntimeEvent::ProviderRecovered(_)
+            | RuntimeEvent::ProviderRetryPolicySet(_)
+            | RuntimeEvent::RecoveryEscalated(_)
+            | RuntimeEvent::ResourceShareRevoked(_)
+            | RuntimeEvent::ResourceShared(_)
+            | RuntimeEvent::RoutePolicyCreated(_)
+            | RuntimeEvent::RoutePolicyUpdated(_)
+            | RuntimeEvent::RunSlaBreached(_)
+            | RuntimeEvent::RunSlaSet(_)
+            | RuntimeEvent::SignalRouted(_)
+            | RuntimeEvent::SignalSubscriptionCreated(_)
+            | RuntimeEvent::SnapshotCreated(_)
+            | RuntimeEvent::TaskDependencyAdded(_)
+            | RuntimeEvent::TaskDependencyResolved(_)
+            | RuntimeEvent::TaskLeaseExpired(_)
+            | RuntimeEvent::TaskPriorityChanged(_)
+            | RuntimeEvent::ToolInvocationProgressUpdated(_) => None,
         }
     }
 }
@@ -318,6 +553,9 @@ pub struct RunCreated {
     pub run_id: RunId,
     pub parent_run_id: Option<RunId>,
     pub prompt_release_id: Option<crate::ids::PromptReleaseId>,
+    /// GAP-011: optional agent role attached at run creation.
+    #[serde(default)]
+    pub agent_role_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -404,6 +642,29 @@ pub struct MailboxMessageAppended {
     pub message_id: MailboxMessageId,
     pub run_id: Option<RunId>,
     pub task_id: Option<TaskId>,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub from_run_id: Option<RunId>,
+    #[serde(default)]
+    pub from_task_id: Option<TaskId>,
+    #[serde(default)]
+    pub deliver_at_ms: u64,
+    /// RFC 002: display name or agent ID of the message sender.
+    #[serde(default)]
+    pub sender: Option<String>,
+    /// RFC 002: display name or agent ID of the intended recipient.
+    #[serde(default)]
+    pub recipient: Option<String>,
+    /// RFC 002: full message body (may differ from content for structured payloads).
+    #[serde(default)]
+    pub body: Option<String>,
+    /// RFC 002: epoch-ms when the message was created by the sender.
+    #[serde(default)]
+    pub sent_at: Option<u64>,
+    /// RFC 002: delivery lifecycle state e.g. pending, delivered, failed.
+    #[serde(default)]
+    pub delivery_status: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -442,8 +703,35 @@ pub struct ToolInvocationFailed {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalWorkerRegistered {
+    /// Sentinel project key (tenant-scoped event has no project).
+    pub sentinel_project: ProjectKey,
+    pub worker_id: crate::ids::WorkerId,
+    pub tenant_id: TenantId,
+    pub display_name: String,
+    pub registered_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExternalWorkerReported {
     pub report: ExternalWorkerReport,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalWorkerSuspended {
+    pub sentinel_project: ProjectKey,
+    pub worker_id: crate::ids::WorkerId,
+    pub tenant_id: TenantId,
+    pub suspended_at: u64,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalWorkerReactivated {
+    pub sentinel_project: ProjectKey,
+    pub worker_id: crate::ids::WorkerId,
+    pub tenant_id: TenantId,
+    pub reactivated_at: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -456,12 +744,27 @@ pub struct SubagentSpawned {
     pub child_run_id: Option<RunId>,
 }
 
+/// Recovery attempt fact per RFC 002.
+///
+/// At least one of `run_id` or `task_id` MUST be present — a targetless
+/// recovery event has no semantic meaning and indicates a caller bug.
+/// Callers should assert `has_target()` before appending this event.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryAttempted {
     pub project: ProjectKey,
     pub run_id: Option<RunId>,
     pub task_id: Option<TaskId>,
     pub reason: String,
+}
+
+impl RecoveryAttempted {
+    /// Returns `true` when the event targets at least one recoverable entity.
+    ///
+    /// RFC 002 requires recovery events to be anchored to a run or task.
+    /// A `false` return indicates a malformed event (both fields absent).
+    pub fn has_target(&self) -> bool {
+        self.run_id.is_some() || self.task_id.is_some()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -473,6 +776,11 @@ pub struct SignalIngested {
     pub timestamp_ms: u64,
 }
 
+/// Recovery completion fact per RFC 002.
+///
+/// At least one of `run_id` or `task_id` MUST be present — a targetless
+/// recovery event has no semantic meaning and indicates a caller bug.
+/// Callers should assert `has_target()` before appending this event.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryCompleted {
     pub project: ProjectKey,
@@ -481,11 +789,31 @@ pub struct RecoveryCompleted {
     pub recovered: bool,
 }
 
+impl RecoveryCompleted {
+    /// Returns `true` when the event targets at least one recoverable entity.
+    ///
+    /// RFC 002 requires recovery events to be anchored to a run or task.
+    /// A `false` return indicates a malformed event (both fields absent).
+    pub fn has_target(&self) -> bool {
+        self.run_id.is_some() || self.task_id.is_some()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserMessageAppended {
     pub project: ProjectKey,
     pub session_id: SessionId,
     pub run_id: RunId,
+    /// The user's message text. Empty string when used as a bare signal
+    /// (backward-compatible — `#[serde(default)]` on old events).
+    #[serde(default)]
+    pub content: String,
+    /// Optional sequence number within the session for stable ordering.
+    #[serde(default)]
+    pub sequence: u64,
+    /// Unix milliseconds when the message was appended.
+    #[serde(default)]
+    pub appended_at_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -533,6 +861,11 @@ pub struct PromptAssetCreated {
     pub name: String,
     pub kind: String,
     pub created_at: u64,
+    /// RFC 006: workspace scope — prompt assets belong to a workspace, not a project.
+    /// Extracted from `project.workspace_id` at creation time so downstream projections
+    /// can scope queries at workspace level without re-deriving from the full project key.
+    #[serde(default)]
+    pub workspace_id: WorkspaceId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -542,6 +875,11 @@ pub struct PromptVersionCreated {
     pub prompt_asset_id: PromptAssetId,
     pub content_hash: String,
     pub created_at: u64,
+    /// RFC 006: workspace scope — prompt versions inherit workspace from the
+    /// owning asset. Extracted from `project.workspace_id` at creation time
+    /// so projections can scope at workspace level without re-deriving.
+    #[serde(default)]
+    pub workspace_id: WorkspaceId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -551,6 +889,12 @@ pub struct PromptReleaseCreated {
     pub prompt_asset_id: PromptAssetId,
     pub prompt_version_id: PromptVersionId,
     pub created_at: u64,
+    /// RFC 006: optional human-readable tag for this release (e.g. "v1.2-beta").
+    #[serde(default)]
+    pub release_tag: Option<String>,
+    /// RFC 006: operator or service account that authored this release.
+    #[serde(default)]
+    pub created_by: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -560,6 +904,12 @@ pub struct PromptReleaseTransitioned {
     pub from_state: String,
     pub to_state: String,
     pub transitioned_at: u64,
+    /// RFC 006: actor (operator id or service account) that triggered the transition.
+    #[serde(default)]
+    pub actor: Option<String>,
+    /// RFC 006: free-text reason supplied at transition time (e.g. "approved by QA").
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -582,6 +932,9 @@ pub struct PromptRolloutStarted {
     pub prompt_release_id: PromptReleaseId,
     pub percent: u8,
     pub started_at: u64,
+    /// Alias for prompt_release_id used by operator views.
+    #[serde(default)]
+    pub release_id: Option<PromptReleaseId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -636,6 +989,712 @@ pub struct ProviderCallCompleted {
     pub output_tokens: Option<u32>,
     pub cost_micros: Option<u64>,
     pub completed_at: u64,
+    /// Session context for LLM observability trace derivation.
+    #[serde(default)]
+    pub session_id: Option<SessionId>,
+    /// Run context for LLM observability trace derivation.
+    #[serde(default)]
+    pub run_id: Option<RunId>,
+    /// Provider error class (None on success).
+    #[serde(default)]
+    pub error_class: Option<crate::providers::ProviderCallErrorClass>,
+    /// Raw error text from the provider (None on success).
+    #[serde(default)]
+    pub raw_error_message: Option<String>,
+    /// Retry attempt index (0 = first attempt).
+    #[serde(default)]
+    pub retry_count: u8,
+    /// Task that triggered this provider call, if any.
+    #[serde(default)]
+    pub task_id: Option<TaskId>,
+    /// Prompt release being executed at the time of the call.
+    #[serde(default)]
+    pub prompt_release_id: Option<PromptReleaseId>,
+    /// Position in the fallback chain (0 = primary, 1 = first fallback, …).
+    #[serde(default)]
+    pub fallback_position: u32,
+    /// Unix epoch ms when the call was dispatched to the provider.
+    #[serde(default)]
+    pub started_at: u64,
+    /// Unix epoch ms when the provider response was received.
+    #[serde(default)]
+    pub finished_at: u64,
+}
+
+/// A soul patch has been proposed and is awaiting operator review.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoulPatchProposed {
+    pub project: ProjectKey,
+    pub patch_id: String,
+    pub patch_content: String,
+    pub requires_approval: bool,
+    pub proposed_at: u64,
+}
+
+/// An approved soul patch has been applied to the document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoulPatchApplied {
+    pub project: ProjectKey,
+    pub patch_id: String,
+    pub new_version: u32,
+    pub applied_at: u64,
+}
+/// GAP-006: session-level accumulated cost delta from a completed provider call.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionCostUpdated {
+    pub project: ProjectKey,
+    pub session_id: crate::ids::SessionId,
+    pub tenant_id: crate::ids::TenantId,
+    /// Cost delta from this specific provider call, in USD micros.
+    pub delta_cost_micros: u64,
+    /// Input tokens consumed by this call.
+    pub delta_tokens_in: u64,
+    /// Output tokens produced by this call.
+    pub delta_tokens_out: u64,
+    /// Provider call that produced this cost update.
+    pub provider_call_id: String,
+    pub updated_at_ms: u64,
+}
+
+/// Run-level accumulated cost updated after a provider call.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunCostUpdated {
+    pub project: ProjectKey,
+    pub run_id: RunId,
+    pub delta_cost_micros: u64,
+    pub delta_tokens_in: u64,
+    pub delta_tokens_out: u64,
+    pub provider_call_id: String,
+    pub updated_at_ms: u64,
+    #[serde(default)]
+    pub session_id: Option<crate::ids::SessionId>,
+    #[serde(default)]
+    pub tenant_id: Option<crate::ids::TenantId>,
+}
+
+/// GAP-006: tenant-level spend alert triggered.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpendAlertTriggered {
+    pub project: ProjectKey,
+    pub alert_id: String,
+    pub tenant_id: crate::ids::TenantId,
+    pub session_id: crate::ids::SessionId,
+    /// Threshold that was crossed, in USD micros.
+    pub threshold_micros: u64,
+    /// Session total cost at alert time, in USD micros.
+    pub current_micros: u64,
+    pub triggered_at_ms: u64,
+}
+
+
+// ── New event structs for extended service coverage ─────────────────────────
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderBudgetSet {
+    pub tenant_id: crate::ids::TenantId,
+    pub budget_id: String,
+    pub period: crate::providers::ProviderBudgetPeriod,
+    pub limit_micros: u64,
+    pub alert_threshold_percent: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelCreated {
+    pub channel_id: crate::ids::ChannelId,
+    pub project: crate::tenancy::ProjectKey,
+    pub name: String,
+    pub capacity: u32,
+    pub created_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelMessageSent {
+    pub channel_id: crate::ids::ChannelId,
+    pub project: crate::tenancy::ProjectKey,
+    pub message_id: String,
+    pub sender_id: String,
+    pub body: String,
+    pub sent_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelMessageConsumed {
+    pub channel_id: crate::ids::ChannelId,
+    pub project: crate::tenancy::ProjectKey,
+    pub message_id: String,
+    pub consumed_by: String,
+    pub consumed_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DefaultSettingSet {
+    pub scope: crate::tenancy::Scope,
+    pub scope_id: String,
+    pub key: String,
+    pub value: serde_json::Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DefaultSettingCleared {
+    pub scope: crate::tenancy::Scope,
+    pub scope_id: String,
+    pub key: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LicenseActivated {
+    pub tenant_id: crate::ids::TenantId,
+    pub license_id: String,
+    pub tier: crate::commercial::ProductTier,
+    pub valid_from_ms: u64,
+    pub valid_until_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntitlementOverrideSet {
+    pub tenant_id: crate::ids::TenantId,
+    pub feature: String,
+    pub allowed: bool,
+    pub reason: Option<String>,
+    pub set_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotificationPreferenceSet {
+    pub tenant_id: crate::ids::TenantId,
+    pub operator_id: String,
+    pub event_types: Vec<String>,
+    pub channels: Vec<crate::notification_prefs::NotificationChannel>,
+    pub set_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotificationSent {
+    pub record_id: String,
+    pub tenant_id: crate::ids::TenantId,
+    pub operator_id: String,
+    pub event_type: String,
+    pub channel_kind: String,
+    pub channel_target: String,
+    pub payload: serde_json::Value,
+    pub sent_at_ms: u64,
+    pub delivered: bool,
+    pub delivery_error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderPoolCreated {
+    pub pool_id: String,
+    pub tenant_id: crate::ids::TenantId,
+    pub max_connections: u32,
+    pub created_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderPoolConnectionAdded {
+    pub pool_id: String,
+    pub tenant_id: crate::ids::TenantId,
+    pub connection_id: ProviderConnectionId,
+    pub added_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderPoolConnectionRemoved {
+    pub pool_id: String,
+    pub tenant_id: crate::ids::TenantId,
+    pub connection_id: ProviderConnectionId,
+    pub removed_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TenantQuotaSet {
+    pub tenant_id: crate::ids::TenantId,
+    pub max_concurrent_runs: u32,
+    pub max_sessions_per_hour: u32,
+    pub max_tasks_per_run: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TenantQuotaViolated {
+    pub tenant_id: crate::ids::TenantId,
+    pub quota_type: String,
+    pub current: u32,
+    pub limit: u32,
+    pub occurred_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetentionPolicySet {
+    pub tenant_id: crate::ids::TenantId,
+    pub policy_id: String,
+    pub full_history_days: u32,
+    pub current_state_days: u32,
+    pub max_events_per_entity: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunCostAlertSet {
+    pub run_id: RunId,
+    pub tenant_id: crate::ids::TenantId,
+    pub threshold_micros: u64,
+    pub set_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunCostAlertTriggered {
+    pub run_id: RunId,
+    pub tenant_id: crate::ids::TenantId,
+    pub threshold_micros: u64,
+    pub actual_cost_micros: u64,
+    pub triggered_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceMemberAdded {
+    pub workspace_key: crate::tenancy::WorkspaceKey,
+    pub member_id: crate::ids::OperatorId,
+    pub role: crate::tenancy::WorkspaceRole,
+    pub added_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceMemberRemoved {
+    pub workspace_key: crate::tenancy::WorkspaceKey,
+    pub member_id: crate::ids::OperatorId,
+    pub removed_at_ms: u64,
+}
+
+// ── Second-wave event structs ────────────────────────────────────────────────
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalDelegated {
+    pub approval_id: ApprovalId,
+    pub delegated_to: String,
+    pub delegated_at_ms: u64,
+}
+
+/// Audit log entry event — carries only Eq-able fields; metadata is in the projection.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditLogEntryRecorded {
+    pub entry_id: String,
+    pub tenant_id: TenantId,
+    pub actor_id: String,
+    pub action: String,
+    pub resource_type: String,
+    pub resource_id: String,
+    pub outcome: crate::audit::AuditOutcome,
+    pub occurred_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckpointStrategySet {
+    pub strategy_id: String,
+    pub description: String,
+    pub set_at_ms: u64,
+    #[serde(default)]
+    pub run_id: Option<RunId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CredentialKeyRotated {
+    pub tenant_id: TenantId,
+    pub rotation_id: String,
+    pub old_key_id: String,
+    pub new_key_id: String,
+    pub credential_ids_rotated: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CredentialRevoked {
+    pub tenant_id: TenantId,
+    pub credential_id: crate::ids::CredentialId,
+    pub revoked_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CredentialStored {
+    pub tenant_id: TenantId,
+    pub credential_id: crate::ids::CredentialId,
+    pub provider_id: String,
+    pub encrypted_value: Vec<u8>,
+    pub key_id: Option<String>,
+    pub key_version: Option<String>,
+    pub encrypted_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvalBaselineLocked {
+    pub baseline_id: String,
+    pub locked_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvalBaselineSet {
+    pub baseline_id: String,
+    pub metric: String,
+    pub value: String,
+    pub set_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvalDatasetCreated {
+    pub dataset_id: String,
+    pub name: String,
+    pub created_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvalDatasetEntryAdded {
+    pub dataset_id: String,
+    pub entry_id: String,
+    pub added_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvalRubricCreated {
+    pub rubric_id: String,
+    pub name: String,
+    pub created_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventLogCompacted {
+    pub up_to_position: u64,
+    pub compacted_at_ms: u64,
+    #[serde(default)]
+    pub tenant_id: TenantId,
+    #[serde(default)]
+    pub events_before: u64,
+    #[serde(default)]
+    pub events_after: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuardrailPolicyCreated {
+    pub tenant_id: TenantId,
+    pub policy_id: String,
+    pub name: String,
+    pub rules: Vec<crate::policy::GuardrailRule>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuardrailPolicyEvaluated {
+    pub tenant_id: TenantId,
+    pub policy_id: String,
+    pub subject_type: crate::policy::GuardrailSubjectType,
+    pub subject_id: Option<String>,
+    pub action: String,
+    pub decision: crate::policy::GuardrailDecisionKind,
+    pub reason: Option<String>,
+    pub evaluated_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorIntervention {
+    pub action: String,
+    #[serde(default)]
+    pub run_id: Option<RunId>,
+    #[serde(default)]
+    pub tenant_id: TenantId,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub intervened_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorProfileCreated {
+    pub tenant_id: TenantId,
+    pub profile_id: crate::ids::OperatorId,
+    pub display_name: String,
+    pub email: String,
+    pub role: crate::tenancy::WorkspaceRole,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorProfileUpdated {
+    pub tenant_id: TenantId,
+    pub profile_id: crate::ids::OperatorId,
+    pub display_name: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PauseScheduled {
+    pub task_id: crate::ids::TaskId,
+    pub resume_at_ms: u64,
+    #[serde(default)]
+    pub run_id: Option<RunId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PermissionDecisionRecorded {
+    pub decision_id: String,
+    pub principal: String,
+    pub action: String,
+    pub resource: String,
+    pub allowed: bool,
+    pub recorded_at_ms: u64,
+    #[serde(default)]
+    pub invocation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderBindingCreated {
+    pub project: crate::tenancy::ProjectKey,
+    pub provider_binding_id: crate::ids::ProviderBindingId,
+    pub provider_connection_id: crate::ids::ProviderConnectionId,
+    pub provider_model_id: crate::ids::ProviderModelId,
+    pub operation_kind: crate::providers::OperationKind,
+    pub settings: crate::providers::ProviderBindingSettings,
+    pub policy_id: Option<String>,
+    pub active: bool,
+    pub created_at: u64,
+    pub estimated_cost_micros: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderBindingStateChanged {
+    pub project: crate::tenancy::ProjectKey,
+    pub provider_binding_id: crate::ids::ProviderBindingId,
+    pub active: bool,
+    pub changed_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderBudgetAlertTriggered {
+    pub budget_id: String,
+    pub current_micros: u64,
+    pub limit_micros: u64,
+    pub triggered_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderBudgetExceeded {
+    pub budget_id: String,
+    pub exceeded_by_micros: u64,
+    pub exceeded_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderConnectionRegistered {
+    pub tenant: crate::tenancy::TenantKey,
+    pub provider_connection_id: crate::ids::ProviderConnectionId,
+    pub provider_family: String,
+    pub adapter_type: String,
+    pub status: crate::providers::ProviderConnectionStatus,
+    pub registered_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderHealthChecked {
+    pub tenant_id: TenantId,
+    pub connection_id: crate::ids::ProviderConnectionId,
+    pub status: crate::providers::ProviderHealthStatus,
+    pub latency_ms: Option<u64>,
+    pub checked_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderHealthScheduleSet {
+    pub schedule_id: String,
+    pub connection_id: crate::ids::ProviderConnectionId,
+    pub tenant_id: TenantId,
+    pub interval_ms: u64,
+    pub enabled: bool,
+    pub set_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderHealthScheduleTriggered {
+    pub schedule_id: String,
+    pub connection_id: crate::ids::ProviderConnectionId,
+    pub tenant_id: TenantId,
+    pub triggered_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderMarkedDegraded {
+    pub tenant_id: TenantId,
+    pub connection_id: crate::ids::ProviderConnectionId,
+    pub reason: String,
+    pub marked_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderModelRegistered {
+    pub tenant_id: TenantId,
+    pub connection_id: ProviderConnectionId,
+    pub model_id: String,
+    /// Serialized capabilities — stored as JSON string to maintain Eq on RuntimeEvent.
+    pub capabilities_json: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderRecovered {
+    pub tenant_id: TenantId,
+    pub connection_id: crate::ids::ProviderConnectionId,
+    pub recovered_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderRetryPolicySet {
+    pub connection_id: crate::ids::ProviderConnectionId,
+    pub tenant_id: crate::ids::TenantId,
+    pub policy: crate::providers::RetryPolicy,
+    pub set_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryEscalated {
+    pub task_id: crate::ids::TaskId,
+    pub reason: String,
+    pub escalated_at_ms: u64,
+    #[serde(default)]
+    pub run_id: Option<RunId>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub attempt_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceShareRevoked {
+    pub share_id: String,
+    pub revoked_at_ms: u64,
+    #[serde(default)]
+    pub tenant_id: TenantId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceShared {
+    pub share_id: String,
+    pub resource_type: String,
+    #[serde(default)]
+    pub grantee: String,
+    pub shared_at_ms: u64,
+    #[serde(default)]
+    pub tenant_id: TenantId,
+    #[serde(default)]
+    pub source_workspace_id: WorkspaceId,
+    #[serde(default)]
+    pub target_workspace_id: WorkspaceId,
+    #[serde(default)]
+    pub resource_id: String,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutePolicyCreated {
+    pub tenant_id: TenantId,
+    pub policy_id: String,
+    pub name: String,
+    pub rules: Vec<crate::providers::RoutePolicyRule>,
+    /// Whether the policy is active at creation time (default: true).
+    #[serde(default = "crate::events::default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool { true }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutePolicyUpdated {
+    pub policy_id: String,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunSlaBreached {
+    pub run_id: RunId,
+    pub tenant_id: TenantId,
+    pub elapsed_ms: u64,
+    pub target_ms: u64,
+    pub breached_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunSlaSet {
+    pub run_id: RunId,
+    pub tenant_id: TenantId,
+    pub target_completion_ms: u64,
+    pub alert_at_percent: u8,
+    pub set_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalRouted {
+    pub project: crate::tenancy::ProjectKey,
+    pub signal_id: crate::ids::SignalId,
+    pub subscription_id: String,
+    pub delivered_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalSubscriptionCreated {
+    pub project: crate::tenancy::ProjectKey,
+    pub subscription_id: String,
+    pub signal_kind: String,
+    pub target_run_id: Option<crate::ids::RunId>,
+    pub target_mailbox_id: Option<String>,
+    pub filter_expression: Option<String>,
+    #[serde(default)]
+    pub created_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotCreated {
+    pub snapshot_id: String,
+    pub created_at_ms: u64,
+    #[serde(default)]
+    pub tenant_id: TenantId,
+    #[serde(default)]
+    pub event_position: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskDependencyAdded {
+    pub task_id: crate::ids::TaskId,
+    pub depends_on: crate::ids::TaskId,
+    pub added_at_ms: u64,
+    /// Alias for task_id (the dependent task).
+    #[serde(default)]
+    pub dependent_task_id: crate::ids::TaskId,
+    /// Alias for depends_on (the prerequisite task).
+    #[serde(default)]
+    pub depends_on_task_id: crate::ids::TaskId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskDependencyResolved {
+    pub task_id: crate::ids::TaskId,
+    pub prerequisite_id: crate::ids::TaskId,
+    pub resolved_at_ms: u64,
+    #[serde(default)]
+    pub dependent_task_id: crate::ids::TaskId,
+    #[serde(default)]
+    pub depends_on_task_id: crate::ids::TaskId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskLeaseExpired {
+    pub task_id: crate::ids::TaskId,
+    pub expired_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskPriorityChanged {
+    pub task_id: crate::ids::TaskId,
+    pub new_priority: u32,
+    pub changed_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolInvocationProgressUpdated {
+    pub invocation_id: ToolInvocationId,
+    pub progress_pct: u8,
+    pub message: Option<String>,
+    pub updated_at_ms: u64,
 }
 
 #[cfg(test)]
@@ -840,6 +1899,9 @@ mod tests {
             project: project.clone(),
             session_id: "session_10".into(),
             run_id: RunId::new("run_10"),
+            content: String::new(),
+            sequence: 0,
+            appended_at_ms: 0,
         });
 
         assert_eq!(event.project(), &project);

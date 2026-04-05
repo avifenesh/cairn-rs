@@ -195,6 +195,7 @@ mod tests {
                 graph_linkage: None,
                 embedding,
                 content_hash: None,
+                entities: Vec::new(),
             },
             score,
             breakdown: ScoringBreakdown::default(),

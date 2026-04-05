@@ -64,7 +64,14 @@ where
         };
 
         let envelope = make_envelope(RuntimeEvent::AuditLogEntryRecorded(AuditLogEntryRecorded {
-            entry: entry.clone(),
+            entry_id: entry.entry_id.clone(),
+            tenant_id: entry.tenant_id.clone(),
+            actor_id: entry.actor_id.clone(),
+            action: entry.action.clone(),
+            resource_type: entry.resource_type.clone(),
+            resource_id: entry.resource_id.clone(),
+            outcome: entry.outcome,
+            occurred_at_ms: entry.occurred_at_ms,
         }));
         self.store.append(&[envelope]).await?;
 

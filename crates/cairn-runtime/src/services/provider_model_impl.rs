@@ -46,7 +46,7 @@ where
             tenant_id,
             connection_id,
             model_id: model_id.clone(),
-            capabilities: capabilities.clone(),
+            capabilities_json: serde_json::to_string(&capabilities).unwrap_or_default(),
         }));
         self.store.append(&[event]).await?;
         Ok(capabilities)

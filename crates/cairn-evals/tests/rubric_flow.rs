@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::{EvalRunId, ProjectId, RubricDimension, RubricScoringFn, TenantId};
+use cairn_domain::{EvalRunId, EvalSubjectKind as DomainSubjectKind, ProjectId, RubricDimension, RubricScoringFn, TenantId};
 use cairn_evals::{
     EvalDatasetServiceImpl, EvalRubricServiceImpl, EvalRunService, EvalSubjectKind,
     PluginDimensionScore, PluginRubricScorer,
@@ -18,7 +18,7 @@ async fn rubric_exact_match_scores_eval_run() {
     let dataset = datasets.create(
         TenantId::new("tenant_rubric"),
         "Rubric Dataset".to_owned(),
-        EvalSubjectKind::PromptRelease,
+        DomainSubjectKind::PromptRelease,
     );
     datasets
         .add_entry(
@@ -46,8 +46,8 @@ async fn rubric_exact_match_scores_eval_run() {
         None,
         None,
         None,
-        Some(dataset.dataset_id.clone()),
     );
+    runs.set_dataset_id(&run.eval_run_id, dataset.dataset_id.clone()).unwrap();
 
     let rubric = rubrics.create(
         TenantId::new("tenant_rubric"),
@@ -73,7 +73,7 @@ async fn rubric_exact_match_scores_eval_run() {
         .await
         .unwrap();
 
-    assert_eq!(run.dataset_id.as_deref(), Some(dataset.dataset_id.as_str()));
+    assert_eq!(run.subject_kind, EvalSubjectKind::PromptRelease);
     assert_eq!(result.run_id, run.eval_run_id.to_string());
     assert_eq!(result.rubric_id, rubric.rubric_id);
     assert_eq!(result.dimension_scores.len(), 1);
@@ -119,7 +119,7 @@ async fn rubric_plugin_scoring_scores_exact_match() {
     let dataset = datasets.create(
         TenantId::new("tenant_rubric_plugin"),
         "Plugin Rubric Dataset".to_owned(),
-        EvalSubjectKind::PromptRelease,
+        DomainSubjectKind::PromptRelease,
     );
     datasets
         .add_entry(
@@ -139,8 +139,8 @@ async fn rubric_plugin_scoring_scores_exact_match() {
         None,
         None,
         None,
-        Some(dataset.dataset_id.clone()),
     );
+    runs.set_dataset_id(&run.eval_run_id, dataset.dataset_id.clone()).unwrap();
 
     let rubric = rubrics.create(
         TenantId::new("tenant_rubric_plugin"),

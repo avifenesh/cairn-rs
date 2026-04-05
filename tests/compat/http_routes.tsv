@@ -13,17 +13,26 @@ GET	/v1/assistant/sessions	preserve	-	{ items }
 GET	/v1/assistant/sessions/:sessionId	preserve	path param: sessionId	{ items } chat messages
 POST	/v1/assistant/message	preserve	body: { message, mode?, sessionId? }	{ taskId }
 POST	/v1/assistant/voice	transitional	multipart: audio, mode?, sessionId?	{ taskId, transcript }
+GET	/v1/channels	preserve	query: limit?	{ items }
+GET	/v1/config	preserve	-	configuration key-value pairs
+GET	/v1/config/:key	preserve	path param: key	single config value
+PUT	/v1/config/:key	preserve	path param: key, body: value	{ ok }
+DELETE	/v1/config/:key	preserve	path param: key	{ ok }
+GET	/v1/evals/datasets	preserve	query: limit?	{ items }
+GET	/v1/evals/runs	preserve	query: limit?	{ items }
 GET	/v1/memories	preserve	query: status?, category?	{ items, hasMore }
 GET	/v1/memories/search	preserve	query: q required, limit?	{ items }
 POST	/v1/memories	preserve	body: { content, category }	create memory response object
 POST	/v1/memories/:id/accept	preserve	path param: id	{ ok }
 POST	/v1/memories/:id/reject	preserve	path param: id	{ ok }
 GET	/v1/fleet	transitional	-	{ agents, summary }
+GET	/v1/overview	preserve	-	operator overview dashboard
 GET	/v1/skills	preserve	-	{ items, summary, currentlyActive? }
 GET	/v1/soul	transitional	-	current singleton asset wrapper
 PUT	/v1/soul	transitional	body: { content }	{ ok, sha }
 GET	/v1/soul/history	transitional	-	{ items }
 GET	/v1/soul/patches	transitional	-	{ items }
+GET	/v1/sources	preserve	-	source connection health
 GET	/v1/costs	preserve	-	cost summary payload
 GET	/v1/metrics	preserve	-	metrics read model
 GET	/v1/status	preserve	-	runtime/system status
@@ -31,6 +40,7 @@ POST	/v1/poll/run	preserve	-	{ ok }
 GET	/v1/stream	preserve	query: token?, lastEventId?	SSE stream with replay support
 GET	/v1/runs	preserve	query: session_id?, limit?	{ items }
 GET	/v1/runs/:id	preserve	path param: id	run detail
+GET	/v1/sessions/:id/llm-traces	preserve	path param: id	LLM call traces for session
 GET	/v1/admin/tenants	preserve	-	{ items }
 GET	/v1/admin/workspaces	preserve	-	{ items }
 GET	/v1/graph/trace	preserve	query: root_id, kind	subgraph
@@ -39,3 +49,12 @@ GET	/v1/prompts/assets	preserve	query: limit?	{ items }
 GET	/v1/prompts/releases	preserve	query: limit?	{ items }
 GET	/v1/providers/health	preserve	-	provider connection health
 GET	/v1/settings	preserve	-	deployment settings
+POST	/v1/import/validate	preserve	body: import payload	{ valid, errors[] }
+POST	/v1/import/preview	preserve	body: import payload	{ plan, conflicts[] }
+POST	/v1/import/apply	preserve	body: import payload	{ report }
+GET	/v1/export/:format	preserve	path param: format	exported bundle
+GET	/v1/import/reports	preserve	query: limit?	{ items }
+GET	/v1/admin/entitlements	preserve	-	tenant entitlement set
+GET	/v1/admin/capabilities	preserve	-	feature capability map
+GET	/v1/admin/license	preserve	-	active license record
+POST	/v1/admin/license/activate	preserve	body: { license_key }	{ ok }

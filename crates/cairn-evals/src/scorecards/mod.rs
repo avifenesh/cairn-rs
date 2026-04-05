@@ -58,6 +58,8 @@ pub struct EvalRun {
     pub prompt_release_id: Option<PromptReleaseId>,
     /// Evaluator configuration.
     pub evaluator_type: String,
+    /// Optional dataset ID used for rubric scoring.
+    pub dataset_id: Option<String>,
     pub dataset_source: Option<DatasetSource>,
     /// Aggregated metrics from this run.
     pub metrics: EvalMetrics,

@@ -12,6 +12,25 @@ pub struct SignalRecord {
     pub timestamp_ms: u64,
 }
 
+
+/// A subscription to a signal type for routing notifications.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SignalSubscription {
+    pub subscription_id: String,
+    pub project: crate::tenancy::ProjectKey,
+    pub signal_kind: String,
+    pub target_run_id: Option<crate::ids::RunId>,
+    pub target_mailbox_id: Option<String>,
+    pub filter_expression: Option<String>,
+    pub created_at_ms: u64,
+    /// Legacy: alias for signal_kind (for backward compat).
+    #[serde(default)]
+    pub signal_type: String,
+    /// Legacy: generic target string (for backward compat).
+    #[serde(default)]
+    pub target: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::SignalRecord;

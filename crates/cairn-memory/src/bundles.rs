@@ -32,7 +32,7 @@ pub fn validate_bundle_schema_version(bundle: &BundleEnvelope) -> Result<(), Str
 }
 
 /// Top-level bundle envelope per RFC 013.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BundleEnvelope {
     pub bundle_schema_version: String,
     pub bundle_type: BundleType,
@@ -44,11 +44,12 @@ pub struct BundleEnvelope {
     pub source_scope: SourceScope,
     pub artifact_count: usize,
     pub artifacts: Vec<ArtifactEntry>,
+    #[serde(default)]
     pub provenance: BundleProvenance,
 }
 
 /// V1 bundle types.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BundleType {
     PromptLibraryBundle,
@@ -56,25 +57,92 @@ pub enum BundleType {
 }
 
 /// Originating scope of the bundle.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SourceScope {
     pub tenant_id: Option<String>,
     pub workspace_id: Option<String>,
     pub project_id: Option<String>,
 }
 
-/// Bundle-level provenance metadata.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Bundle-level provenance metadata (RFC 013).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BundleProvenance {
     pub description: Option<String>,
     pub source_system: Option<String>,
     pub export_reason: Option<String>,
+    /// RFC 013: where the bundle came from (e.g. "export", "manual", "migration").
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// RFC 013: how the bundle was produced (e.g. "automated_export", "manual_curation").
+    #[serde(default)]
+    pub production_method: Option<String>,
+    /// RFC 013: version of the source system that produced this bundle.
+    #[serde(default)]
+    pub source_version: Option<String>,
 }
 
 // --- Artifact Entry ---
 
+/// Typed artifact payload for bundle entries (RFC 013 §4).
+///
+/// `#[serde(untagged)]` preserves backward compatibility: old bundles that
+/// stored arbitrary JSON objects round-trip through `InlineJson`, and plain
+/// JSON strings round-trip through `InlineText`.
+///
+/// Disambiguation note: `ExternalRef` and `InlineText` are both
+/// newtype-over-String; under untagged deserialization a bare JSON string
+/// always resolves to `InlineText` first.  `ExternalRef` is intended for
+/// programmatic construction (e.g. a URI into an external blob store) and
+/// serializes correctly, but will not round-trip from old plain-string payloads.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(untagged)]
+pub enum ArtifactPayload {
+    /// Inline plain-text content (serializes as a JSON string).
+    InlineText(String),
+    /// URI reference to an external blob (serializes as a JSON string).
+    ExternalRef(String),
+    /// Inline structured payload — any JSON value that is not a bare string
+    /// (object, array, number, boolean, null).
+    InlineJson(serde_json::Value),
+}
+
+impl ArtifactPayload {
+    /// Returns the payload as a raw `serde_json::Value`.
+    ///
+    /// Used by code paths that require value-level access such as
+    /// `serde_json::from_value` and JSON index operators.
+    pub fn as_value(&self) -> serde_json::Value {
+        match self {
+            Self::InlineText(s) | Self::ExternalRef(s) => serde_json::Value::String(s.clone()),
+            Self::InlineJson(v) => v.clone(),
+        }
+    }
+
+    /// Returns `true` when this payload is a JSON `null`.
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::InlineJson(v) if v.is_null())
+    }
+}
+
+/// Structured per-artifact provenance metadata (RFC 013 §4).
+///
+/// `#[serde(default)]` allows existing bundles that omit this field to
+/// deserialize without error.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ArtifactProvenance {
+    /// Source system or operator that originally produced the artifact.
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// How the artifact was produced (e.g. `"human_authored"`, `"llm_generated"`).
+    #[serde(default)]
+    pub production_method: Option<String>,
+    /// Wall-clock timestamp (ms since epoch) when the artifact was first created.
+    #[serde(default)]
+    pub created_at: Option<u64>,
+}
+
 /// One artifact entry in a bundle's `artifacts` array.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ArtifactEntry {
     pub artifact_kind: ArtifactKind,
     pub artifact_logical_id: String,
@@ -85,13 +153,17 @@ pub struct ArtifactEntry {
     pub source_bundle_id: String,
     pub origin_timestamp: u64,
     pub metadata: HashMap<String, serde_json::Value>,
-    pub payload: serde_json::Value,
+    /// Typed artifact payload — replaces the raw `serde_json::Value`.
+    pub payload: ArtifactPayload,
+    /// Structured per-artifact provenance (origin, production method, timestamp).
+    #[serde(default)]
+    pub provenance: ArtifactProvenance,
     pub lineage: Option<String>,
     pub tags: Vec<String>,
 }
 
 /// V1 artifact kinds across both bundle types.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {
     PromptAsset,
@@ -197,6 +269,9 @@ pub struct ImportPlan {
     pub update_count: usize,
     pub skip_count: usize,
     pub conflict_count: usize,
+    /// Default conflict resolution strategy for this plan.
+    #[serde(default)]
+    pub conflict_resolution: ConflictResolutionStrategy,
 }
 
 impl ImportPlan {
@@ -269,6 +344,71 @@ pub struct PromptVersionPayload {
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
+/// How to handle an import conflict (name collision with different logical ID).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictResolutionStrategy {
+    /// Skip the conflicting artifact — leave existing unchanged.
+    #[default]
+    Skip,
+    /// Overwrite the existing artifact with the incoming one.
+    Overwrite,
+    /// Create the incoming artifact with a renamed ID.
+    Rename,
+}
+
+/// Filters for selecting which documents to include in an export bundle.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct DocumentExportFilters {
+    /// Only export documents from these source IDs (empty = all).
+    pub source_ids: Vec<String>,
+    /// Only export documents with a quality score at or above this threshold.
+    pub min_quality_score: Option<f32>,
+    /// Only export documents with a credibility score at or above this threshold.
+    pub min_credibility_score: Option<f32>,
+    /// Only export documents created after this timestamp (Unix ms).
+    pub created_after_ms: Option<u64>,
+    /// Only export documents created before this timestamp (Unix ms).
+    pub created_before_ms: Option<u64>,
+    /// Only export documents with these tags (empty = any tag).
+    pub tags: Vec<String>,
+    /// Minimum `created_at` as alias for `created_after_ms` (for backward compat).
+    pub created_at: Option<u64>,
+    /// Filter by import job ID.
+    #[serde(default)]
+    pub import_id: Option<String>,
+    /// Filter by corpus ID.
+    #[serde(default)]
+    pub corpus_id: Option<String>,
+    /// Filter by bundle source ID.
+    #[serde(default)]
+    pub bundle_source_id: Option<String>,
+}
+
+/// Status of a prompt asset in a bundle export/import operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptAssetBundleStatus {
+    #[default]
+    Included,
+    Excluded,
+    Conflicted,
+}
+
+/// Validation report from bundle pre-import validation.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct ValidationReport {
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub valid: bool,
+}
+
+impl ValidationReport {
+    pub fn ok() -> Self {
+        Self { errors: vec![], warnings: vec![], valid: true }
+    }
+}
+
 // --- Import/Export Service Traits ---
 
 /// Import service boundary per RFC 013.
@@ -279,7 +419,7 @@ pub trait ImportService: Send + Sync {
     type Error: std::fmt::Debug;
 
     /// Validate a bundle without mutating state.
-    async fn validate(&self, bundle: &BundleEnvelope) -> Result<(), Self::Error>;
+    async fn validate(&self, bundle: &BundleEnvelope) -> Result<ValidationReport, Self::Error>;
 
     /// Produce an import plan (preview) without mutating state.
     async fn plan(
@@ -341,7 +481,8 @@ mod tests {
                 source_bundle_id: "bundle_1".to_owned(),
                 origin_timestamp: 1000,
                 metadata: HashMap::new(),
-                payload: serde_json::json!({"document_name": "test"}),
+                payload: ArtifactPayload::InlineJson(serde_json::json!({"document_name": "test"})),
+                provenance: ArtifactProvenance::default(),
                 lineage: None,
                 tags: vec!["curated".to_owned()],
             }],
@@ -349,6 +490,9 @@ mod tests {
                 description: Some("Test export".to_owned()),
                 source_system: None,
                 export_reason: None,
+                origin: None,
+                production_method: None,
+                source_version: None,
             },
         };
 
@@ -439,7 +583,7 @@ mod tests {
             source_scope: SourceScope { tenant_id: None, workspace_id: None, project_id: None },
             artifact_count: 0,
             artifacts: vec![],
-            provenance: BundleProvenance { description: None, source_system: None, export_reason: None },
+            provenance: BundleProvenance { description: None, source_system: None, export_reason: None, origin: None, production_method: None, source_version: None },
         }
     }
 
@@ -457,3 +601,93 @@ mod tests {
         assert_eq!(json["ref_type"], "url");
     }
 }
+
+// ── RFC 013 Gap Tests ─────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod rfc013_tests {
+    use super::*;
+
+    /// RFC 013: both bundle types use the same physical envelope format.
+    #[test]
+    fn rfc013_both_bundle_types_use_same_envelope_shape() {
+        for bundle_type in [BundleType::PromptLibraryBundle, BundleType::CuratedKnowledgePackBundle] {
+            let bundle = BundleEnvelope {
+                bundle_schema_version: "1".to_owned(),
+                bundle_type,
+                bundle_id: "b1".to_owned(),
+                bundle_name: "Test".to_owned(),
+                created_at: 1000,
+                created_by: Some("operator".to_owned()),
+                source_deployment_id: None,
+                source_scope: SourceScope { tenant_id: Some("t1".to_owned()), workspace_id: None, project_id: None },
+                artifact_count: 0,
+                artifacts: vec![],
+                provenance: BundleProvenance { description: None, source_system: None, export_reason: None, origin: None, production_method: None, source_version: None },
+            };
+            assert!(validate_bundle_schema_version(&bundle).is_ok(),
+                "RFC 013: {:?} bundle must pass schema validation", bundle_type);
+            let json = serde_json::to_value(&bundle).expect("bundle must serialize");
+            assert!(json.is_object(), "RFC 013: bundle must serialize as JSON object");
+        }
+    }
+
+    /// RFC 013: import plan classifies each artifact as one of 5 outcomes.
+    #[test]
+    fn rfc013_import_plan_all_five_outcomes_representable() {
+        let entries = vec![
+            ImportPlanEntry { artifact_logical_id: "a1".to_owned(), artifact_kind: ArtifactKind::PromptAsset, outcome: ImportOutcome::Create, reason: "new".to_owned(), existing_id: None },
+            ImportPlanEntry { artifact_logical_id: "a2".to_owned(), artifact_kind: ArtifactKind::PromptAsset, outcome: ImportOutcome::Reuse, reason: "same".to_owned(), existing_id: Some("pa_1".to_owned()) },
+            ImportPlanEntry { artifact_logical_id: "a3".to_owned(), artifact_kind: ArtifactKind::PromptVersion, outcome: ImportOutcome::Update, reason: "changed".to_owned(), existing_id: Some("pv_1".to_owned()) },
+            ImportPlanEntry { artifact_logical_id: "a4".to_owned(), artifact_kind: ArtifactKind::KnowledgePack, outcome: ImportOutcome::Skip, reason: "excluded".to_owned(), existing_id: None },
+            ImportPlanEntry { artifact_logical_id: "a5".to_owned(), artifact_kind: ArtifactKind::KnowledgeDocument, outcome: ImportOutcome::Conflict, reason: "collision".to_owned(), existing_id: None },
+        ];
+        let (c, r, u, s, conf) = ImportPlan::summarize_counts(&entries);
+        assert_eq!(c, 1, "RFC 013: Create must be countable");
+        assert_eq!(r, 1, "RFC 013: Reuse must be countable");
+        assert_eq!(u, 1, "RFC 013: Update must be countable");
+        assert_eq!(s, 1, "RFC 013: Skip must be countable");
+        assert_eq!(conf, 1, "RFC 013: Conflict must be countable");
+    }
+
+    /// RFC 013: Skip must have an explicit reason, never as conflict substitute.
+    #[test]
+    fn rfc013_skip_requires_explicit_reason() {
+        let skip_entry = ImportPlanEntry {
+            artifact_logical_id: "a1".to_owned(),
+            artifact_kind: ArtifactKind::PromptAsset,
+            outcome: ImportOutcome::Skip,
+            reason: "operator excluded from scope".to_owned(),
+            existing_id: None,
+        };
+        assert!(!skip_entry.reason.is_empty(), "RFC 013: Skip entries must have a reason");
+        assert_ne!(skip_entry.outcome, ImportOutcome::Conflict,
+            "RFC 013: Skip must not substitute for Conflict");
+    }
+
+    /// RFC 013: artifact_logical_id is the portable identity key.
+    #[test]
+    fn rfc013_artifact_logical_id_is_portable_identity() {
+        let entry = ArtifactEntry {
+            artifact_kind: ArtifactKind::PromptAsset,
+            artifact_logical_id: "acme.prompts.agent.system_v2".to_owned(),
+            artifact_display_name: "Agent System v2".to_owned(),
+            origin_scope: SourceScope { tenant_id: None, workspace_id: Some("w1".to_owned()), project_id: None },
+            origin_artifact_id: Some("pa_abc123".to_owned()),
+            content_hash: "sha256:def456".to_owned(),
+            source_bundle_id: "bundle_001".to_owned(),
+            origin_timestamp: 1000,
+            metadata: std::collections::HashMap::new(),
+            payload: ArtifactPayload::InlineJson(serde_json::json!({})),
+            provenance: ArtifactProvenance::default(),
+            lineage: None,
+            tags: vec![],
+        };
+        assert!(!entry.artifact_logical_id.is_empty(),
+            "RFC 013: artifact_logical_id is the portable reconciliation key");
+        // origin_artifact_id is source-system local.
+        assert!(entry.origin_artifact_id.is_some(),
+            "RFC 013: origin_artifact_id is local, NOT the portable key");
+    }
+}
+

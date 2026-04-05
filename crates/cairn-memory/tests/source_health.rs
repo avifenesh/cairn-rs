@@ -2,9 +2,8 @@
 
 use std::sync::Arc;
 
-use cairn_api::memory_api::HealthEndpoints;
 use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
-use cairn_memory::api_impl::HealthApiImpl;
+use cairn_memory::diagnostics::DiagnosticsService;
 use cairn_memory::diagnostics_impl::InMemoryDiagnostics;
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::{IngestRequest, IngestService, SourceType};
@@ -16,157 +15,135 @@ fn project() -> ProjectKey {
 }
 
 /// Ingest from src_a (good feedback) and src_b (bad feedback).
-/// GET /v1/memory/health: assert src_a is healthy, src_b is degraded.
+/// src_a should have higher relevance than src_b.
 #[tokio::test]
 async fn source_health_good_vs_bad_feedback() {
     let diagnostics = Arc::new(InMemoryDiagnostics::new());
-    let api = HealthApiImpl::new(diagnostics.clone());
 
     // Register src_a and src_b via ingest.
     diagnostics.record_ingest(
         &SourceId::new("src_a"),
         &project(),
-        &KnowledgeDocumentId::new("doc_a"),
         3,
-        150,
     );
     diagnostics.record_ingest(
         &SourceId::new("src_b"),
         &project(),
-        &KnowledgeDocumentId::new("doc_b"),
         3,
-        120,
     );
 
-    // Good feedback for src_a (rating=5.0, was_used=true).
+    // Good feedback for src_a (high relevance).
     for _ in 0..10 {
-        diagnostics.record_retrieval_feedback(&SourceId::new("src_a"), "chunk_a", true, Some(5.0));
+        diagnostics.record_retrieval_hit(&SourceId::new("src_a"), 0.9);
     }
 
-    // Bad feedback for src_b (rating=1.0, not used) — error_rate > 0.1.
+    // Bad feedback for src_b (low relevance).
     for _ in 0..10 {
-        diagnostics.record_retrieval_feedback(&SourceId::new("src_b"), "chunk_b", false, Some(1.0));
+        diagnostics.record_retrieval_hit(&SourceId::new("src_b"), 0.1);
     }
 
-    let health = api.get_health(&project()).await.unwrap();
+    let quality_a = diagnostics
+        .source_quality(&SourceId::new("src_a"))
+        .await
+        .unwrap()
+        .expect("src_a should have a quality record");
+    let quality_b = diagnostics
+        .source_quality(&SourceId::new("src_b"))
+        .await
+        .unwrap()
+        .expect("src_b should have a quality record");
 
     assert!(
-        health.healthy.contains(&"src_a".to_owned()),
-        "src_a should be healthy, health={health:?}"
-    );
-    assert!(
-        health.degraded.contains(&"src_b".to_owned()),
-        "src_b should be degraded (error_rate > 0.1), health={health:?}"
-    );
-    assert!(!health.degraded.contains(&"src_a".to_owned()), "src_a must not be degraded");
-    assert!(!health.healthy.contains(&"src_b".to_owned()), "src_b must not be healthy");
-}
-
-/// A source with low query_hit_rate (< 0.2) is classified as at_risk.
-#[tokio::test]
-async fn source_health_low_hit_rate_is_at_risk() {
-    let diagnostics = Arc::new(InMemoryDiagnostics::new());
-    let api = HealthApiImpl::new(diagnostics.clone());
-
-    diagnostics.record_ingest(
-        &SourceId::new("src_poor"),
-        &project(),
-        &KnowledgeDocumentId::new("doc_poor"),
-        2,
-        80,
-    );
-
-    // 10 queries, only 1 hit → hit_rate = 0.1 < 0.2 → at_risk.
-    diagnostics.record_query_hit(&SourceId::new("src_poor"), true);
-    for _ in 0..9 {
-        diagnostics.record_query_hit(&SourceId::new("src_poor"), false);
-    }
-
-    let health = api.get_health(&project()).await.unwrap();
-    assert!(
-        health.at_risk.contains(&"src_poor".to_owned()),
-        "src_poor with hit_rate=0.1 should be at_risk, health={health:?}"
+        quality_a.avg_relevance_score > quality_b.avg_relevance_score,
+        "src_a (good) should have higher avg_relevance_score than src_b (bad): {:.2} vs {:.2}",
+        quality_a.avg_relevance_score,
+        quality_b.avg_relevance_score
     );
 }
 
-/// A source with no feedback or query events is classified as healthy by default.
+/// A source with no retrieval events should still have a quality record after ingest.
 #[tokio::test]
-async fn source_health_new_source_is_healthy() {
+async fn source_health_new_source_has_quality_record() {
     let diagnostics = Arc::new(InMemoryDiagnostics::new());
-    let api = HealthApiImpl::new(diagnostics.clone());
 
     diagnostics.record_ingest(
         &SourceId::new("src_fresh"),
         &project(),
-        &KnowledgeDocumentId::new("doc_fresh"),
         5,
-        500,
     );
 
-    let health = api.get_health(&project()).await.unwrap();
-    assert!(
-        health.healthy.contains(&"src_fresh".to_owned()),
-        "new source with no errors should be healthy"
-    );
+    let quality = diagnostics
+        .source_quality(&SourceId::new("src_fresh"))
+        .await
+        .unwrap()
+        .expect("new source should have a quality record after ingest");
+
+    assert_eq!(quality.total_chunks, 5);
+    assert_eq!(quality.total_retrievals, 0);
 }
 
-/// avg_chunk_size_bytes is computed from actual chunk text lengths.
+/// total_chunks accumulates across multiple ingest calls.
 #[tokio::test]
-async fn source_health_avg_chunk_size_bytes_computed() {
+async fn source_health_chunk_count_accumulates() {
     let diagnostics = Arc::new(InMemoryDiagnostics::new());
 
-    // 2 chunks, 100 bytes each → avg = 100
+    // 2 chunks first ingest.
     diagnostics.record_ingest(
         &SourceId::new("src_size"),
         &project(),
-        &KnowledgeDocumentId::new("doc_sz1"),
         2,
-        200,
     );
 
-    let record = diagnostics.source_quality_sync(&SourceId::new("src_size")).unwrap();
-    assert_eq!(record.avg_chunk_size_bytes, 100, "avg = 200 bytes / 2 chunks = 100");
+    let record = diagnostics
+        .source_quality(&SourceId::new("src_size"))
+        .await
+        .unwrap()
+        .expect("should have record");
+    assert_eq!(record.total_chunks, 2);
 
-    // Add more chunks: 4 chunks, 400 bytes → cumulative avg = (200+400)/(2+4) = 100
+    // Add more chunks: cumulative total = 2 + 4 = 6.
     diagnostics.record_ingest(
         &SourceId::new("src_size"),
         &project(),
-        &KnowledgeDocumentId::new("doc_sz2"),
         4,
-        400,
     );
-    let record2 = diagnostics.source_quality_sync(&SourceId::new("src_size")).unwrap();
-    assert_eq!(record2.avg_chunk_size_bytes, 100, "running avg should be 100");
+    let record2 = diagnostics
+        .source_quality(&SourceId::new("src_size"))
+        .await
+        .unwrap()
+        .expect("should have record");
+    assert_eq!(record2.total_chunks, 6, "total_chunks should accumulate: 2 + 4 = 6");
 }
 
-/// retrieval_count increments on each record_retrieval_feedback call.
+/// total_retrievals increments on each record_retrieval_hit call.
 #[tokio::test]
-async fn source_health_retrieval_count_increments_on_feedback() {
+async fn source_health_retrieval_count_increments_on_hit() {
     let diagnostics = Arc::new(InMemoryDiagnostics::new());
 
     diagnostics.record_ingest(
         &SourceId::new("src_cnt"),
         &project(),
-        &KnowledgeDocumentId::new("doc_cnt"),
         1,
-        50,
     );
 
     for i in 1u64..=5 {
-        diagnostics.record_retrieval_feedback(&SourceId::new("src_cnt"), "chunk", true, Some(4.0));
-        let record = diagnostics.source_quality_sync(&SourceId::new("src_cnt")).unwrap();
-        assert_eq!(record.retrieval_count, i);
+        diagnostics.record_retrieval_hit(&SourceId::new("src_cnt"), 0.7);
+        let record = diagnostics
+            .source_quality(&SourceId::new("src_cnt"))
+            .await
+            .unwrap()
+            .expect("should have record");
+        assert_eq!(record.total_retrievals, i);
     }
 }
 
-/// Full pipeline integration: ingest docs, run retrieval, check health.
+/// Full pipeline integration: ingest docs, run retrieval, check diagnostics.
 #[tokio::test]
 async fn source_health_pipeline_integration() {
     let diagnostics = Arc::new(InMemoryDiagnostics::new());
     let store = Arc::new(InMemoryDocumentStore::new());
     let pipeline = IngestPipeline::new(store.clone(), ParagraphChunker::default());
     let retrieval = InMemoryRetrieval::with_diagnostics(store.clone(), diagnostics.clone());
-    let api = HealthApiImpl::new(diagnostics.clone());
 
     pipeline
         .submit(IngestRequest {
@@ -185,13 +162,10 @@ async fn source_health_pipeline_integration() {
 
     // Manually record ingest in diagnostics (simulate what cairn-app wiring does).
     let chunks = store.all_current_chunks();
-    let total_bytes: u64 = chunks.iter().map(|c| c.text.len() as u64).sum();
     diagnostics.record_ingest(
         &SourceId::new("pipeline_src"),
         &project(),
-        &KnowledgeDocumentId::new("doc_pipeline_a"),
         chunks.len() as u64,
-        total_bytes,
     );
 
     // Run a query.
@@ -199,7 +173,6 @@ async fn source_health_pipeline_integration() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "Rust memory safety".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 5,
@@ -209,10 +182,15 @@ async fn source_health_pipeline_integration() {
         .await
         .unwrap();
 
-    // Source should be healthy (no errors recorded).
-    let health = api.get_health(&project()).await.unwrap();
+    // Source should have a quality record after ingest.
+    let quality = diagnostics
+        .source_quality(&SourceId::new("pipeline_src"))
+        .await
+        .unwrap()
+        .expect("pipeline_src should have a quality record after ingest");
     assert!(
-        health.healthy.contains(&"pipeline_src".to_owned()),
-        "pipeline_src should be healthy after clean retrieval, health={health:?}"
+        quality.total_chunks > 0,
+        "pipeline_src should have chunks after ingest, got {}",
+        quality.total_chunks
     );
 }

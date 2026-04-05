@@ -6,6 +6,7 @@ use cairn_domain::{EventEnvelope, RuntimeEvent};
 
 use crate::error::StoreError;
 use crate::event_log::{EntityRef, EventLog, EventPosition, StoredEvent};
+use super::projections::PgSyncProjection;
 
 /// Postgres-backed append-only event log.
 ///
@@ -71,13 +72,21 @@ impl EventLog for PgEventLog {
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;
 
-            positions.push(EventPosition(row.0 as u64));
-        }
+            let pos = EventPosition(row.0 as u64);
 
-        // Sync projections are applied here within the same transaction.
-        // The PgSyncProjection handles event dispatch to current-state tables.
-        // For now, projection application is done by the caller composing
-        // PgEventLog + PgSyncProjection within the same PgAdapter transaction.
+            // Apply synchronous projections within the same transaction.
+            // This guarantees that current-state tables (sessions, runs, tasks, …)
+            // are always consistent with the event log — reads can never see a
+            // position that hasn't been projected yet.
+            let stored = StoredEvent {
+                position: pos,
+                envelope: event.clone(),
+                stored_at: now as u64,
+            };
+            PgSyncProjection::apply_async(&mut tx, &stored).await?;
+
+            positions.push(pos);
+        }
 
         tx.commit()
             .await
@@ -241,5 +250,8 @@ fn entity_ref_filter(entity: &EntityRef) -> (&'static str, String) {
         EntityRef::Signal(id) => ("signal_id", id.to_string()),
         EntityRef::IngestJob(id) => ("job_id", id.to_string()),
         EntityRef::EvalRun(id) => ("eval_run_id", id.to_string()),
+        EntityRef::PromptAsset(id) => ("prompt_asset_id", id.to_string()),
+        EntityRef::PromptVersion(id) => ("prompt_version_id", id.to_string()),
+        EntityRef::PromptRelease(id) => ("prompt_release_id", id.to_string()),
     }
 }

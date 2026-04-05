@@ -29,6 +29,10 @@ async fn memory_search_flows_through_real_retrieval_service() {
             source_type: SourceType::PlainText,
             project: project.clone(),
             content: "Kubernetes pod scheduling uses node affinity rules.".to_owned(),
+            import_id: None,
+            corpus_id: None,
+            bundle_source_id: None,
+            tags: vec![],
         })
         .await
         .unwrap();

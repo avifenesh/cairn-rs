@@ -118,6 +118,14 @@ impl DocumentStore for SqliteDocumentStore {
 
         Ok(row.and_then(|(s,)| parse_ingest_status(&s)))
     }
+
+    async fn chunk_hashes_for_project(
+        &self,
+        _project: &cairn_domain::ProjectKey,
+    ) -> Result<std::collections::HashSet<String>, crate::ingest::IngestError> {
+        // SQLite backend stub — returns empty set; full impl deferred.
+        Ok(std::collections::HashSet::new())
+    }
 }
 
 fn now_ms() -> i64 {

@@ -46,7 +46,7 @@ where
             budget_id: budget_id_for(&tenant_id, period),
             period,
             limit_micros,
-            alert_threshold_percent,
+            alert_threshold_percent: Some(alert_threshold_percent),
         }));
         self.store.append(&[event]).await?;
         self.get_budget(&tenant_id, period)
@@ -207,6 +207,7 @@ mod tests {
                 EventId::new("evt_budget_session_cost"),
                 EventSource::Runtime,
                 RuntimeEvent::SessionCostUpdated(SessionCostUpdated {
+                    project: cairn_domain::tenancy::ProjectKey::new("_", "_", "_"),
                     session_id: "session_budget".into(),
                     tenant_id: TenantId::new("tenant_budget"),
                     delta_cost_micros: 1_100,
@@ -219,7 +220,7 @@ mod tests {
             .await
             .unwrap();
 
-        let resolver = SimpleRouteResolver::new(store.clone(), store.clone());
+        let resolver = SimpleRouteResolver::with_store(store.clone(), store.clone());
         let err = resolver
             .resolve(
                 &project,

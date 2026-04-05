@@ -90,7 +90,6 @@ async fn graph_proximity_linked_docs_score_higher_than_isolated() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "Rust memory safety".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 10,
@@ -179,7 +178,6 @@ async fn graph_proximity_zero_without_graph_service() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "graph proximity".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 5,
@@ -227,7 +225,6 @@ async fn graph_proximity_single_result_stays_zero() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "solo document unique".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 5,
@@ -280,7 +277,6 @@ async fn graph_proximity_appears_in_scoring_dimensions() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "scoring graph proximity".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 10,

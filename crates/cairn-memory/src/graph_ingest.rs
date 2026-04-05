@@ -139,6 +139,10 @@ mod tests {
                 source_type: SourceType::PlainText,
                 project: ProjectKey::new("t", "w", "p"),
                 content: "Test content for graph-aware ingest.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();

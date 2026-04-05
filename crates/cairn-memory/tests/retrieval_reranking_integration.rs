@@ -28,6 +28,10 @@ async fn ingest_docs(store: Arc<InMemoryDocumentStore>) {
             project: ProjectKey::new("t", "w", "p"),
             content: "Rust ownership model prevents data races and ensures memory safety."
                 .to_owned(),
+            import_id: None,
+            corpus_id: None,
+            bundle_source_id: None,
+            tags: vec![],
         })
         .await
         .unwrap();
@@ -39,6 +43,10 @@ async fn ingest_docs(store: Arc<InMemoryDocumentStore>) {
             source_type: SourceType::PlainText,
             project: ProjectKey::new("t", "w", "p"),
             content: "Rust borrowing rules enforce memory safety at compile time.".to_owned(),
+            import_id: None,
+            corpus_id: None,
+            bundle_source_id: None,
+            tags: vec![],
         })
         .await
         .unwrap();
@@ -51,6 +59,10 @@ async fn ingest_docs(store: Arc<InMemoryDocumentStore>) {
             project: ProjectKey::new("t", "w", "p"),
             content: "Fearless concurrency in Rust uses ownership to prevent data races."
                 .to_owned(),
+            import_id: None,
+            corpus_id: None,
+            bundle_source_id: None,
+            tags: vec![],
         })
         .await
         .unwrap();

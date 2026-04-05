@@ -169,6 +169,224 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Corpus management implementation (RFC 003)
+// ---------------------------------------------------------------------------
+
+use cairn_api::memory_api::{
+    AddDocumentToCorpusRequest, AddSourceTagsRequest, CorpusEndpoints, CorpusRecord,
+    CreateCorpusRequest, SourceTagsEndpoints, SourceTagsResponse,
+};
+use crate::in_memory::InMemoryDocumentStore;
+
+/// Corpus API implementation backed by InMemoryDocumentStore.
+pub struct CorpusApiImpl {
+    store: std::sync::Arc<InMemoryDocumentStore>,
+    corpora: Mutex<Vec<CorpusEntry>>,
+}
+
+/// Internal corpus entry with project scope.
+struct CorpusEntry {
+    corpus_id: String,
+    name: String,
+    description: Option<String>,
+    project: ProjectKey,
+    document_ids: Vec<String>,
+}
+
+impl CorpusApiImpl {
+    pub fn new(store: std::sync::Arc<InMemoryDocumentStore>) -> Self {
+        Self {
+            store,
+            corpora: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl CorpusEndpoints for CorpusApiImpl {
+    type Error = String;
+
+    async fn create_corpus(
+        &self,
+        project: &ProjectKey,
+        request: &CreateCorpusRequest,
+    ) -> Result<CorpusRecord, Self::Error> {
+        let mut corpora = self.corpora.lock().unwrap();
+        let id = format!("corpus_{}", corpora.len() + 1);
+        corpora.push(CorpusEntry {
+            corpus_id: id.clone(),
+            name: request.name.clone(),
+            description: request.description.clone(),
+            project: project.clone(),
+            document_ids: Vec::new(),
+        });
+        Ok(CorpusRecord {
+            corpus_id: id,
+            name: request.name.clone(),
+            description: request.description.clone(),
+            document_count: 0,
+        })
+    }
+
+    async fn get_corpus(&self, corpus_id: &str) -> Result<Option<CorpusRecord>, Self::Error> {
+        let corpora = self.corpora.lock().unwrap();
+        Ok(corpora.iter().find(|c| c.corpus_id == corpus_id).map(|c| {
+            // Count documents: both directly added and those ingested with this corpus_id.
+            let chunks = self.store.all_current_chunks();
+            let ingested_doc_ids: std::collections::HashSet<String> = chunks
+                .iter()
+                .filter(|ch| {
+                    ch.provenance_metadata
+                        .as_ref()
+                        .and_then(|m| m.get("corpus_id"))
+                        .and_then(|v| v.as_str())
+                        .map_or(false, |v| v == corpus_id)
+                })
+                .map(|ch| ch.document_id.as_str().to_owned())
+                .collect();
+
+            let mut all_doc_ids: std::collections::HashSet<String> = ingested_doc_ids;
+            for did in &c.document_ids {
+                all_doc_ids.insert(did.clone());
+            }
+
+            CorpusRecord {
+                corpus_id: c.corpus_id.clone(),
+                name: c.name.clone(),
+                description: c.description.clone(),
+                document_count: all_doc_ids.len() as u32,
+            }
+        }))
+    }
+
+    async fn list_corpora(&self, project: &ProjectKey) -> Result<Vec<CorpusRecord>, Self::Error> {
+        let corpora = self.corpora.lock().unwrap();
+        Ok(corpora
+            .iter()
+            .filter(|c| &c.project == project)
+            .map(|c| CorpusRecord {
+                corpus_id: c.corpus_id.clone(),
+                name: c.name.clone(),
+                description: c.description.clone(),
+                document_count: c.document_ids.len() as u32,
+            })
+            .collect())
+    }
+
+    async fn add_document_to_corpus(
+        &self,
+        corpus_id: &str,
+        request: &AddDocumentToCorpusRequest,
+    ) -> Result<(), Self::Error> {
+        let mut corpora = self.corpora.lock().unwrap();
+        let corpus = corpora
+            .iter_mut()
+            .find(|c| c.corpus_id == corpus_id)
+            .ok_or_else(|| format!("corpus not found: {corpus_id}"))?;
+
+        if !corpus.document_ids.contains(&request.document_id) {
+            corpus.document_ids.push(request.document_id.clone());
+        }
+
+        // Tag existing chunks from that document with corpus_id in provenance_metadata.
+        drop(corpora);
+        let mut store_chunks = self.store.chunks_mut();
+        for chunk in store_chunks.iter_mut() {
+            if chunk.document_id.as_str() == request.document_id {
+                let mut meta = chunk
+                    .provenance_metadata
+                    .clone()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                meta.as_object_mut()
+                    .unwrap()
+                    .insert("corpus_id".to_owned(), serde_json::json!(corpus_id));
+                chunk.provenance_metadata = Some(meta);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Source tags implementation (RFC 003)
+// ---------------------------------------------------------------------------
+
+/// Source tags API implementation backed by InMemoryDocumentStore.
+pub struct SourceTagsApiImpl {
+    store: std::sync::Arc<InMemoryDocumentStore>,
+    tags: Mutex<HashMap<String, Vec<String>>>,
+}
+
+impl SourceTagsApiImpl {
+    pub fn new(store: std::sync::Arc<InMemoryDocumentStore>) -> Self {
+        Self {
+            store,
+            tags: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl SourceTagsEndpoints for SourceTagsApiImpl {
+    type Error = String;
+
+    async fn get_source_tags(&self, source_id: &str) -> Result<SourceTagsResponse, Self::Error> {
+        let tags = self.tags.lock().unwrap();
+        let source_tags = tags.get(source_id).cloned().unwrap_or_default();
+        Ok(SourceTagsResponse {
+            source_id: source_id.to_owned(),
+            tags: source_tags,
+        })
+    }
+
+    async fn add_source_tags(
+        &self,
+        source_id: &str,
+        request: &AddSourceTagsRequest,
+    ) -> Result<SourceTagsResponse, Self::Error> {
+        let mut tags = self.tags.lock().unwrap();
+        let entry = tags.entry(source_id.to_owned()).or_default();
+        for tag in &request.tags {
+            if !entry.contains(tag) {
+                entry.push(tag.clone());
+            }
+        }
+        let result = entry.clone();
+        drop(tags);
+
+        // Retroactively tag chunks from this source in provenance_metadata.
+        let mut store_chunks = self.store.chunks_mut();
+        for chunk in store_chunks.iter_mut() {
+            if chunk.source_id.as_str() == source_id {
+                let mut meta = chunk
+                    .provenance_metadata
+                    .clone()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let obj = meta.as_object_mut().unwrap();
+                let existing: Vec<String> = obj
+                    .get("tags")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let mut merged = existing;
+                for tag in &request.tags {
+                    if !merged.contains(tag) {
+                        merged.push(tag.clone());
+                    }
+                }
+                obj.insert("tags".to_owned(), serde_json::json!(merged));
+                chunk.provenance_metadata = Some(meta);
+            }
+        }
+
+        Ok(SourceTagsResponse {
+            source_id: source_id.to_owned(),
+            tags: result,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +411,10 @@ mod tests {
                 source_type: SourceType::PlainText,
                 project: ProjectKey::new("t", "w", "p"),
                 content: "Rust borrow checker ensures memory safety.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();

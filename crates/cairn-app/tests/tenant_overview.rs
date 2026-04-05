@@ -4,9 +4,11 @@ use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
 };
+use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
-use cairn_domain::{TenantId, WorkspaceId, WorkspaceKey};
+use cairn_domain::{OperatorId, TenantId, WorkspaceId, WorkspaceKey};
+use cairn_domain::tenancy::TenantKey;
 use cairn_domain::tenancy::WorkspaceRole;
 use cairn_runtime::{TenantService, WorkspaceMembershipService, WorkspaceService};
 use tower::ServiceExt;
@@ -19,7 +21,7 @@ async fn tenant_overview_returns_workspace_and_member_counts() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register(TOKEN, TenantId::new("default_tenant"));
+    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     // 1. Create tenant
     runtime
@@ -134,7 +136,7 @@ async fn tenant_overview_returns_404_for_unknown_tenant() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register(TOKEN, TenantId::new("default_tenant"));
+    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     let response = app
         .oneshot(

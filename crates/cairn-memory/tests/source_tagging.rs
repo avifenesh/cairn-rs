@@ -14,6 +14,16 @@ fn project() -> ProjectKey {
     ProjectKey::new("t", "w", "p")
 }
 
+/// Helper: check if a chunk's provenance_metadata contains a given tag.
+fn chunk_has_tag(chunk: &cairn_memory::ingest::ChunkRecord, tag: &str) -> bool {
+    chunk
+        .provenance_metadata
+        .as_ref()
+        .and_then(|m| m.get("tags"))
+        .and_then(|v| v.as_array())
+        .map_or(false, |arr| arr.iter().any(|v| v.as_str() == Some(tag)))
+}
+
 /// Ingest doc with tags=['production','qa'].
 /// Search with tag='production' → result returned.
 /// Search with tag='staging' → no result.
@@ -43,7 +53,6 @@ async fn source_tagging_filter_by_tag_returns_matching_chunks() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "deployment guide".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 10,
@@ -62,7 +71,7 @@ async fn source_tagging_filter_by_tag_returns_matching_chunks() {
     );
     for result in &prod_response.results {
         assert!(
-            result.chunk.tags.contains(&"production".to_owned()),
+            chunk_has_tag(&result.chunk, "production"),
             "returned chunk must have 'production' tag"
         );
     }
@@ -72,7 +81,6 @@ async fn source_tagging_filter_by_tag_returns_matching_chunks() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "deployment guide".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 10,
@@ -119,7 +127,7 @@ async fn source_tagging_tags_propagate_to_all_chunks() {
     assert!(chunks.len() >= 2, "expected multiple chunks");
     for chunk in &chunks {
         assert!(
-            chunk.tags.contains(&"infra".to_owned()),
+            chunk_has_tag(chunk, "infra"),
             "every chunk must carry the 'infra' tag (chunk_id={})",
             chunk.chunk_id
         );
@@ -181,7 +189,7 @@ async fn source_tagging_api_add_and_get_source_tags() {
     assert!(!src_chunks.is_empty());
     for chunk in src_chunks {
         assert!(
-            chunk.tags.contains(&"ops".to_owned()),
+            chunk_has_tag(chunk, "ops"),
             "chunk must carry the newly-added 'ops' tag"
         );
     }

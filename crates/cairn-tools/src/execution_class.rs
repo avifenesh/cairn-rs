@@ -103,6 +103,8 @@ mod tests {
                 default_timeout_ms: Some(15_000),
             }),
             execution_class: exec_class,
+            description: None,
+            homepage: None,
         }
     }
 

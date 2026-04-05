@@ -55,13 +55,13 @@ impl InMemoryImportService {
         }
 
         if artifact.artifact_kind == ArtifactKind::KnowledgeDocument {
-            if serde_json::from_value::<KnowledgeDocumentPayload>(artifact.payload.clone()).is_err()
-            {
+            let payload_value = artifact.payload.as_value();
+            if serde_json::from_value::<KnowledgeDocumentPayload>(payload_value.clone()).is_err() {
                 errors.push(format!(
                     "artifact {} has invalid knowledge_document payload",
                     artifact.artifact_logical_id
                 ));
-            } else if extract_document_content_text(&artifact.payload)
+            } else if extract_document_content_text(&payload_value)
                 .map(|text| text.trim().is_empty())
                 .unwrap_or(true)
             {
@@ -123,8 +123,9 @@ impl InMemoryImportService {
             };
         };
 
+        let payload_value = artifact.payload.as_value();
         let payload =
-            match serde_json::from_value::<KnowledgeDocumentPayload>(artifact.payload.clone()) {
+            match serde_json::from_value::<KnowledgeDocumentPayload>(payload_value.clone()) {
                 Ok(payload) => payload,
                 Err(_) => {
                     return ImportPlanEntry {
@@ -137,7 +138,7 @@ impl InMemoryImportService {
                 }
             };
 
-        let Some(content) = extract_document_content_text(&artifact.payload) else {
+        let Some(content) = extract_document_content_text(&payload_value) else {
             return ImportPlanEntry {
                 artifact_logical_id: artifact.artifact_logical_id.clone(),
                 artifact_kind: artifact.artifact_kind,
@@ -175,6 +176,7 @@ impl InMemoryImportService {
                 crate::ingest::SourceType::Html => "html",
                 crate::ingest::SourceType::StructuredJson => "structured_json",
                 crate::ingest::SourceType::KnowledgePack => "knowledge_pack",
+                crate::ingest::SourceType::JsonStructured => "json_structured",
             },
         );
 
@@ -269,7 +271,7 @@ impl InMemoryImportService {
                     Some("overwritten"),
                 ))
             }
-            ConflictResolutionStrategy::CreateVersion => {
+            ConflictResolutionStrategy::Rename => {
                 let versioned_id = self
                     .next_versioned_document_id(&artifact.artifact_logical_id)
                     .await?;
@@ -293,23 +295,13 @@ impl InMemoryImportService {
                         artifact_logical_id: entry.artifact_logical_id.clone(),
                         artifact_kind: entry.artifact_kind,
                         outcome: ImportOutcome::Create,
-                        reason: "matching content already existed; imported as versioned copy"
+                        reason: "matching content already existed; imported with renamed ID"
                             .to_owned(),
                         created_object_id: Some(versioned_id.to_string()),
                     },
                     Some("versioned"),
                 ))
             }
-            ConflictResolutionStrategy::AskOperator => Ok((
-                ImportReportEntry {
-                    artifact_logical_id: entry.artifact_logical_id.clone(),
-                    artifact_kind: entry.artifact_kind,
-                    outcome: ImportOutcome::Conflict,
-                    reason: "matching content requires operator review".to_owned(),
-                    created_object_id: None,
-                },
-                Some("pending_operator_review"),
-            )),
         }
     }
 }
@@ -334,7 +326,7 @@ impl ImportService for InMemoryImportService {
             ));
         }
 
-        if bundle.created_by.trim().is_empty() {
+        if bundle.created_by.as_deref().map(str::trim).unwrap_or("").is_empty() {
             errors.push("bundle created_by is required".to_owned());
         }
 
@@ -350,10 +342,11 @@ impl ImportService for InMemoryImportService {
             errors.extend(Self::validation_errors_for_artifact(artifact));
         }
 
+        let valid = errors.is_empty();
         Ok(ValidationReport {
-            bundle_id: bundle.bundle_id.clone(),
             errors,
             warnings: vec![],
+            valid,
         })
     }
 
@@ -410,11 +403,6 @@ impl ImportService for InMemoryImportService {
             .collect();
 
         let mut report_entries = Vec::with_capacity(plan.entries.len());
-        let mut created = 0u32;
-        let mut skipped = 0u32;
-        let mut overwritten = 0u32;
-        let mut versioned = 0u32;
-        let mut pending_operator_review = Vec::new();
 
         for entry in &plan.entries {
             let artifact = artifacts.get(entry.artifact_logical_id.as_str()).copied();
@@ -433,8 +421,9 @@ impl ImportService for InMemoryImportService {
                         continue;
                     };
 
+                    let apply_payload_value = artifact.payload.as_value();
                     let payload = match serde_json::from_value::<KnowledgeDocumentPayload>(
-                        artifact.payload.clone(),
+                        apply_payload_value.clone(),
                     ) {
                         Ok(payload) => payload,
                         Err(_) => {
@@ -450,7 +439,7 @@ impl ImportService for InMemoryImportService {
                         }
                     };
 
-                    let Some(content) = extract_document_content_text(&artifact.payload) else {
+                    let Some(content) = extract_document_content_text(&apply_payload_value) else {
                         report_entries.push(ImportReportEntry {
                             artifact_logical_id: entry.artifact_logical_id.clone(),
                             artifact_kind: entry.artifact_kind,
@@ -465,7 +454,7 @@ impl ImportService for InMemoryImportService {
 
                     let source_type = bundle_source_type_to_ingest(Some(payload.source_type));
                     let normalized_hash = compute_content_hash(&content);
-                    let existing_ids = self.store.document_ids_by_hash(&project, &normalized_hash);
+                    let existing_ids = self.store.document_ids_by_hash(&normalized_hash);
                     if !existing_ids.is_empty() {
                         let (report_entry, counter) = self
                             .apply_duplicate_strategy(
@@ -475,19 +464,11 @@ impl ImportService for InMemoryImportService {
                                 &project,
                                 &bundle.bundle_id,
                                 source_type,
-                                content,
+                                content.to_string(),
                                 &existing_ids,
                             )
                             .await?;
-                        match counter {
-                            Some("skipped") => skipped += 1,
-                            Some("overwritten") => overwritten += 1,
-                            Some("versioned") => versioned += 1,
-                            Some("pending_operator_review") => {
-                                pending_operator_review.push(entry.artifact_logical_id.clone())
-                            }
-                            _ => {}
-                        }
+                        let _ = counter;
                         report_entries.push(report_entry);
                         continue;
                     }
@@ -508,7 +489,6 @@ impl ImportService for InMemoryImportService {
                         .await
                     {
                         Ok(()) => {
-                            created += 1;
                             report_entries.push(ImportReportEntry {
                                 artifact_logical_id: entry.artifact_logical_id.clone(),
                                 artifact_kind: entry.artifact_kind,
@@ -529,16 +509,16 @@ impl ImportService for InMemoryImportService {
                 ImportOutcome::Skip => {
                     if plan.conflict_resolution != ConflictResolutionStrategy::Skip {
                         if let Some(artifact) = artifact {
+                            let skip_pv = artifact.payload.as_value();
                             if let Ok(payload) = serde_json::from_value::<KnowledgeDocumentPayload>(
-                                artifact.payload.clone(),
+                                skip_pv.clone(),
                             ) {
                                 if let Some(content) =
-                                    extract_document_content_text(&artifact.payload)
+                                    extract_document_content_text(&skip_pv)
                                 {
                                     let source_type =
                                         bundle_source_type_to_ingest(Some(payload.source_type));
                                     let existing_ids = self.store.document_ids_by_hash(
-                                        &project,
                                         &compute_content_hash(&content),
                                     );
                                     if !existing_ids.is_empty() {
@@ -554,16 +534,7 @@ impl ImportService for InMemoryImportService {
                                                 &existing_ids,
                                             )
                                             .await?;
-                                        match counter {
-                                            Some("skipped") => skipped += 1,
-                                            Some("overwritten") => overwritten += 1,
-                                            Some("versioned") => versioned += 1,
-                                            Some("pending_operator_review") => {
-                                                pending_operator_review
-                                                    .push(entry.artifact_logical_id.clone())
-                                            }
-                                            _ => {}
-                                        }
+                                        let _ = counter;
                                         report_entries.push(report_entry);
                                         continue;
                                     }
@@ -571,7 +542,6 @@ impl ImportService for InMemoryImportService {
                             }
                         }
                     }
-                    skipped += 1;
                     report_entries.push(ImportReportEntry {
                         artifact_logical_id: entry.artifact_logical_id.clone(),
                         artifact_kind: entry.artifact_kind,
@@ -617,13 +587,8 @@ impl ImportService for InMemoryImportService {
         Ok(ImportReport {
             bundle_id: bundle.bundle_id.clone(),
             target_scope: plan.target_scope.clone(),
-            import_actor: Some(bundle.created_by.clone()),
+            import_actor: bundle.created_by.clone(),
             entries: report_entries,
-            created,
-            skipped,
-            overwritten,
-            versioned,
-            pending_operator_review,
             create_count,
             reuse_count,
             update_count,
@@ -646,7 +611,7 @@ mod tests {
             bundle_id: "test_bundle".to_owned(),
             bundle_name: "Test Bundle".to_owned(),
             created_at: 0,
-            created_by: "test_operator".to_owned(),
+            created_by: Some("test_operator".to_owned()),
             source_deployment_id: None,
             source_scope: crate::bundles::SourceScope {
                 tenant_id: Some("t1".to_owned()),
@@ -659,6 +624,9 @@ mod tests {
                 description: None,
                 source_system: None,
                 export_reason: None,
+                origin: None,
+                production_method: None,
+                source_version: None,
             },
         }
     }

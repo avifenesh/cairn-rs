@@ -279,6 +279,7 @@ mod tests {
                     run_id: RunId::new("run_1"),
                     parent_run_id: None,
                     prompt_release_id: None,
+                    agent_role_id: None,
                 })),
                 make_stored(RuntimeEvent::TaskCreated(TaskCreated {
                     project: ProjectKey::new("t", "w", "p"),
@@ -319,6 +320,7 @@ mod tests {
                     run_id: RunId::new("r1"),
                     parent_run_id: None,
                     prompt_release_id: None,
+                    agent_role_id: None,
                 })),
             ])
             .await

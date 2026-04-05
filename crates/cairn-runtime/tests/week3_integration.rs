@@ -147,6 +147,9 @@ async fn mailbox_append_and_list() {
         MailboxMessageId::new("msg_1"),
         Some(run_id.clone()),
         None,
+        "".to_owned(),
+        None,
+        0,
     )
     .await
     .unwrap();
@@ -155,6 +158,9 @@ async fn mailbox_append_and_list() {
         MailboxMessageId::new("msg_2"),
         Some(run_id.clone()),
         None,
+        "".to_owned(),
+        None,
+        0,
     )
     .await
     .unwrap();
@@ -174,7 +180,7 @@ async fn recovery_requeues_expired_leased_tasks() {
 
     // Create and claim a task with a very short lease
     task_svc
-        .submit(&project, TaskId::new("task_1"), None, None)
+        .submit(&project, TaskId::new("task_1"), None, None, 0)
         .await
         .unwrap();
     task_svc

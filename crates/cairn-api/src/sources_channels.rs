@@ -15,6 +15,46 @@ pub enum SourceChannelError {
     Internal(String),
 }
 
+/// Bulk action that can be applied to a set of signal sources.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BulkSourceAction {
+    /// Re-trigger polling for degraded or stalled sources.
+    Retry,
+    /// Pause polling for the specified sources.
+    Pause,
+    /// Resume polling for previously paused sources.
+    Resume,
+}
+
+/// Request body for `POST /v1/sources/bulk`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct BulkSourceActionRequest {
+    /// Source IDs the action should be applied to.
+    pub source_ids: Vec<String>,
+    /// Action to apply to all listed sources.
+    pub action: BulkSourceAction,
+}
+
+/// Response for `POST /v1/sources/bulk`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct BulkSourceActionResponse {
+    /// Source IDs the action was applied to successfully.
+    #[serde(default)]
+    pub succeeded: Vec<String>,
+    /// Source IDs that failed together with the per-source error message.
+    /// Each entry is `(source_id, error_message)`.
+    #[serde(default)]
+    pub failed: Vec<(String, String)>,
+}
+
+impl BulkSourceActionResponse {
+    /// Convenience: an empty response (no successes, no failures).
+    pub fn empty() -> Self {
+        Self { succeeded: vec![], failed: vec![] }
+    }
+}
+
 /// API endpoint boundary for signal source management.
 #[async_trait]
 pub trait SourceEndpoints: Send + Sync {
@@ -30,6 +70,18 @@ pub trait SourceEndpoints: Send + Sync {
     ) -> Result<Option<SignalSource>, SourceChannelError>;
 
     async fn trigger_poll(&self, source_id: &SourceId) -> Result<(), SourceChannelError>;
+
+    /// Apply a bulk action (retry / pause / resume) to a set of sources.
+    ///
+    /// Default stub — returns an empty success response.
+    /// Implementors should override to drive the actual source lifecycle.
+    async fn bulk_action(
+        &self,
+        _project: &ProjectKey,
+        _request: &BulkSourceActionRequest,
+    ) -> Result<BulkSourceActionResponse, SourceChannelError> {
+        Ok(BulkSourceActionResponse::empty())
+    }
 }
 
 /// API endpoint boundary for channel management.

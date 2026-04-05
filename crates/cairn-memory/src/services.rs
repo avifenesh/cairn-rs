@@ -97,6 +97,10 @@ mod tests {
                 source_type: SourceType::PlainText,
                 project: project.clone(),
                 content: "Rust ownership and borrowing rules.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();

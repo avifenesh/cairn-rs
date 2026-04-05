@@ -90,7 +90,34 @@ const MIGRATIONS: &[(u32, &str, &str)] = &[
         "add_task_approval_titles",
         include_str!("../../migrations/V015__add_task_approval_titles.sql"),
     ),
+    (
+        16,
+        "create_prompt_and_routing_state",
+        include_str!("../../migrations/V016__create_prompt_and_routing_state.sql"),
+    ),
+    (
+        17,
+        "create_org_hierarchy",
+        include_str!("../../migrations/V017__create_org_hierarchy.sql"),
+    ),
+    (
+        18,
+        "create_route_policies",
+        include_str!("migrations/V018__create_route_policies.sql"),
+    ),
+    (
+        19,
+        "create_workspace_members",
+        include_str!("migrations/V019__create_workspace_members.sql"),
+    ),
 ];
+
+/// Return the compile-time migration registry as (version, name, sql) triples.
+///
+/// Used by contract tests to validate the registry without a live database.
+pub fn registered_migrations() -> &'static [(u32, &'static str, &'static str)] {
+    MIGRATIONS
+}
 
 impl PgMigrationRunner {
     pub fn new(pool: PgPool) -> Self {

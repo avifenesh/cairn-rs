@@ -288,7 +288,15 @@ impl PgSyncProjection {
 
             // These events are recorded in the event log for audit/replay
             // but do not mutate current-state projection tables.
-            RuntimeEvent::ExternalWorkerReported(_)
+            RuntimeEvent::ExternalWorkerRegistered(_)
+            | RuntimeEvent::ExternalWorkerReported(_)
+            | RuntimeEvent::ExternalWorkerSuspended(_)
+            | RuntimeEvent::ExternalWorkerReactivated(_)
+            | RuntimeEvent::SoulPatchProposed(_)
+            | RuntimeEvent::SoulPatchApplied(_)
+            | RuntimeEvent::SessionCostUpdated(_)
+            | RuntimeEvent::RunCostUpdated(_)
+            | RuntimeEvent::SpendAlertTriggered(_)
             | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
@@ -307,6 +315,124 @@ impl PgSyncProjection {
             | RuntimeEvent::ProjectCreated(_)
             | RuntimeEvent::RouteDecisionMade(_)
             | RuntimeEvent::ProviderCallCompleted(_) => {}
+            | RuntimeEvent::ProviderBudgetSet(_)
+            | RuntimeEvent::ChannelCreated(_)
+            | RuntimeEvent::ChannelMessageSent(_)
+            | RuntimeEvent::ChannelMessageConsumed(_)
+            | RuntimeEvent::DefaultSettingSet(_)
+            | RuntimeEvent::DefaultSettingCleared(_)
+            | RuntimeEvent::LicenseActivated(_)
+            | RuntimeEvent::EntitlementOverrideSet(_)
+            | RuntimeEvent::NotificationPreferenceSet(_)
+            | RuntimeEvent::NotificationSent(_)
+            | RuntimeEvent::ProviderPoolCreated(_)
+            | RuntimeEvent::ProviderPoolConnectionAdded(_)
+            | RuntimeEvent::ProviderPoolConnectionRemoved(_)
+            | RuntimeEvent::TenantQuotaSet(_)
+            | RuntimeEvent::TenantQuotaViolated(_)
+            | RuntimeEvent::RetentionPolicySet(_)
+            | RuntimeEvent::RunCostAlertSet(_)
+            | RuntimeEvent::RunCostAlertTriggered(_)
+            | RuntimeEvent::WorkspaceMemberAdded(_)
+            | RuntimeEvent::WorkspaceMemberRemoved(_)
+            | RuntimeEvent::ApprovalDelegated(_)
+            | RuntimeEvent::AuditLogEntryRecorded(_)
+            | RuntimeEvent::CheckpointStrategySet(_)
+            | RuntimeEvent::CredentialKeyRotated(_)
+            | RuntimeEvent::CredentialRevoked(_)
+            | RuntimeEvent::CredentialStored(_)
+            | RuntimeEvent::EvalBaselineLocked(_)
+            | RuntimeEvent::EvalBaselineSet(_)
+            | RuntimeEvent::EvalDatasetCreated(_)
+            | RuntimeEvent::EvalDatasetEntryAdded(_)
+            | RuntimeEvent::EvalRubricCreated(_)
+            | RuntimeEvent::EventLogCompacted(_)
+            | RuntimeEvent::GuardrailPolicyCreated(_)
+            | RuntimeEvent::GuardrailPolicyEvaluated(_)
+            | RuntimeEvent::OperatorIntervention(_)
+            | RuntimeEvent::OperatorProfileCreated(_)
+            | RuntimeEvent::OperatorProfileUpdated(_)
+            | RuntimeEvent::PauseScheduled(_)
+            | RuntimeEvent::PermissionDecisionRecorded(_)
+            | RuntimeEvent::ProviderBindingCreated(_)
+            | RuntimeEvent::ProviderBindingStateChanged(_)
+            | RuntimeEvent::ProviderBudgetAlertTriggered(_)
+            | RuntimeEvent::ProviderBudgetExceeded(_)
+            | RuntimeEvent::ProviderConnectionRegistered(_)
+            | RuntimeEvent::ProviderHealthChecked(_)
+            | RuntimeEvent::ProviderHealthScheduleSet(_)
+            | RuntimeEvent::ProviderHealthScheduleTriggered(_)
+            | RuntimeEvent::ProviderMarkedDegraded(_)
+            | RuntimeEvent::ProviderModelRegistered(_)
+            | RuntimeEvent::ProviderRecovered(_)
+            | RuntimeEvent::ProviderRetryPolicySet(_)
+            | RuntimeEvent::RecoveryEscalated(_)
+            | RuntimeEvent::ResourceShareRevoked(_)
+            | RuntimeEvent::ResourceShared(_)
+            | RuntimeEvent::RoutePolicyUpdated(_) => {
+                // RoutePolicyUpdated carries only policy_id + updated_at_ms; no schema fields change.
+            }
+
+            RuntimeEvent::RoutePolicyCreated(e) => {
+                let rules = serde_json::to_value(&e.rules)
+                    .map_err(|err| StoreError::Serialization(err.to_string()))?;
+                sqlx::query(
+                    "INSERT INTO route_policies (policy_id, tenant_id, name, rules, enabled, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, TRUE, $5, $5)
+                     ON CONFLICT (policy_id) DO UPDATE
+                     SET name = EXCLUDED.name, rules = EXCLUDED.rules, updated_at = EXCLUDED.updated_at",
+                )
+                .bind(&e.policy_id)
+                .bind(e.tenant_id.as_str())
+                .bind(&e.name)
+                .bind(rules)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::WorkspaceMemberAdded(e) => {
+                let role = enum_to_str(&e.role)?;
+                sqlx::query(
+                    "INSERT INTO workspace_members (workspace_id, operator_id, role, added_at_ms)
+                     VALUES ($1, $2, $3, $4)
+                     ON CONFLICT (workspace_id, operator_id) DO UPDATE SET role = EXCLUDED.role",
+                )
+                .bind(e.workspace_key.workspace_id.as_str())
+                .bind(e.member_id.as_str())
+                .bind(role)
+                .bind(e.added_at_ms as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::WorkspaceMemberRemoved(e) => {
+                sqlx::query(
+                    "DELETE FROM workspace_members WHERE workspace_id = $1 AND operator_id = $2",
+                )
+                .bind(e.workspace_key.workspace_id.as_str())
+                .bind(e.member_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            | RuntimeEvent::RunSlaBreached(_)
+            | RuntimeEvent::RunSlaSet(_)
+            | RuntimeEvent::SignalRouted(_)
+            | RuntimeEvent::SignalSubscriptionCreated(_)
+            | RuntimeEvent::SnapshotCreated(_)
+            | RuntimeEvent::TaskDependencyAdded(_)
+            | RuntimeEvent::TaskDependencyResolved(_)
+            | RuntimeEvent::TaskLeaseExpired(_)
+            | RuntimeEvent::TaskPriorityChanged(_)
+            | RuntimeEvent::ToolInvocationProgressUpdated(_)
+            // RFC 005 approval policies — no durable table yet
+            | RuntimeEvent::ApprovalPolicyCreated(_)
+            // RFC 001 gradual rollout — state tracked via prompt_releases table
+            | RuntimeEvent::PromptRolloutStarted(_) => {}
         }
 
         Ok(())

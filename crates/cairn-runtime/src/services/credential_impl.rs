@@ -256,6 +256,9 @@ where
         Ok(CredentialRotationRecord {
             rotation_id,
             tenant_id,
+            credential_id: CredentialId::new(""),
+            rotated_at: now_ms(),
+            rotated_by: None,
             old_key_id,
             new_key_id,
             rotated_credentials: rotated_ids.len() as u32,

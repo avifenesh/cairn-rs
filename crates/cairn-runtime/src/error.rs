@@ -21,6 +21,10 @@ pub enum RuntimeError {
     Store(cairn_store::StoreError),
     /// Internal error.
     Internal(String),
+    /// Tenant quota exceeded.
+    QuotaExceeded { tenant_id: String, quota_type: String, current: u32, limit: u32 },
+    /// Validation failure.
+    Validation { reason: String },
 }
 
 impl fmt::Display for RuntimeError {
@@ -37,6 +41,10 @@ impl fmt::Display for RuntimeError {
             RuntimeError::LeaseExpired { task_id } => write!(f, "lease expired: {task_id}"),
             RuntimeError::Store(e) => write!(f, "store error: {e}"),
             RuntimeError::Internal(msg) => write!(f, "internal runtime error: {msg}"),
+            RuntimeError::QuotaExceeded { tenant_id, quota_type, current, limit } => {
+                write!(f, "quota exceeded for tenant {tenant_id}: {quota_type} ({current}/{limit})")
+            }
+            RuntimeError::Validation { reason } => write!(f, "validation error: {reason}"),
         }
     }
 }

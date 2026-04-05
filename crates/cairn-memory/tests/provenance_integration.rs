@@ -99,6 +99,10 @@ async fn ingest_search_and_trace_provenance_end_to_end() {
                       For authentication failures, verify the API key is valid and not expired.\n\n\
                       For timeout errors, check network connectivity and increase retry limits."
                 .to_owned(),
+            import_id: None,
+            corpus_id: None,
+            bundle_source_id: None,
+            tags: vec![],
         })
         .await
         .unwrap();
@@ -113,6 +117,10 @@ async fn ingest_search_and_trace_provenance_end_to_end() {
                       Include the API key in the Authorization header.\n\n\
                       Rate limiting applies after 100 requests per minute."
                 .to_owned(),
+            import_id: None,
+            corpus_id: None,
+            bundle_source_id: None,
+            tags: vec![],
         })
         .await
         .unwrap();

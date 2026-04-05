@@ -47,6 +47,45 @@ pub struct HealthResponse {
     pub ok: bool,
 }
 
+/// Structured API error returned by HTTP handlers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ApiError {
+    pub status_code: u16,
+    pub code: String,
+    pub message: String,
+    #[serde(default)]
+    pub request_id: Option<String>,
+}
+
+impl ApiError {
+    pub fn new(status_code: u16, code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            status_code,
+            code: code.into(),
+            message: message.into(),
+            request_id: None,
+        }
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(404, "not_found", message)
+    }
+
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        Self::new(401, "unauthorized", message)
+    }
+
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::new(400, "bad_request", message)
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}: {}", self.status_code, self.code, self.message)
+    }
+}
+
 /// Seam for HTTP route registration. Implementors wire routes to handlers.
 pub trait RouteRegistry {
     type Error;
@@ -289,6 +328,81 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
         RouteEntry {
             method: Get,
             path: "/v1/admin/workspaces".into(),
+            classification: Preserve,
+        },
+        // GAP-008: runtime config key-value store routes.
+        RouteEntry {
+            method: Get,
+            path: "/v1/config".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/config/:key".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Put,
+            path: "/v1/config/:key".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Delete,
+            path: "/v1/config/:key".into(),
+            classification: Preserve,
+        },
+        // GAP-010: LLM observability — per-session trace history.
+        RouteEntry {
+            method: Get,
+            path: "/v1/sessions/:id/llm-traces".into(),
+            classification: Preserve,
+        },
+        // RFC 013: import/export contract — validate → preview → apply pipeline.
+        RouteEntry {
+            method: Post,
+            path: "/v1/import/validate".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/import/preview".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/import/apply".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/export/:format".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/import/reports".into(),
+            classification: Preserve,
+        },
+        // RFC 014: commercial/admin surface — entitlement status, capability mapping,
+        // license inspection and activation.
+        RouteEntry {
+            method: Get,
+            path: "/v1/admin/entitlements".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/admin/capabilities".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/admin/license".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/admin/license/activate".into(),
             classification: Preserve,
         },
     ]

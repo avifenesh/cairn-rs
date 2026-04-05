@@ -1,6 +1,7 @@
 use cairn_domain::policy::ExecutionClass;
 use serde::{Deserialize, Serialize};
 
+use crate::mcp_client::McpEndpoint;
 use crate::permissions::DeclaredPermissions;
 
 /// Plugin capability families per RFC 007.
@@ -13,6 +14,11 @@ pub enum PluginCapability {
     PostTurnHook,
     PolicyHook,
     EvalScorer,
+    /// This plugin connects to an external MCP server.
+    ///
+    /// When registered, cairn-tools will connect to the server via `McpClient`
+    /// and expose its tools under the `mcp.<server_id>.<tool>` namespace.
+    McpServer { endpoint: McpEndpoint },
 }
 
 /// Concurrency and timeout limits declared in the plugin manifest.
@@ -34,6 +40,12 @@ pub struct PluginManifest {
     pub permissions: DeclaredPermissions,
     pub limits: Option<PluginLimits>,
     pub execution_class: ExecutionClass,
+    /// RFC 007: human-readable description of what the plugin does.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// RFC 007: URL for plugin documentation or source repository.
+    #[serde(default)]
+    pub homepage: Option<String>,
 }
 
 /// Plugin lifecycle states managed by the host.
@@ -95,6 +107,8 @@ mod tests {
                 default_timeout_ms: Some(30_000),
             }),
             execution_class: ExecutionClass::SupervisedProcess,
+            description: None,
+            homepage: None,
         };
 
         assert_eq!(manifest.capabilities.len(), 1);
@@ -129,6 +143,8 @@ mod tests {
             permissions: DeclaredPermissions::default(),
             limits: None,
             execution_class: ExecutionClass::SandboxedProcess,
+            description: None,
+            homepage: None,
         };
 
         assert_eq!(manifest.capabilities.len(), 3);

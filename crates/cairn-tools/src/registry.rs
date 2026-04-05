@@ -79,6 +79,44 @@ impl PluginRegistry for InMemoryPluginRegistry {
     }
 }
 
+impl InMemoryPluginRegistry {
+    /// Returns metrics for a plugin, or `None` if not found.
+    pub fn metrics(&self, plugin_id: &str) -> Option<crate::PluginMetrics> {
+        self.plugins
+            .lock()
+            .unwrap()
+            .contains_key(plugin_id)
+            .then(|| crate::PluginMetrics {
+                plugin_id: plugin_id.to_owned(),
+                ..Default::default()
+            })
+    }
+
+    /// Lists log entries for a plugin (stub — in-memory has no persistent log store).
+    pub fn list_logs(
+        &self,
+        plugin_id: &str,
+        _limit: usize,
+    ) -> Result<Vec<crate::PluginLogEntry>, RegistryError> {
+        if !self.plugins.lock().unwrap().contains_key(plugin_id) {
+            return Err(RegistryError::NotFound(plugin_id.to_owned()));
+        }
+        Ok(vec![])
+    }
+
+    /// Lists pending signals for a plugin (stub).
+    pub fn list_pending_signals(
+        &self,
+        plugin_id: &str,
+        _limit: usize,
+    ) -> Result<Vec<cairn_domain::SignalRecord>, RegistryError> {
+        if !self.plugins.lock().unwrap().contains_key(plugin_id) {
+            return Err(RegistryError::NotFound(plugin_id.to_owned()));
+        }
+        Ok(vec![])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +133,8 @@ mod tests {
             permissions: DeclaredPermissions::new(vec![Permission::FsRead]),
             limits: None,
             execution_class: ExecutionClass::SupervisedProcess,
+            description: None,
+            homepage: None,
         }
     }
 

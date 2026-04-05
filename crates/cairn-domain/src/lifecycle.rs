@@ -180,9 +180,11 @@ pub fn can_transition_task_state(from: TaskState, to: TaskState) -> bool {
     matches!(
         (from, to),
         (TaskState::Queued, TaskState::Leased)
+            | (TaskState::Queued, TaskState::WaitingDependency)
             | (TaskState::Queued, TaskState::Paused)
             | (TaskState::Queued, TaskState::Canceled)
             | (TaskState::Queued, TaskState::DeadLettered)
+            | (TaskState::WaitingDependency, TaskState::Queued)
             | (TaskState::Leased, TaskState::Running)
             | (TaskState::Leased, TaskState::Queued)
             | (TaskState::Leased, TaskState::Paused)
@@ -226,6 +228,34 @@ pub fn can_resume_run_to(target: RunResumeTarget) -> bool {
 
 pub fn can_resume_task_to(target: TaskResumeTarget) -> bool {
     matches!(target, TaskResumeTarget::Queued | TaskResumeTarget::Running)
+}
+
+/// Operational status of an agent session in the fleet view.
+///
+/// Mirrors `cairn/internal/server/routes_fleet.go` status mapping:
+/// - `Busy`    — session has a running or claimed task
+/// - `Idle`    — session is open but has no active task (queued or paused)
+/// - `Offline` — session is terminal (completed / failed / archived)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStatus {
+    Busy,
+    Idle,
+    Offline,
+}
+
+impl AgentStatus {
+    /// Derive agent status from the session's current `RunState` (if any).
+    pub fn from_run_state(run_state: Option<RunState>) -> Self {
+        match run_state {
+            Some(RunState::Running) => AgentStatus::Busy,
+            Some(RunState::Pending | RunState::WaitingApproval | RunState::Paused) => AgentStatus::Idle,
+            Some(RunState::Completed | RunState::Failed | RunState::Canceled) | None => {
+                AgentStatus::Offline
+            }
+            Some(RunState::WaitingDependency) => AgentStatus::Idle,
+        }
+    }
 }
 
 /// Derives session state using the v1 rules from RFC 005.

@@ -27,7 +27,25 @@ pub trait TaskService: Send + Sync {
         task_id: TaskId,
         parent_run_id: Option<RunId>,
         parent_task_id: Option<TaskId>,
+        priority: u32,
     ) -> Result<TaskRecord, RuntimeError>;
+
+    /// Declare that `dependent_task_id` cannot start until `prerequisite_task_id` completes.
+    ///
+    /// Transitions `dependent_task_id` to `WaitingDependency`.
+    async fn declare_dependency(
+        &self,
+        dependent_task_id: &TaskId,
+        prerequisite_task_id: &TaskId,
+    ) -> Result<cairn_store::projections::TaskDependencyRecord, RuntimeError>;
+
+    /// Return unresolved (blocking) dependencies for `task_id`.
+    ///
+    /// If all dependencies are resolved, transitions the task to `Queued`.
+    async fn check_dependencies(
+        &self,
+        task_id: &TaskId,
+    ) -> Result<Vec<cairn_store::projections::TaskDependencyRecord>, RuntimeError>;
 
     /// Get a task by ID.
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, RuntimeError>;

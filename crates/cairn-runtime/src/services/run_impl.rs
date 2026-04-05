@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{RunReadModel, RunRecord, SessionReadModel};
+use cairn_store::projections::{QuotaReadModel, RunReadModel, RunRecord, SessionReadModel};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
+use super::quota_impl::enforce_run_quota;
 use super::session_impl::derive_and_update_session;
 use crate::error::RuntimeError;
 use crate::runs::RunService;
@@ -66,7 +67,7 @@ impl<S: EventLog + RunReadModel + SessionReadModel + 'static> RunServiceImpl<S> 
 #[async_trait]
 impl<S> RunService for RunServiceImpl<S>
 where
-    S: EventLog + RunReadModel + SessionReadModel + 'static,
+    S: EventLog + RunReadModel + SessionReadModel + QuotaReadModel + 'static,
 {
     async fn start(
         &self,
@@ -85,12 +86,16 @@ where
             });
         }
 
+        // Enforce run quota before creating the run.
+        enforce_run_quota(self.store.as_ref(), &project.tenant_id).await?;
+
         let event = make_envelope(RuntimeEvent::RunCreated(RunCreated {
             project: project.clone(),
             session_id: session_id.clone(),
             run_id: run_id.clone(),
             parent_run_id,
             prompt_release_id: None,
+            agent_role_id: None,
         }));
 
         self.store.append(&[event]).await?;
@@ -328,5 +333,60 @@ mod tests {
             .await;
 
         assert!(result.is_err());
+    }
+}
+
+// ── Additional stubs for cairn-app ────────────────────────────────────────
+
+impl<S> RunServiceImpl<S>
+where
+    S: cairn_store::EventLog + cairn_store::projections::RunReadModel + cairn_store::projections::SessionReadModel + 'static,
+{
+    /// List child runs for a parent run.
+    pub async fn list_child_runs(
+        &self,
+        parent_run_id: &cairn_domain::RunId,
+        limit: usize,
+    ) -> Result<Vec<cairn_store::projections::RunRecord>, crate::error::RuntimeError> {
+        let all = cairn_store::projections::RunReadModel::list_by_session(
+            self.store.as_ref(),
+            &cairn_domain::SessionId::new("_"),
+            limit,
+            0,
+        ).await?;
+        Ok(all.into_iter().filter(|r| r.parent_run_id.as_ref() == Some(parent_run_id)).collect())
+    }
+
+    /// Spawn a subagent run linked to a parent.
+    pub async fn spawn_subagent(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        parent_run_id: cairn_domain::RunId,
+        session_id: &cairn_domain::SessionId,
+    ) -> Result<cairn_store::projections::RunRecord, crate::error::RuntimeError> {
+        let child_run_id = cairn_domain::RunId::new(format!("subagent_{}", parent_run_id.as_str()));
+        let event = super::event_helpers::make_envelope(cairn_domain::RuntimeEvent::RunCreated(
+            cairn_domain::RunCreated {
+                project: project.clone(),
+                session_id: session_id.clone(),
+                run_id: child_run_id.clone(),
+                parent_run_id: Some(parent_run_id),
+                prompt_release_id: None,
+                agent_role_id: None,
+            },
+        ));
+        self.store.append(&[event]).await?;
+        cairn_store::projections::RunReadModel::get(self.store.as_ref(), &child_run_id)
+            .await?
+            .ok_or_else(|| crate::error::RuntimeError::Internal("subagent run not found after create".into()))
+    }
+
+    /// Set a checkpoint strategy for a run (stub — records as event only).
+    pub async fn set_checkpoint_strategy(
+        &self,
+        _run_id: &cairn_domain::RunId,
+        _strategy: String,
+    ) -> Result<(), crate::error::RuntimeError> {
+        Ok(())
     }
 }

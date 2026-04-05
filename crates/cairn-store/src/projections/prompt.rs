@@ -11,6 +11,18 @@ pub struct PromptAssetRecord {
     pub name: String,
     pub kind: String,
     pub created_at: u64,
+    /// Scope of this asset (e.g. "project", "workspace", "tenant").
+    #[serde(default)]
+    pub scope: String,
+    /// Lifecycle status (e.g. "draft", "published", "archived").
+    #[serde(default)]
+    pub status: String,
+    /// Workspace ID for cross-workspace lookup.
+    #[serde(default)]
+    pub workspace: String,
+    /// Last-updated timestamp.
+    #[serde(default)]
+    pub updated_at: u64,
 }
 
 #[async_trait]
@@ -26,6 +38,12 @@ pub struct PromptVersionRecord {
     pub project: ProjectKey,
     pub content_hash: String,
     pub created_at: u64,
+    /// Monotonically increasing version number within the asset.
+    #[serde(default)]
+    pub version_number: u32,
+    /// Workspace ID for cross-workspace operations.
+    #[serde(default)]
+    pub workspace: String,
 }
 
 #[async_trait]
@@ -43,6 +61,27 @@ pub struct PromptReleaseRecord {
     pub state: String,
     /// RFC 001: percentage of traffic routed to this release (0-100).
     pub rollout_percent: Option<u8>,
+    /// RFC 006: routing slot this release is pinned to (e.g. "slot_a").
+    /// When set, selectors that match this slot get this release first.
+    #[serde(default)]
+    pub routing_slot: Option<String>,
+    /// RFC 006: task-type affinity (e.g. "worker", "planner").
+    /// Second in precedence after routing_slot.
+    #[serde(default)]
+    pub task_type: Option<String>,
+    /// RFC 006: agent-type affinity (e.g. "orchestrator").
+    /// Third in precedence after task_type.
+    #[serde(default)]
+    pub agent_type: Option<String>,
+    /// RFC 006: marks this release as the project-wide default fallback.
+    #[serde(default)]
+    pub is_project_default: bool,
+    /// RFC 006: optional human-readable tag (e.g. "v1.2-beta") from the creation event.
+    #[serde(default)]
+    pub release_tag: Option<String>,
+    /// RFC 006: operator or service account that created this release.
+    #[serde(default)]
+    pub created_by: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
 }

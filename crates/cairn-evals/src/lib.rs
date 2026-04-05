@@ -7,6 +7,7 @@
 //! - **Matrices**: eval comparison grids with canonical and plugin metrics (RFC 004)
 //! - **Scorecards**: aggregated eval results for operator comparison (RFC 004)
 
+pub mod experiments;
 pub mod matrices;
 pub mod prompts;
 pub mod scorecards;
@@ -14,8 +15,10 @@ pub mod selectors;
 pub mod services;
 
 pub use matrices::{
-    EvalMetrics, GuardrailPolicyRow, MatrixCategory, MemorySourceQualityRow, PermissionRow,
-    PromptComparisonRow, ProviderRoutingMatrix, ProviderRoutingRow, SkillHealthRow,
+    EvalMetrics, GuardrailMatrix, GuardrailPolicyRow, MatrixCategory,
+    MemorySourceQualityMatrix, MemorySourceQualityRow, PermissionMatrix, PermissionRow,
+    PromptComparisonMatrix, PromptComparisonRow, ProviderRoutingMatrix, ProviderRoutingRow,
+    SkillHealthMatrix, SkillHealthRow,
 };
 pub use prompts::{
     PromptAsset, PromptAssetStatus, PromptFormat, PromptKind, PromptRelease, PromptReleaseState,
@@ -25,7 +28,14 @@ pub use scorecards::{
     DatasetSource, EvalRun, EvalRunStatus, EvalSubjectKind, Scorecard, ScorecardEntry,
 };
 pub use selectors::{ResolutionContext, RolloutTarget, SelectorKind, SelectorValue};
-pub use services::{EvalRunService, GraphIntegration, PromptReleaseService, SelectorResolver};
+pub use services::{
+    EvalBaselineServiceImpl, EvalDatasetServiceImpl, EvalRunService, EvalRubricServiceImpl,
+    GraphIntegration, ModelComparisonServiceImpl, PluginDimensionScore, PluginRubricScorer,
+    PromptReleaseService, SelectorResolver,
+};
+pub use services::eval_service::{MemoryDiagnosticsSource, SourceQualitySnapshot};
+// Re-export RubricDimension from domain for cairn-app convenience.
+pub use cairn_domain::RubricDimension;
 
 #[cfg(test)]
 mod tests {

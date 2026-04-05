@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use cairn_domain::providers::{ProviderCallRecord, RouteDecisionRecord};
-use cairn_domain::{ProjectKey, RouteDecisionId};
+use cairn_domain::providers::{ProviderCallRecord, RouteAttemptRecord, RouteDecisionRecord};
+use cairn_domain::{ProjectKey, RouteAttemptId, RouteDecisionId};
 
 use crate::error::StoreError;
 
@@ -18,6 +18,27 @@ pub trait RouteDecisionReadModel: Send + Sync {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<RouteDecisionRecord>, StoreError>;
+}
+
+/// Read-model for route attempt records (RFC 009 first-class entities).
+#[async_trait]
+pub trait RouteAttemptReadModel: Send + Sync {
+    async fn get(
+        &self,
+        attempt_id: &RouteAttemptId,
+    ) -> Result<Option<RouteAttemptRecord>, StoreError> {
+        let _ = attempt_id;
+        Ok(None)
+    }
+
+    async fn list_by_decision(
+        &self,
+        route_decision_id: &RouteDecisionId,
+        limit: usize,
+    ) -> Result<Vec<RouteAttemptRecord>, StoreError> {
+        let _ = (route_decision_id, limit);
+        Ok(vec![])
+    }
 }
 
 /// Read-model for provider call records.

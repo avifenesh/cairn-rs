@@ -61,6 +61,7 @@ where
             resource_type: resource_type.clone(),
             resource_id: resource_id.clone(),
             permissions: permissions.clone(),
+            grantee: String::new(),
             shared_at_ms: now,
         }));
         self.store.append(&[event]).await?;
@@ -127,12 +128,13 @@ mod tests {
     };
     use crate::tenants::TenantService;
     use crate::workspaces::WorkspaceService;
-    use cairn_domain::{PromptAssetId, PromptVersionId, WorkspaceKey};
+    use cairn_domain::{PromptAssetId, PromptVersionId};
+    use cairn_domain::tenancy::ProjectKey;
 
     async fn setup_tenant_and_workspaces(
         store: &Arc<InMemoryStore>,
         tenant_id: &str,
-    ) -> (WorkspaceKey, WorkspaceKey) {
+    ) -> (ProjectKey, ProjectKey) {
         let tenant_svc = TenantServiceImpl::new(store.clone());
         let ws_svc = WorkspaceServiceImpl::new(store.clone());
 
@@ -157,8 +159,8 @@ mod tests {
             .await
             .unwrap();
 
-        let ws_a = WorkspaceKey::new(TenantId::new(tenant_id), WorkspaceId::new("ws_a"));
-        let ws_b = WorkspaceKey::new(TenantId::new(tenant_id), WorkspaceId::new("ws_b"));
+        let ws_a = ProjectKey::new(tenant_id, "ws_a", "default");
+        let ws_b = ProjectKey::new(tenant_id, "ws_b", "default");
         (ws_a, ws_b)
     }
 
@@ -190,8 +192,6 @@ mod tests {
                 PromptVersionId::new("ver_1"),
                 PromptAssetId::new("asset_shared"),
                 "hash_1".to_owned(),
-                Some("prompt content v1".to_owned()),
-                None,
             )
             .await
             .unwrap_err();
@@ -221,8 +221,6 @@ mod tests {
                 PromptVersionId::new("ver_2"),
                 PromptAssetId::new("asset_shared"),
                 "hash_2".to_owned(),
-                Some("prompt content v2".to_owned()),
-                None,
             )
             .await
             .unwrap();
@@ -238,8 +236,6 @@ mod tests {
                 PromptVersionId::new("ver_3"),
                 PromptAssetId::new("asset_shared"),
                 "hash_3".to_owned(),
-                Some("prompt content v3".to_owned()),
-                None,
             )
             .await
             .unwrap_err();

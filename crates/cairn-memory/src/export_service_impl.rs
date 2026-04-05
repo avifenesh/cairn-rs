@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use cairn_domain::{ProjectKey, PromptAssetId, PromptKind, WorkspaceKey};
+use cairn_domain::{ProjectKey, PromptAssetId};
 use cairn_store::projections::{PromptAssetReadModel, PromptVersionReadModel};
 use cairn_store::InMemoryStore;
 
 use crate::bundles::{
     ArtifactEntry, ArtifactKind, BundleEnvelope, BundleProvenance, BundleSourceType, BundleType,
     DocumentContent, DocumentExportFilters, ExportService, KnowledgeDocumentPayload,
-    PromptAssetBundleStatus, PromptAssetPayload, PromptVersionPayload, SourceScope,
+    PromptAssetPayload, PromptVersionPayload, SourceScope,
 };
 use crate::in_memory::{ExportableDocument, InMemoryDocumentStore};
 use crate::pipeline::compute_content_hash;
@@ -67,10 +67,10 @@ impl InMemoryExportService {
         }
     }
 
-    fn workspace_scope(workspace: &WorkspaceKey) -> SourceScope {
+    fn workspace_scope(workspace_id: &str) -> SourceScope {
         SourceScope {
-            tenant_id: Some(workspace.tenant_id.as_str().to_owned()),
-            workspace_id: Some(workspace.workspace_id.as_str().to_owned()),
+            tenant_id: None,
+            workspace_id: Some(workspace_id.to_owned()),
             project_id: None,
         }
     }
@@ -90,12 +90,14 @@ impl InMemoryExportService {
             crate::ingest::SourceType::Html => BundleSourceType::TextHtml,
             crate::ingest::SourceType::StructuredJson => BundleSourceType::JsonStructured,
             crate::ingest::SourceType::KnowledgePack => BundleSourceType::ExternalRef,
+            crate::ingest::SourceType::JsonStructured => BundleSourceType::JsonStructured,
         }
     }
 
-    fn metadata_map(value: &serde_json::Value) -> HashMap<String, serde_json::Value> {
+    fn metadata_map(value: &Option<serde_json::Value>) -> HashMap<String, serde_json::Value> {
         value
-            .as_object()
+            .as_ref()
+            .and_then(|v| v.as_object())
             .map(|object| {
                 object
                     .iter()
@@ -105,23 +107,12 @@ impl InMemoryExportService {
             .unwrap_or_default()
     }
 
-    fn prompt_kind(raw: &str) -> Result<PromptKind, String> {
-        match raw.trim() {
-            "system" => Ok(PromptKind::System),
-            "user_template" => Ok(PromptKind::UserTemplate),
-            "tool_prompt" => Ok(PromptKind::ToolPrompt),
-            "critic" => Ok(PromptKind::Critic),
-            "router" => Ok(PromptKind::Router),
-            other => Err(format!("unsupported prompt kind for export: {other}")),
-        }
+    fn prompt_kind_string(raw: &str) -> String {
+        raw.trim().to_owned()
     }
 
-    fn prompt_status(raw: Option<&str>) -> PromptAssetBundleStatus {
-        match raw.map(str::trim) {
-            Some("archived") => PromptAssetBundleStatus::Archived,
-            Some("draft") => PromptAssetBundleStatus::Draft,
-            _ => PromptAssetBundleStatus::Active,
-        }
+    fn prompt_status_string(raw: &str) -> String {
+        raw.trim().to_owned()
     }
 
     fn document_matches_filters(
@@ -155,7 +146,7 @@ impl InMemoryExportService {
             }
         }
         if let Some(min_cred) = filters.min_credibility_score {
-            if document.credibility_score < min_cred {
+            if document.credibility_score.unwrap_or(0.0) < min_cred {
                 return false;
             }
         }
@@ -164,16 +155,13 @@ impl InMemoryExportService {
     }
 }
 
-#[async_trait]
-impl ExportService for InMemoryExportService {
-    type Error = String;
-
-    async fn export_documents(
+impl InMemoryExportService {
+    pub async fn export_documents(
         &self,
         bundle_name: &str,
         project: &ProjectKey,
         filters: &DocumentExportFilters,
-    ) -> Result<BundleEnvelope, Self::Error> {
+    ) -> Result<BundleEnvelope, String> {
         let created_at = Self::now_millis();
         let bundle_id = Self::build_bundle_id(
             BundleType::CuratedKnowledgePackBundle,
@@ -185,8 +173,9 @@ impl ExportService for InMemoryExportService {
         let mut artifacts = Vec::new();
         for document in self
             .document_store
-            .exportable_documents(project)
+            .exportable_documents()
             .into_iter()
+            .filter(|document| document.project == *project)
             .filter(|document| Self::document_matches_filters(document, filters))
         {
             let payload = KnowledgeDocumentPayload {
@@ -204,6 +193,17 @@ impl ExportService for InMemoryExportService {
                 retrieval_hints: document.tags.clone(),
             };
 
+            let content_hash = compute_content_hash(&document.text);
+            let source_bundle_id = document
+                .provenance
+                .as_ref()
+                .and_then(|p| p.get("source_bundle_id").and_then(|v| v.as_str()).map(str::to_owned))
+                .unwrap_or_else(|| bundle_id.clone());
+            let lineage = document
+                .provenance
+                .as_ref()
+                .and_then(|p| p.get("lineage").and_then(|v| v.as_str()).map(str::to_owned));
+
             artifacts.push(ArtifactEntry {
                 artifact_kind: ArtifactKind::KnowledgeDocument,
                 artifact_logical_id: document.document_id.as_str().to_owned(),
@@ -213,27 +213,21 @@ impl ExportService for InMemoryExportService {
                     .unwrap_or_else(|| document.document_id.as_str().to_owned()),
                 origin_scope: Self::project_scope(&document.project),
                 origin_artifact_id: Some(document.document_id.as_str().to_owned()),
-                content_hash: document.content_hash,
-                source_bundle_id: document
-                    .provenance
-                    .as_ref()
-                    .and_then(|p| p.source_bundle_id.clone())
-                    .unwrap_or_else(|| bundle_id.clone()),
+                content_hash,
+                source_bundle_id,
                 origin_timestamp: document.created_at,
                 metadata: {
                     let mut m = Self::metadata_map(&document.provenance_metadata);
                     if let Some(prov) = &document.provenance {
-                        if let Ok(prov_val) = serde_json::to_value(prov) {
-                            m.insert("import_provenance".to_owned(), prov_val);
-                        }
+                        m.insert("import_provenance".to_owned(), prov.clone());
                     }
                     m
                 },
-                payload: serde_json::to_value(payload).map_err(|err| err.to_string())?,
-                lineage: document
-                    .provenance
-                    .as_ref()
-                    .and_then(|p| p.lineage.clone()),
+                payload: crate::bundles::ArtifactPayload::InlineJson(
+                    serde_json::to_value(payload).map_err(|err| err.to_string())?,
+                ),
+                provenance: crate::bundles::ArtifactProvenance::default(),
+                lineage,
                 tags: document.tags,
             });
         }
@@ -244,7 +238,7 @@ impl ExportService for InMemoryExportService {
             bundle_id,
             bundle_name: bundle_name.to_owned(),
             created_at,
-            created_by: self.created_by.clone(),
+            created_by: Some(self.created_by.clone()),
             source_deployment_id: None,
             source_scope,
             artifact_count: artifacts.len(),
@@ -253,16 +247,19 @@ impl ExportService for InMemoryExportService {
                 description: Some(format!("Exported {} knowledge documents", bundle_name)),
                 source_system: Some("cairn-memory".to_owned()),
                 export_reason: Some("operator_export".to_owned()),
+                origin: Some("export".to_owned()),
+                production_method: Some("automated_export".to_owned()),
+                source_version: None,
             },
         })
     }
 
-    async fn export_prompts(
+    pub async fn export_prompts(
         &self,
         bundle_name: &str,
         tenant_id: &str,
         asset_ids: &[PromptAssetId],
-    ) -> Result<BundleEnvelope, Self::Error> {
+    ) -> Result<BundleEnvelope, String> {
         let created_at = Self::now_millis();
         let bundle_id =
             Self::build_bundle_id(BundleType::PromptLibraryBundle, bundle_name, created_at);
@@ -274,28 +271,23 @@ impl ExportService for InMemoryExportService {
                 .map_err(|err| err.to_string())?
                 .ok_or_else(|| format!("prompt asset not found: {}", asset_id.as_str()))?;
 
-            if asset.workspace.tenant_id.as_str() != tenant_id {
-                return Err(format!(
-                    "prompt asset {} belongs to tenant {}, not {}",
-                    asset_id.as_str(),
-                    asset.workspace.tenant_id.as_str(),
-                    tenant_id
-                ));
-            }
-
             let asset_payload = PromptAssetPayload {
                 name: asset.name.clone(),
-                kind: Self::prompt_kind(&asset.kind)?,
-                status: Self::prompt_status(asset.status.as_deref()),
-                library_scope_hint: asset.scope.clone(),
+                kind: Self::prompt_kind_string(&asset.kind),
+                status: Self::prompt_status_string(&asset.status),
+                library_scope_hint: if asset.scope.is_empty() { None } else { Some(asset.scope.clone()) },
                 metadata: HashMap::from([
                     (
                         "updated_at".to_owned(),
-                        serde_json::Value::from(asset.updated_at.unwrap_or(asset.created_at)),
+                        serde_json::Value::from(asset.updated_at),
                     ),
                     (
                         "workspace_id".to_owned(),
-                        serde_json::Value::from(asset.workspace.workspace_id.as_str()),
+                        serde_json::Value::from(asset.workspace.as_str()),
+                    ),
+                    (
+                        "tenant_id".to_owned(),
+                        serde_json::Value::from(tenant_id),
                     ),
                 ]),
             };
@@ -313,22 +305,15 @@ impl ExportService for InMemoryExportService {
                 metadata: HashMap::from([
                     (
                         "status".to_owned(),
-                        asset
-                            .status
-                            .clone()
-                            .map(serde_json::Value::from)
-                            .unwrap_or(serde_json::Value::Null),
+                        serde_json::Value::from(asset.status.as_str()),
                     ),
                     (
                         "scope".to_owned(),
-                        asset
-                            .scope
-                            .clone()
-                            .map(serde_json::Value::from)
-                            .unwrap_or(serde_json::Value::Null),
+                        serde_json::Value::from(asset.scope.as_str()),
                     ),
                 ]),
-                payload: asset_payload_json,
+                payload: crate::bundles::ArtifactPayload::InlineJson(asset_payload_json),
+                provenance: crate::bundles::ArtifactProvenance::default(),
                 lineage: None,
                 tags: vec!["prompt_asset".to_owned()],
             });
@@ -344,16 +329,12 @@ impl ExportService for InMemoryExportService {
             {
                 let version_payload = PromptVersionPayload {
                     prompt_asset_logical_id: asset.prompt_asset_id.as_str().to_owned(),
-                    version_number: version.version_number.unwrap_or(0),
-                    format: version.format.clone().unwrap_or_else(|| "text".to_owned()),
-                    content: version.content.clone().unwrap_or_default(),
+                    version_number: version.version_number,
+                    format: "text".to_owned(),
+                    content: String::new(),
                     metadata: HashMap::from([(
-                        "created_by".to_owned(),
-                        version
-                            .created_by
-                            .clone()
-                            .map(serde_json::Value::from)
-                            .unwrap_or(serde_json::Value::Null),
+                        "content_hash".to_owned(),
+                        serde_json::Value::from(version.content_hash.as_str()),
                     )]),
                 };
 
@@ -363,7 +344,7 @@ impl ExportService for InMemoryExportService {
                     artifact_display_name: format!(
                         "{} v{}",
                         asset.name,
-                        version.version_number.unwrap_or(0)
+                        version.version_number,
                     ),
                     origin_scope: Self::workspace_scope(&version.workspace),
                     origin_artifact_id: Some(version.prompt_version_id.as_str().to_owned()),
@@ -371,8 +352,11 @@ impl ExportService for InMemoryExportService {
                     source_bundle_id: bundle_id.clone(),
                     origin_timestamp: version.created_at,
                     metadata: HashMap::new(),
-                    payload: serde_json::to_value(version_payload)
-                        .map_err(|err| err.to_string())?,
+                    payload: crate::bundles::ArtifactPayload::InlineJson(
+                        serde_json::to_value(version_payload)
+                            .map_err(|err| err.to_string())?,
+                    ),
+                    provenance: crate::bundles::ArtifactProvenance::default(),
                     lineage: Some(asset.prompt_asset_id.as_str().to_owned()),
                     tags: vec!["prompt_version".to_owned()],
                 });
@@ -385,7 +369,7 @@ impl ExportService for InMemoryExportService {
             bundle_id,
             bundle_name: bundle_name.to_owned(),
             created_at,
-            created_by: self.created_by.clone(),
+            created_by: Some(self.created_by.clone()),
             source_deployment_id: None,
             source_scope: Self::tenant_scope(tenant_id),
             artifact_count: artifacts.len(),
@@ -394,7 +378,40 @@ impl ExportService for InMemoryExportService {
                 description: Some(format!("Exported prompt library {}", bundle_name)),
                 source_system: Some("cairn-memory".to_owned()),
                 export_reason: Some("operator_export".to_owned()),
+                origin: Some("export".to_owned()),
+                production_method: Some("automated_export".to_owned()),
+                source_version: None,
             },
         })
+    }
+
+}
+
+#[async_trait]
+impl ExportService for InMemoryExportService {
+    type Error = String;
+
+    async fn export(
+        &self,
+        bundle_name: &str,
+        bundle_type: crate::bundles::BundleType,
+        source_scope: &crate::bundles::SourceScope,
+    ) -> Result<crate::bundles::BundleEnvelope, Self::Error> {
+        use crate::bundles::BundleType;
+        match bundle_type {
+            BundleType::CuratedKnowledgePackBundle => {
+                let project = cairn_domain::ProjectKey::new(
+                    source_scope.tenant_id.as_deref().unwrap_or("_"),
+                    source_scope.workspace_id.as_deref().unwrap_or("_"),
+                    source_scope.project_id.as_deref().unwrap_or("_"),
+                );
+                let filters = crate::bundles::DocumentExportFilters::default();
+                self.export_documents(bundle_name, &project, &filters).await
+            }
+            BundleType::PromptLibraryBundle => {
+                let tenant_id = source_scope.tenant_id.as_deref().unwrap_or("_");
+                self.export_prompts(bundle_name, tenant_id, &[]).await
+            }
+        }
     }
 }

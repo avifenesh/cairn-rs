@@ -1,6 +1,14 @@
 use crate::tenancy::Scope;
 use serde::{Deserialize, Serialize};
 
+/// A stored default setting record (key/value with scope metadata).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DefaultSetting {
+    pub key: String,
+    pub value: serde_json::Value,
+    pub scope: Scope,
+}
+
 /// A single defaults entry at a specific scope layer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DefaultsLayer {

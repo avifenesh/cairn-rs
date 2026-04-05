@@ -9,13 +9,16 @@
 
 pub mod api_impl;
 pub mod bundles;
+pub mod entity_extraction;
 pub mod deep_search;
 pub mod deep_search_impl;
 pub mod diagnostics;
 pub mod diagnostics_impl;
+pub mod export_service_impl;
 pub mod feed_impl;
 pub mod graph_expansion;
 pub mod graph_ingest;
+pub mod import_service_impl;
 pub mod in_memory;
 pub mod ingest;
 #[cfg(feature = "postgres")]
@@ -29,7 +32,10 @@ pub mod sqlite;
 
 pub use deep_search::{DeepSearchError, DeepSearchService};
 pub use diagnostics::{DiagnosticsError, DiagnosticsService};
-pub use ingest::{IngestError, IngestService, IngestStatus, SourceType};
+pub use entity_extraction::{
+    EntityExtractionRequest, EntityExtractionResult, EntityExtractor, RegexEntityExtractor,
+};
+pub use ingest::{ChunkRecord, IngestError, IngestService, IngestStatus, SourceType};
 pub use retrieval::{RetrievalError, RetrievalMode, RetrievalService};
 
 #[cfg(test)]

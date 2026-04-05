@@ -27,14 +27,7 @@ async fn auto_checkpoint_saves_checkpoint_when_triggered_on_task_complete() {
         .unwrap();
     runs.set_checkpoint_strategy(
         &run_id,
-        CheckpointStrategy {
-            strategy_id: "strategy_auto_cp".to_owned(),
-            project: project.clone(),
-            run_id: run_id.clone(),
-            interval_ms: 60_000,
-            max_checkpoints: 5,
-            trigger_on_task_complete: true,
-        },
+        "auto_60s".to_owned(),
     )
     .await
     .unwrap();

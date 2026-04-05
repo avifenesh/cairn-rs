@@ -19,7 +19,28 @@ Owner: repo-wide truth, drift detection, acceptance gates
 
 ## Inbox
 
-- none
+- 2026-04-05 | Worker (quality sweep) → Manager | **TOTAL TESTS: 794 passing, 0 failing** across 12 crates (excluding cairn-app).
+
+  Per-crate breakdown:
+  | Crate | Tests |
+  |---|---|
+  | cairn-domain | 148 |
+  | cairn-store | 24 |
+  | cairn-runtime | 206 |
+  | cairn-evals | 42 |
+  | cairn-tools | 114 |
+  | cairn-memory | 92 |
+  | cairn-graph | 21 |
+  | cairn-api | 113 |
+  | cairn-agent | 13 |
+  | cairn-signal | 7 |
+  | cairn-channels | 7 |
+  | cairn-plugin-proto | 7 |
+  | **Total** | **794** |
+
+  **cairn-runtime** went from 175 passing to **206 passing** (31 new tests from linter-added service impls now fully passing). All 30 previously failing service tests (channel, credential, defaults, guardrail, license, notification, operator_profile, provider_binding, provider_connection, provider_pool, provider_health, quota, budget) now pass after adding real event projection handlers and real read model implementations to InMemoryStore.
+
+  **cairn-app** still has ~705 compile errors — a mix of pre-existing stub/forward-reference issues (axum extractor lifetime mismatches requiring `#[async_trait]`, ProviderBindingBootstrapService being struct not trait, InMemoryServices::new missing, etc.). worker-2 is handling the axum root cause. The other crates are fully healthy.
 
 ## Outbox
 

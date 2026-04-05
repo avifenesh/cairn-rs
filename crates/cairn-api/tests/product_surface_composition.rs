@@ -166,6 +166,15 @@ fn overview_surface_wired_through_real_types() {
         pending_approvals: 2,
         failed_runs_24h: 1,
         system_healthy: true,
+        latency_p50_ms: None,
+        latency_p95_ms: None,
+        error_rate_24h: 0.0,
+        degraded_components: vec![],
+        recent_critical_events: vec![],
+        active_providers: 0,
+        active_plugins: 0,
+        memory_doc_count: 0,
+        eval_runs_today: 0,
     };
     let json = serde_json::to_value(&overview).unwrap();
     assert_eq!(json["active_runs"], 3);

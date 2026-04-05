@@ -73,7 +73,6 @@ async fn corpus_management_filter_by_corpus_id() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "Rust memory safety".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 20,
@@ -100,7 +99,6 @@ async fn corpus_management_filter_by_corpus_id() {
         .query(RetrievalQuery {
             project: project(),
             query_text: "Rust memory safety".to_owned(),
-            query_embedding: None,
             mode: RetrievalMode::LexicalOnly,
             reranker: RerankerStrategy::None,
             limit: 20,
@@ -177,7 +175,6 @@ async fn corpus_management_api_add_document_post_ingest() {
     let q = RetrievalQuery {
         project: project(),
         query_text: "corpus add unique".to_owned(),
-        query_embedding: None,
         mode: RetrievalMode::LexicalOnly,
         reranker: RerankerStrategy::None,
         limit: 10,

@@ -21,7 +21,7 @@ async fn enrichment_returns_task_title_and_state() {
     let enrichment = StoreBackedEnrichment::new(store.clone());
 
     task_svc
-        .submit(&project(), TaskId::new("t1"), None, None)
+        .submit(&project(), TaskId::new("t1"), None, None, 0)
         .await
         .unwrap();
     task_svc
@@ -187,7 +187,7 @@ async fn task_enrichment_tracks_lifecycle_churn() {
     let p = project();
 
     task_svc
-        .submit(&p, TaskId::new("t1"), None, None)
+        .submit(&p, TaskId::new("t1"), None, None, 0)
         .await
         .unwrap();
 

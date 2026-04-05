@@ -4,9 +4,11 @@ use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
 };
+use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
-use cairn_domain::{ProjectKey, SessionId, TenantId, WorkspaceId, WorkspaceKey};
+use cairn_domain::{OperatorId, ProjectKey, SessionId, TenantId, WorkspaceId, WorkspaceKey};
+use cairn_domain::tenancy::TenantKey;
 use cairn_domain::tenancy::WorkspaceRole;
 use cairn_runtime::{SessionService, TenantService, WorkspaceMembershipService, WorkspaceService};
 use cairn_runtime::projects::ProjectService;
@@ -62,7 +64,7 @@ async fn request_tracing_run_creation_produces_spans() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register(TOKEN, TenantId::new("trace_tenant"));
+    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("trace_tenant") });
     setup_project(&app, &runtime).await;
 
     // POST /v1/runs with a custom X-Trace-Id header.
@@ -145,7 +147,7 @@ async fn request_tracing_x_trace_id_header_set_on_response() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register(TOKEN, TenantId::new("default_tenant"));
+    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
 
     // Any request should get X-Trace-Id back.
     let resp = app

@@ -62,7 +62,7 @@ async fn event_log_compaction_retains_state() {
     assert_eq!(task_before.state, TaskState::Leased);
 
     // Compact: retain last 10 events
-    let report = store.compact_event_log(&tenant_id, 10);
+    let report = store.compact_event_log(&tenant_id, Some(10));
 
     // Assert: 10 retained + 1 compaction event = 11 total
     let total_after = store.read_stream(None, 10_000).await.unwrap().len() as u64;
@@ -72,8 +72,8 @@ async fn event_log_compaction_retains_state() {
     );
 
     // Assert compaction report
-    assert_eq!(report.events_before, total_before);
-    assert_eq!(report.events_after, 10);
+    assert_eq!(report["events_before"].as_u64().unwrap(), total_before);
+    assert_eq!(report["events_after"].as_u64().unwrap(), 10);
 
     // The last 10 events should include the filler runs (events 41-50).
     // final_run and final_task were created early (events ~5-7) so they are

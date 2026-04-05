@@ -16,6 +16,10 @@ fn make_request(doc_id: &str, src_id: &str, content: &str, project: ProjectKey) 
         source_type: SourceType::PlainText,
         project,
         content: content.to_owned(),
+        tags: vec![],
+        corpus_id: None,
+        bundle_source_id: None,
+        import_id: None,
     }
 }
 

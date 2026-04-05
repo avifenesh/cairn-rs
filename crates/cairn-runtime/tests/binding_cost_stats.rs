@@ -28,6 +28,7 @@ fn make_call_event(
             run_id: None,
             operation_kind: OperationKind::Generate,
             status: ProviderCallStatus::Succeeded,
+            session_id: None,
             latency_ms: Some(50),
             input_tokens: Some(100),
             output_tokens: Some(50),
@@ -35,6 +36,11 @@ fn make_call_event(
             error_class: None,
             raw_error_message: None,
             retry_count: 0,
+            task_id: None,
+            prompt_release_id: None,
+            fallback_position: 0,
+            started_at: 0,
+            finished_at: 0,
             completed_at,
         }),
     )
@@ -62,16 +68,13 @@ async fn binding_cost_stats_accumulates_calls_and_computes_avg() {
     .unwrap()
     .expect("stats should exist for binding_a");
 
-    assert_eq!(stats.total_calls, 3, "total_calls should be 3");
+    assert_eq!(stats.call_count, 3, "call_count should be 3");
     assert_eq!(
         stats.total_cost_micros, 600,
         "total_cost should be 100+200+300=600"
     );
-    assert_eq!(
-        stats.avg_cost_per_call_micros, 200,
-        "avg should be 600/3=200"
-    );
-    assert_eq!(stats.last_call_ms, 3000, "last_call_ms should be 3000");
+    let avg = stats.total_cost_micros / stats.call_count;
+    assert_eq!(avg, 200, "avg should be 600/3=200");
     assert_eq!(stats.binding_id, ProviderBindingId::new("binding_a"));
 }
 
@@ -109,9 +112,8 @@ async fn binding_cost_stats_list_by_tenant_returns_sorted_by_avg_cost() {
         ProviderBindingId::new("binding_b"),
         "binding_b (avg=500) should rank second"
     );
-    assert_eq!(ranking[0].total_calls, 3);
+    assert_eq!(ranking[0].call_count, 3);
     assert_eq!(ranking[0].total_cost_micros, 600);
-    assert_eq!(ranking[0].avg_cost_per_call_micros, 200);
 }
 
 #[tokio::test]

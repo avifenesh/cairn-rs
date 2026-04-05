@@ -98,7 +98,7 @@ where
                 tenant_id: connection.tenant_id.clone(),
                 connection_id: connection.provider_connection_id.clone(),
                 status: checked_status,
-                latency_ms,
+                latency_ms: Some(latency_ms),
                 checked_at_ms,
             },
         ))];
@@ -414,7 +414,7 @@ mod tests {
                 .unwrap();
         assert!(!primary_binding.active);
 
-        let resolver = SimpleRouteResolver::new(store.clone(), store.clone());
+        let resolver = SimpleRouteResolver::with_store(store.clone(), store.clone());
         let decision = resolver
             .resolve(
                 &project,

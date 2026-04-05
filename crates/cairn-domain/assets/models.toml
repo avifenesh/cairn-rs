@@ -1,0 +1,163 @@
+# Bundled model catalog for cairn-rs.
+# User overrides go in ~/.cairn/models.toml — same format, user entries win on id conflict.
+#
+# Required per entry: id, provider, display_name, context_len.
+# Optional with defaults: cost_type="metered", max_tokens=4096, reasoning=false,
+#   supports_tools=true, supports_streaming=true, supports_json_mode=false,
+#   cache_read_per_1m=0, cache_write_per_1m=0, min_cacheable_tokens=1024,
+#   enabled=true.
+
+# --- OpenAI ---
+
+[[models]]
+id              = "gpt-4o"
+provider        = "openai"
+display_name    = "GPT-4o"
+tier            = "brain"
+tags            = ["chat", "code", "vision"]
+context_len     = 128000
+cost_in         = 2.50
+cost_out        = 10.00
+cost_type       = "metered"
+enabled         = true
+max_tokens      = 16384
+cache_read_per_1m  = 1.25
+cache_write_per_1m = 0.0
+reasoning       = false
+input_modalities  = ["text", "image"]
+supports_json_mode = true
+
+[[models]]
+id              = "gpt-4o-mini"
+provider        = "openai"
+display_name    = "GPT-4o Mini"
+tier            = "light"
+tags            = ["chat", "fast", "extraction"]
+context_len     = 128000
+cost_in         = 0.15
+cost_out        = 0.60
+cost_type       = "metered"
+enabled         = true
+max_tokens      = 16384
+cache_read_per_1m  = 0.075
+cache_write_per_1m = 0.0
+reasoning       = false
+input_modalities  = ["text", "image"]
+supports_json_mode = true
+
+# --- Anthropic (direct API) ---
+
+[[models]]
+id              = "claude-opus-4-6"
+provider        = "anthropic"
+display_name    = "Claude Opus 4.6"
+tier            = "brain"
+tags            = ["chat", "code", "reasoning"]
+context_len     = 1000000
+cost_in         = 15.0
+cost_out        = 75.0
+cost_type       = "metered"
+enabled         = true
+max_tokens      = 32768
+cache_read_per_1m  = 1.50
+cache_write_per_1m = 3.75
+reasoning       = true
+input_modalities  = ["text", "image"]
+supports_json_mode = false
+
+[[models]]
+id              = "claude-sonnet-4-6"
+provider        = "anthropic"
+display_name    = "Claude Sonnet 4.6"
+tier            = "mid"
+tags            = ["chat", "code"]
+context_len     = 1000000
+cost_in         = 3.0
+cost_out        = 15.0
+cost_type       = "metered"
+enabled         = true
+max_tokens      = 16384
+cache_read_per_1m  = 0.30
+cache_write_per_1m = 0.75
+reasoning       = false
+input_modalities  = ["text", "image"]
+supports_json_mode = false
+
+[[models]]
+id              = "claude-haiku-4-5"
+provider        = "anthropic"
+display_name    = "Claude Haiku 4.5"
+tier            = "light"
+tags            = ["fast", "extraction"]
+context_len     = 1000000
+cost_in         = 0.25
+cost_out        = 1.25
+cost_type       = "metered"
+enabled         = true
+max_tokens      = 4096
+cache_read_per_1m  = 0.025
+cache_write_per_1m = 0.063
+reasoning       = false
+input_modalities  = ["text", "image"]
+
+# --- Bedrock: Claude ---
+
+[[models]]
+id              = "us.anthropic.claude-sonnet-4-6"
+provider        = "bedrock"
+display_name    = "Claude Sonnet 4.6 (Bedrock)"
+tier            = "mid"
+tags            = ["chat", "code"]
+context_len     = 1000000
+cost_in         = 3.0
+cost_out        = 15.0
+cost_type       = "metered"
+enabled         = true
+max_tokens      = 16384
+cache_read_per_1m  = 0.30
+cache_write_per_1m = 0.75
+input_modalities  = ["text", "image"]
+
+[[models]]
+id              = "us.anthropic.claude-haiku-4-5-20251001"
+provider        = "bedrock"
+display_name    = "Claude Haiku 4.5 (Bedrock)"
+tier            = "light"
+tags            = ["fast", "extraction"]
+context_len     = 1000000
+cost_in         = 0.25
+cost_out        = 1.25
+cost_type       = "metered"
+enabled         = true
+max_tokens      = 4096
+cache_read_per_1m  = 0.025
+cache_write_per_1m = 0.063
+input_modalities  = ["text", "image"]
+
+# --- OpenRouter: free tier ---
+
+[[models]]
+id           = "meta-llama/llama-3.3-70b-instruct:free"
+provider     = "openrouter"
+display_name = "Llama 3.3 70B Instruct (free)"
+tier         = "mid"
+tags         = ["chat", "free"]
+context_len  = 65536
+cost_in      = 0.0
+cost_out     = 0.0
+cost_type    = "free"
+enabled      = true
+max_tokens   = 8192
+
+[[models]]
+id           = "google/gemma-3-27b-it:free"
+provider     = "openrouter"
+display_name = "Gemma 3 27B (free)"
+tier         = "mid"
+tags         = ["chat", "free"]
+context_len  = 131072
+cost_in      = 0.0
+cost_out     = 0.0
+cost_type    = "free"
+enabled      = true
+max_tokens   = 8192

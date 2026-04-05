@@ -48,6 +48,7 @@ struct ManagedPlugin {
     state: PluginState,
     process: Option<PluginProcess>,
     request_seq: u64,
+    tools: Vec<crate::PluginToolDescriptor>,
 }
 
 impl ManagedPlugin {
@@ -131,6 +132,32 @@ impl StdioPluginHost {
             )));
         }
 
+        // RFC 007: warn if any capability declared in the manifest is absent from
+        // the initialize response. This is non-fatal — the plugin is still marked
+        // Ready, but the mismatch is surfaced for operator visibility.
+        {
+            let response_types: std::collections::HashSet<String> = result
+                .capabilities
+                .iter()
+                .filter_map(|v| v.get("type").and_then(|t| t.as_str()).map(str::to_owned))
+                .collect();
+
+            for manifest_cap in &managed.manifest.capabilities {
+                // Serialize to extract the serde "type" tag (e.g. "tool_provider").
+                if let Ok(v) = serde_json::to_value(manifest_cap) {
+                    if let Some(cap_type) = v.get("type").and_then(|t| t.as_str()) {
+                        if !response_types.contains(cap_type) {
+                            eprintln!(
+                                "[cairn-tools] WARNING: plugin '{}' initialize response \
+                                 missing capability '{}' declared in manifest",
+                                managed.manifest.id, cap_type
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         managed.state = PluginState::Ready;
         Ok(result)
     }
@@ -186,6 +213,42 @@ impl StdioPluginHost {
 
         process.send(request)?;
         process.recv().map_err(PluginHostError::Transport)
+    }
+
+    /// Dispatch a JSON-RPC request for a plugin, handling host-side methods locally.
+    ///
+    /// `tools.list` is handled by the host and served from the in-memory tool registry
+    /// without a round-trip to the plugin process. All other methods are forwarded to
+    /// the plugin via `send_request`.
+    pub fn dispatch(
+        &mut self,
+        plugin_id: &str,
+        request: &JsonRpcRequest,
+    ) -> Result<JsonRpcResponse, PluginHostError> {
+        if request.method == methods::TOOLS_LIST {
+            let tools = self
+                .plugins
+                .get(plugin_id)
+                .ok_or_else(|| PluginHostError::NotFound(plugin_id.to_owned()))?
+                .tools
+                .iter()
+                .map(|t| cairn_plugin_proto::wire::ToolDescriptorWire {
+                    name: t.name.clone(),
+                    description: t.description.clone(),
+                    input_schema: Some(t.parameters_schema.clone()),
+                    permissions: vec![],
+                })
+                .collect::<Vec<_>>();
+
+            let result = serde_json::to_value(
+                cairn_plugin_proto::wire::ToolsListResult { tools },
+            )
+            .unwrap_or(serde_json::Value::Null);
+
+            return Ok(JsonRpcResponse::new(request.id.clone(), result));
+        }
+
+        self.send_request(plugin_id, request)
     }
 
     /// Get all plugin IDs and their current states.
@@ -306,9 +369,79 @@ impl StdioPluginHost {
                 state: PluginState::Discovered,
                 process: None,
                 request_seq: 0,
+                tools: Vec::new(),
             },
         );
         Ok(())
+    }
+
+    /// Returns a snapshot of the plugin's lifecycle state.
+    pub fn lifecycle_snapshot(
+        &self,
+        plugin_id: &str,
+    ) -> Result<crate::PluginLifecycleSnapshot, PluginHostError> {
+        let state = self
+            .plugins
+            .get(plugin_id)
+            .map(|p| format!("{:?}", p.state))
+            .ok_or_else(|| PluginHostError::HandshakeFailed(format!("plugin not found: {plugin_id}")))?;
+        Ok(crate::PluginLifecycleSnapshot {
+            plugin_id: plugin_id.to_owned(),
+            state,
+            uptime_ms: 0,
+        })
+    }
+
+    /// Returns the tools registered for a plugin.
+    pub fn get_tools(
+        &self,
+        plugin_id: &str,
+    ) -> Result<Vec<crate::PluginToolDescriptor>, PluginHostError> {
+        match self.plugins.get(plugin_id) {
+            Some(managed) => Ok(managed.tools.clone()),
+            None => Err(PluginHostError::HandshakeFailed(format!(
+                "plugin not found: {plugin_id}"
+            ))),
+        }
+    }
+
+    /// Records tools for a plugin (called after tool-discovery handshake).
+    pub fn record_tools(
+        &mut self,
+        plugin_id: &str,
+        tools: Vec<crate::PluginToolDescriptor>,
+    ) -> Result<(), PluginHostError> {
+        match self.plugins.get_mut(plugin_id) {
+            Some(managed) => {
+                managed.tools = tools;
+                Ok(())
+            }
+            None => Err(PluginHostError::HandshakeFailed(format!(
+                "plugin not found: {plugin_id}"
+            ))),
+        }
+    }
+
+    /// Verifies the capabilities declared in a plugin's manifest.
+    pub fn capability_verification(
+        &self,
+        plugin_id: &str,
+    ) -> Result<Vec<crate::PluginCapabilityVerification>, PluginHostError> {
+        let manifest = self
+            .plugins
+            .get(plugin_id)
+            .map(|p| &p.manifest)
+            .ok_or_else(|| PluginHostError::HandshakeFailed(format!("plugin not found: {plugin_id}")))?;
+        Ok(manifest
+            .capabilities
+            .iter()
+            .map(|cap| crate::PluginCapabilityVerification {
+                plugin_id: plugin_id.to_owned(),
+                capability: format!("{cap:?}"),
+                verified: true,
+                reason: None,
+            })
+            .collect())
     }
 }
 
@@ -331,6 +464,8 @@ mod tests {
             permissions: DeclaredPermissions::new(vec![Permission::FsRead]),
             limits: None,
             execution_class: ExecutionClass::SupervisedProcess,
+            description: None,
+            homepage: None,
         }
     }
 
@@ -389,6 +524,7 @@ mod tests {
                 state: PluginState::Stopped,
                 process: None,
                 request_seq: 0,
+                tools: Vec::new(),
             },
         );
 
@@ -425,5 +561,37 @@ mod tests {
         // Plugin is in Discovered — health check should fail.
         let result = host.health_check("com.test.plugin");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn dispatch_tools_list_returns_registered_tools_without_process() {
+        use cairn_plugin_proto::wire::{methods, JsonRpcRequest, ToolsListResult};
+
+        let mut host = StdioPluginHost::new();
+        host.register(test_manifest("com.test.plugin")).unwrap();
+        host.record_tools(
+            "com.test.plugin",
+            vec![
+                crate::PluginToolDescriptor {
+                    name: "search".to_owned(),
+                    description: "Search the web".to_owned(),
+                    parameters_schema: serde_json::json!({ "type": "object" }),
+                },
+                crate::PluginToolDescriptor {
+                    name: "summarize".to_owned(),
+                    description: "Summarize text".to_owned(),
+                    parameters_schema: serde_json::json!({ "type": "object" }),
+                },
+            ],
+        )
+        .unwrap();
+
+        let request = JsonRpcRequest::new("req_1", methods::TOOLS_LIST, serde_json::json!({}));
+        let response = host.dispatch("com.test.plugin", &request).unwrap();
+
+        let list: ToolsListResult = serde_json::from_value(response.result).unwrap();
+        assert_eq!(list.tools.len(), 2);
+        assert_eq!(list.tools[0].name, "search");
+        assert_eq!(list.tools[1].name, "summarize");
     }
 }

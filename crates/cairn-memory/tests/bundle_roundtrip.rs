@@ -42,12 +42,13 @@ async fn bundle_documents_ingest_through_existing_pipeline() {
                 source_bundle_id: "pack_onboard".to_owned(),
                 origin_timestamp: 900,
                 metadata: HashMap::new(),
-                payload: serde_json::json!({
+                payload: cairn_memory::bundles::ArtifactPayload::InlineJson(serde_json::json!({
                     "knowledge_pack_logical_id": "pack_onboard",
                     "document_name": "Setup Guide",
                     "source_type": "text_plain",
                     "content": {"kind": "inline_text", "text": "Install the CLI with cargo install cairn-cli."}
-                }),
+                })),
+                provenance: cairn_memory::bundles::ArtifactProvenance::default(),
                 lineage: None,
                 tags: vec!["onboarding".to_owned()],
             },
@@ -65,12 +66,13 @@ async fn bundle_documents_ingest_through_existing_pipeline() {
                 source_bundle_id: "pack_onboard".to_owned(),
                 origin_timestamp: 950,
                 metadata: HashMap::new(),
-                payload: serde_json::json!({
+                payload: cairn_memory::bundles::ArtifactPayload::InlineJson(serde_json::json!({
                     "knowledge_pack_logical_id": "pack_onboard",
                     "document_name": "FAQ",
                     "source_type": "text_markdown",
                     "content": {"kind": "inline_text", "text": "# FAQ\n\nQ: How do I reset my password?\nA: Use the forgot password link."}
-                }),
+                })),
+                provenance: cairn_memory::bundles::ArtifactProvenance::default(),
                 lineage: None,
                 tags: vec!["onboarding".to_owned()],
             },
@@ -79,6 +81,9 @@ async fn bundle_documents_ingest_through_existing_pipeline() {
             description: Some("Onboarding knowledge pack".to_owned()),
             source_system: None,
             export_reason: None,
+            origin: None,
+            production_method: None,
+            source_version: None,
         },
     };
 
@@ -94,8 +99,9 @@ async fn bundle_documents_ingest_through_existing_pipeline() {
     let project = ProjectKey::new("acme", "eng", "support");
 
     for artifact in &parsed.artifacts {
-        let payload = &artifact.payload;
-        let content = payload["content"]["text"].as_str().unwrap_or("");
+        let payload = artifact.payload.as_value();
+        let content = payload["content"]["text"].as_str().unwrap_or("").to_owned();
+        let content = content.as_str();
         let source_type = match payload["source_type"].as_str().unwrap_or("") {
             "text_plain" => SourceType::PlainText,
             "text_markdown" => SourceType::Markdown,
@@ -109,6 +115,10 @@ async fn bundle_documents_ingest_through_existing_pipeline() {
                 source_type,
                 project: project.clone(),
                 content: content.to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
             })
             .await
             .unwrap();

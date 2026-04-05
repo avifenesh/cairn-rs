@@ -25,6 +25,8 @@ pub enum NodeKind {
     ChannelTarget,
     Signal,
     IngestJob,
+    RouteDecision,
+    ProviderCall,
 }
 
 /// Graph edge categories (RFC 004).
@@ -47,6 +49,7 @@ pub enum EdgeKind {
     RoutedTo,
     UsedPrompt,
     UsedTool,
+    CalledProvider,
 }
 
 /// A typed graph node with a unique identity.

@@ -1,0 +1,32 @@
+# Build artifacts — largest directory, never needed in Docker context.
+target/
+
+# Version control — not needed for build.
+.git/
+.gitignore
+.gitattributes
+
+# IDE and editor files.
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# CI / local tooling.
+.github/
+.coordination/
+*.md
+
+# Test fixtures and coverage reports.
+coverage/
+lcov.info
+
+# Local environment files (may contain secrets).
+.env
+.env.*
+*.local
+
+# Docker files themselves (avoid recursive copy).
+Dockerfile
+.dockerignore

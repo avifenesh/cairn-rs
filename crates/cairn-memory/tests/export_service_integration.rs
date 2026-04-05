@@ -60,13 +60,13 @@ async fn export_documents_builds_curated_bundle_with_artifacts() {
     assert_eq!(bundle.bundle_type, BundleType::CuratedKnowledgePackBundle);
     assert_eq!(bundle.artifact_count, 2);
     assert_eq!(bundle.artifacts.len(), 2);
-    assert_eq!(bundle.created_by, "operator");
+    assert_eq!(bundle.created_by, Some("operator".to_owned()));
     assert!(bundle.bundle_id.contains("knowledge_pack"));
 
     for artifact in &bundle.artifacts {
         assert!(!artifact.payload.is_null());
         let payload: KnowledgeDocumentPayload =
-            serde_json::from_value(artifact.payload.clone()).unwrap();
+            serde_json::from_value(artifact.payload.as_value()).unwrap();
         let text = match payload.content {
             cairn_memory::bundles::DocumentContent::InlineText { text } => text,
             other => panic!("expected inline text export payload, got {other:?}"),

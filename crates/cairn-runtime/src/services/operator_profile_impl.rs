@@ -5,12 +5,23 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cairn_domain::org::{validate_operator_preferences, OperatorProfile};
 use cairn_domain::*;
-use cairn_store::projections::{OperatorProfileReadModel, TenantReadModel};
+use cairn_store::projections::{OperatorProfileReadModel, OperatorProfileRecord, TenantReadModel};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
 use crate::error::RuntimeError;
 use crate::operator_profiles::OperatorProfileService;
+
+fn record_to_profile(r: OperatorProfileRecord) -> OperatorProfile {
+    OperatorProfile {
+        operator_id: r.operator_id,
+        tenant_id: r.tenant_id,
+        display_name: r.display_name,
+        email: r.email.unwrap_or_default(),
+        role: serde_json::from_str(&format!("\"{}\"", r.role)).unwrap_or_default(),
+        preferences: serde_json::Value::Null,
+    }
+}
 
 pub struct OperatorProfileServiceImpl<S> {
     store: Arc<S>,
@@ -63,15 +74,16 @@ where
         ));
         self.store.append(&[event]).await?;
 
-        OperatorProfileReadModel::get(self.store.as_ref(), &profile_id)
+        OperatorProfileReadModel::get(self.store.as_ref(),&profile_id)
             .await?
+            .map(record_to_profile)
             .ok_or_else(|| {
                 RuntimeError::Internal("operator profile not found after create".to_owned())
             })
     }
 
     async fn get(&self, profile_id: &OperatorId) -> Result<Option<OperatorProfile>, RuntimeError> {
-        Ok(OperatorProfileReadModel::get(self.store.as_ref(), profile_id).await?)
+        Ok(OperatorProfileReadModel::get(self.store.as_ref(),profile_id).await?.map(record_to_profile))
     }
 
     async fn list(
@@ -81,8 +93,11 @@ where
         offset: usize,
     ) -> Result<Vec<OperatorProfile>, RuntimeError> {
         Ok(
-            OperatorProfileReadModel::list_by_tenant(self.store.as_ref(), tenant_id, limit, offset)
-                .await?,
+            OperatorProfileReadModel::list_by_tenant(self.store.as_ref(),tenant_id, limit, offset)
+                .await?
+                .into_iter()
+                .map(record_to_profile)
+                .collect(),
         )
     }
 
@@ -92,7 +107,7 @@ where
         display_name: String,
         email: String,
     ) -> Result<OperatorProfile, RuntimeError> {
-        let existing = OperatorProfileReadModel::get(self.store.as_ref(), profile_id)
+        let existing = OperatorProfileReadModel::get(self.store.as_ref(),profile_id)
             .await?
             .ok_or_else(|| RuntimeError::NotFound {
                 entity: "operator_profile",
@@ -103,14 +118,15 @@ where
             OperatorProfileUpdated {
                 tenant_id: existing.tenant_id.clone(),
                 profile_id: profile_id.clone(),
-                display_name,
-                email,
+                display_name: Some(display_name),
+                email: Some(email),
             },
         ));
         self.store.append(&[event]).await?;
 
-        OperatorProfileReadModel::get(self.store.as_ref(), profile_id)
+        OperatorProfileReadModel::get(self.store.as_ref(),profile_id)
             .await?
+            .map(record_to_profile)
             .ok_or_else(|| {
                 RuntimeError::Internal("operator profile not found after update".to_owned())
             })
@@ -121,34 +137,31 @@ where
         profile_id: &OperatorId,
         preferences: serde_json::Value,
     ) -> Result<OperatorProfile, RuntimeError> {
-        // RFC 008: reject preferences that would silently affect runtime outcomes.
         validate_operator_preferences(&preferences).map_err(|reason| {
             RuntimeError::Validation { reason }
         })?;
 
-        let existing = OperatorProfileReadModel::get(self.store.as_ref(), profile_id)
+        let existing = OperatorProfileReadModel::get(self.store.as_ref(),profile_id)
             .await?
             .ok_or_else(|| RuntimeError::NotFound {
                 entity: "operator_profile",
                 id: profile_id.to_string(),
             })?;
 
-        // Store preferences by emitting an update event with the same display/email
-        // but different preferences (preferences are stored in the in-memory projection).
         let event = make_envelope(RuntimeEvent::OperatorProfileUpdated(
             OperatorProfileUpdated {
                 tenant_id: existing.tenant_id.clone(),
                 profile_id: profile_id.clone(),
-                display_name: existing.display_name.clone(),
+                display_name: Some(existing.display_name.clone()),
                 email: existing.email.clone(),
             },
         ));
         self.store.append(&[event]).await?;
 
-        // Return the profile with updated preferences (in-memory store merges them).
-        let mut updated = OperatorProfileReadModel::get(self.store.as_ref(), profile_id)
+        let record = OperatorProfileReadModel::get(self.store.as_ref(),profile_id)
             .await?
             .ok_or_else(|| RuntimeError::Internal("profile not found after set_preferences".into()))?;
+        let mut updated = record_to_profile(record);
         updated.preferences = preferences;
         Ok(updated)
     }

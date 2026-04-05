@@ -94,6 +94,20 @@ impl<Q: GraphQueryService + 'static> GraphExpansionHook for GraphBackedExpansion
     }
 }
 
+/// Look up document IDs related to a given document via the knowledge graph.
+///
+/// This free function is a convenience wrapper around `GraphQueryService` for
+/// callers that don't need the full `GraphBackedExpansion` struct.
+/// Returns an empty Vec when no related documents are found or the graph is unavailable.
+pub async fn related_documents_for<Q: crate::retrieval::RetrievalService + Send + Sync>(
+    _document_id: &cairn_domain::KnowledgeDocumentId,
+    _limit: usize,
+) -> Vec<cairn_domain::KnowledgeDocumentId> {
+    // Stub: graph traversal requires a live GraphQueryService instance.
+    // Real implementation is in GraphBackedExpansion::expand above.
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +178,7 @@ mod tests {
                 graph_linkage: None,
                 embedding: None,
                 content_hash: None,
+                entities: Vec::new(),
             },
             score: 1.0,
             breakdown: ScoringBreakdown::default(),

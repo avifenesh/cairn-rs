@@ -39,6 +39,10 @@ async fn setup() -> (
                       <p>Step 2: Push to the registry with <code>docker push</code>.</p>\
                       <p>Step 3: Apply the Kubernetes manifest with <code>kubectl apply</code>.</p>"
                 .to_owned(),
+            tags: vec![],
+            corpus_id: None,
+            bundle_source_id: None,
+            import_id: None,
         })
         .await
         .unwrap();
@@ -56,6 +60,10 @@ async fn setup() -> (
                       ## Kubernetes pod crashes\n\n\
                       Use `kubectl logs` and `kubectl describe pod` to diagnose crash loops."
                 .to_owned(),
+            tags: vec![],
+            corpus_id: None,
+            bundle_source_id: None,
+            import_id: None,
         })
         .await
         .unwrap();

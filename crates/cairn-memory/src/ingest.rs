@@ -12,6 +12,7 @@ pub enum SourceType {
     Markdown,
     Html,
     StructuredJson,
+    JsonStructured,
     KnowledgePack,
 }
 
@@ -45,6 +46,12 @@ pub struct ChunkRecord {
     pub graph_linkage: Option<String>,
     pub embedding: Option<Vec<f32>>,
     pub content_hash: Option<String>,
+    /// Named entities extracted from this chunk by the entity extraction pipeline.
+    ///
+    /// Populated during ingest when an `EntityExtractor` is configured.
+    /// Contains persons, organizations, and locations in a flat deduplicated list.
+    #[serde(default)]
+    pub entities: Vec<String>,
 }
 
 /// Request to ingest a document into the owned retrieval pipeline.
@@ -55,6 +62,14 @@ pub struct IngestRequest {
     pub source_type: SourceType,
     pub project: ProjectKey,
     pub content: String,
+    /// Optional stable import ID for idempotent re-ingestion.
+    pub import_id: Option<String>,
+    /// Corpus or collection this document belongs to.
+    pub corpus_id: Option<String>,
+    /// Source bundle ID when ingested via a bundle import.
+    pub bundle_source_id: Option<String>,
+    /// Tags attached to the document for filtering.
+    pub tags: Vec<String>,
 }
 
 /// Request to ingest a curated knowledge pack (RFC 013 bundle).
@@ -112,6 +127,28 @@ impl std::fmt::Display for IngestError {
 }
 
 impl std::error::Error for IngestError {}
+
+/// Read model for tracking document version history within a source.
+///
+/// Enables operators to see how a document's content has evolved across
+/// re-ingestion events.
+#[async_trait::async_trait]
+pub trait DocumentVersionReadModel: Send + Sync {
+    async fn list_versions(
+        &self,
+        document_id: &cairn_domain::KnowledgeDocumentId,
+        limit: usize,
+    ) -> Result<Vec<DocumentVersion>, IngestError>;
+}
+
+/// One version snapshot of an ingested document.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct DocumentVersion {
+    pub document_id: cairn_domain::KnowledgeDocumentId,
+    pub version: u32,
+    pub content_hash: String,
+    pub ingested_at_ms: u64,
+}
 
 #[cfg(test)]
 mod tests {
