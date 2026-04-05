@@ -36,6 +36,7 @@ const LogsPage           = lazy(() => import('./pages/LogsPage').then(m => ({ de
 const AuditLogPage       = lazy(() => import('./pages/AuditLogPage').then(m => ({ default: m.AuditLogPage })));
 const SettingsPage       = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const ProfilePage        = lazy(() => import('./pages/ProfilePage').then(m => ({ default: m.ProfilePage })));
+import { NotFoundPage } from './pages/NotFoundPage';
 
 import { defaultApi, getStoredToken, clearStoredToken, ApiError } from './lib/api';
 import type { NavPage } from './components/Sidebar';
@@ -63,6 +64,9 @@ function Guarded({ name, children }: { name: string; children: React.ReactNode }
 }
 
 function renderRoute(route: Route): React.ReactNode {
+  if (route.kind === 'not-found') {
+    return <NotFoundPage />;
+  }
   if (route.kind === 'run-detail') {
     return (
       <Guarded name="Run Detail">
@@ -128,7 +132,7 @@ function renderRoute(route: Route): React.ReactNode {
       case 'settings':    return <SettingsPage />;
       case 'profile':     return <ProfilePage />;
       case 'playground':  return <PlaygroundPage />;
-      default:            return null;
+      default:            return <NotFoundPage />;
     }
   })();
 

@@ -298,6 +298,18 @@ function PreferencesSection() {
           onChange={(v) => setPrefs({ compactMode: v })}
         />
       </Row>
+      <Row
+        label="Auto-refresh"
+        hint="Master switch for per-page automatic data polling. When off, pages only update on manual refresh."
+      >
+        <Toggle
+          checked={prefs.autoRefresh ?? true}
+          onChange={(v) => {
+            setPrefs({ autoRefresh: v });
+            try { localStorage.setItem('cairn_refresh_global', String(v)); } catch { /* ignore */ }
+          }}
+        />
+      </Row>
     </SectionCard>
   );
 }

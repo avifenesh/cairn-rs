@@ -22,7 +22,8 @@ export type Route =
   | { kind: 'page'; page: NavPage }
   | { kind: 'run-detail'; runId: string }
   | { kind: 'session-detail'; sessionId: string }
-  | { kind: 'eval-compare'; leftId: string; rightId: string };
+  | { kind: 'eval-compare'; leftId: string; rightId: string }
+  | { kind: 'not-found'; hash: string };
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#/, '');
@@ -38,8 +39,11 @@ export function parseRoute(hash: string): Route {
       return { kind: 'eval-compare', leftId: parts[0], rightId: parts[1] };
     }
   }
+  // Empty hash → dashboard; known page → page; anything else → 404
+  if (h === '') return { kind: 'page', page: 'dashboard' };
   const page = h as NavPage;
-  return { kind: 'page', page: VALID_PAGES.includes(page) ? page : 'dashboard' };
+  if (VALID_PAGES.includes(page)) return { kind: 'page', page };
+  return { kind: 'not-found', hash: h };
 }
 
 export function currentRoute(): Route {
@@ -134,6 +138,7 @@ export function buildBreadcrumbs(route: Route): BreadcrumbItem[] {
       { label: shortId(route.sessionId) },
     ];
   }
+  if (route.kind === 'not-found') return [{ label: 'Not Found' }];
   return [];
 }
 
@@ -141,6 +146,7 @@ function activePage(route: Route): NavPage {
   if (route.kind === 'run-detail')    return 'runs';
   if (route.kind === 'session-detail') return 'sessions';
   if (route.kind === 'eval-compare')  return 'evals';
+  if (route.kind === 'not-found')     return 'dashboard';
   return route.page;
 }
 

@@ -15,6 +15,7 @@ import {
   Pause,
   Timer,
   Radio,
+  RefreshCw,
 } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
