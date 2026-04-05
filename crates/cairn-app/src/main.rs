@@ -282,15 +282,17 @@ const LOG_RING_SIZE: usize = 2_000;
 /// One structured request log entry.
 #[derive(Clone, Serialize)]
 pub struct LogEntry {
-    pub timestamp:  String,
-    pub level:      &'static str,
-    pub message:    String,
-    pub request_id: String,
-    pub method:     String,
-    pub path:       String,
-    pub query:      Option<String>,
-    pub status:     u16,
-    pub latency_ms: u64,
+    pub timestamp:          String,
+    pub level:              &'static str,
+    pub message:            String,
+    pub request_id:         String,
+    pub method:             String,
+    pub path:               String,
+    pub query:              Option<String>,
+    pub status:             u16,
+    pub latency_ms:         u64,
+    /// Wall-clock start time in Unix nanoseconds.  Used for OTLP span export.
+    pub start_time_unix_ns: u64,
 }
 
 /// Fixed-capacity FIFO ring buffer of structured log entries.
@@ -762,11 +764,15 @@ async fn metrics_middleware(
 ) -> Response {
     use uuid::Uuid;
 
-    let request_id = Uuid::new_v4().to_string();
-    let method     = request.method().to_string();
-    let path       = request.uri().path().to_owned();
-    let query      = request.uri().query().map(|q| q.to_owned());
-    let start      = std::time::Instant::now();
+    let request_id         = Uuid::new_v4().to_string();
+    let method             = request.method().to_string();
+    let path               = request.uri().path().to_owned();
+    let query              = request.uri().query().map(|q| q.to_owned());
+    let start              = std::time::Instant::now();
+    let start_time_unix_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
 
     let mut response   = next.run(request).await;
     let latency_ms = start.elapsed().as_millis() as u64;
@@ -838,13 +844,14 @@ async fn metrics_middleware(
             )
         },
         level,
-        message:    format!("{method} {path} → {status}"),
+        message:            format!("{method} {path} → {status}"),
         request_id,
         method,
         path,
         query,
         status,
         latency_ms,
+        start_time_unix_ns,
     };
     if let Ok(mut log) = state.request_log.write() {
         log.push(entry);
@@ -2740,6 +2747,64 @@ async fn list_request_logs_handler(
     })))
 }
 
+// ── Admin snapshot / restore ──────────────────────────────────────────────────
+
+/// `POST /v1/admin/snapshot` — export the full InMemory event log as a
+/// downloadable JSON attachment.
+///
+/// The snapshot contains all events in position order. Restoring it via
+/// `POST /v1/admin/restore` will replay every event and rebuild all
+/// projections from scratch, giving a consistent store state.
+async fn admin_snapshot_handler(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let snap = state.runtime.store.dump_events();
+    let json = match serde_json::to_vec_pretty(&snap) {
+        Ok(b)  => b,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::response::Response::builder()
+                    .status(500)
+                    .body(axum::body::Body::from(e.to_string()))
+                    .unwrap(),
+            ).into_response();
+        }
+    };
+    let filename = format!(
+        "cairn-snapshot-{}.json",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    );
+    axum::response::Response::builder()
+        .status(200)
+        .header("Content-Type", "application/json; charset=utf-8")
+        .header("Content-Disposition", format!("attachment; filename=\"{filename}\""))
+        .header("X-Event-Count", snap.event_count.to_string())
+        .body(axum::body::Body::from(json))
+        .unwrap()
+        .into_response()
+}
+
+/// `POST /v1/admin/restore` — restore from a snapshot uploaded as a JSON body.
+///
+/// Clears all in-memory state and replays the uploaded event log. Returns the
+/// count of replayed events. This is irreversible — take a snapshot first.
+async fn admin_restore_handler(
+    State(state): State<AppState>,
+    axum::Json(snap): axum::Json<cairn_store::snapshot::StoreSnapshot>,
+) -> impl IntoResponse {
+    let event_count = snap.event_count;
+    let replayed = state.runtime.store.load_snapshot(snap);
+    (StatusCode::OK, Json(serde_json::json!({
+        "ok":           true,
+        "event_count":  event_count,
+        "replayed":     replayed,
+    })))
+}
+
 // ── Eval runs handler ─────────────────────────────────────────────────────────
 
 /// `GET /v1/evals/runs?project_id=...&limit=100` — list eval runs (operator view).
@@ -4149,9 +4214,11 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/traces", get(list_all_traces_handler))
         .route("/v1/sessions/:id/llm-traces", get(list_session_traces_handler))
         // Admin routes
-        .route("/v1/admin/tenants", post(create_tenant_handler))
+        .route("/v1/admin/tenants",  post(create_tenant_handler))
         .route("/v1/admin/audit-log", get(list_audit_log_handler))
-        .route("/v1/admin/logs", get(list_request_logs_handler))
+        .route("/v1/admin/logs",     get(list_request_logs_handler))
+        .route("/v1/admin/snapshot", post(admin_snapshot_handler))
+        .route("/v1/admin/restore",  post(admin_restore_handler))
         // Notifications
         .route("/v1/notifications",            get(list_notifications_handler))
         .route("/v1/notifications/read-all",   post(mark_all_notifications_read_handler))

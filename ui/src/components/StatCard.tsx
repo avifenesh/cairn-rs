@@ -42,17 +42,20 @@ export function StatCard({ label, value, description, variant = "default", loadi
   }
 
   return (
-    <div className={clsx(
-      "bg-white dark:bg-zinc-900",
-      "border border-gray-200 dark:border-zinc-800",
-      "border-l-2 rounded-lg p-4",
-      ACCENT[variant],
-    )}>
-      <p className="text-[11px] font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1.5 truncate">
+    <div
+      data-stat-card
+      className={clsx(
+        "bg-white dark:bg-zinc-900",
+        "border border-gray-200 dark:border-zinc-800",
+        "border-l-2 rounded-lg p-4",
+        ACCENT[variant],
+      )}
+    >
+      <p data-stat-label className="text-[11px] font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1.5 truncate">
         <span className="truncate">{label}</span>
         {help && <HelpTooltip text={help} placement="top" className="shrink-0" />}
       </p>
-      <p className={clsx("text-xl font-semibold tabular-nums leading-none", VALUE[variant])}>
+      <p data-stat-value className={clsx("text-xl font-semibold tabular-nums leading-none", VALUE[variant])}>
         {value}
       </p>
       {description && (

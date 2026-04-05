@@ -2,13 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Anti-FOUC: apply dark class before first paint based on stored preference -->
+    <!-- Anti-FOUC: apply dark/compact classes before first paint -->
     <script>
       try {
         var t = localStorage.getItem('cairn_theme') || 'dark';
         if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
         }
+        var prefs = JSON.parse(localStorage.getItem('cairn_preferences') || '{}');
+        if (prefs.compactMode) document.documentElement.classList.add('compact');
       } catch(e) {}
     </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -29,7 +31,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="/assets/index-w96HiXMX.js"></script>
+    <script type="module" crossorigin src="/assets/index-BupLANmp.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/clsx-1x2H0FXB.js">
     <link rel="modulepreload" crossorigin href="/assets/api-ffgQhiwJ.js">
     <link rel="modulepreload" crossorigin href="/assets/circle-check-CRhP8jCQ.js">
@@ -37,7 +39,7 @@
     <link rel="modulepreload" crossorigin href="/assets/info-BEa3tr4f.js">
     <link rel="modulepreload" crossorigin href="/assets/triangle-alert-BeRPNLDc.js">
     <link rel="modulepreload" crossorigin href="/assets/x-CS_Dlmxe.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-CLuxYhS_.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-2tkzHEV5.css">
   </head>
   <body>
     <div id="root"></div>

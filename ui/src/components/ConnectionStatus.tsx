@@ -10,10 +10,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Wifi, WifiOff, Loader2, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Wifi, WifiOff, Loader2, ChevronDown, ChevronUp, X, RefreshCw, CloudOff } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import { useEventStream } from '../hooks/useEventStream';
+import { onNetworkChange, isOnline, hasPendingUpdate, applyUpdate } from '../lib/registerSW';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -81,9 +82,21 @@ function ServiceRow({ svc }: { svc: ServiceState }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ConnectionStatus() {
-  const [expanded, setExpanded] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
+  const [expanded,    setExpanded]    = useState(false);
+  const [dismissed,   setDismissed]   = useState(false);
+  const [offline,     setOffline]     = useState(!isOnline());
+  const [swUpdate,    setSwUpdate]    = useState(hasPendingUpdate());
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Track browser online/offline state.
+  useEffect(() => onNetworkChange(setOffline), []);
+
+  // Listen for SW update-ready events.
+  useEffect(() => {
+    const handler = () => setSwUpdate(true);
+    window.addEventListener('sw-update-ready', handler);
+    return () => window.removeEventListener('sw-update-ready', handler);
+  }, []);
 
   // ── API health check ────────────────────────────────────────────────────────
   const {
@@ -178,6 +191,52 @@ export function ConnectionStatus() {
     : null;
 
   return (
+    <>
+      {/* ── Offline banner (top of screen) ─────────────────────────────── */}
+      {offline && (
+        <div
+          className="fixed top-0 inset-x-0 z-50 flex items-center justify-center gap-2
+                     bg-red-950/95 border-b border-red-800/60 px-4 py-2 backdrop-blur-sm
+                     no-print"
+          role="alert"
+          aria-live="assertive"
+        >
+          <CloudOff size={13} className="text-red-400 shrink-0" />
+          <span className="text-[12px] font-medium text-red-300">
+            You are offline — data may be stale
+          </span>
+        </div>
+      )}
+
+      {/* ── SW update banner (top of screen, below offline if both shown) ── */}
+      {swUpdate && !offline && (
+        <div
+          className="fixed top-0 inset-x-0 z-50 flex items-center justify-center gap-3
+                     bg-indigo-950/95 border-b border-indigo-800/60 px-4 py-2 backdrop-blur-sm
+                     no-print"
+          role="alert"
+        >
+          <RefreshCw size={12} className="text-indigo-400 shrink-0" />
+          <span className="text-[12px] text-indigo-300">
+            A new version of cairn is available.
+          </span>
+          <button
+            onClick={applyUpdate}
+            className="text-[12px] font-semibold text-white bg-indigo-600 hover:bg-indigo-500
+                       rounded px-2.5 py-0.5 transition-colors"
+          >
+            Reload
+          </button>
+          <button
+            onClick={() => setSwUpdate(false)}
+            className="text-indigo-500 hover:text-indigo-300 transition-colors ml-1"
+            aria-label="Dismiss update notification"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
     <div
       ref={containerRef}
       className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-0"
@@ -260,5 +319,6 @@ export function ConnectionStatus() {
         }
       </button>
     </div>
+    </>
   );
 }

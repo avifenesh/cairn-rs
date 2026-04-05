@@ -4548,4 +4548,99 @@ impl InMemoryStore {
             false
         }
     }
+
+    // ── Snapshot / restore ────────────────────────────────────────────────────
+
+    /// Export the full event log as a serializable snapshot.
+    ///
+    /// The event log is the source of truth; all projections are derived from
+    /// it so serialising only the events is sufficient for a complete restore.
+    pub fn dump_events(&self) -> crate::snapshot::StoreSnapshot {
+        let state = self.state.lock().unwrap();
+        crate::snapshot::StoreSnapshot {
+            version: 1,
+            created_at_ms: now_millis(),
+            event_count: state.events.len() as u64,
+            events: state.events.clone(),
+        }
+    }
+
+    /// Clear all state and replay the events from a snapshot.
+    ///
+    /// Returns the number of events replayed.
+    pub fn load_snapshot(&self, snap: crate::snapshot::StoreSnapshot) -> u64 {
+        let mut state = self.state.lock().unwrap();
+
+        // Reset all projections to empty.
+        state.events.clear();
+        state.next_position = 1;
+        state.command_id_index.clear();
+        state.sessions.clear();
+        state.runs.clear();
+        state.tasks.clear();
+        state.approvals.clear();
+        state.checkpoints.clear();
+        state.mailbox_messages.clear();
+        state.tool_invocations.clear();
+        state.signals.clear();
+        state.ingest_jobs.clear();
+        state.eval_runs.clear();
+        state.eval_datasets.clear();
+        state.eval_rubrics.clear();
+        state.eval_baselines.clear();
+        state.checkpoint_strategies.clear();
+        state.prompt_assets.clear();
+        state.prompt_versions.clear();
+        state.prompt_releases.clear();
+        state.route_decisions.clear();
+        state.provider_calls.clear();
+        state.approval_policies.clear();
+        state.external_workers.clear();
+        state.session_costs.clear();
+        state.run_costs.clear();
+        state.llm_traces.clear();
+        state.task_deps.clear();
+        state.operator_profiles.clear();
+        state.full_operator_profiles.clear();
+        state.workspace_members.clear();
+        state.signal_subscriptions.clear();
+        state.provider_health_records.clear();
+        state.provider_pools.clear();
+        state.default_settings.clear();
+        state.credentials.clear();
+        state.channels.clear();
+        state.channel_messages.clear();
+        state.credential_rotations.clear();
+        state.licenses.clear();
+        state.entitlement_overrides.clear();
+        state.notification_prefs.clear();
+        state.notification_records.clear();
+        state.guardrail_policies.clear();
+        state.provider_budgets.clear();
+        state.provider_connections.clear();
+        state.quotas.clear();
+        state.provider_bindings.clear();
+        state.provider_health_schedules.clear();
+        state.run_sla_configs.clear();
+        state.run_sla_breaches.clear();
+        state.run_cost_alerts.clear();
+        state.retention_policies.clear();
+        state.route_policies.clear();
+        state.resource_shares.clear();
+        state.tenants.clear();
+        state.workspaces.clear();
+        state.projects.clear();
+        state.snapshots.clear();
+
+        // Replay events in order.
+        let count = snap.events.len() as u64;
+        for stored in snap.events {
+            Self::apply_projection(&mut state, &stored);
+            if stored.position.0 >= state.next_position {
+                state.next_position = stored.position.0 + 1;
+            }
+            state.events.push(stored);
+        }
+        count
+    }
 }

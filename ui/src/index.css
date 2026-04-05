@@ -52,6 +52,55 @@ body {
   border-radius: inherit; /* follow element rounding */
 }
 
+/* ── Compact (dense) mode ────────────────────────────────────────────────────── */
+/*
+ * Applied by toggling the `.compact` class on <html>.
+ * Targets table rows, cells, toolbar heights, and stat cards to reduce
+ * vertical whitespace for data-dense operator views.
+ */
+
+/* Table rows: 36px → 28px */
+html.compact table tbody tr {
+  height: 28px !important;
+}
+
+/* Table cells: tighten vertical padding and reduce text */
+html.compact table tbody td {
+  font-size: 11px !important;
+  padding-top: 1px !important;
+  padding-bottom: 1px !important;
+}
+
+/* Table headers: tighten slightly */
+html.compact table thead th {
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+  font-size: 9px !important;
+}
+
+/* EventLog rows */
+html.compact [data-event-row] {
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+}
+
+/* Stat cards: tighter padding and smaller value text */
+html.compact [data-stat-card] {
+  padding: 10px !important;
+}
+html.compact [data-stat-card] [data-stat-value] {
+  font-size: 16px !important;
+  line-height: 1.2 !important;
+}
+html.compact [data-stat-card] [data-stat-label] {
+  margin-bottom: 4px !important;
+}
+
+/* Virtual scroll rows (TracesPage) */
+html.compact [data-virtual-row] {
+  height: 28px !important;
+}
+
 /* ── Connection status panel slide-in ───────────────────────────────────────── */
 
 @keyframes fadeIn {

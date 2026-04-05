@@ -54,6 +54,14 @@ function savePrefs(p: Preferences): void {
 }
 
 /**
+ * Apply compact mode to the document root — adds/removes the `compact` CSS
+ * class which triggers reduced row heights, padding, and font sizes globally.
+ */
+export function applyCompactMode(compact: boolean): void {
+  document.documentElement.classList.toggle('compact', compact);
+}
+
+/**
  * Apply the theme preference to the document root so Tailwind's `dark:` class
  * picks it up immediately.
  */
@@ -86,13 +94,20 @@ type SetPrefs = (patch: Partial<Preferences>) => void;
  *   setPrefs({ compactMode: true });
  */
 export function usePreferences(): [Preferences, SetPrefs] {
-  const [prefs, setPrefsState] = useState<Preferences>(loadPrefs);
+  const [prefs, setPrefsState] = useState<Preferences>(() => {
+    const p = loadPrefs();
+    // Sync DOM on first call — index.html script handles the pre-React window,
+    // but this ensures React state and DOM are consistent after hydration.
+    applyCompactMode(p.compactMode);
+    return p;
+  });
 
   const setPrefs = useCallback<SetPrefs>((patch) => {
     setPrefsState((prev) => {
       const next = { ...prev, ...patch };
       savePrefs(next);
-      if (patch.theme !== undefined) applyTheme(next.theme);
+      if (patch.theme       !== undefined) applyTheme(next.theme);
+      if (patch.compactMode !== undefined) applyCompactMode(next.compactMode);
       return next;
     });
   }, []);

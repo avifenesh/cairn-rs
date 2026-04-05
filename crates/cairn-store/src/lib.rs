@@ -18,6 +18,7 @@ pub mod migrations;
 #[cfg(feature = "postgres")]
 pub mod pg;
 pub mod projections;
+pub mod snapshot;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 

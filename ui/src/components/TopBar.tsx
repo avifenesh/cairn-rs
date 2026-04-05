@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Menu, Sun, Moon, Monitor } from 'lucide-react';
+import { Menu, Sun, Moon, Monitor, Rows3, AlignJustify } from 'lucide-react';
+import { usePreferences } from '../hooks/usePreferences';
 import { defaultApi } from '../lib/api';
 import type { SystemStatus } from '../lib/types';
 import { clsx } from 'clsx';
@@ -44,7 +45,9 @@ interface TopBarProps {
 export function TopBar({ breadcrumbs, onMenuClick }: TopBarProps) {
   const [status, setStatus]   = useState<SystemStatus | null>(null);
   const [healthy, setHealthy] = useState<boolean | null>(null);
-  const { theme, cycleTheme } = useTheme();
+  const { theme, cycleTheme }   = useTheme();
+  const [prefs, setPrefs]       = usePreferences();
+  const compact = prefs.compactMode;
 
   useEffect(() => {
     let cancelled = false;
@@ -85,6 +88,22 @@ export function TopBar({ breadcrumbs, onMenuClick }: TopBarProps) {
       <div className="ml-auto flex items-center gap-3 shrink-0">
         {/* Notifications */}
         <NotificationCenter />
+
+        {/* Compact / dense mode toggle */}
+        <button
+          onClick={() => setPrefs({ compactMode: !compact })}
+          title={compact ? 'Switch to comfortable view' : 'Switch to compact view'}
+          aria-label={compact ? 'Switch to comfortable view' : 'Switch to compact view'}
+          aria-pressed={compact}
+          className={clsx(
+            'p-1.5 rounded transition-colors',
+            compact
+              ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
+              : 'text-gray-400 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-zinc-800',
+          )}
+        >
+          {compact ? <AlignJustify size={14} /> : <Rows3 size={14} />}
+        </button>
 
         {/* Theme toggle */}
         <button

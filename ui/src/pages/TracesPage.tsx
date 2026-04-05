@@ -80,6 +80,7 @@ const TH = ({ ch, right, hide }: { ch: string; right?: boolean; hide?: string })
 function TraceRow({ trace, even }: { trace: LlmCallTrace; even: boolean }) {
   return (
     <tr
+      data-virtual-row
       style={{ height: DEFAULT_ROW_HEIGHT }}
       className={clsx(
         "border-b border-zinc-800/50 transition-colors hover:bg-white/5",

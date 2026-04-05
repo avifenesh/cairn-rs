@@ -70,7 +70,7 @@ function toDetail(payload: unknown): string {
 
 function EventRow({ ev }: { ev: NormalizedEvent }) {
   return (
-    <div className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-zinc-800/40 transition-colors group">
+    <div data-event-row className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-zinc-800/40 transition-colors group">
       {/* Time */}
       <span className="shrink-0 text-[11px] text-zinc-600 font-mono tabular-nums w-[52px]">
         {ev.time}

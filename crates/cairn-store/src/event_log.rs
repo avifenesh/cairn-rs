@@ -43,7 +43,7 @@ pub enum EntityRef {
 }
 
 /// An event persisted in the log with storage metadata.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StoredEvent {
     pub position: EventPosition,
     pub envelope: EventEnvelope<RuntimeEvent>,
