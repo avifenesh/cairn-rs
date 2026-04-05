@@ -7,6 +7,8 @@
 | Topic | File | Sources | Depth | Created |
 |-------|------|---------|-------|---------|
 | Live Collaboration Between Terminal Agents | live-collaboration-between-terminal-agents.md | 24 | medium | 2026-04-03 |
+| React Frontend for Rust/Axum Backends | react-rust-axum-frontend.md | 25 | deep | 2026-04-05 |
+| AI Observability & LLM Ops UX Patterns | ai-observability-ux-patterns.md | 25 | deep | 2026-04-05 |
 
 ## Trigger Phrases
 
@@ -26,6 +28,28 @@ Use this knowledge when the user asks about:
 - "LangGraph CrewAI AutoGen comparison" → live-collaboration-between-terminal-agents.md
 - "multi-agent shared memory state" → live-collaboration-between-terminal-agents.md
 - "agent collaboration best practices" → live-collaboration-between-terminal-agents.md
+- "React axum frontend" → react-rust-axum-frontend.md
+- "Vite React TypeScript setup" → react-rust-axum-frontend.md
+- "shadcn/ui dashboard" → react-rust-axum-frontend.md
+- "SSE consumption React" → react-rust-axum-frontend.md
+- "TanStack Query axum" → react-rust-axum-frontend.md
+- "bearer token auth React" → react-rust-axum-frontend.md
+- "dark mode Tailwind" → react-rust-axum-frontend.md
+- "serve static files axum" → react-rust-axum-frontend.md
+- "rust-embed frontend" → react-rust-axum-frontend.md
+- "EventSource React hook" → react-rust-axum-frontend.md
+- "API client fetch wrapper" → react-rust-axum-frontend.md
+- "Vite proxy axum backend" → react-rust-axum-frontend.md
+- "LLM observability dashboard UX" → ai-observability-ux-patterns.md
+- "trace visualization waterfall" → ai-observability-ux-patterns.md
+- "cost monitoring LLM dashboard" → ai-observability-ux-patterns.md
+- "approval queue workflow UI" → ai-observability-ux-patterns.md
+- "prompt version comparison view" → ai-observability-ux-patterns.md
+- "RAG quality panel" → ai-observability-ux-patterns.md
+- "annotation queue design" → ai-observability-ux-patterns.md
+- "enterprise vs hobby AI platform" → ai-observability-ux-patterns.md
+- "Langfuse Helicone LangSmith comparison" → ai-observability-ux-patterns.md
+- "operator dashboard trust signals" → ai-observability-ux-patterns.md
 
 ## Quick Lookup
 
@@ -40,6 +64,20 @@ Use this knowledge when the user asks about:
 | A2A, Agent Card, interoperability | live-collaboration-between-terminal-agents.md |
 | LangGraph, CrewAI, AutoGen | live-collaboration-between-terminal-agents.md |
 | file locking, race condition, inbox | live-collaboration-between-terminal-agents.md |
+| React, Vite, TypeScript, frontend | react-rust-axum-frontend.md |
+| shadcn/ui, Tailwind, dark mode, theming | react-rust-axum-frontend.md |
+| SSE, EventSource, useSyncExternalStore | react-rust-axum-frontend.md |
+| TanStack Query, useQuery, useMutation | react-rust-axum-frontend.md |
+| bearer token, auth, API client, fetch | react-rust-axum-frontend.md |
+| rust-embed, ServeDir, static files | react-rust-axum-frontend.md |
+| Vite proxy, build, deployment, Docker | react-rust-axum-frontend.md |
+| trace visualization, waterfall, timeline, span tree | ai-observability-ux-patterns.md |
+| cost monitoring, budget controls, spend tracking | ai-observability-ux-patterns.md |
+| approval queue, annotation queue, human review | ai-observability-ux-patterns.md |
+| prompt management, version comparison, label deploy | ai-observability-ux-patterns.md |
+| RAG quality, retrieval metrics, embedding drift | ai-observability-ux-patterns.md |
+| Langfuse, Helicone, LangSmith, Arize Phoenix | ai-observability-ux-patterns.md |
+| enterprise AI platform, RBAC, audit trail | ai-observability-ux-patterns.md |
 
 ## How to Use
 
