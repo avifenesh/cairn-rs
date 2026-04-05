@@ -180,7 +180,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
               <Loader2 size={14} className="animate-spin" /> Loading tasks…
             </div>
           ) : !tasks || tasks.length === 0 ? (
-            <p className="text-[13px] text-zinc-600 italic py-4">No tasks for this run.</p>
+            <p className="text-[13px] text-zinc-600 py-4 text-center">No tasks for this run.</p>
           ) : (
             <div className="rounded-lg border border-zinc-800 overflow-hidden">
               <table className="min-w-full text-[13px]">
@@ -200,14 +200,14 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                       i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
                       "hover:bg-zinc-800/60",
                     )}>
-                      <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap">
+                      <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap" title={t.task_id}>
                         {shortId(t.task_id)}
                       </td>
                       <td className="px-3 py-1.5 whitespace-nowrap">
                         <StateBadge state={t.state as Parameters<typeof StateBadge>[0]["state"]} compact />
                       </td>
                       <td className="px-3 py-1.5 font-mono text-zinc-500 text-[12px] whitespace-nowrap hidden sm:table-cell">
-                        {t.lease_owner ? shortId(t.lease_owner) : <span className="text-zinc-700">—</span>}
+                        {t.lease_owner ? <span title={t.lease_owner}>{shortId(t.lease_owner)}</span> : <span className="text-zinc-700">—</span>}
                       </td>
                       <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums hidden sm:table-cell">
                         {fmtTime(t.created_at)}

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ServerCrash, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 
@@ -109,17 +110,7 @@ export function CostsPage() {
     refetchInterval: 30_000,
   });
 
-  if (isError) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-48 gap-3 text-center p-8">
-        <ServerCrash size={32} className="text-red-500" />
-        <p className="text-sm text-zinc-300">{error instanceof Error ? error.message : "Unknown error"}</p>
-        <button onClick={() => refetch()} className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:bg-white/5 transition-colors">
-          <RefreshCw size={12} /> Retry
-        </button>
-      </div>
-    );
-  }
+  if (isError) return <ErrorFallback error={error} resource="costs" onRetry={() => void refetch()} />;
 
   const totalTokens = (costs?.total_tokens_in ?? 0) + (costs?.total_tokens_out ?? 0);
   const avgPerCall  = (costs?.total_provider_calls ?? 0) > 0

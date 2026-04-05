@@ -169,9 +169,10 @@ function LoadingBar() {
 interface LayoutProps {
   children?: (page: NavPage) => ReactNode;
   routeRenderer?: (route: Route) => ReactNode;
+  onLogout?: () => void;
 }
 
-export function Layout({ children, routeRenderer }: LayoutProps) {
+export function Layout({ children, routeRenderer, onLogout }: LayoutProps) {
   const [route, setRoute]             = useState<Route>(currentRoute);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
@@ -225,6 +226,7 @@ export function Layout({ children, routeRenderer }: LayoutProps) {
         onNavigate={navigate}
         mobileOpen={sidebarOpen}
         onMobileClose={() => setSidebarOpen(false)}
+        onLogout={onLogout}
       />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">

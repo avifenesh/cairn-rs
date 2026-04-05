@@ -13,6 +13,14 @@ function fmtTime(ms: number) {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
   });
 }
+function fmtRelative(ms: number): string {
+  const d = Date.now() - ms;
+  if (d < 60_000)       return "just now";
+  if (d < 3_600_000)    return `${Math.floor(d / 60_000)}m ago`;
+  if (d < 86_400_000)   return `${Math.floor(d / 3_600_000)}h ago`;
+  if (d < 604_800_000)  return `${Math.floor(d / 86_400_000)}d ago`;
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 function shortId(id: string) {
   return id.length > 20 ? `${id.slice(0, 8)}\u2026${id.slice(-5)}` : id;
 }
@@ -210,11 +218,11 @@ export function RunsPage() {
           <DataTable<RunRecord>
             data={filtered}
             columns={[
-              { key: 'run_id',    header: 'Run ID',    render: r => <span className="flex items-center gap-1.5 font-mono text-[12px] text-zinc-300 whitespace-nowrap">{selected?.run_id===r.run_id&&<ChevronRight size={11} className="text-indigo-400 shrink-0"/>}{shortId(r.run_id)}</span>, sortValue: r => r.run_id },
-              { key: 'session',   header: 'Session',   render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap">{shortId(r.session_id)}</span> },
+              { key: 'run_id',    header: 'Run ID',    render: r => <span className="flex items-center gap-1.5 font-mono text-[12px] text-zinc-300 whitespace-nowrap" title={r.run_id}>{selected?.run_id===r.run_id&&<ChevronRight size={11} className="text-indigo-400 shrink-0"/>}{shortId(r.run_id)}</span>, sortValue: r => r.run_id },
+              { key: 'session',   header: 'Session',   render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={r.session_id}>{shortId(r.session_id)}</span> },
               { key: 'state',     header: 'State',     render: r => <StateBadge state={r.state} compact />,   sortValue: r => r.state },
-              { key: 'created',   header: 'Created',   render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap tabular-nums text-right">{fmtTime(r.created_at)}</span>, sortValue: r => r.created_at, headClass:'text-right', cellClass:'text-right' },
-              { key: 'updated',   header: 'Updated',   render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap tabular-nums text-right">{fmtTime(r.updated_at)}</span>, sortValue: r => r.updated_at, headClass:'text-right', cellClass:'text-right' },
+              { key: 'created',   header: 'Created',   render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap tabular-nums text-right" title={fmtTime(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at, headClass:'text-right', cellClass:'text-right' },
+              { key: 'updated',   header: 'Updated',   render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap tabular-nums text-right" title={fmtTime(r.updated_at)}>{fmtRelative(r.updated_at)}</span>, sortValue: r => r.updated_at, headClass:'text-right', cellClass:'text-right' },
             ]}
             filterFn={(r, q) => r.run_id.includes(q) || r.session_id.includes(q) || r.state.includes(q)}
             csvRow={r => [r.run_id, r.session_id, r.state, r.parent_run_id??'', r.created_at, r.updated_at]}

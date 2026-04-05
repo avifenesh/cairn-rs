@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Loader2, ServerCrash, Check, X } from "lucide-react";
+import { RefreshCw, Loader2, Check, X } from "lucide-react";
+import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import type { DeploymentSettings } from "../lib/types";
@@ -91,17 +92,7 @@ export function SettingsPage() {
 
   const s: DeploymentSettings | undefined = data;
 
-  if (isError) return (
-    <div className="flex flex-col items-center justify-center min-h-64 gap-3 p-8 text-center">
-      <ServerCrash size={32} className="text-red-500" />
-      <p className="text-[13px] text-zinc-300 font-medium">Failed to load settings</p>
-      <p className="text-[12px] text-zinc-500">{error instanceof Error ? error.message : "Unknown"}</p>
-      <button onClick={() => refetch()}
-        className="mt-1 px-3 py-1.5 rounded bg-zinc-800 text-zinc-300 text-[12px] hover:bg-zinc-700 transition-colors">
-        Retry
-      </button>
-    </div>
-  );
+  if (isError) return <ErrorFallback error={error} resource="settings" onRetry={() => void refetch()} />;
 
   return (
     <div className="flex flex-col h-full bg-zinc-900">

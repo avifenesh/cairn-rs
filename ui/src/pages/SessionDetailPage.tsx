@@ -226,17 +226,17 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                         "hover:bg-zinc-800/60",
                       )}
                     >
-                      <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap text-[12px]">
+                      <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap text-[12px]" title={run.run_id}>
                         {shortId(run.run_id)}
                       </td>
                       <td className="px-3 py-1.5 whitespace-nowrap">
                         <StateBadge state={run.state} compact />
                       </td>
                       <td className="px-3 py-1.5 font-mono text-zinc-600 text-[11px] whitespace-nowrap hidden sm:table-cell">
-                        {run.parent_run_id ? shortId(run.parent_run_id) : <span className="text-zinc-700">—</span>}
+                        {run.parent_run_id ? <span title={run.parent_run_id}>{shortId(run.parent_run_id)}</span> : <span className="text-zinc-700">—</span>}
                       </td>
                       <td className="px-3 py-1.5 font-mono text-zinc-600 text-[11px] whitespace-nowrap hidden md:table-cell">
-                        {run.prompt_release_id ? shortId(run.prompt_release_id) : <span className="text-zinc-700">—</span>}
+                        {run.prompt_release_id ? <span title={run.prompt_release_id}>{shortId(run.prompt_release_id)}</span> : <span className="text-zinc-700">—</span>}
                       </td>
                       <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap text-[12px] tabular-nums">
                         {fmtTime(run.created_at)}

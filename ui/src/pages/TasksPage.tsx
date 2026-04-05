@@ -17,6 +17,15 @@ const fmtTime = (ms: number) =>
 const shortId = (id: string) =>
   id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
 
+const fmtRelative = (ms: number): string => {
+  const d = Date.now() - ms;
+  if (d < 60_000)      return "just now";
+  if (d < 3_600_000)   return `${Math.floor(d / 60_000)}m ago`;
+  if (d < 86_400_000)  return `${Math.floor(d / 3_600_000)}h ago`;
+  if (d < 604_800_000) return `${Math.floor(d / 86_400_000)}d ago`;
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
 const ACTIVE_STATES: TaskState[] = [
   "queued", "leased", "running", "paused", "waiting_dependency",
 ];
@@ -146,11 +155,11 @@ export function TasksPage() {
           <DataTable<TaskRecord>
             data={filtered}
             columns={[
-              { key: 'task_id',    header: 'Task ID',   render: r => <span className="font-mono text-xs text-zinc-300 whitespace-nowrap">{shortId(r.task_id)}</span>,               sortValue: r => r.task_id },
-              { key: 'run',        header: 'Run',        render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap">{shortId(r.parent_run_id)}</span> : <span className="text-zinc-700">—</span> },
+              { key: 'task_id',    header: 'Task ID',   render: r => <span className="font-mono text-xs text-zinc-300 whitespace-nowrap" title={r.task_id}>{shortId(r.task_id)}</span>,               sortValue: r => r.task_id },
+              { key: 'run',        header: 'Run',        render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-zinc-700">—</span> },
               { key: 'state',      header: 'Status',     render: r => <StateBadge state={r.state as Parameters<typeof StateBadge>[0]["state"]} compact />, sortValue: r => r.state },
               { key: 'worker',     header: 'Worker',     render: r => r.lease_owner ? <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{shortId(r.lease_owner)}</span> : <span className="text-zinc-700">—</span> },
-              { key: 'queued_at',  header: 'Queued At',  render: r => <span className="text-[11px] text-zinc-500 tabular-nums whitespace-nowrap">{fmtTime(r.created_at)}</span>,   sortValue: r => r.created_at },
+              { key: 'queued_at',  header: 'Queued',     render: r => <span className="text-[11px] text-zinc-500 tabular-nums whitespace-nowrap" title={fmtTime(r.created_at)}>{fmtRelative(r.created_at)}</span>,   sortValue: r => r.created_at },
               { key: 'started_at', header: 'Started At', render: r => r.lease_expires_at ? <span className="text-[11px] text-zinc-400 tabular-nums whitespace-nowrap">{fmtTime(r.updated_at)}</span> : <span className="text-zinc-700">—</span>, sortValue: r => r.updated_at },
               { key: 'actions',    header: '',            render: r => <RowActions task={r} /> },
             ]}

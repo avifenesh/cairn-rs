@@ -112,9 +112,10 @@ interface SidebarProps {
   onNavigate: (page: NavPage) => void;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
+  onLogout?: () => void;
 }
 
-export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose }: SidebarProps): ReactNode {
+export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose, onLogout }: SidebarProps): ReactNode {
   const server = (import.meta.env.VITE_API_URL ?? 'localhost:3000')
     .replace(/^https?:\/\//, '');
 
@@ -217,7 +218,14 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
             Account
           </button>
           <button
-            onClick={() => { clearStoredToken(); window.location.reload(); }}
+            onClick={() => {
+              clearStoredToken();
+              if (onLogout) {
+                onLogout();
+              } else {
+                window.location.reload();
+              }
+            }}
             className="w-full flex items-center gap-2 px-3 py-1.5 rounded text-[12px]
                        text-gray-500 dark:text-zinc-600
                        hover:bg-gray-100 dark:hover:bg-zinc-800/50

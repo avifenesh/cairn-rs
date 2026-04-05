@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, RefreshCw, Plus } from 'lucide-react';
 import { DataTable } from '../components/DataTable';
+import { ErrorFallback } from '../components/ErrorFallback';
 import { useToast } from '../components/Toast';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
@@ -12,6 +13,15 @@ function fmtTs(ms: number): string {
   return new Date(ms).toLocaleString(undefined, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
+}
+
+function fmtRelative(ms: number): string {
+  const d = Date.now() - ms;
+  if (d < 60_000)      return 'just now';
+  if (d < 3_600_000)   return `${Math.floor(d / 60_000)}m ago`;
+  if (d < 86_400_000)  return `${Math.floor(d / 3_600_000)}h ago`;
+  if (d < 604_800_000) return `${Math.floor(d / 86_400_000)}d ago`;
+  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function mono(s: string, max = 18): string {
@@ -108,21 +118,19 @@ export function SessionsPage() {
 
       {/* Table */}
       {isError ? (
-        <div className="rounded-lg border border-zinc-800 p-6 text-center">
-          <p className="text-sm text-zinc-400">{error instanceof Error ? error.message : 'Failed to load sessions'}</p>
-        </div>
+        <ErrorFallback error={error} resource="sessions" onRetry={() => void refetch()} compact />
       ) : (
         <DataTable<SessionRecord>
           data={list}
           columns={[
             { key: 'arrow',      header: '',           render: _r => <ChevronRight size={13} className="text-zinc-700" /> },
-            { key: 'session_id', header: 'Session ID', render: r => <span className="font-mono text-xs text-zinc-200 whitespace-nowrap">{mono(r.session_id, 22)}</span>,         sortValue: r => r.session_id },
+            { key: 'session_id', header: 'Session ID', render: r => <span className="font-mono text-xs text-zinc-200 whitespace-nowrap" title={r.session_id}>{mono(r.session_id, 22)}</span>, sortValue: r => r.session_id },
             { key: 'tenant',     header: 'Tenant',     render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden md:block">{r.project.tenant_id}</span> },
             { key: 'workspace',  header: 'Workspace',  render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden lg:block">{r.project.workspace_id}</span> },
             { key: 'project',    header: 'Project',    render: r => <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{mono(r.project.project_id, 16)}</span> },
             { key: 'state',      header: 'Status',     render: r => <SessionPill state={r.state} />,                      sortValue: r => r.state },
             { key: 'runs',       header: 'Runs',       render: r => { const n = runCountFor(r.session_id); return n > 0 ? <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-zinc-800 text-zinc-400 text-[10px] font-medium tabular-nums">{n}</span> : <span className="text-zinc-700 text-[11px]">—</span>; } },
-            { key: 'created',    header: 'Created',    render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap">{fmtTs(r.created_at)}</span>,       sortValue: r => r.created_at },
+            { key: 'created',    header: 'Created',    render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={fmtTs(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
           ]}
           filterFn={(r, q) => r.session_id.includes(q) || r.project.project_id.includes(q) || r.project.tenant_id.includes(q) || r.state.includes(q)}
           csvRow={r => [r.session_id, r.project.tenant_id, r.project.workspace_id, r.project.project_id, r.state, r.created_at]}

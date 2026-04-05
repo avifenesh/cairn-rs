@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2, ServerCrash, Inbox, Check, X } from "lucide-react";
+import { RefreshCw, Loader2, Inbox, Check, X } from "lucide-react";
+import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
@@ -16,6 +17,15 @@ const fmtTime = (ms: number) =>
     month: "short", day: "numeric",
     hour: "2-digit", minute: "2-digit",
   });
+
+const fmtRelative = (ms: number): string => {
+  const d = Date.now() - ms;
+  if (d < 60_000)      return "just now";
+  if (d < 3_600_000)   return `${Math.floor(d / 60_000)}m ago`;
+  if (d < 86_400_000)  return `${Math.floor(d / 3_600_000)}h ago`;
+  if (d < 604_800_000) return `${Math.floor(d / 86_400_000)}d ago`;
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
 
 // ── Stat card ──────────────────────────────────────────────────────────────────
 
@@ -129,14 +139,14 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
               i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
               "hover:bg-zinc-800/70",
             )}>
-            <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap">
+            <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap" title={a.approval_id}>
               {shortId(a.approval_id)}
             </td>
             <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px] hidden sm:table-cell">
-              {a.run_id ? shortId(a.run_id) : <span className="text-zinc-700">—</span>}
+              {a.run_id ? <span title={a.run_id}>{shortId(a.run_id)}</span> : <span className="text-zinc-700">—</span>}
             </td>
             <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px] hidden md:table-cell">
-              {a.task_id ? shortId(a.task_id) : <span className="text-zinc-700">—</span>}
+              {a.task_id ? <span title={a.task_id}>{shortId(a.task_id)}</span> : <span className="text-zinc-700">—</span>}
             </td>
             <td className="px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">
               <span className={clsx(
@@ -151,8 +161,8 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
             <td className="px-3 py-1.5 whitespace-nowrap">
               <DecisionBadge decision={a.decision} />
             </td>
-            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums hidden md:table-cell">
-              {fmtTime(a.created_at)}
+            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums hidden md:table-cell" title={fmtTime(a.created_at)}>
+              {fmtRelative(a.created_at)}
             </td>
             <td className="px-3 py-1.5 whitespace-nowrap">
               <RowActions approval={a} />
@@ -197,17 +207,7 @@ export function ApprovalsPage() {
   const approved24 = resolved.filter(a => a.decision === "approved" && a.created_at >= since24h).length;
   const rejected24 = resolved.filter(a => a.decision === "rejected" && a.created_at >= since24h).length;
 
-  if (isError) return (
-    <div className="flex flex-col items-center justify-center min-h-64 gap-3 p-8 text-center">
-      <ServerCrash size={32} className="text-red-500" />
-      <p className="text-[13px] text-zinc-300 font-medium">Failed to load approvals</p>
-      <p className="text-[12px] text-zinc-500">{error instanceof Error ? error.message : "Unknown"}</p>
-      <button onClick={() => refetch()}
-        className="mt-1 px-3 py-1.5 rounded bg-zinc-800 text-zinc-300 text-[12px] hover:bg-zinc-700 transition-colors">
-        Retry
-      </button>
-    </div>
-  );
+  if (isError) return <ErrorFallback error={error} resource="approvals" onRetry={() => void refetch()} />;
 
   return (
     <div className="flex flex-col h-full bg-zinc-900">
