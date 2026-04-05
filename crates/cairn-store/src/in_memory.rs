@@ -4330,8 +4330,76 @@ impl crate::projections::RunCostAlertReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::AuditLogReadModel for InMemoryStore {
-    async fn list_by_tenant(&self, _tenant_id: &cairn_domain::TenantId, _since_ms: Option<u64>, _limit: usize) -> Result<Vec<cairn_domain::AuditLogEntry>, StoreError> { Ok(vec![]) }
-    async fn list_by_resource(&self, _resource_type: &str, _resource_id: &str) -> Result<Vec<cairn_domain::AuditLogEntry>, StoreError> { Ok(vec![]) }
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        since_ms: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<cairn_domain::AuditLogEntry>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let entries: Vec<_> = state
+            .events
+            .iter()
+            .filter_map(|e| {
+                if let RuntimeEvent::AuditLogEntryRecorded(a) = &e.envelope.payload {
+                    if &a.tenant_id == tenant_id {
+                        if let Some(since) = since_ms {
+                            if a.occurred_at_ms < since { return None; }
+                        }
+                        return Some(cairn_domain::AuditLogEntry {
+                            entry_id: a.entry_id.clone(),
+                            tenant_id: a.tenant_id.clone(),
+                            actor_id: a.actor_id.clone(),
+                            action: a.action.clone(),
+                            resource_type: a.resource_type.clone(),
+                            resource_id: a.resource_id.clone(),
+                            outcome: a.outcome,
+                            request_id: None,
+                            ip_address: None,
+                            occurred_at_ms: a.occurred_at_ms,
+                            metadata: serde_json::json!({}),
+                        });
+                    }
+                }
+                None
+            })
+            .take(limit)
+            .collect();
+        Ok(entries)
+    }
+
+    async fn list_by_resource(
+        &self,
+        resource_type: &str,
+        resource_id: &str,
+    ) -> Result<Vec<cairn_domain::AuditLogEntry>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let entries: Vec<_> = state
+            .events
+            .iter()
+            .filter_map(|e| {
+                if let RuntimeEvent::AuditLogEntryRecorded(a) = &e.envelope.payload {
+                    if a.resource_type == resource_type && a.resource_id == resource_id {
+                        return Some(cairn_domain::AuditLogEntry {
+                            entry_id: a.entry_id.clone(),
+                            tenant_id: a.tenant_id.clone(),
+                            actor_id: a.actor_id.clone(),
+                            action: a.action.clone(),
+                            resource_type: a.resource_type.clone(),
+                            resource_id: a.resource_id.clone(),
+                            outcome: a.outcome,
+                            request_id: None,
+                            ip_address: None,
+                            occurred_at_ms: a.occurred_at_ms,
+                            metadata: serde_json::json!({}),
+                        });
+                    }
+                }
+                None
+            })
+            .collect();
+        Ok(entries)
+    }
 }
 
 #[async_trait]
@@ -4402,11 +4470,32 @@ impl crate::projections::CheckpointStrategyReadModel for InMemoryStore {
 impl crate::projections::OperatorInterventionReadModel for InMemoryStore {
     async fn list_by_run(
         &self,
-        _run_id: &cairn_domain::RunId,
-        _limit: usize,
-        _offset: usize,
+        run_id: &cairn_domain::RunId,
+        limit: usize,
+        offset: usize,
     ) -> Result<Vec<crate::projections::OperatorInterventionRecord>, StoreError> {
-        Ok(vec![])
+        let state = self.state.lock().unwrap();
+        let records: Vec<_> = state
+            .events
+            .iter()
+            .filter_map(|e| {
+                if let RuntimeEvent::OperatorIntervention(op) = &e.envelope.payload {
+                    if op.run_id.as_ref() == Some(run_id) {
+                        return Some(crate::projections::OperatorInterventionRecord {
+                            run_id: run_id.clone(),
+                            tenant_id: op.tenant_id.clone(),
+                            action: op.action.clone(),
+                            reason: op.reason.clone(),
+                            intervened_at_ms: op.intervened_at_ms,
+                        });
+                    }
+                }
+                None
+            })
+            .skip(offset)
+            .take(limit)
+            .collect();
+        Ok(records)
     }
 }
 

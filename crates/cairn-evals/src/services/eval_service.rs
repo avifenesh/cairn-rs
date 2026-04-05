@@ -221,13 +221,41 @@ impl EvalRunService {
             .collect()
     }
 
-    /// Stub: build a prompt comparison matrix (returns empty matrix).
+    /// Build a prompt comparison matrix for a prompt asset.
     pub fn build_prompt_comparison_matrix(
         &self,
         _project_id: &ProjectId,
-        _prompt_asset_id: &PromptAssetId,
+        prompt_asset_id: &PromptAssetId,
     ) -> crate::matrices::PromptComparisonMatrix {
-        crate::matrices::PromptComparisonMatrix { rows: vec![] }
+        let state = self.state.lock().unwrap();
+        let mut rows: Vec<crate::matrices::PromptComparisonRow> = state
+            .runs
+            .values()
+            .filter(|r| {
+                r.prompt_asset_id.as_ref() == Some(prompt_asset_id)
+                    && r.status == EvalRunStatus::Completed
+            })
+            .map(|r| crate::matrices::PromptComparisonRow {
+                project_id: r.project_id.clone(),
+                prompt_release_id: r
+                    .prompt_release_id
+                    .clone()
+                    .unwrap_or_else(|| cairn_domain::PromptReleaseId::new("")),
+                prompt_asset_id: r
+                    .prompt_asset_id
+                    .clone()
+                    .unwrap_or_else(|| prompt_asset_id.clone()),
+                prompt_version_id: r
+                    .prompt_version_id
+                    .clone()
+                    .unwrap_or_else(|| cairn_domain::PromptVersionId::new("")),
+                provider_binding_id: None,
+                eval_run_id: r.eval_run_id.clone(),
+                metrics: r.metrics.clone(),
+            })
+            .collect();
+        rows.sort_by_key(|r| r.eval_run_id.as_str().to_owned());
+        crate::matrices::PromptComparisonMatrix { rows }
     }
 
     /// Stub: build a permission matrix.
