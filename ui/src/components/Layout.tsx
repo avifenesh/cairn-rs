@@ -39,7 +39,11 @@ function PlaceholderPage({ page }: { page: NavPage }) {
 // ── Layout ────────────────────────────────────────────────────────────────────
 
 interface LayoutProps {
-  /** Override the content area; defaults to a placeholder when omitted. */
+  /**
+   * Render function for the content area.
+   * Receives the current NavPage and returns a ReactNode.
+   * Defaults to a "coming soon" placeholder when omitted.
+   */
   children?: (page: NavPage) => ReactNode;
 }
 
@@ -69,8 +73,8 @@ export function Layout({ children }: LayoutProps) {
       <div className="flex flex-col flex-1 overflow-hidden">
         <TopBar title={PAGE_TITLES[page]} />
 
-        {/* Scrollable content area */}
-        <main className="flex-1 overflow-y-auto p-6 bg-zinc-950">
+        {/* Content area — RunsPage manages its own scroll; others get a scrollable wrapper */}
+        <main className="flex-1 overflow-hidden bg-zinc-950">
           {children ? children(page) : <PlaceholderPage page={page} />}
         </main>
       </div>
