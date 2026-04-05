@@ -7703,6 +7703,7 @@ async fn spawn_subagent_run_handler(
             &parent_run.project,
             parent_run_id.clone(),
             &child_session_id,
+            Some(child_run_id),
         )
         .await
     {

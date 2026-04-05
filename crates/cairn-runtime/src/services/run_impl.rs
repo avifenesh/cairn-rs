@@ -348,13 +348,32 @@ where
         parent_run_id: &cairn_domain::RunId,
         limit: usize,
     ) -> Result<Vec<cairn_store::projections::RunRecord>, crate::error::RuntimeError> {
-        let all = cairn_store::projections::RunReadModel::list_by_session(
-            self.store.as_ref(),
-            &cairn_domain::SessionId::new("_"),
-            limit,
-            0,
-        ).await?;
-        Ok(all.into_iter().filter(|r| r.parent_run_id.as_ref() == Some(parent_run_id)).collect())
+        // Scan event log for RunCreated events that reference this parent_run_id,
+        // then fetch the current record for each child run found.
+        let events = cairn_store::EventLog::read_stream(self.store.as_ref(), None, 10_000).await?;
+        let mut child_run_ids: Vec<cairn_domain::RunId> = events
+            .into_iter()
+            .filter_map(|stored| {
+                if let cairn_domain::RuntimeEvent::RunCreated(e) = stored.envelope.payload {
+                    if e.parent_run_id.as_ref() == Some(parent_run_id) {
+                        return Some(e.run_id);
+                    }
+                }
+                None
+            })
+            .take(limit)
+            .collect();
+
+        let mut records = Vec::new();
+        for run_id in child_run_ids {
+            if let Some(record) = cairn_store::projections::RunReadModel::get(
+                self.store.as_ref(),
+                &run_id,
+            ).await? {
+                records.push(record);
+            }
+        }
+        Ok(records)
     }
 
     /// Spawn a subagent run linked to a parent.
@@ -363,8 +382,10 @@ where
         project: &cairn_domain::ProjectKey,
         parent_run_id: cairn_domain::RunId,
         session_id: &cairn_domain::SessionId,
+        child_run_id: Option<cairn_domain::RunId>,
     ) -> Result<cairn_store::projections::RunRecord, crate::error::RuntimeError> {
-        let child_run_id = cairn_domain::RunId::new(format!("subagent_{}", parent_run_id.as_str()));
+        let child_run_id = child_run_id
+            .unwrap_or_else(|| cairn_domain::RunId::new(format!("subagent_{}", parent_run_id.as_str())));
         let event = super::event_helpers::make_envelope(cairn_domain::RuntimeEvent::RunCreated(
             cairn_domain::RunCreated {
                 project: project.clone(),
