@@ -332,30 +332,116 @@ impl EvalRunService {
         Ok(crate::matrices::ProviderRoutingMatrix { rows: vec![] })
     }
 
-    /// Stub: returns trend points for a prompt asset metric.
+    /// Returns trend points for a prompt asset metric, ordered by creation time.
     pub fn get_trend(
         &self,
         _tenant_id: &str,
-        _asset_id: &cairn_domain::PromptAssetId,
-        _metric: String,
+        asset_id: &cairn_domain::PromptAssetId,
+        metric: String,
         _days: u32,
     ) -> Result<Vec<EvalTrendPoint>, EvalError> {
-        Ok(vec![])
+        let state = self.state.lock().unwrap();
+        let mut runs: Vec<&EvalRun> = state
+            .runs
+            .values()
+            .filter(|r| {
+                r.prompt_asset_id.as_ref() == Some(asset_id)
+                    && r.status == EvalRunStatus::Completed
+            })
+            .collect();
+        runs.sort_by_key(|r| r.created_at);
+        let points = runs
+            .into_iter()
+            .map(|r| {
+                let value = match metric.as_str() {
+                    "task_success_rate" => r.metrics.task_success_rate.unwrap_or(0.0),
+                    "latency_p50_ms" => r.metrics.latency_p50_ms.map(|v| v as f64).unwrap_or(0.0),
+                    "cost_per_run" => r.metrics.cost_per_run.unwrap_or(0.0),
+                    _ => 0.0,
+                };
+                EvalTrendPoint {
+                    eval_run_id: r.eval_run_id.as_str().to_owned(),
+                    day: r.created_at.to_string(),
+                    value,
+                }
+            })
+            .collect();
+        Ok(points)
     }
 
-    /// Stub: generates an eval summary report.
+    /// Generates an eval summary report for a prompt asset.
     pub fn generate_report(
         &self,
         _tenant_id: &str,
-        _asset_id: &cairn_domain::PromptAssetId,
+        asset_id: &cairn_domain::PromptAssetId,
     ) -> EvalReport {
-        EvalReport { summary: String::new(), run_count: 0 }
+        let state = self.state.lock().unwrap();
+        let mut runs: Vec<&EvalRun> = state
+            .runs
+            .values()
+            .filter(|r| {
+                r.prompt_asset_id.as_ref() == Some(asset_id)
+                    && r.status == EvalRunStatus::Completed
+            })
+            .collect();
+        if runs.is_empty() {
+            return EvalReport {
+                asset_id: asset_id.as_str().to_owned(),
+                total_runs: 0,
+                best_run_id: String::new(),
+                worst_run_id: String::new(),
+                trend_direction: "no_data".to_owned(),
+                summary: String::new(),
+            };
+        }
+        // Sort by task_success_rate to find best/worst
+        runs.sort_by(|a, b| {
+            let a_s = a.metrics.task_success_rate.unwrap_or(0.0);
+            let b_s = b.metrics.task_success_rate.unwrap_or(0.0);
+            b_s.partial_cmp(&a_s).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let best_run_id = runs.first().map(|r| r.eval_run_id.as_str().to_owned()).unwrap_or_default();
+        let worst_run_id = runs.last().map(|r| r.eval_run_id.as_str().to_owned()).unwrap_or_default();
+
+        // Compute trend direction from chronologically sorted scores
+        let mut by_time = state
+            .runs
+            .values()
+            .filter(|r| {
+                r.prompt_asset_id.as_ref() == Some(asset_id)
+                    && r.status == EvalRunStatus::Completed
+            })
+            .collect::<Vec<_>>();
+        by_time.sort_by_key(|r| r.created_at);
+        let scores: Vec<f64> = by_time
+            .iter()
+            .filter_map(|r| r.metrics.task_success_rate)
+            .collect();
+        let trend_direction = if scores.len() >= 2 {
+            let first = scores[0];
+            let last = *scores.last().unwrap();
+            if last > first { "improving" }
+            else if last < first { "declining" }
+            else { "stable" }
+        } else {
+            "stable"
+        };
+
+        EvalReport {
+            asset_id: asset_id.as_str().to_owned(),
+            total_runs: by_time.len(),
+            best_run_id,
+            worst_run_id,
+            trend_direction: trend_direction.to_owned(),
+            summary: format!("{} completed eval runs", by_time.len()),
+        }
     }
 }
 
 /// A single data point in a trend series.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EvalTrendPoint {
+    pub eval_run_id: String,
     pub day: String,
     pub value: f64,
 }
@@ -363,8 +449,12 @@ pub struct EvalTrendPoint {
 /// Summary report for an eval asset.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EvalReport {
+    pub asset_id: String,
+    pub total_runs: usize,
+    pub best_run_id: String,
+    pub worst_run_id: String,
+    pub trend_direction: String,
     pub summary: String,
-    pub run_count: usize,
 }
 
 impl Default for EvalRunService {
