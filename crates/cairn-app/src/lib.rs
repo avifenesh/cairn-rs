@@ -16,7 +16,7 @@ use axum::{
         DefaultBodyLimit, Extension, FromRequest, FromRequestParts, MatchedPath, Path, Query,
         Request, State,
     },
-    http::{header, request::Parts, HeaderValue, StatusCode},
+    http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode},
     middleware::{from_fn, from_fn_with_state, Next},
     response::sse::{Event as SseEvent, Sse},
     response::{IntoResponse, Response},
@@ -510,6 +510,11 @@ struct AppState {
     model_comparisons: Arc<ModelComparisonServiceImpl>,
     eval_rubrics: Arc<EvalRubricServiceImpl>,
     runtime_sse_tx: broadcast::Sender<SseFrame>,
+    /// Ring buffer of the last 10,000 SSE frames with monotonic sequence IDs.
+    /// Clients use Last-Event-ID to replay missed events after reconnect (RFC 002).
+    sse_event_buffer: Arc<std::sync::RwLock<std::collections::VecDeque<(u64, SseFrame)>>>,
+    /// Monotonic counter for SSE frame sequence IDs.
+    sse_seq: Arc<std::sync::atomic::AtomicU64>,
     graph: Arc<InMemoryGraphStore>,
     document_store: Arc<InMemoryDocumentStore>,
     retrieval: Arc<InMemoryRetrieval>,
@@ -585,6 +590,10 @@ impl AppState {
         let rate_limits = Arc::new(Mutex::new(HashMap::new()));
         let metrics = Arc::new(AppMetrics::default());
         let (runtime_sse_tx, _) = broadcast::channel(256);
+        let sse_event_buffer = Arc::new(std::sync::RwLock::new(
+            std::collections::VecDeque::<(u64, SseFrame)>::with_capacity(10_000),
+        ));
+        let sse_seq = Arc::new(std::sync::atomic::AtomicU64::new(1));
 
         runtime
             .tenants
@@ -643,6 +652,8 @@ impl AppState {
             metrics,
             started_at: Instant::now(),
             runtime_sse_tx,
+            sse_event_buffer,
+            sse_seq,
             runtime,
             evals,
             eval_baselines,
@@ -3805,6 +3816,9 @@ impl AppBootstrap {
             .route("/v1/providers/connections/:id/models", get(list_provider_models_handler).post(register_provider_model_handler))
             .route("/v1/providers/connections/:id/health-schedule", get(get_provider_health_schedule_handler).post(set_provider_health_schedule_handler))
             .route("/v1/providers/connections/:id/retry-policy", put(set_provider_retry_policy_handler))
+            // ── Events + Stats ───────────────────────────────────────────────────────
+            .route("/v1/events/recent", get(recent_events_handler))
+            .route("/v1/stats", get(stats_handler))
             // ── Trace / Export ────────────────────────────────────────────────────────
             .route("/v1/trace/:trace_id", get(get_trace_handler))
             .route("/v1/export/:format", get(export_bundle_by_format_handler))
@@ -4390,13 +4404,50 @@ fn parse_scope_name(scope: &str) -> Option<Scope> {
 
 async fn runtime_stream_handler(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
+    // Subscribe to the live broadcast BEFORE reading the replay window so no
+    // frames can be missed in the gap between replay and live subscription.
     let receiver = state.runtime_sse_tx.subscribe();
-    let stream = BroadcastStream::new(receiver).filter_map(|message| match message {
+
+    // Parse Last-Event-ID — the client sends this on reconnect to resume
+    // from where it left off (RFC 002 §4).
+    let last_seq: Option<u64> = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok());
+
+    // Collect all buffered frames after last_seq.
+    let replay_frames: Vec<SseFrame> = {
+        let buf = state.sse_event_buffer.read()
+            .expect("sse_event_buffer poisoned");
+        match last_seq {
+            None => vec![],
+            Some(after) => buf
+                .iter()
+                .filter(|(seq, _)| *seq > after)
+                .map(|(_, frame)| frame.clone())
+                .collect(),
+        }
+    };
+
+    // Replay stream: historical frames the client missed.
+    let replay = tokio_stream::iter(replay_frames)
+        .map(|frame| Ok::<SseEvent, Infallible>(sse_event_from_frame(frame)));
+
+    // Live stream: new frames arriving via broadcast.
+    let live = BroadcastStream::new(receiver).filter_map(|message| match message {
         Ok(frame) => Some(Ok(sse_event_from_frame(frame))),
-        Err(_) => None,
+        Err(_) => None, // lagged receiver — client will reconnect
     });
-    Sse::new(stream)
+
+    // Replay missed events first, then switch to the live stream.
+    let stream = replay.chain(live);
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("ping"),
+    )
 }
 
 fn sse_event_from_frame(frame: SseFrame) -> SseEvent {
@@ -4413,6 +4464,8 @@ async fn current_event_head(state: &Arc<AppState>) -> Option<EventPosition> {
     state.runtime.store.head_position().await.ok().flatten()
 }
 
+const SSE_BUFFER_CAPACITY: usize = 10_000;
+
 async fn publish_runtime_frames_since(state: &Arc<AppState>, after: Option<EventPosition>) {
     let Ok(events) = state.runtime.store.read_stream(after, 64).await else {
         return;
@@ -4422,7 +4475,22 @@ async fn publish_runtime_frames_since(state: &Arc<AppState>, after: Option<Event
     let _ = projector.project_events(&events).await;
 
     for stored in events {
-        if let Some(frame) = build_runtime_sse_frame(state, &stored).await {
+        if let Some(mut frame) = build_runtime_sse_frame(state, &stored).await {
+            // Assign a monotonic sequence ID for Last-Event-ID replay.
+            let seq = state.sse_seq
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            frame.id = Some(seq.to_string());
+
+            // Push to replay buffer (trim oldest if at capacity).
+            {
+                let mut buf = state.sse_event_buffer.write()
+                    .expect("sse_event_buffer poisoned");
+                if buf.len() >= SSE_BUFFER_CAPACITY {
+                    buf.pop_front();
+                }
+                buf.push_back((seq, frame.clone()));
+            }
+
             let _ = state.runtime_sse_tx.send(frame);
         }
     }
@@ -4687,6 +4755,103 @@ async fn version_handler() -> impl IntoResponse {
             build_date: option_env!("BUILD_DATE").unwrap_or("unknown").to_owned(),
         }),
     )
+}
+
+/// `GET /v1/events/recent?limit=50` — last N events as a JSON array.
+///
+/// No SSE connection needed — suitable for initial page load.
+/// Returns at most `limit` events (default 50, capped at 500).
+async fn recent_events_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PaginationQuery>,
+) -> impl IntoResponse {
+    let limit: usize = query.limit().min(500);
+    let events = match state.runtime.store.read_stream(None, limit).await {
+        Ok(v) => v,
+        Err(e) => return store_error_response(e),
+    };
+
+    let items: Vec<serde_json::Value> = events
+        .iter()
+        .rev() // most recent first
+        .take(limit)
+        .map(|ev| {
+            serde_json::json!({
+                "position":   ev.position.0,
+                "event_type": event_type_name(&ev.envelope.payload),
+                "message":    event_message(&ev.envelope.payload),
+                "run_id":     run_id_for_event(&ev.envelope.payload),
+                "stored_at":  ev.stored_at,
+            })
+        })
+        .collect();
+
+    let count = items.len();
+    (StatusCode::OK, Json(serde_json::json!({
+        "items": items,
+        "count": count,
+        "limit": limit,
+    }))).into_response()
+}
+
+/// `GET /v1/stats` — lightweight aggregate counts for the deployment.
+///
+/// Uses only public store methods — no private state access.
+async fn stats_handler(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let store = state.runtime.store.as_ref();
+
+    // Event log head position is the last event index; +1 gives total count.
+    let total_events: u64 = store
+        .head_position().await
+        .ok().flatten()
+        .map(|p| p.0 + 1)
+        .unwrap_or(0);
+
+    // Use public count helpers (O(N) scans, acceptable for in-memory store).
+    let active_runs:  u64 = store.count_active_runs().await;
+    let active_tasks: u64 = store.count_active_tasks().await;
+
+    // Total counts from list-all queries.
+    use cairn_store::projections::SessionReadModel;
+    let total_sessions: u64 = SessionReadModel::list_active(store, usize::MAX)
+        .await.unwrap_or_default().len() as u64;
+
+    let total_runs: u64 = match state.runtime.runs.list_by_session(
+        &cairn_domain::SessionId::new("__stats__"), usize::MAX, 0,
+    ).await {
+        Ok(_) => 0, // session-scoped — use read_stream count instead
+        Err(_) => 0,
+    };
+    // More reliable: count runs from the read_stream events
+    let total_runs: u64 = if total_events > 0 {
+        match store.read_stream(None, usize::MAX).await {
+            Ok(events) => events.iter().filter(|e| matches!(
+                e.envelope.payload, cairn_domain::RuntimeEvent::RunCreated(_)
+            )).count() as u64,
+            Err(_) => 0,
+        }
+    } else { 0 };
+
+    let pending_approvals: u64 = {
+        let dummy = cairn_domain::ProjectKey::new("", "", "");
+        use cairn_store::projections::ApprovalReadModel;
+        ApprovalReadModel::list_pending(store, &dummy, usize::MAX, 0)
+            .await.unwrap_or_default().len() as u64
+    };
+
+    let uptime_seconds = state.started_at.elapsed().as_secs();
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "total_events":      total_events,
+        "total_sessions":    total_sessions,
+        "total_runs":        total_runs,
+        "total_tasks":       active_tasks,
+        "active_runs":       active_runs,
+        "pending_approvals": pending_approvals,
+        "uptime_seconds":    uptime_seconds,
+    }))).into_response()
 }
 
 async fn dashboard_handler(
