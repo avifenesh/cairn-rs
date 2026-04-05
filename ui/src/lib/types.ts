@@ -578,3 +578,27 @@ export interface RequestLogsResponse {
   total:   number;
   limit:   number;
 }
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+
+export type NotifType =
+  | 'approval_requested'
+  | 'approval_resolved'
+  | 'run_completed'
+  | 'run_failed'
+  | 'task_stuck';
+
+export interface Notification {
+  id:         string;
+  type:       NotifType;
+  message:    string;
+  entity_id?: string;
+  href:       string;
+  read:       boolean;
+  created_at: number; // unix ms
+}
+
+export interface NotifListResponse {
+  notifications: Notification[];
+  unread_count:  number;
+}

@@ -140,6 +140,74 @@ struct AppState {
     rate_limits: RateLimitTable,
     /// Structured request log ring buffer — written by the tracing middleware.
     request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
+    /// In-memory notification buffer — populated by event-driven hooks.
+    notifications: Arc<std::sync::RwLock<NotificationBuffer>>,
+}
+
+// ── Notification buffer ───────────────────────────────────────────────────────
+
+const NOTIF_RING_SIZE: usize = 200;
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifType {
+    ApprovalRequested,
+    ApprovalResolved,
+    RunCompleted,
+    RunFailed,
+    TaskStuck,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Notification {
+    pub id:         String,
+    #[serde(rename = "type")]
+    pub notif_type: NotifType,
+    pub message:    String,
+    /// Entity ID the notification links to (run_id, approval_id, task_id, …).
+    pub entity_id:  Option<String>,
+    /// Hash navigation target for the UI (e.g. "runs", "approvals").
+    pub href:       String,
+    pub read:       bool,
+    pub created_at: u64,
+}
+
+pub struct NotificationBuffer {
+    entries: std::collections::VecDeque<Notification>,
+}
+
+impl NotificationBuffer {
+    fn new() -> Self {
+        Self { entries: std::collections::VecDeque::with_capacity(NOTIF_RING_SIZE) }
+    }
+
+    fn push(&mut self, n: Notification) {
+        if self.entries.len() == NOTIF_RING_SIZE {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(n);
+    }
+
+    fn list(&self, limit: usize) -> Vec<&Notification> {
+        self.entries.iter().rev().take(limit).collect::<Vec<_>>().into_iter().rev().collect()
+    }
+
+    fn mark_read(&mut self, id: &str) -> bool {
+        if let Some(n) = self.entries.iter_mut().find(|n| n.id == id) {
+            n.read = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn mark_all_read(&mut self) {
+        for n in &mut self.entries { n.read = true; }
+    }
+
+    fn unread_count(&self) -> usize {
+        self.entries.iter().filter(|n| !n.read).count()
+    }
 }
 
 // ── Request metrics ──────────────────────────────────────────────────────────
@@ -1837,6 +1905,101 @@ async fn append_events_handler(
     for envelope in envelopes {
         let event_id = envelope.event_id.as_str().to_owned();
 
+        // ── Notification hook ──────────────────────────────────────────────────
+        // Inspect each event and push a notification for operator-relevant ones.
+        {
+            use cairn_domain::RuntimeEvent as E;
+            use cairn_domain::lifecycle::RunState;
+            use std::time::SystemTime;
+            let now_ms = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let notif_id = format!("notif-{}", &event_id[..event_id.len().min(16)]);
+
+            let maybe_notif: Option<Notification> = match &envelope.payload {
+                E::ApprovalRequested(e) => Some(Notification {
+                    id:         notif_id,
+                    notif_type: NotifType::ApprovalRequested,
+                    message:    format!(
+                        "Approval requested for {}",
+                        e.run_id.as_ref().map(|r| r.as_str()).unwrap_or("a task"),
+                    ),
+                    entity_id:  Some(e.approval_id.as_str().to_owned()),
+                    href:       "approvals".to_owned(),
+                    read:       false,
+                    created_at: now_ms,
+                }),
+                E::ApprovalResolved(e) => Some(Notification {
+                    id:         notif_id,
+                    notif_type: NotifType::ApprovalResolved,
+                    message:    format!(
+                        "Approval {} — decision: {:?}",
+                        e.approval_id.as_str(),
+                        e.decision,
+                    ),
+                    entity_id:  Some(e.approval_id.as_str().to_owned()),
+                    href:       "approvals".to_owned(),
+                    read:       false,
+                    created_at: now_ms,
+                }),
+                E::RunStateChanged(e) => match &e.transition.to {
+                    RunState::Completed => Some(Notification {
+                        id:         notif_id,
+                        notif_type: NotifType::RunCompleted,
+                        message:    format!("Run {} completed", e.run_id.as_str()),
+                        entity_id:  Some(e.run_id.as_str().to_owned()),
+                        href:       format!("run/{}", e.run_id.as_str()),
+                        read:       false,
+                        created_at: now_ms,
+                    }),
+                    RunState::Failed => Some(Notification {
+                        id:         notif_id,
+                        notif_type: NotifType::RunFailed,
+                        message:    format!(
+                            "Run {} failed{}",
+                            e.run_id.as_str(),
+                            e.failure_class.as_ref()
+                                .map(|f| format!(" ({f:?})"))
+                                .unwrap_or_default(),
+                        ),
+                        entity_id:  Some(e.run_id.as_str().to_owned()),
+                        href:       format!("run/{}", e.run_id.as_str()),
+                        read:       false,
+                        created_at: now_ms,
+                    }),
+                    _ => None,
+                },
+                E::TaskStateChanged(e) => {
+                    use cairn_domain::lifecycle::TaskState;
+                    match &e.transition.to {
+                        TaskState::DeadLettered | TaskState::RetryableFailed => Some(Notification {
+                            id:         notif_id,
+                            notif_type: NotifType::TaskStuck,
+                            message:    format!(
+                                "Task {} is stuck ({:?})",
+                                e.task_id.as_str(),
+                                e.transition.to,
+                            ),
+                            entity_id:  Some(e.task_id.as_str().to_owned()),
+                            href:       "tasks".to_owned(),
+                            read:       false,
+                            created_at: now_ms,
+                        }),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+
+            if let Some(n) = maybe_notif {
+                if let Ok(mut buf) = state.notifications.write() {
+                    buf.push(n);
+                }
+            }
+        }
+        // ── End notification hook ──────────────────────────────────────────────
+
         // Idempotency check: if causation_id is set and already in the log,
         // return the existing position instead of appending.
         if let Some(ref cid) = envelope.causation_id {
@@ -1987,6 +2150,56 @@ struct AuditLogQuery {
 }
 
 /// `GET /v1/admin/audit-log?limit=100` — list audit log entries for the operator's tenant.
+// ── Notification handlers ─────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct NotifListQuery {
+    limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct NotifListResponse {
+    notifications: Vec<Notification>,
+    unread_count:  usize,
+}
+
+/// `GET /v1/notifications?limit=50` — list recent notifications.
+async fn list_notifications_handler(
+    State(state): State<AppState>,
+    Query(q): Query<NotifListQuery>,
+) -> impl IntoResponse {
+    let limit = q.limit.unwrap_or(50).min(200);
+    let buf = state.notifications.read().expect("notification lock poisoned");
+    let notifications: Vec<Notification> = buf.list(limit).into_iter().cloned().collect();
+    let unread_count = buf.unread_count();
+    Json(NotifListResponse { notifications, unread_count })
+}
+
+/// `POST /v1/notifications/:id/read` — mark one notification as read.
+async fn mark_notification_read_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let found = state.notifications.write()
+        .expect("notification lock poisoned")
+        .mark_read(&id);
+    if found {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(ApiError { code: "not_found", message: format!("notification {id} not found") })).into_response()
+    }
+}
+
+/// `POST /v1/notifications/read-all` — mark all notifications as read.
+async fn mark_all_notifications_read_handler(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    state.notifications.write()
+        .expect("notification lock poisoned")
+        .mark_all_read();
+    StatusCode::NO_CONTENT
+}
+
 async fn list_audit_log_handler(
     State(state): State<AppState>,
     Query(query): Query<AuditLogQuery>,
@@ -2926,6 +3139,7 @@ async fn main() {
         metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
         request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
+        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
     };
 
     // ── Router ────────────────────────────────────────────────────────────────
@@ -3403,6 +3617,10 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/admin/tenants", post(create_tenant_handler))
         .route("/v1/admin/audit-log", get(list_audit_log_handler))
         .route("/v1/admin/logs", get(list_request_logs_handler))
+        // Notifications
+        .route("/v1/notifications",            get(list_notifications_handler))
+        .route("/v1/notifications/read-all",   post(mark_all_notifications_read_handler))
+        .route("/v1/notifications/:id/read",   post(mark_notification_read_handler))
         .route("/v1/evals/runs", get(list_evals_handler))
         // Ollama local LLM provider
         .route("/v1/providers/ollama/models",          get(ollama_models_handler))
@@ -3564,6 +3782,7 @@ mod tests {
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
+        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
             }
         }
     }
@@ -5167,6 +5386,7 @@ mod tests {
             ollama: None,
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
+        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         };
         let app = build_router(state);
 
@@ -5701,6 +5921,7 @@ mod run_events_tests {
                 ollama: None,
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
+        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
             }
         }
     }
@@ -5884,6 +6105,7 @@ mod tool_invocations_tests {
                 ollama: None,
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
+        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
             }
         }
     }
@@ -6098,6 +6320,7 @@ mod provider_health_tests {
                 ollama: None,
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
+        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
             }
         }
     }

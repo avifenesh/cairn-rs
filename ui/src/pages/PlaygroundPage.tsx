@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Terminal, Send, Loader2, AlertTriangle,
   Clock, Zap, ChevronDown, ChevronRight, Trash2, Square, Bot, User, Settings2,
-  Plus, X, Copy, Check, PanelLeftClose, PanelLeft, GitCompare,
+  Plus, X, Copy, Check, PanelLeftClose, PanelLeft, GitCompare, Download,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
@@ -34,10 +34,17 @@ const MAX_CONVERSATIONS   = 50;
 
 type Role = "user" | "assistant";
 
+interface MessageMeta {
+  latency_ms: number;
+  model: string;
+  tokens_in?: number;
+  tokens_out?: number;
+}
+
 interface Message {
   role: Role;
   content: string;
-  meta?: { latency_ms: number; model: string };
+  meta?: MessageMeta;
   error?: string;
   streaming?: boolean;
 }
@@ -93,7 +100,7 @@ interface GenerateParams {
 function streamGenerate(
   params: GenerateParams,
   onToken: (text: string) => void,
-  onDone: (meta: { latency_ms: number; model: string }) => void,
+  onDone: (meta: MessageMeta) => void,
   onError: (msg: string) => void,
 ): AbortController {
   const controller = new AbortController();
@@ -124,7 +131,12 @@ function streamGenerate(
           try {
             const p = JSON.parse(data) as Record<string, unknown>;
             if (p.text !== undefined)          onToken(String(p.text));
-            else if (p.latency_ms !== undefined) onDone({ latency_ms: Number(p.latency_ms), model: String(p.model ?? params.model) });
+            else if (p.latency_ms !== undefined) onDone({
+              latency_ms: Number(p.latency_ms),
+              model:      String(p.model ?? params.model),
+              tokens_in:  p.tokens_in  !== undefined ? Number(p.tokens_in)  : undefined,
+              tokens_out: p.tokens_out !== undefined ? Number(p.tokens_out) : undefined,
+            });
             else if (p.error !== undefined)     onError(String(p.error));
           } catch { /* ignore */ }
         }
@@ -226,6 +238,251 @@ function useChatStream() {
   }, []);
 
   return { messages, streaming, submit, stop, clear, load };
+}
+
+
+// ── Markdown renderer (regex-based, no external library) ──────────────────────
+
+/** Parse inline markdown to React nodes: bold, italic, code, links. */
+function parseInline(text: string, depth = 0): React.ReactNode {
+  if (depth > 8 || !text) return text;
+  type Rule = { re: RegExp; render: (m: RegExpExecArray) => React.ReactNode };
+  const rules: Rule[] = [
+    // Inline code: `code`
+    { re: /`([^`
+]+)`/,
+      render: (m) => (
+        <code className="font-mono text-[11.5px] bg-zinc-700/70 text-amber-300 px-1 py-px rounded mx-0.5">
+          {m[1]}
+        </code>
+      ),
+    },
+    // Bold: **text**
+    { re: /\*\*([^*
+]+)\*\*/,
+      render: (m) => <strong className="font-semibold text-zinc-100">{parseInline(m[1], depth + 1)}</strong>,
+    },
+    // Italic: *text* (not ** or ***)
+    { re: /(?<!\*)\*(?!\*)([^*
+]+)(?<!\*)\*(?!\*)/,
+      render: (m) => <em className="italic text-zinc-300">{parseInline(m[1], depth + 1)}</em>,
+    },
+    // Link: [text](url)
+    { re: /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/,
+      render: (m) => (
+        <a href={m[2]} target="_blank" rel="noopener noreferrer"
+           className="text-indigo-400 underline underline-offset-2 hover:text-indigo-300 transition-colors">
+          {parseInline(m[1], depth + 1)}
+        </a>
+      ),
+    },
+  ];
+
+  let best: { idx: number; len: number; node: React.ReactNode } | null = null;
+  for (const { re, render } of rules) {
+    const m = re.exec(text);
+    if (m !== null && (best === null || m.index < best.idx)) {
+      best = { idx: m.index, len: m[0].length, node: render(m) };
+    }
+  }
+
+  if (!best) return text;
+  return (
+    <>
+      {best.idx > 0 ? text.slice(0, best.idx) : null}
+      {best.node}
+      {text.length > best.idx + best.len
+        ? parseInline(text.slice(best.idx + best.len), depth + 1)
+        : null}
+    </>
+  );
+}
+
+type MarkdownBlock =
+  | { type: "h1" | "h2" | "h3"; content: string }
+  | { type: "code"; lang: string; content: string }
+  | { type: "list"; items: string[]; ordered: boolean }
+  | { type: "hr" }
+  | { type: "paragraph"; content: string };
+
+function parseBlocks(text: string): MarkdownBlock[] {
+  const lines = text.split("\n");
+  const blocks: MarkdownBlock[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Fenced code block
+    if (line.startsWith("```")) {
+      const lang = line.slice(3).trim();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith("```")) { codeLines.push(lines[i]); i++; }
+      i++; // skip closing ```
+      blocks.push({ type: "code", lang, content: codeLines.join("\n") });
+      continue;
+    }
+
+    // Headers
+    if (line.startsWith("### ")) { blocks.push({ type: "h3", content: line.slice(4) }); i++; continue; }
+    if (line.startsWith("## "))  { blocks.push({ type: "h2", content: line.slice(3) }); i++; continue; }
+    if (line.startsWith("# "))   { blocks.push({ type: "h1", content: line.slice(2) }); i++; continue; }
+
+    // HR
+    if (/^[-_*]{3,}$/.test(line.trim())) { blocks.push({ type: "hr" }); i++; continue; }
+
+    // List (unordered or ordered)
+    if (/^[-*] /.test(line) || /^\d+\. /.test(line)) {
+      const ordered = /^\d+\. /.test(line);
+      const items: string[] = [];
+      while (i < lines.length && (/^[-*] /.test(lines[i]) || /^\d+\. /.test(lines[i]))) {
+        items.push(lines[i].replace(/^[-*] |^\d+\. /, "").replace(/^\d+\.\s/, ""));
+        i++;
+      }
+      // Remove leading numbering properly
+      const cleanItems = items.map(it => it.replace(/^\d+\.\s*/, ""));
+      blocks.push({ type: "list", items: cleanItems, ordered });
+      continue;
+    }
+
+    // Empty line
+    if (line.trim() === "") { i++; continue; }
+
+    // Paragraph — accumulate consecutive plain lines
+    const paraLines: string[] = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() !== "" &&
+      !lines[i].startsWith("```") &&
+      !lines[i].startsWith("# ") &&
+      !lines[i].startsWith("## ") &&
+      !lines[i].startsWith("### ") &&
+      !/^[-*] /.test(lines[i]) &&
+      !/^\d+\. /.test(lines[i]) &&
+      !/^[-_*]{3,}$/.test(lines[i].trim())
+    ) {
+      paraLines.push(lines[i]);
+      i++;
+    }
+    if (paraLines.length > 0) {
+      blocks.push({ type: "paragraph", content: paraLines.join("\n") });
+    }
+  }
+
+  return blocks;
+}
+
+/** Copy-button that appears on code blocks. */
+function CopyCodeButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        void navigator.clipboard.writeText(code).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1"
+    >
+      {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
+    </button>
+  );
+}
+
+/** Render parsed markdown blocks. */
+function MarkdownContent({ text }: { text: string }) {
+  if (!text.trim()) return null;
+  const blocks = parseBlocks(text);
+  return (
+    <div className="space-y-1.5 min-w-0">
+      {blocks.map((block, i) => {
+        switch (block.type) {
+          case "h1":
+            return <h1 key={i} className="text-[17px] font-bold text-zinc-100 mt-2 mb-1 leading-snug">{parseInline(block.content)}</h1>;
+          case "h2":
+            return <h2 key={i} className="text-[14px] font-semibold text-zinc-200 mt-2 mb-0.5 leading-snug">{parseInline(block.content)}</h2>;
+          case "h3":
+            return <h3 key={i} className="text-[13px] font-semibold text-zinc-300 mt-1.5 mb-0.5 leading-snug">{parseInline(block.content)}</h3>;
+          case "code":
+            return (
+              <div key={i} className="my-1.5 rounded-lg overflow-hidden border border-zinc-700/60">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-800 border-b border-zinc-700/60">
+                  <span className="text-[10px] font-mono text-zinc-500">{block.lang || "code"}</span>
+                  <CopyCodeButton code={block.content} />
+                </div>
+                <pre className="p-3 bg-zinc-800/50 overflow-x-auto text-[12px] leading-relaxed">
+                  <code className="font-mono text-zinc-200 whitespace-pre">{block.content}</code>
+                </pre>
+              </div>
+            );
+          case "list": {
+            const Tag = block.ordered ? "ol" : "ul";
+            return (
+              <Tag key={i} className={clsx("pl-5 space-y-0.5 my-1", block.ordered ? "list-decimal" : "list-disc")}>
+                {block.items.map((item, j) => (
+                  <li key={j} className="text-[13px] text-zinc-200 leading-relaxed">
+                    {parseInline(item)}
+                  </li>
+                ))}
+              </Tag>
+            );
+          }
+          case "hr":
+            return <hr key={i} className="border-zinc-700 my-2" />;
+          case "paragraph":
+            return (
+              <p key={i} className="text-[13px] text-zinc-200 leading-relaxed whitespace-pre-wrap break-words">
+                {parseInline(block.content)}
+              </p>
+            );
+        }
+      })}
+    </div>
+  );
+}
+
+// ── Export conversation ───────────────────────────────────────────────────────
+
+function exportConversation(messages: Message[], model: string, systemPrompt: string) {
+  const lines: string[] = [
+    "# Conversation",
+    `> **Model:** ${model}  `,
+    `> **Exported:** ${new Date().toLocaleString()}`,
+    "",
+  ];
+
+  if (systemPrompt.trim()) {
+    lines.push("## System Prompt", "", systemPrompt, "");
+  }
+
+  for (const msg of messages) {
+    lines.push(`## ${msg.role === "user" ? "User" : "Assistant"}`, "");
+    if (msg.error) {
+      lines.push(`> ⚠️ Error: ${msg.error}`, "");
+    } else {
+      lines.push(msg.content, "");
+    }
+    if (msg.meta) {
+      const parts = [
+        `${msg.meta.latency_ms >= 1000 ? (msg.meta.latency_ms / 1000).toFixed(1) + "s" : msg.meta.latency_ms + "ms"}`,
+        msg.meta.model,
+        ...(msg.meta.tokens_in  !== undefined ? [`${msg.meta.tokens_in}↑`]  : []),
+        ...(msg.meta.tokens_out !== undefined ? [`${msg.meta.tokens_out}↓`] : []),
+      ];
+      lines.push(`*${parts.join(" · ")}*`, "");
+    }
+    lines.push("---", "");
+  }
+
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `conversation-${new Date().toISOString().slice(0, 10)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── ModelSelector ─────────────────────────────────────────────────────────────
@@ -375,16 +632,22 @@ function ChatBubble({ msg }: { msg: Message }) {
               <AlertTriangle size={12} className="shrink-0 mt-0.5 text-red-400" />
               {msg.error}
             </span>
+          ) : isUser ? (
+            /* User messages: plain pre-wrap */
+            <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">
+              {msg.content}
+            </p>
           ) : (
+            /* Assistant messages: markdown rendering */
             <>
-              <pre className="whitespace-pre-wrap break-words font-sans">
-                {msg.content}
-                {msg.streaming && (
-                  <span className="inline-block w-0.5 h-3 bg-zinc-400 ml-0.5 animate-pulse align-text-bottom" />
-                )}
-              </pre>
-              {/* Copy button — only for assistant messages with content */}
-              {!isUser && !msg.streaming && msg.content && (
+              {msg.content
+                ? <MarkdownContent text={msg.content} />
+                : null}
+              {msg.streaming && (
+                <span className="inline-block w-0.5 h-3 bg-zinc-400 ml-0.5 mt-1 animate-pulse align-text-bottom" />
+              )}
+              {/* Copy button */}
+              {!msg.streaming && msg.content && (
                 <button
                   onClick={handleCopy}
                   title="Copy response"
@@ -404,10 +667,21 @@ function ChatBubble({ msg }: { msg: Message }) {
         </div>
 
         {msg.meta && !msg.streaming && (
-          <div className="flex items-center gap-2 px-1 text-[10px] text-zinc-700">
-            <Clock size={9} />
-            {msg.meta.latency_ms >= 1000 ? `${(msg.meta.latency_ms / 1000).toFixed(1)}s` : `${msg.meta.latency_ms}ms`}
-            <span className="font-mono">{msg.meta.model}</span>
+          <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 px-1 text-[10px] text-zinc-700">
+            <span className="flex items-center gap-1">
+              <Clock size={9} />
+              {msg.meta.latency_ms >= 1000
+                ? `${(msg.meta.latency_ms / 1000).toFixed(1)}s`
+                : `${msg.meta.latency_ms}ms`}
+            </span>
+            <span className="font-mono text-indigo-500/70 bg-indigo-950/40 px-1.5 py-px rounded text-[10px]">
+              {msg.meta.model}
+            </span>
+            {(msg.meta.tokens_in !== undefined || msg.meta.tokens_out !== undefined) && (
+              <span className="text-zinc-700 font-mono">
+                {msg.meta.tokens_in ?? "—"}↑ {msg.meta.tokens_out ?? "—"}↓
+              </span>
+            )}
           </div>
         )}
         {msg.streaming && (
@@ -818,15 +1092,26 @@ export function PlaygroundPage() {
             </div>
           )}
 
-          {/* Clear (single mode) */}
+          {/* Export + Clear (single mode) */}
           {!compareMode && primary.messages.length > 0 && (
-            <button onClick={() => { primary.stop(); primary.clear(); }} disabled={primary.streaming}
-              title="Clear conversation"
-              className="flex items-center gap-1.5 text-[11px] text-zinc-600 hover:text-red-400
-                         disabled:opacity-30 transition-colors px-1.5 py-1 rounded hover:bg-zinc-900">
-              <Trash2 size={12} />
-              <span className="hidden sm:inline">Clear</span>
-            </button>
+            <>
+              <button
+                onClick={() => exportConversation(primary.messages, activeModel, systemPrompt)}
+                title="Export conversation as Markdown"
+                disabled={primary.streaming}
+                className="flex items-center gap-1.5 text-[11px] text-zinc-600 hover:text-zinc-300
+                           disabled:opacity-30 transition-colors px-1.5 py-1 rounded hover:bg-zinc-900">
+                <Download size={12} />
+                <span className="hidden sm:inline">Export</span>
+              </button>
+              <button onClick={() => { primary.stop(); primary.clear(); }} disabled={primary.streaming}
+                title="Clear conversation"
+                className="flex items-center gap-1.5 text-[11px] text-zinc-600 hover:text-red-400
+                           disabled:opacity-30 transition-colors px-1.5 py-1 rounded hover:bg-zinc-900">
+                <Trash2 size={12} />
+                <span className="hidden sm:inline">Clear</span>
+              </button>
+            </>
           )}
         </div>
       </div>

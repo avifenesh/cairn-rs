@@ -15,6 +15,7 @@ import {
   useCallback,
   type KeyboardEvent,
 } from 'react';
+import { GlobalSearch } from './GlobalSearch';
 import {
   Search,
   LayoutDashboard,
@@ -104,6 +105,7 @@ const SHORTCUT_SECTIONS = [
     title: 'Navigation',
     items: [
       { keys: [MOD, 'K'],  label: 'Open command palette' },
+      { keys: [MOD, 'F'],  label: 'Global entity search'  },
       { keys: [MOD, '1'],  label: 'Dashboard'            },
       { keys: [MOD, '2'],  label: 'Sessions'             },
       { keys: [MOD, '3'],  label: 'Runs'                 },
@@ -313,9 +315,11 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ onNavigate }: CommandPaletteProps) {
-  const [open,     setOpen]     = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
-  const [query,    setQuery]    = useState('');
+  const [open,        setOpen]        = useState(false);
+  const [showHelp,    setShowHelp]    = useState(false);
+  const [searchOpen,  setSearchOpen]  = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [query,       setQuery]       = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -346,6 +350,15 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
       shortcut:    ['?'],
       action:      () => { setOpen(false); setShowHelp(true); },
     },
+    // Dynamic search action — only visible when there's a query.
+    ...(query.trim().length >= 2 ? [{
+      kind:        'action' as const,
+      id:          'search-entities',
+      label:       `Search "${query.trim()}" across all entities`,
+      description: 'Runs, sessions, tasks, approvals, traces, prompts',
+      icon:        Search,
+      action:      () => { setSearchQuery(query); setOpen(false); setSearchOpen(true); },
+    }] : []),
   ];
 
   // Fetch recent runs + sessions for quick-jump (non-blocking).
@@ -398,6 +411,14 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
         return;
       }
 
+      // Cmd+F — open global entity search directly.
+      if (mod && e.key === 'f' && !open) {
+        e.preventDefault();
+        setSearchQuery('');
+        setSearchOpen((v) => !v);
+        return;
+      }
+
       // Cmd+1..9 — navigate directly (only when palette/help not open).
       if (mod && !open && !showHelp && e.key >= '1' && e.key <= '9') {
         const page = NAV_OPTIONS[parseInt(e.key, 10) - 1];
@@ -412,6 +433,7 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
       if (e.key === 'Escape') {
         setOpen(false);
         setShowHelp(false);
+        setSearchOpen(false);
         return;
       }
 
@@ -471,6 +493,15 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
     <>
       {/* Shortcuts help overlay */}
       {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
+
+      {/* Global entity search */}
+      {searchOpen && (
+        <GlobalSearch
+          initialQuery={searchQuery}
+          onClose={() => setSearchOpen(false)}
+          onBack={() => { setSearchOpen(false); setOpen(true); }}
+        />
+      )}
 
       {/* Command palette */}
       {open && (

@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -7,6 +8,13 @@ import {
   Cpu,
   Zap,
   Activity,
+  TrendingUp,
+  TrendingDown,
+  Coins,
+  Play,
+  Pause,
+  Timer,
+  Radio,
 } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
@@ -14,9 +22,53 @@ import { StatCard } from "../components/StatCard";
 import { EventLog } from "../components/EventLog";
 import { defaultApi } from "../lib/api";
 import type { StatCardVariant } from "../components/StatCard";
-import type { HealthCheckEntry } from "../lib/types";
+import type { HealthCheckEntry, RunRecord } from "../lib/types";
 
-// ── Section header ────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmtMicros(micros: number): string {
+  if (micros === 0) return "$0.00";
+  const usd = micros / 1_000_000;
+  if (usd < 0.001) return `$${(usd * 1000).toFixed(3)}m`;
+  if (usd < 1)     return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function fmtElapsed(createdAtMs: number): string {
+  const s = Math.floor((Date.now() - createdAtMs) / 1_000);
+  if (s < 60)      return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60)      return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+function fmtUptime(secs: number) {
+  if (secs < 60)   return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  const h = Math.floor(secs / 3600);
+  return `${h}h ${Math.floor((secs % 3600) / 60)}m`;
+}
+
+const ACTIVE_STATES = new Set(["running", "pending", "paused", "waiting_approval", "waiting_dependency"]);
+
+function runStateColors(state: string): string {
+  switch (state) {
+    case "running":           return "text-emerald-400 bg-emerald-400/10";
+    case "paused":            return "text-amber-400  bg-amber-400/10";
+    case "waiting_approval":  return "text-purple-400 bg-purple-400/10";
+    case "pending":           return "text-sky-400    bg-sky-400/10";
+    default:                  return "text-zinc-500   bg-zinc-800";
+  }
+}
+
+// ── Primitives ────────────────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -26,8 +78,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ── Panel shell ───────────────────────────────────────────────────────────────
-
 function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={clsx("bg-zinc-900 border border-zinc-800 rounded-lg p-4", className)}>
@@ -36,7 +86,350 @@ function Panel({ children, className }: { children: React.ReactNode; className?:
   );
 }
 
-// ── System health card ────────────────────────────────────────────────────────
+function Skeleton({ className }: { className?: string }) {
+  return <div className={clsx("rounded bg-zinc-800 animate-pulse", className)} />;
+}
+
+// ── Widget: Active Runs ───────────────────────────────────────────────────────
+
+function ActiveRunRow({ run }: { run: RunRecord }) {
+  const handleClick = useCallback(() => {
+    window.location.hash = `run/${run.run_id}`;
+  }, [run.run_id]);
+
+  return (
+    <button
+      onClick={handleClick}
+      className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-zinc-800/60 transition-colors text-left group"
+    >
+      {/* State icon */}
+      <span className={clsx(
+        "shrink-0 flex h-6 w-6 items-center justify-center rounded-full",
+        run.state === "running" ? "bg-emerald-500/15" : "bg-zinc-800",
+      )}>
+        {run.state === "running"
+          ? <Play  size={9} className="text-emerald-400 fill-emerald-400" />
+          : run.state === "paused"
+          ? <Pause size={9} className="text-amber-400" />
+          : <Timer size={9} className="text-zinc-500" />
+        }
+      </span>
+
+      {/* Run id + project */}
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] font-mono text-zinc-200 truncate group-hover:text-zinc-100">
+          {run.run_id}
+        </p>
+        <p className="text-[10px] text-zinc-600 truncate font-mono">
+          {run.project.tenant_id}/{run.project.project_id}
+        </p>
+      </div>
+
+      {/* State badge + elapsed */}
+      <div className="flex flex-col items-end gap-0.5 shrink-0">
+        <span className={clsx(
+          "text-[10px] font-medium px-1.5 py-0.5 rounded-full",
+          runStateColors(run.state),
+        )}>
+          {run.state.replace(/_/g, " ")}
+        </span>
+        <span className="text-[10px] font-mono text-zinc-600 tabular-nums">
+          {fmtElapsed(run.created_at)}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function ActiveRunsWidget() {
+  const { data: runs, isLoading } = useQuery({
+    queryKey: ["runs-active"],
+    queryFn:  () => defaultApi.getRuns({ limit: 50 }),
+    refetchInterval: 5_000,
+    select: (rows) => rows.filter(r => ACTIVE_STATES.has(r.state))
+                          .sort((a, b) => b.created_at - a.created_at)
+                          .slice(0, 8),
+  });
+
+  return (
+    <Panel className="flex flex-col min-h-[160px]">
+      <div className="flex items-center justify-between mb-2">
+        <SectionLabel>Active Runs</SectionLabel>
+        <span className="text-[10px] text-zinc-600 flex items-center gap-1">
+          <Radio size={9} className="text-emerald-500" />
+          5s
+        </span>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2">
+              <Skeleton className="h-6 w-6 rounded-full" />
+              <div className="flex-1 space-y-1">
+                <Skeleton className="h-3 w-3/4" />
+                <Skeleton className="h-2 w-1/2" />
+              </div>
+              <Skeleton className="h-4 w-16" />
+            </div>
+          ))}
+        </div>
+      ) : !runs || runs.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
+          <CheckCircle2 size={18} className="text-emerald-600/50" />
+          <p className="text-[12px] text-zinc-600">No active runs</p>
+        </div>
+      ) : (
+        <div className="space-y-0.5">
+          {runs.map(run => <ActiveRunRow key={run.run_id} run={run} />)}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// ── Widget: Cost ──────────────────────────────────────────────────────────────
+
+/** Render n CSS-only bars for visual interest (token proportion breakdown). */
+function TokenBar({ inputTokens, outputTokens }: { inputTokens: number; outputTokens: number }) {
+  const total = inputTokens + outputTokens;
+  if (total === 0) {
+    return (
+      <div className="flex gap-0.5 h-6 items-end">
+        {Array.from({ length: 12 }, (_, i) => (
+          <div key={i} className="flex-1 rounded-sm bg-zinc-800" style={{ height: "30%" }} />
+        ))}
+      </div>
+    );
+  }
+
+  // Synthetic per-bucket bars: distribute total across 12 segments using a
+  // slight decay so it resembles a call-distribution histogram.
+  const decay = [1, 0.92, 0.87, 0.94, 0.78, 0.85, 0.91, 0.73, 0.88, 0.82, 0.69, 0.76];
+  const inPct  = inputTokens  / total;
+  const bars = decay.map((d, i) => ({
+    h:     Math.max(8, Math.round(d * 80)),
+    isIn:  i < Math.round(inPct * 12),
+  }));
+
+  return (
+    <div className="flex gap-0.5 h-8 items-end">
+      {bars.map((b, i) => (
+        <div
+          key={i}
+          className={clsx(
+            "flex-1 rounded-sm transition-all",
+            b.isIn ? "bg-indigo-500/60" : "bg-sky-500/50",
+          )}
+          style={{ height: `${b.h}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function CostWidget() {
+  const { data: costs, isLoading, dataUpdatedAt } = useQuery({
+    queryKey: ["costs-widget"],
+    queryFn:  () => defaultApi.getCosts(),
+    refetchInterval: 30_000,
+  });
+
+  const { data: prevCosts } = useQuery({
+    queryKey: ["costs-widget-prev"],
+    queryFn:  () => defaultApi.getCosts(),
+    staleTime: Infinity,
+    gcTime: 30_000,
+    enabled: false,        // seeded from cache; we just compare snapshots
+  });
+
+  const trend = costs && prevCosts && prevCosts.total_cost_micros > 0
+    ? costs.total_cost_micros > prevCosts.total_cost_micros ? "up" : "down"
+    : null;
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between mb-2">
+        <SectionLabel>Costs</SectionLabel>
+        {dataUpdatedAt > 0 && (
+          <span className="text-[10px] text-zinc-700 tabular-nums">
+            {new Date(dataUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          <Skeleton className="h-6 w-24" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-3 w-3/4" />
+        </div>
+      ) : !costs ? (
+        <p className="text-[12px] text-zinc-600 italic">Unavailable</p>
+      ) : (
+        <div className="space-y-2">
+          {/* Total cost headline */}
+          <div className="flex items-baseline gap-2">
+            <span className="text-[22px] font-semibold tabular-nums text-zinc-100 leading-none">
+              {fmtMicros(costs.total_cost_micros)}
+            </span>
+            {trend === "up" && <TrendingUp  size={13} className="text-red-400" />}
+            {trend === "down" && <TrendingDown size={13} className="text-emerald-400" />}
+          </div>
+
+          {/* Sparkline: token distribution */}
+          <TokenBar
+            inputTokens={costs.total_tokens_in}
+            outputTokens={costs.total_tokens_out}
+          />
+
+          {/* Legend */}
+          <div className="flex items-center justify-between text-[10px] text-zinc-600">
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-sm bg-indigo-500/60 inline-block" />
+              in {fmtTokens(costs.total_tokens_in)}
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-sm bg-sky-500/50 inline-block" />
+              out {fmtTokens(costs.total_tokens_out)}
+            </span>
+            <span className="flex items-center gap-1">
+              <Coins size={9} />
+              {costs.total_provider_calls.toLocaleString()} calls
+            </span>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// ── Widget: Provider status ───────────────────────────────────────────────────
+
+function ProviderDot({ status }: { status: string }) {
+  return (
+    <span className={clsx(
+      "inline-block w-2 h-2 rounded-full shrink-0",
+      status === "healthy"      ? "bg-emerald-500"                        :
+      status === "degraded"     ? "bg-amber-500 animate-pulse"            :
+      status === "unhealthy"    ? "bg-red-500 animate-pulse"              :
+      status === "unconfigured" ? "bg-zinc-600"                           :
+                                  "bg-zinc-600",
+    )} />
+  );
+}
+
+function ProviderStatusWidget() {
+  const { data: health, isLoading: healthLoading } = useQuery({
+    queryKey: ["detailed-health"],
+    queryFn:  () => defaultApi.getDetailedHealth(),
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  const { data: ollamaModels, isLoading: modelsLoading } = useQuery({
+    queryKey: ["ollama-models-dashboard"],
+    queryFn:  () => defaultApi.getOllamaModels(),
+    refetchInterval: 60_000,
+    retry: false,
+  });
+
+  const isLoading = healthLoading || modelsLoading;
+
+  type ProviderRow = { name: string; status: string; detail: string };
+  const providers: ProviderRow[] = [];
+
+  if (health) {
+    providers.push({
+      name:   "Store",
+      status: health.checks.store.status,
+      detail: health.checks.store.latency_ms !== undefined
+        ? `${health.checks.store.latency_ms}ms`
+        : health.checks.store.status,
+    });
+    providers.push({
+      name:   "Ollama",
+      status: health.checks.ollama.status,
+      detail: health.checks.ollama.status === "unconfigured"
+        ? "not configured"
+        : health.checks.ollama.models !== undefined
+        ? `${health.checks.ollama.models} model${health.checks.ollama.models !== 1 ? "s" : ""}`
+        : health.checks.ollama.status,
+    });
+    providers.push({
+      name:   "Events",
+      status: health.checks.event_buffer.status,
+      detail: health.checks.event_buffer.status,
+    });
+    providers.push({
+      name:   "Memory",
+      status: health.checks.memory.status,
+      detail: health.checks.memory.rss_mb !== undefined
+        ? `${health.checks.memory.rss_mb}MB RSS`
+        : health.checks.memory.status,
+    });
+  }
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between mb-2">
+        <SectionLabel>Providers</SectionLabel>
+        {ollamaModels && (
+          <span className="text-[10px] text-zinc-600 font-mono truncate max-w-[100px]">
+            {ollamaModels.host.replace(/^https?:\/\//, "")}
+          </span>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2.5">
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className="flex items-center gap-2">
+              <Skeleton className="h-2 w-2 rounded-full" />
+              <Skeleton className="h-3 flex-1" />
+              <Skeleton className="h-3 w-12" />
+            </div>
+          ))}
+        </div>
+      ) : providers.length === 0 ? (
+        <p className="text-[12px] text-zinc-600 italic">Health endpoint unavailable</p>
+      ) : (
+        <div className="space-y-2">
+          {providers.map(p => (
+            <div key={p.name} className="flex items-center gap-2.5">
+              <ProviderDot status={p.status} />
+              <span className="text-[12px] text-zinc-400 flex-1">{p.name}</span>
+              <span className={clsx(
+                "text-[10px] font-mono tabular-nums",
+                p.status === "healthy"      ? "text-emerald-500" :
+                p.status === "unconfigured" ? "text-zinc-600"    :
+                p.status === "degraded"     ? "text-amber-400"   : "text-red-400",
+              )}>
+                {p.detail}
+              </span>
+            </div>
+          ))}
+
+          {/* Ollama model list (compact) */}
+          {ollamaModels && ollamaModels.models.length > 0 && (
+            <div className="pt-2 mt-1 border-t border-zinc-800/60">
+              <p className="text-[10px] text-zinc-700 mb-1.5">Local models</p>
+              <div className="flex flex-wrap gap-1">
+                {ollamaModels.models.map(m => (
+                  <span key={m} className="text-[10px] font-mono text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
+                    {m}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// ── Widget: System health ─────────────────────────────────────────────────────
 
 const STATUS_DOT: Record<string, string> = {
   healthy:      "bg-emerald-500",
@@ -102,18 +495,10 @@ function UsageBar({ value, max, color }: { value: number; max: number; color: st
 function SystemHealthCard() {
   const { data, isLoading } = useQuery({
     queryKey: ["detailed-health"],
-    queryFn: () => defaultApi.getDetailedHealth(),
+    queryFn:  () => defaultApi.getDetailedHealth(),
     refetchInterval: 30_000,
     retry: false,
   });
-
-  const fmtUptime = (secs: number) => {
-    if (secs < 60)    return `${secs}s`;
-    if (secs < 3600)  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    return `${h}h ${m}m`;
-  };
 
   return (
     <Panel>
@@ -122,11 +507,9 @@ function SystemHealthCard() {
         {data && (
           <span className={clsx(
             "inline-flex items-center gap-1.5 text-[10px] font-medium rounded px-1.5 py-0.5",
-            data.status === "healthy"
-              ? "bg-emerald-500/10 text-emerald-400"
-              : data.status === "degraded"
-              ? "bg-amber-500/10 text-amber-400"
-              : "bg-red-500/10 text-red-400",
+            data.status === "healthy"  ? "bg-emerald-500/10 text-emerald-400" :
+            data.status === "degraded" ? "bg-amber-500/10 text-amber-400"     :
+                                          "bg-red-500/10 text-red-400",
           )}>
             <span className={clsx("w-1.5 h-1.5 rounded-full", STATUS_DOT[data.status])} />
             {data.status}
@@ -148,7 +531,6 @@ function SystemHealthCard() {
           <CheckRow icon={Zap}      label="Ollama" check={data.checks.ollama} />
           <CheckRow icon={Activity} label="Events" check={data.checks.event_buffer} />
 
-          {/* Memory usage */}
           {(data.checks.memory.rss_mb ?? 0) > 0 && (
             <div className="pt-2 mt-1 border-t border-zinc-800/60 space-y-1.5">
               <div className="flex items-center gap-2">
@@ -170,11 +552,8 @@ function SystemHealthCard() {
             </div>
           )}
 
-          {/* Uptime + version footer */}
           <div className="flex items-center justify-between pt-2 mt-1 border-t border-zinc-800/60">
-            <span className="text-[10px] text-zinc-700 font-mono">
-              v{data.version}
-            </span>
+            <span className="text-[10px] text-zinc-700 font-mono">v{data.version}</span>
             <span className="text-[10px] text-zinc-700 font-mono tabular-nums">
               up {fmtUptime(data.uptime_seconds)}
             </span>
@@ -185,7 +564,7 @@ function SystemHealthCard() {
   );
 }
 
-// ── Critical events ───────────────────────────────────────────────────────────
+// ── Widget: Critical events ───────────────────────────────────────────────────
 
 function CriticalEvents({ events }: { events: string[] }) {
   return (
@@ -202,7 +581,7 @@ function CriticalEvents({ events }: { events: string[] }) {
       ) : (
         <ul className="space-y-1.5">
           {events.map((evt, i) => (
-            <li key={`evt-${i}-${evt.slice(0, 20)}`} className="flex items-start gap-2 rounded bg-zinc-800/50 px-3 py-2">
+            <li key={`evt-${i}`} className="flex items-start gap-2 rounded bg-zinc-800/50 px-3 py-2">
               <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-500" />
               <span className="text-[13px] text-zinc-300 break-words">{evt}</span>
             </li>
@@ -222,38 +601,33 @@ function DegradedBanner({ components }: { components: string[] }) {
       <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
       <div>
         <p className="text-[13px] font-medium text-amber-400">
-          {components.length} degraded component{components.length > 1 ? 's' : ''}
+          {components.length} degraded component{components.length > 1 ? "s" : ""}
         </p>
-        <p className="text-[11px] text-amber-600 mt-0.5">
-          {components.join(', ')}
-        </p>
+        <p className="text-[11px] text-amber-600 mt-0.5">{components.join(", ")}</p>
       </div>
     </div>
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
-  // Primary: fast real-time counts from /v1/stats (5s refresh).
   const { data: stats, dataUpdatedAt: statsUpdatedAt } = useQuery({
     queryKey: ["stats"],
-    queryFn: () => defaultApi.getStats(),
+    queryFn:  () => defaultApi.getStats(),
     refetchInterval: 5_000,
     retry: false,
   });
 
-  // Fallback: richer dashboard payload (15s refresh) for fields not in stats.
   const { data, isLoading, isError, error, dataUpdatedAt, refetch: refetchDashboard } = useQuery({
     queryKey: ["dashboard"],
-    queryFn: () => defaultApi.getDashboard(),
+    queryFn:  () => defaultApi.getDashboard(),
     refetchInterval: 15_000,
   });
 
-  // Seed the event log with the most recent events before SSE connects.
   const { data: recentEventsData } = useQuery({
     queryKey: ["recent-events"],
-    queryFn: () => defaultApi.getRecentEvents(50),
+    queryFn:  () => defaultApi.getRecentEvents(50),
     staleTime: 30_000,
     retry: false,
   });
@@ -268,11 +642,10 @@ export function DashboardPage() {
     );
   }
 
-  // Prefer stats counts (faster); fall back to dashboard payload.
-  const runs      = stats?.active_runs      ?? data?.active_runs      ?? 0;
-  const tasks     = stats?.total_tasks      ?? data?.active_tasks     ?? 0;
+  const runs      = stats?.active_runs       ?? data?.active_runs       ?? 0;
+  const tasks     = stats?.total_tasks       ?? data?.active_tasks      ?? 0;
   const approvals = stats?.pending_approvals ?? data?.pending_approvals ?? 0;
-  const failed    = data?.failed_runs_24h ?? 0;
+  const failed    = data?.failed_runs_24h    ?? 0;
 
   const runVariant:  StatCardVariant = runs      > 0 ? "info"    : "default";
   const taskVariant: StatCardVariant = tasks     > 0 ? "info"    : "default";
@@ -286,7 +659,7 @@ export function DashboardPage() {
     <div className="h-full overflow-y-auto bg-zinc-950">
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
 
-        {/* Header row */}
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-[13px] font-medium text-zinc-200">Overview</h2>
@@ -317,18 +690,18 @@ export function DashboardPage() {
         {/* Degraded banner */}
         {data && <DegradedBanner components={data.degraded_components ?? []} />}
 
-        {/* Primary metrics */}
+        {/* Activity stat cards */}
         <div>
           <SectionLabel>Activity</SectionLabel>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Active Runs"      value={runs}      variant={runVariant}  loading={isLoading} />
-            <StatCard label="Active Tasks"     value={tasks}     variant={taskVariant} loading={isLoading} />
+            <StatCard label="Active Runs"       value={runs}      variant={runVariant}  loading={isLoading} />
+            <StatCard label="Active Tasks"      value={tasks}     variant={taskVariant} loading={isLoading} />
             <StatCard label="Pending Approvals" value={approvals} variant={aprVariant}  loading={isLoading} />
-            <StatCard label="Failed (24 h)"    value={failed}    variant={failVariant} loading={isLoading} />
+            <StatCard label="Failed (24h)"      value={failed}    variant={failVariant} loading={isLoading} />
           </div>
         </div>
 
-        {/* Secondary metrics */}
+        {/* Infrastructure stat cards */}
         <div>
           <SectionLabel>Infrastructure</SectionLabel>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -339,17 +712,27 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {/* Lower row */}
+        {/* Live widgets row — Active Runs + Cost + Providers */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <CriticalEvents events={data?.recent_critical_events ?? []} />
-          <SystemHealthCard />
-          <Panel>
-            <SectionLabel>Live event stream</SectionLabel>
+          <ActiveRunsWidget />
+          <div className="flex flex-col gap-4">
+            <CostWidget />
+            <ProviderStatusWidget />
+          </div>
+          {/* Recent Activity timeline via EventLog */}
+          <Panel className="flex flex-col">
+            <SectionLabel>Recent Activity</SectionLabel>
             <EventLog
               initialEvents={recentEventsData ?? []}
               maxEvents={50}
             />
           </Panel>
+        </div>
+
+        {/* Bottom row — Critical events + System health */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <CriticalEvents events={data?.recent_critical_events ?? []} />
+          <SystemHealthCard />
         </div>
 
       </div>
