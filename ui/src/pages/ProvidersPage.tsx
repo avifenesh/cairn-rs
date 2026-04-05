@@ -154,6 +154,7 @@ function OllamaSection() {
   const toast = useToast();
   const [prompt, setPrompt] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
+  const [expandedInfo, setExpandedInfo] = useState<string | null>(null);
   const [pullName, setPullName] = useState("");
   const [result, setResult] = useState<{
     text: string; model: string; tokens_in: number | null;
@@ -279,38 +280,62 @@ function OllamaSection() {
           {models.length > 0 ? (
             <div className="space-y-1.5">
               {models.map((m) => {
-                const isDeleting = deleteModel.isPending && deleteModel.variables === m;
+                const isDeleting  = deleteModel.isPending && deleteModel.variables === m;
+                const isExpanded  = expandedInfo === m;
                 return (
-                  <div key={m}
-                    className={clsx(
+                  <div key={m}>
+                    <div className={clsx(
                       "flex items-center justify-between rounded-lg px-3 py-2 ring-1 transition-colors",
                       activeModel === m
                         ? "bg-indigo-950/50 ring-indigo-800/60"
                         : "bg-zinc-800/50 ring-zinc-700/50",
-                    )}
-                  >
-                    <button
-                      onClick={() => setSelectedModel(m)}
-                      className="text-xs font-mono text-zinc-300 hover:text-zinc-100 transition-colors"
-                    >
-                      {m}
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm(`Delete "${m}"? This removes it from Ollama.`)) {
-                          deleteModel.mutate(m);
+                    )}>
+                      {/* Model name — click to select */}
+                      <button
+                        onClick={() => setSelectedModel(m)}
+                        className="text-xs font-mono text-zinc-300 hover:text-zinc-100 transition-colors flex-1 text-left"
+                      >
+                        {m}
+                      </button>
+
+                      {/* Info expand toggle */}
+                      <button
+                        onClick={() => setExpandedInfo(isExpanded ? null : m)}
+                        title="Show model info"
+                        className="text-zinc-600 hover:text-zinc-300 transition-colors ml-2"
+                      >
+                        {isExpanded
+                          ? <ChevronDown size={13} />
+                          : <ChevronRight size={13} />
                         }
-                      }}
-                      disabled={isDeleting || deleteModel.isPending}
-                      title={`Delete ${m}`}
-                      className="flex items-center gap-1 text-zinc-600 hover:text-red-400
-                                 disabled:opacity-30 transition-colors ml-3"
-                    >
-                      {isDeleting
-                        ? <Loader2 size={12} className="animate-spin" />
-                        : <Trash2 size={12} />
-                      }
-                    </button>
+                      </button>
+
+                      {/* Delete */}
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete "${m}"? This removes it from Ollama.`)) {
+                            deleteModel.mutate(m);
+                          }
+                        }}
+                        disabled={isDeleting || deleteModel.isPending}
+                        title={`Delete ${m}`}
+                        className="flex items-center gap-1 text-zinc-600 hover:text-red-400
+                                   disabled:opacity-30 transition-colors ml-1.5"
+                      >
+                        {isDeleting
+                          ? <Loader2 size={12} className="animate-spin" />
+                          : <Trash2 size={12} />
+                        }
+                      </button>
+                    </div>
+
+                    {/* Inline info panel */}
+                    {isExpanded && (
+                      <ModelInfoPanel
+                        name={m}
+                        onClose={() => setExpandedInfo(null)}
+                      />
+                    )}
                   </div>
                 );
               })}
