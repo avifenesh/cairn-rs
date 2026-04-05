@@ -7,7 +7,7 @@ import {
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
 import { defaultApi } from "../lib/api";
-import type { RunRecord, RunState, TaskRecord, TaskState } from "../lib/types";
+import type { RunRecord, RunState, TaskState } from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -225,6 +225,16 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/providers/health — list provider health records. */
     getProviderHealth: (): Promise<unknown[]> => get("/v1/providers/health"),
 
+    // ── LLM Traces ───────────────────────────────────────────────────────────
+
+    /** GET /v1/traces — all recent LLM call traces (operator view). */
+    getTraces: (limit = 500): Promise<import("./types").TracesResponse> =>
+      get(`/v1/traces?limit=${limit}`),
+
+    /** GET /v1/sessions/:id/llm-traces — traces for one session. */
+    getSessionTraces: (sessionId: string, limit = 200): Promise<import("./types").TracesResponse> =>
+      get(`/v1/sessions/${sessionId}/llm-traces?limit=${limit}`),
+
     // ── Memory / Knowledge ───────────────────────────────────────────────────
 
     /** GET /v1/memory/search — lexical retrieval over the knowledge store. */

@@ -258,3 +258,23 @@ export interface ListResponse<T> {
   items: T[];
   has_more: boolean;
 }
+
+// ── LLM Traces ────────────────────────────────────────────────────────────────
+
+/** GET /v1/traces or GET /v1/sessions/:id/llm-traces — one call per trace */
+export interface LlmCallTrace {
+  trace_id: string;
+  model_id: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  latency_ms: number;
+  cost_micros: number;
+  session_id: string | null;
+  run_id: string | null;
+  created_at_ms: number;
+  is_error: boolean;
+}
+
+export interface TracesResponse {
+  traces: LlmCallTrace[];
+}
