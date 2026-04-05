@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
+import { EventLog } from "../components/EventLog";
 import { defaultApi } from "../lib/api";
 import type { StatCardVariant } from "../components/StatCard";
 
@@ -278,6 +279,9 @@ export function DashboardPage() {
           </ul>
         </div>
       )}
+
+      {/* ── Live event stream ────────────────────────────────────────────── */}
+      <EventLog maxEvents={20} className="w-full" />
     </div>
   );
 }
