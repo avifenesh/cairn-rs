@@ -67,8 +67,8 @@ function activePage(route: Route): NavPage {
 
 function PlaceholderPage({ page }: { page: NavPage }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-2 text-zinc-700">
-      <span className="text-xl font-semibold text-zinc-600">{PAGE_TITLES[page]}</span>
+    <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-400 dark:text-zinc-700">
+      <span className="text-xl font-semibold text-gray-400 dark:text-zinc-600">{PAGE_TITLES[page]}</span>
       <p className="text-[13px]">Coming soon.</p>
     </div>
   );
@@ -118,7 +118,7 @@ export function Layout({ children, routeRenderer }: LayoutProps) {
   content ??= <PlaceholderPage page={page} />;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-200">
+    <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-200">
       <Sidebar
         current={page}
         onNavigate={navigate}
@@ -129,7 +129,7 @@ export function Layout({ children, routeRenderer }: LayoutProps) {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <TopBar title={routeTitle(route)} onMenuClick={() => setSidebarOpen(v => !v)} />
 
-        <main className="flex-1 overflow-hidden bg-zinc-950">
+        <main className="flex-1 overflow-hidden bg-gray-50 dark:bg-zinc-950">
           {content}
         </main>
       </div>

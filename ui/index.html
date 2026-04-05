@@ -2,6 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Anti-FOUC: apply dark class before first paint based on stored preference -->
+    <script>
+      try {
+        var t = localStorage.getItem('cairn_theme') || 'dark';
+        if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch(e) {}
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cairn — AI Agent Control Plane</title>

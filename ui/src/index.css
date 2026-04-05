@@ -1,11 +1,30 @@
 @import "tailwindcss";
 
+/* ── Class-based dark mode (Tailwind v4) ───────────────────────────────────── */
+/* dark: variants activate when any ancestor has the .dark class.               */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Base theme variables ──────────────────────────────────────────────────── */
+
+:root {
+  --page-bg:   #ffffff;
+  --page-fg:   #111827; /* gray-900 */
+  --scrollbar: #d1d5db; /* gray-300 */
+}
+
+:root.dark {
+  --page-bg:   #09090b; /* zinc-950 */
+  --page-fg:   #e4e4e7; /* zinc-200 */
+  --scrollbar: #3f3f46; /* zinc-700 */
+}
+
 /* ── Base ──────────────────────────────────────────────────────────────────── */
 
 html,
 body {
-  background-color: #09090b; /* zinc-950 */
-  color: #e4e4e7;            /* zinc-200 */
+  background-color: var(--page-bg);
+  color: var(--page-fg);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-size: 13px;
   line-height: 1.5;
@@ -14,15 +33,15 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* ── Scrollbar — thin, matches zinc palette ────────────────────────────────── */
+/* ── Scrollbar — thin, theme-aware ─────────────────────────────────────────── */
 
 ::-webkit-scrollbar        { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track  { background: transparent; }
-::-webkit-scrollbar-thumb  { background: #3f3f46; border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: #52525b; }
+::-webkit-scrollbar-thumb  { background: var(--scrollbar); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { filter: brightness(1.15); }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-* { scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
 
 /* ── Focus ring — indigo only ──────────────────────────────────────────────── */
 
@@ -33,7 +52,7 @@ body {
 
 /* ── Selection ─────────────────────────────────────────────────────────────── */
 
-::selection { background: rgba(99, 102, 241, 0.25); }
+::selection { background: rgba(99, 102, 241, 0.2); }
 
 /* ── Toast slide-in ─────────────────────────────────────────────────────────── */
 

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Menu } from 'lucide-react';
+import { Menu, Sun, Moon, Monitor } from 'lucide-react';
 import { defaultApi } from '../lib/api';
 import type { SystemStatus } from '../lib/types';
 import { clsx } from 'clsx';
+import { useTheme, type Theme } from '../hooks/useTheme';
 
 function formatUptime(secs: number): string {
   if (secs < 60)   return `${secs}s`;
@@ -12,7 +13,7 @@ function formatUptime(secs: number): string {
 
 function Dot({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+    <span className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-zinc-500">
       <span className={clsx('inline-block w-1.5 h-1.5 rounded-full shrink-0',
         ok ? 'bg-emerald-500' : 'bg-red-500')} />
       {label}
@@ -20,15 +21,27 @@ function Dot({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+const THEME_ICON: Record<Theme, React.ComponentType<{ size?: number; className?: string }>> = {
+  dark:   Moon,
+  light:  Sun,
+  system: Monitor,
+};
+
+const THEME_NEXT_LABEL: Record<Theme, string> = {
+  dark:   'Switch to light',
+  light:  'Switch to system',
+  system: 'Switch to dark',
+};
+
 interface TopBarProps {
   title: string;
-  /** Callback to open/close the sidebar on mobile/tablet. */
   onMenuClick?: () => void;
 }
 
 export function TopBar({ title, onMenuClick }: TopBarProps) {
   const [status, setStatus]   = useState<SystemStatus | null>(null);
   const [healthy, setHealthy] = useState<boolean | null>(null);
+  const { theme, cycleTheme } = useTheme();
 
   useEffect(() => {
     let cancelled = false;
@@ -45,20 +58,31 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
+  const ThemeIcon = THEME_ICON[theme];
+
   return (
-    <header className="flex items-center h-11 px-4 bg-zinc-950 border-b border-zinc-800 shrink-0 gap-3">
+    <header className="flex items-center h-11 px-4 bg-white dark:bg-zinc-950 border-b border-gray-200 dark:border-zinc-800 shrink-0 gap-3">
       {/* Hamburger — visible on tablet/mobile only */}
       <button
         onClick={onMenuClick}
-        className="lg:hidden -ml-1 p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors shrink-0"
+        className="lg:hidden -ml-1 p-1.5 rounded text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors shrink-0"
         aria-label="Open menu"
       >
         <Menu size={16} />
       </button>
 
-      <h1 className="text-[13px] font-medium text-zinc-200 truncate">{title}</h1>
+      <h1 className="text-[13px] font-medium text-gray-900 dark:text-zinc-200 truncate">{title}</h1>
 
       <div className="ml-auto flex items-center gap-3 shrink-0">
+        {/* Theme toggle */}
+        <button
+          onClick={cycleTheme}
+          title={THEME_NEXT_LABEL[theme]}
+          className="p-1.5 rounded text-gray-400 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+        >
+          <ThemeIcon size={14} />
+        </button>
+
         {/* Compact single dot on mobile */}
         {healthy !== null && (
           <span className={clsx(
@@ -69,8 +93,8 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
 
         {/* Full health breakdown on desktop */}
         {healthy === null ? (
-          <span className="hidden lg:flex items-center gap-1.5 text-[11px] text-zinc-600">
-            <span className="w-1.5 h-1.5 rounded-full bg-zinc-700 animate-pulse inline-block" />
+          <span className="hidden lg:flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-zinc-600">
+            <span className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-zinc-700 animate-pulse inline-block" />
             connecting
           </span>
         ) : (
@@ -79,7 +103,7 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
             {status && <Dot ok={status.runtime_ok} label="runtime" />}
             {status && <Dot ok={status.store_ok}   label="store"   />}
             {status && (
-              <span className="text-[11px] text-zinc-600 font-mono tabular-nums">
+              <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono tabular-nums">
                 {formatUptime(status.uptime_secs)}
               </span>
             )}
