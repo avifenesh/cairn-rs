@@ -178,7 +178,7 @@ impl EvalRunService {
     ) -> Scorecard {
         let state = self.state.lock().unwrap();
 
-        let entries: Vec<ScorecardEntry> = state
+        let mut entries: Vec<ScorecardEntry> = state
             .runs
             .values()
             .filter(|r| {
@@ -195,6 +195,13 @@ impl EvalRunService {
                 })
             })
             .collect();
+
+        // Sort by task_success_rate descending so the best run is first.
+        entries.sort_by(|a, b| {
+            let a_score = a.metrics.task_success_rate.unwrap_or(0.0);
+            let b_score = b.metrics.task_success_rate.unwrap_or(0.0);
+            b_score.partial_cmp(&a_score).unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Scorecard {
             project_id: project_id.clone(),
