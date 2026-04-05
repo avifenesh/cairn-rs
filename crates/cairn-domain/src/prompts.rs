@@ -8,6 +8,8 @@ pub struct PromptTemplateVar {
     pub name: String,
     pub description: Option<String>,
     pub required: bool,
+    #[serde(default)]
+    pub default_value: Option<String>,
 }
 
 /// Stable prompt family kinds from RFC 006.

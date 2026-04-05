@@ -243,6 +243,13 @@ struct AppSourceMetadata {
     description: Option<String>,
 }
 
+/// Cached prompt version content and template vars (not in event payload).
+#[derive(Clone, Debug, Default)]
+struct AppVersionContent {
+    content: String,
+    template_vars: Vec<PromptTemplateVar>,
+}
+
 #[derive(Clone, Debug)]
 struct PendingIngestJobPayload {
     project: ProjectKey,
@@ -514,6 +521,8 @@ struct AppState {
     bundle_import: Arc<InMemoryImportService>,
     bundle_export: Arc<InMemoryExportService>,
     source_metadata: Arc<Mutex<HashMap<String, AppSourceMetadata>>>,
+    /// Cache of prompt version content + template vars, keyed by version_id.
+    version_content: Arc<Mutex<HashMap<String, AppVersionContent>>>,
     pending_ingest_jobs: Arc<Mutex<HashMap<String, PendingIngestJobPayload>>>,
     mailbox_messages: Arc<Mutex<HashMap<String, AppMailboxMessage>>>,
     templates: Arc<StarterTemplateRegistry>,
@@ -569,6 +578,7 @@ impl AppState {
             "cairn-app",
         ));
         let source_metadata = Arc::new(Mutex::new(HashMap::new()));
+        let version_content: Arc<Mutex<HashMap<String, AppVersionContent>>> = Arc::new(Mutex::new(HashMap::new()));
         let pending_ingest_jobs = Arc::new(Mutex::new(HashMap::new()));
         let mailbox_messages = Arc::new(Mutex::new(HashMap::new()));
         let service_tokens = Arc::new(ServiceTokenRegistry::new());
@@ -623,6 +633,7 @@ impl AppState {
             bundle_import,
             bundle_export,
             source_metadata,
+            version_content,
             pending_ingest_jobs,
             mailbox_messages,
             templates: Arc::new(StarterTemplateRegistry::v1_defaults()),
@@ -7754,6 +7765,7 @@ async fn pause_run_handler(
         kind: body.reason_kind.unwrap_or(PauseReasonKind::OperatorPause),
         detail: body.detail,
         resume_after_ms: body.resume_after_ms,
+        actor: body.actor,
     };
 
     match state.runtime.runs.pause(&RunId::new(id), reason).await {
@@ -8948,6 +8960,23 @@ async fn complete_task_handler(
 
     match state.runtime.tasks.complete(&task_id).await {
         Ok(task) => {
+            // Auto-checkpoint if the run has trigger_on_task_complete strategy.
+            if let Some(ref parent_run_id) = task.parent_run_id {
+                if let Ok(Some(strategy)) = CheckpointStrategyReadModel::get_by_run(
+                    state.runtime.store.as_ref(),
+                    parent_run_id,
+                )
+                .await
+                {
+                    if strategy.trigger_on_task_complete {
+                        let cp_id = CheckpointId::new(format!(
+                            "cp_auto_{}_{}_{}", parent_run_id, task_id, now_ms()
+                        ));
+                        let _ = state.runtime.checkpoints.save(&task.project, parent_run_id, cp_id).await;
+                    }
+                }
+            }
+
             if let Some(parent_run_id) = task.parent_run_id.clone() {
                 match TaskReadModel::any_non_terminal_children(
                     state.runtime.store.as_ref(),
@@ -9044,14 +9073,37 @@ async fn get_tool_invocation_progress_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    // latest_progress is not part of the ToolInvocationReadModel trait; return stub.
-    let _ = (state, id);
-    AppApiError::new(
-        StatusCode::NOT_FOUND,
-        "not_found",
-        "tool invocation progress not found",
-    )
-    .into_response()
+    let invocation_id = ToolInvocationId::new(id);
+    // Scan events for the latest ToolInvocationProgressUpdated for this invocation.
+    let events = match state.runtime.store.read_stream(None, 10_000).await {
+        Ok(e) => e,
+        Err(err) => return store_error_response(err),
+    };
+    let latest = events.into_iter().rev().find_map(|stored| {
+        if let RuntimeEvent::ToolInvocationProgressUpdated(p) = stored.envelope.payload {
+            if p.invocation_id == invocation_id {
+                return Some(p);
+            }
+        }
+        None
+    });
+    match latest {
+        Some(p) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "percent": p.progress_pct as f64 + 0.5,
+                "message": p.message,
+                "updated_at_ms": p.updated_at_ms,
+            })),
+        )
+            .into_response(),
+        None => AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "tool invocation progress not found",
+        )
+        .into_response(),
+    }
 }
 
 async fn create_tool_invocation_handler(
@@ -9315,27 +9367,36 @@ async fn set_checkpoint_strategy_handler(
         Err(err) => return runtime_error_response(err),
     };
 
-    let before = current_event_head(&state).await;
     let strategy = CheckpointStrategy {
-        strategy_id: body.strategy_id,
-        project: run.project,
-        run_id: run.run_id,
+        strategy_id: body.strategy_id.clone(),
+        project: run.project.clone(),
+        run_id: run.run_id.clone(),
         interval_ms: body.interval_ms,
         max_checkpoints: body.max_checkpoints,
         trigger_on_task_complete: body.trigger_on_task_complete,
     };
 
-    match state
-        .runtime
-        .runs
-        .set_checkpoint_strategy(&run_id, strategy.strategy_id.clone())
-        .await
-    {
-        Ok(()) => {
+    // Emit the CheckpointStrategySet event with full fields so the projection
+    // can restore them on query.
+    let event = operator_event_envelope(RuntimeEvent::CheckpointStrategySet(
+        CheckpointStrategySet {
+            strategy_id: strategy.strategy_id.clone(),
+            description: String::new(),
+            set_at_ms: now_ms(),
+            run_id: Some(run_id.clone()),
+            interval_ms: body.interval_ms,
+            max_checkpoints: body.max_checkpoints,
+            trigger_on_task_complete: body.trigger_on_task_complete,
+        },
+    ));
+
+    let before = current_event_head(&state).await;
+    match state.runtime.store.append(&[event]).await {
+        Ok(_) => {
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(strategy)).into_response()
         }
-        Err(err) => runtime_error_response(err),
+        Err(err) => store_error_response(err),
     }
 }
 
@@ -9763,6 +9824,10 @@ async fn create_prompt_version_handler(
     Path(id): Path<String>,
     Json(body): Json<CreatePromptVersionRequest>,
 ) -> impl IntoResponse {
+    let version_id_str = body.prompt_version_id.clone();
+    let content = body.content.clone().unwrap_or_default();
+    let template_vars = body.template_vars.clone().unwrap_or_default();
+
     match state
         .runtime
         .prompt_versions
@@ -9778,7 +9843,14 @@ async fn create_prompt_version_handler(
         )
         .await
     {
-        Ok(record) => (StatusCode::CREATED, Json(record)).into_response(),
+        Ok(record) => {
+            // Cache content and template vars (not carried in the event).
+            state.version_content.lock().unwrap().insert(
+                version_id_str,
+                AppVersionContent { content, template_vars },
+            );
+            (StatusCode::CREATED, Json(record)).into_response()
+        }
         Err(err) => runtime_error_response(err),
     }
 }
@@ -9788,46 +9860,75 @@ async fn render_prompt_version_handler(
     Path((id, version_id)): Path<(String, String)>,
     Json(body): Json<RenderPromptVersionRequest>,
 ) -> impl IntoResponse {
-    let prompt_version_id = PromptVersionId::new(version_id);
-    match state.runtime.prompt_versions.get(&prompt_version_id).await {
+    let prompt_version_id = PromptVersionId::new(version_id.clone());
+    let version_exists = match state.runtime.prompt_versions.get(&prompt_version_id).await {
         Ok(Some(record)) if record.prompt_asset_id != PromptAssetId::new(id.clone()) => {
-            AppApiError::new(
+            return AppApiError::new(
                 StatusCode::NOT_FOUND,
                 "not_found",
-                format!(
-                    "prompt version {} not found for asset {}",
-                    prompt_version_id, id
-                ),
+                format!("prompt version {} not found for asset {}", prompt_version_id, id),
             )
-            .into_response()
+            .into_response();
         }
-        Ok(Some(version)) => (
-            StatusCode::OK,
-            Json(RenderPromptVersionResponse {
-                content: version.content_hash, // render is not yet implemented; return hash as placeholder
-            }),
-        )
-            .into_response(),
-        Ok(None) => AppApiError::new(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            format!("prompt version not found: {}", prompt_version_id),
-        )
-        .into_response(),
-        Err(err) => runtime_error_response(err),
+        Ok(Some(_)) => true,
+        Ok(None) => {
+            return AppApiError::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                format!("prompt version not found: {}", prompt_version_id),
+            )
+            .into_response();
+        }
+        Err(err) => return runtime_error_response(err),
+    };
+    let _ = version_exists;
+
+    let cached = state.version_content.lock().unwrap().get(&version_id).cloned();
+    let (content_template, template_vars) = match cached {
+        Some(vc) => (vc.content, vc.template_vars),
+        None => return (StatusCode::OK, Json(RenderPromptVersionResponse { content: String::new() })).into_response(),
+    };
+
+    // Validate required vars and apply defaults.
+    let mut rendered = content_template.clone();
+    for var in &template_vars {
+        let value = if let Some(v) = body.vars.get(&var.name) {
+            v.clone()
+        } else if let Some(ref default) = var.default_value {
+            default.clone()
+        } else if var.required {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({
+                    "code": "validation_error",
+                    "message": format!("required template variable '{}' not provided", var.name)
+                })),
+            )
+                .into_response();
+        } else {
+            continue;
+        };
+        rendered = rendered.replace(&format!("{{{{{}}}}}", var.name), &value);
     }
+
+    (StatusCode::OK, Json(RenderPromptVersionResponse { content: rendered })).into_response()
 }
 
 async fn list_prompt_template_vars_handler(
     State(state): State<Arc<AppState>>,
     Path((id, version_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let prompt_version_id = PromptVersionId::new(version_id);
+    let prompt_version_id = PromptVersionId::new(version_id.clone());
     match state.runtime.prompt_versions.get(&prompt_version_id).await {
         Ok(Some(record)) if record.prompt_asset_id == PromptAssetId::new(id) => {
-            // template_vars not stored in PromptVersionRecord; return empty
-            let _record = record;
-            (StatusCode::OK, Json(Vec::<PromptTemplateVar>::new())).into_response()
+            let vars = state
+                .version_content
+                .lock()
+                .unwrap()
+                .get(&version_id)
+                .map(|vc| vc.template_vars.clone())
+                .unwrap_or_default();
+            (StatusCode::OK, Json(vars)).into_response()
         }
         Ok(Some(_)) | Ok(None) => AppApiError::new(
             StatusCode::NOT_FOUND,
@@ -10175,16 +10276,35 @@ async fn diff_prompt_versions_handler(
     Path((_asset_id, version_id)): Path<(String, String)>,
     Query(query): Query<PromptVersionDiffQuery>,
 ) -> impl IntoResponse {
-    let _version_id_a = PromptVersionId::new(version_id);
-    let _version_id_b = PromptVersionId::new(query.compare_to);
-    // diff() is not part of the PromptVersionService trait; return a stub.
+    let cache = state.version_content.lock().unwrap();
+    let content_a = cache.get(&version_id).map(|vc| vc.content.clone()).unwrap_or_default();
+    let content_b = cache.get(&query.compare_to).map(|vc| vc.content.clone()).unwrap_or_default();
+    drop(cache);
+
+    let lines_a: Vec<&str> = content_a.lines().collect();
+    let lines_b: Vec<&str> = content_b.lines().collect();
+
+    let set_a: std::collections::HashSet<&str> = lines_a.iter().copied().collect();
+    let set_b: std::collections::HashSet<&str> = lines_b.iter().copied().collect();
+
+    let added_lines: Vec<String> = lines_b.iter().filter(|l| !set_a.contains(*l)).map(|l| l.to_string()).collect();
+    let removed_lines: Vec<String> = lines_a.iter().filter(|l| !set_b.contains(*l)).map(|l| l.to_string()).collect();
+    let unchanged_lines: Vec<String> = lines_a.iter().filter(|l| set_b.contains(*l)).map(|l| l.to_string()).collect();
+
+    let total = lines_a.len() + lines_b.len();
+    let similarity_score = if total == 0 {
+        1.0_f64
+    } else {
+        (unchanged_lines.len() * 2) as f64 / total as f64
+    };
+
     (
         StatusCode::OK,
         Json(PromptVersionDiffResponse {
-            added_lines: vec![],
-            removed_lines: vec![],
-            unchanged_lines: vec![],
-            similarity_score: 1.0,
+            added_lines,
+            removed_lines,
+            unchanged_lines,
+            similarity_score,
         }),
     )
         .into_response()
@@ -14413,6 +14533,7 @@ mod tests {
                     kind: PauseReasonKind::OperatorPause,
                     detail: None,
                     resume_after_ms: Some(9_999_999_999_999),
+                    actor: None,
                 },
             )
             .await

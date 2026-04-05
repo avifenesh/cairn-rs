@@ -1293,6 +1293,12 @@ pub struct CheckpointStrategySet {
     pub set_at_ms: u64,
     #[serde(default)]
     pub run_id: Option<RunId>,
+    #[serde(default)]
+    pub interval_ms: u64,
+    #[serde(default)]
+    pub max_checkpoints: u32,
+    #[serde(default)]
+    pub trigger_on_task_complete: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -158,6 +158,7 @@ mod tests {
                 kind: PauseReasonKind::RuntimeSuspension,
                 detail: Some("waiting for capacity".to_owned()),
                 resume_after_ms: None,
+                actor: None,
             },
         };
 

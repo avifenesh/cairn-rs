@@ -69,6 +69,9 @@ pub struct PauseReason {
     pub detail: Option<String>,
     /// Optional timestamp (unix ms) after which the entity should auto-resume.
     pub resume_after_ms: Option<u64>,
+    /// Actor (operator or system) who initiated the pause.
+    #[serde(default)]
+    pub actor: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

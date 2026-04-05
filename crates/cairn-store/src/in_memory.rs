@@ -1430,9 +1430,6 @@ impl InMemoryStore {
                 }
             }
             RuntimeEvent::CheckpointStrategySet(e) => {
-                // RFC 002: store the latest strategy for each run (upsert by run_id).
-                // The event lacks project/interval fields; store with sentinel project
-                // and default interval so get_by_run works for strategy_id tracking.
                 if let Some(run_id) = &e.run_id {
                     state.checkpoint_strategies.insert(
                         run_id.as_str().to_owned(),
@@ -1440,9 +1437,9 @@ impl InMemoryStore {
                             strategy_id: e.strategy_id.clone(),
                             project: cairn_domain::ProjectKey::new("_strategy", "_strategy", "_strategy"),
                             run_id: run_id.clone(),
-                            interval_ms: 0,
-                            max_checkpoints: 10,
-                            trigger_on_task_complete: false,
+                            interval_ms: e.interval_ms,
+                            max_checkpoints: if e.max_checkpoints > 0 { e.max_checkpoints } else { 10 },
+                            trigger_on_task_complete: e.trigger_on_task_complete,
                         },
                     );
                 }
