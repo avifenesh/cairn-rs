@@ -493,3 +493,40 @@ export interface StoreCredentialRequest {
   plaintext_value: string;
   key_id?: string;
 }
+
+// ── Notification channels (RFC 007/014) ───────────────────────────────────────
+
+/** Channel kind — mirrors cairn_channels::ChannelKind + pagerduty extension */
+export type ChannelKind = 'webhook' | 'slack' | 'email' | 'pagerduty' | 'telegram' | 'plugin';
+
+/** One channel entry inside a NotificationPreference */
+export interface NotificationChannel {
+  /** e.g. "webhook", "slack", "email", "pagerduty" */
+  kind: string;
+  /** Webhook URL, email address, Slack webhook URL, or PagerDuty routing key */
+  target: string;
+}
+
+/** GET /v1/admin/operators/:id/notifications */
+export interface NotificationPreference {
+  pref_id: string;
+  tenant_id: string;
+  operator_id: string;
+  /** Event type strings subscribed across all channels */
+  event_types: string[];
+  channels: NotificationChannel[];
+}
+
+/** One entry from GET /v1/admin/notifications/failed */
+export interface NotificationRecord {
+  record_id: string;
+  tenant_id: string;
+  operator_id: string;
+  event_type: string;
+  channel_kind: string;
+  channel_target: string;
+  payload: Record<string, unknown>;
+  sent_at_ms: number;
+  delivered: boolean;
+  delivery_error: string | null;
+}

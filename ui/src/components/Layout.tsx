@@ -11,7 +11,7 @@ const VALID_PAGES: NavPage[] = [
   'dashboard',
   'sessions', 'runs', 'tasks', 'approvals', 'prompts',
   'traces', 'memory', 'sources', 'costs', 'evals', 'graph', 'audit-log',
-  'providers', 'plugins', 'credentials', 'playground', 'api-docs', 'settings',
+  'providers', 'plugins', 'credentials', 'playground', 'api-docs', 'settings', 'profile',
 ];
 
 // ── Route descriptor ──────────────────────────────────────────────────────────
@@ -60,6 +60,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   credentials: 'Credentials',
   playground:  'Playground',
   settings:    'Settings',
+  profile:     'Account',
 };
 
 const PAGE_GROUP: Partial<Record<NavPage, string>> = {

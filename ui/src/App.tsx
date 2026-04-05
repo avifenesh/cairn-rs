@@ -13,6 +13,7 @@ import { SessionDetailPage } from './pages/SessionDetailPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { TasksPage } from './pages/TasksPage';
 import { TracesPage } from './pages/TracesPage';
 import { EvalsPage } from './pages/EvalsPage';
@@ -61,6 +62,7 @@ function renderRoute(route: Route): React.ReactNode {
     case 'api-docs':   return <Guarded name="API Docs"><ApiDocsPage /></Guarded>;
     case 'audit-log':  return <Guarded name="Audit Log"><AuditLogPage /></Guarded>;
     case 'settings':   return <Guarded name="Settings"><SettingsPage /></Guarded>;
+    case 'profile':    return <Guarded name="Account"><ProfilePage /></Guarded>;
     case 'playground': return <Guarded name="Playground"><PlaygroundPage /></Guarded>;
     default:           return null;
   }

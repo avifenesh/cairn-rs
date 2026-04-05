@@ -194,6 +194,25 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
           <p className="px-1 text-[11px] text-gray-400 dark:text-zinc-600 font-mono truncate" title={server}>
             {server}
           </p>
+          {/* Profile link */}
+          <button
+            onClick={() => onNavigate('profile')}
+            className={clsx(
+              'w-full flex items-center gap-2 px-3 py-1.5 rounded text-[12px] font-medium transition-colors relative',
+              current === 'profile'
+                ? 'bg-gray-100 dark:bg-zinc-800/80 text-gray-900 dark:text-zinc-100'
+                : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800/50 hover:text-gray-900 dark:hover:text-zinc-100',
+            )}
+          >
+            {current === 'profile' && (
+              <span className="absolute left-0 inset-y-1 w-0.5 rounded-full bg-indigo-500" />
+            )}
+            <User
+              size={13}
+              className={clsx('shrink-0', current === 'profile' ? 'text-indigo-500 dark:text-indigo-400' : 'text-gray-400 dark:text-zinc-500')}
+            />
+            Account
+          </button>
           <button
             onClick={() => { clearStoredToken(); window.location.reload(); }}
             className="w-full flex items-center gap-2 px-3 py-1.5 rounded text-[12px]

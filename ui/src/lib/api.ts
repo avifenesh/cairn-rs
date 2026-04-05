@@ -408,6 +408,49 @@ export function createApiClient(config: ApiClientConfig) {
     ): Promise<import("./types").CredentialSummary> =>
       del(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/credentials/${encodeURIComponent(credentialId)}`),
 
+    // ── Notification channels (RFC 007/014) ──────────────────────────────────
+
+    /** GET /v1/admin/operators/:operatorId/notifications — fetch preferences for one operator. */
+    getNotificationPreferences: (
+      operatorId: string,
+      tenantId = "default",
+    ): Promise<import("./types").NotificationPreference> => {
+      const qs = new URLSearchParams({ tenant_id: tenantId });
+      return get(`/v1/admin/operators/${encodeURIComponent(operatorId)}/notifications?${qs}`);
+    },
+
+    /** POST /v1/admin/operators/:operatorId/notifications — create/replace preferences. */
+    setNotificationPreferences: (
+      operatorId: string,
+      body: {
+        tenant_id?: string;
+        event_types: string[];
+        channels: import("./types").NotificationChannel[];
+      },
+    ): Promise<{ ok: boolean }> =>
+      post(`/v1/admin/operators/${encodeURIComponent(operatorId)}/notifications`, body),
+
+    /** GET /v1/admin/notifications/failed — list failed delivery records. */
+    getFailedNotifications: (tenantId = "default"): Promise<import("./types").ListResponse<import("./types").NotificationRecord>> => {
+      const qs = new URLSearchParams({ tenant_id: tenantId });
+      return get(`/v1/admin/notifications/failed?${qs}`);
+    },
+
+    /** POST /v1/admin/notifications/:id/retry — retry a failed delivery. */
+    retryNotification: (recordId: string, tenantId = "default"): Promise<import("./types").NotificationRecord> => {
+      const qs = new URLSearchParams({ tenant_id: tenantId });
+      return post(`/v1/admin/notifications/${encodeURIComponent(recordId)}/retry?${qs}`, {});
+    },
+
+    /** POST /v1/notifications/send — dispatch an ad-hoc / test notification. */
+    sendTestNotification: (
+      tenantId: string,
+      body: { event_type: string; message: string; severity?: string; operator_id?: string },
+    ): Promise<{ dispatched: number; records: import("./types").NotificationRecord[] }> => {
+      const qs = new URLSearchParams({ tenant_id: tenantId });
+      return post(`/v1/notifications/send?${qs}`, body);
+    },
+
     // ── Prompts (RFC 006) ────────────────────────────────────────────────────
 
     /** GET /v1/prompts/assets — list prompt assets. */
