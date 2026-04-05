@@ -127,8 +127,9 @@ export function buildBreadcrumbs(route: Route): BreadcrumbItem[] {
 }
 
 function activePage(route: Route): NavPage {
-  if (route.kind === 'run-detail') return 'runs';
+  if (route.kind === 'run-detail')    return 'runs';
   if (route.kind === 'session-detail') return 'sessions';
+  if (route.kind === 'eval-compare')  return 'evals';
   return route.page;
 }
 

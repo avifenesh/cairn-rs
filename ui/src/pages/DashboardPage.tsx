@@ -812,7 +812,14 @@ function OnboardingBanner() {
   );
 }
 
+// ── Dashboard tab definitions ─────────────────────────────────────────────────
+
+const DASH_TABS = ['Overview', 'Runs', 'Tasks', 'Activity'] as const;
+type DashTab = typeof DASH_TABS[number];
+
 export function DashboardPage() {
+  const [activeTab, setActiveTab] = useState<DashTab>('Overview');
+
   const { data: stats, dataUpdatedAt: statsUpdatedAt } = useQuery({
     queryKey: ["stats"],
     queryFn:  () => defaultApi.getStats(),
@@ -922,30 +929,93 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {/* Live widgets row — Active Runs + Cost/Providers + Event log */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <ActiveRunsWidget />
-          <div className="flex flex-col gap-4">
-            <CostWidget />
-            <ProviderStatusWidget />
-          </div>
-          {/* Recent Activity timeline via EventLog */}
-          <Panel className="flex flex-col">
-            <SectionLabel>Recent Activity</SectionLabel>
-            <EventLog
-              initialEvents={recentEventsData ?? []}
-              maxEvents={50}
-            />
-          </Panel>
+        {/* Tab bar */}
+        <div
+          role="tablist"
+          aria-label="Dashboard sections"
+          className="flex items-center gap-0 border-b border-zinc-800 -mb-2"
+          onKeyDown={e => {
+            const idx = DASH_TABS.indexOf(activeTab);
+            if (e.key === 'ArrowRight') setActiveTab(DASH_TABS[(idx + 1) % DASH_TABS.length]);
+            else if (e.key === 'ArrowLeft') setActiveTab(DASH_TABS[(idx - 1 + DASH_TABS.length) % DASH_TABS.length]);
+          }}
+        >
+          {DASH_TABS.map(tab => (
+            <button
+              key={tab}
+              role="tab"
+              aria-selected={activeTab === tab}
+              aria-controls={`dash-panel-${tab.toLowerCase()}`}
+              id={`dash-tab-${tab.toLowerCase()}`}
+              onClick={() => setActiveTab(tab)}
+              className={clsx(
+                'px-4 h-9 text-[12px] font-medium transition-colors border-b-2 -mb-px',
+                activeTab === tab
+                  ? 'text-zinc-100 border-indigo-500'
+                  : 'text-zinc-500 border-transparent hover:text-zinc-300',
+              )}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
 
-        {/* Model usage bar chart */}
-        <ModelUsageWidget />
+        {/* Tab panels */}
+        <div
+          role="tabpanel"
+          id={`dash-panel-${activeTab.toLowerCase()}`}
+          aria-labelledby={`dash-tab-${activeTab.toLowerCase()}`}
+        >
+          {activeTab === 'Overview' && (
+            <div className="space-y-6">
+              {/* Live widgets row — Active Runs + Cost/Providers + Event log */}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <ActiveRunsWidget />
+                <div className="flex flex-col gap-4">
+                  <CostWidget />
+                  <ProviderStatusWidget />
+                </div>
+                <Panel className="flex flex-col">
+                  <SectionLabel>Recent Activity</SectionLabel>
+                  <EventLog initialEvents={recentEventsData ?? []} maxEvents={50} />
+                </Panel>
+              </div>
+              <ModelUsageWidget />
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <CriticalEvents events={data?.recent_critical_events ?? []} />
+                <SystemHealthCard />
+              </div>
+            </div>
+          )}
 
-        {/* Bottom row — Critical events + System health */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <CriticalEvents events={data?.recent_critical_events ?? []} />
-          <SystemHealthCard />
+          {activeTab === 'Runs' && (
+            <Panel>
+              <SectionLabel>Recent Runs</SectionLabel>
+              <ActiveRunsWidget />
+            </Panel>
+          )}
+
+          {activeTab === 'Tasks' && (
+            <Panel>
+              <SectionLabel>Recent Tasks</SectionLabel>
+              <div className="space-y-1 pt-1">
+                {(stats?.total_tasks ?? 0) === 0 ? (
+                  <p className="text-[12px] text-zinc-600 py-4 text-center">No tasks yet.</p>
+                ) : (
+                  <p className="text-[12px] text-zinc-500">
+                    {stats?.total_tasks ?? 0} total tasks · {runs} active
+                  </p>
+                )}
+              </div>
+            </Panel>
+          )}
+
+          {activeTab === 'Activity' && (
+            <Panel className="flex flex-col min-h-[320px]">
+              <SectionLabel>Live Event Stream</SectionLabel>
+              <EventLog initialEvents={recentEventsData ?? []} maxEvents={100} />
+            </Panel>
+          )}
         </div>
 
       </div>

@@ -11,17 +11,7 @@ import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
 import { HelpTooltip } from "../components/HelpTooltip";
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface ProviderHealthEntry {
-  connection_id: string;
-  status: string;
-  healthy: boolean;
-  last_checked_at: number;
-  consecutive_failures: number;
-  error_message: string | null;
-}
+import type { ProviderHealthEntry } from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -313,7 +303,7 @@ function OllamaSection() {
 export function ProvidersPage() {
   const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["providers-health"],
-    queryFn:  () => defaultApi.getProviderHealth() as Promise<ProviderHealthEntry[]>,
+    queryFn:  () => defaultApi.getProviderHealth(),
     refetchInterval: 20_000,
   });
 

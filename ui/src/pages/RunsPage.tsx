@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { X, RefreshCw, ChevronRight } from "lucide-react";
+import { X, RefreshCw, ChevronRight, Download } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
 import { DataTable } from "../components/DataTable";
+import { useTableKeyboard } from "../hooks/useTableKeyboard";
 import { defaultApi } from "../lib/api";
 import type { RunRecord, RunState } from "../lib/types";
 
@@ -102,61 +103,6 @@ function DetailPanel({ run, onClose }: { run: RunRecord; onClose: () => void }) 
   );
 }
 
-// ── Table ─────────────────────────────────────────────────────────────────────
-
-function RunsTable({ runs, selectedId, onSelect }: {
-  runs: RunRecord[]; selectedId: string | null; onSelect: (r: RunRecord) => void;
-}) {
-  if (runs.length === 0) return (
-    <div className="flex flex-col items-center justify-center py-20 gap-2 text-zinc-600">
-      <p className="text-[13px]">No runs match this filter</p>
-    </div>
-  );
-
-  return (
-    <table className="min-w-full">
-      <thead className="sticky top-0 z-10 bg-zinc-950">
-        <tr className="border-b border-zinc-800">
-          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-left">Run ID</th>
-          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-left hidden sm:table-cell">Session</th>
-          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-left">State</th>
-          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-right hidden sm:table-cell">Created</th>
-          <th className="px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap text-right hidden md:table-cell">Updated</th>
-        </tr>
-      </thead>
-      <tbody>
-        {runs.map((run, idx) => {
-          const sel = run.run_id === selectedId;
-          return (
-            <tr key={run.run_id} onClick={() => onSelect(run)}
-              className={clsx("cursor-pointer border-b border-zinc-800/40 h-9 transition-colors",
-                sel ? "bg-zinc-800/60" : idx % 2 === 0 ? "bg-transparent hover:bg-zinc-900/60" : "bg-zinc-900/20 hover:bg-zinc-900/60",
-              )}>
-              <td className="px-4 py-0 font-mono text-[12px] text-zinc-300 whitespace-nowrap">
-                <span className="flex items-center gap-1.5">
-                  {sel && <ChevronRight size={11} className="text-indigo-400 shrink-0" />}
-                  {shortId(run.run_id)}
-                </span>
-              </td>
-              <td className="px-4 py-0 font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden sm:table-cell">
-                {shortId(run.session_id)}
-              </td>
-              <td className="px-4 py-0 whitespace-nowrap">
-                <StateBadge state={run.state} compact />
-              </td>
-              <td className="px-4 py-0 text-[11px] text-zinc-500 whitespace-nowrap text-right hidden sm:table-cell">
-                {fmtTime(run.created_at)}
-              </td>
-              <td className="px-4 py-0 text-[11px] text-zinc-500 whitespace-nowrap text-right hidden md:table-cell">
-                {fmtTime(run.updated_at)}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-}
 
 function Skeleton() {
   return <div className="divide-y divide-zinc-800/40">
@@ -187,9 +133,31 @@ export function RunsPage() {
   const runs = data ?? [];
   const filtered = filter === "all" ? runs : runs.filter(r => r.state === filter);
 
+  const kbd = useTableKeyboard({
+    items:  filtered,
+    getKey: r => r.run_id,
+    onOpen: r => { window.location.hash = `run/${r.run_id}`; },
+  });
+
+  function exportSelected() {
+    const toExport = filtered.filter(r => kbd.selectedKeys.has(r.run_id));
+    const blob = new Blob([JSON.stringify({
+      version: '1.0', type: 'runs_export',
+      exported_at: new Date().toISOString(),
+      data: { runs: toExport },
+    }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url; a.download = 'runs-export.json'; a.click();
+    URL.revokeObjectURL(url);
+    kbd.clearSelection();
+  }
+
   if (isError) return (
     <ErrorFallback error={error} resource="runs" onRetry={() => void refetch()} />
   );
+
+  const selCount = kbd.selectedKeys.size;
 
   return (
     <div className="flex flex-col h-full">
@@ -201,22 +169,49 @@ export function RunsPage() {
             {filtered.length}{filter !== "all" ? ` / ${runs.length}` : ""}
           </span>}
         </span>
+        {selCount > 0 && (
+          <span className="text-[11px] text-indigo-400 font-medium">
+            {selCount} selected
+          </span>
+        )}
         <select value={filter} onChange={e => setFilter(e.target.value as RunState | "all")}
           className="rounded bg-zinc-900 border border-zinc-800 text-zinc-400 text-[12px] px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500">
           <option value="all">All states</option>
           {ALL_STATES.map(s => <option key={s} value={s}>{STATE_LABEL[s]}</option>)}
         </select>
-        <button onClick={() => void refetch()} disabled={isFetching}
-          className="ml-auto flex items-center gap-1.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-500 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 transition-colors">
-          <RefreshCw size={11} className={clsx(isFetching && "animate-spin")}/>Refresh
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {selCount > 0 && (
+            <button
+              onClick={exportSelected}
+              className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-900 text-zinc-400 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:border-zinc-600 transition-colors"
+            >
+              <Download size={11} /> Export {selCount}
+            </button>
+          )}
+          {selCount > 0 && (
+            <button onClick={kbd.clearSelection} className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors px-1">
+              Clear
+            </button>
+          )}
+          <button onClick={() => void refetch()} disabled={isFetching}
+            className="flex items-center gap-1.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-500 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 transition-colors">
+            <RefreshCw size={11} className={clsx(isFetching && "animate-spin")}/>Refresh
+          </button>
+        </div>
       </div>
       {/* Content */}
       <div className="flex flex-1 overflow-hidden">
-        <div className={clsx("flex-1 overflow-y-auto", selected && "border-r border-zinc-800")}>
+        <div
+          {...kbd.containerProps}
+          className={clsx("flex-1 overflow-y-auto", selected && "border-r border-zinc-800", kbd.containerProps.className)}
+        >
           {isLoading ? <Skeleton /> : (
           <DataTable<RunRecord>
             data={filtered}
+            activeIndex={kbd.activeIndex}
+            selectedIds={kbd.selectedKeys}
+            getRowId={r => r.run_id}
+            onRowClick={r => { window.location.hash = `run/${r.run_id}`; kbd.setActiveIndex(filtered.indexOf(r)); }}
             columns={[
               { key: 'run_id',    header: 'Run ID',    render: r => <span className="flex items-center gap-1.5 font-mono text-[12px] text-zinc-300 whitespace-nowrap" title={r.run_id}>{selected?.run_id===r.run_id&&<ChevronRight size={11} className="text-indigo-400 shrink-0"/>}{shortId(r.run_id)}</span>, sortValue: r => r.run_id },
               { key: 'session',   header: 'Session',   render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={r.session_id}>{shortId(r.session_id)}</span> },
@@ -229,18 +224,14 @@ export function RunsPage() {
             csvHeaders={['Run ID','Session ID','State','Parent Run','Created At','Updated At']}
             filename="runs"
             emptyText="No runs match this filter"
-            className="cursor-pointer"
           />
         )}
-        {/* Hidden click handler preserved for row selection */}
-        {false && <RunsTable runs={filtered} selectedId={selected?.run_id ?? null} onSelect={r => {
-          window.location.hash = `run/${r.run_id}`;
-        }} />}
         </div>
         {selected && <DetailPanel run={selected} onClose={() => setSelected(null)} />}
       </div>
     </div>
   );
+
 }
 
 export default RunsPage;

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2 } from "lucide-react";
+import { RefreshCw, Loader2, Unlock } from "lucide-react";
+import { useTableKeyboard } from "../hooks/useTableKeyboard";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { HelpTooltip } from "../components/HelpTooltip";
 import { StateBadge } from "../components/StateBadge";
@@ -99,6 +100,8 @@ function RowActions({ task }: { task: TaskRecord }) {
 
 export function TasksPage() {
   const [filter, setFilter] = useState<TaskState | "all">("all");
+  const qc    = useQueryClient();
+  const toast = useToast();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["tasks"],
@@ -110,9 +113,36 @@ export function TasksPage() {
   const filtered  = filter === "all" ? tasks : tasks.filter(t => t.state === filter);
   const activeCnt = tasks.filter(t => ACTIVE_STATES.includes(t.state)).length;
 
+  const kbd = useTableKeyboard({
+    items:  filtered,
+    getKey: t => t.task_id,
+    // tasks don't have a detail page, just navigate to the tasks list focused
+  });
+
+  const releaseSelected = useMutation({
+    mutationFn: async () => {
+      const toRelease = filtered.filter(t => kbd.selectedKeys.has(t.task_id) &&
+        (t.state === 'leased' || t.state === 'running') && t.lease_owner);
+      await Promise.all(toRelease.map(t => defaultApi.releaseLease(t.task_id)));
+      return toRelease.length;
+    },
+    onSuccess: n => {
+      toast.success(`Released ${n} task lease${n !== 1 ? 's' : ''}.`);
+      kbd.clearSelection();
+      void qc.invalidateQueries({ queryKey: ['tasks'] });
+    },
+    onError: () => toast.error('Failed to release some leases.'),
+  });
+
   if (isError) return (
     <ErrorFallback error={error} resource="tasks" onRetry={() => void refetch()} />
   );
+
+  const selCount = kbd.selectedKeys.size;
+  const releasable = filtered.filter(t =>
+    kbd.selectedKeys.has(t.task_id) &&
+    (t.state === 'leased' || t.state === 'running') && t.lease_owner
+  ).length;
 
   return (
     <div className="flex flex-col h-full bg-zinc-900">
@@ -130,6 +160,9 @@ export function TasksPage() {
             </span>
           )}
         </span>
+        {selCount > 0 && (
+          <span className="text-[11px] text-indigo-400 font-medium">{selCount} selected</span>
+        )}
 
         <select
           value={filter}
@@ -144,6 +177,24 @@ export function TasksPage() {
           ))}
         </select>
 
+        {releasable > 0 && (
+          <button
+            onClick={() => releaseSelected.mutate()}
+            disabled={releaseSelected.isPending}
+            className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-900
+                       text-zinc-400 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:border-zinc-600
+                       disabled:opacity-40 transition-colors"
+          >
+            <Unlock size={11} />
+            Release {releasable}
+          </button>
+        )}
+        {selCount > 0 && (
+          <button onClick={kbd.clearSelection} className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors">
+            Clear
+          </button>
+        )}
+
         <button onClick={() => refetch()} disabled={isFetching}
           className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors">
           <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
@@ -152,7 +203,10 @@ export function TasksPage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto">
+      <div
+        {...kbd.containerProps}
+        className={`flex-1 overflow-x-auto overflow-y-auto ${kbd.containerProps.className}`}
+      >
         {isLoading
           ? <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
               <Loader2 size={16} className="animate-spin" />
@@ -161,6 +215,9 @@ export function TasksPage() {
           : (
           <DataTable<TaskRecord>
             data={filtered}
+            activeIndex={kbd.activeIndex}
+            selectedIds={kbd.selectedKeys}
+            getRowId={t => t.task_id}
             columns={[
               { key: 'task_id',    header: 'Task ID',   render: r => <span className="font-mono text-xs text-zinc-300 whitespace-nowrap" title={r.task_id}>{shortId(r.task_id)}</span>,               sortValue: r => r.task_id },
               { key: 'run',        header: 'Run',        render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-zinc-700">—</span> },

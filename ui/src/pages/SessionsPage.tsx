@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, RefreshCw, Plus } from 'lucide-react';
+import { useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronRight, RefreshCw, Plus, Upload } from 'lucide-react';
 import { DataTable } from '../components/DataTable';
 import { ErrorFallback } from '../components/ErrorFallback';
 import { useToast } from '../components/Toast';
@@ -89,10 +90,33 @@ export function SessionsPage() {
     staleTime: 30_000,
   });
 
-  const toast = useToast();
+  const toast      = useToast();
+  const qc         = useQueryClient();
+  const importRef  = useRef<HTMLInputElement>(null);
+
   const list = sessions ?? [];
   const runCountFor = (id: string) => (allRuns ?? []).filter(r => r.session_id === id).length;
   const activeNow   = list.filter(s => s.state === 'open').length;
+
+  /** Parse a JSON file chosen by the user and POST it to /v1/sessions/import. */
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const data = JSON.parse(reader.result as string);
+        await defaultApi.importSession(data);
+        toast.success('Session imported successfully.');
+        void qc.invalidateQueries({ queryKey: ['sessions'] });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Import failed — invalid JSON or incompatible format.');
+      }
+      // Reset input so the same file can be re-imported if needed.
+      if (importRef.current) importRef.current.value = '';
+    };
+    reader.readAsText(file);
+  }
 
   return (
     <div className="p-6 space-y-5">
@@ -102,6 +126,21 @@ export function SessionsPage() {
         <div className="flex items-center gap-2">
           <button onClick={() => refetch()} className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 transition-colors">
             <RefreshCw size={11} className={clsx(isFetching && 'animate-spin')} /> Refresh
+          </button>
+          {/* Hidden file input for importing a session JSON */}
+          <input
+            ref={importRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+          <button
+            onClick={() => importRef.current?.click()}
+            title="Import a previously exported session JSON file"
+            className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 transition-colors"
+          >
+            <Upload size={11} /> Import
           </button>
           <button onClick={() => toast.info("Use POST /v1/sessions to create a session via the API.")} className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1.5 text-[11px] text-white font-medium transition-colors">
             <Plus size={11} /> New Session

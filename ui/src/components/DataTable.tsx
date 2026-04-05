@@ -51,6 +51,15 @@ export interface DataTableProps<T> {
   /** Default rows per page. */
   defaultPageSize?: number;
   className?:  string;
+  // ── Keyboard navigation ───────────────────────────────────────────────────
+  /** 0-based index (in `data`) of the currently keyboard-focused row. */
+  activeIndex?:  number;
+  /** Set of row keys that are selected for bulk actions. */
+  selectedIds?:  Set<string>;
+  /** Called with the original data row and its index when clicked or Enter'd. */
+  onRowClick?:   (row: T, index: number) => void;
+  /** Derive a stable string key from a row (required when selectedIds is set). */
+  getRowId?:     (row: T) => string;
 }
 
 type SortDir = 'asc' | 'desc';
@@ -99,6 +108,10 @@ export function DataTable<T>({
   emptyText = 'No data',
   defaultPageSize = 25,
   className,
+  activeIndex,
+  selectedIds,
+  onRowClick,
+  getRowId,
 }: DataTableProps<T>) {
   const [query,      setQuery]      = useState('');
   const [sortKey,    setSortKey]    = useState<string | null>(null);
@@ -234,12 +247,26 @@ export function DataTable<T>({
         ) : (
           <table className="w-full">
             <tbody>
-              {pageRows.map((row, i) => (
+              {pageRows.map((row, i) => {
+                // Absolute index in `data` (pre-filter/sort) for keyboard nav matching.
+                const absIdx   = safePage * pageSize + i;
+                const rowKey   = getRowId ? getRowId(row) : undefined;
+                const isActive = activeIndex !== undefined && activeIndex === absIdx;
+                const isSelected = rowKey !== undefined && selectedIds ? selectedIds.has(rowKey) : false;
+                return (
                 <tr
                   key={i}
+                  onClick={() => onRowClick?.(row, absIdx)}
                   className={clsx(
-                    'border-b border-zinc-800/50 last:border-0 hover:bg-white/5 transition-colors',
-                    i % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-900/50',
+                    'border-b border-zinc-800/50 last:border-0 transition-colors',
+                    onRowClick ? 'cursor-pointer' : '',
+                    isActive
+                      ? 'bg-zinc-700/70 ring-1 ring-inset ring-zinc-500/60'
+                      : isSelected
+                        ? 'bg-indigo-950/40 hover:bg-indigo-950/60'
+                        : i % 2 === 0
+                          ? 'bg-zinc-900 hover:bg-white/5'
+                          : 'bg-zinc-900/50 hover:bg-white/5',
                   )}
                 >
                   {columns.map(col => (
@@ -248,7 +275,8 @@ export function DataTable<T>({
                     </td>
                   ))}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}

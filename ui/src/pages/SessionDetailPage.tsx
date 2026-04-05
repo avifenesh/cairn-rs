@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowLeft, Loader2, AlertTriangle, CheckCircle2, Inbox,
+  ArrowLeft, Loader2, AlertTriangle, CheckCircle2, Inbox, Download,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
@@ -163,6 +163,25 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
             </div>
             <div className="flex items-center gap-3 shrink-0">
               {session && <SessionPill state={session.state} />}
+              <button
+                onClick={() => {
+                  void defaultApi.exportSession(sessionId).then(data => {
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url  = URL.createObjectURL(blob);
+                    const a    = document.createElement('a');
+                    a.href     = url;
+                    a.download = `session-${sessionId}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  });
+                }}
+                title="Export session as JSON"
+                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] font-medium
+                           border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600
+                           bg-zinc-900 transition-colors"
+              >
+                <Download size={12} /> Export
+              </button>
             </div>
           </div>
         </div>

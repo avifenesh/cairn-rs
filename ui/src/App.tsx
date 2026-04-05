@@ -1,33 +1,36 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoginPage } from './pages/LoginPage';
-import { ApprovalsPage } from './pages/ApprovalsPage';
-import { CostsPage } from './pages/CostsPage';
+// ── Eagerly-loaded pages (always needed on first paint) ───────────────────────
 import { DashboardPage } from './pages/DashboardPage';
-import { MemoryPage } from './pages/MemoryPage';
-import { ProvidersPage } from './pages/ProvidersPage';
 import { RunsPage } from './pages/RunsPage';
-import { RunDetailPage } from './pages/RunDetailPage';
-import { SessionDetailPage } from './pages/SessionDetailPage';
 import { SessionsPage } from './pages/SessionsPage';
-import { PlaygroundPage } from './pages/PlaygroundPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { ProfilePage } from './pages/ProfilePage';
 import { TasksPage } from './pages/TasksPage';
-import { TracesPage } from './pages/TracesPage';
+import { ApprovalsPage } from './pages/ApprovalsPage';
 import { EvalsPage } from './pages/EvalsPage';
-import { EvalComparisonPage } from './pages/EvalComparisonPage';
-import { PluginsPage } from './pages/PluginsPage';
-import { SourcesPage } from './pages/SourcesPage';
-import { CredentialsPage } from './pages/CredentialsPage';
-import { ChannelsPage } from './pages/ChannelsPage';
-import { LogsPage } from './pages/LogsPage';
-import { PromptsPage } from './pages/PromptsPage';
-import { AuditLogPage } from './pages/AuditLogPage';
-import { GraphPage } from './pages/GraphPage';
-import { ApiDocsPage } from './pages/ApiDocsPage';
+// ── Lazily-loaded pages (loaded on first navigation) ─────────────────────────
+const RunDetailPage      = lazy(() => import('./pages/RunDetailPage').then(m => ({ default: m.RunDetailPage })));
+const SessionDetailPage  = lazy(() => import('./pages/SessionDetailPage').then(m => ({ default: m.SessionDetailPage })));
+const EvalComparisonPage = lazy(() => import('./pages/EvalComparisonPage').then(m => ({ default: m.EvalComparisonPage })));
+const PlaygroundPage     = lazy(() => import('./pages/PlaygroundPage').then(m => ({ default: m.PlaygroundPage })));
+const ApiDocsPage        = lazy(() => import('./pages/ApiDocsPage').then(m => ({ default: m.ApiDocsPage })));
+const GraphPage          = lazy(() => import('./pages/GraphPage').then(m => ({ default: m.GraphPage })));
+const PromptsPage        = lazy(() => import('./pages/PromptsPage').then(m => ({ default: m.PromptsPage })));
+const TracesPage         = lazy(() => import('./pages/TracesPage').then(m => ({ default: m.TracesPage })));
+const CostsPage          = lazy(() => import('./pages/CostsPage').then(m => ({ default: m.CostsPage })));
+const MemoryPage         = lazy(() => import('./pages/MemoryPage').then(m => ({ default: m.MemoryPage })));
+const ProvidersPage      = lazy(() => import('./pages/ProvidersPage').then(m => ({ default: m.ProvidersPage })));
+const PluginsPage        = lazy(() => import('./pages/PluginsPage').then(m => ({ default: m.PluginsPage })));
+const SourcesPage        = lazy(() => import('./pages/SourcesPage').then(m => ({ default: m.SourcesPage })));
+const CredentialsPage    = lazy(() => import('./pages/CredentialsPage').then(m => ({ default: m.CredentialsPage })));
+const ChannelsPage       = lazy(() => import('./pages/ChannelsPage').then(m => ({ default: m.ChannelsPage })));
+const LogsPage           = lazy(() => import('./pages/LogsPage').then(m => ({ default: m.LogsPage })));
+const AuditLogPage       = lazy(() => import('./pages/AuditLogPage').then(m => ({ default: m.AuditLogPage })));
+const SettingsPage       = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const ProfilePage        = lazy(() => import('./pages/ProfilePage').then(m => ({ default: m.ProfilePage })));
+
 import { defaultApi, getStoredToken, clearStoredToken, ApiError } from './lib/api';
 import type { NavPage } from './components/Sidebar';
 import type { Route } from './components/Layout';
@@ -37,6 +40,16 @@ import type { Route } from './components/Layout';
 /** 'checking' = existing stored token is being validated against /v1/status */
 type AuthState = 'checking' | 'authenticated' | 'unauthenticated';
 
+// ── Page loader fallback ──────────────────────────────────────────────────────
+
+function PageLoader() {
+  return (
+    <div className="flex h-full items-center justify-center bg-zinc-950">
+      <Loader2 size={16} className="animate-spin text-zinc-600" />
+    </div>
+  );
+}
+
 // ── Route renderer ────────────────────────────────────────────────────────────
 
 function Guarded({ name, children }: { name: string; children: React.ReactNode }) {
@@ -45,46 +58,76 @@ function Guarded({ name, children }: { name: string; children: React.ReactNode }
 
 function renderRoute(route: Route): React.ReactNode {
   if (route.kind === 'run-detail') {
-    return <Guarded name="Run Detail"><RunDetailPage runId={route.runId} /></Guarded>;
+    return (
+      <Guarded name="Run Detail">
+        <Suspense fallback={<PageLoader />}>
+          <RunDetailPage runId={route.runId} />
+        </Suspense>
+      </Guarded>
+    );
   }
   if (route.kind === 'session-detail') {
-    return <Guarded name="Session Detail"><SessionDetailPage sessionId={route.sessionId} /></Guarded>;
+    return (
+      <Guarded name="Session Detail">
+        <Suspense fallback={<PageLoader />}>
+          <SessionDetailPage sessionId={route.sessionId} />
+        </Suspense>
+      </Guarded>
+    );
   }
   if (route.kind === 'eval-compare') {
     return (
       <Guarded name="Eval Comparison">
-        <EvalComparisonPage leftId={route.leftId} rightId={route.rightId} />
+        <Suspense fallback={<PageLoader />}>
+          <EvalComparisonPage leftId={route.leftId} rightId={route.rightId} />
+        </Suspense>
       </Guarded>
     );
   }
 
   const page = (route as { kind: 'page'; page: NavPage }).page;
 
+  // Eager pages — no Suspense needed.
   switch (page) {
-    case 'dashboard':    return <Guarded name="Dashboard"><DashboardPage /></Guarded>;
-    case 'runs':         return <Guarded name="Runs"><RunsPage /></Guarded>;
-    case 'tasks':        return <Guarded name="Tasks"><TasksPage /></Guarded>;
-    case 'sessions':     return <Guarded name="Sessions"><SessionsPage /></Guarded>;
-    case 'approvals':    return <Guarded name="Approvals"><ApprovalsPage /></Guarded>;
-    case 'prompts':      return <Guarded name="Prompts"><PromptsPage /></Guarded>;
-    case 'providers':    return <Guarded name="Providers"><ProvidersPage /></Guarded>;
-    case 'memory':       return <Guarded name="Memory"><MemoryPage /></Guarded>;
-    case 'costs':        return <Guarded name="Costs"><CostsPage /></Guarded>;
-    case 'traces':       return <Guarded name="Traces"><TracesPage /></Guarded>;
-    case 'evals':        return <Guarded name="Evaluations"><EvalsPage /></Guarded>;
-    case 'plugins':      return <Guarded name="Plugins"><PluginsPage /></Guarded>;
-    case 'sources':      return <Guarded name="Sources"><SourcesPage /></Guarded>;
-    case 'credentials':  return <Guarded name="Credentials"><CredentialsPage /></Guarded>;
-    case 'channels':     return <Guarded name="Channels"><ChannelsPage /></Guarded>;
-    case 'logs':         return <Guarded name="Logs"><LogsPage /></Guarded>;
-    case 'graph':        return <Guarded name="Graph"><GraphPage /></Guarded>;
-    case 'api-docs':     return <Guarded name="API Docs"><ApiDocsPage /></Guarded>;
-    case 'audit-log':    return <Guarded name="Audit Log"><AuditLogPage /></Guarded>;
-    case 'settings':     return <Guarded name="Settings"><SettingsPage /></Guarded>;
-    case 'profile':      return <Guarded name="Account"><ProfilePage /></Guarded>;
-    case 'playground':   return <Guarded name="Playground"><PlaygroundPage /></Guarded>;
-    default:             return null;
+    case 'dashboard':  return <Guarded name="Dashboard"><DashboardPage /></Guarded>;
+    case 'runs':       return <Guarded name="Runs"><RunsPage /></Guarded>;
+    case 'tasks':      return <Guarded name="Tasks"><TasksPage /></Guarded>;
+    case 'sessions':   return <Guarded name="Sessions"><SessionsPage /></Guarded>;
+    case 'approvals':  return <Guarded name="Approvals"><ApprovalsPage /></Guarded>;
+    case 'evals':      return <Guarded name="Evaluations"><EvalsPage /></Guarded>;
+    default: break;
   }
+
+  // Lazy pages — wrapped in Suspense.
+  const lazy_page = (() => {
+    switch (page) {
+      case 'prompts':     return <PromptsPage />;
+      case 'providers':   return <ProvidersPage />;
+      case 'memory':      return <MemoryPage />;
+      case 'costs':       return <CostsPage />;
+      case 'traces':      return <TracesPage />;
+      case 'plugins':     return <PluginsPage />;
+      case 'sources':     return <SourcesPage />;
+      case 'credentials': return <CredentialsPage />;
+      case 'channels':    return <ChannelsPage />;
+      case 'logs':        return <LogsPage />;
+      case 'graph':       return <GraphPage />;
+      case 'api-docs':    return <ApiDocsPage />;
+      case 'audit-log':   return <AuditLogPage />;
+      case 'settings':    return <SettingsPage />;
+      case 'profile':     return <ProfilePage />;
+      case 'playground':  return <PlaygroundPage />;
+      default:            return null;
+    }
+  })();
+
+  if (lazy_page === null) return null;
+  const label = page.charAt(0).toUpperCase() + page.slice(1).replace(/-/g, ' ');
+  return (
+    <Guarded name={label}>
+      <Suspense fallback={<PageLoader />}>{lazy_page}</Suspense>
+    </Guarded>
+  );
 }
 
 // ── Validating screen ─────────────────────────────────────────────────────────

@@ -1484,15 +1484,13 @@ async fn export_run_handler(
     });
 
     let filename = format!("run-{id}.json");
-    Ok((
-        StatusCode::OK,
-        [
-            (axum::http::header::CONTENT_TYPE, "application/json"),
-            (axum::http::header::CONTENT_DISPOSITION,
-             &format!("attachment; filename=\"{filename}\"")),
-        ],
-        Json(body),
-    ))
+    let content_disposition = format!("attachment; filename=\"{filename}\"");
+    let mut resp = (StatusCode::OK, Json(body)).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        axum::http::HeaderValue::from_str(&content_disposition).unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment")),
+    );
+    Ok(resp)
 }
 
 /// `GET /v1/sessions/:id/export` — export a session with all runs, tasks, events.
@@ -1520,7 +1518,7 @@ async fn export_session_handler(
     // All tasks for every run.
     let mut all_tasks: Vec<serde_json::Value> = Vec::new();
     for run in &runs {
-        let rid = RunId::new(run["run_id"].as_str().unwrap_or(""));
+        let rid = run.run_id.clone();
         if let Ok(tasks) = TaskReadModel::list_by_parent_run(
             state.runtime.store.as_ref(), &rid, 2000,
         ).await {
@@ -1557,15 +1555,13 @@ async fn export_session_handler(
     });
 
     let filename = format!("session-{id}.json");
-    Ok((
-        StatusCode::OK,
-        [
-            (axum::http::header::CONTENT_TYPE, "application/json"),
-            (axum::http::header::CONTENT_DISPOSITION,
-             &format!("attachment; filename=\"{filename}\"")),
-        ],
-        Json(body),
-    ))
+    let content_disposition = format!("attachment; filename=\"{filename}\"");
+    let mut resp = (StatusCode::OK, Json(body)).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        axum::http::HeaderValue::from_str(&content_disposition).unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment")),
+    );
+    Ok(resp)
 }
 
 /// Import body for `POST /v1/sessions/import`.

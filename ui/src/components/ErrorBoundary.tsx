@@ -30,8 +30,11 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    // Could forward to an error reporting service here.
-    console.error('[ErrorBoundary]', error, info.componentStack);
+    // Forward to an error reporting service in production; log in dev.
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('[ErrorBoundary]', error, info.componentStack);
+    }
   }
 
   reset = () => this.setState({ error: null, showStack: false });

@@ -281,7 +281,7 @@ export function createApiClient(config: ApiClientConfig) {
     // ── Providers ────────────────────────────────────────────────────────────
 
     /** GET /v1/providers/health — list provider health records. */
-    getProviderHealth: (): Promise<unknown[]> => get("/v1/providers/health"),
+    getProviderHealth: (): Promise<import("./types").ProviderHealthEntry[]> => get("/v1/providers/health"),
 
     /** GET /v1/providers/ollama/models — list locally available Ollama models. */
     getOllamaModels: (): Promise<{ host: string; models: string[]; count: number }> =>
@@ -583,6 +583,20 @@ export function createApiClient(config: ApiClientConfig) {
       const q = qs.toString() ? `?${qs}` : "";
       return get(`/v1/admin/logs${q}`);
     },
+
+    // ── Export / Import ───────────────────────────────────────────────────────
+
+    /** GET /v1/runs/:id/export — download run + tasks + events as JSON blob. */
+    exportRun: (runId: string): Promise<unknown> =>
+      get(`/v1/runs/${encodeURIComponent(runId)}/export`),
+
+    /** GET /v1/sessions/:id/export — download session + runs + tasks + events. */
+    exportSession: (sessionId: string): Promise<unknown> =>
+      get(`/v1/sessions/${encodeURIComponent(sessionId)}/export`),
+
+    /** POST /v1/sessions/import — re-create a session from an export file. */
+    importSession: (exportData: unknown): Promise<import("./types").SessionRecord> =>
+      post("/v1/sessions/import", exportData),
 
     // ── Notifications ─────────────────────────────────────────────────────────
 

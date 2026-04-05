@@ -9,7 +9,8 @@ interface StatCardProps {
   description?: string;
   variant?: StatCardVariant;
   loading?: boolean;
-  icon?: unknown;
+  /** Reserved for future icon support — not yet rendered. */
+  icon?: React.ReactNode;
   /** Optional inline help text shown as a (?) tooltip next to the label. */
   help?: string;
 }
