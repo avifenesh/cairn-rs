@@ -1,11 +1,14 @@
 import {
   Bell,
   Cpu,
+  GitBranch,
+  Calculator,
   Coins,
   Database,
   FileText,
   FlaskConical,
   KeyRound,
+  ServerCrash,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -24,6 +27,7 @@ import {
   CheckSquare,
 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { useQuery } from '@tanstack/react-query';
 import { clearStoredToken } from '../lib/api';
 import type { ReactNode } from 'react';
 
@@ -33,11 +37,13 @@ export type NavPage =
   | 'runs'
   | 'tasks'
   | 'workers'
+  | 'orchestration'
   | 'approvals'
   | 'prompts'
   | 'traces'
   | 'memory'
   | 'costs'
+  | 'cost-calc'
   | 'graph'
   | 'sources'
   | 'providers'
@@ -50,6 +56,7 @@ export type NavPage =
   | 'evals'
   | 'api-docs'
   | 'settings'
+  | 'deployment'
   | 'profile';
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
@@ -78,7 +85,8 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'sessions',  label: 'Sessions',  icon: MonitorPlay },
       { id: 'runs',      label: 'Runs',      icon: Play        },
       { id: 'tasks',     label: 'Tasks',     icon: ListChecks  },
-      { id: 'workers',   label: 'Workers',   icon: Cpu         },
+      { id: 'workers',        label: 'Workers',        icon: Cpu       },
+      { id: 'orchestration',  label: 'Orchestration',  icon: GitBranch },
       { id: 'approvals', label: 'Approvals', icon: CheckSquare },
       { id: 'prompts',   label: 'Prompts',   icon: FileText    },
     ],
@@ -90,6 +98,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'memory',    label: 'Memory',    icon: Database      },
       { id: 'sources',   label: 'Sources',   icon: Database      },
       { id: 'costs',     label: 'Costs',     icon: Coins         },
+      { id: 'cost-calc', label: 'Calculator', icon: Calculator    },
       { id: 'evals',     label: 'Evals',     icon: FlaskConical  },
       { id: 'graph',     label: 'Graph',     icon: Network       },
       { id: 'audit-log', label: 'Audit Log', icon: Shield        },
@@ -101,7 +110,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'providers',   label: 'Providers',   icon: Zap      },
       { id: 'plugins',     label: 'Plugins',     icon: Puzzle   },
-      { id: 'credentials', label: 'Credentials', icon: KeyRound },
+      { id: 'credentials',  label: 'Credentials',  icon: KeyRound     },
+      { id: 'deployment',   label: 'Deployment',   icon: ServerCrash  },
       { id: 'channels',     label: 'Channels',     icon: Bell     },
       { id: 'playground',  label: 'Playground',  icon: Terminal },
       { id: 'api-docs',    label: 'API Docs',    icon: BookOpen },
@@ -123,6 +133,17 @@ interface SidebarProps {
 export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose, onLogout }: SidebarProps): ReactNode {
   const server = (import.meta.env.VITE_API_URL ?? 'localhost:3000')
     .replace(/^https?:\/\//, '');
+
+  // Fetch server version from X-Cairn-Version header via the health endpoint.
+  const { data: serverVersion } = useQuery({
+    queryKey: ['server-version'],
+    queryFn: async () => {
+      const resp = await fetch('/health');
+      return resp.headers.get('X-Cairn-Version') ?? null;
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
 
   return (
     <>
@@ -218,9 +239,18 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
 
         {/* Footer */}
         <div className="px-3 py-3 border-t border-gray-200 dark:border-zinc-800 space-y-1">
-          <p className="px-1 text-[11px] text-gray-400 dark:text-zinc-600 font-mono truncate" title={server}>
-            {server}
-          </p>
+          <div className="flex items-center justify-between px-1">
+            <p className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono truncate" title={server}>
+              {server}
+            </p>
+            {serverVersion && (
+              <span className="ml-2 shrink-0 text-[9px] font-mono font-medium text-indigo-500 dark:text-indigo-400
+                               bg-indigo-500/10 border border-indigo-500/20 rounded px-1.5 py-0.5"
+                    title={`Server version ${serverVersion}`}>
+                v{serverVersion}
+              </span>
+            )}
+          </div>
           {/* Profile link */}
           <button
             onClick={() => onNavigate('profile')}

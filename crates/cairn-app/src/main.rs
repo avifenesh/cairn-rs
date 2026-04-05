@@ -413,6 +413,7 @@ fn is_auth_exempt(path: &str) -> bool {
         || path == "/v1/openapi.json"
         || path == "/v1/docs"
         || path == "/v1/rate-limit"
+        || path == "/v1/changelog"
 }
 
 /// Extract the raw token from an `Authorization: Bearer <token>` header.
@@ -481,6 +482,60 @@ async fn auth_middleware(
 // ── Metrics middleware ────────────────────────────────────────────────────────
 
 /// Axum middleware that records request count, latency, and error rate.
+// ── Version + changelog ──────────────────────────────────────────────────────
+
+/// The canonical application version — sourced from Cargo.toml at compile time.
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Static changelog.  Add a new entry for every published release.
+const CHANGELOG: &str = r##"[
+  {
+    "version": "0.1.0",
+    "date":    "2026-04-06",
+    "changes": [
+      "Initial release of cairn-rs",
+      "22 operator UI pages (Dashboard, Sessions, Runs, Tasks, Approvals, Prompts, Traces, Memory, Sources, Costs, Evals, Graph, Audit Log, Providers, Plugins, Credentials, Channels, Playground, API Docs, Settings, Profile, Eval Comparison)",
+      "56 REST API routes across Health, Sessions, Runs, Tasks, Approvals, Providers, Memory, Events, Evals, Admin groups",
+      "Event-sourced runtime: 56+ domain event types, append-only log, idempotent commands",
+      "Real-time SSE event stream with Last-Event-ID replay",
+      "Multi-tenant isolation: tenant / workspace / project hierarchy with RBAC",
+      "Human-in-the-loop approval workflows",
+      "LLM provider abstraction over Ollama, OpenAI-compatible endpoints",
+      "Built-in eval framework with rubrics, baselines, bandit experiments",
+      "Local LLM support via Ollama (qwen3:8b, nomic-embed-text)",
+      "Cost tracking and token metering per call, run, and session",
+      "Knowledge retrieval: ingest, chunking, multi-factor scoring, graph expansion",
+      "Per-IP and per-token rate limiting (100/1000 req/min) with X-RateLimit-* headers",
+      "Request body size limit: 10 MB",
+      "Batch operations: POST /v1/runs/batch, POST /v1/tasks/batch/cancel",
+      "Static OpenAPI 3.0 spec at /v1/openapi.json and Swagger UI at /v1/docs",
+      "Session and run export (JSON download) and import",
+      "SQLite and Postgres persistence backends",
+      "Embedded React UI served from the binary (rust-embed)",
+      "X-Cairn-Version header on every response"
+    ]
+  }
+]"##;
+
+/// Middleware: inject `X-Cairn-Version` on every response so clients can
+/// inspect the server version without a separate request.
+async fn version_header_middleware(req: Request<Body>, next: Next) -> Response {
+    let mut resp = next.run(req).await;
+    if let Ok(v) = axum::http::HeaderValue::from_str(APP_VERSION) {
+        resp.headers_mut().insert("X-Cairn-Version", v);
+    }
+    resp
+}
+
+/// `GET /v1/changelog` — release notes as a JSON array.
+/// Public endpoint — no auth required.
+async fn changelog_handler() -> impl IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        CHANGELOG,
+    )
+}
+
 // ── Rate-limit middleware ─────────────────────────────────────────────────────
 
 /// Extract the best available identity key for rate-limiting.
@@ -4034,6 +4089,7 @@ fn build_router(state: AppState) -> Router {
         // ── OpenAPI spec + Swagger UI (public, no auth) ───────────────────
         .route("/v1/openapi.json", get(openapi_json_handler))
         .route("/v1/docs",         get(swagger_ui_handler))
+        .route("/v1/changelog",    get(changelog_handler))
         // ── Embedded frontend (SPA fallback) ──────────────────────────────
         // Any path not matched by an API route above is handled by the React
         // app.  Static assets (JS/CSS/icons) are served with the correct MIME
@@ -4059,6 +4115,8 @@ fn build_router(state: AppState) -> Router {
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024))
         // Metrics runs outermost — captures every request including rejected ones.
         .layer(from_fn_with_state(state.clone(), metrics_middleware))
+        // Inject X-Cairn-Version on every response.
+        .layer(axum::middleware::from_fn(version_header_middleware))
         .with_state(state)
 }
 

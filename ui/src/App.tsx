@@ -17,11 +17,14 @@ const SessionDetailPage  = lazy(() => import('./pages/SessionDetailPage').then(m
 const EvalComparisonPage = lazy(() => import('./pages/EvalComparisonPage').then(m => ({ default: m.EvalComparisonPage })));
 const PlaygroundPage     = lazy(() => import('./pages/PlaygroundPage').then(m => ({ default: m.PlaygroundPage })));
 const WorkersPage        = lazy(() => import('./pages/WorkersPage').then(m => ({ default: m.WorkersPage })));
+const OrchestrationPage  = lazy(() => import('./pages/OrchestrationPage').then(m => ({ default: m.OrchestrationPage })));
+const DeploymentPage     = lazy(() => import('./pages/DeploymentPage').then(m => ({ default: m.DeploymentPage })));
 const ApiDocsPage        = lazy(() => import('./pages/ApiDocsPage').then(m => ({ default: m.ApiDocsPage })));
 const GraphPage          = lazy(() => import('./pages/GraphPage').then(m => ({ default: m.GraphPage })));
 const PromptsPage        = lazy(() => import('./pages/PromptsPage').then(m => ({ default: m.PromptsPage })));
 const TracesPage         = lazy(() => import('./pages/TracesPage').then(m => ({ default: m.TracesPage })));
 const CostsPage          = lazy(() => import('./pages/CostsPage').then(m => ({ default: m.CostsPage })));
+const CostCalculatorPage = lazy(() => import('./pages/CostCalculatorPage').then(m => ({ default: m.CostCalculatorPage })));
 const MemoryPage         = lazy(() => import('./pages/MemoryPage').then(m => ({ default: m.MemoryPage })));
 const ProvidersPage      = lazy(() => import('./pages/ProvidersPage').then(m => ({ default: m.ProvidersPage })));
 const PluginsPage        = lazy(() => import('./pages/PluginsPage').then(m => ({ default: m.PluginsPage })));
@@ -103,11 +106,14 @@ function renderRoute(route: Route): React.ReactNode {
   // Lazy pages — wrapped in Suspense.
   const lazy_page = (() => {
     switch (page) {
-      case 'workers':     return <WorkersPage />;
+      case 'workers':         return <WorkersPage />;
+      case 'orchestration': return <OrchestrationPage />;
+      case 'deployment':  return <DeploymentPage />;
       case 'prompts':     return <PromptsPage />;
       case 'providers':   return <ProvidersPage />;
       case 'memory':      return <MemoryPage />;
       case 'costs':       return <CostsPage />;
+      case 'cost-calc':   return <CostCalculatorPage />;
       case 'traces':      return <TracesPage />;
       case 'plugins':     return <PluginsPage />;
       case 'sources':     return <SourcesPage />;

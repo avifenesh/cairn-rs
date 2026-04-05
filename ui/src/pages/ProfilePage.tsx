@@ -13,6 +13,7 @@ import {
   AlignJustify,
   ChevronDown,
   Server,
+  ListOrdered,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import {
@@ -21,6 +22,7 @@ import {
   clearStoredToken,
   defaultApi,
 } from '../lib/api';
+import type { ChangelogEntry } from '../lib/types';
 import {
   usePreferences,
   applyTheme,
@@ -346,6 +348,47 @@ function AboutSection() {
   );
 }
 
+// ── Changelog ─────────────────────────────────────────────────────────────────
+
+function ChangelogSection() {
+  const { data: entries = [], isLoading } = useQuery<ChangelogEntry[]>({
+    queryKey: ['changelog'],
+    queryFn:  () => defaultApi.getChangelog(),
+    staleTime: Infinity,
+  });
+
+  return (
+    <SectionCard title="Changelog" icon={ListOrdered}>
+      {isLoading ? (
+        <p className="text-[12px] text-zinc-600">Loading…</p>
+      ) : entries.length === 0 ? (
+        <p className="text-[12px] text-zinc-600">No changelog entries.</p>
+      ) : (
+        <div className="space-y-5">
+          {entries.map((entry) => (
+            <div key={entry.version}>
+              <div className="flex items-baseline gap-3 mb-2">
+                <span className="text-[13px] font-semibold text-zinc-100 font-mono">
+                  v{entry.version}
+                </span>
+                <span className="text-[11px] text-zinc-600">{entry.date}</span>
+              </div>
+              <ul className="space-y-1">
+                {entry.changes.map((change, i) => (
+                  <li key={i} className="flex items-start gap-2 text-[12px] text-zinc-400">
+                    <span className="mt-1.5 h-1 w-1 rounded-full bg-zinc-600 shrink-0" />
+                    {change}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function ProfilePage() {
@@ -366,6 +409,7 @@ export function ProfilePage() {
         <TokenSection />
         <PreferencesSection />
         <AboutSection />
+        <ChangelogSection />
       </div>
     </div>
   );

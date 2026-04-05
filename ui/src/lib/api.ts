@@ -357,6 +357,10 @@ export function createApiClient(config: ApiClientConfig) {
     // ── Audit Log ────────────────────────────────────────────────────────────
 
     /** GET /v1/admin/audit-log — list audit log entries (most recent first). */
+    /** GET /v1/changelog — release notes array. Public endpoint. */
+    getChangelog: (): Promise<import("./types").ChangelogEntry[]> =>
+      get('/v1/changelog'),
+
     getAuditLog: (limit = 100): Promise<import("./types").AuditLogResponse> =>
       get(`/v1/admin/audit-log?limit=${limit}`),
 
