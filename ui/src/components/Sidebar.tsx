@@ -16,7 +16,6 @@ import {
   Settings,
   ScrollText,
   Shield,
-  Square,
   Terminal,
   User,
   Waves,
@@ -146,15 +145,31 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
         )}
         style={{ width: 220 }}
       >
-        {/* Wordmark */}
-        <div className="flex items-center gap-2.5 px-4 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
-          <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-indigo-500 shrink-0">
-            <Square size={9} className="text-white fill-white" />
-          </span>
-          <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100 tracking-tight">
-            cairn
-          </span>
-          <span className="ml-auto text-[10px] text-gray-400 dark:text-zinc-600 font-mono">v0.1</span>
+        {/* Logo / wordmark */}
+        <div className="flex items-center gap-3 px-4 h-14 border-b border-gray-200 dark:border-zinc-800 shrink-0">
+          {/* Favicon-matched icon: four stacked stones */}
+          <svg
+            aria-hidden="true"
+            width="22"
+            height="22"
+            viewBox="0 0 32 32"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            className="shrink-0"
+          >
+            <rect x="3"  y="24" width="26" height="5" rx="2.5" fill="#4f46e5"/>
+            <rect x="6"  y="17" width="20" height="5" rx="2.5" fill="#6366f1"/>
+            <rect x="9"  y="10" width="14" height="5" rx="2.5" fill="#818cf8"/>
+            <rect x="12" y="5"  width="8"  height="4" rx="2"   fill="#a5b4fc"/>
+          </svg>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[20px] font-semibold leading-tight text-gray-900 dark:text-zinc-100 tracking-tight">
+              cairn
+            </span>
+            <span className="text-[10px] text-gray-400 dark:text-zinc-500 leading-none mt-0.5">
+              control plane
+            </span>
+          </div>
         </div>
 
         {/* Navigation — grouped */}
