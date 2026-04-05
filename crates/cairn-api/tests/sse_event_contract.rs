@@ -451,7 +451,8 @@ fn runtime_events_map_to_correct_sse_surfaces() {
                 project: project.clone(), session_id: "s1".into(), run_id: "r1".into(),
                 parent_run_id: None, prompt_release_id: None, agent_role_id: None,
             }),
-            None,
+            // RunCreated emits AgentProgress so the SSE stream surfaces run creation
+            Some(SseEventName::AgentProgress),
         ),
     ];
 

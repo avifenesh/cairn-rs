@@ -5,6 +5,7 @@ import {
   ListChecks,
   LogOut,
   MonitorPlay,
+  Network,
   Play,
   Settings,
   Shield,
@@ -27,6 +28,7 @@ export type NavPage =
   | 'traces'
   | 'memory'
   | 'costs'
+  | 'graph'
   | 'providers'
   | 'playground'
   | 'audit-log'
@@ -67,6 +69,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'traces',    label: 'Traces',    icon: Waves    },
       { id: 'memory',    label: 'Memory',    icon: Database },
       { id: 'costs',     label: 'Costs',     icon: Coins    },
+      { id: 'graph',     label: 'Graph',     icon: Network  },
       { id: 'audit-log', label: 'Audit Log', icon: Shield   },
     ],
   },

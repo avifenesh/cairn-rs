@@ -29,6 +29,7 @@ import {
   Clock,
   Terminal,
   ListChecks,
+  Network,
   Waves,
   Plus,
   Keyboard,
@@ -85,10 +86,11 @@ const NAV_OPTIONS: NavOption[] = [
   { kind: 'page', id: 'approvals',  label: 'Approvals',   description: 'Pending operator approvals',         icon: CheckSquare,     shortcut: [MOD, '5'] },
   { kind: 'page', id: 'traces',     label: 'Traces',      description: 'LLM call traces and latency',        icon: Waves,           shortcut: [MOD, '6'] },
   { kind: 'page', id: 'memory',     label: 'Memory',      description: 'Knowledge base and search',          icon: Database,        shortcut: [MOD, '7'] },
-  { kind: 'page', id: 'costs',      label: 'Costs',       description: 'Token spend and provider costs',     icon: Coins,           shortcut: [MOD, '8'] },
-  { kind: 'page', id: 'providers',  label: 'Providers',   description: 'LLM provider health',                icon: Zap,             shortcut: [MOD, '9'] },
-  { kind: 'page', id: 'playground', label: 'Playground',  description: 'Interactive LLM prompt testing',     icon: Terminal         },
-  { kind: 'page', id: 'settings',   label: 'Settings',    description: 'Deployment configuration',           icon: Settings         },
+  { kind: 'page', id: 'costs',      label: 'Costs',           description: 'Token spend and provider costs',     icon: Coins,    shortcut: [MOD, '8'] },
+  { kind: 'page', id: 'providers',  label: 'Providers',       description: 'LLM provider health',                icon: Zap,      shortcut: [MOD, '9'] },
+  { kind: 'page', id: 'graph',      label: 'Knowledge Graph', description: 'Node/edge schema, RFC 004 graph',    icon: Network       },
+  { kind: 'page', id: 'playground', label: 'Playground',      description: 'Interactive LLM prompt testing',     icon: Terminal      },
+  { kind: 'page', id: 'settings',   label: 'Settings',        description: 'Deployment configuration',           icon: Settings      },
 ];
 
 // ── Shortcut help data ────────────────────────────────────────────────────────

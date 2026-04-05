@@ -3822,6 +3822,7 @@ impl AppBootstrap {
             // ── Trace / Export ────────────────────────────────────────────────────────
             .route("/v1/trace/:trace_id", get(get_trace_handler))
             .route("/v1/export/:format", get(export_bundle_by_format_handler))
+            .route("/healthz", get(health_handler)) // alias for k8s liveness probes
             .fallback(not_found_handler)
             .with_state(state.clone())
             .layer(from_fn_with_state(state.clone(), auth_middleware))
@@ -4075,6 +4076,7 @@ fn auth_exempt_path(path: &str) -> bool {
     matches!(
         path,
         "/health"
+            | "/healthz"
             | "/ready"
             | "/metrics"
             | "/version"

@@ -383,18 +383,27 @@ async fn list_runs_handler(
     State(state): State<AppState>,
     Query(q): Query<PaginationQuery>,
 ) -> impl axum::response::IntoResponse {
-    // list_by_state across every state is expensive; use the store's filtered
-    // helper which returns all runs when no filters are applied.
-    let dummy_project = ProjectKey::new("_", "_", "_");
-    match state
-        .runtime
-        .store
-        .list_runs_filtered(&dummy_project, None, None, q.limit, q.offset)
-        .await
-    {
-        Ok(runs) => Ok(Json(runs)),
-        Err(e) => Err(internal_error(e.to_string())),
+    // Scan the event log for RunCreated events and return the current RunRecord
+    // for each — this covers runs across all projects/tenants.
+    let limit: usize = q.limit;
+    let offset: usize = q.offset;
+    use cairn_store::EventLog;
+    use cairn_store::projections::RunReadModel;
+    let events = match state.runtime.store.read_stream(None, usize::MAX).await {
+        Ok(v) => v,
+        Err(e) => return Err(internal_error(e.to_string())),
+    };
+    let mut runs = Vec::new();
+    for ev in &events {
+        if let cairn_domain::RuntimeEvent::RunCreated(e) = &ev.envelope.payload {
+            if let Ok(Some(record)) = RunReadModel::get(state.runtime.store.as_ref(), &e.run_id).await {
+                runs.push(record);
+            }
+        }
     }
+    runs.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+    let page = runs.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
+    Ok(Json(page))
 }
 
 /// `GET /v1/runs/:id` — get a single run by ID.

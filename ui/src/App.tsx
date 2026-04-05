@@ -16,6 +16,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { TasksPage } from './pages/TasksPage';
 import { TracesPage } from './pages/TracesPage';
 import { AuditLogPage } from './pages/AuditLogPage';
+import { GraphPage } from './pages/GraphPage';
 import { getStoredToken } from './lib/api';
 import type { NavPage } from './components/Sidebar';
 import type { Route } from './components/Layout';
@@ -45,6 +46,8 @@ function renderRoute(route: Route): React.ReactNode {
     case 'memory':     return <Guarded name="Memory"><MemoryPage /></Guarded>;
     case 'costs':      return <Guarded name="Costs"><CostsPage /></Guarded>;
     case 'traces':     return <Guarded name="Traces"><TracesPage /></Guarded>;
+    case 'graph':      return <Guarded name="Graph"><GraphPage /></Guarded>;
+    case 'audit-log':  return <Guarded name="Audit Log"><AuditLogPage /></Guarded>;
     case 'settings':   return <Guarded name="Settings"><SettingsPage /></Guarded>;
     case 'playground': return <Guarded name="Playground"><PlaygroundPage /></Guarded>;
     default:           return null;

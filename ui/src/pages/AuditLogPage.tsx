@@ -9,7 +9,7 @@ import {
 import { clsx } from "clsx";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { defaultApi } from "../lib/api";
-import type { AuditRecord, AuditOutcome } from "../lib/types";
+import type { AuditOutcome } from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
