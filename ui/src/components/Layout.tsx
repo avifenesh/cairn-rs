@@ -8,7 +8,7 @@ import { TopBar } from './TopBar';
 function readPage(): NavPage {
   const hash = window.location.hash.replace('#', '') as NavPage;
   const valid: NavPage[] = [
-    'dashboard', 'runs', 'sessions', 'approvals', 'providers', 'memory', 'settings',
+    'dashboard', 'runs', 'sessions', 'approvals', 'providers', 'costs', 'memory', 'settings',
   ];
   return valid.includes(hash) ? hash : 'dashboard';
 }
@@ -19,6 +19,7 @@ const PAGE_TITLES: Record<NavPage, string> = {
   sessions:   'Sessions',
   approvals:  'Approvals',
   providers:  'Providers',
+  costs:      'Costs',
   memory:     'Memory',
   settings:   'Settings',
 };

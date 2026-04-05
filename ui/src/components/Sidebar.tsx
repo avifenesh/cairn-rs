@@ -1,4 +1,4 @@
-import {
+import { Coins,
   LayoutDashboard,
   Play,
   MonitorPlay,
@@ -16,6 +16,7 @@ export type NavPage =
   | 'sessions'
   | 'approvals'
   | 'providers'
+  | 'costs'
   | 'memory'
   | 'settings';
 
@@ -31,6 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'sessions',   label: 'Sessions',    icon: MonitorPlay     },
   { id: 'approvals',  label: 'Approvals',   icon: CheckSquare     },
   { id: 'providers',  label: 'Providers',   icon: Zap             },
+  { id: 'costs',      label: 'Costs',       icon: Coins           },
   { id: 'memory',     label: 'Memory',      icon: Database        },
   { id: 'settings',   label: 'Settings',    icon: Settings        },
 ];
