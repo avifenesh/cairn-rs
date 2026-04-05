@@ -557,3 +557,24 @@ export interface NotificationRecord {
   delivered: boolean;
   delivery_error: string | null;
 }
+
+// ── Request log (GET /v1/admin/logs) ──────────────────────────────────────────
+
+/** One structured request log entry from the in-memory ring buffer. */
+export interface RequestLogEntry {
+  timestamp:  string;
+  level:      'info' | 'warn' | 'error';
+  message:    string;
+  request_id: string;
+  method:     string;
+  path:       string;
+  query:      string | null;
+  status:     number;
+  latency_ms: number;
+}
+
+export interface RequestLogsResponse {
+  entries: RequestLogEntry[];
+  total:   number;
+  limit:   number;
+}

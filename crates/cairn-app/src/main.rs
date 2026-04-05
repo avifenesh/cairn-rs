@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
+use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::middleware::{from_fn_with_state, Next};
@@ -204,6 +205,56 @@ impl AppMetrics {
     }
 }
 
+// ── Request log ring buffer ───────────────────────────────────────────────────
+
+/// Maximum number of structured log entries retained in memory.
+const LOG_RING_SIZE: usize = 2_000;
+
+/// One structured request log entry.
+#[derive(Clone, Serialize)]
+pub struct LogEntry {
+    pub timestamp:  String,
+    pub level:      &'static str,
+    pub message:    String,
+    pub request_id: String,
+    pub method:     String,
+    pub path:       String,
+    pub query:      Option<String>,
+    pub status:     u16,
+    pub latency_ms: u64,
+}
+
+/// Fixed-capacity FIFO ring buffer of structured log entries.
+pub struct RequestLogBuffer {
+    entries: std::collections::VecDeque<LogEntry>,
+}
+
+impl RequestLogBuffer {
+    fn new() -> Self {
+        Self { entries: std::collections::VecDeque::with_capacity(LOG_RING_SIZE) }
+    }
+
+    fn push(&mut self, entry: LogEntry) {
+        if self.entries.len() == LOG_RING_SIZE {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(entry);
+    }
+
+    /// Return the last `n` entries whose level matches the filter (empty = all).
+    fn tail(&self, n: usize, level_filter: &[&str]) -> Vec<&LogEntry> {
+        self.entries
+            .iter()
+            .rev()
+            .filter(|e| level_filter.is_empty() || level_filter.contains(&e.level))
+            .take(n)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    }
+}
+
 // ── Response types ───────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -285,7 +336,9 @@ impl ProjectQuery {
 /// - `/v1/stream` — SSE endpoint: browsers can't set custom headers in
 ///   `EventSource`, so clients reconnect using the last-event-id only.
 fn is_auth_exempt(path: &str) -> bool {
-    path == "/health" || path.starts_with("/v1/stream")
+    // /v1/ws: browsers can't send headers during WS upgrade, so auth is
+    // handled inside the handler via ?token= query parameter instead.
+    path == "/health" || path.starts_with("/v1/stream") || path == "/v1/ws"
 }
 
 /// Extract the raw token from an `Authorization: Bearer <token>` header.
@@ -503,22 +556,110 @@ async fn rate_limit_status_handler(
     }))
 }
 
+/// Request tracing + metrics middleware.
 ///
 /// Runs outermost in the middleware stack so it captures every request,
-/// including those rejected by the auth middleware.
+/// including those rejected by auth and rate-limit middleware.
+///
+/// Per request it:
+///   1. Generates a UUID v4 `X-Request-ID` and injects it into the response.
+///   2. Logs a structured entry into the in-memory ring buffer.
+///   3. Updates the rolling metrics counters and latency ring.
 async fn metrics_middleware(
     State(state): State<AppState>,
     request: Request<Body>,
     next: Next,
 ) -> Response {
-    let path = request.uri().path().to_owned();
-    let start = std::time::Instant::now();
-    let response = next.run(request).await;
+    use uuid::Uuid;
+
+    let request_id = Uuid::new_v4().to_string();
+    let method     = request.method().to_string();
+    let path       = request.uri().path().to_owned();
+    let query      = request.uri().query().map(|q| q.to_owned());
+    let start      = std::time::Instant::now();
+
+    let mut response   = next.run(request).await;
     let latency_ms = start.elapsed().as_millis() as u64;
-    let status = response.status().as_u16();
+    let status     = response.status().as_u16();
+
+    // Inject request ID into response header so clients can correlate.
+    if let Ok(val) = axum::http::HeaderValue::from_str(&request_id) {
+        response.headers_mut().insert("x-request-id", val);
+    }
+
+    // Update rolling metrics.
     if let Ok(mut m) = state.metrics.write() {
         m.record(&path, status, latency_ms);
     }
+
+    // Derive log level from status code.
+    let level: &'static str = if status >= 500 {
+        "error"
+    } else if status >= 400 {
+        "warn"
+    } else {
+        "info"
+    };
+
+    // Emit structured tracing span (picked up by tracing-subscriber).
+    match level {
+        "error" => tracing::error!(
+            request_id = %request_id,
+            method = %method,
+            path = %path,
+            status = status,
+            latency_ms = latency_ms,
+            "request completed"
+        ),
+        "warn" => tracing::warn!(
+            request_id = %request_id,
+            method = %method,
+            path = %path,
+            status = status,
+            latency_ms = latency_ms,
+            "request completed"
+        ),
+        _ => tracing::info!(
+            request_id = %request_id,
+            method = %method,
+            path = %path,
+            status = status,
+            latency_ms = latency_ms,
+            "request completed"
+        ),
+    }
+
+    // Append structured entry to in-memory log ring buffer.
+    let entry = LogEntry {
+        timestamp:  {
+            // chrono clock feature not enabled; compute ISO-8601 from SystemTime.
+            let secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            format!(
+                "{}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                1970 + secs / 31_557_600,
+                ((secs % 31_557_600) / 2_629_800) + 1,
+                ((secs % 2_629_800) / 86_400) + 1,
+                (secs % 86_400) / 3_600,
+                (secs % 3_600) / 60,
+                secs % 60,
+            )
+        },
+        level,
+        message:    format!("{method} {path} → {status}"),
+        request_id,
+        method,
+        path,
+        query,
+        status,
+        latency_ms,
+    };
+    if let Ok(mut log) = state.request_log.write() {
+        log.push(entry);
+    }
+
     response
 }
 
@@ -719,6 +860,41 @@ async fn dashboard_handler(State(state): State<AppState>) -> Json<DashboardOverv
     })
 }
 
+// ── Stats handler ─────────────────────────────────────────────────────────────
+
+/// `GET /v1/stats` — lightweight real-time system-wide counters.
+async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
+    use cairn_store::projections::SessionReadModel;
+
+    let total_events: u64 = state
+        .runtime
+        .store
+        .head_position()
+        .await
+        .ok()
+        .flatten()
+        .map(|p| p.0 + 1)
+        .unwrap_or(0);
+
+    let active_runs  = state.runtime.store.count_active_runs().await;
+    let active_tasks = state.runtime.store.count_active_tasks().await;
+
+    let total_sessions = SessionReadModel::list_active(state.runtime.store.as_ref(), usize::MAX)
+        .await
+        .unwrap_or_default()
+        .len() as u64;
+
+    Json(serde_json::json!({
+        "total_events":     total_events,
+        "total_sessions":   total_sessions,
+        "total_runs":       active_runs,
+        "total_tasks":      active_tasks,
+        "active_runs":      active_runs,
+        "pending_approvals": 0u64,
+        "uptime_seconds":   state.started_at.elapsed().as_secs(),
+    }))
+}
+
 /// `GET /v1/stream` — Real-time SSE event stream (RFC 002).
 ///
 /// Protocol:
@@ -798,6 +974,166 @@ fn stored_event_to_sse(e: StoredEvent) -> Event {
         .id(e.position.0.to_string())
         .event(event_type_name(&e.envelope.payload))
         .data(serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_owned()))
+}
+
+// ── WebSocket handler ─────────────────────────────────────────────────────────
+
+/// Query parameters accepted by `GET /v1/ws`.
+#[derive(Deserialize)]
+struct WsQueryParams {
+    /// Bearer token — required because browsers can't set headers during WS upgrade.
+    token: Option<String>,
+}
+
+/// `GET /v1/ws` — real-time event stream over WebSocket (RFC 002 companion).
+///
+/// ### Auth
+/// Pass the admin token via `?token=<token>` query parameter.
+/// Header-based auth cannot be used for WebSocket connections from browsers.
+///
+/// ### Client → Server messages (JSON)
+/// ```json
+/// { "type": "subscribe",  "event_types": ["run_created", "task_queued"] }
+/// { "type": "ping" }
+/// ```
+///
+/// ### Server → Client messages (JSON)
+/// ```json
+/// { "type": "connected",  "head_position": 42 }
+/// { "type": "event",      "position": 43, "event_type": "run_created", "event_id": "...", "payload": {...} }
+/// { "type": "pong" }
+/// { "type": "warn",       "message": "lagged: missed N event(s)" }
+/// ```
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Query(params): Query<WsQueryParams>,
+) -> impl IntoResponse {
+    // Authenticate via query param — same token registry as bearer auth.
+    let token = match params.token {
+        Some(t) if !t.is_empty() => t,
+        _ => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    let authenticator = ServiceTokenAuthenticator::new(state.tokens.clone());
+    if authenticator.authenticate(&token).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    ws.on_upgrade(move |socket| handle_ws_connection(socket, state))
+}
+
+/// Drive a single WebSocket connection to completion.
+async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
+    use tokio::sync::broadcast::error::RecvError;
+
+    let mut receiver = state.runtime.store.subscribe();
+
+    // Active event-type filter set by the client (None = all events).
+    let mut filter: Option<Vec<String>> = None;
+
+    // Send the "connected" handshake with the current log head position.
+    let head_pos = state
+        .runtime
+        .store
+        .head_position()
+        .await
+        .ok()
+        .flatten()
+        .map(|p| p.0)
+        .unwrap_or(0);
+
+    let connected = serde_json::json!({ "type": "connected", "head_position": head_pos });
+    if socket
+        .send(WsMessage::Text(connected.to_string().into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            // ── Inbound from the browser ──────────────────────────────────
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(WsMessage::Text(text))) => {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                            match val.get("type").and_then(|t| t.as_str()) {
+                                Some("subscribe") => {
+                                    filter = val
+                                        .get("event_types")
+                                        .and_then(|e| e.as_array())
+                                        .map(|arr| {
+                                            arr.iter()
+                                                .filter_map(|v| v.as_str().map(str::to_owned))
+                                                .collect()
+                                        });
+                                }
+                                Some("ping") => {
+                                    let _ = socket
+                                        .send(WsMessage::Text(r#"{"type":"pong"}"#.to_owned().into()))
+                                        .await;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    Some(Ok(WsMessage::Ping(data))) => {
+                        let _ = socket.send(WsMessage::Pong(data)).await;
+                    }
+                    // Client closed or errored — end the task.
+                    Some(Ok(WsMessage::Close(_))) | None | Some(Err(_)) => break,
+                    _ => {}
+                }
+            }
+
+            // ── Outbound broadcast events ─────────────────────────────────
+            recv_result = receiver.recv() => {
+                match recv_result {
+                    Ok(event) => {
+                        let event_type = event_type_name(&event.envelope.payload);
+
+                        // Apply the client's subscription filter when set.
+                        if let Some(ref types) = filter {
+                            if !types.is_empty()
+                                && !types.iter().any(|t| t.as_str() == event_type)
+                            {
+                                continue;
+                            }
+                        }
+
+                        let msg = serde_json::json!({
+                            "type":       "event",
+                            "position":   event.position.0,
+                            "event_type": event_type,
+                            "event_id":   event.envelope.event_id.as_str(),
+                            "payload":    &event.envelope.payload,
+                        });
+
+                        if socket
+                            .send(WsMessage::Text(msg.to_string().into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    // Missed messages due to a slow consumer — notify and continue.
+                    Err(RecvError::Lagged(n)) => {
+                        let warn = serde_json::json!({
+                            "type":    "warn",
+                            "message": format!("lagged: missed {n} event(s)"),
+                        });
+                        let _ = socket
+                            .send(WsMessage::Text(warn.to_string().into()))
+                            .await;
+                    }
+                    // Broadcast channel dropped — server shutting down.
+                    Err(RecvError::Closed) => break,
+                }
+            }
+        }
+    }
 }
 
 // ── Run handlers ──────────────────────────────────────────────────────────────
@@ -1669,6 +2005,55 @@ async fn list_audit_log_handler(
     }
 }
 
+// ── Request log handler ───────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct LogsQuery {
+    /// Maximum entries to return (default 100, max 500).
+    #[serde(default = "default_logs_limit")]
+    limit: usize,
+    /// Comma-separated level filter: "info", "warn", "error".  Omit = all levels.
+    level: Option<String>,
+}
+
+fn default_logs_limit() -> usize { 100 }
+
+/// `GET /v1/admin/logs?limit=100&level=error,warn` — structured request log tail.
+///
+/// Returns the most recent N entries from the in-memory request log ring buffer,
+/// written by the tracing middleware on every completed request.
+async fn list_request_logs_handler(
+    State(state): State<AppState>,
+    Query(q): Query<LogsQuery>,
+) -> impl IntoResponse {
+    let limit = q.limit.min(500);
+    let level_filter: Vec<&'static str> = q.level
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .filter_map(|l| match l.trim() {
+                    "info"  => Some("info"),
+                    "warn"  => Some("warn"),
+                    "error" => Some("error"),
+                    _       => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let entries: Vec<LogEntry> = match state.request_log.read() {
+        Ok(log) => log.tail(limit, &level_filter).into_iter().cloned().collect(),
+        Err(_)  => vec![],
+    };
+
+    let total = entries.len();
+    (StatusCode::OK, Json(serde_json::json!({
+        "entries": entries,
+        "total":   total,
+        "limit":   limit,
+    })))
+}
+
 // ── Eval runs handler ─────────────────────────────────────────────────────────
 
 /// `GET /v1/evals/runs?project_id=...&limit=100` — list eval runs (operator view).
@@ -2534,6 +2919,7 @@ async fn main() {
         ollama,
         metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
+        request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
     };
 
     // ── Router ────────────────────────────────────────────────────────────────
@@ -2956,10 +3342,13 @@ fn build_router(state: AppState) -> Router {
         // SSE stream — both paths accepted for compatibility with lib.rs and clients.
         .route("/v1/stream",          get(stream_handler))
         .route("/v1/streams/runtime", get(stream_handler))
+        // WebSocket stream — auth via ?token= query param.
+        .route("/v1/ws",              get(ws_handler))
         // ── Protected /v1/* routes ────────────────────────────────────────
         .route("/v1/health/detailed", get(detailed_health_handler))
         .route("/v1/status", get(status_handler))
         .route("/v1/dashboard", get(dashboard_handler))
+        .route("/v1/stats", get(stats_handler))
         .route("/v1/runs", get(list_runs_handler).post(create_run_handler))
         .route("/v1/runs/:id", get(get_run_handler))
         .route("/v1/runs/:id/pause",  post(pause_run_handler))
@@ -2989,6 +3378,7 @@ fn build_router(state: AppState) -> Router {
         // Admin routes
         .route("/v1/admin/tenants", post(create_tenant_handler))
         .route("/v1/admin/audit-log", get(list_audit_log_handler))
+        .route("/v1/admin/logs", get(list_request_logs_handler))
         .route("/v1/evals/runs", get(list_evals_handler))
         // Ollama local LLM provider
         .route("/v1/providers/ollama/models",          get(ollama_models_handler))
@@ -3145,6 +3535,8 @@ mod tests {
                 ingest,
                 ollama: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
+                rate_limits: Arc::new(Mutex::new(HashMap::new())),
+                request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
             }
         }
     }
@@ -4746,6 +5138,8 @@ mod tests {
             retrieval,
             ingest,
             ollama: None,
+            rate_limits: Arc::new(Mutex::new(HashMap::new())),
+            request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         };
         let app = build_router(state);
 
@@ -5278,6 +5672,8 @@ mod run_events_tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                rate_limits: Arc::new(Mutex::new(HashMap::new())),
+                request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
             }
         }
     }
@@ -5459,6 +5855,8 @@ mod tool_invocations_tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                rate_limits: Arc::new(Mutex::new(HashMap::new())),
+                request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
             }
         }
     }
@@ -5671,6 +6069,8 @@ mod provider_health_tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                rate_limits: Arc::new(Mutex::new(HashMap::new())),
+                request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
             }
         }
     }

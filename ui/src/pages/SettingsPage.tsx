@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Loader2, Check, X } from "lucide-react";
+import { RefreshCw, Loader2, Check, X, Radio, Wifi } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
+import { usePreferences } from "../hooks/usePreferences";
+import { useWebSocket } from "../hooks/useWebSocket";
 import type { DeploymentSettings } from "../lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -78,6 +80,102 @@ function Section({ title, children }: { title: string; children: React.ReactNode
         {children}
       </div>
     </div>
+  );
+}
+
+// ── Transport section ─────────────────────────────────────────────────────────
+
+const WS_STATUS_COLOR: Record<string, string> = {
+  connected:    "text-emerald-400",
+  connecting:   "text-amber-400",
+  reconnecting: "text-amber-400",
+  failed:       "text-red-400",
+  idle:         "text-zinc-600",
+};
+
+function TransportSection() {
+  const [prefs, setPrefs] = usePreferences();
+  const isWs = prefs.transport === "websocket";
+
+  const { status: wsStatus, reconnect } = useWebSocket({
+    enabled: isWs,
+  });
+
+  return (
+    <Section title="Real-time Transport">
+      <KV
+        label="Protocol"
+        value={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPrefs({ transport: "sse" })}
+              title="Server-Sent Events (default)"
+              className={clsx(
+                "flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors border",
+                !isWs
+                  ? "bg-indigo-600/20 text-indigo-300 border-indigo-700/50"
+                  : "text-zinc-500 border-zinc-700 hover:text-zinc-300",
+              )}
+            >
+              <Radio size={11} /> SSE
+            </button>
+            <button
+              onClick={() => setPrefs({ transport: "websocket" })}
+              title="WebSocket (bidirectional, with event filtering)"
+              className={clsx(
+                "flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors border",
+                isWs
+                  ? "bg-indigo-600/20 text-indigo-300 border-indigo-700/50"
+                  : "text-zinc-500 border-zinc-700 hover:text-zinc-300",
+              )}
+            >
+              <Wifi size={11} /> WebSocket
+            </button>
+          </div>
+        }
+      />
+
+      {isWs && (
+        <KV
+          label="WS Status"
+          value={
+            <div className="flex items-center gap-2">
+              <span className={clsx("text-[12px] font-medium", WS_STATUS_COLOR[wsStatus] ?? "text-zinc-500")}>
+                {wsStatus}
+              </span>
+              {(wsStatus === "failed" || wsStatus === "idle") && (
+                <button
+                  onClick={reconnect}
+                  className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  Reconnect
+                </button>
+              )}
+            </div>
+          }
+        />
+      )}
+
+      <KV
+        label="Endpoint"
+        value={
+          <code className="text-[11px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
+            {isWs ? "GET /v1/ws?token=…" : "GET /v1/stream"}
+          </code>
+        }
+      />
+
+      <KV
+        label="Description"
+        value={
+          <span className="text-[11px] text-zinc-600">
+            {isWs
+              ? "Bidirectional; supports event-type filtering. Uses ?token= for auth."
+              : "Unidirectional push with Last-Event-ID replay. Default."}
+          </span>
+        }
+      />
+    </Section>
   );
 }
 
@@ -186,6 +284,9 @@ export function SettingsPage() {
                 }
               />
             </Section>
+
+            {/* Transport */}
+            <TransportSection />
 
           </div>
         ) : null}

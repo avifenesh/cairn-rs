@@ -14,6 +14,7 @@ import {
   Play,
   Puzzle,
   Settings,
+  ScrollText,
   Shield,
   Square,
   Terminal,
@@ -44,6 +45,7 @@ export type NavPage =
   | 'channels'
   | 'playground'
   | 'audit-log'
+  | 'logs'
   | 'evals'
   | 'api-docs'
   | 'settings'
@@ -89,6 +91,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'evals',     label: 'Evals',     icon: FlaskConical  },
       { id: 'graph',     label: 'Graph',     icon: Network       },
       { id: 'audit-log', label: 'Audit Log', icon: Shield        },
+      { id: 'logs',      label: 'Logs',      icon: ScrollText    },
     ],
   },
   {

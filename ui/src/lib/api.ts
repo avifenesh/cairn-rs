@@ -534,6 +534,23 @@ export function createApiClient(config: ApiClientConfig) {
     /** POST /v1/prompts/releases/:id/transition — generic state transition. */
     transitionPromptRelease: (releaseId: string, toState: string): Promise<import("./types").PromptReleaseRecord> =>
       post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/transition`, { to_state: toState }),
+
+    // ── Request logs ─────────────────────────────────────────────────────────
+
+    /**
+     * GET /v1/admin/logs — structured request log tail from the in-memory ring buffer.
+     * Supports ?limit=N and ?level=info,warn,error filtering.
+     */
+    getRequestLogs: (params?: {
+      limit?: number;
+      level?: string;
+    }): Promise<import("./types").RequestLogsResponse> => {
+      const qs = new URLSearchParams();
+      if (params?.limit  !== undefined) qs.set("limit", String(params.limit));
+      if (params?.level)               qs.set("level", params.level);
+      const q = qs.toString() ? `?${qs}` : "";
+      return get(`/v1/admin/logs${q}`);
+    },
   };
 }
 

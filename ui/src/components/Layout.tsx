@@ -10,7 +10,7 @@ import { type BreadcrumbItem } from './Breadcrumb';
 const VALID_PAGES: NavPage[] = [
   'dashboard',
   'sessions', 'runs', 'tasks', 'approvals', 'prompts',
-  'traces', 'memory', 'sources', 'costs', 'evals', 'graph', 'audit-log',
+  'traces', 'memory', 'sources', 'costs', 'evals', 'graph', 'audit-log', 'logs',
   'providers', 'plugins', 'credentials', 'channels', 'playground', 'api-docs', 'settings', 'profile',
 ];
 
@@ -54,6 +54,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   evals:       'Evaluations',
   graph:       'Knowledge Graph',
   'audit-log': 'Audit Log',
+  logs:        'Request Logs',
   'api-docs':  'API Reference',
   providers:   'Providers',
   plugins:     'Plugins',
@@ -77,6 +78,7 @@ const PAGE_GROUP: Partial<Record<NavPage, string>> = {
   evals:       'Observability',
   graph:       'Observability',
   'audit-log': 'Observability',
+  logs:        'Observability',
   providers:   'Infrastructure',
   plugins:      'Infrastructure',
   credentials:  'Infrastructure',

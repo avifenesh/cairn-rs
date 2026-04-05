@@ -13,6 +13,8 @@ export interface Preferences {
   compactMode: boolean;
   /** UI colour scheme. */
   theme: 'dark' | 'light' | 'system';
+  /** Real-time event transport: SSE (default) or WebSocket. */
+  transport: 'sse' | 'websocket';
 }
 
 const STORAGE_KEY = 'cairn_preferences';
@@ -23,6 +25,7 @@ const DEFAULTS: Preferences = {
   timezone:     '',
   compactMode:  false,
   theme:        'dark',
+  transport:    'sse',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

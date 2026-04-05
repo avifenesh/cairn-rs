@@ -22,6 +22,7 @@ import { PluginsPage } from './pages/PluginsPage';
 import { SourcesPage } from './pages/SourcesPage';
 import { CredentialsPage } from './pages/CredentialsPage';
 import { ChannelsPage } from './pages/ChannelsPage';
+import { LogsPage } from './pages/LogsPage';
 import { PromptsPage } from './pages/PromptsPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { GraphPage } from './pages/GraphPage';
@@ -67,6 +68,7 @@ function renderRoute(route: Route): React.ReactNode {
     case 'sources':      return <Guarded name="Sources"><SourcesPage /></Guarded>;
     case 'credentials':  return <Guarded name="Credentials"><CredentialsPage /></Guarded>;
     case 'channels':     return <Guarded name="Channels"><ChannelsPage /></Guarded>;
+    case 'logs':         return <Guarded name="Logs"><LogsPage /></Guarded>;
     case 'graph':        return <Guarded name="Graph"><GraphPage /></Guarded>;
     case 'api-docs':     return <Guarded name="API Docs"><ApiDocsPage /></Guarded>;
     case 'audit-log':    return <Guarded name="Audit Log"><AuditLogPage /></Guarded>;
