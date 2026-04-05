@@ -1,7 +1,9 @@
 import {
   Coins,
   Database,
+  FileText,
   FlaskConical,
+  KeyRound,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -14,6 +16,7 @@ import {
   Shield,
   Square,
   Terminal,
+  User,
   Waves,
   Zap,
   CheckSquare,
@@ -28,6 +31,7 @@ export type NavPage =
   | 'runs'
   | 'tasks'
   | 'approvals'
+  | 'prompts'
   | 'traces'
   | 'memory'
   | 'costs'
@@ -35,11 +39,13 @@ export type NavPage =
   | 'sources'
   | 'providers'
   | 'plugins'
+  | 'credentials'
   | 'playground'
   | 'audit-log'
   | 'evals'
   | 'api-docs'
-  | 'settings';
+  | 'settings'
+  | 'profile';
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
 
@@ -68,6 +74,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'runs',      label: 'Runs',      icon: Play        },
       { id: 'tasks',     label: 'Tasks',     icon: ListChecks  },
       { id: 'approvals', label: 'Approvals', icon: CheckSquare },
+      { id: 'prompts',   label: 'Prompts',   icon: FileText    },
     ],
   },
   {
@@ -85,11 +92,12 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Infrastructure',
     items: [
-      { id: 'providers',  label: 'Providers',  icon: Zap      },
-      { id: 'plugins',    label: 'Plugins',    icon: Puzzle   },
-      { id: 'playground', label: 'Playground', icon: Terminal },
-      { id: 'api-docs',   label: 'API Docs',   icon: BookOpen },
-      { id: 'settings',   label: 'Settings',   icon: Settings },
+      { id: 'providers',   label: 'Providers',   icon: Zap      },
+      { id: 'plugins',     label: 'Plugins',     icon: Puzzle   },
+      { id: 'credentials', label: 'Credentials', icon: KeyRound },
+      { id: 'playground',  label: 'Playground',  icon: Terminal },
+      { id: 'api-docs',    label: 'API Docs',    icon: BookOpen },
+      { id: 'settings',    label: 'Settings',    icon: Settings },
     ],
   },
 ];

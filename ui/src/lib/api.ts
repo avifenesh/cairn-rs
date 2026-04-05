@@ -407,6 +407,87 @@ export function createApiClient(config: ApiClientConfig) {
       credentialId: string,
     ): Promise<import("./types").CredentialSummary> =>
       del(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/credentials/${encodeURIComponent(credentialId)}`),
+
+    // ── Prompts (RFC 006) ────────────────────────────────────────────────────
+
+    /** GET /v1/prompts/assets — list prompt assets. */
+    getPromptAssets: (params?: { limit?: number; offset?: number }): Promise<import("./types").ListResponse<import("./types").PromptAssetRecord>> => {
+      const qs = new URLSearchParams();
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      const q = qs.toString() ? `?${qs}` : "";
+      return get(`/v1/prompts/assets${q}`);
+    },
+
+    /** POST /v1/prompts/assets — create a new prompt asset. */
+    createPromptAsset: (body: {
+      prompt_asset_id: string;
+      name: string;
+      kind: string;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").PromptAssetRecord> =>
+      post("/v1/prompts/assets", body),
+
+    /** GET /v1/prompts/assets/:id/versions — version history. */
+    getPromptVersions: (assetId: string, params?: { limit?: number }): Promise<import("./types").ListResponse<import("./types").PromptVersionRecord>> => {
+      const qs = new URLSearchParams();
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+      const q = qs.toString() ? `?${qs}` : "";
+      return get(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions${q}`);
+    },
+
+    /** POST /v1/prompts/assets/:id/versions — create a new version. */
+    createPromptVersion: (assetId: string, body: {
+      prompt_version_id: string;
+      content_hash: string;
+      content?: string;
+      template_vars?: import("./types").PromptTemplateVar[];
+    }): Promise<import("./types").PromptVersionRecord> =>
+      post(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions`, body),
+
+    /** GET /v1/prompts/assets/:id/versions/:vid/diff — diff two versions. */
+    getVersionDiff: (assetId: string, versionId: string, compareTo: string): Promise<import("./types").PromptVersionDiff> =>
+      get(`/v1/prompts/assets/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(versionId)}/diff?compare_to=${encodeURIComponent(compareTo)}`),
+
+    /** GET /v1/prompts/releases — list all releases. */
+    getPromptReleases: (params?: { limit?: number; offset?: number }): Promise<import("./types").ListResponse<import("./types").PromptReleaseRecord>> => {
+      const qs = new URLSearchParams();
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      const q = qs.toString() ? `?${qs}` : "";
+      return get(`/v1/prompts/releases${q}`);
+    },
+
+    /** POST /v1/prompts/releases — create a release from a version. */
+    createPromptRelease: (body: {
+      prompt_release_id: string;
+      prompt_asset_id: string;
+      prompt_version_id: string;
+      release_tag?: string;
+    }): Promise<import("./types").PromptReleaseRecord> =>
+      post("/v1/prompts/releases", body),
+
+    /** POST /v1/prompts/releases/:id/activate — activate a release. */
+    activatePromptRelease: (releaseId: string): Promise<import("./types").PromptReleaseRecord> =>
+      post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/activate`, {}),
+
+    /** POST /v1/prompts/releases/:id/rollout — set rollout percentage. */
+    rolloutPromptRelease: (releaseId: string, percent: number): Promise<import("./types").PromptReleaseRecord> =>
+      post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/rollout`, { percent }),
+
+    /** POST /v1/prompts/releases/:id/request-approval — request approval gate. */
+    requestPromptReleaseApproval: (releaseId: string): Promise<unknown> =>
+      post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/request-approval`, {}),
+
+    /** POST /v1/prompts/releases/:id/rollback — roll back to a previous release. */
+    rollbackPromptRelease: (releaseId: string, targetReleaseId: string): Promise<import("./types").PromptReleaseRecord> =>
+      post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/rollback`, { target_release_id: targetReleaseId }),
+
+    /** POST /v1/prompts/releases/:id/transition — generic state transition. */
+    transitionPromptRelease: (releaseId: string, toState: string): Promise<import("./types").PromptReleaseRecord> =>
+      post(`/v1/prompts/releases/${encodeURIComponent(releaseId)}/transition`, { to_state: toState }),
   };
 }
 

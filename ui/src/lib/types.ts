@@ -304,6 +304,66 @@ export interface TracesResponse {
   traces: LlmCallTrace[];
 }
 
+// ── Prompts (RFC 006) ─────────────────────────────────────────────────────────
+
+/** GET /v1/prompts/assets */
+export interface PromptAssetRecord {
+  prompt_asset_id: string;
+  project: ProjectKey;
+  name: string;
+  kind: string;
+  scope?: string;
+  status?: string;
+  created_at: number;
+  updated_at?: number;
+}
+
+/** One template variable definition */
+export interface PromptTemplateVar {
+  name: string;
+  description?: string;
+  required?: boolean;
+  default_value?: string;
+}
+
+/** GET /v1/prompts/assets/:id/versions */
+export interface PromptVersionRecord {
+  prompt_version_id: string;
+  prompt_asset_id: string;
+  project: ProjectKey;
+  content_hash: string;
+  version_number?: number;
+  content?: string;
+  template_vars?: PromptTemplateVar[];
+  created_at: number;
+}
+
+/** GET /v1/prompts/releases */
+export interface PromptReleaseRecord {
+  prompt_release_id: string;
+  project: ProjectKey;
+  prompt_asset_id: string;
+  prompt_version_id: string;
+  state: string;
+  rollout_percent?: number | null;
+  routing_slot?: string | null;
+  task_type?: string | null;
+  agent_type?: string | null;
+  is_project_default?: boolean;
+  release_tag?: string | null;
+  created_by?: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/** GET /v1/prompts/assets/:id/versions/:vid/diff */
+export interface PromptVersionDiff {
+  added_lines: string[];
+  removed_lines: string[];
+  unchanged_lines: string[];
+  similarity_score: number;
+}
+
 // ── Audit Log ─────────────────────────────────────────────────────────────────
 
 export type AuditOutcome = 'success' | 'failure';

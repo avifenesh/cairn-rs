@@ -9,9 +9,9 @@ import { type BreadcrumbItem } from './Breadcrumb';
 // All top-level pages — must match NavPage union in Sidebar.tsx
 const VALID_PAGES: NavPage[] = [
   'dashboard',
-  'sessions', 'runs', 'tasks', 'approvals',
+  'sessions', 'runs', 'tasks', 'approvals', 'prompts',
   'traces', 'memory', 'sources', 'costs', 'evals', 'graph', 'audit-log',
-  'providers', 'plugins', 'playground', 'api-docs', 'settings',
+  'providers', 'plugins', 'credentials', 'playground', 'api-docs', 'settings',
 ];
 
 // ── Route descriptor ──────────────────────────────────────────────────────────
@@ -46,6 +46,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   runs:        'Runs',
   tasks:       'Tasks',
   approvals:   'Approvals',
+  prompts:     'Prompts',
   traces:      'Traces',
   memory:      'Memory',
   sources:     'Sources',
@@ -56,6 +57,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   'api-docs':  'API Reference',
   providers:   'Providers',
   plugins:     'Plugins',
+  credentials: 'Credentials',
   playground:  'Playground',
   settings:    'Settings',
 };
@@ -65,6 +67,7 @@ const PAGE_GROUP: Partial<Record<NavPage, string>> = {
   runs:        'Operations',
   tasks:       'Operations',
   approvals:   'Operations',
+  prompts:     'Operations',
   traces:      'Observability',
   memory:      'Observability',
   sources:     'Observability',
@@ -73,8 +76,9 @@ const PAGE_GROUP: Partial<Record<NavPage, string>> = {
   graph:       'Observability',
   'audit-log': 'Observability',
   providers:   'Infrastructure',
-  plugins:     'Infrastructure',
-  playground:  'Infrastructure',
+  plugins:      'Infrastructure',
+  credentials:  'Infrastructure',
+  playground:   'Infrastructure',
   'api-docs':  'Infrastructure',
   settings:    'Infrastructure',
 };
