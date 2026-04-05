@@ -16073,7 +16073,7 @@ mod tests {
 
         state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
         state.runtime.runs.start(&project, &session_id, run_id.clone(), None).await.unwrap();
-        state.runtime.tasks.submit(&project, task_id.clone(), None, None).await.unwrap();
+        state.runtime.tasks.submit(&project, task_id.clone(), None, None, 0).await.unwrap();
 
         let app = AppBootstrap::build_router(state);
         let resp = post_json(
