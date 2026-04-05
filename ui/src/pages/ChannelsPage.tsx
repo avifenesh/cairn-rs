@@ -297,7 +297,7 @@ function ChannelRow({
 
         {/* Name */}
         <div className="flex-1 min-w-0 flex items-center gap-2 pr-2">
-          <KindIcon kind={channel.kind} size={12} className="shrink-0 text-zinc-500" />
+          <KindIcon kind={channel.kind} size={12} />
           <span className="text-[12px] font-medium text-zinc-200 truncate" title={channel.target}>
             {channelDisplayName(channel)}
           </span>
