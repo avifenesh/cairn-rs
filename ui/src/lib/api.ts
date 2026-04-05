@@ -161,6 +161,23 @@ export function createApiClient(config: ApiClientConfig) {
     getRunEvents: (runId: string, limit = 100): Promise<import("./types").RunEventSummary[]> =>
       get(`/v1/runs/${runId}/events?limit=${limit}`),
 
+    /** GET /v1/tasks — all tasks across every project (operator view). */
+    getAllTasks: (params?: { limit?: number; offset?: number }): Promise<import("./types").TaskRecord[]> => {
+      const qs = new URLSearchParams();
+      if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      const q = qs.toString() ? `?${qs}` : "";
+      return get(`/v1/tasks${q}`);
+    },
+
+    /** POST /v1/tasks/:id/claim — claim a queued task for a worker. */
+    claimTask: (taskId: string, workerId: string, leaseDurationMs = 30_000): Promise<import("./types").TaskRecord> =>
+      post(`/v1/tasks/${taskId}/claim`, { worker_id: workerId, lease_duration_ms: leaseDurationMs }),
+
+    /** POST /v1/tasks/:id/release-lease — release a leased task back to queued. */
+    releaseLease: (taskId: string): Promise<import("./types").TaskRecord> =>
+      post(`/v1/tasks/${taskId}/release-lease`),
+
     /** GET /v1/runs/:id/tasks — tasks belonging to a run. */
     getRunTasks: (runId: string): Promise<import("./types").TaskRecord[]> =>
       get(`/v1/runs/${runId}/tasks`),

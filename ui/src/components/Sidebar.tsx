@@ -1,6 +1,7 @@
 import { Coins, LogOut,
   LayoutDashboard,
   Play,
+  ListChecks,
   MonitorPlay,
   CheckSquare,
   Waves,
@@ -19,6 +20,7 @@ export type NavPage =
   | 'approvals'
   | 'providers'
   | 'costs'
+  | 'tasks'
   | 'traces'
   | 'memory'
   | 'settings';
@@ -32,6 +34,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
   { id: 'runs',       label: 'Runs',        icon: Play            },
+  { id: 'tasks',      label: 'Tasks',       icon: ListChecks      },
   { id: 'sessions',   label: 'Sessions',    icon: MonitorPlay     },
   { id: 'approvals',  label: 'Approvals',   icon: CheckSquare     },
   { id: 'providers',  label: 'Providers',   icon: Zap             },

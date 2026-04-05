@@ -125,7 +125,7 @@ export type TaskState =
   | 'failed' | 'canceled' | 'paused'
   | 'waiting_dependency' | 'retryable_failed' | 'dead_lettered';
 
-/** One record from GET /v1/runs/:id/tasks */
+/** One record from GET /v1/runs/:id/tasks or GET /v1/tasks */
 export interface TaskRecord {
   task_id: string;
   project: { tenant_id: string; workspace_id: string; project_id: string };
@@ -133,6 +133,8 @@ export interface TaskRecord {
   parent_task_id: string | null;
   state: TaskState;
   failure_class: string | null;
+  lease_owner: string | null;
+  lease_expires_at: number | null;
   version: number;
   created_at: number;
   updated_at: number;

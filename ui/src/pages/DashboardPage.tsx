@@ -3,13 +3,10 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
-  CircleDot,
   Clock,
   Cpu,
-  ListChecks,
   ServerCrash,
   XCircle,
-  Zap,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
@@ -180,7 +177,6 @@ export function DashboardPage() {
               ? `${dashboard!.active_runs} run(s) in progress`
               : "No active runs"
           }
-          icon={Zap}
           variant={activeRunsVariant}
           loading={isLoading}
         />
@@ -192,7 +188,6 @@ export function DashboardPage() {
               ? `${dashboard!.active_tasks} task(s) running`
               : "No active tasks"
           }
-          icon={ListChecks}
           variant={(dashboard?.active_tasks ?? 0) > 0 ? "info" : "default"}
           loading={isLoading}
         />
@@ -204,7 +199,6 @@ export function DashboardPage() {
               ? "Operator action required"
               : "Inbox clear"
           }
-          icon={CircleDot}
           variant={approvalsVariant}
           loading={isLoading}
         />
@@ -216,7 +210,6 @@ export function DashboardPage() {
               ? "Failures in last 24 hours"
               : "No failures today"
           }
-          icon={AlertTriangle}
           variant={failedVariant}
           loading={isLoading}
         />
@@ -227,28 +220,24 @@ export function DashboardPage() {
         <StatCard
           label="Active Providers"
           value={dashboard?.active_providers ?? 0}
-          icon={Cpu}
           variant="default"
           loading={isLoading}
         />
         <StatCard
           label="Active Plugins"
           value={dashboard?.active_plugins ?? 0}
-          icon={Zap}
           variant="default"
           loading={isLoading}
         />
         <StatCard
           label="Memory Docs"
           value={dashboard?.memory_doc_count ?? 0}
-          icon={ListChecks}
           variant="default"
           loading={isLoading}
         />
         <StatCard
           label="Eval Runs Today"
           value={dashboard?.eval_runs_today ?? 0}
-          icon={Activity}
           variant="default"
           loading={isLoading}
         />

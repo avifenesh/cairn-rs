@@ -9,6 +9,7 @@ import { ProvidersPage } from './pages/ProvidersPage';
 import { RunsPage } from './pages/RunsPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { TasksPage } from './pages/TasksPage';
 import { TracesPage } from './pages/TracesPage';
 import { getStoredToken } from './lib/api';
 
@@ -26,6 +27,7 @@ export default function App() {
         switch (page) {
           case 'dashboard': return <DashboardPage />;
           case 'runs':      return <RunsPage />;
+          case 'tasks':     return <TasksPage />;
           case 'sessions':  return <SessionsPage />;
           case 'approvals': return <ApprovalsPage />;
           case 'providers': return <ProvidersPage />;
