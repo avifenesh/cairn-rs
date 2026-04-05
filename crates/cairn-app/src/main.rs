@@ -40,7 +40,7 @@ use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
 use cairn_runtime::tenants::TenantService;
-use cairn_runtime::InMemoryServices;
+use cairn_runtime::{InMemoryServices, OllamaModel, OllamaProvider};
 use cairn_store::projections::{ApprovalReadModel, LlmCallTraceReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
 use cairn_store::{EventLog, EventPosition, StoredEvent};
 use cairn_store::DbAdapter;
@@ -100,6 +100,8 @@ struct AppState {
     retrieval: Arc<InMemoryRetrieval>,
     /// Ingest pipeline (chunker + store writer).
     ingest: Arc<IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>>,
+    /// Ollama local LLM provider — Some when OLLAMA_HOST is set and reachable.
+    ollama: Option<Arc<OllamaProvider>>,
 }
 
 // ── Response types ───────────────────────────────────────────────────────────
@@ -1475,6 +1477,28 @@ async fn main() {
     ));
     let retrieval = Arc::new(InMemoryRetrieval::new(doc_store.clone()));
 
+    // ── Ollama local LLM provider (optional) ─────────────────────────────────
+    let ollama: Option<Arc<OllamaProvider>> = if let Some(provider) = OllamaProvider::from_env() {
+        eprintln!("ollama: connecting to {}", provider.host());
+        match provider.health_check().await {
+            Ok(tags) => {
+                if tags.models.is_empty() {
+                    eprintln!("ollama: reachable but no models loaded");
+                } else {
+                    let names: Vec<&str> = tags.models.iter().map(|m| m.name.as_str()).collect();
+                    eprintln!("ollama: {} model(s) available: {}", names.len(), names.join(", "));
+                }
+                Some(Arc::new(provider))
+            }
+            Err(e) => {
+                eprintln!("ollama: health check failed ({e}) — provider disabled");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let state = AppState {
         runtime,
         started_at: Arc::new(Instant::now()),
@@ -1485,6 +1509,7 @@ async fn main() {
         document_store: doc_store,
         retrieval,
         ingest: ingest_pipeline,
+        ollama,
     };
 
     // ── Router ────────────────────────────────────────────────────────────────
