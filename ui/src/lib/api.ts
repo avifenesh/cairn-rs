@@ -242,6 +242,22 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/providers/health — list provider health records. */
     getProviderHealth: (): Promise<unknown[]> => get("/v1/providers/health"),
 
+    /** GET /v1/providers/ollama/models — list locally available Ollama models. */
+    getOllamaModels: (): Promise<{ host: string; models: string[]; count: number }> =>
+      get("/v1/providers/ollama/models"),
+
+    /** POST /v1/providers/ollama/generate — run a prompt through Ollama. */
+    ollamaGenerate: (body: {
+      prompt: string;
+      model?: string;
+    }): Promise<{
+      text: string;
+      model: string;
+      tokens_in: number | null;
+      tokens_out: number | null;
+      latency_ms: number;
+    }> => post("/v1/providers/ollama/generate", body),
+
     // ── LLM Traces ───────────────────────────────────────────────────────────
 
     /** GET /v1/traces — all recent LLM call traces (operator view). */
