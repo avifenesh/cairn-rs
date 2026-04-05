@@ -144,15 +144,29 @@ impl InMemoryDiagnostics {
     }
 
     /// Record retrieval feedback (rating for a specific chunk).
+    ///
+    /// Updates `avg_rating` via a running average when a numeric rating is
+    /// provided, and records a retrieval hit at the given relevance score
+    /// (defaulting to 0.7 when no rating is given).
     pub fn record_retrieval_feedback(
         &self,
         source_id: &cairn_domain::SourceId,
         _chunk_id: &str,
         was_used: bool,
-        _rating: Option<f64>,
+        rating: Option<f64>,
     ) {
+        let relevance = rating.unwrap_or(0.7);
         if was_used {
-            self.record_retrieval_hit(source_id, 0.7);
+            self.record_retrieval_hit(source_id, relevance);
+        }
+        if let Some(r) = rating {
+            let key = source_id.as_str().to_owned();
+            let mut sources = self.sources.lock().unwrap();
+            if let Some(entry) = sources.get_mut(&key) {
+                let n = entry.retrieval_count as f64;
+                entry.avg_rating = (entry.avg_rating * n + r) / (n + 1.0);
+                entry.retrieval_count += 1;
+            }
         }
     }
 }

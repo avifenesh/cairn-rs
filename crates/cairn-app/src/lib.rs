@@ -11908,12 +11908,31 @@ async fn memory_feedback_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<MemoryFeedbackRequest>,
 ) -> impl IntoResponse {
+    let rating_f64 = body.rating.map(|r| r as f64);
+
     state.diagnostics.record_retrieval_feedback(
-        &SourceId::new(body.source_id),
+        &SourceId::new(&body.source_id),
         &body.chunk_id,
         body.was_used,
-        body.rating.map(|r| r as f64),
+        rating_f64,
     );
+
+    // When a positive rating is provided, update the chunk's credibility_score
+    // so that subsequent retrievals benefit from the boosted signal.
+    if let Some(rating) = rating_f64 {
+        if rating > 0.0 {
+            let normalised = (rating / 5.0).clamp(0.0, 1.0);
+            let mut chunks = state.document_store.chunks_mut();
+            for chunk in chunks.iter_mut() {
+                if chunk.chunk_id.as_str() == body.chunk_id {
+                    let prev = chunk.credibility_score.unwrap_or(0.5);
+                    // Running average between existing score and new rating.
+                    chunk.credibility_score = Some((prev + normalised) / 2.0);
+                    break;
+                }
+            }
+        }
+    }
 
     (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
 }
