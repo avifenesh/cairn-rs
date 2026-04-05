@@ -3,62 +3,48 @@ import { Sidebar, type NavPage } from './Sidebar';
 import { TopBar } from './TopBar';
 import { CommandPalette } from './CommandPalette';
 
-// ── Lightweight hash router ────────────────────────────────────────────────────
-// No react-router-dom dependency — reads/writes window.location.hash.
-
 function readPage(): NavPage {
   const hash = window.location.hash.replace('#', '') as NavPage;
   const valid: NavPage[] = [
-    'dashboard', 'runs', 'tasks', 'sessions', 'approvals', 'providers', 'costs', 'traces', 'memory', 'settings',
+    'dashboard', 'runs', 'tasks', 'sessions', 'approvals',
+    'providers', 'costs', 'traces', 'memory', 'settings',
   ];
   return valid.includes(hash) ? hash : 'dashboard';
 }
 
-const PAGE_TITLES: Record<NavPage, string> = {
-  dashboard:  'Dashboard',
-  runs:       'Runs',
-  tasks:      'Tasks',
-  sessions:   'Sessions',
-  approvals:  'Approvals',
-  providers:  'Providers',
-  costs:      'Costs',
-  traces:     'Traces',
-  memory:     'Memory',
-  settings:   'Settings',
+export const PAGE_TITLES: Record<NavPage, string> = {
+  dashboard: 'Dashboard',
+  runs:      'Runs',
+  tasks:     'Tasks',
+  sessions:  'Sessions',
+  approvals: 'Approvals',
+  providers: 'Providers',
+  costs:     'Costs',
+  traces:    'Traces',
+  memory:    'Memory',
+  settings:  'Settings',
 };
-
-// ── Page placeholder ──────────────────────────────────────────────────────────
 
 function PlaceholderPage({ page }: { page: NavPage }) {
   return (
-    <div className="flex flex-col items-center justify-center flex-1 gap-3 text-zinc-600">
-      <span className="text-4xl font-bold tracking-tight text-zinc-800">
+    <div className="flex flex-col items-center justify-center h-full gap-2 text-zinc-700">
+      <span className="text-2xl font-semibold text-zinc-600">
         {PAGE_TITLES[page]}
       </span>
-      <p className="text-sm">This view is coming soon.</p>
+      <p className="text-[13px]">Coming soon.</p>
     </div>
   );
 }
 
-// ── Layout ────────────────────────────────────────────────────────────────────
-
 interface LayoutProps {
-  /**
-   * Render function for the content area.
-   * Receives the current NavPage and returns a ReactNode.
-   * Defaults to a "coming soon" placeholder when omitted.
-   */
   children?: (page: NavPage) => ReactNode;
 }
 
 export function Layout({ children }: LayoutProps) {
   const [page, setPage] = useState<NavPage>(readPage);
 
-  // Keep hash in sync when the user navigates back/forward.
   useEffect(() => {
-    function onHashChange() {
-      setPage(readPage());
-    }
+    const onHashChange = () => setPage(readPage());
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
@@ -69,21 +55,18 @@ export function Layout({ children }: LayoutProps) {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100">
-      {/* Left sidebar */}
+    <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-200">
       <Sidebar current={page} onNavigate={navigate} />
 
-      {/* Right panel: top bar + content */}
-      <div className="flex flex-col flex-1 overflow-hidden">
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <TopBar title={PAGE_TITLES[page]} />
 
-        {/* Content area — RunsPage manages its own scroll; others get a scrollable wrapper */}
+        {/* Pages own their own scroll and padding */}
         <main className="flex-1 overflow-hidden bg-zinc-950">
           {children ? children(page) : <PlaceholderPage page={page} />}
         </main>
       </div>
 
-      {/* Command palette — Cmd+K / Ctrl+K — mounted at root to overlay everything */}
       <CommandPalette onNavigate={navigate} />
     </div>
   );
