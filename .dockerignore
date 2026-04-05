@@ -1,32 +1,50 @@
-# Build artifacts — largest directory, never needed in Docker context.
+# ── Rust build artifacts ──────────────────────────────────────────────────────
+# Largest directory by far; always rebuilt inside Docker.
 target/
 
-# Version control — not needed for build.
+# ── Version control ───────────────────────────────────────────────────────────
 .git/
 .gitignore
 .gitattributes
 
-# IDE and editor files.
+# ── UI build artifacts ────────────────────────────────────────────────────────
+# node_modules is installed fresh inside the ui-builder stage.
+ui/node_modules/
+ui/.vite/
+# Stale dist from host — always rebuilt by the ui-builder stage.
+ui/dist/
+
+# ── IDE / editor ──────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 .DS_Store
 
-# CI / local tooling.
+# ── CI / local tooling ────────────────────────────────────────────────────────
 .github/
-.coordination/
-*.md
 
-# Test fixtures and coverage reports.
+# ── Agent coordination and memory logs ───────────────────────────────────────
+.coordination/
+.remember/
+
+# ── Documentation / non-build files ──────────────────────────────────────────
+*.md
+docs/
+scripts/
+agent-knowledge/
+tests/
+
+# ── Test fixtures and coverage ────────────────────────────────────────────────
 coverage/
 lcov.info
 
-# Local environment files (may contain secrets).
+# ── Local environment (may contain secrets) ───────────────────────────────────
 .env
 .env.*
 *.local
 
-# Docker files themselves (avoid recursive copy).
+# ── Docker files (avoid recursive COPY) ──────────────────────────────────────
 Dockerfile
 .dockerignore
+docker-compose.yml

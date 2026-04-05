@@ -1,44 +1,48 @@
-# cairn-rs full-stack deployment
+# cairn-rs + Ollama — one-command local deployment
 #
-# One-command startup:
-#   docker compose up
-#
-# First-time setup (build image):
+# Quick start:
 #   docker compose up --build
 #
-# Detached (background):
-#   docker compose up -d
+# Background:
+#   docker compose up -d --build
 #
-# Stop and remove containers (keep data volume):
+# Stop (keep model cache):
 #   docker compose down
 #
-# Stop and wipe all data:
+# Wipe everything including downloaded models:
 #   docker compose down -v
+#
+# Pull a model into Ollama after startup:
+#   docker compose exec ollama ollama pull llama3.2
+#
+# Override the admin token via env file:
+#   echo 'CAIRN_ADMIN_TOKEN=my-secret-token' > .env
+#   docker compose up -d
+#
+# For a production setup with PostgreSQL persistence, see docs/docker-postgres.md
 
 services:
 
-  # ── PostgreSQL 16 ───────────────────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
+  # ── Ollama local LLM runtime ─────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
     restart: unless-stopped
-    environment:
-      POSTGRES_USER:     cairn
-      POSTGRES_PASSWORD: cairn
-      POSTGRES_DB:       cairn
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
     ports:
-      # Expose 5432 locally for direct DB inspection / migrations.
-      # Remove this port mapping in production to keep the DB off the host network.
-      - "5432:5432"
+      - "11434:11434"
+    volumes:
+      # Persist downloaded models across container restarts and rebuilds.
+      - ollama_models:/root/.ollama
+    environment:
+      # Optional: set OLLAMA_NUM_PARALLEL to control concurrent requests.
+      OLLAMA_KEEP_ALIVE: "5m"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cairn -d cairn"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+      test: ["CMD-SHELL", "curl -fsS http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
-  # ── cairn control-plane ─────────────────────────────────────────────────────
+  # ── Cairn control plane ───────────────────────────────────────────────────────
   cairn:
     build:
       context: .
@@ -47,31 +51,31 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Admin token for team mode — override in production.
-      CAIRN_ADMIN_TOKEN: "changeme-in-production"
-    # Pass the postgres URL and mode as CLI flags (the app uses --db and --mode,
-    # not env vars, for storage configuration).
-    command:
-      - "--mode"
-      - "team"
-      - "--addr"
-      - "0.0.0.0"
-      - "--port"
-      - "3000"
-      - "--db"
-      - "postgres://cairn:cairn@postgres:5432/cairn"
+      # Bearer token for the admin account — override in production.
+      CAIRN_ADMIN_TOKEN: "${CAIRN_ADMIN_TOKEN:-dev-admin-token}"
+      # Point to the Ollama service in this compose network.
+      OLLAMA_HOST: "http://ollama:11434"
+      # Mode: "local" (default, no auth enforcement) or "team" (requires token).
+      CAIRN_MODE: "${CAIRN_MODE:-local}"
     depends_on:
-      postgres:
+      ollama:
         condition: service_healthy
     healthcheck:
-      # /health returns {"status":"ok"} with no auth required.
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 30s
+    # Uncomment to persist state with SQLite:
+    # volumes:
+    #   - cairn_data:/data
+    # command: ["--db", "/data/cairn.db"]
 
 volumes:
-  # Named volume for Postgres data — survives container restarts and rebuilds.
-  postgres_data:
+  # Ollama model cache — survives container restarts.
+  ollama_models:
     driver: local
+
+  # Uncomment if you enable SQLite persistence above.
+  # cairn_data:
+  #   driver: local
