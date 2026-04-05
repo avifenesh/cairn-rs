@@ -96,6 +96,14 @@ export function DashboardPage() {
     refetchInterval: 15_000,
   });
 
+  // Seed the event log with the most recent events before SSE connects.
+  const { data: recentEventsData } = useQuery({
+    queryKey: ["recent-events"],
+    queryFn: () => defaultApi.getRecentEvents(50),
+    staleTime: 30_000,
+    retry: false,
+  });
+
   if (isError && !stats) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-8">
@@ -184,7 +192,10 @@ export function DashboardPage() {
           <CriticalEvents events={data?.recent_critical_events ?? []} />
           <Panel>
             <SectionLabel>Live event stream</SectionLabel>
-            <EventLog maxEvents={15} />
+            <EventLog
+              initialEvents={recentEventsData ?? []}
+              maxEvents={50}
+            />
           </Panel>
         </div>
 

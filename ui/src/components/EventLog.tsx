@@ -1,193 +1,191 @@
 /**
- * EventLog — live tail of the last 50 runtime SSE events.
+ * EventLog — live tail of the last N runtime SSE events.
  *
- * Connects via useEventStream and renders a scrollable, auto-updating
- * log with event type badges, payload preview, and connection status.
+ * Renders oldest→newest (auto-scrolls to bottom on new arrivals).
+ * Accepts optional initialEvents from getRecentEvents so the log
+ * is populated immediately — before the SSE connection opens.
  */
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
 import { clsx } from 'clsx';
-import { Radio, WifiOff, Loader2, Inbox } from 'lucide-react';
-import { useEventStream, type StreamStatus } from '../hooks/useEventStream';
+import { WifiOff, Loader2, Inbox, Activity } from 'lucide-react';
+import { useEventStream, type StreamStatus, type StreamEvent } from '../hooks/useEventStream';
+import type { RecentEvent } from '../lib/types';
 
-// ── Status indicator ──────────────────────────────────────────────────────────
+// ── Status dot ─────────────────────────────────────────────────────────────────
 
-const STATUS_CFG: Record<StreamStatus, { label: string; dot: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = {
-  connecting:   { label: 'Connecting',   dot: 'bg-amber-400 animate-pulse', icon: Loader2 },
-  connected:    { label: 'Live',         dot: 'bg-emerald-400',             icon: Radio   },
-  disconnected: { label: 'Disconnected', dot: 'bg-red-500',                 icon: WifiOff },
-};
-
-function ConnectionBadge({ status }: { status: StreamStatus }) {
-  const cfg = STATUS_CFG[status];
-  const Icon = cfg.icon;
+function StatusDot({ status }: { status: StreamStatus }) {
   return (
-    <span className={clsx(
-      'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1',
-      status === 'connected'    && 'bg-emerald-950 text-emerald-400 ring-emerald-800',
-      status === 'connecting'   && 'bg-amber-950   text-amber-400   ring-amber-800',
-      status === 'disconnected' && 'bg-red-950     text-red-400     ring-red-800',
-    )}>
-      <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', cfg.dot)} />
-      <Icon size={11} className={status === 'connecting' ? 'animate-spin' : undefined} />
-      {cfg.label}
+    <span className="flex items-center gap-1.5 text-[11px] font-medium">
+      <span className={clsx(
+        'w-1.5 h-1.5 rounded-full shrink-0',
+        status === 'connected'    && 'bg-emerald-400',
+        status === 'connecting'   && 'bg-amber-400 animate-pulse',
+        status === 'disconnected' && 'bg-red-500',
+      )} />
+      <span className={clsx(
+        status === 'connected'    && 'text-emerald-400',
+        status === 'connecting'   && 'text-amber-400',
+        status === 'disconnected' && 'text-red-400',
+      )}>
+        {status === 'connected' ? 'Live' : status === 'connecting' ? 'Connecting…' : 'Disconnected'}
+      </span>
     </span>
   );
 }
 
-// ── Event type → badge colour ─────────────────────────────────────────────────
+// ── Event type badge colour ────────────────────────────────────────────────────
 
-function eventBadgeClass(type: string): string {
-  if (type.includes('run'))      return 'bg-blue-950 text-blue-300 ring-blue-800';
-  if (type.includes('task'))     return 'bg-indigo-950 text-indigo-300 ring-indigo-800';
-  if (type.includes('approval')) return 'bg-violet-950 text-violet-300 ring-violet-800';
-  if (type.includes('session'))  return 'bg-sky-950 text-sky-300 ring-sky-800';
+function typeBadgeClass(type: string): string {
+  if (type.includes('run'))        return 'bg-blue-950  text-blue-300  ring-blue-800';
+  if (type.includes('task'))       return 'bg-indigo-950 text-indigo-300 ring-indigo-800';
+  if (type.includes('approval'))   return 'bg-violet-950 text-violet-300 ring-violet-800';
+  if (type.includes('session'))    return 'bg-sky-950    text-sky-300   ring-sky-800';
+  if (type.includes('checkpoint')) return 'bg-amber-950  text-amber-300 ring-amber-800';
   if (type.includes('provider') || type.includes('tool'))
-                                 return 'bg-teal-950 text-teal-300 ring-teal-800';
-  if (type.includes('checkpoint')) return 'bg-amber-950 text-amber-300 ring-amber-800';
+                                   return 'bg-teal-950   text-teal-300  ring-teal-800';
+  if (type.includes('eval') || type.includes('score'))
+                                   return 'bg-pink-950   text-pink-300  ring-pink-800';
   return 'bg-zinc-800 text-zinc-400 ring-zinc-700';
 }
 
-function EventTypeBadge({ type }: { type: string }) {
-  return (
-    <span className={clsx(
-      'inline-block shrink-0 rounded px-1.5 py-0.5 text-[10px] font-mono font-medium ring-1 whitespace-nowrap',
-      eventBadgeClass(type),
-    )}>
-      {type}
-    </span>
-  );
+// ── Unified event row ──────────────────────────────────────────────────────────
+
+interface NormalizedEvent {
+  key: string;
+  time: string;
+  type: string;
+  detail: string;
 }
 
-// ── Payload preview ───────────────────────────────────────────────────────────
-
-function PayloadPreview({ payload }: { payload: unknown }) {
-  let preview = '';
+function toDetail(payload: unknown): string {
+  if (!payload) return '';
   try {
-    const text = typeof payload === 'string'
-      ? payload
-      : JSON.stringify(payload);
-    preview = text.length > 120 ? `${text.slice(0, 120)}…` : text;
+    const s = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    return s.length > 90 ? `${s.slice(0, 90)}…` : s;
   } catch {
-    preview = String(payload);
+    return String(payload);
   }
-  return (
-    <span className="font-mono text-[11px] text-zinc-500 break-all leading-relaxed">
-      {preview}
-    </span>
-  );
 }
 
-// ── Timestamp ─────────────────────────────────────────────────────────────────
-
-function Timestamp({ ms }: { ms: number }) {
-  const d = new Date(ms);
-  const time = d.toLocaleTimeString(undefined, {
-    hour:   '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+function EventRow({ ev }: { ev: NormalizedEvent }) {
   return (
-    <span className="shrink-0 text-[10px] text-zinc-600 font-mono tabular-nums">
-      {time}
-    </span>
+    <div className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-zinc-800/40 transition-colors group">
+      {/* Time */}
+      <span className="shrink-0 text-[11px] text-zinc-600 font-mono tabular-nums w-[52px]">
+        {ev.time}
+      </span>
+
+      {/* Type badge */}
+      <span className={clsx(
+        'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-mono font-medium ring-1 whitespace-nowrap',
+        typeBadgeClass(ev.type),
+      )}>
+        {ev.type.replace(/_/g, '\u202F')}
+      </span>
+
+      {/* Detail */}
+      <span className="flex-1 min-w-0 text-[11px] text-zinc-500 font-mono truncate">
+        {ev.detail}
+      </span>
+    </div>
   );
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
 interface EventLogProps {
+  /** Pre-loaded events from getRecentEvents (shown before SSE connects). */
+  initialEvents?: RecentEvent[];
   /** Override the SSE URL. */
   url?: string;
   /** Override the bearer token. */
   token?: string;
-  /** Maximum number of events to display (default: 50). */
+  /** Maximum rows to display (default 50). */
   maxEvents?: number;
-  /** CSS class applied to the outer container. */
   className?: string;
 }
 
 export function EventLog({
+  initialEvents = [],
   url,
   token,
   maxEvents = 50,
   className,
 }: EventLogProps) {
-  const { events, status } = useEventStream({ url, token });
+  const { events: liveEvents, status } = useEventStream({ url, token });
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Keep the list scrolled to top (newest first) on mount.
-  const listRef = useRef<HTMLDivElement>(null);
+  // Convert initial REST events → display format
+  const seedRows: NormalizedEvent[] = useMemo(() =>
+    initialEvents
+      .slice(-maxEvents)
+      .map((e, i) => ({
+        key:    `seed-${i}`,
+        time:   new Date(e.timestamp).toLocaleTimeString(undefined, {
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        }),
+        type:   e.event_type ?? 'unknown',
+        detail: toDetail(e.data),
+      })),
+    [initialEvents, maxEvents],
+  );
 
-  // Scroll to top when new events arrive.
+  // Convert live SSE events → display format (newest first → reverse for oldest-first display)
+  const liveRows: NormalizedEvent[] = useMemo(() => {
+    const sorted = [...liveEvents].reverse(); // hook returns newest-first; we want oldest-first
+    return sorted.slice(-maxEvents).map((e: StreamEvent) => ({
+      key:    `live-${e.id}`,
+      time:   new Date(e.receivedAt).toLocaleTimeString(undefined, {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      }),
+      type:   e.type ?? 'unknown',
+      detail: toDetail(e.payload),
+    }));
+  }, [liveEvents, maxEvents]);
+
+  // Merge: when live events arrive, they supersede the seed.
+  const rows = liveRows.length > 0 ? liveRows : seedRows;
+
+  // Auto-scroll to bottom (newest row) on every update.
   useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = 0;
-    }
-  }, [events.length]);
-
-  const displayEvents = events.slice(0, maxEvents);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [rows.length]);
 
   return (
     <div className={clsx(
-      'flex flex-col rounded-xl ring-1 ring-zinc-800 overflow-hidden bg-zinc-950',
+      'flex flex-col rounded-lg border border-zinc-800 overflow-hidden bg-zinc-900',
       className,
     )}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
-        <h3 className="text-xs font-semibold text-zinc-300 flex items-center gap-2">
-          <Radio size={13} className="text-zinc-500" />
+      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 shrink-0">
+        <span className="text-[11px] font-semibold text-zinc-400 flex items-center gap-1.5 uppercase tracking-wider">
+          <Activity size={11} className="text-zinc-600" />
           Event Stream
-          {displayEvents.length > 0 && (
-            <span className="text-zinc-600 font-normal">
-              ({displayEvents.length}{displayEvents.length === maxEvents ? '+' : ''})
-            </span>
+          {rows.length > 0 && (
+            <span className="text-zinc-600 font-normal ml-0.5">({rows.length})</span>
           )}
-        </h3>
-        <ConnectionBadge status={status} />
+        </span>
+        <StatusDot status={status} />
       </div>
 
-      {/* Event list */}
-      <div
-        ref={listRef}
-        className="flex-1 overflow-y-auto min-h-0"
-        style={{ maxHeight: '420px' }}
-      >
-        {displayEvents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-2 text-zinc-700">
+      {/* Event list — compact Linear-style rows */}
+      <div className="overflow-y-auto" style={{ maxHeight: '280px' }}>
+        {rows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 gap-1.5 text-zinc-700">
             {status === 'connected' ? (
-              <>
-                <Inbox size={24} />
-                <p className="text-xs">Waiting for events…</p>
-              </>
+              <><Inbox size={20} /><p className="text-[12px]">Waiting for events…</p></>
+            ) : status === 'connecting' ? (
+              <><Loader2 size={20} className="animate-spin" /><p className="text-[12px]">Connecting…</p></>
             ) : (
-              <>
-                <WifiOff size={24} />
-                <p className="text-xs">
-                  {status === 'connecting' ? 'Connecting to stream…' : 'Not connected'}
-                </p>
-              </>
+              <><WifiOff size={20} /><p className="text-[12px]">Not connected</p></>
             )}
           </div>
         ) : (
-          <ul className="divide-y divide-zinc-800/50">
-            {displayEvents.map((ev, i) => (
-              <li
-                key={`${ev.id}-${i}`}
-                className="flex items-start gap-3 px-4 py-2.5 hover:bg-zinc-900/50 transition-colors"
-              >
-                {/* Timestamp */}
-                <Timestamp ms={ev.receivedAt} />
-
-                {/* Type badge */}
-                <EventTypeBadge type={ev.type} />
-
-                {/* Payload preview */}
-                <div className="flex-1 min-w-0">
-                  <PayloadPreview payload={ev.payload} />
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="divide-y divide-zinc-800/40">
+            {rows.map(ev => <EventRow key={ev.key} ev={ev} />)}
+            <div ref={bottomRef} />
+          </div>
         )}
       </div>
     </div>
