@@ -14375,7 +14375,6 @@ async fn start_rollout_handler(
     start_prompt_rollout_handler(state, path, body).await
 }
 
-stub_handler!(check_provider_health_handler);
 stub_handler!(compare_eval_run_baseline_handler);
 stub_handler!(create_tenant_snapshot_handler);
 stub_handler!(delete_credential_handler);
@@ -14383,7 +14382,6 @@ stub_handler!(request_approval_for_release_handler);
 stub_handler!(restore_tenant_snapshot_handler);
 stub_handler!(revoke_resource_share_handler);
 stub_handler!(score_eval_run_with_rubric_handler);
-stub_handler!(send_notification_handler);
 stub_handler!(share_resource_handler);
 stub_handler!(unregister_plugin_handler);
 stub_handler!(export_bundle_by_format_handler);
