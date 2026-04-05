@@ -775,6 +775,9 @@ impl InMemoryStore {
                     if let Some(dn) = &e.display_name {
                         rec.display_name = dn.clone();
                     }
+                    if let Some(email) = &e.email {
+                        rec.email = Some(email.clone());
+                    }
                 }
                 if let Some(profile) = state.full_operator_profiles.get_mut(e.profile_id.as_str()) {
                     if let Some(dn) = &e.display_name {
@@ -1732,6 +1735,9 @@ impl InMemoryStore {
                 if let Some(rec) = state.operator_profiles.get_mut(e.profile_id.as_str()) {
                     if let Some(dn) = &e.display_name {
                         rec.display_name = dn.clone();
+                    }
+                    if let Some(email) = &e.email {
+                        rec.email = Some(email.clone());
                     }
                 }
                 if let Some(profile) = state.full_operator_profiles.get_mut(e.profile_id.as_str()) {
