@@ -1,6 +1,7 @@
 import { useState, useRef, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Loader2, X, RefreshCw } from 'lucide-react';
+import { HelpTooltip } from '../components/HelpTooltip';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import type { MemoryChunkResult, SourceRecord } from '../lib/types';
@@ -142,6 +143,7 @@ export function MemoryPage() {
     <div className="p-6 space-y-5">
       {/* ── Search bar ──────────────────────────────────────────────────── */}
       <form onSubmit={handleSearch} className="flex gap-2">
+        {/* Hint label */}
         <div className="relative flex-1">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
           <input
@@ -168,6 +170,11 @@ export function MemoryPage() {
           {isFetching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
           Search
         </button>
+        <HelpTooltip
+          text="Lexical search over ingested documents. Shorter, specific phrases work best. Results are ranked by relevance, freshness, and source credibility."
+          placement="left"
+          className="self-center"
+        />
       </form>
 
       {/* ── Search results ──────────────────────────────────────────────── */}

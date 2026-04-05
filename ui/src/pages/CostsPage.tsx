@@ -1,7 +1,10 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
+import { MiniChart } from "../components/MiniChart";
+import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -101,6 +104,27 @@ function BreakdownRow({ label, value, mono, even }: BreakdownRowProps) {
   );
 }
 
+// ── Model color palette (matches DashboardPage) ───────────────────────────────
+
+const MODEL_COLORS: Record<string, string> = {
+  qwen3:    "#8b5cf6",
+  llama:    "#f59e0b",
+  mistral:  "#10b981",
+  nomic:    "#06b6d4",
+  gemma:    "#f97316",
+  claude:   "#a855f7",
+  gpt:      "#22d3ee",
+  deepseek: "#e879f9",
+};
+
+function modelColor(id: string): string {
+  const lower = id.toLowerCase();
+  for (const [key, col] of Object.entries(MODEL_COLORS)) {
+    if (lower.includes(key)) return col;
+  }
+  return "#6366f1";
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function CostsPage() {
@@ -109,6 +133,41 @@ export function CostsPage() {
     queryFn: () => defaultApi.getCosts(),
     refetchInterval: 30_000,
   });
+
+  // Traces — source of per-model cost breakdown and daily-trend sparkline.
+  const { data: tracesData } = useQuery({
+    queryKey: ["traces-costs"],
+    queryFn:  () => defaultApi.getTraces(500),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  // Per-model cost aggregation for the bar chart.
+  const modelCostItems = useMemo(() => {
+    const traces = tracesData?.traces ?? [];
+    const byModel: Record<string, number> = {};
+    for (const t of traces) {
+      byModel[t.model_id] = (byModel[t.model_id] ?? 0) + t.cost_micros;
+    }
+    return Object.entries(byModel)
+      .map(([label, value]) => ({ label, value, color: modelColor(label) }))
+      .sort((a, b) => b.value - a.value);
+  }, [tracesData]);
+
+  // Daily spend sparkline: bucket the last 7 days of traces by day.
+  const dailySpend = useMemo((): number[] => {
+    const traces = tracesData?.traces ?? [];
+    const days = 7;
+    const now  = Date.now();
+    return Array.from({ length: days }, (_, i) => {
+      const dayStart = now - (days - i) * 86_400_000;
+      const dayEnd   = dayStart + 86_400_000;
+      return traces
+        .filter((t) => t.created_at_ms >= dayStart && t.created_at_ms < dayEnd)
+        .reduce((sum, t) => sum + t.cost_micros, 0);
+    });
+  }, [tracesData]);
 
   if (isError) return <ErrorFallback error={error} resource="costs" onRetry={() => void refetch()} />;
 
@@ -164,6 +223,64 @@ export function CostsPage() {
               <BreakdownRow label="Total tokens"         value={formatTokens(totalTokens)} mono even />
               <BreakdownRow label="Input tokens"         value={formatTokens(costs?.total_tokens_in ?? 0)} mono />
               <BreakdownRow label="Output tokens"        value={formatTokens(costs?.total_tokens_out ?? 0)} mono even />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Charts row — model breakdown bar chart + daily spend sparkline */}
+      {!isLoading && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* Cost by model */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+            <div className="px-4 h-9 flex items-center border-b border-zinc-800">
+              <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Cost by Model</p>
+            </div>
+            <div className="p-4">
+              {modelCostItems.length === 0 ? (
+                <p className="text-[11px] text-zinc-600 text-center py-3 italic">
+                  No trace data yet — costs appear after LLM calls.
+                </p>
+              ) : (
+                <BarChart
+                  items={modelCostItems}
+                  formatValue={(v) => formatMicros(v)}
+                  maxItems={6}
+                  barHeight={7}
+                  rowGap={9}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Daily spend trend sparkline */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+            <div className="px-4 h-9 flex items-center justify-between border-b border-zinc-800">
+              <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Daily Spend (7d)</p>
+              <span className="text-[10px] text-zinc-700 font-mono">µUSD</span>
+            </div>
+            <div className="p-4 flex items-end gap-4">
+              <div className="flex-1">
+                <MiniChart
+                  data={dailySpend}
+                  height={52}
+                  color="#10b981"
+                  baseline
+                  className="w-full"
+                />
+                {/* Day labels */}
+                <div className="flex justify-between mt-1.5">
+                  {["6d", "5d", "4d", "3d", "2d", "1d", "Now"].map((label) => (
+                    <span key={label} className="text-[9px] text-zinc-700 font-mono">{label}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[11px] text-zinc-500">Today</p>
+                <p className="text-[15px] font-semibold tabular-nums text-emerald-400">
+                  {formatMicros(dailySpend[dailySpend.length - 1] ?? 0)}
+                </p>
+              </div>
             </div>
           </div>
         </div>

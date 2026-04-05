@@ -14,6 +14,10 @@ import { clsx } from "clsx";
 export interface MiniChartProps {
   /** Y-axis data values. Must have at least 2 points to draw a line. */
   data: number[];
+  /**
+   * Fixed pixel width. When omitted the SVG expands to fill its container
+   * via width="100%" — useful inside a flex/grid parent.
+   */
   width?: number;
   height?: number;
   /** Stroke + fill colour. Accepts any CSS colour string. */
@@ -48,9 +52,12 @@ function smoothPath(points: [number, number][]): string {
   return d.join(" ");
 }
 
+/** Internal canvas width used for coordinate calculations. */
+const CANVAS_W = 200;
+
 export function MiniChart({
   data,
-  width = 120,
+  width,
   height = 36,
   color = "#6366f1",
   className,
@@ -58,16 +65,20 @@ export function MiniChart({
 }: MiniChartProps) {
   const points = useMemo<[number, number][]>(() => {
     if (data.length < 2) return [];
-    const min = Math.min(...data);
-    const max = Math.max(...data);
-    const step = (width - 2) / (data.length - 1);
+    const min  = Math.min(...data);
+    const max  = Math.max(...data);
+    const step = (CANVAS_W - 2) / (data.length - 1);
     return data.map((v, i) => [1 + i * step, scaleY(v, min, max, height)]);
-  }, [data, width, height]);
+  }, [data, height]);
+
+  // SVG width attribute: fixed number or "100%" for fluid layout.
+  const svgWidth: number | string = width ?? "100%";
 
   if (points.length < 2) {
     return (
-      <svg width={width} height={height} className={clsx("overflow-visible", className)}>
-        <line x1={0} y1={height / 2} x2={width} y2={height / 2}
+      <svg width={svgWidth} height={height} viewBox={`0 0 ${CANVAS_W} ${height}`}
+           className={clsx("overflow-visible", className)}>
+        <line x1={0} y1={height / 2} x2={CANVAS_W} y2={height / 2}
           stroke={color} strokeWidth={1} strokeDasharray="3 3" opacity={0.3} />
       </svg>
     );
@@ -81,13 +92,15 @@ export function MiniChart({
     ` L ${points[points.length - 1][0]} ${height}` +
     ` L ${points[0][0]} ${height} Z`;
 
-  const gradId = `mg-${color.replace(/[^a-z0-9]/gi, "")}-${width}`;
+  // Gradient ID must not collide between instances.
+  const gradId = `mg-${color.replace(/[^a-z0-9]/gi, "")}-${height}`;
 
   return (
     <svg
-      width={width}
+      width={svgWidth}
       height={height}
-      viewBox={`0 0 ${width} ${height}`}
+      viewBox={`0 0 ${CANVAS_W} ${height}`}
+      preserveAspectRatio="none"
       className={clsx("overflow-visible", className)}
       aria-hidden="true"
     >

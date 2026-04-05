@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -611,7 +611,206 @@ function DegradedBanner({ components }: { components: string[] }) {
   );
 }
 
+// ── Widget: Event sparkline ───────────────────────────────────────────────────
+
+/**
+ * Derives an hourly-bucket event count from the last 12h of event positions.
+ * Since the global event log only gives us position + timestamp, we bucket
+ * stored_at timestamps into hourly counts.
+ */
+function useHourlyEventCounts(): number[] {
+  const { data } = useQuery({
+    queryKey: ["events-recent-sparkline"],
+    queryFn:  () => defaultApi.getRecentEvents(200),
+    refetchInterval: 30_000,
+    retry: false,
+    staleTime: 15_000,
+  });
+
+  const hours = 12;
+  const now   = Date.now();
+  const buckets = Array.from({ length: hours }, (_, i) => {
+    const bucketStart = now - (hours - i) * 3_600_000;
+    const bucketEnd   = bucketStart + 3_600_000;
+    return (data ?? []).filter((e) => {
+      const ts = typeof e === "object" && e !== null && "timestamp" in e
+        ? new Date((e as { timestamp: string }).timestamp).getTime()
+        : 0;
+      return ts >= bucketStart && ts < bucketEnd;
+    }).length;
+  });
+
+  // If all zeros (no data yet), return a gentle flat line so the chart renders.
+  return buckets.every((b) => b === 0) ? Array.from({ length: hours }, () => 0) : buckets;
+}
+
+function EventSparklineCard({ totalEvents }: { totalEvents: number }) {
+  const hourly = useHourlyEventCounts();
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex items-center justify-between gap-4">
+      <div>
+        <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Events (12h)</p>
+        <p className="text-[22px] font-semibold tabular-nums text-zinc-100 leading-none">{totalEvents}</p>
+        <p className="text-[10px] text-zinc-600 mt-1">total in log</p>
+      </div>
+      <MiniChart
+        data={hourly}
+        width={100}
+        height={40}
+        color="#6366f1"
+        baseline
+        className="shrink-0"
+      />
+    </div>
+  );
+}
+
+// ── Widget: Top models by token usage ─────────────────────────────────────────
+
+const MODEL_COLORS: Record<string, string> = {
+  qwen3:    "#8b5cf6",
+  llama:    "#f59e0b",
+  mistral:  "#10b981",
+  nomic:    "#06b6d4",
+  gemma:    "#f97316",
+  claude:   "#a855f7",
+  gpt:      "#22d3ee",
+  deepseek: "#e879f9",
+};
+
+function modelColor(modelId: string): string {
+  const lower = modelId.toLowerCase();
+  for (const [key, color] of Object.entries(MODEL_COLORS)) {
+    if (lower.includes(key)) return color;
+  }
+  return "#6366f1";
+}
+
+function fmtTokensShort(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(0)}k`;
+  return String(n);
+}
+
+function ModelUsageWidget() {
+  const { data: tracesData, isLoading } = useQuery({
+    queryKey: ["traces-model-usage"],
+    queryFn:  () => defaultApi.getTraces(200),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  const modelItems = useMemo(() => {
+    const traces = tracesData?.traces ?? [];
+    const byModel: Record<string, number> = {};
+    for (const t of traces) {
+      byModel[t.model_id] = (byModel[t.model_id] ?? 0) + t.prompt_tokens + t.completion_tokens;
+    }
+    return Object.entries(byModel)
+      .map(([label, value]) => ({ label, value, color: modelColor(label) }))
+      .sort((a, b) => b.value - a.value);
+  }, [tracesData]);
+
+  return (
+    <Panel>
+      <SectionLabel>Top Models · Token Usage</SectionLabel>
+      {isLoading ? (
+        <div className="space-y-2 animate-pulse">
+          {[0, 1, 2].map((i) => <div key={i} className="h-5 rounded bg-zinc-800" />)}
+        </div>
+      ) : modelItems.length === 0 ? (
+        <p className="text-[12px] text-zinc-600 italic py-1">
+          No traces yet — model usage appears after LLM calls.
+        </p>
+      ) : (
+        <BarChart
+          items={modelItems}
+          formatValue={fmtTokensShort}
+          maxItems={6}
+          barHeight={6}
+          rowGap={8}
+        />
+      )}
+    </Panel>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
+
+// ── Onboarding banner ─────────────────────────────────────────────────────────
+
+const ONBOARDED_KEY = 'cairn_onboarded';
+
+const STEPS = [
+  { n: 1, title: 'Connect an LLM', body: 'Set OLLAMA_HOST to a running Ollama instance, or configure an OpenAI-compatible provider under Providers.' },
+  { n: 2, title: 'Create a Session', body: 'POST /v1/sessions (or click New Session in the Sessions page) to create a conversation context for your agent.' },
+  { n: 3, title: 'Start a Run', body: 'POST /v1/runs with a session_id to kick off an agent execution. Runs, tasks, and costs appear here in real time.' },
+];
+
+function OnboardingBanner() {
+  const [dismissed, setDismissed] = useState(
+    () => localStorage.getItem(ONBOARDED_KEY) === 'true',
+  );
+
+  if (dismissed) return null;
+
+  function dismiss(permanent: boolean) {
+    if (permanent) localStorage.setItem(ONBOARDED_KEY, 'true');
+    setDismissed(true);
+  }
+
+  return (
+    <div className="rounded-lg border-l-2 border-l-indigo-500 border border-zinc-800 bg-zinc-900 p-4">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <div>
+          <p className="text-[13px] font-semibold text-zinc-100">Welcome to Cairn ✦</p>
+          <p className="text-[11px] text-zinc-500 mt-0.5">
+            A self-hostable control plane for production AI agents. Here's how to get started.
+          </p>
+        </div>
+        <button
+          onClick={() => dismiss(false)}
+          aria-label="Dismiss onboarding"
+          className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors shrink-0"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {STEPS.map(({ n, title, body }) => (
+          <div key={n} className="flex gap-3">
+            <span className="shrink-0 w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 text-[11px] font-bold flex items-center justify-center mt-0.5">
+              {n}
+            </span>
+            <div>
+              <p className="text-[12px] font-medium text-zinc-200">{title}</p>
+              <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug">{body}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-zinc-800/60">
+        <button
+          onClick={() => dismiss(true)}
+          className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+        >
+          Don&apos;t show again
+        </button>
+        <a
+          href="#sessions"
+          onClick={() => { window.location.hash = 'sessions'; dismiss(false); }}
+          className="ml-auto text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
+        >
+          Go to Sessions →
+        </a>
+      </div>
+    </div>
+  );
+}
 
 export function DashboardPage() {
   const { data: stats, dataUpdatedAt: statsUpdatedAt } = useQuery({
@@ -661,6 +860,9 @@ export function DashboardPage() {
     <div className="h-full overflow-y-auto bg-zinc-950">
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
 
+        {/* Onboarding banner — only on first visit */}
+        <OnboardingBanner />
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -701,6 +903,12 @@ export function DashboardPage() {
             <StatCard label="Pending Approvals" value={approvals} variant={aprVariant}  loading={isLoading} help="Human-in-the-loop gates waiting for an operator approve or reject decision." />
             <StatCard label="Failed (24h)"      value={failed}    variant={failVariant} loading={isLoading} help="Runs that transitioned to the 'failed' state in the last 24 hours." />
           </div>
+          {/* Event sparkline — full-width strip beneath stat cards */}
+          {!isLoading && (
+            <div className="mt-3">
+              <EventSparklineCard totalEvents={stats?.total_events ?? 0} />
+            </div>
+          )}
         </div>
 
         {/* Infrastructure stat cards */}
@@ -714,7 +922,7 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {/* Live widgets row — Active Runs + Cost + Providers */}
+        {/* Live widgets row — Active Runs + Cost/Providers + Event log */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <ActiveRunsWidget />
           <div className="flex flex-col gap-4">
@@ -730,6 +938,9 @@ export function DashboardPage() {
             />
           </Panel>
         </div>
+
+        {/* Model usage bar chart */}
+        <ModelUsageWidget />
 
         {/* Bottom row — Critical events + System health */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

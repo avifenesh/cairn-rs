@@ -18,6 +18,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { TasksPage } from './pages/TasksPage';
 import { TracesPage } from './pages/TracesPage';
 import { EvalsPage } from './pages/EvalsPage';
+import { EvalComparisonPage } from './pages/EvalComparisonPage';
 import { PluginsPage } from './pages/PluginsPage';
 import { SourcesPage } from './pages/SourcesPage';
 import { CredentialsPage } from './pages/CredentialsPage';
@@ -48,6 +49,13 @@ function renderRoute(route: Route): React.ReactNode {
   }
   if (route.kind === 'session-detail') {
     return <Guarded name="Session Detail"><SessionDetailPage sessionId={route.sessionId} /></Guarded>;
+  }
+  if (route.kind === 'eval-compare') {
+    return (
+      <Guarded name="Eval Comparison">
+        <EvalComparisonPage leftId={route.leftId} rightId={route.rightId} />
+      </Guarded>
+    );
   }
 
   const page = (route as { kind: 'page'; page: NavPage }).page;

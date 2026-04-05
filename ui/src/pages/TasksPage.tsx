@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Loader2 } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
+import { HelpTooltip } from "../components/HelpTooltip";
 import { StateBadge } from "../components/StateBadge";
 import { DataTable } from "../components/DataTable";
 import { useToast } from "../components/Toast";
@@ -61,24 +62,30 @@ function RowActions({ task }: { task: TaskRecord }) {
   return (
     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
       {canClaim && (
-        <button
-          onClick={e => { e.stopPropagation(); claim.mutate(); }}
-          disabled={claim.isPending}
-          className="px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-900/60 text-indigo-300
-                     hover:bg-indigo-900 border border-indigo-800/50 transition-colors disabled:opacity-40"
-        >
-          {claim.isPending ? <Loader2 size={10} className="animate-spin inline" /> : "Claim"}
-        </button>
+        <>
+          <HelpTooltip text="Claim: assign this queued task to yourself as the worker. Sets state to 'leased' with a 60-second expiry." placement="left" />
+          <button
+            onClick={e => { e.stopPropagation(); claim.mutate(); }}
+            disabled={claim.isPending}
+            className="px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-900/60 text-indigo-300
+                       hover:bg-indigo-900 border border-indigo-800/50 transition-colors disabled:opacity-40"
+          >
+            {claim.isPending ? <Loader2 size={10} className="animate-spin inline" /> : "Claim"}
+          </button>
+        </>
       )}
       {canRelease && (
-        <button
-          onClick={e => { e.stopPropagation(); release.mutate(); }}
-          disabled={release.isPending}
-          className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-800 text-zinc-400
-                     hover:bg-zinc-700 border border-zinc-700 transition-colors disabled:opacity-40"
-        >
-          {release.isPending ? <Loader2 size={10} className="animate-spin inline" /> : "Release"}
-        </button>
+        <>
+          <HelpTooltip text="Release: return this leased task to the queue so another worker can pick it up." placement="left" />
+          <button
+            onClick={e => { e.stopPropagation(); release.mutate(); }}
+            disabled={release.isPending}
+            className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-800 text-zinc-400
+                       hover:bg-zinc-700 border border-zinc-700 transition-colors disabled:opacity-40"
+          >
+            {release.isPending ? <Loader2 size={10} className="animate-spin inline" /> : "Release"}
+          </button>
+        </>
       )}
     </div>
   );

@@ -10,6 +10,7 @@ import {
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
+import { HelpTooltip } from "../components/HelpTooltip";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,12 @@ function ProviderRow({ entry, even }: { entry: ProviderHealthEntry; even: boolea
           <span className={clsx("text-[11px] font-medium", entry.healthy ? "text-emerald-400" : "text-red-400")}>
             {entry.healthy ? "Healthy" : entry.status || "Unhealthy"}
           </span>
+          <HelpTooltip
+            text={entry.healthy
+              ? "Provider is reachable and responding to health checks."
+              : "Provider is failing health checks. Check OLLAMA_HOST or API credentials. The pulsing dot means consecutive failures are accumulating."}
+            placement="right"
+          />
         </div>
       </td>
       <td className="px-4 h-9 font-mono text-xs text-zinc-300 max-w-[200px] truncate" title={entry.connection_id}>

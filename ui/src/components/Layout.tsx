@@ -20,7 +20,8 @@ const VALID_PAGES: NavPage[] = [
 export type Route =
   | { kind: 'page'; page: NavPage }
   | { kind: 'run-detail'; runId: string }
-  | { kind: 'session-detail'; sessionId: string };
+  | { kind: 'session-detail'; sessionId: string }
+  | { kind: 'eval-compare'; leftId: string; rightId: string };
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#/, '');
@@ -29,6 +30,12 @@ export function parseRoute(hash: string): Route {
   }
   if (h.startsWith('session/') && h.length > 8) {
     return { kind: 'session-detail', sessionId: h.slice(8) };
+  }
+  if (h.startsWith('eval-compare/')) {
+    const parts = h.slice('eval-compare/'.length).split('/');
+    if (parts.length >= 2) {
+      return { kind: 'eval-compare', leftId: parts[0], rightId: parts[1] };
+    }
   }
   const page = h as NavPage;
   return { kind: 'page', page: VALID_PAGES.includes(page) ? page : 'dashboard' };
