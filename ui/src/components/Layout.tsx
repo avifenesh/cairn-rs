@@ -23,6 +23,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   traces:    'Traces',
   memory:    'Memory',
   settings:  'Settings',
+  playground: 'Playground',
 };
 
 function PlaceholderPage({ page }: { page: NavPage }) {

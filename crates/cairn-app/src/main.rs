@@ -1368,6 +1368,75 @@ async fn ollama_generate_handler(
     }
 }
 
+// ── Ollama embed handler ──────────────────────────────────────────────────────
+
+/// `POST /v1/memory/embed` — embed a batch of texts using the local Ollama daemon.
+///
+/// Body: `{ "texts": ["text a", "text b"], "model": "nomic-embed-text" }`
+///
+/// Returns `{ "embeddings": [[...], [...]], "model": "...", "token_count": N }`.
+///
+/// Returns 503 when OLLAMA_HOST is not configured, 400 when `texts` is empty,
+/// 502 when the daemon is unreachable.
+#[derive(serde::Deserialize)]
+struct OllamaEmbedRequest {
+    texts: Vec<String>,
+    model: Option<String>,
+}
+
+async fn ollama_embed_handler(
+    State(state): State<AppState>,
+    Json(body): Json<OllamaEmbedRequest>,
+) -> impl IntoResponse {
+    // Require Ollama to be configured (OLLAMA_HOST must be set).
+    let Some(ollama) = &state.ollama else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "error": "Ollama provider not configured — set OLLAMA_HOST to enable"
+            })),
+        ).into_response();
+    };
+
+    if body.texts.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": "texts must not be empty" })),
+        ).into_response();
+    }
+
+    // Build an embedding provider that shares the same host as the generation provider.
+    let embedder = OllamaEmbeddingProvider::new(ollama.host());
+    let model_id = body.model.as_deref().unwrap_or("nomic-embed-text");
+
+    let start = std::time::Instant::now();
+    match embedder.embed(model_id, body.texts).await {
+        Ok(resp) => {
+            let latency_ms = start.elapsed().as_millis() as u64;
+            (StatusCode::OK, axum::Json(serde_json::json!({
+                "embeddings":   resp.embeddings,
+                "model":        resp.model_id,
+                "token_count":  resp.token_count,
+                "latency_ms":   latency_ms,
+            }))).into_response()
+        }
+        Err(e) => {
+            use cairn_domain::providers::ProviderAdapterError;
+            let (status, msg) = match &e {
+                ProviderAdapterError::TimedOut =>
+                    (StatusCode::GATEWAY_TIMEOUT, e.to_string()),
+                ProviderAdapterError::RateLimited =>
+                    (StatusCode::TOO_MANY_REQUESTS, e.to_string()),
+                ProviderAdapterError::TransportFailure(_) =>
+                    (StatusCode::BAD_GATEWAY, e.to_string()),
+                _ =>
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            };
+            (status, axum::Json(serde_json::json!({ "error": msg }))).into_response()
+        }
+    }
+}
+
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 fn parse_args_from(args: &[String]) -> BootstrapConfig {
@@ -1980,8 +2049,9 @@ fn build_router(state: AppState) -> Router {
         // Admin routes
         .route("/v1/admin/tenants", post(create_tenant_handler))
         // Ollama local LLM provider
-        .route("/v1/providers/ollama/models", get(ollama_models_handler))
+        .route("/v1/providers/ollama/models",   get(ollama_models_handler))
         .route("/v1/providers/ollama/generate", post(ollama_generate_handler))
+        .route("/v1/memory/embed",              post(ollama_embed_handler))
         // DB diagnostics
         .route("/v1/db/status", get(db_status_handler))
         .route("/v1/sources", get(list_sources_handler))

@@ -8,6 +8,7 @@ import { MemoryPage } from './pages/MemoryPage';
 import { ProvidersPage } from './pages/ProvidersPage';
 import { RunsPage } from './pages/RunsPage';
 import { SessionsPage } from './pages/SessionsPage';
+import { PlaygroundPage } from './pages/PlaygroundPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TasksPage } from './pages/TasksPage';
 import { TracesPage } from './pages/TracesPage';
@@ -35,6 +36,7 @@ export default function App() {
           case 'costs':     return <CostsPage />;
           case 'traces':    return <TracesPage />;
           case 'settings':  return <SettingsPage />;
+          case 'playground': return <PlaygroundPage />;
           default:          return null;
         }
       }}

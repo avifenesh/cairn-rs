@@ -2,6 +2,7 @@ import {
   Activity,
   Coins,
   GitBranch,
+  Terminal,
   LayoutDashboard,
   Play,
   MonitorPlay,
@@ -24,7 +25,8 @@ export type NavPage =
   | 'memory'
   | 'tasks'
   | 'traces'
-  | 'settings';
+  | 'settings'
+  | 'playground';
 
 interface NavItem {
   id: NavPage;
@@ -43,6 +45,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'costs',      label: 'Costs',       icon: Coins           },
   { id: 'memory',     label: 'Memory',      icon: Database        },
   { id: 'settings',   label: 'Settings',    icon: Settings        },
+  { id: 'playground', label: 'Playground',  icon: Terminal        },
 ];
 
 interface SidebarProps {
