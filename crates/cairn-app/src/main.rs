@@ -83,9 +83,6 @@ struct SqliteBackend {
     adapter:   Arc<SqliteAdapter>,
 }
 
-// ── App state ────────────────────────────────────────────────────────────────
-
-#[derive(Clone)]
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 
 /// One sliding-window bucket per identity key (token or IP).
@@ -113,6 +110,9 @@ const RATE_LIMIT_IP: u32 = 100;
 /// Window duration.
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 
+// ── App state ────────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
 struct AppState {
     runtime: Arc<InMemoryServices>,
     started_at: Arc<Instant>,
@@ -352,6 +352,155 @@ async fn auth_middleware(
 // ── Metrics middleware ────────────────────────────────────────────────────────
 
 /// Axum middleware that records request count, latency, and error rate.
+// ── Rate-limit middleware ─────────────────────────────────────────────────────
+
+/// Extract the best available identity key for rate-limiting.
+///
+/// Prefers the Bearer token (stable across IPs) so token holders share
+/// a single 1 000 req/min bucket.  Falls back to `X-Forwarded-For` or the
+/// socket peer address when no token is present (100 req/min bucket).
+fn rate_limit_key(req: &Request<Body>) -> (String, u32) {
+    let token = req.headers()
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|t| t.trim().to_owned());
+
+    if let Some(tok) = token {
+        return (format!("tok:{tok}"), RATE_LIMIT_TOKEN);
+    }
+
+    let ip = req.headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_else(|| "unknown".to_owned());
+
+    (format!("ip:{ip}"), RATE_LIMIT_IP)
+}
+
+/// Sliding-window rate-limit middleware.
+///
+/// Checks the per-key bucket and returns `429 Too Many Requests` when the
+/// limit is exceeded.  Injects three response headers on every request:
+///
+/// - `X-RateLimit-Limit`     — max requests per minute for this key
+/// - `X-RateLimit-Remaining` — requests left in the current window
+/// - `X-RateLimit-Reset`     — Unix timestamp when the window resets
+async fn rate_limit_middleware(
+    State(state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    // /health and /v1/stream are exempt (SSE keeps the connection open).
+    let path = req.uri().path();
+    if path == "/health" || path.starts_with("/v1/stream") {
+        return next.run(req).await;
+    }
+
+    let (key, limit) = rate_limit_key(&req);
+
+    let (remaining, reset_secs) = {
+        let mut table = state.rate_limits.lock().unwrap_or_else(|e| e.into_inner());
+        let bucket = table.entry(key.clone()).or_insert_with(RateBucket::new);
+
+        // Roll the window when it has expired.
+        if bucket.window_start.elapsed() >= RATE_WINDOW {
+            bucket.count = 0;
+            bucket.window_start = Instant::now();
+        }
+
+        if bucket.count >= limit {
+            let reset_in = RATE_WINDOW
+                .checked_sub(bucket.window_start.elapsed())
+                .unwrap_or(RATE_WINDOW)
+                .as_secs();
+            let reset_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .saturating_add(reset_in);
+            let mut resp = (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({
+                    "code": "rate_limited",
+                    "message": "Too many requests — slow down and retry after the reset window.",
+                    "retry_after_secs": reset_in,
+                })),
+            ).into_response();
+            resp.headers_mut().insert(
+                "X-RateLimit-Limit",
+                axum::http::HeaderValue::from_str(&limit.to_string()).unwrap(),
+            );
+            resp.headers_mut().insert(
+                "X-RateLimit-Remaining",
+                axum::http::HeaderValue::from_static("0"),
+            );
+            resp.headers_mut().insert(
+                "X-RateLimit-Reset",
+                axum::http::HeaderValue::from_str(&reset_ts.to_string()).unwrap(),
+            );
+            return resp;
+        }
+
+        bucket.count += 1;
+        let remaining = limit.saturating_sub(bucket.count);
+        let reset_in = RATE_WINDOW
+            .checked_sub(bucket.window_start.elapsed())
+            .unwrap_or(RATE_WINDOW)
+            .as_secs();
+        let reset_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_add(reset_in);
+        (remaining, reset_ts)
+    };
+
+    let mut resp = next.run(req).await;
+    let headers = resp.headers_mut();
+    if let Ok(v) = axum::http::HeaderValue::from_str(&limit.to_string()) {
+        headers.insert("X-RateLimit-Limit", v);
+    }
+    if let Ok(v) = axum::http::HeaderValue::from_str(&remaining.to_string()) {
+        headers.insert("X-RateLimit-Remaining", v);
+    }
+    if let Ok(v) = axum::http::HeaderValue::from_str(&reset_secs.to_string()) {
+        headers.insert("X-RateLimit-Reset", v);
+    }
+    resp
+}
+
+/// `GET /v1/rate-limit` — return current limits and remaining quota.
+async fn rate_limit_status_handler(
+    State(state): State<AppState>,
+    req: Request<Body>,
+) -> impl IntoResponse {
+    let (key, limit) = rate_limit_key(&req);
+    let table = state.rate_limits.lock().unwrap_or_else(|e| e.into_inner());
+    let (count, reset_in_secs) = match table.get(&key) {
+        Some(bucket) if bucket.window_start.elapsed() < RATE_WINDOW => {
+            let elapsed = bucket.window_start.elapsed();
+            let reset_in = RATE_WINDOW.checked_sub(elapsed).unwrap_or(RATE_WINDOW).as_secs();
+            (bucket.count, reset_in)
+        }
+        _ => (0, RATE_WINDOW.as_secs()),
+    };
+    let remaining = limit.saturating_sub(count);
+    axum::Json(serde_json::json!({
+        "limit_per_minute":     limit,
+        "used_this_minute":     count,
+        "remaining_this_minute": remaining,
+        "reset_in_seconds":     reset_in_secs,
+        "policy": {
+            "token_limit_per_minute": RATE_LIMIT_TOKEN,
+            "ip_limit_per_minute":    RATE_LIMIT_IP,
+            "window_seconds":         RATE_WINDOW.as_secs(),
+        },
+    }))
+}
+
 ///
 /// Runs outermost in the middleware stack so it captures every request,
 /// including those rejected by the auth middleware.
@@ -2863,6 +3012,8 @@ fn build_router(state: AppState) -> Router {
         // type; all other paths return index.html for client-side routing.
         .fallback(get(serve_frontend))
         // ── Middleware stack ──────────────────────────────────────────────
+        // Rate-limit status endpoint (no auth — token deduced from header).
+        .route("/v1/rate-limit", get(rate_limit_status_handler))
         // TraceLayer logs method, path, status, and latency for every request.
         .layer(
             TraceLayer::new_for_http()
@@ -2874,6 +3025,10 @@ fn build_router(state: AppState) -> Router {
         // a token — browsers never send credentials on preflight requests.
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         .layer(cors_layer(state.mode))
+        // Rate-limiting — runs after auth so we can key by token.
+        .layer(from_fn_with_state(state.clone(), rate_limit_middleware))
+        // Reject request bodies larger than 10 MB before they reach handlers.
+        .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024))
         // Metrics runs outermost — captures every request including rejected ones.
         .layer(from_fn_with_state(state.clone(), metrics_middleware))
         .with_state(state)
