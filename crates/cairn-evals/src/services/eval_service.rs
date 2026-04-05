@@ -349,7 +349,12 @@ impl EvalRunService {
                     && r.status == EvalRunStatus::Completed
             })
             .collect();
-        runs.sort_by_key(|r| r.created_at);
+        // Sort by created_at, then by eval_run_id as a stable tiebreaker
+        // (HashMap iteration order is non-deterministic).
+        runs.sort_by(|a, b| {
+            a.created_at.cmp(&b.created_at)
+                .then_with(|| a.eval_run_id.as_str().cmp(b.eval_run_id.as_str()))
+        });
         let points = runs
             .into_iter()
             .map(|r| {
@@ -412,7 +417,10 @@ impl EvalRunService {
                     && r.status == EvalRunStatus::Completed
             })
             .collect::<Vec<_>>();
-        by_time.sort_by_key(|r| r.created_at);
+        by_time.sort_by(|a, b| {
+            a.created_at.cmp(&b.created_at)
+                .then_with(|| a.eval_run_id.as_str().cmp(b.eval_run_id.as_str()))
+        });
         let scores: Vec<f64> = by_time
             .iter()
             .filter_map(|r| r.metrics.task_success_rate)
