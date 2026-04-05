@@ -30,7 +30,11 @@ use tokio_stream::StreamExt as _;
 use cairn_api::auth::{AuthPrincipal, Authenticator, ServiceTokenAuthenticator, ServiceTokenRegistry};
 use cairn_api::bootstrap::{BootstrapConfig, DeploymentMode, EncryptionKeySource, StorageBackend};
 use cairn_api::{DashboardOverview, HealthResponse, SystemStatus};
-use cairn_domain::{ApprovalDecision, ApprovalId, ProjectKey, RunId, TaskId};
+use cairn_domain::{
+    ApprovalDecision, ApprovalId, ProjectKey, RunId, TaskId,
+    lifecycle::{PauseReason, PauseReasonKind, ResumeTrigger},
+    lifecycle::RunResumeTarget,
+};
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
@@ -41,8 +45,10 @@ use cairn_store::{EventLog, EventPosition, StoredEvent};
 use cairn_store::DbAdapter;
 use cairn_store::pg::{PgAdapter, PgEventLog};
 use cairn_store::pg::PgMigrationRunner;
+use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
+use sqlx::sqlite::SqlitePoolOptions;
 use tokio_stream::Stream;
 
 // ── Postgres backend ──────────────────────────────────────────────────────────
@@ -58,6 +64,16 @@ struct PgBackend {
     adapter:   Arc<PgAdapter>,
 }
 
+/// Bundled SQLite connection handles.
+///
+/// Created at startup when `--db sqlite:path` or a bare `.db` path is supplied.
+/// Appends go to both SQLite (durable) and InMemory (read models + SSE).
+#[derive(Clone)]
+struct SqliteBackend {
+    event_log: Arc<SqliteEventLog>,
+    adapter:   Arc<SqliteAdapter>,
+}
+
 // ── App state ────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -68,6 +84,10 @@ struct AppState {
     tokens: Arc<ServiceTokenRegistry>,
     /// Postgres backend — Some when `--db postgres://...` is passed, None otherwise.
     pg: Option<Arc<PgBackend>>,
+    /// SQLite backend — Some when `--db sqlite:... ` or `--db *.db` is passed.
+    sqlite: Option<Arc<SqliteBackend>>,
+    /// Deployment mode captured at startup for the /v1/settings endpoint.
+    mode: DeploymentMode,
 }
 
 // ── Response types ───────────────────────────────────────────────────────────
@@ -224,9 +244,11 @@ async fn health_handler() -> Json<HealthResponse> {
 }
 
 async fn status_handler(State(state): State<AppState>) -> Json<SystemStatus> {
-    // Prefer Postgres health when configured; fall back to InMemory store.
+    // Check durable backend health (Postgres > SQLite > InMemory).
     let store_ok = if let Some(pg) = &state.pg {
         pg.adapter.health_check().await.is_ok()
+    } else if let Some(sq) = &state.sqlite {
+        sq.adapter.health_check().await.is_ok()
     } else {
         state.runtime.store.head_position().await.is_ok()
     };
@@ -922,9 +944,11 @@ async fn list_events_handler(
 ) -> impl axum::response::IntoResponse {
     let limit = q.limit.min(500);
     let after = q.after.map(EventPosition);
-    // Use Postgres event log when available for durable replay.
+    // Use durable event log for replay when available (Postgres > SQLite > InMemory).
     let read_result = if let Some(pg) = &state.pg {
         pg.event_log.read_stream(after, limit).await
+    } else if let Some(sq) = &state.sqlite {
+        sq.event_log.read_stream(after, limit).await
     } else {
         state.runtime.store.read_stream(after, limit).await
     };
@@ -1026,12 +1050,15 @@ async fn append_events_handler(
         }
 
         // Append the single event.
-        // When Postgres is configured: dual-write — persist to Pg (durable) and
-        // also write to InMemory so read models and SSE broadcast stay current.
+        // Dual-write: persist to durable backend first, then update InMemory
+        // so projections and SSE broadcasts stay current.
         if let Some(ref pg) = state.pg {
-            // Durable append to Postgres.
             if let Err(e) = pg.event_log.append(&[envelope.clone()]).await {
                 return Err(internal_error(format!("postgres append: {e}")));
+            }
+        } else if let Some(ref sq) = state.sqlite {
+            if let Err(e) = sq.event_log.append(&[envelope.clone()]).await {
+                return Err(internal_error(format!("sqlite append: {e}")));
             }
         }
         // Always write to InMemory: updates projections + broadcasts to SSE subscribers.
@@ -1071,36 +1098,43 @@ struct DbStatusResponse {
 /// When Postgres is configured, checks connectivity and reports the number
 /// of applied migrations so operators can diagnose schema drift.
 async fn db_status_handler(State(state): State<AppState>) -> Json<DbStatusResponse> {
-    match &state.pg {
-        None => Json(DbStatusResponse {
+    if let Some(pg) = &state.pg {
+        let connected = pg.adapter.health_check().await.is_ok();
+        let (migration_count, schema_current) = if connected {
+            let pool = pg.adapter.pool().clone();
+            let runner = PgMigrationRunner::new(pool);
+            match runner.applied().await {
+                Ok(applied) => {
+                    const TOTAL_KNOWN: usize = 19;
+                    let count = applied.len();
+                    (Some(count), Some(count >= TOTAL_KNOWN))
+                }
+                Err(_) => (None, Some(false)),
+            }
+        } else {
+            (None, Some(false))
+        };
+        Json(DbStatusResponse {
+            backend: "postgres",
+            connected,
+            migration_count,
+            schema_current,
+        })
+    } else if let Some(sq) = &state.sqlite {
+        let connected = sq.adapter.health_check().await.is_ok();
+        Json(DbStatusResponse {
+            backend: "sqlite",
+            connected,
+            migration_count: None,   // SQLite uses single-shot migrate(), no versioned log
+            schema_current: Some(connected),
+        })
+    } else {
+        Json(DbStatusResponse {
             backend: "in_memory",
             connected: true,
             migration_count: None,
             schema_current: None,
-        }),
-        Some(pg) => {
-            let connected = pg.adapter.health_check().await.is_ok();
-            let (migration_count, schema_current) = if connected {
-                let pool = pg.adapter.pool().clone();
-                let runner = PgMigrationRunner::new(pool);
-                match runner.applied().await {
-                    Ok(applied) => {
-                        const TOTAL_KNOWN: usize = 19;
-                        let count = applied.len();
-                        (Some(count), Some(count >= TOTAL_KNOWN))
-                    }
-                    Err(_) => (None, Some(false)),
-                }
-            } else {
-                (None, Some(false))
-            };
-            Json(DbStatusResponse {
-                backend: "postgres",
-                connected,
-                migration_count,
-                schema_current,
-            })
-        }
+        })
     }
 }
 
@@ -1134,6 +1168,66 @@ async fn create_tenant_handler(
             axum::Json(serde_json::json!({ "error": e.to_string() })),
         )
         .into_response(),
+    }
+}
+
+// ── Run lifecycle write handlers ──────────────────────────────────────────────
+
+#[derive(serde::Deserialize, Default)]
+struct PauseRunRequest {
+    #[serde(alias = "kind")]
+    reason_kind: Option<PauseReasonKind>,
+    detail: Option<String>,
+    actor: Option<String>,
+    resume_after_ms: Option<u64>,
+}
+
+/// `POST /v1/runs/:id/pause` — pause a running run.
+async fn pause_run_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Option<Json<PauseRunRequest>>,
+) -> impl IntoResponse {
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let reason = PauseReason {
+        kind: body.reason_kind.unwrap_or(PauseReasonKind::OperatorPause),
+        detail: body.detail,
+        resume_after_ms: body.resume_after_ms,
+        actor: body.actor,
+    };
+    match RunService::pause(&state.runtime.runs, &RunId::new(id), reason).await {
+        Ok(run) => (StatusCode::OK, axum::Json(run)).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": e.to_string() })),
+        ).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+struct ResumeRunRequest {
+    trigger: Option<ResumeTrigger>,
+    target: Option<RunResumeTarget>,
+}
+
+/// `POST /v1/runs/:id/resume` — resume a paused run.
+async fn resume_run_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Option<Json<ResumeRunRequest>>,
+) -> impl IntoResponse {
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    match RunService::resume(
+        &state.runtime.runs,
+        &RunId::new(id),
+        body.trigger.unwrap_or(ResumeTrigger::OperatorResume),
+        body.target.unwrap_or(RunResumeTarget::Running),
+    ).await {
+        Ok(run) => (StatusCode::OK, axum::Json(run)).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": e.to_string() })),
+        ).into_response(),
     }
 }
 
@@ -1255,8 +1349,10 @@ async fn main() {
     );
     eprintln!("auth: admin token registered (set CAIRN_ADMIN_TOKEN to override)");
 
-    // ── Postgres (optional) ───────────────────────────────────────────────────
-    let pg = match &config.storage {
+    // ── Durable backends (Postgres / SQLite) — optional ─────────────────────
+    let pg;
+    let sqlite;
+    match &config.storage {
         StorageBackend::Postgres { connection_url } => {
             let url = connection_url.clone();
             eprintln!("store: connecting to Postgres at {url}");
@@ -1268,7 +1364,6 @@ async fn main() {
             {
                 Ok(pool) => {
                     eprintln!("store: Postgres connection established");
-                    // Run pending schema migrations before accepting traffic.
                     let migrator = PgMigrationRunner::new(pool.clone());
                     match migrator.run_pending().await {
                         Ok(applied) if applied.is_empty() => {
@@ -1290,7 +1385,8 @@ async fn main() {
                         adapter:   Arc::new(PgAdapter::new(pool)),
                     });
                     eprintln!("store: Postgres backend active (dual-write with InMemory)");
-                    Some(backend)
+                    pg = Some(backend);
+                    sqlite = None;
                 }
                 Err(e) => {
                     eprintln!("error: failed to connect to Postgres: {e}");
@@ -1299,11 +1395,47 @@ async fn main() {
             }
         }
         StorageBackend::Sqlite { path } => {
-            eprintln!("store: SQLite backend not yet wired ({path}); using InMemory");
-            None
+            // Normalise the URL: accept bare paths like "cairn.db" or "sqlite:cairn.db".
+            let url = if path.starts_with("sqlite:") {
+                path.clone()
+            } else {
+                format!("sqlite:{path}")
+            };
+            eprintln!("store: connecting to SQLite at {url}");
+            match SqlitePoolOptions::new()
+                .max_connections(1)   // SQLite is not safe with multiple writers
+                .connect(&url)
+                .await
+            {
+                Ok(pool) => {
+                    eprintln!("store: SQLite connection established");
+                    let adapter = SqliteAdapter::new(pool.clone());
+                    match adapter.migrate().await {
+                        Ok(()) => eprintln!("store: SQLite schema applied"),
+                        Err(e) => {
+                            eprintln!("error: SQLite migration failed: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                    let backend = Arc::new(SqliteBackend {
+                        event_log: Arc::new(SqliteEventLog::new(pool)),
+                        adapter:   Arc::new(adapter),
+                    });
+                    eprintln!("store: SQLite backend active (dual-write with InMemory)");
+                    pg = None;
+                    sqlite = Some(backend);
+                }
+                Err(e) => {
+                    eprintln!("error: failed to connect to SQLite: {e}");
+                    std::process::exit(1);
+                }
+            }
         }
-        _ => None,
-    };
+        _ => {
+            pg = None;
+            sqlite = None;
+        }
+    }
 
     // ── App state ─────────────────────────────────────────────────────────────
     let runtime = Arc::new(InMemoryServices::new());
@@ -1312,6 +1444,8 @@ async fn main() {
         started_at: Arc::new(Instant::now()),
         tokens,
         pg,
+        sqlite,
+        mode: config.mode,
     };
 
     // ── Router ────────────────────────────────────────────────────────────────
@@ -1332,6 +1466,47 @@ async fn main() {
 ///
 /// Extracted from `main` so tests can construct the router with a custom
 /// `AppState` (e.g. pre-loaded with test tokens).
+
+// ── Settings and Overview handlers ───────────────────────────────────────────
+
+/// `GET /v1/settings` — deployment configuration summary.
+async fn settings_handler(
+    State(state): State<AppState>,
+) -> impl axum::response::IntoResponse {
+    let store_backend = if state.pg.is_some() { "postgres" } else { "memory" };
+    let deployment_mode = match state.mode {
+        DeploymentMode::SelfHostedTeam => "self_hosted_team",
+        DeploymentMode::Local          => "local",
+    };
+    let settings = cairn_api::settings_api::DeploymentSettings {
+        deployment_mode: deployment_mode.to_owned(),
+        store_backend:   store_backend.to_owned(),
+        plugin_count:    0,
+        system_health:   cairn_api::settings_api::SystemHealthSettings::default(),
+        key_management:  cairn_api::settings_api::KeyManagementStatus::default(),
+    };
+    (StatusCode::OK, Json(settings))
+}
+
+/// `GET /v1/overview` — high-level operator overview combining status and dashboard.
+async fn overview_handler(
+    State(state): State<AppState>,
+) -> impl axum::response::IntoResponse {
+    let store_backend = if state.pg.is_some() { "postgres" } else { "memory" };
+    let deployment_mode = match state.mode {
+        DeploymentMode::SelfHostedTeam => "self_hosted_team",
+        DeploymentMode::Local          => "local",
+    };
+    let uptime_secs = state.started_at.elapsed().as_secs();
+    (StatusCode::OK, Json(serde_json::json!({
+        "deployment_mode": deployment_mode,
+        "store_backend":   store_backend,
+        "uptime_secs":     uptime_secs,
+        "runtime_ok":      true,
+        "store_ok":        state.pg.as_ref().map(|_| true).unwrap_or(true),
+    })))
+}
+
 fn build_router(state: AppState) -> Router {
     Router::new()
         // ── Public (no auth required) ─────────────────────────────────────
@@ -1342,6 +1517,8 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/dashboard", get(dashboard_handler))
         .route("/v1/runs", get(list_runs_handler).post(create_run_handler))
         .route("/v1/runs/:id", get(get_run_handler))
+        .route("/v1/runs/:id/pause",  post(pause_run_handler))
+        .route("/v1/runs/:id/resume", post(resume_run_handler))
         .route("/v1/runs/:id/cost", get(get_run_cost_handler))
         .route("/v1/runs/:id/events", get(list_run_events_handler))
         .route("/v1/runs/:id/tool-invocations", get(list_run_tool_invocations_handler))
@@ -1363,6 +1540,8 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/admin/tenants", post(create_tenant_handler))
         // DB diagnostics
         .route("/v1/db/status", get(db_status_handler))
+        .route("/v1/settings", get(settings_handler))
+        .route("/v1/overview", get(overview_handler))
         // ── Middleware stack ──────────────────────────────────────────────
         // TraceLayer logs method, path, status, and latency for every request.
         .layer(
@@ -1461,6 +1640,8 @@ mod tests {
             started_at: Arc::new(Instant::now()),
             tokens,
             pg: None,
+            sqlite: None,
+            mode: DeploymentMode::Local,
         }
     }
 
@@ -3051,6 +3232,8 @@ mod tests {
             started_at: Arc::new(Instant::now()),
             tokens,
             pg: None,
+            sqlite: None,
+            mode: DeploymentMode::Local,
         };
         let app = build_router(state);
 
@@ -3572,6 +3755,8 @@ mod run_events_tests {
             started_at: Arc::new(std::time::Instant::now()),
             tokens,
             pg: None,
+            sqlite: None,
+            mode: DeploymentMode::Local,
         }
     }
 
@@ -3741,6 +3926,8 @@ mod tool_invocations_tests {
             started_at: Arc::new(std::time::Instant::now()),
             tokens,
             pg: None,
+            sqlite: None,
+            mode: DeploymentMode::Local,
         }
     }
 
@@ -3941,6 +4128,8 @@ mod provider_health_tests {
             started_at: Arc::new(std::time::Instant::now()),
             tokens,
             pg: None,
+            sqlite: None,
+            mode: DeploymentMode::Local,
         }
     }
 

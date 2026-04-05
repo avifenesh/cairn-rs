@@ -16,8 +16,8 @@ cairn-memory = { path = "../cairn-memory" }
 cairn-runtime = { path = "../cairn-runtime" }
 cairn-evals = { path = "../cairn-evals" }
 cairn-graph = { path = "../cairn-graph" }
-cairn-store = { path = "../cairn-store", features = ["postgres"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"], optional = false }
+cairn-store = { path = "../cairn-store", features = ["postgres", "sqlite"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite"], optional = false }
 cairn-domain = { path = "../cairn-domain" }
 cairn-tools = { path = "../cairn-tools" }
 axum = { version = "0.7", features = ["ws"] }
