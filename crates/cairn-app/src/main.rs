@@ -38,6 +38,7 @@ use cairn_domain::{
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
+use cairn_runtime::tasks::TaskService;
 use cairn_runtime::tenants::TenantService;
 use cairn_runtime::InMemoryServices;
 use cairn_store::projections::{ApprovalReadModel, LlmCallTraceReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
@@ -1545,6 +1546,66 @@ async fn overview_handler(
     })))
 }
 
+// ── Task handlers ─────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ClaimTaskRequest {
+    worker_id: String,
+    #[serde(default = "default_lease_ms")]
+    lease_duration_ms: u64,
+}
+fn default_lease_ms() -> u64 { 30_000 }
+
+/// `GET /v1/tasks` — list all tasks, most-recent first (operator view).
+async fn list_all_tasks_handler(
+    State(state): State<AppState>,
+    Query(q): Query<PaginationQuery>,
+) -> impl axum::response::IntoResponse {
+    match state.runtime.store.list_all_tasks(q.limit, q.offset).await {
+        Ok(tasks) => Ok(Json(tasks)),
+        Err(e)    => Err(internal_error(e.to_string())),
+    }
+}
+
+/// `POST /v1/tasks/:id/claim` — claim a queued task for a worker.
+async fn claim_task_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<ClaimTaskRequest>,
+) -> impl axum::response::IntoResponse {
+    let task_id = TaskId::new(id);
+    match state.runtime.tasks.claim(&task_id, body.worker_id, body.lease_duration_ms).await {
+        Ok(record) => Ok((StatusCode::OK, Json(record))),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") || msg.contains("NotFound") {
+                Err(not_found(format!("task {} not found", task_id.as_str())))
+            } else {
+                Err(bad_request(msg))
+            }
+        }
+    }
+}
+
+/// `POST /v1/tasks/:id/release-lease` — release a leased task back to queued.
+async fn release_task_lease_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl axum::response::IntoResponse {
+    let task_id = TaskId::new(id);
+    match state.runtime.tasks.release_lease(&task_id).await {
+        Ok(record) => Ok((StatusCode::OK, Json(record))),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") || msg.contains("NotFound") {
+                Err(not_found(format!("task {} not found", task_id.as_str())))
+            } else {
+                Err(bad_request(msg))
+            }
+        }
+    }
+}
+
 // ── LLM trace handlers (GAP-010) ─────────────────────────────────────────────
 
 /// `GET /v1/traces` — all recent LLM call traces (operator view, limit 500).
@@ -1780,6 +1841,9 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/providers/health", get(provider_health_handler))
         .route("/v1/events", get(list_events_handler))
         .route("/v1/events/append", post(append_events_handler))
+        .route("/v1/tasks", get(list_all_tasks_handler))
+        .route("/v1/tasks/:id/claim", post(claim_task_handler))
+        .route("/v1/tasks/:id/release-lease", post(release_task_lease_handler))
         .route("/v1/traces", get(list_all_traces_handler))
         .route("/v1/sessions/:id/llm-traces", get(list_session_traces_handler))
         // Admin routes

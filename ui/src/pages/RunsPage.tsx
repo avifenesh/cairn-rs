@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "../components/Toast";
 import {
   X, RefreshCw, ServerCrash, Inbox, ChevronRight,
   Pause, Play, Loader2, Clock, ListChecks, DollarSign, Activity,
@@ -82,6 +83,7 @@ interface DetailPanelProps {
 
 function DetailPanel({ run, onClose }: DetailPanelProps) {
   const qc = useQueryClient();
+  const toast = useToast();
 
   // Sub-resource queries.
   const { data: events, isLoading: eventsLoading } = useQuery({
@@ -105,12 +107,20 @@ function DetailPanel({ run, onClose }: DetailPanelProps) {
   // Pause / resume mutations.
   const pause = useMutation({
     mutationFn: () => defaultApi.pauseRun(run.run_id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['runs'] }),
+    onSuccess: () => {
+      toast.success('Run paused.');
+      void qc.invalidateQueries({ queryKey: ['runs'] });
+    },
+    onError: () => toast.error('Failed to pause run.'),
   });
 
   const resume = useMutation({
     mutationFn: () => defaultApi.resumeRun(run.run_id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['runs'] }),
+    onSuccess: () => {
+      toast.success('Run resumed.');
+      void qc.invalidateQueries({ queryKey: ['runs'] });
+    },
+    onError: () => toast.error('Failed to resume run.'),
   });
 
   const canPause  = run.state === 'running' || run.state === 'pending';
