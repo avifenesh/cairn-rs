@@ -102,3 +102,9 @@ Commits: `0f2f9a6` → `022fce3`
 - Fixed `provider_call_status` test: added missing `ProviderCallCompleted` fields (`task_id`, `prompt_release_id`, `fallback_position`, `started_at`, `finished_at`)
 - `Dockerfile` (multi-stage rust:1.82 → debian:bookworm-slim) and `docker-compose.yml` added
 - `.github/workflows/ci.yml` updated with cargo cache, `SQLX_OFFLINE`, correct test exclusions
+
+---
+
+## Session End Summary (2026-04-05)
+
+This session delivered 29+ commits and 40 end-to-end integration test files spanning every major RFC (001–014). Across the 14 RFCs, 80+ compliance fixes were applied to event structs, store projections, service implementations, and the HTTP route catalog — closing gaps in provider routing (RFC 009), credential encryption (RFC 011), entitlement gating (RFC 014), and memory deduplication (RFC 003), among others. The bootstrap integration test suite improved from 35 failures down to 13 (63% reduction), driven by catalog routing fixes and missing handler registrations. All 829 lib-unit tests remain green across 13 crate suites. New e2e test files cover the full runtime arc: sessions/runs, tasks, checkpoints, approvals, guardrails, credentials, defaults resolution, ingest jobs, provider budgets and pools, retention policies, LLM observability traces, tool invocations, graph execution traces, SSE streaming, onboarding flow, notification preferences, and more.
