@@ -163,9 +163,16 @@ impl InMemoryDiagnostics {
             let key = source_id.as_str().to_owned();
             let mut sources = self.sources.lock().unwrap();
             if let Some(entry) = sources.get_mut(&key) {
+                // Update avg_rating via running average.
                 let n = entry.retrieval_count as f64;
                 entry.avg_rating = (entry.avg_rating * n + r) / (n + 1.0);
                 entry.retrieval_count += 1;
+
+                // Nudge credibility_score toward the normalised rating (0–1 scale).
+                // This allows the quality endpoint to reflect feedback sentiment.
+                let normalised = (r / 5.0).clamp(0.0, 1.0);
+                entry.credibility_score =
+                    (entry.credibility_score * 0.8 + normalised * 0.2).clamp(0.0, 1.0);
             }
         }
     }

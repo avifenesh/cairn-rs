@@ -81,21 +81,36 @@ impl InMemoryDocumentStore {
     /// Return all documents as `ExportableDocument` records (for export operations).
     pub fn exportable_documents(&self) -> Vec<ExportableDocument> {
         let docs = self.docs.lock().unwrap();
+        let chunks = self.chunks.lock().unwrap();
+        // Build a map of document_id -> (source_id, text, tags, created_at) from chunks.
+        let mut chunk_info: std::collections::HashMap<&str, (&SourceId, String, Vec<String>, u64)> =
+            std::collections::HashMap::new();
+        for chunk in chunks.iter() {
+            chunk_info
+                .entry(chunk.document_id.as_str())
+                .or_insert_with(|| (&chunk.source_id, chunk.text.clone(), chunk.entities.clone(), chunk.created_at));
+        }
         docs.iter()
-            .map(|(id, (_, project, source_type))| ExportableDocument {
-                document_id: KnowledgeDocumentId::new(id.clone()),
-                source_id: SourceId::new("unknown"),
-                project: project.clone(),
-                source_type: source_type.clone(),
-                text: String::new(),
-                credibility_score: None,
-                provenance: None,
-                tags: vec![],
-                corpus_id: None,
-                created_at_ms: 0,
-                created_at: 0,
-                title: None,
-                provenance_metadata: None,
+            .map(|(id, (_, project, source_type))| {
+                let (source_id, text, tags, created_at) = chunk_info
+                    .get(id.as_str())
+                    .map(|(s, t, tags, ts)| ((*s).clone(), t.clone(), tags.clone(), *ts))
+                    .unwrap_or_else(|| (SourceId::new("unknown"), String::new(), vec![], 0));
+                ExportableDocument {
+                    document_id: KnowledgeDocumentId::new(id.clone()),
+                    source_id,
+                    project: project.clone(),
+                    source_type: source_type.clone(),
+                    text,
+                    credibility_score: None,
+                    provenance: None,
+                    tags,
+                    corpus_id: None,
+                    created_at_ms: created_at,
+                    created_at,
+                    title: None,
+                    provenance_metadata: None,
+                }
             })
             .collect()
     }
@@ -385,13 +400,18 @@ impl RetrievalService for InMemoryRetrieval {
                     policy.staleness_threshold_days,
                 );
 
+                let credibility = chunk.credibility_score
+                    .map(|s| s.clamp(0.0, 1.0))
+                    .unwrap_or(0.0);
+
                 let breakdown = ScoringBreakdown {
                     lexical_relevance: lexical_score,
                     freshness: fresh,
                     staleness_penalty: stale,
-                    // RFC 003: explicit baseline values for dimensions not yet computed at this
-                    // stage.  graph_proximity is updated below when a graph store is wired;
-                    // corroboration and recency_of_use remain at their baselines for now.
+                    // RFC 003: source_credibility populated from the chunk record so
+                    // operator feedback (which updates chunk.credibility_score) is
+                    // reflected in subsequent retrieval scores.
+                    source_credibility: credibility,
                     corroboration: 0.0,
                     graph_proximity: 0.0,
                     recency_of_use: Some(0.0),

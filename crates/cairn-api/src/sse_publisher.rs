@@ -12,7 +12,8 @@ use crate::sse::{SseEventName, SseFrame};
 pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
     match event {
         RuntimeEvent::SessionCreated(_) | RuntimeEvent::SessionStateChanged(_) => None,
-        RuntimeEvent::RunCreated(_) | RuntimeEvent::RunStateChanged(_) => None,
+        RuntimeEvent::RunCreated(_) => Some(SseEventName::AgentProgress),
+        RuntimeEvent::RunStateChanged(_) => None,
         RuntimeEvent::TaskCreated(_)
         | RuntimeEvent::TaskStateChanged(_)
         | RuntimeEvent::TaskLeaseClaimed(_)

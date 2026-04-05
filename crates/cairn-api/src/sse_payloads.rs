@@ -475,6 +475,13 @@ pub fn shape_event_payload(event: &RuntimeEvent) -> Option<serde_json::Value> {
             };
             serde_json::to_value(&payload).ok()
         }
+        RuntimeEvent::RunCreated(e) => {
+            let payload = AgentProgressPayload {
+                agent_id: e.run_id.to_string(),
+                message: "run started".to_owned(),
+            };
+            serde_json::to_value(&payload).ok()
+        }
         _ => None,
     }
 }

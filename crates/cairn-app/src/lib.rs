@@ -2646,6 +2646,8 @@ struct RunEventListEntry {
 #[derive(Clone, Debug, serde::Deserialize)]
 struct EventsPageQuery {
     cursor: Option<u64>,
+    /// Alias for cursor (legacy/test compatibility): return events as a plain array.
+    from: Option<u64>,
     limit: Option<usize>,
 }
 
@@ -7348,7 +7350,9 @@ async fn list_run_events_handler(
     };
 
     let limit = query.limit.unwrap_or(50).clamp(1, 500);
-    let cursor = query.cursor.map(EventPosition);
+    // `from` is a legacy param: treat it as a minimum position filter and return a plain array.
+    let use_legacy_array = query.from.is_some() && query.cursor.is_none();
+    let cursor = query.cursor.or(query.from).map(EventPosition);
 
     // Fetch one extra to detect whether more pages exist
     let fetched = match state
@@ -7365,7 +7369,7 @@ async fn list_run_events_handler(
     let page: Vec<StoredEvent> = fetched.into_iter().take(limit).collect();
     let next_cursor = if has_more { page.last().map(|e| e.position.0) } else { None };
 
-    let events = page
+    let events: Vec<EventSummary> = page
         .into_iter()
         .map(|e| EventSummary {
             position: e.position.0,
@@ -7374,6 +7378,11 @@ async fn list_run_events_handler(
             description: event_message(&e.envelope.payload),
         })
         .collect();
+
+    if use_legacy_array {
+        // Legacy `from=N` callers expect a plain JSON array of event summaries.
+        return (StatusCode::OK, Json(events)).into_response();
+    }
 
     (StatusCode::OK, Json(EventsPage { events, next_cursor, has_more })).into_response()
 }
