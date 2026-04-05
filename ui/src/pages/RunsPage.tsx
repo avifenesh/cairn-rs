@@ -11,6 +11,7 @@ import { defaultApi } from "../lib/api";
 import type { RunRecord, RunState } from "../lib/types";
 import { TimelineView, ZoomSelector } from "../components/TimelineView";
 import type { ZoomLevel } from "../components/TimelineView";
+import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 
 function fmtTime(ms: number) {
   return new Date(ms).toLocaleString(undefined, {
@@ -233,6 +234,8 @@ function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function RunsPage() {
+  const { ms: refreshMs, setOption: setRefreshOption, interval: refreshInterval } = useAutoRefresh("runs", "15s");
+
   const [filter, setFilter]         = useState<RunState | "all">("all");
   const [selected, setSelected]     = useState<RunRecord | null>(null);
   const [viewMode, setViewMode]     = useState<"table" | "timeline">("table");
@@ -243,7 +246,7 @@ export function RunsPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["runs"],
     queryFn: () => defaultApi.getRuns({ limit: 200 }),
-    refetchInterval: 15_000,
+    refetchInterval: refreshMs,
   });
 
   const runs = data ?? [];
@@ -332,10 +335,30 @@ export function RunsPage() {
           >
             <Plus size={11} /> Batch Create
           </button>
-          <button onClick={() => void refetch()} disabled={isFetching}
-            className="flex items-center gap-1.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-500 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 transition-colors">
-            <RefreshCw size={11} className={clsx(isFetching && "animate-spin")}/>Refresh
-          </button>
+          {/* Auto-refresh control */}
+          <div className="flex items-center gap-1">
+            <div className="relative">
+              <select
+                value={refreshInterval.option}
+                onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
+                className="appearance-none rounded border border-zinc-700 bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors hover:border-zinc-600"
+                title="Auto-refresh interval"
+              >
+                {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
+              </select>
+              {isFetching
+                ? <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none"><RefreshCw size={9} className="animate-spin text-indigo-400" /></span>
+                : <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-600"><RefreshCw size={9} /></span>
+              }
+            </div>
+            <button onClick={() => refetch()} disabled={isFetching}
+              className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+              title="Refresh now"
+            >
+              <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
         </div>
       </div>
       {/* Content */}

@@ -7,6 +7,7 @@ import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import type { ApprovalRecord, ApprovalDecision } from "../lib/types";
+import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -193,12 +194,14 @@ const TABS: { id: Tab; label: string }[] = [
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function ApprovalsPage() {
+  const { ms: refreshMs, setOption: setRefreshOption, interval: refreshInterval } = useAutoRefresh("approvals", "15s");
+
   const [tab, setTab] = useState<Tab>("all");
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["approvals"],
     queryFn: () => defaultApi.getPendingApprovals(),
-    refetchInterval: 15_000,
+    refetchInterval: refreshMs,
   });
 
   const all      = data ?? [];
@@ -257,11 +260,30 @@ export function ApprovalsPage() {
           ))}
         </div>
 
-        <button onClick={() => refetch()} disabled={isFetching}
-          className="ml-auto flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors">
-          <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-          Refresh
-        </button>
+                {/* Auto-refresh control */}
+        <div className="flex items-center gap-1">
+          <div className="relative">
+            <select
+              value={refreshInterval.option}
+              onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
+              className="appearance-none rounded border border-zinc-700 bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors hover:border-zinc-600"
+              title="Auto-refresh interval"
+            >
+              {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
+            </select>
+            {isFetching
+              ? <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none"><RefreshCw size={9} className="animate-spin text-indigo-400" /></span>
+              : <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-600"><RefreshCw size={9} /></span>
+            }
+          </div>
+          <button onClick={() => refetch()} disabled={isFetching}
+            className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+            title="Refresh now"
+          >
+            <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* Table */}

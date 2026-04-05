@@ -13,6 +13,7 @@ import { DataTable } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import type { TaskRecord, TaskState } from "../lib/types";
+import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -491,6 +492,8 @@ function RowActions({ task }: { task: TaskRecord }) {
 type ViewMode = "table" | "board";
 
 export function TasksPage() {
+  const { ms: refreshMs, setOption: setRefreshOption, interval: refreshInterval } = useAutoRefresh("tasks", "15s");
+
   const [filter,   setFilter]   = useState<TaskState | "all">("all");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const qc    = useQueryClient();
@@ -499,7 +502,7 @@ export function TasksPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["tasks"],
     queryFn:  () => defaultApi.getAllTasks({ limit: 500 }),
-    refetchInterval: 15_000,
+    refetchInterval: refreshMs,
   });
 
   const tasks     = data ?? [];
@@ -658,12 +661,25 @@ export function TasksPage() {
             </button>
           )}
           <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
           >
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
             Refresh
+          </button>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="relative">
+            <select value={refreshInterval.option} onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
+              className="appearance-none rounded border border-zinc-700 bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors">
+              {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
+            </select>
+            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none">
+              <RefreshCw size={9} className={isFetching ? "animate-spin text-indigo-400" : "text-zinc-600"} />
+            </span>
+          </div>
+          <button onClick={() => refetch()} disabled={isFetching}
+            className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors">
+            <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+            <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
       </div>

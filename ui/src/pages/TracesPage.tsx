@@ -17,6 +17,7 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { defaultApi } from "../lib/api";
 import { useVirtualScroll, DEFAULT_ROW_HEIGHT } from "../hooks/useVirtualScroll";
 import type { LlmCallTrace } from "../lib/types";
+import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -146,12 +147,14 @@ function exportCsv(traces: LlmCallTrace[]) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function TracesPage() {
+  const { ms: refreshMs, setOption: setRefreshOption, interval: refreshInterval } = useAutoRefresh("traces", "30s");
+
   const [filterQuery, setFilterQuery] = useState('');
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["traces"],
     queryFn:  () => defaultApi.getTraces(500),
-    refetchInterval: 30_000,
+    refetchInterval: refreshMs,
   });
 
   const traces = data?.traces ?? [];
@@ -242,13 +245,30 @@ export function TracesPage() {
           <Download size={11} />
         </button>
 
-        <button
-          onClick={() => refetch()} disabled={isFetching}
-          className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
-        >
-          <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-          Refresh
-        </button>
+                  {/* Auto-refresh control */}
+          <div className="flex items-center gap-1">
+            <div className="relative">
+              <select
+                value={refreshInterval.option}
+                onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
+                className="appearance-none rounded border border-zinc-700 bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors hover:border-zinc-600"
+                title="Auto-refresh interval"
+              >
+                {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
+              </select>
+              {isFetching
+                ? <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none"><RefreshCw size={9} className="animate-spin text-indigo-400" /></span>
+                : <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-600"><RefreshCw size={9} /></span>
+              }
+            </div>
+            <button onClick={() => refetch()} disabled={isFetching}
+              className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+              title="Refresh now"
+            >
+              <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
       </div>
 
       {/* Stat strip */}

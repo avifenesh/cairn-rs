@@ -23,6 +23,7 @@ import { EventLog } from "../components/EventLog";
 import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
+import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 import type { StatCardVariant } from "../components/StatCard";
 import type { HealthCheckEntry, RunRecord } from "../lib/types";
 
@@ -819,18 +820,19 @@ type DashTab = typeof DASH_TABS[number];
 
 export function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashTab>('Overview');
+  const { ms: refreshMs, setOption: setRefreshOption, interval: refreshInterval } = useAutoRefresh("dashboard", "15s");
 
-  const { data: stats, dataUpdatedAt: statsUpdatedAt } = useQuery({
+  const { data: stats, dataUpdatedAt: statsUpdatedAt, isFetching: statsFetching, refetch: refetchStats } = useQuery({
     queryKey: ["stats"],
     queryFn:  () => defaultApi.getStats(),
-    refetchInterval: 5_000,
+    refetchInterval: refreshMs || 5_000,
     retry: false,
   });
 
-  const { data, isLoading, isError, error, dataUpdatedAt, refetch: refetchDashboard } = useQuery({
+  const { data, isLoading, isError, error, dataUpdatedAt, refetch: refetchDashboard, isFetching: dashFetching } = useQuery({
     queryKey: ["dashboard"],
     queryFn:  () => defaultApi.getDashboard(),
-    refetchInterval: 15_000,
+    refetchInterval: refreshMs || 15_000,
   });
 
   const { data: recentEventsData } = useQuery({
@@ -895,6 +897,30 @@ export function DashboardPage() {
                 {updatedAt}
               </span>
             )}
+            {/* Auto-refresh control */}
+            <div className="flex items-center gap-1">
+              <div className="relative">
+                <select value={refreshInterval.option}
+                  onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
+                  className="appearance-none rounded border border-zinc-700 bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors"
+                >
+                  {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
+                </select>
+                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                  {(statsFetching || dashFetching)
+                    ? <RefreshCw size={9} className="animate-spin text-indigo-400" />
+                    : <RefreshCw size={9} className="text-zinc-600" />
+                  }
+                </span>
+              </div>
+              <button onClick={() => { void refetchStats(); void refetchDashboard(); }}
+                disabled={statsFetching || dashFetching}
+                className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+              >
+                <RefreshCw size={11} className={(statsFetching || dashFetching) ? "animate-spin" : ""} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
+            </div>
           </div>
         </div>
 

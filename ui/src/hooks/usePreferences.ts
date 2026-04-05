@@ -15,6 +15,12 @@ export interface Preferences {
   theme: 'dark' | 'light' | 'system';
   /** Real-time event transport: SSE (default) or WebSocket. */
   transport: 'sse' | 'websocket';
+  /**
+   * Global master switch for auto-refresh on all data pages.
+   * When false, per-page refresh intervals are ignored and pages only
+   * update on manual refresh. Default: true.
+   */
+  autoRefresh: boolean;
 }
 
 const STORAGE_KEY = 'cairn_preferences';
@@ -26,6 +32,7 @@ const DEFAULTS: Preferences = {
   compactMode:  false,
   theme:        'dark',
   transport:    'sse',
+  autoRefresh:  true,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -536,6 +536,67 @@ async fn changelog_handler() -> impl IntoResponse {
     )
 }
 
+// ── Webhook test ─────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct TestWebhookRequest {
+    url:        String,
+    event_type: String,
+}
+
+#[derive(serde::Serialize)]
+struct TestWebhookResponse {
+    success:    bool,
+    status_code: u16,
+    latency_ms:  u64,
+}
+
+async fn test_webhook_handler(
+    axum::Json(body): axum::Json<TestWebhookRequest>,
+) -> impl IntoResponse {
+    let payload = serde_json::json!({
+        "event_type": body.event_type,
+        "source":     "cairn-rs",
+        "test":       true,
+        "timestamp":  std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0),
+        "message":    format!("Test notification for event '{}'", body.event_type),
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
+
+    let start = std::time::Instant::now();
+    let result = client
+        .post(&body.url)
+        .header("Content-Type", "application/json")
+        .header("User-Agent", "cairn-rs/webhook-test")
+        .json(&payload)
+        .send()
+        .await;
+    let latency_ms = start.elapsed().as_millis() as u64;
+
+    match result {
+        Ok(resp) => {
+            let status_code = resp.status().as_u16();
+            axum::Json(TestWebhookResponse {
+                success: resp.status().is_success(),
+                status_code,
+                latency_ms,
+            })
+        }
+        Err(_) => axum::Json(TestWebhookResponse {
+            success:     false,
+            status_code: 0,
+            latency_ms,
+        }),
+    }
+}
+
 // ── Rate-limit middleware ─────────────────────────────────────────────────────
 
 /// Extract the best available identity key for rate-limiting.
@@ -4090,6 +4151,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/openapi.json", get(openapi_json_handler))
         .route("/v1/docs",         get(swagger_ui_handler))
         .route("/v1/changelog",    get(changelog_handler))
+        .route("/v1/test/webhook", post(test_webhook_handler))
         // ── Embedded frontend (SPA fallback) ──────────────────────────────
         // Any path not matched by an API route above is handled by the React
         // app.  Static assets (JS/CSS/icons) are served with the correct MIME
