@@ -4500,8 +4500,34 @@ impl crate::projections::OperatorInterventionReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::PauseScheduleReadModel for InMemoryStore {
-    async fn list_due(&self, _before_ms: u64) -> Result<Vec<crate::projections::PauseScheduledRecord>, StoreError> {
-        Ok(vec![])
+    async fn list_due(&self, before_ms: u64) -> Result<Vec<crate::projections::PauseScheduledRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        // Find all RunStateChanged(to=Paused) events with resume_after_ms set.
+        // Use a map to keep only the latest pause event per run.
+        let mut paused: std::collections::HashMap<String, crate::projections::PauseScheduledRecord> =
+            std::collections::HashMap::new();
+        for stored in &state.events {
+            if let RuntimeEvent::RunStateChanged(e) = &stored.envelope.payload {
+                if e.transition.to == cairn_domain::RunState::Paused {
+                    if let Some(reason) = &e.pause_reason {
+                        if let Some(resume_after_ms) = reason.resume_after_ms {
+                            let resume_at_ms = stored.stored_at + resume_after_ms;
+                            paused.insert(e.run_id.as_str().to_owned(), crate::projections::PauseScheduledRecord {
+                                run_id: e.run_id.clone(),
+                                project: e.project.clone(),
+                                resume_at_ms,
+                                created_at_ms: stored.stored_at,
+                            });
+                        }
+                    }
+                } else if matches!(e.transition.to, cairn_domain::RunState::Running | cairn_domain::RunState::Completed | cairn_domain::RunState::Failed) {
+                    // Run resumed/completed — remove from paused map.
+                    paused.remove(e.run_id.as_str());
+                }
+            }
+        }
+        let due: Vec<_> = paused.into_values().filter(|r| r.resume_at_ms <= before_ms).collect();
+        Ok(due)
     }
 }
 
