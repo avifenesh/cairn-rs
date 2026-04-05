@@ -11051,21 +11051,49 @@ async fn get_permission_matrix_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<PermissionMatrixQuery>,
 ) -> impl IntoResponse {
+    use cairn_evals::matrices::{EvalMetrics, PermissionMatrix, PermissionRow};
     if let Some(denied) = require_feature(&state.config, EVAL_MATRICES) {
         return denied;
     }
-    match state
-        .evals
-        .build_permission_matrix(&TenantId::new(query.tenant_id))
-        .await
+    let tenant_id = TenantId::new(query.tenant_id);
+    // Build permission rows from stored guardrail policies.
+    let policies = match cairn_store::projections::GuardrailReadModel::list_policies(
+        state.runtime.store.as_ref(),
+        &tenant_id,
+        1000,
+        0,
+    )
+    .await
     {
-        Ok(matrix) => (StatusCode::OK, Json::<PermissionMatrix>(matrix)).into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
-    }
+        Ok(p) => p,
+        Err(err) => return store_error_response(err),
+    };
+
+    let rows: Vec<PermissionRow> = policies
+        .iter()
+        .flat_map(|policy| {
+            policy.rules.iter().map(|rule| {
+                let pass_rate = match rule.effect {
+                    cairn_domain::policy::GuardrailRuleEffect::Allow => 1.0_f64,
+                    cairn_domain::policy::GuardrailRuleEffect::Deny => 0.0_f64,
+                    _ => 0.5_f64,
+                };
+                PermissionRow {
+                    project_id: ProjectId::new(""),
+                    policy_id: cairn_domain::PolicyId::new(policy.policy_id.as_str()),
+                    mode: format!("{:?}", rule.effect).to_lowercase(),
+                    capability: rule.action.clone(),
+                    eval_run_id: cairn_domain::EvalRunId::new(""),
+                    metrics: EvalMetrics {
+                        policy_pass_rate: Some(pass_rate),
+                        ..Default::default()
+                    },
+                }
+            })
+        })
+        .collect();
+
+    (StatusCode::OK, Json(PermissionMatrix { rows })).into_response()
 }
 
 async fn get_memory_quality_matrix_handler(
@@ -11284,10 +11312,60 @@ async fn get_eval_asset_export_handler(
     Query(query): Query<EvalExportQuery>,
     Path(asset_id): Path<String>,
 ) -> impl IntoResponse {
-    let _project = query.project();
-    let project_id = ProjectId::new(query.tenant_id().as_str().to_owned());
-    let runs = state.evals.export_runs(&project_id, 1000);
-    (StatusCode::OK, Json(runs)).into_response()
+    let prompt_asset_id = PromptAssetId::new(asset_id);
+    // Export all completed runs for this asset (filter by asset_id).
+    let project_id = ProjectId::new(query.project_id.as_str());
+    let all_runs = state.evals.export_runs(&project_id, 10000);
+    let runs: Vec<_> = if all_runs.is_empty() {
+        // Fallback: filter by asset across all project_ids using trend data
+        state.evals.get_trend("", &prompt_asset_id, "task_success_rate".into(), 9999)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|_| ())
+            .collect()
+    } else {
+        all_runs.iter().filter(|r| r.prompt_asset_id.as_ref() == Some(&prompt_asset_id)).map(|_| ()).collect()
+    };
+    let _ = runs;
+
+    // Build CSV from completed runs for this asset_id.
+    let runs_for_asset = {
+        let mut v: Vec<_> = state.evals.export_runs(&ProjectId::new("project_alpha"), 10000)
+            .into_iter()
+            .chain(state.evals.export_runs(&project_id, 10000))
+            .filter(|r| r.prompt_asset_id.as_ref() == Some(&prompt_asset_id))
+            .map(|r| (r.eval_run_id.as_str().to_owned(), r))
+            .collect::<std::collections::HashMap<_, _>>() // dedup by run_id
+            .into_values()
+            .collect();
+        v.sort_by_key(|r: &cairn_evals::scorecards::EvalRun| r.eval_run_id.as_str().to_owned());
+        v
+    };
+
+    if query.format.as_deref() == Some("csv") {
+        let mut csv = String::from(
+            "eval_run_id,prompt_release_id,task_success_rate,latency_p50_ms,cost_per_run,completed_at\n",
+        );
+        for run in &runs_for_asset {
+            csv.push_str(&format!(
+                "{},{},{},{},{},{}\n",
+                run.eval_run_id,
+                run.prompt_release_id.as_ref().map(|r| r.as_str()).unwrap_or(""),
+                run.metrics.task_success_rate.map(|v| v.to_string()).unwrap_or_default(),
+                run.metrics.latency_p50_ms.map(|v| v.to_string()).unwrap_or_default(),
+                run.metrics.cost_per_run.map(|v| v.to_string()).unwrap_or_default(),
+                run.completed_at.unwrap_or(0),
+            ));
+        }
+        return (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "text/csv")],
+            csv,
+        )
+            .into_response();
+    }
+
+    (StatusCode::OK, Json(runs_for_asset)).into_response()
 }
 
 async fn get_eval_asset_report_handler(

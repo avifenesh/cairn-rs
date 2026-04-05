@@ -449,8 +449,10 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
+ "cairn-api",
  "cairn-domain",
  "cairn-evals",
+ "cairn-memory",
  "cairn-store",
  "serde",
  "serde_json",
