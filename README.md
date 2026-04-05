@@ -41,6 +41,14 @@ Or with Docker:
 docker compose up
 ```
 
+## Operator Dashboard
+
+```bash
+cd ui && npm install && npm run dev
+```
+
+Open **http://localhost:5173** — enter your admin token to log in.
+
 ---
 
 ### Cargo (local dev — zero config)
