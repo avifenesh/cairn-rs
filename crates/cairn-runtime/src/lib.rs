@@ -130,6 +130,9 @@ pub use services::{
 
 pub use aggregate::InMemoryServices;
 
+// ── Ollama local LLM provider ─────────────────────────────────────────────────
+pub use services::{OllamaModel, OllamaProvider, OllamaTagsResponse};
+
 /// Noop tracing hook — sets a trace ID in thread-local state (stub).
 pub fn set_current_trace_id(_trace_id: &str) {}
 

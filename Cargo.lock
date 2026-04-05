@@ -502,6 +502,7 @@ dependencies = [
  "cairn-evals",
  "cairn-memory",
  "cairn-store",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
