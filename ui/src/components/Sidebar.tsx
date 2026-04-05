@@ -21,6 +21,7 @@ import {
   ScrollText,
   Shield,
   Terminal,
+  TestTube,
   User,
   BarChart2,
   Waves,
@@ -57,6 +58,7 @@ export type NavPage =
   | 'metrics'
   | 'evals'
   | 'api-docs'
+  | 'test-harness'
   | 'settings'
   | 'deployment'
   | 'profile';
@@ -116,7 +118,8 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'credentials',  label: 'Credentials',  icon: KeyRound     },
       { id: 'deployment',   label: 'Deployment',   icon: ServerCrash  },
       { id: 'channels',     label: 'Channels',     icon: Bell     },
-      { id: 'playground',  label: 'Playground',  icon: Terminal },
+      { id: 'playground',    label: 'Playground',    icon: Terminal  },
+      { id: 'test-harness',  label: 'Test Harness',  icon: TestTube  },
       { id: 'api-docs',    label: 'API Docs',    icon: BookOpen },
       { id: 'settings',    label: 'Settings',    icon: Settings },
     ],

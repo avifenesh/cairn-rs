@@ -174,6 +174,167 @@ function SystemInfoSections({ info }: { info: SystemInfo }) {
   );
 }
 
+// ── Environment variables ─────────────────────────────────────────────────────
+
+type EnvSecret = 'set' | 'unset' | 'unknown';
+
+interface EnvVar {
+  name:        string;
+  current:     React.ReactNode;
+  default_:    string;
+  description: string;
+  secret?:     boolean;
+}
+
+function SecretChip({ status }: { status: EnvSecret }) {
+  if (status === 'set') return (
+    <span className="inline-flex items-center gap-1 text-[11px] font-medium font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-800/30 rounded px-1.5 py-0.5">
+      <span className="tracking-widest text-[8px] leading-none">●●●●●●</span>
+      <span className="text-[10px]">set</span>
+    </span>
+  );
+  if (status === 'unset') return (
+    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-600 bg-zinc-800/60 border border-zinc-700 rounded px-1.5 py-0.5">
+      not set
+    </span>
+  );
+  return <span className="text-[11px] text-zinc-700 font-mono">—</span>;
+}
+
+function EnvValue({ value }: { value: string }) {
+  return (
+    <span className="font-mono text-[11px] text-zinc-300 bg-zinc-800 px-1.5 py-0.5 rounded max-w-[180px] truncate block text-right"
+          title={value}>
+      {value || '—'}
+    </span>
+  );
+}
+
+function EnvVarsSection({
+  settings,
+  info,
+}: {
+  settings?: import('../lib/types').DeploymentSettings;
+  info?:     import('../lib/types').SystemInfo;
+}) {
+  const listenAddr = info?.environment.listen_addr ?? '';
+  const colonIdx   = listenAddr.lastIndexOf(':');
+  const host       = colonIdx > 0 ? listenAddr.slice(0, colonIdx) : listenAddr;
+  const port       = colonIdx > 0 ? listenAddr.slice(colonIdx + 1) : '';
+
+  const rows: EnvVar[] = [
+    {
+      name: 'CAIRN_ADMIN_TOKEN',
+      current: <SecretChip status={
+        info ? (info.environment.admin_token_set ? 'set' : 'unset') : 'unknown'
+      } />,
+      default_:    '(none)',
+      description: 'Bearer token for admin API authentication. Required for all /v1/* requests.',
+      secret: true,
+    },
+    {
+      name: 'OLLAMA_HOST',
+      current: info?.environment.ollama_host
+        ? <EnvValue value={info.environment.ollama_host} />
+        : <SecretChip status="unset" />,
+      default_:    '(none)',
+      description: 'Base URL for the local Ollama API. Enables LLM generation, embedding, and model management.',
+    },
+    {
+      name: 'CAIRN_STORAGE',
+      current: settings
+        ? <EnvValue value={settings.store_backend} />
+        : <span className="text-[11px] text-zinc-700 font-mono">—</span>,
+      default_:    'in_memory',
+      description: 'Persistence backend: in_memory (default), sqlite, or postgres.',
+    },
+    {
+      name: 'CAIRN_MODE',
+      current: info?.environment.deployment_mode
+        ? <EnvValue value={info.environment.deployment_mode} />
+        : <span className="text-[11px] text-zinc-700 font-mono">—</span>,
+      default_:    'local',
+      description: 'Deployment mode: local (single user) or self_hosted_team (multi-tenant).',
+    },
+    {
+      name: 'CAIRN_LISTEN_ADDR',
+      current: host ? <EnvValue value={host} /> : <span className="text-[11px] text-zinc-700 font-mono">—</span>,
+      default_:    '127.0.0.1',
+      description: 'TCP address to bind. Set to 0.0.0.0 to listen on all interfaces.',
+    },
+    {
+      name: 'CAIRN_LISTEN_PORT',
+      current: port ? <EnvValue value={port} /> : <span className="text-[11px] text-zinc-700 font-mono">—</span>,
+      default_:    '3000',
+      description: 'TCP port to listen on.',
+    },
+    {
+      name: 'CAIRN_ENCRYPTION_KEY',
+      current: <SecretChip status={
+        settings
+          ? (settings.key_management.encryption_key_configured ? 'set' : 'unset')
+          : 'unknown'
+      } />,
+      default_:    '(none)',
+      description: 'AES-256 key for at-rest credential encryption. If unset, credentials are stored unencrypted.',
+      secret: true,
+    },
+    {
+      name: 'CAIRN_TLS_CERT',
+      current: <span className="text-[11px] text-zinc-700 font-mono italic">not exposed</span>,
+      default_:    '(none)',
+      description: 'Path to PEM certificate file for HTTPS. Requires CAIRN_TLS_KEY.',
+    },
+    {
+      name: 'CAIRN_TLS_KEY',
+      current: <span className="text-[11px] text-zinc-700 font-mono italic">not exposed</span>,
+      default_:    '(none)',
+      description: 'Path to PEM private key file for HTTPS. Requires CAIRN_TLS_CERT.',
+      secret: true,
+    },
+  ];
+
+  return (
+    <Section title="Environment Variables">
+      <div className="-mx-4">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b border-zinc-800">
+              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600 w-[220px]">Variable</th>
+              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600 w-[160px] text-right">Current</th>
+              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600 w-[90px]">Default</th>
+              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.name} className="border-b border-zinc-800/60 last:border-0 hover:bg-zinc-800/20 transition-colors">
+                <td className="px-4 py-2.5 align-top">
+                  <code className="text-[11px] font-mono text-indigo-300 select-all">
+                    {row.name}
+                  </code>
+                  {row.secret && (
+                    <span className="ml-1.5 text-[9px] text-zinc-700 uppercase tracking-wide">secret</span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 align-top text-right">
+                  {row.current}
+                </td>
+                <td className="px-4 py-2.5 align-top">
+                  <span className="font-mono text-[11px] text-zinc-600">{row.default_}</span>
+                </td>
+                <td className="px-4 py-2.5 align-top">
+                  <span className="text-[11px] text-zinc-500 leading-relaxed">{row.description}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
+}
+
 // ── Transport section ─────────────────────────────────────────────────────────
 
 const WS_STATUS_COLOR: Record<string, string> = {
@@ -315,7 +476,7 @@ export function SettingsPage() {
             <span className="text-[13px]">Loading settings…</span>
           </div>
         ) : s ? (
-          <div className="max-w-2xl space-y-4">
+          <div className="max-w-4xl space-y-4">
 
             {/* Deployment */}
             <Section title="Deployment">
@@ -382,6 +543,9 @@ export function SettingsPage() {
                 }
               />
             </Section>
+
+            {/* Environment variables */}
+            <EnvVarsSection settings={s} info={sysInfo} />
 
             {/* Transport */}
             <TransportSection />
