@@ -103,6 +103,72 @@ struct AppState {
     ingest: Arc<IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>>,
     /// Ollama local LLM provider — Some when OLLAMA_HOST is set and reachable.
     ollama: Option<Arc<OllamaProvider>>,
+    /// Rolling request metrics — updated by the metrics middleware on every request.
+    metrics: Arc<std::sync::RwLock<AppMetrics>>,
+}
+
+// ── Request metrics ──────────────────────────────────────────────────────────
+
+/// Rolling-window request metrics.  No external crates required.
+///
+/// Latency samples are stored in a fixed-size ring buffer; percentiles are
+/// computed on-demand from a sorted copy of the buffer (cheap for N=1000).
+const LATENCY_RING_SIZE: usize = 1_000;
+
+struct AppMetrics {
+    total_requests:   u64,
+    requests_by_path: std::collections::HashMap<String, u64>,
+    errors_by_status: std::collections::HashMap<u16, u64>,
+    /// Rolling window — LATENCY_RING_SIZE most-recent latencies in ms.
+    latency_ring:     std::collections::VecDeque<u64>,
+}
+
+impl AppMetrics {
+    fn new() -> Self {
+        Self {
+            total_requests:   0,
+            requests_by_path: std::collections::HashMap::new(),
+            errors_by_status: std::collections::HashMap::new(),
+            latency_ring:     std::collections::VecDeque::with_capacity(LATENCY_RING_SIZE),
+        }
+    }
+
+    fn record(&mut self, path: &str, status: u16, latency_ms: u64) {
+        self.total_requests += 1;
+        *self.requests_by_path.entry(path.to_owned()).or_insert(0) += 1;
+        if status >= 400 {
+            *self.errors_by_status.entry(status).or_insert(0) += 1;
+        }
+        if self.latency_ring.len() == LATENCY_RING_SIZE {
+            self.latency_ring.pop_front();
+        }
+        self.latency_ring.push_back(latency_ms);
+    }
+
+    fn percentile(&self, p: f64) -> u64 {
+        if self.latency_ring.is_empty() {
+            return 0;
+        }
+        let mut sorted: Vec<u64> = self.latency_ring.iter().copied().collect();
+        sorted.sort_unstable();
+        let idx = ((p / 100.0) * (sorted.len() as f64 - 1.0)).round() as usize;
+        sorted[idx.min(sorted.len() - 1)]
+    }
+
+    fn avg_latency_ms(&self) -> u64 {
+        if self.latency_ring.is_empty() {
+            return 0;
+        }
+        self.latency_ring.iter().sum::<u64>() / self.latency_ring.len() as u64
+    }
+
+    fn error_rate(&self) -> f64 {
+        if self.total_requests == 0 {
+            return 0.0;
+        }
+        let errors: u64 = self.errors_by_status.values().sum();
+        errors as f64 / self.total_requests as f64
+    }
 }
 
 // ── Response types ───────────────────────────────────────────────────────────
@@ -250,6 +316,28 @@ async fn auth_middleware(
         )
             .into_response(),
     }
+}
+
+// ── Metrics middleware ────────────────────────────────────────────────────────
+
+/// Axum middleware that records request count, latency, and error rate.
+///
+/// Runs outermost in the middleware stack so it captures every request,
+/// including those rejected by the auth middleware.
+async fn metrics_middleware(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let path = request.uri().path().to_owned();
+    let start = std::time::Instant::now();
+    let response = next.run(request).await;
+    let latency_ms = start.elapsed().as_millis() as u64;
+    let status = response.status().as_u16();
+    if let Ok(mut m) = state.metrics.write() {
+        m.record(&path, status, latency_ms);
+    }
+    response
 }
 
 // ── Core handlers ─────────────────────────────────────────────────────────────
@@ -2082,6 +2170,7 @@ async fn main() {
         retrieval,
         ingest: ingest_pipeline,
         ollama,
+        metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
     };
 
     // ── Router ────────────────────────────────────────────────────────────────
@@ -2407,6 +2496,96 @@ async fn memory_ingest_handler(
     }
 }
 
+// ── Metrics handlers ──────────────────────────────────────────────────────────
+
+/// `GET /v1/metrics` — JSON snapshot of rolling request metrics.
+///
+/// Response shape:
+/// ```json
+/// {
+///   "total_requests": 1024,
+///   "requests_by_path": {"/v1/runs": 300, ...},
+///   "avg_latency_ms": 12,
+///   "p50_latency_ms": 8,
+///   "p95_latency_ms": 45,
+///   "p99_latency_ms": 120,
+///   "error_rate": 0.02,
+///   "errors_by_status": {"500": 5, "404": 15}
+/// }
+/// ```
+#[derive(Serialize)]
+struct MetricsResponse {
+    total_requests:   u64,
+    requests_by_path: std::collections::HashMap<String, u64>,
+    avg_latency_ms:   u64,
+    p50_latency_ms:   u64,
+    p95_latency_ms:   u64,
+    p99_latency_ms:   u64,
+    error_rate:       f64,
+    errors_by_status: std::collections::HashMap<u16, u64>,
+}
+
+async fn metrics_json_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let m = state.metrics.read().unwrap();
+    Json(MetricsResponse {
+        total_requests:   m.total_requests,
+        requests_by_path: m.requests_by_path.clone(),
+        avg_latency_ms:   m.avg_latency_ms(),
+        p50_latency_ms:   m.percentile(50.0),
+        p95_latency_ms:   m.percentile(95.0),
+        p99_latency_ms:   m.percentile(99.0),
+        error_rate:       m.error_rate(),
+        errors_by_status: m.errors_by_status.clone(),
+    })
+}
+
+/// `GET /v1/metrics/prometheus` — Prometheus exposition format (text/plain).
+///
+/// Compatible with Prometheus scrape configs and Grafana data sources.
+async fn metrics_prometheus_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let m = state.metrics.read().unwrap();
+    let mut out = String::with_capacity(1024);
+
+    out.push_str("# HELP cairn_http_requests_total Total HTTP requests handled\n");
+    out.push_str("# TYPE cairn_http_requests_total counter\n");
+    out.push_str(&format!("cairn_http_requests_total {}\n\n", m.total_requests));
+
+    out.push_str("# HELP cairn_http_requests_by_path_total Requests grouped by path\n");
+    out.push_str("# TYPE cairn_http_requests_by_path_total counter\n");
+    let mut paths: Vec<(&String, &u64)> = m.requests_by_path.iter().collect();
+    paths.sort_by_key(|(p, _)| p.as_str());
+    for (path, count) in &paths {
+        let safe = path.replace('\\', "\\\\").replace('"', "\\\"");
+        out.push_str(&format!("cairn_http_requests_by_path_total{{path=\"{safe}\"}} {count}\n"));
+    }
+    out.push('\n');
+
+    out.push_str("# HELP cairn_http_latency_ms HTTP request latency quantiles (ms)\n");
+    out.push_str("# TYPE cairn_http_latency_ms gauge\n");
+    out.push_str(&format!("cairn_http_latency_ms{{quantile=\"0.50\"}} {}\n", m.percentile(50.0)));
+    out.push_str(&format!("cairn_http_latency_ms{{quantile=\"0.95\"}} {}\n", m.percentile(95.0)));
+    out.push_str(&format!("cairn_http_latency_ms{{quantile=\"0.99\"}} {}\n", m.percentile(99.0)));
+    out.push_str(&format!("cairn_http_latency_ms{{quantile=\"avg\"}} {}\n", m.avg_latency_ms()));
+    out.push('\n');
+
+    out.push_str("# HELP cairn_http_error_rate Fraction of requests with 4xx/5xx status\n");
+    out.push_str("# TYPE cairn_http_error_rate gauge\n");
+    out.push_str(&format!("cairn_http_error_rate {:.6}\n\n", m.error_rate()));
+
+    out.push_str("# HELP cairn_http_errors_by_status Error count by HTTP status code\n");
+    out.push_str("# TYPE cairn_http_errors_by_status counter\n");
+    let mut statuses: Vec<(&u16, &u64)> = m.errors_by_status.iter().collect();
+    statuses.sort_by_key(|(s, _)| *s);
+    for (status, count) in &statuses {
+        out.push_str(&format!("cairn_http_errors_by_status{{status=\"{status}\"}} {count}\n"));
+    }
+
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        out,
+    )
+}
+
 fn build_router(state: AppState) -> Router {
     Router::new()
         // ── Public (no auth required) ─────────────────────────────────────
@@ -2461,6 +2640,9 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/memory/ingest", post(memory_ingest_handler))
         .route("/v1/settings", get(settings_handler))
         .route("/v1/overview", get(overview_handler))
+        // Metrics
+        .route("/v1/metrics",            get(metrics_json_handler))
+        .route("/v1/metrics/prometheus", get(metrics_prometheus_handler))
         // ── Embedded frontend (SPA fallback) ──────────────────────────────
         // Any path not matched by an API route above is handled by the React
         // app.  Static assets (JS/CSS/icons) are served with the correct MIME
@@ -2478,6 +2660,8 @@ fn build_router(state: AppState) -> Router {
         // a token — browsers never send credentials on preflight requests.
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         .layer(cors_layer(state.mode))
+        // Metrics runs outermost — captures every request including rejected ones.
+        .layer(from_fn_with_state(state.clone(), metrics_middleware))
         .with_state(state)
 }
 
@@ -2589,6 +2773,7 @@ mod tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
             }
         }
     }

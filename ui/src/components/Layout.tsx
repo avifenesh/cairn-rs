@@ -8,7 +8,7 @@ const VALID_PAGES: NavPage[] = [
   'dashboard',
   'sessions', 'runs', 'tasks', 'approvals',
   'traces', 'memory', 'costs', 'graph', 'audit-log',
-  'providers', 'playground', 'settings',
+  'providers', 'playground', 'api-docs', 'settings',
 ];
 
 // ── Route descriptor ──────────────────────────────────────────────────────────
@@ -50,6 +50,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   costs:      'Costs',
   graph:       'Knowledge Graph',
   'audit-log': 'Audit Log',
+  'api-docs':  'API Reference',
   providers:  'Providers',
   playground: 'Playground',
   settings:   'Settings',

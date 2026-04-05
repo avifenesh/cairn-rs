@@ -5,6 +5,7 @@ import {
   ListChecks,
   LogOut,
   MonitorPlay,
+  BookOpen,
   Network,
   Play,
   Settings,
@@ -32,6 +33,7 @@ export type NavPage =
   | 'providers'
   | 'playground'
   | 'audit-log'
+  | 'api-docs'
   | 'settings';
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'providers',  label: 'Providers',  icon: Zap      },
       { id: 'playground', label: 'Playground', icon: Terminal },
+      { id: 'api-docs',   label: 'API Docs',   icon: BookOpen },
       { id: 'settings',   label: 'Settings',   icon: Settings },
     ],
   },
