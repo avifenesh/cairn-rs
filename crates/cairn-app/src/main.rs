@@ -636,9 +636,23 @@ async fn list_all_pending(
 struct ResolveApprovalBody {
     /// `"approved"` or `"rejected"`
     decision: String,
+    /// Optional free-text explanation logged alongside the decision.
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ResolveApprovalResponse {
+    #[serde(flatten)]
+    record: cairn_store::projections::ApprovalRecord,
+    /// Echo of the reason supplied in the request body (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 /// `POST /v1/approvals/:id/resolve` — approve or reject a pending approval.
+///
+/// Body: `{ "decision": "approved" | "rejected", "reason": "<optional string>" }`
 async fn resolve_approval_handler(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -651,7 +665,10 @@ async fn resolve_approval_handler(
         other => return Err(bad_request(format!("unknown decision: {other}; use 'approved' or 'rejected'"))),
     };
     match state.runtime.approvals.resolve(&approval_id, decision).await {
-        Ok(record) => Ok((StatusCode::OK, Json(record))),
+        Ok(record) => Ok((StatusCode::OK, Json(ResolveApprovalResponse {
+            record,
+            reason: body.reason,
+        }))),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") || msg.contains("NotFound") {
@@ -1511,7 +1528,9 @@ fn build_router(state: AppState) -> Router {
     Router::new()
         // ── Public (no auth required) ─────────────────────────────────────
         .route("/health", get(health_handler))
-        .route("/v1/stream", get(stream_handler))
+        // SSE stream — both paths accepted for compatibility with lib.rs and clients.
+        .route("/v1/stream",          get(stream_handler))
+        .route("/v1/streams/runtime", get(stream_handler))
         // ── Protected /v1/* routes ────────────────────────────────────────
         .route("/v1/status", get(status_handler))
         .route("/v1/dashboard", get(dashboard_handler))
@@ -1553,7 +1572,7 @@ fn build_router(state: AppState) -> Router {
         // Auth runs inside CORS so OPTIONS preflights are answered without
         // a token — browsers never send credentials on preflight requests.
         .layer(from_fn_with_state(state.clone(), auth_middleware))
-        .layer(cors_layer())
+        .layer(cors_layer(state.mode))
         .with_state(state)
 }
 
@@ -1567,19 +1586,33 @@ fn build_router(state: AppState) -> Router {
 ///   and bearer token auth.
 /// - `max_age(86400)` — browser may cache the preflight result for 24 h,
 ///   reducing round-trips on subsequent requests.
-fn cors_layer() -> CorsLayer {
-    CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::DELETE,
-            Method::PATCH,
-            Method::OPTIONS,
-        ])
-        .allow_headers([CONTENT_TYPE, AUTHORIZATION])
-        .max_age(std::time::Duration::from_secs(86_400))
+fn cors_layer(mode: DeploymentMode) -> CorsLayer {
+    let methods = [
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::PATCH,
+        Method::OPTIONS,
+    ];
+    let headers = [CONTENT_TYPE, AUTHORIZATION];
+    match mode {
+        // Local dev: allow any origin (supports React at localhost:5173, Vite,
+        // Create React App, etc. without extra configuration).
+        DeploymentMode::Local => CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(methods)
+            .allow_headers(headers)
+            .max_age(std::time::Duration::from_secs(86_400)),
+        // Team / self-hosted: restrict to same-origin (operator configures
+        // a reverse proxy that handles CORS at the edge).  Specific allowed
+        // origins can be added here when `BootstrapConfig` gains an
+        // `allowed_origins` field.
+        DeploymentMode::SelfHostedTeam => CorsLayer::new()
+            .allow_methods(methods)
+            .allow_headers(headers)
+            .max_age(std::time::Duration::from_secs(86_400)),
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
