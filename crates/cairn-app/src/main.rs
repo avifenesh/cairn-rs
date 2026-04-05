@@ -34,6 +34,7 @@ use cairn_domain::{ApprovalDecision, ApprovalId, ProjectKey, RunId, TaskId};
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
+use cairn_runtime::tenants::TenantService;
 use cairn_runtime::InMemoryServices;
 use cairn_store::projections::{ApprovalReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
 use cairn_store::{EventLog, EventPosition, StoredEvent};
@@ -1103,6 +1104,39 @@ async fn db_status_handler(State(state): State<AppState>) -> Json<DbStatusRespon
     }
 }
 
+// ── Admin handlers ────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct CreateTenantRequest {
+    tenant_id: String,
+    name: String,
+}
+
+/// `POST /v1/admin/tenants` — create a new tenant.
+async fn create_tenant_handler(
+    State(state): State<AppState>,
+    Json(body): Json<CreateTenantRequest>,
+) -> impl IntoResponse {
+    match TenantService::create(
+        &state.runtime.tenants,
+        cairn_domain::TenantId::new(body.tenant_id),
+        body.name,
+    )
+    .await
+    {
+        Ok(record) => (StatusCode::CREATED, axum::Json(serde_json::json!({
+            "tenant_id": record.tenant_id,
+            "name":      record.name,
+        })))
+        .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": e.to_string() })),
+        )
+        .into_response(),
+    }
+}
+
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 fn parse_args_from(args: &[String]) -> BootstrapConfig {
@@ -1325,6 +1359,8 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/providers/health", get(provider_health_handler))
         .route("/v1/events", get(list_events_handler))
         .route("/v1/events/append", post(append_events_handler))
+        // Admin routes
+        .route("/v1/admin/tenants", post(create_tenant_handler))
         // DB diagnostics
         .route("/v1/db/status", get(db_status_handler))
         // ── Middleware stack ──────────────────────────────────────────────
