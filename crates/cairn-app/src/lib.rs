@@ -6517,6 +6517,86 @@ async fn revoke_workspace_share_handler(
     }
 }
 
+/// `DELETE /v1/credentials/:id` — revoke (soft-delete) a credential by ID.
+///
+/// Credential deletion is modelled as a revoke: the record is retained with
+/// `active = false` for audit history.  Returns 404 when the credential does
+/// not exist or was already revoked.
+async fn delete_credential_handler(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Some(denied) = require_feature(&state.config, CREDENTIAL_MANAGEMENT) {
+        return denied;
+    }
+    let credential_id = CredentialId::new(id);
+    let existing = match state.runtime.credentials.get(&credential_id).await {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "credential not found")
+                .into_response()
+        }
+        Err(err) => return runtime_error_response(err),
+    };
+    match state.runtime.credentials.revoke(&credential_id).await {
+        Ok(record) => {
+            let _ = state
+                .runtime
+                .audit
+                .record(
+                    existing.tenant_id.clone(),
+                    audit_actor_id(&principal),
+                    "delete_credential".to_owned(),
+                    "credential".to_owned(),
+                    credential_id.to_string(),
+                    AuditOutcome::Success,
+                    serde_json::json!({ "provider_id": existing.name }),
+                )
+                .await;
+            (StatusCode::OK, Json(credential_summary(record))).into_response()
+        }
+        Err(err) => runtime_error_response(err),
+    }
+}
+
+/// `POST /v1/resources/:id/share` — share a resource with another workspace.
+///
+/// Generic per-resource sharing requires the multi-tenant sharing
+/// infrastructure defined in RFC 008.  Workspace-scoped shares are already
+/// available via `POST /v1/admin/workspaces/:id/shares`.
+/// This endpoint is reserved for the future per-resource surface.
+async fn share_resource_handler(
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+) -> impl IntoResponse {
+    AppApiError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "not_implemented",
+        "generic resource sharing is not yet implemented; \
+         use POST /v1/admin/workspaces/:id/shares for workspace-scoped shares",
+    )
+    .into_response()
+}
+
+/// `POST /v1/resources/shares/:id/revoke` — revoke a generic resource share.
+///
+/// Workspace share revocation is available at
+/// `DELETE /v1/admin/workspaces/:id/shares/:share_id`.
+/// This endpoint is reserved for the future per-resource sharing surface.
+async fn revoke_resource_share_handler(
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+) -> impl IntoResponse {
+    AppApiError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "not_implemented",
+        "generic resource share revocation is not yet implemented; \
+         use DELETE /v1/admin/workspaces/:id/shares/:share_id for workspace-scoped shares",
+    )
+    .into_response()
+}
+
 async fn store_credential_handler(
     State(state): State<Arc<AppState>>,
     Path(tenant_id): Path<String>,
@@ -14515,10 +14595,6 @@ async fn export_bundle_by_format_handler(
         ),
     )
 }
-
-stub_handler!(delete_credential_handler);
-stub_handler!(revoke_resource_share_handler);
-stub_handler!(share_resource_handler);
 
 /// `POST /v1/evals/runs/:id/compare-baseline`
 /// Compare an eval run against the locked baseline for its prompt asset.
