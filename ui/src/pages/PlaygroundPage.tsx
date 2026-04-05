@@ -14,6 +14,11 @@ const DEFAULT_SYSTEM_PROMPT =
 
 const LS_SYSTEM_PROMPT = "cairn_playground_system_prompt";
 const LS_SYSTEM_OPEN   = "cairn_playground_system_open";
+const LS_TEMPERATURE   = "cairn_playground_temperature";
+const LS_MAX_TOKENS    = "cairn_playground_max_tokens";
+
+const DEFAULT_TEMPERATURE = 0.7;
+const DEFAULT_MAX_TOKENS  = 2048;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,9 +37,15 @@ interface Message {
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 const getToken = () => localStorage.getItem("cairn_token") ?? import.meta.env.VITE_API_TOKEN ?? "";
 
+interface GenerateParams {
+  model:       string;
+  messages:    { role: string; content: string }[];
+  temperature: number;
+  max_tokens:  number;
+}
+
 function streamGenerate(
-  model: string,
-  messages: { role: string; content: string }[],
+  params: GenerateParams,
   onToken: (text: string) => void,
   onDone:  (meta: { latency_ms: number; model: string }) => void,
   onError: (msg: string) => void,
@@ -49,7 +60,12 @@ function streamGenerate(
           "Content-Type": "application/json",
           Authorization: `Bearer ${getToken()}`,
         },
-        body: JSON.stringify({ model, messages }),
+        body: JSON.stringify({
+          model:      params.model,
+          messages:   params.messages,
+          temperature: params.temperature,
+          max_tokens:  params.max_tokens,
+        }),
         signal: controller.signal,
       });
 
@@ -116,6 +132,71 @@ function ModelSelector({ value, onChange, models, disabled }: {
         {models.map((m) => <option key={m} value={m}>{m}</option>)}
       </select>
       <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+    </div>
+  );
+}
+
+// ── Model settings row ────────────────────────────────────────────────────────
+
+interface ModelSettingsProps {
+  temperature: number;
+  onTemperature: (v: number) => void;
+  maxTokens: number;
+  onMaxTokens: (v: number) => void;
+  disabled: boolean;
+}
+
+function ModelSettings({ temperature, onTemperature, maxTokens, onMaxTokens, disabled }: ModelSettingsProps) {
+  return (
+    <div className="flex items-center gap-6 px-4 py-2 border-b border-zinc-800 bg-zinc-950 shrink-0">
+      {/* Temperature */}
+      <div className="flex items-center gap-2.5 min-w-0">
+        <label className="text-[11px] font-medium text-zinc-500 whitespace-nowrap">Temp</label>
+        <input
+          type="range"
+          min={0} max={2} step={0.1}
+          value={temperature}
+          onChange={(e) => onTemperature(Number(e.target.value))}
+          disabled={disabled}
+          className="w-24 accent-indigo-500 disabled:opacity-40 cursor-pointer"
+        />
+        <span className="text-[12px] font-mono text-zinc-300 w-8 text-right tabular-nums">
+          {temperature.toFixed(1)}
+        </span>
+        {temperature === 0 && (
+          <span className="text-[10px] text-sky-500">deterministic</span>
+        )}
+        {temperature >= 1.5 && (
+          <span className="text-[10px] text-amber-500">creative</span>
+        )}
+      </div>
+
+      <div className="w-px h-4 bg-zinc-800 shrink-0" />
+
+      {/* Max tokens */}
+      <div className="flex items-center gap-2.5">
+        <label className="text-[11px] font-medium text-zinc-500 whitespace-nowrap">Max tokens</label>
+        <input
+          type="number"
+          min={64} max={8192} step={64}
+          value={maxTokens}
+          onChange={(e) => {
+            const v = Math.max(64, Math.min(8192, Number(e.target.value) || 64));
+            onMaxTokens(v);
+          }}
+          disabled={disabled}
+          className="w-20 rounded border border-zinc-800 bg-zinc-900 text-[12px] font-mono
+                     text-zinc-300 px-2 py-1 text-right
+                     focus:outline-none focus:border-indigo-500
+                     disabled:opacity-40 [appearance:textfield]
+                     [&::-webkit-outer-spin-button]:appearance-none
+                     [&::-webkit-inner-spin-button]:appearance-none"
+        />
+      </div>
+
+      <div className="ml-auto text-[10px] text-zinc-700">
+        passed to model as <code className="text-zinc-600">temperature</code> · <code className="text-zinc-600">max_tokens</code>
+      </div>
     </div>
   );
 }
@@ -288,6 +369,14 @@ export function PlaygroundPage() {
     () => localStorage.getItem(LS_SYSTEM_OPEN) === "true"
   );
 
+  // Generation settings — persisted in localStorage
+  const [temperature, setTemperatureRaw] = useState<number>(
+    () => parseFloat(localStorage.getItem(LS_TEMPERATURE) ?? String(DEFAULT_TEMPERATURE))
+  );
+  const [maxTokens, setMaxTokensRaw] = useState<number>(
+    () => parseInt(localStorage.getItem(LS_MAX_TOKENS) ?? String(DEFAULT_MAX_TOKENS), 10)
+  );
+
   function setSystemPrompt(v: string) {
     setSystemPromptRaw(v);
     localStorage.setItem(LS_SYSTEM_PROMPT, v);
@@ -296,6 +385,14 @@ export function PlaygroundPage() {
     const next = !systemOpen;
     setSystemOpen(next);
     localStorage.setItem(LS_SYSTEM_OPEN, String(next));
+  }
+  function setTemperature(v: number) {
+    setTemperatureRaw(v);
+    localStorage.setItem(LS_TEMPERATURE, String(v));
+  }
+  function setMaxTokens(v: number) {
+    setMaxTokensRaw(v);
+    localStorage.setItem(LS_MAX_TOKENS, String(v));
   }
 
   const abortRef    = useRef<AbortController | null>(null);
@@ -336,8 +433,7 @@ export function PlaygroundPage() {
     [...messages, userMsg].forEach((m) => history.push({ role: m.role, content: m.content }));
 
     abortRef.current = streamGenerate(
-      activeModel,
-      history,
+      { model: activeModel, messages: history, temperature, max_tokens: maxTokens },
       (token) => {
         setMessages((prev) => {
           const next = [...prev];

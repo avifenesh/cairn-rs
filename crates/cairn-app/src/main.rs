@@ -1675,6 +1675,123 @@ async fn ollama_delete_model_handler(
     }
 }
 
+// ── Ollama model info handler ─────────────────────────────────────────────────
+
+/// `GET /v1/providers/ollama/models/:name/info` — detailed info for one model.
+///
+/// Calls `POST OLLAMA_HOST/api/show` + `GET OLLAMA_HOST/api/tags` and returns
+/// the fields most useful for an operator dashboard:
+///
+/// ```json
+/// {
+///   "name": "qwen3:8b",
+///   "family": "qwen3",
+///   "format": "gguf",
+///   "parameter_size": "8.2B",
+///   "parameter_count": 8190735360,
+///   "quantization_level": "Q4_K_M",
+///   "context_length": 40960,
+///   "size_bytes": 5234519167,
+///   "size_human": "4.9 GB"
+/// }
+/// ```
+async fn ollama_model_info_handler(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    let Some(provider) = &state.ollama else {
+        return (StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "Ollama not configured"}))).into_response();
+    };
+
+    let host   = provider.host().to_owned();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_default();
+
+    // ── Call /api/show ────────────────────────────────────────────────────────
+    let show_resp = match client.post(format!("{host}/api/show"))
+        .json(&serde_json::json!({"name": name}))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => {
+            let msg = r.text().await.unwrap_or_default();
+            return (StatusCode::NOT_FOUND,
+                axum::Json(serde_json::json!({"error": msg}))).into_response();
+        }
+        Err(e) => return (StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    };
+
+    let show: serde_json::Value = match show_resp.json().await {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    };
+
+    // ── Extract fields from `details` + `model_info` ─────────────────────────
+    let details      = &show["details"];
+    let model_info   = &show["model_info"];
+
+    let family             = details["family"].as_str().unwrap_or("unknown");
+    let format             = details["format"].as_str().unwrap_or("unknown");
+    let parameter_size     = details["parameter_size"].as_str().unwrap_or("unknown");
+    let quantization_level = details["quantization_level"].as_str().unwrap_or("unknown");
+
+    // Derive architecture key (e.g. "qwen3", "llama") for model_info lookups.
+    let arch = family;
+    let parameter_count = model_info
+        .get("general.parameter_count")
+        .and_then(|v| v.as_u64());
+    let context_length = model_info
+        .get(format!("{arch}.context_length"))
+        .and_then(|v| v.as_u64())
+        .or_else(|| model_info.get("llama.context_length").and_then(|v| v.as_u64()));
+    let embedding_length = model_info
+        .get(format!("{arch}.embedding_length"))
+        .and_then(|v| v.as_u64());
+
+    // ── Get disk size from /api/tags ──────────────────────────────────────────
+    let (size_bytes, size_human) = match client.get(format!("{host}/api/tags")).send().await {
+        Ok(r) if r.status().is_success() => {
+            if let Ok(tags) = r.json::<serde_json::Value>().await {
+                let size = tags["models"]
+                    .as_array()
+                    .and_then(|arr| arr.iter().find(|m| m["name"].as_str() == Some(&name)))
+                    .and_then(|m| m["size"].as_u64())
+                    .unwrap_or(0);
+                let human = if size >= 1_073_741_824 {
+                    format!("{:.1} GB", size as f64 / 1_073_741_824.0)
+                } else if size >= 1_048_576 {
+                    format!("{:.0} MB", size as f64 / 1_048_576.0)
+                } else {
+                    format!("{size} B")
+                };
+                (size, human)
+            } else {
+                (0, "unknown".to_owned())
+            }
+        }
+        _ => (0, "unknown".to_owned()),
+    };
+
+    (StatusCode::OK, axum::Json(serde_json::json!({
+        "name":               name,
+        "family":             family,
+        "format":             format,
+        "parameter_size":     parameter_size,
+        "parameter_count":    parameter_count,
+        "quantization_level": quantization_level,
+        "context_length":     context_length,
+        "embedding_length":   embedding_length,
+        "size_bytes":         if size_bytes > 0 { serde_json::Value::Number(size_bytes.into()) } else { serde_json::Value::Null },
+        "size_human":         size_human,
+    }))).into_response()
+}
+
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 fn parse_args_from(args: &[String]) -> BootstrapConfig {
@@ -2287,11 +2404,12 @@ fn build_router(state: AppState) -> Router {
         // Admin routes
         .route("/v1/admin/tenants", post(create_tenant_handler))
         // Ollama local LLM provider
-        .route("/v1/providers/ollama/models",   get(ollama_models_handler))
-        .route("/v1/providers/ollama/generate", post(ollama_generate_handler))
-        .route("/v1/providers/ollama/stream",   post(ollama_stream_handler))
-        .route("/v1/providers/ollama/pull",     post(ollama_pull_handler))
-        .route("/v1/providers/ollama/delete",   post(ollama_delete_model_handler))
+        .route("/v1/providers/ollama/models",          get(ollama_models_handler))
+        .route("/v1/providers/ollama/models/:name/info", get(ollama_model_info_handler))
+        .route("/v1/providers/ollama/generate",        post(ollama_generate_handler))
+        .route("/v1/providers/ollama/stream",          post(ollama_stream_handler))
+        .route("/v1/providers/ollama/pull",            post(ollama_pull_handler))
+        .route("/v1/providers/ollama/delete",          post(ollama_delete_model_handler))
         .route("/v1/memory/embed",              post(ollama_embed_handler))
         // DB diagnostics
         .route("/v1/db/status", get(db_status_handler))
