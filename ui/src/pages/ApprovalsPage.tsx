@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useToast } from "../components/Toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -198,6 +199,7 @@ function ResolvedCard({ approval }: { approval: ApprovalRecord }) {
 
 export function ApprovalsPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [optimisticResolved, setOptimisticResolved] = useState<
     Record<string, ApprovalDecision>
   >({});
@@ -215,11 +217,15 @@ export function ApprovalsPage() {
       onMutate: ({ id, decision }) => {
         setOptimisticResolved((prev) => ({ ...prev, [id]: decision }));
       },
+      onSuccess: (_data, { decision }) => {
+        toast.success(decision === 'approved' ? 'Approval granted.' : 'Approval denied.');
+      },
       onSettled: () => {
         queryClient.invalidateQueries({ queryKey: ["approvals"] });
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       },
       onError: (_err, { id }) => {
+        toast.error('Failed to resolve approval — please try again.');
         setOptimisticResolved((prev) => {
           const next = { ...prev };
           delete next[id];

@@ -1,4 +1,4 @@
-import { Coins,
+import { Coins, LogOut,
   LayoutDashboard,
   Play,
   MonitorPlay,
@@ -10,6 +10,7 @@ import { Coins,
   ChevronRight,
 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { clearStoredToken } from '../lib/api';
 
 export type NavPage =
   | 'dashboard'
@@ -79,9 +80,19 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
         })}
       </nav>
 
-      {/* Footer hint */}
-      <div className="px-4 py-3 border-t border-zinc-800">
-        <p className="text-[10px] text-zinc-600 font-mono">localhost:3000</p>
+      {/* Footer: server URL + logout */}
+      <div className="px-3 py-3 border-t border-zinc-800 space-y-2">
+        <p className="px-1 text-[10px] text-zinc-600 font-mono truncate"
+           title={import.meta.env.VITE_API_URL ?? 'localhost:3000'}>
+          {(import.meta.env.VITE_API_URL ?? 'localhost:3000').replace(/^https?:\/\//, '')}
+        </p>
+        <button
+          onClick={() => { clearStoredToken(); window.location.reload(); }}
+          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs text-zinc-500 hover:bg-zinc-900 hover:text-red-400 transition-colors group"
+        >
+          <LogOut size={13} className="group-hover:text-red-400 transition-colors" />
+          Sign out
+        </button>
       </div>
     </aside>
   );

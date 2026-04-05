@@ -4811,6 +4811,19 @@ impl InMemoryStore {
     }
 
     /// Scan all prompt assets across every project (RFC 010 operator view).
+    /// Scan all tasks across every project (operator view).
+    pub async fn list_all_tasks(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<TaskRecord>, crate::StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut tasks: Vec<TaskRecord> = state.tasks.values().cloned().collect();
+        // Most-recent first.
+        tasks.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.task_id.as_str().cmp(b.task_id.as_str())));
+        Ok(tasks.into_iter().skip(offset).take(limit).collect())
+    }
+
     pub async fn list_all_prompt_assets(
         &self,
         limit: usize,
