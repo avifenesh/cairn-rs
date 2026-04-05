@@ -46,7 +46,12 @@ use cairn_store::DbAdapter;
 use cairn_store::pg::{PgAdapter, PgEventLog};
 use cairn_store::pg::PgMigrationRunner;
 use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
+use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
+use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
+use cairn_memory::ingest::{IngestRequest, IngestService, SourceType};
+use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
+use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqlitePoolOptions;
 use tokio_stream::Stream;
@@ -88,6 +93,12 @@ struct AppState {
     sqlite: Option<Arc<SqliteBackend>>,
     /// Deployment mode captured at startup for the /v1/settings endpoint.
     mode: DeploymentMode,
+    /// In-memory document store for knowledge ingestion and retrieval.
+    document_store: Arc<InMemoryDocumentStore>,
+    /// Retrieval engine backed by the document store.
+    retrieval: Arc<InMemoryRetrieval>,
+    /// Ingest pipeline (chunker + store writer).
+    ingest: Arc<IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>>,
 }
 
 // ── Response types ───────────────────────────────────────────────────────────
@@ -1456,6 +1467,13 @@ async fn main() {
 
     // ── App state ─────────────────────────────────────────────────────────────
     let runtime = Arc::new(InMemoryServices::new());
+    let doc_store = Arc::new(InMemoryDocumentStore::new());
+    let ingest_pipeline = Arc::new(IngestPipeline::new(
+        doc_store.clone(),
+        ParagraphChunker { max_chunk_size: 512 },
+    ));
+    let retrieval = Arc::new(InMemoryRetrieval::new(doc_store.clone()));
+
     let state = AppState {
         runtime,
         started_at: Arc::new(Instant::now()),
@@ -1463,6 +1481,9 @@ async fn main() {
         pg,
         sqlite,
         mode: config.mode,
+        document_store: doc_store,
+        retrieval,
+        ingest: ingest_pipeline,
     };
 
     // ── Router ────────────────────────────────────────────────────────────────
@@ -1524,6 +1545,171 @@ async fn overview_handler(
     })))
 }
 
+// ── Embedded frontend (ui/dist/) ──────────────────────────────────────────────
+//
+// In debug builds rust-embed reads files from disk at request time so you can
+// update ui/dist/ without recompiling.  In release builds the files are baked
+// into the binary — single-binary deployment with no external assets needed.
+
+#[derive(RustEmbed)]
+#[folder = "../../ui/dist"]
+struct FrontendAssets;
+
+/// Serve an embedded frontend file, falling back to `index.html` for any path
+/// not found (SPA client-side routing).  API routes registered before this
+/// fallback continue to take priority.
+async fn serve_frontend(uri: axum::http::Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+
+    // Empty path → index.html
+    let path = if path.is_empty() { "index.html" } else { path };
+
+    match FrontendAssets::get(path) {
+        Some(file) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            (
+                [(axum::http::header::CONTENT_TYPE, mime.as_ref().to_owned())],
+                file.data.to_vec(),
+            )
+                .into_response()
+        }
+        // SPA fallback: any unknown path returns index.html so React Router
+        // handles client-side navigation (e.g. #settings, #runs).
+        None => match FrontendAssets::get("index.html") {
+            Some(index) => (
+                [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8".to_owned())],
+                index.data.to_vec(),
+            )
+                .into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        },
+    }
+}
+
+
+// ── Memory / knowledge handlers ───────────────────────────────────────────────
+
+/// `GET /v1/sources` — list all ingested knowledge sources.
+async fn list_sources_handler(
+    State(state): State<AppState>,
+    Query(q): Query<ProjectQuery>,
+) -> impl axum::response::IntoResponse {
+    let project = q.project_key().unwrap_or_else(|| ProjectKey::new("default", "default", "default"));
+    let sources = state.document_store.list_sources(&project);
+    (StatusCode::OK, Json(sources))
+}
+
+#[derive(serde::Deserialize)]
+struct MemorySearchQuery {
+    tenant_id:    Option<String>,
+    workspace_id: Option<String>,
+    project_id:   Option<String>,
+    query_text:   Option<String>,
+    #[serde(default = "default_search_limit")]
+    limit: usize,
+}
+
+fn default_search_limit() -> usize { 10 }
+
+impl MemorySearchQuery {
+    fn project(&self) -> ProjectKey {
+        ProjectKey::new(
+            self.tenant_id.as_deref().unwrap_or("default"),
+            self.workspace_id.as_deref().unwrap_or("default"),
+            self.project_id.as_deref().unwrap_or("default"),
+        )
+    }
+}
+
+/// `GET /v1/memory/search` — keyword search over ingested documents.
+async fn memory_search_handler(
+    State(state): State<AppState>,
+    Query(q): Query<MemorySearchQuery>,
+) -> impl axum::response::IntoResponse {
+    let query_text = q.query_text.clone().unwrap_or_default();
+    if query_text.is_empty() {
+        return (StatusCode::OK, Json(serde_json::json!({ "results": [] }))).into_response();
+    }
+    match RetrievalService::query(
+        state.retrieval.as_ref(),
+        RetrievalQuery {
+            project: q.project(),
+            query_text,
+            mode: RetrievalMode::LexicalOnly,
+            reranker: RerankerStrategy::None,
+            limit: q.limit,
+            metadata_filters: Vec::new(),
+            scoring_policy: None,
+        },
+    ).await {
+        Ok(response) => (StatusCode::OK, Json(serde_json::json!({
+            "results": response.results.iter().map(|r| serde_json::json!({
+                "chunk_id":    r.chunk.chunk_id,
+                "document_id": r.chunk.document_id,
+                "source_id":   r.chunk.source_id,
+                "text":        r.chunk.text,
+                "score":       r.score,
+            })).collect::<Vec<_>>()
+        }))).into_response(),
+        Err(e) => internal_error(e.to_string()).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct MemoryIngestBody {
+    tenant_id:    Option<String>,
+    workspace_id: Option<String>,
+    project_id:   Option<String>,
+    source_id:    String,
+    document_id:  String,
+    content:      String,
+    source_type:  Option<String>,
+}
+
+impl MemoryIngestBody {
+    fn project(&self) -> ProjectKey {
+        ProjectKey::new(
+            self.tenant_id.as_deref().unwrap_or("default"),
+            self.workspace_id.as_deref().unwrap_or("default"),
+            self.project_id.as_deref().unwrap_or("default"),
+        )
+    }
+}
+
+/// `POST /v1/memory/ingest` — ingest a document into the knowledge store.
+async fn memory_ingest_handler(
+    State(state): State<AppState>,
+    Json(body): Json<MemoryIngestBody>,
+) -> impl axum::response::IntoResponse {
+    use cairn_domain::{KnowledgeDocumentId, SourceId};
+    let project     = body.project();
+    let source_id   = SourceId::new(body.source_id);
+    let document_id = KnowledgeDocumentId::new(body.document_id);
+    let source_type = match body.source_type.as_deref() {
+        Some("markdown") => SourceType::Markdown,
+        _                => SourceType::PlainText,
+    };
+    state.document_store.register_source(&project, &source_id);
+    match state.ingest.submit(IngestRequest {
+        document_id: document_id.clone(),
+        source_id:   source_id.clone(),
+        source_type,
+        project:     project.clone(),
+        content:     body.content,
+        tags:        Vec::new(),
+        corpus_id:   None,
+        import_id:   None,
+        bundle_source_id: None,
+    }).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({
+            "document_id": document_id,
+            "source_id":   source_id,
+            "status":      "ingested",
+        }))).into_response(),
+        Err(e) => internal_error(e.to_string()).into_response(),
+    }
+}
+
 fn build_router(state: AppState) -> Router {
     Router::new()
         // ── Public (no auth required) ─────────────────────────────────────
@@ -1559,8 +1745,16 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/admin/tenants", post(create_tenant_handler))
         // DB diagnostics
         .route("/v1/db/status", get(db_status_handler))
+        .route("/v1/sources", get(list_sources_handler))
+        .route("/v1/memory/search", get(memory_search_handler))
+        .route("/v1/memory/ingest", post(memory_ingest_handler))
         .route("/v1/settings", get(settings_handler))
         .route("/v1/overview", get(overview_handler))
+        // ── Embedded frontend (SPA fallback) ──────────────────────────────
+        // Any path not matched by an API route above is handled by the React
+        // app.  Static assets (JS/CSS/icons) are served with the correct MIME
+        // type; all other paths return index.html for client-side routing.
+        .fallback(get(serve_frontend))
         // ── Middleware stack ──────────────────────────────────────────────
         // TraceLayer logs method, path, status, and latency for every request.
         .layer(

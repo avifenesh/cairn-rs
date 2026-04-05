@@ -204,6 +204,43 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/providers/health — list provider health records. */
     getProviderHealth: (): Promise<unknown[]> => get("/v1/providers/health"),
+
+    // ── Memory / Knowledge ───────────────────────────────────────────────────
+
+    /** GET /v1/memory/search — lexical retrieval over the knowledge store. */
+    searchMemory: (params: {
+      query_text: string;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+      limit?: number;
+    }): Promise<import("./types").MemorySearchResponse> => {
+      const qs = new URLSearchParams();
+      qs.set("query_text",   params.query_text);
+      qs.set("tenant_id",    params.tenant_id    ?? "default_tenant");
+      qs.set("workspace_id", params.workspace_id ?? "default_workspace");
+      qs.set("project_id",   params.project_id   ?? "default_project");
+      if (params.limit !== undefined) qs.set("limit", String(params.limit));
+      return get(`/v1/memory/search?${qs}`);
+    },
+
+    /** GET /v1/sources — list registered signal sources. */
+    getSources: (params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").SourceRecord[]> => {
+      const qs = new URLSearchParams();
+      if (params?.tenant_id)    qs.set("tenant_id",    params.tenant_id);
+      if (params?.workspace_id) qs.set("workspace_id", params.workspace_id);
+      if (params?.project_id)   qs.set("project_id",   params.project_id);
+      const query = qs.toString() ? `?${qs}` : "";
+      return get(`/v1/sources${query}`);
+    },
+
+    /** GET /v1/sources/:id/quality — quality metrics for a single source. */
+    getSourceQuality: (sourceId: string): Promise<import("./types").SourceQualityRecord> =>
+      get(`/v1/sources/${encodeURIComponent(sourceId)}/quality`),
   };
 }
 

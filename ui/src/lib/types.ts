@@ -163,6 +163,57 @@ export interface ApprovalRecord {
   created_at: number; // unix ms
 }
 
+// ── Memory / Knowledge ───────────────────────────────────────────────────────
+
+/** One chunk returned by /v1/memory/search */
+export interface MemoryChunkResult {
+  score: number;
+  chunk: {
+    chunk_id: string;
+    document_id: string;
+    source_id: string;
+    source_type: string;
+    text: string;
+    position: number;
+    created_at: number;
+    content_hash: string | null;
+    credibility_score: number | null;
+  };
+  breakdown: {
+    lexical_relevance: number;
+    freshness: number;
+    source_credibility: number;
+  };
+}
+
+/** GET /v1/memory/search response */
+export interface MemorySearchResponse {
+  results: MemoryChunkResult[];
+  diagnostics?: {
+    mode_used: string;
+    results_returned: number;
+    candidates_generated: number;
+    latency_ms: number;
+  };
+}
+
+/** One entry from GET /v1/sources */
+export interface SourceRecord {
+  source_id: string;
+  document_count: number;
+  avg_quality_score: number;
+  last_ingested_at_ms: number | null;
+}
+
+/** GET /v1/sources/:id/quality */
+export interface SourceQualityRecord {
+  source_id: string;
+  credibility_score: number;
+  total_retrievals: number;
+  avg_rating: number | null;
+  chunk_count: number;
+}
+
 // ── Generic list response ─────────────────────────────────────────────────────
 
 /** Paginated list wrapper used by some endpoints */

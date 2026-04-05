@@ -4,6 +4,7 @@ import { LoginPage } from './pages/LoginPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { CostsPage } from './pages/CostsPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { MemoryPage } from './pages/MemoryPage';
 import { ProvidersPage } from './pages/ProvidersPage';
 import { RunsPage } from './pages/RunsPage';
 import { SessionsPage } from './pages/SessionsPage';
@@ -27,6 +28,7 @@ export default function App() {
           case 'sessions':  return <SessionsPage />;
           case 'approvals': return <ApprovalsPage />;
           case 'providers': return <ProvidersPage />;
+          case 'memory':    return <MemoryPage />;
           case 'costs':     return <CostsPage />;
           case 'settings':  return <SettingsPage />;
           default:          return null;
