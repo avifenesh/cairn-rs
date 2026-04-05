@@ -12,18 +12,7 @@
 use cairn_domain::providers::{EmbeddingProvider, ProviderAdapterError};
 use cairn_runtime::services::{OllamaEmbeddingProvider, OllamaProvider};
 
-// ── (1) OllamaProvider::from_env — None when unset ───────────────────────────
-
-#[tokio::test]
-async fn ollama_provider_from_env_returns_none_when_unset() {
-    std::env::remove_var("OLLAMA_HOST");
-    assert!(
-        OllamaProvider::from_env().is_none(),
-        "from_env must return None when OLLAMA_HOST is not set"
-    );
-}
-
-// ── (2) OllamaProvider::new — correct host ────────────────────────────────────
+// ── (1) OllamaProvider::new — correct host (no env, no race) ─────────────────
 
 #[tokio::test]
 async fn ollama_provider_new_stores_host() {
@@ -37,32 +26,7 @@ async fn ollama_provider_default_local_uses_localhost() {
     assert_eq!(p.host(), "http://localhost:11434");
 }
 
-#[tokio::test]
-async fn ollama_provider_from_env_uses_env_var() {
-    std::env::set_var("OLLAMA_HOST", "http://remote-ollama:11434");
-    let p = OllamaProvider::from_env().expect("must be Some when OLLAMA_HOST is set");
-    assert_eq!(p.host(), "http://remote-ollama:11434");
-    std::env::remove_var("OLLAMA_HOST");
-}
-
-#[tokio::test]
-async fn ollama_provider_from_env_strips_trailing_slash() {
-    std::env::set_var("OLLAMA_HOST", "http://localhost:11434/");
-    let p = OllamaProvider::from_env().unwrap();
-    assert_eq!(p.host(), "http://localhost:11434", "trailing slash must be stripped");
-    std::env::remove_var("OLLAMA_HOST");
-}
-
-// ── (3) OllamaEmbeddingProvider::from_env — same pattern ─────────────────────
-
-#[tokio::test]
-async fn ollama_embedding_from_env_returns_none_when_unset() {
-    std::env::remove_var("OLLAMA_HOST");
-    assert!(
-        OllamaEmbeddingProvider::from_env().is_none(),
-        "from_env must return None when OLLAMA_HOST is not set"
-    );
-}
+// ── (2) OllamaEmbeddingProvider::new — same pattern ──────────────────────────
 
 #[tokio::test]
 async fn ollama_embedding_new_stores_host() {
@@ -76,12 +40,38 @@ async fn ollama_embedding_default_local_uses_localhost() {
     assert_eq!(p.host(), "http://localhost:11434");
 }
 
-#[tokio::test]
-async fn ollama_embedding_from_env_strips_trailing_slash() {
-    std::env::set_var("OLLAMA_HOST", "http://localhost:11434/");
-    let p = OllamaEmbeddingProvider::from_env().unwrap();
-    assert_eq!(p.host(), "http://localhost:11434");
+// ── (3) from_env tests — run sequentially to avoid env-var races ──────────────
+//
+// tokio tests run in parallel by default. Env var mutation is not thread-safe,
+// so all OLLAMA_HOST set/remove operations are in a single serialised test.
+
+#[test]
+fn ollama_from_env_behaviour() {
+    // Ensure unset → None for both providers.
     std::env::remove_var("OLLAMA_HOST");
+    assert!(OllamaProvider::from_env().is_none(),
+        "OllamaProvider::from_env must be None when OLLAMA_HOST unset");
+    assert!(OllamaEmbeddingProvider::from_env().is_none(),
+        "OllamaEmbeddingProvider::from_env must be None when OLLAMA_HOST unset");
+
+    // Set and read back.
+    std::env::set_var("OLLAMA_HOST", "http://remote-ollama:11434");
+    let p = OllamaProvider::from_env().expect("must be Some when OLLAMA_HOST is set");
+    assert_eq!(p.host(), "http://remote-ollama:11434");
+    let e = OllamaEmbeddingProvider::from_env().expect("must be Some when OLLAMA_HOST is set");
+    assert_eq!(e.host(), "http://remote-ollama:11434");
+
+    // Trailing slash stripped.
+    std::env::set_var("OLLAMA_HOST", "http://localhost:11434/");
+    let p2 = OllamaProvider::from_env().unwrap();
+    assert_eq!(p2.host(), "http://localhost:11434", "trailing slash must be stripped");
+    let e2 = OllamaEmbeddingProvider::from_env().unwrap();
+    assert_eq!(e2.host(), "http://localhost:11434", "trailing slash must be stripped");
+
+    // Clean up.
+    std::env::remove_var("OLLAMA_HOST");
+    assert!(OllamaProvider::from_env().is_none());
+    assert!(OllamaEmbeddingProvider::from_env().is_none());
 }
 
 // ── (4) health_check — error when no server reachable ────────────────────────
