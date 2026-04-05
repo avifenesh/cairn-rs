@@ -1262,6 +1262,111 @@ async fn resume_run_handler(
     }
 }
 
+// ── Ollama handler ────────────────────────────────────────────────────────────
+
+/// `GET /v1/providers/ollama/models` — list models available in the local Ollama registry.
+///
+/// Returns `200` with a JSON array of model names when Ollama is configured and
+/// reachable, `503` when Ollama is not wired (OLLAMA_HOST unset), and `502`
+/// when the daemon cannot be reached at call time.
+async fn ollama_models_handler(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let Some(provider) = &state.ollama else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "error": "Ollama provider not configured — set OLLAMA_HOST to enable"
+            })),
+        ).into_response();
+    };
+
+    match provider.list_models().await {
+        Ok(models) => {
+            let names: Vec<&str> = models.iter().map(|m: &OllamaModel| m.name.as_str()).collect();
+            (StatusCode::OK, axum::Json(serde_json::json!({
+                "host":   provider.host(),
+                "models": names,
+                "count":  names.len(),
+            }))).into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({
+                "error": format!("Ollama unreachable: {e}")
+            })),
+        ).into_response(),
+    }
+}
+
+
+/// `POST /v1/providers/ollama/generate` — run a prompt through the local Ollama LLM.
+///
+/// Body: `{ "model": "llama3", "prompt": "Hello, world!" }`
+/// Response: `{ "text", "model", "tokens_in", "tokens_out", "latency_ms" }`
+///
+/// Returns 503 when OLLAMA_HOST is not configured, 502 when the daemon is
+/// unreachable, 500 on model errors.
+#[derive(serde::Deserialize)]
+struct OllamaGenerateRequest {
+    model:  Option<String>,
+    prompt: String,
+}
+
+async fn ollama_generate_handler(
+    State(state): State<AppState>,
+    Json(body): Json<OllamaGenerateRequest>,
+) -> impl IntoResponse {
+    let Some(provider) = &state.ollama else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "error": "Ollama provider not configured — set OLLAMA_HOST to enable"
+            })),
+        ).into_response();
+    };
+
+    let model_id = body.model
+        .as_deref()
+        .unwrap_or("llama3")
+        .to_owned();
+
+    let messages = vec![serde_json::json!({
+        "role":    "user",
+        "content": body.prompt,
+    })];
+
+    let settings = cairn_domain::providers::ProviderBindingSettings::default();
+    let start = std::time::Instant::now();
+
+    use cairn_domain::providers::GenerationProvider as _;
+    match provider.generate(&model_id, messages, &settings).await {
+        Ok(resp) => {
+            let latency_ms = start.elapsed().as_millis() as u64;
+            (StatusCode::OK, axum::Json(serde_json::json!({
+                "text":       resp.text,
+                "model":      resp.model_id,
+                "tokens_in":  resp.input_tokens,
+                "tokens_out": resp.output_tokens,
+                "latency_ms": latency_ms,
+            }))).into_response()
+        }
+        Err(e) => {
+            let (status, msg) = match &e {
+                cairn_domain::providers::ProviderAdapterError::TimedOut =>
+                    (StatusCode::GATEWAY_TIMEOUT, e.to_string()),
+                cairn_domain::providers::ProviderAdapterError::RateLimited =>
+                    (StatusCode::TOO_MANY_REQUESTS, e.to_string()),
+                cairn_domain::providers::ProviderAdapterError::TransportFailure(_) =>
+                    (StatusCode::BAD_GATEWAY, e.to_string()),
+                _ =>
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            };
+            (status, axum::Json(serde_json::json!({ "error": msg }))).into_response()
+        }
+    }
+}
+
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 fn parse_args_from(args: &[String]) -> BootstrapConfig {
@@ -1875,6 +1980,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/admin/tenants", post(create_tenant_handler))
         // Ollama local LLM provider
         .route("/v1/providers/ollama/models", get(ollama_models_handler))
+        .route("/v1/providers/ollama/generate", post(ollama_generate_handler))
         // DB diagnostics
         .route("/v1/db/status", get(db_status_handler))
         .route("/v1/sources", get(list_sources_handler))
