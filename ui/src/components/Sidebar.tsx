@@ -32,6 +32,7 @@ import {
 import { clsx } from 'clsx';
 import { useQuery } from '@tanstack/react-query';
 import { clearStoredToken } from '../lib/api';
+import { usePresence, type PresenceEntry } from '../hooks/usePresence';
 import type { ReactNode } from 'react';
 
 export type NavPage =
@@ -129,6 +130,30 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+// ── Presence dots ─────────────────────────────────────────────────────────────
+
+function PresenceDots({ entries }: { entries: PresenceEntry[] }) {
+  if (entries.length === 0) return null;
+  const shown = entries.slice(0, 3);
+  const overflow = entries.length - shown.length;
+  return (
+    <span className="ml-auto flex items-center gap-0.5 shrink-0">
+      {shown.map(e => (
+        <span
+          key={e.id}
+          className="inline-block w-[5px] h-[5px] rounded-full"
+          style={{ backgroundColor: e.color }}
+          title="Another user is viewing this page"
+          aria-hidden="true"
+        />
+      ))}
+      {overflow > 0 && (
+        <span className="text-[9px] text-zinc-600 font-mono leading-none">+{overflow}</span>
+      )}
+    </span>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface SidebarProps {
@@ -142,6 +167,8 @@ interface SidebarProps {
 export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose, onLogout }: SidebarProps): ReactNode {
   const server = (import.meta.env.VITE_API_URL ?? 'localhost:3000')
     .replace(/^https?:\/\//, '');
+
+  const presenceByPage = usePresence(current);
 
   // Fetch server version from X-Cairn-Version header via the health endpoint.
   const { data: serverVersion } = useQuery({
@@ -214,7 +241,8 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
               </p>
               <div className="space-y-0.5">
                 {group.items.map(({ id, label, icon: Icon }) => {
-                  const active = current === id;
+                  const active   = current === id;
+                  const visitors = presenceByPage.get(id) ?? [];
                   return (
                     <button
                       key={id}
@@ -239,7 +267,8 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
                           active ? 'text-indigo-500 dark:text-indigo-400' : 'text-gray-400 dark:text-zinc-500',
                         )}
                       />
-                      {label}
+                      <span className="truncate">{label}</span>
+                      <PresenceDots entries={visitors} />
                     </button>
                   );
                 })}

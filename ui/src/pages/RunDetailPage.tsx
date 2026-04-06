@@ -5,6 +5,7 @@ import {
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
 import { GanttView } from "../components/TimelineView";
+import { CopyButton } from "../components/CopyButton";
 import { defaultApi } from "../lib/api";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -138,7 +139,10 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <p className="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Run</p>
-              <p className="text-[15px] font-mono font-medium text-zinc-100 break-all">{runId}</p>
+              <p className="flex items-center gap-2 text-[15px] font-mono font-medium text-zinc-100 break-all">
+                {runId}
+                <CopyButton text={runId} label="Copy run ID" size={12} />
+              </p>
               {run && (
                 <p className="text-[12px] text-zinc-500 mt-1 font-mono">
                   {run.project.project_id} · {fmtTime(run.created_at)}

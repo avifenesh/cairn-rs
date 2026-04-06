@@ -695,7 +695,33 @@ function ChatBubble({ msg }: { msg: Message }) {
 
 // ── EmptyChat ─────────────────────────────────────────────────────────────────
 
-function EmptyChat({ model }: { model: string }) {
+function EmptyChat({ model, ollamaDown }: { model: string; ollamaDown?: boolean }) {
+  if (ollamaDown) {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center py-12 px-6">
+        <div className="w-10 h-10 rounded-full bg-amber-950/40 border border-amber-800/30 flex items-center justify-center">
+          <Bot size={18} className="text-amber-600" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-[13px] font-medium text-amber-500">Ollama is not reachable</p>
+          <p className="text-[11px] text-zinc-600 max-w-xs">
+            To use the Playground, you need Ollama running locally or a configured provider.
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-left max-w-xs space-y-1.5">
+          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Quick fix</p>
+          {[
+            '1. Install Ollama from ollama.ai',
+            '2. Run: ollama serve',
+            '3. Set OLLAMA_HOST and restart cairn-app',
+            '4. Pull a model: ollama pull llama3.2',
+          ].map(step => (
+            <p key={step} className="text-[11px] text-zinc-400 font-mono">{step}</p>
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center py-12">
       <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
@@ -1063,7 +1089,12 @@ export function PlaygroundPage() {
               <Loader2 size={10} className="animate-spin" /> Checking…
             </span>
           ) : ollamaDown ? (
-            <span className="text-[11px] text-amber-600">Ollama offline</span>
+            <span
+              className="text-[11px] text-amber-600 cursor-help"
+              title={`Ollama is unreachable.\n\nTo fix:\n1. Install Ollama: https://ollama.ai\n2. Start it: ollama serve\n3. Set OLLAMA_HOST env var and restart cairn-app\n4. Pull a model: ollama pull llama3.2`}
+            >
+              ⚠ Ollama offline
+            </span>
           ) : (
             <span className="text-[11px] text-zinc-600 flex items-center gap-1.5 hidden sm:flex">
               <Zap size={10} className="text-emerald-500" />
@@ -1148,7 +1179,7 @@ export function PlaygroundPage() {
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
             <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
               {primary.messages.length === 0
-                ? <EmptyChat model={activeModel} />
+                ? <EmptyChat model={activeModel} ollamaDown={ollamaDown} />
                 : primary.messages.map((msg, i) => <ChatBubble key={`msg-${i}-${msg.role}`} msg={msg} />)
               }
               <div ref={bottomRef1} />
@@ -1180,7 +1211,7 @@ export function PlaygroundPage() {
                 />
                 <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
                   {primary.messages.length === 0
-                    ? <EmptyChat model={activeModel} />
+                    ? <EmptyChat model={activeModel} ollamaDown={ollamaDown} />
                     : primary.messages.map((msg, i) => <ChatBubble key={`msg-${i}-${msg.role}`} msg={msg} />)
                   }
                   <div ref={bottomRef1} />
@@ -1200,7 +1231,7 @@ export function PlaygroundPage() {
                 />
                 <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
                   {secondary.messages.length === 0
-                    ? <EmptyChat model={cmpModel} />
+                    ? <EmptyChat model={cmpModel} ollamaDown={ollamaDown} />
                     : secondary.messages.map((msg, i) => <ChatBubble key={`msg-${i}-${msg.role}`} msg={msg} />)
                   }
                   <div ref={bottomRef2} />

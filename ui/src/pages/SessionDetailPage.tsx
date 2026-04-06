@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
+import { CopyButton } from "../components/CopyButton";
 import { defaultApi } from "../lib/api";
 import type { SessionState } from "../lib/types";
 
@@ -148,7 +149,10 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <p className="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Session</p>
-              <p className="text-[15px] font-mono font-medium text-zinc-100 break-all">{sessionId}</p>
+              <p className="flex items-center gap-2 text-[15px] font-mono font-medium text-zinc-100 break-all">
+                {sessionId}
+                <CopyButton text={sessionId} label="Copy session ID" size={12} />
+              </p>
               {session && (
                 <p className="text-[12px] text-zinc-500 mt-1 font-mono">
                   {session.project.tenant_id}

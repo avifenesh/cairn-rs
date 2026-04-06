@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw, Loader2, Unlock, LayoutList, LayoutGrid,
-  ChevronDown, ChevronRight, XCircle,
+  ChevronDown, ChevronRight, XCircle, ListChecks,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useTableKeyboard } from "../hooks/useTableKeyboard";
@@ -11,6 +11,7 @@ import { HelpTooltip } from "../components/HelpTooltip";
 import { StateBadge } from "../components/StateBadge";
 import { DataTable } from "../components/DataTable";
 import { useToast } from "../components/Toast";
+import { CopyButton } from "../components/CopyButton";
 import { defaultApi } from "../lib/api";
 import type { TaskRecord, TaskState } from "../lib/types";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
@@ -416,8 +417,13 @@ function BoardView({ tasks }: { tasks: TaskRecord[] }) {
   return (
     <div className="flex-1 overflow-x-auto overflow-y-hidden p-3">
       {totalVisible === 0 ? (
-        <div className="flex items-center justify-center h-full text-zinc-700 text-[13px]">
-          No tasks
+        <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-6">
+          <ListChecks size={28} className="text-zinc-700" />
+          <p className="text-[13px] text-zinc-600 font-medium">No tasks yet</p>
+          <p className="text-[11px] text-zinc-700 max-w-xs">
+            Tasks are created automatically when a run starts executing work.
+            Start a run in the <a href="#runs" onClick={() => { window.location.hash = "runs"; }} className="text-indigo-500 hover:text-indigo-400">Runs</a> page to see tasks appear here.
+          </p>
         </div>
       ) : (
         <div className="flex gap-2.5 h-full">
@@ -643,9 +649,22 @@ export function TasksPage() {
           )}
           {selCount > 0 && viewMode === "table" && (
             <button
-              onClick={() => cancelSelected.mutate()}
+              onClick={() => {
+                const cancelable = filtered.filter(t =>
+                  kbd.selectedKeys.has(t.task_id) &&
+                  !["completed","failed","canceled","dead_lettered"].includes(t.state)
+                ).length;
+                if (cancelable === 0) {
+                  toast.info("Selected tasks are already in a terminal state.");
+                  return;
+                }
+                if (!window.confirm(
+                  `Cancel ${cancelable} task${cancelable !== 1 ? "s" : ""}?\n\nThis will stop them from being executed. Tasks already running may complete their current step before stopping.`
+                )) return;
+                cancelSelected.mutate();
+              }}
               disabled={cancelSelected.isPending}
-              title="Cancel all selected non-terminal tasks"
+              title="Cancel selected non-terminal tasks"
               className="flex items-center gap-1.5 rounded border border-red-900/60 bg-red-950/30
                          text-red-400 text-[12px] px-2.5 py-1 hover:bg-red-950/60 hover:border-red-800
                          disabled:opacity-40 transition-colors"
@@ -691,9 +710,19 @@ export function TasksPage() {
 
       {/* Content */}
       {isLoading ? (
-        <div className="flex items-center justify-center flex-1 gap-2 text-zinc-600">
-          <Loader2 size={16} className="animate-spin" />
-          <span className="text-[13px]">Loading…</span>
+        /* Skeleton rows — gives users a sense of the layout while loading */
+        <div className="flex-1 overflow-hidden">
+          <div className="divide-y divide-zinc-800/40">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 px-4 h-9 animate-pulse">
+                <div className="h-2.5 w-28 rounded bg-zinc-800" />
+                <div className="h-2.5 w-20 rounded bg-zinc-800" />
+                <div className="h-4 w-16 rounded bg-zinc-800" />
+                <div className="h-2.5 w-20 rounded bg-zinc-800" />
+                <div className="ml-auto h-2.5 w-16 rounded bg-zinc-800" />
+              </div>
+            ))}
+          </div>
         </div>
       ) : viewMode === "board" ? (
         <BoardView tasks={tasks} />
@@ -708,7 +737,7 @@ export function TasksPage() {
             selectedIds={kbd.selectedKeys}
             getRowId={t => t.task_id}
             columns={[
-              { key: "task_id",    header: "Task ID",    render: r => <span className="font-mono text-xs text-zinc-300 whitespace-nowrap" title={r.task_id}>{shortId(r.task_id)}</span>,                sortValue: r => r.task_id },
+              { key: "task_id",    header: "Task ID",    render: r => <span className="flex items-center gap-1 font-mono text-xs text-zinc-300 whitespace-nowrap group/id" title={r.task_id}>{shortId(r.task_id)}<CopyButton text={r.task_id} label="Copy task ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>,                sortValue: r => r.task_id },
               { key: "run",        header: "Run",         render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-zinc-700">—</span> },
               { key: "state",      header: "Status",      render: r => <StateBadge state={r.state as Parameters<typeof StateBadge>[0]["state"]} compact />, sortValue: r => r.state },
               { key: "worker",     header: "Worker",      render: r => r.lease_owner ? <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{shortId(r.lease_owner)}</span> : <span className="text-zinc-700">—</span> },
@@ -720,7 +749,7 @@ export function TasksPage() {
             csvRow={r => [r.task_id, r.parent_run_id ?? "", r.state, r.lease_owner ?? "", r.created_at, r.updated_at]}
             csvHeaders={["Task ID", "Run ID", "State", "Worker", "Queued At", "Updated At"]}
             filename="tasks"
-            emptyText="No tasks match this filter"
+            emptyText="No tasks match this filter — try a different state or clear the search"
           />
         </div>
       )}

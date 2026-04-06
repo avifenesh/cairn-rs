@@ -7,6 +7,7 @@ import { StateBadge } from "../components/StateBadge";
 import { DataTable } from "../components/DataTable";
 import { useTableKeyboard } from "../hooks/useTableKeyboard";
 import { useToast } from "../components/Toast";
+import { CopyButton } from "../components/CopyButton";
 import { defaultApi } from "../lib/api";
 import type { RunRecord, RunState } from "../lib/types";
 import { TimelineView, ZoomSelector } from "../components/TimelineView";
@@ -380,8 +381,8 @@ export function RunsPage() {
             getRowId={r => r.run_id}
             onRowClick={r => { window.location.hash = `run/${r.run_id}`; kbd.setActiveIndex(filtered.indexOf(r)); }}
             columns={[
-              { key: 'run_id',    header: 'Run ID',    render: r => <span className="flex items-center gap-1.5 font-mono text-[12px] text-zinc-300 whitespace-nowrap" title={r.run_id}>{selected?.run_id===r.run_id&&<ChevronRight size={11} className="text-indigo-400 shrink-0"/>}{shortId(r.run_id)}</span>, sortValue: r => r.run_id },
-              { key: 'session',   header: 'Session',   render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={r.session_id}>{shortId(r.session_id)}</span> },
+              { key: 'run_id',    header: 'Run ID',    render: r => <span className="flex items-center gap-1 font-mono text-[12px] text-zinc-300 whitespace-nowrap group/id" title={r.run_id}>{selected?.run_id===r.run_id&&<ChevronRight size={11} className="text-indigo-400 shrink-0"/>}{shortId(r.run_id)}<CopyButton text={r.run_id} label="Copy run ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>, sortValue: r => r.run_id },
+              { key: 'session',   header: 'Session',   render: r => <span className="flex items-center gap-1 font-mono text-[11px] text-zinc-500 whitespace-nowrap group/id" title={r.session_id}>{shortId(r.session_id)}<CopyButton text={r.session_id} label="Copy session ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span> },
               { key: 'state',     header: 'State',     render: r => <StateBadge state={r.state} compact />,   sortValue: r => r.state },
               { key: 'created',   header: 'Created',   render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap tabular-nums text-right" title={fmtTime(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at, headClass:'text-right', cellClass:'text-right' },
               { key: 'updated',   header: 'Updated',   render: r => <span className="text-[11px] text-zinc-500 whitespace-nowrap tabular-nums text-right" title={fmtTime(r.updated_at)}>{fmtRelative(r.updated_at)}</span>, sortValue: r => r.updated_at, headClass:'text-right', cellClass:'text-right' },
@@ -390,7 +391,7 @@ export function RunsPage() {
             csvRow={r => [r.run_id, r.session_id, r.state, r.parent_run_id??'', r.created_at, r.updated_at]}
             csvHeaders={['Run ID','Session ID','State','Parent Run','Created At','Updated At']}
             filename="runs"
-            emptyText="No runs match this filter"
+            emptyText="No runs match this filter — try 'All states' or POST /v1/runs to start one"
           />
         )}
         </div>

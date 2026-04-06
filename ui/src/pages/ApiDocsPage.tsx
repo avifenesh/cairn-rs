@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { useRequestLog } from "../components/RequestLogContext";
+import { CopyButton } from "../components/CopyButton";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -570,10 +571,16 @@ function EndpointRow({ ep }: { ep: Endpoint }) {
       expanded ? "border-zinc-700 bg-zinc-900/60" : "border-zinc-800 bg-zinc-900 hover:border-zinc-700",
     )}>
       <button onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left">
+        className="w-full flex items-center gap-3 px-4 py-3 text-left group">
         <MethodBadge method={ep.method} />
         <code className="flex-1 text-[13px] font-mono text-zinc-200 truncate">{ep.path}</code>
         {ep.sse && <span className="text-[10px] font-medium text-sky-400 bg-sky-950/60 border border-sky-800/40 rounded px-1.5 py-0.5 shrink-0">SSE</span>}
+        <CopyButton
+          text={`${API_BASE || "http://localhost:3000"}${ep.path}`}
+          label="Copy endpoint URL"
+          size={11}
+          className="shrink-0 hidden group-hover:inline-flex"
+        />
         <span className="text-[12px] text-zinc-500 truncate max-w-xs hidden md:block">{ep.description}</span>
         {expanded ? <ChevronDown size={13} className="text-zinc-500 shrink-0" /> : <ChevronRight size={13} className="text-zinc-600 shrink-0" />}
       </button>

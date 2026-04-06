@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Loader2, Inbox, Check, X } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { HelpTooltip } from "../components/HelpTooltip";
+import { CopyButton } from "../components/CopyButton";
 import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
@@ -87,7 +88,13 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
         placement="top"
       />
       <button
-        onClick={e => { e.stopPropagation(); resolve.mutate("approved"); }}
+        onClick={e => {
+          e.stopPropagation();
+          if (!window.confirm(
+            `Approve this request?\n\nApproving will allow the run or task to continue past this gate.\n\nApproval: ${approval.approval_id.slice(0, 16)}…`
+          )) return;
+          resolve.mutate("approved");
+        }}
         disabled={resolve.isPending}
         className="px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-900/50 text-emerald-300
                    hover:bg-emerald-900 border border-emerald-800/50 transition-colors disabled:opacity-40"
@@ -95,11 +102,16 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
         {resolve.isPending ? <Loader2 size={10} className="animate-spin inline" /> : "Approve"}
       </button>
       <button
-        onClick={e => { e.stopPropagation(); resolve.mutate("rejected"); }}
+        onClick={e => {
+          e.stopPropagation();
+          if (!window.confirm(
+            `Reject this request?\n\nRejecting will block the run and record a rejection decision. This cannot be undone.\n\nApproval: ${approval.approval_id.slice(0, 16)}…`
+          )) return;
+          resolve.mutate("rejected");
+        }}
         disabled={resolve.isPending}
         className="px-2 py-0.5 rounded text-[11px] font-medium bg-red-900/40 text-red-400
                    hover:bg-red-900/70 border border-red-800/40 transition-colors disabled:opacity-40"
-        title="Reject: blocks the run and records a rejection decision."
       >
         Reject
       </button>
@@ -119,9 +131,13 @@ const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: 
 
 function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
   if (approvals.length === 0) return (
-    <div className="flex flex-col items-center justify-center py-16 gap-2 text-zinc-700">
-      <Inbox size={26} />
-      <p className="text-[13px]">No approvals match this filter</p>
+    <div className="flex flex-col items-center justify-center py-16 gap-2 text-center px-6">
+      <Inbox size={26} className="text-zinc-700" />
+      <p className="text-[13px] text-zinc-600 font-medium">Inbox clear</p>
+      <p className="text-[11px] text-zinc-700 max-w-xs">
+        No approvals match this filter. Approvals appear here when a run hits a human-in-the-loop gate
+        that requires operator sign-off.
+      </p>
     </div>
   );
 
@@ -147,7 +163,7 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
               "hover:bg-zinc-800/70",
             )}>
             <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap" title={a.approval_id}>
-              {shortId(a.approval_id)}
+              <span className="flex items-center gap-1 group/id">{shortId(a.approval_id)}<CopyButton text={a.approval_id} label="Copy approval ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>
             </td>
             <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px] hidden sm:table-cell">
               {a.run_id ? <span title={a.run_id}>{shortId(a.run_id)}</span> : <span className="text-zinc-700">—</span>}
@@ -288,13 +304,20 @@ export function ApprovalsPage() {
 
       {/* Table */}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
-        {isLoading
-          ? <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
-              <Loader2 size={16} className="animate-spin" />
-              <span className="text-[13px]">Loading…</span>
-            </div>
-          : <ApprovalsTable approvals={displayed} />
-        }
+        {isLoading ? (
+          <div className="divide-y divide-zinc-800/40">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 px-4 h-9 animate-pulse">
+                <div className="h-2.5 w-24 rounded bg-zinc-800" />
+                <div className="h-2.5 w-20 rounded bg-zinc-800 hidden sm:block" />
+                <div className="h-2.5 w-20 rounded bg-zinc-800 hidden md:block" />
+                <div className="h-4 w-14 rounded bg-zinc-800 hidden sm:block" />
+                <div className="h-5 w-16 rounded bg-zinc-800" />
+                <div className="ml-auto h-2.5 w-16 rounded bg-zinc-800 hidden md:block" />
+              </div>
+            ))}
+          </div>
+        ) : <ApprovalsTable approvals={displayed} />}
       </div>
     </div>
   );
