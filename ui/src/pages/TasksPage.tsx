@@ -262,6 +262,8 @@ function LifecycleBanner() {
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        aria-controls="lifecycle-diagram"
         className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-zinc-900/40 transition-colors"
       >
         {open
@@ -278,7 +280,7 @@ function LifecycleBanner() {
         )}
       </button>
       {open && (
-        <div className="px-4 pb-3 bg-zinc-950/40">
+        <div id="lifecycle-diagram" className="px-4 pb-3 bg-zinc-950/40">
           <LifecycleDiagram />
         </div>
       )}

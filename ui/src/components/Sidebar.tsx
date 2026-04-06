@@ -206,7 +206,7 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
         </div>
 
         {/* Navigation — grouped */}
-        <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-4">
+        <nav role="navigation" aria-label="Main navigation" className="flex-1 overflow-y-auto py-2 px-2 space-y-4">
           {NAV_GROUPS.map((group) => (
             <div key={group.label}>
               <p className="px-3 pb-1 text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
@@ -219,6 +219,8 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
                     <button
                       key={id}
                       onClick={() => onNavigate(id)}
+                      aria-current={active ? 'page' : undefined}
+                      aria-label={label}
                       className={clsx(
                         'w-full flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors relative',
                         active
@@ -263,6 +265,8 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
           {/* Profile link */}
           <button
             onClick={() => onNavigate('profile')}
+            aria-current={current === 'profile' ? 'page' : undefined}
+            aria-label="Account"
             className={clsx(
               'w-full flex items-center gap-2 px-3 py-1.5 rounded text-[12px] font-medium transition-colors relative',
               current === 'profile'

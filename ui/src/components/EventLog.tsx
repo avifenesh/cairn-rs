@@ -170,7 +170,15 @@ export function EventLog({
       </div>
 
       {/* Event list — compact Linear-style rows */}
-      <div className="overflow-y-auto" style={{ maxHeight: '280px' }}>
+      <div
+        className="overflow-y-auto"
+        style={{ maxHeight: '280px' }}
+        aria-live="polite"
+        aria-atomic="false"
+        aria-label="Live event stream"
+        aria-relevant="additions"
+        role="log"
+      >
         {rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 gap-1.5 text-zinc-700">
             {status === 'connected' ? (

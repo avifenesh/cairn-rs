@@ -555,6 +555,8 @@ function SystemPromptPanel({ value, onChange, open, onToggle, disabled }: {
   return (
     <div className="border-b border-zinc-800 shrink-0">
       <button type="button" onClick={onToggle}
+        aria-expanded={open}
+        aria-controls="system-prompt-panel"
         className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-zinc-900/40 transition-colors">
         {open ? <ChevronDown size={12} className="text-zinc-500 shrink-0" />
                : <ChevronRight size={12} className="text-zinc-500 shrink-0" />}
@@ -566,7 +568,7 @@ function SystemPromptPanel({ value, onChange, open, onToggle, disabled }: {
         )}
       </button>
       {open && (
-        <div className="px-4 pb-3 space-y-2">
+        <div id="system-prompt-panel" className="px-4 pb-3 space-y-2">
           <textarea value={value} onChange={(e) => onChange(e.target.value)}
             disabled={disabled} rows={3}
             className="w-full rounded border border-zinc-800 bg-zinc-900 text-[13px] text-zinc-300
@@ -1040,6 +1042,8 @@ export function PlaygroundPage() {
         <button
           onClick={toggleSidebar}
           title={sidebarOpen ? "Close history" : "Open history"}
+          aria-expanded={sidebarOpen}
+          aria-label={sidebarOpen ? "Close conversation history" : "Open conversation history"}
           className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
         >
           {sidebarOpen ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { ErrorFallback } from '../components/ErrorFallback';
 import { defaultApi } from '../lib/api';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 import type { PluginManifest, PluginCapability, PluginDetailResponse } from '../lib/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -287,10 +288,14 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
 
   const displayErr = parseErr ?? (mutErr instanceof Error ? mutErr.message : null);
 
+  const trapRef = useFocusTrap({ onClose: onClose });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
         className="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg mx-4 shadow-2xl"
+        ref={trapRef}
+        role="dialog"
+        aria-modal="true"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">

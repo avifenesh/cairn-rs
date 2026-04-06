@@ -300,6 +300,8 @@ export function LogsPage() {
           {/* Pause / resume */}
           <button
             onClick={() => setPaused(v => !v)}
+            aria-pressed={paused}
+            aria-label={paused ? "Resume auto-refresh" : "Pause auto-refresh"}
             className={clsx(
               'flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors',
               paused

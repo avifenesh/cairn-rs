@@ -4549,6 +4549,16 @@ impl InMemoryStore {
         }
     }
 
+    /// Total number of task records in the store (all states).
+    pub fn count_all_tasks(&self) -> usize {
+        self.state.lock().unwrap().tasks.len()
+    }
+
+    /// Total number of approval records in the store (all states).
+    pub fn count_all_approvals(&self) -> usize {
+        self.state.lock().unwrap().approvals.len()
+    }
+
     // ── Snapshot / restore ────────────────────────────────────────────────────
 
     /// Export the full event log as a serializable snapshot.

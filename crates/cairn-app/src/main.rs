@@ -364,6 +364,46 @@ fn bad_request(message: impl Into<String>) -> (StatusCode, Json<ApiError>) {
     )
 }
 
+// ── Pagination headers ────────────────────────────────────────────────────────
+
+/// Build the four standard pagination response headers.
+///
+/// Returned as an `AppendHeaders` value that axum can include in a response
+/// tuple alongside the body — e.g. `Ok((pagination_headers(...), Json(page)))`.
+///
+/// - `X-Total-Count` — total items across all pages
+/// - `X-Page`        — 1-based current page number
+/// - `X-Per-Page`    — items per page (the effective limit)
+/// - `Link`          — RFC 5988 next/last relations for cursor navigation
+fn pagination_headers(
+    path: &str,
+    total: usize,
+    offset: usize,
+    limit: usize,
+) -> axum::response::AppendHeaders<[(String, String); 4]> {
+    let per_page   = limit.max(1);
+    let page       = offset / per_page + 1;
+    let last_page  = (total.max(1) + per_page - 1) / per_page;
+    let has_next   = offset + per_page < total;
+
+    let link = if has_next {
+        format!(
+            "<{path}?page={next}>; rel=\"next\", <{path}?page={last}>; rel=\"last\"",
+            next = page + 1,
+            last = last_page,
+        )
+    } else {
+        format!("<{path}?page={last_page}>; rel=\"last\"")
+    };
+
+    axum::response::AppendHeaders([
+        ("X-Total-Count".to_owned(), total.to_string()),
+        ("X-Page".to_owned(),        page.to_string()),
+        ("X-Per-Page".to_owned(),    per_page.to_string()),
+        ("Link".to_owned(),          link),
+    ])
+}
+
 // ── Query param structs ───────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -1386,8 +1426,9 @@ async fn list_runs_handler(
         }
     }
     runs.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+    let total = runs.len();
     let page = runs.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
-    Ok(Json(page))
+    Ok((pagination_headers("/v1/runs", total, offset, limit), Json(page)))
 }
 
 /// `GET /v1/runs/:id` — get a single run by ID.
@@ -1488,10 +1529,12 @@ async fn list_sessions_handler(
     State(state): State<AppState>,
     Query(q): Query<PaginationQuery>,
 ) -> impl axum::response::IntoResponse {
-    match SessionReadModel::list_active(state.runtime.store.as_ref(), q.limit).await {
+    // Fetch all to get accurate total, then paginate in-process.
+    match SessionReadModel::list_active(state.runtime.store.as_ref(), usize::MAX).await {
         Ok(sessions) => {
-            let page: Vec<_> = sessions.into_iter().skip(q.offset).collect();
-            Ok(Json(page))
+            let total = sessions.len();
+            let page: Vec<_> = sessions.into_iter().skip(q.offset).take(q.limit).collect();
+            Ok((pagination_headers("/v1/sessions", total, q.offset, q.limit), Json(page)))
         }
         Err(e) => Err(internal_error(e.to_string())),
     }
@@ -1894,6 +1937,9 @@ async fn list_pending_approvals_handler(
     State(state): State<AppState>,
     Query(q): Query<ProjectQuery>,
 ) -> impl axum::response::IntoResponse {
+    // Use total approval count (all states) as the pagination denominator.
+    let total = state.runtime.store.count_all_approvals();
+    let hdrs  = pagination_headers("/v1/approvals/pending", total, q.offset, q.limit);
     if let Some(project) = q.project_key() {
         match ApprovalReadModel::list_pending(
             state.runtime.store.as_ref(),
@@ -1903,13 +1949,12 @@ async fn list_pending_approvals_handler(
         )
         .await
         {
-            Ok(records) => Ok(Json(records)),
+            Ok(records) => Ok((hdrs, Json(records))),
             Err(e) => Err(internal_error(e.to_string())),
         }
     } else {
-        // No project filter — scan all approvals and return pending ones.
         match list_all_pending(&state, q.limit, q.offset).await {
-            Ok(records) => Ok(Json(records)),
+            Ok(records) => Ok((hdrs, Json(records))),
             Err(e) => Err(internal_error(e.to_string())),
         }
     }
@@ -2644,7 +2689,7 @@ async fn list_notifications_handler(
 ) -> impl IntoResponse {
     let limit = q.limit.unwrap_or(50).min(200);
     let buf = state.notifications.read().expect("notification lock poisoned");
-    let notifications: Vec<Notification> = buf.list(limit).into_iter().cloned().collect();
+    let notifications: Vec<Notification> = buf.list(limit).into_iter().map(|n| n.clone()).collect();
     let unread_count = buf.unread_count();
     Json(NotifListResponse { notifications, unread_count })
 }
@@ -3710,6 +3755,101 @@ fn parse_args() -> BootstrapConfig {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
+// ── Graceful shutdown ─────────────────────────────────────────────────────────
+
+/// Returns a future that resolves when SIGINT (Ctrl-C) or SIGTERM is received.
+///
+/// On non-Unix platforms only Ctrl-C is supported.
+async fn wait_for_shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c    => { eprintln!("shutdown: SIGINT received");  },
+        _ = terminate => { eprintln!("shutdown: SIGTERM received"); },
+    }
+}
+
+/// Snapshot the in-memory event log and notification buffer to
+/// `/tmp/cairn-shutdown-buffer.json` so they survive a server restart.
+///
+/// This is best-effort — failures are logged but do not block exit.
+async fn flush_state_to_disk(state: &AppState) {
+    const FLUSH_PATH: &str = "/tmp/cairn-shutdown-buffer.json";
+    const MAX_EVENTS: usize = 5_000;
+
+    // ── Events ────────────────────────────────────────────────────────────────
+    let events = match state.runtime.store.read_stream(None, MAX_EVENTS).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("shutdown: could not read event buffer: {e}");
+            vec![]
+        }
+    };
+    let event_snapshots: Vec<serde_json::Value> = events.iter().map(|e| serde_json::json!({
+        "position":   e.position.0,
+        "stored_at":  e.stored_at,
+        "event_type": event_type_name(&e.envelope.payload),
+    })).collect();
+
+    // ── Notifications ─────────────────────────────────────────────────────────
+    // Serialise while holding the lock, then release before writing to disk.
+    let (notif_count, notif_json) = match state.notifications.read() {
+        Ok(buf) => {
+            let list = buf.list(200);
+            let json: Vec<serde_json::Value> = list.iter().map(|n| serde_json::json!({
+                "id":         n.id,
+                "type":       n.notif_type,
+                "message":    n.message,
+                "entity_id":  n.entity_id,
+                "href":       n.href,
+                "read":       n.read,
+                "created_at": n.created_at,
+            })).collect();
+            (json.len(), json)
+        }
+        Err(_) => (0, vec![]),
+    };
+
+    // ── Uptime ────────────────────────────────────────────────────────────────
+    let uptime_secs = state.started_at.elapsed().as_secs();
+
+    let payload = serde_json::json!({
+        "flushed_at":        now_iso8601(),
+        "uptime_seconds":    uptime_secs,
+        "event_count":       event_snapshots.len(),
+        "events":            event_snapshots,
+        "notification_count": notif_count,
+        "notifications":     notif_json,
+    });
+
+    match serde_json::to_string_pretty(&payload) {
+        Ok(text) => match std::fs::write(FLUSH_PATH, text) {
+            Ok(())  => eprintln!(
+                "shutdown: flushed {} events + {} notifications → {FLUSH_PATH}",
+                events.len(),
+                notif_count,
+            ),
+            Err(e)  => eprintln!("shutdown: write failed ({FLUSH_PATH}): {e}"),
+        },
+        Err(e) => eprintln!("shutdown: serialisation failed: {e}"),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // Initialise structured request tracing.  Operators can tune verbosity via
@@ -3887,6 +4027,8 @@ async fn main() {
     };
 
     // ── Router ────────────────────────────────────────────────────────────────
+    // Keep a cheap Arc-clone of state so we can flush it after shutdown.
+    let state_for_flush = state.clone();
     let app = build_router(state);
 
     let addr = format!("{}:{}", config.listen_addr, config.listen_port);
@@ -3895,9 +4037,54 @@ async fn main() {
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
 
     eprintln!("cairn-app listening on http://{addr}");
+
+    // ── Graceful shutdown wiring ───────────────────────────────────────────────
+    //
+    // Strategy:
+    //   1. axum stops accepting new connections when the signal future resolves.
+    //   2. In-flight requests are given 30 s to complete naturally.
+    //   3. A watchdog task fires after 30 s and forces a clean exit; this
+    //      ensures the process never hangs indefinitely.
+    //   4. On both the clean path and the forced path, state is flushed to disk.
+
+    // Channel: signal_tx fires when a shutdown signal is received; the watchdog
+    // listens on signal_rx to know when to start its countdown.
+    let (signal_tx, signal_rx) = tokio::sync::watch::channel(false);
+
+    // Watchdog: waits for the signal, then gives 30 s before forcing exit.
+    let watchdog_state = state_for_flush.clone();
+    let watchdog = tokio::spawn(async move {
+        let mut rx = signal_rx;
+        // Park until the shutdown flag flips.
+        loop {
+            if rx.changed().await.is_err() { return; } // sender dropped = clean exit
+            if *rx.borrow() { break; }
+        }
+        eprintln!("shutdown: draining in-flight requests (max 30s)…");
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        // 30 s expired — flush and force-exit.
+        flush_state_to_disk(&watchdog_state).await;
+        eprintln!("shutdown: 30s drain timeout — forcing exit");
+        std::process::exit(0);
+    });
+
+    // Serve with graceful shutdown.  When `wait_for_shutdown_signal()` resolves
+    // axum stops accepting new connections and this future completes once every
+    // existing connection has closed.
     axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            wait_for_shutdown_signal().await;
+            // Notify the watchdog that the countdown should start.
+            let _ = signal_tx.send(true);
+        })
         .await
-        .unwrap_or_else(|e| panic!("server error: {e}"));
+        .unwrap_or_else(|e| eprintln!("server error: {e}"));
+
+    // ── Clean exit path (all connections drained before 30 s) ─────────────────
+    watchdog.abort(); // cancel the watchdog — we exited cleanly
+    eprintln!("shutdown: all connections drained");
+    flush_state_to_disk(&state_for_flush).await;
+    eprintln!("shutdown: complete");
 }
 
 /// Build the application router with all routes and auth middleware wired in.
@@ -3960,8 +4147,9 @@ async fn list_all_tasks_handler(
     State(state): State<AppState>,
     Query(q): Query<PaginationQuery>,
 ) -> impl axum::response::IntoResponse {
+    let total = state.runtime.store.count_all_tasks();
     match state.runtime.store.list_all_tasks(q.limit, q.offset).await {
-        Ok(tasks) => Ok(Json(tasks)),
+        Ok(tasks) => Ok((pagination_headers("/v1/tasks", total, q.offset, q.limit), Json(tasks))),
         Err(e)    => Err(internal_error(e.to_string())),
     }
 }
@@ -4013,8 +4201,16 @@ async fn list_all_traces_handler(
     Query(q): Query<PaginationQuery>,
 ) -> impl axum::response::IntoResponse {
     let limit = q.limit.min(500);
-    match LlmCallTraceReadModel::list_all_traces(state.runtime.store.as_ref(), limit).await {
-        Ok(traces) => Ok(Json(serde_json::json!({ "traces": traces }))),
+    // Fetch all traces to obtain the true total, then page.
+    match LlmCallTraceReadModel::list_all_traces(state.runtime.store.as_ref(), usize::MAX).await {
+        Ok(all_traces) => {
+            let total  = all_traces.len();
+            let traces: Vec<_> = all_traces.into_iter().skip(q.offset).take(limit).collect();
+            Ok((
+                pagination_headers("/v1/traces", total, q.offset, limit),
+                Json(serde_json::json!({ "traces": traces })),
+            ))
+        }
         Err(e) => Err(internal_error(e.to_string())),
     }
 }

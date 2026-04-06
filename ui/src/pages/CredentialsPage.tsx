@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 import type { CredentialSummary, StoreCredentialRequest } from '../lib/types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -97,10 +98,14 @@ function DeleteDialog({
   onCancel: () => void;
   isPending: boolean;
 }) {
+  const trapRef = useFocusTrap({ onClose: onCancel });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
       <div
         className="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-md mx-4 shadow-2xl"
+        ref={trapRef}
+        role="dialog"
+        aria-modal="true"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-start gap-3 p-5">
@@ -204,6 +209,7 @@ function AddCredentialModal({
 
   const displayErr = mutErr instanceof Error ? mutErr.message : null;
 
+  const trapRef = useFocusTrap({ onClose: onClose });
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -211,6 +217,9 @@ function AddCredentialModal({
     >
       <div
         className="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg mx-4 shadow-2xl"
+        ref={trapRef}
+        role="dialog"
+        aria-modal="true"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}

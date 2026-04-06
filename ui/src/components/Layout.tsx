@@ -281,9 +281,11 @@ export function Layout({ children, routeRenderer, onLogout }: LayoutProps) {
 
         <main
           id="main-content"
+          role="main"
           ref={mainRef}
           className="flex-1 overflow-hidden bg-gray-50 dark:bg-zinc-950 page-enter print-full"
           tabIndex={-1}
+          aria-label="Main content"
         >
           {content}
         </main>
