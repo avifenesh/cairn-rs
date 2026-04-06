@@ -10,6 +10,7 @@ mod sse_hooks;
 mod openapi_spec;
 mod templates;
 mod entitlements;
+mod bundles;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -42,6 +43,7 @@ use cairn_domain::{
     lifecycle::RunResumeTarget,
 };
 use cairn_runtime::approvals::ApprovalService;
+use cairn_runtime::provider_health::ProviderHealthService;
 use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
@@ -997,6 +999,8 @@ struct DetailedHealthResponse {
     uptime_seconds: u64,
     version:        &'static str,
     started_at:     String,
+    /// RFC 011: current process role.
+    role:           String,
 }
 
 /// Read resident set size from `/proc/self/status` (Linux only).
@@ -1113,6 +1117,7 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
         uptime_seconds: uptime,
         version: env!("CARGO_PKG_VERSION"),
         started_at,
+        role: state.process_role.as_str().to_owned(),
     })
 }
 
@@ -4514,65 +4519,78 @@ async fn main() {
         seed_demo_data(&state).await;
     }
 
-    // ── Router ────────────────────────────────────────────────────────────────
-    // Keep a cheap Arc-clone of state so we can flush it after shutdown.
-    let state_for_flush = state.clone();
-    let app = build_router(state);
+    eprintln!("cairn-app starting with role: {}", config.process_role);
 
-    let addr = format!("{}:{}", config.listen_addr, config.listen_port);
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
+    // ── RFC 011: Role-based startup ──────────────────────────────────────────
+    if config.process_role.serves_http() {
+        // ── Router ───────────────────────────────────────────────────────────
+        let state_for_flush = state.clone();
+        let app = build_router(state);
 
-    eprintln!("cairn-app listening on http://{addr}");
+        let addr = format!("{}:{}", config.listen_addr, config.listen_port);
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
+            .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
 
-    // ── Graceful shutdown wiring ───────────────────────────────────────────────
-    //
-    // Strategy:
-    //   1. axum stops accepting new connections when the signal future resolves.
-    //   2. In-flight requests are given 30 s to complete naturally.
-    //   3. A watchdog task fires after 30 s and forces a clean exit; this
-    //      ensures the process never hangs indefinitely.
-    //   4. On both the clean path and the forced path, state is flushed to disk.
+        eprintln!("cairn-app listening on http://{addr}");
 
-    // Channel: signal_tx fires when a shutdown signal is received; the watchdog
-    // listens on signal_rx to know when to start its countdown.
-    let (signal_tx, signal_rx) = tokio::sync::watch::channel(false);
+        // ── Graceful shutdown wiring ─────────────────────────────────────────
+        let (signal_tx, signal_rx) = tokio::sync::watch::channel(false);
 
-    // Watchdog: waits for the signal, then gives 30 s before forcing exit.
-    let watchdog_state = state_for_flush.clone();
-    let watchdog = tokio::spawn(async move {
-        let mut rx = signal_rx;
-        // Park until the shutdown flag flips.
+        let watchdog_state = state_for_flush.clone();
+        let watchdog = tokio::spawn(async move {
+            let mut rx = signal_rx;
+            loop {
+                if rx.changed().await.is_err() { return; }
+                if *rx.borrow() { break; }
+            }
+            eprintln!("shutdown: draining in-flight requests (max 30s)…");
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            flush_state_to_disk(&watchdog_state).await;
+            eprintln!("shutdown: 30s drain timeout — forcing exit");
+            std::process::exit(0);
+        });
+
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                wait_for_shutdown_signal().await;
+                let _ = signal_tx.send(true);
+            })
+            .await
+            .unwrap_or_else(|e| eprintln!("server error: {e}"));
+
+        watchdog.abort();
+        eprintln!("shutdown: all connections drained");
+        flush_state_to_disk(&state_for_flush).await;
+        eprintln!("shutdown: complete");
+    } else {
+        // ── WorkerOnly mode: no HTTP server, run task processing loop ────────
+        eprintln!("cairn-app running in worker-only mode (no HTTP server)");
+        eprintln!("connected to same store — processing tasks until shutdown signal");
+
+        // Run a simple claim/execute loop until a shutdown signal arrives.
+        // Both roles share the same store, so workers see events from the API.
+        let shutdown = wait_for_shutdown_signal();
+        tokio::pin!(shutdown);
+
         loop {
-            if rx.changed().await.is_err() { return; } // sender dropped = clean exit
-            if *rx.borrow() { break; }
+            tokio::select! {
+                _ = &mut shutdown => {
+                    eprintln!("shutdown: worker received signal, exiting");
+                    break;
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                    // Worker tick: run due health checks, recovery sweeps, etc.
+                    // These are non-blocking and use the shared store.
+                    let _ = state.runtime.provider_health
+                        .run_due_health_checks()
+                        .await;
+                }
+            }
         }
-        eprintln!("shutdown: draining in-flight requests (max 30s)…");
-        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-        // 30 s expired — flush and force-exit.
-        flush_state_to_disk(&watchdog_state).await;
-        eprintln!("shutdown: 30s drain timeout — forcing exit");
-        std::process::exit(0);
-    });
 
-    // Serve with graceful shutdown.  When `wait_for_shutdown_signal()` resolves
-    // axum stops accepting new connections and this future completes once every
-    // existing connection has closed.
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            wait_for_shutdown_signal().await;
-            // Notify the watchdog that the countdown should start.
-            let _ = signal_tx.send(true);
-        })
-        .await
-        .unwrap_or_else(|e| eprintln!("server error: {e}"));
-
-    // ── Clean exit path (all connections drained before 30 s) ─────────────────
-    watchdog.abort(); // cancel the watchdog — we exited cleanly
-    eprintln!("shutdown: all connections drained");
-    flush_state_to_disk(&state_for_flush).await;
-    eprintln!("shutdown: complete");
+        eprintln!("shutdown: worker complete");
+    }
 }
 
 /// Build the application router with all routes and auth middleware wired in.
@@ -5044,6 +5062,105 @@ struct TenantQuery {
     tenant_id: Option<String>,
 }
 
+// ── RFC 013: Bundle import/export handlers ───────────────────────────────────
+
+/// `POST /v1/bundles/export` — export a project's artifacts as a portable bundle.
+async fn bundle_export_handler(
+    State(state): State<AppState>,
+    Json(body): Json<bundles::ExportRequest>,
+) -> impl IntoResponse {
+    let _project_id = body.project_id.as_deref().unwrap_or("default");
+
+    // Collect artifacts from the store.
+    let prompts = state.runtime.store.list_all_prompt_assets(1000, 0).await.unwrap_or_default();
+    let releases = state.runtime.store.list_all_prompt_releases(1000, 0).await.unwrap_or_default();
+    let bindings = state.runtime.store.list_all_provider_bindings(1000, 0).await.unwrap_or_default();
+
+    let bundle_prompts: Vec<bundles::BundlePrompt> = prompts
+        .iter()
+        .map(|p| bundles::BundlePrompt {
+            id: p.prompt_asset_id.as_str().to_owned(),
+            name: p.name.clone(),
+            kind: p.kind.clone(),
+            content: String::new(),
+            version: None,
+        })
+        .collect();
+
+    let bundle_configs: Vec<bundles::BundleProviderConfig> = bindings
+        .iter()
+        .map(|b| bundles::BundleProviderConfig {
+            id: b.provider_binding_id.as_str().to_owned(),
+            provider_family: b.provider_connection_id.as_str().to_owned(),
+            model_id: b.provider_model_id.as_str().to_owned(),
+            operation: format!("{:?}", b.operation_kind),
+            settings: serde_json::to_value(&b.settings).unwrap_or_default(),
+        })
+        .collect();
+
+    let contents = bundles::BundleContents {
+        prompts: bundle_prompts,
+        eval_suites: vec![], // eval runs don't have a persistent "suite" — placeholder
+        provider_configs: bundle_configs,
+        sources: vec![],
+    };
+
+    let bundle = bundles::new_bundle(contents);
+
+    match bundles::serialize_bundle(&bundle, body.format) {
+        Ok(serialized) => {
+            let ext = body.format.file_extension();
+            let ct = body.format.content_type();
+            let filename = format!("cairn-bundle.{ext}");
+            let mut resp = (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, ct)],
+                serialized,
+            )
+                .into_response();
+            resp.headers_mut().insert(
+                axum::http::header::CONTENT_DISPOSITION,
+                axum::http::HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment")),
+            );
+            Ok(resp)
+        }
+        Err(e) => Err(internal_error(format!("serialization failed: {e}"))),
+    }
+}
+
+/// `POST /v1/bundles/import` — import a bundle into a target project.
+async fn bundle_import_handler(
+    Json(body): Json<bundles::ImportRequest>,
+) -> impl IntoResponse {
+    // Validate the bundle.
+    let validation = bundles::validate_bundle(&body.bundle);
+    if !validation.valid {
+        return Err(bad_request(format!(
+            "bundle validation failed: {}",
+            validation
+                .errors
+                .iter()
+                .map(|e| format!("{}: {}", e.field, e.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )));
+    }
+
+    // Plan the import with conflict resolution.
+    let existing: std::collections::HashSet<String> = body.existing_ids.into_iter().collect();
+    let plan = bundles::plan_import(
+        &body.bundle,
+        &body.project_id,
+        &existing,
+        body.conflict_strategy,
+    );
+
+    // Execute the plan.
+    let result = bundles::execute_import(&plan);
+    Ok(Json(result))
+}
+
 // ── RFC 012: Template handlers ───────────────────────────────────────────────
 
 /// `GET /v1/templates` — list all available starter templates.
@@ -5088,6 +5205,7 @@ fn build_router(state: AppState) -> Router {
         // ── Protected /v1/* routes ────────────────────────────────────────
         .route("/v1/health/detailed", get(detailed_health_handler))
         .route("/v1/system/info",     get(system_info_handler))
+        .route("/v1/system/role",     get(system_role_handler))
         .route("/v1/status", get(status_handler))
         .route("/v1/dashboard", get(dashboard_handler))
         .route("/v1/stats", get(stats_handler))
@@ -5141,6 +5259,9 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/notifications/read-all",   post(mark_all_notifications_read_handler))
         .route("/v1/notifications/:id/read",   post(mark_notification_read_handler))
         .route("/v1/evals/runs", get(list_evals_handler))
+        // RFC 013: bundle import/export
+        .route("/v1/bundles/export",     post(bundle_export_handler))
+        .route("/v1/bundles/import",     post(bundle_import_handler))
         // RFC 014: entitlement gating
         .route("/v1/entitlements",       get(entitlements_handler))
         .route("/v1/entitlements/usage", get(entitlements_usage_handler))

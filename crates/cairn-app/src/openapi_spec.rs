@@ -127,6 +127,156 @@ pub const OPENAPI_JSON: &str = r##"{
           "position": { "type": "integer" },
           "appended": { "type": "boolean" }
         }
+      },
+      "TemplateSummary": {
+        "type": "object",
+        "properties": {
+          "id":          { "type": "string" },
+          "name":        { "type": "string" },
+          "description": { "type": "string" },
+          "category":    { "type": "string", "enum": ["chatbot","code_assistant","data_pipeline","customer_support"] },
+          "file_count":  { "type": "integer" }
+        },
+        "required": ["id", "name", "description", "category", "file_count"]
+      },
+      "TemplateFile": {
+        "type": "object",
+        "properties": {
+          "path":        { "type": "string", "description": "Relative file path within the template" },
+          "description": { "type": "string" },
+          "content":     { "type": "string" }
+        },
+        "required": ["path", "description", "content"]
+      },
+      "Template": {
+        "type": "object",
+        "properties": {
+          "id":          { "type": "string" },
+          "name":        { "type": "string" },
+          "description": { "type": "string" },
+          "category":    { "type": "string", "enum": ["chatbot","code_assistant","data_pipeline","customer_support"] },
+          "files":       { "type": "array", "items": { "$ref": "#/components/schemas/TemplateFile" } }
+        },
+        "required": ["id", "name", "description", "category", "files"]
+      },
+      "ApplyTemplateRequest": {
+        "type": "object",
+        "properties": {
+          "project_id": { "type": "string" }
+        },
+        "required": ["project_id"]
+      },
+      "ApplyTemplateResult": {
+        "type": "object",
+        "properties": {
+          "template_id":   { "type": "string" },
+          "project_id":    { "type": "string" },
+          "files_created": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["template_id", "project_id", "files_created"]
+      },
+      "UsageReport": {
+        "type": "object",
+        "properties": {
+          "tenant_id":            { "type": "string" },
+          "tier":                 { "type": "string", "enum": ["free","pro","enterprise"] },
+          "sessions_used":        { "type": "integer" },
+          "max_sessions":         { "type": "integer" },
+          "runs_today":           { "type": "integer" },
+          "max_runs_per_day":     { "type": "integer" },
+          "tokens_this_month":    { "type": "integer", "format": "int64" },
+          "max_tokens_per_month": { "type": "integer", "format": "int64" },
+          "features_enabled":     { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["tenant_id", "tier"]
+      },
+      "ResourceUsage": {
+        "type": "object",
+        "properties": {
+          "used":         { "type": "integer" },
+          "limit":        { "type": "integer" },
+          "remaining":    { "type": "integer" },
+          "percent_used": { "type": "number", "format": "double" }
+        }
+      },
+      "DetailedUsageReport": {
+        "type": "object",
+        "properties": {
+          "tenant_id": { "type": "string" },
+          "tier":      { "type": "string", "enum": ["free","pro","enterprise"] },
+          "sessions":  { "$ref": "#/components/schemas/ResourceUsage" },
+          "runs":      { "$ref": "#/components/schemas/ResourceUsage" },
+          "tokens":    { "$ref": "#/components/schemas/ResourceUsage" }
+        },
+        "required": ["tenant_id", "tier", "sessions", "runs", "tokens"]
+      },
+      "SystemInfo": {
+        "type": "object",
+        "properties": {
+          "version":         { "type": "string" },
+          "deployment_mode": { "type": "string", "enum": ["local","self_hosted_team"] },
+          "store_backend":   { "type": "string", "enum": ["memory","postgres"] },
+          "uptime_secs":     { "type": "integer" },
+          "capabilities":    { "type": "object" },
+          "environment":     { "type": "object" }
+        }
+      },
+      "SystemRole": {
+        "type": "object",
+        "properties": {
+          "role":        { "type": "string", "description": "Process role: all, api, worker" },
+          "serves_http": { "type": "boolean" },
+          "runs_workers": { "type": "boolean" }
+        },
+        "required": ["role", "serves_http", "runs_workers"]
+      },
+      "EventCountResponse": {
+        "type": "object",
+        "properties": {
+          "total":   { "type": "integer", "format": "int64" },
+          "by_type": { "type": "object", "additionalProperties": { "type": "integer" } }
+        },
+        "required": ["total", "by_type"]
+      },
+      "RebuildProjectionsResponse": {
+        "type": "object",
+        "properties": {
+          "ok":               { "type": "boolean" },
+          "events_replayed":  { "type": "integer" },
+          "duration_ms":      { "type": "integer" }
+        }
+      },
+      "ExportBundleRequest": {
+        "type": "object",
+        "properties": {
+          "project_id": { "type": "string", "nullable": true },
+          "format":     { "type": "string", "enum": ["json","yaml"], "default": "json" }
+        }
+      },
+      "ImportBundleRequest": {
+        "type": "object",
+        "properties": {
+          "project_id":        { "type": "string" },
+          "bundle":            { "type": "object", "description": "Full CairnBundle envelope" },
+          "conflict_strategy": { "type": "string", "enum": ["skip","overwrite","rename"], "default": "skip" },
+          "existing_ids":      { "type": "array", "items": { "type": "string" }, "default": [] }
+        },
+        "required": ["project_id", "bundle"]
+      },
+      "WorkspaceUsageReport": {
+        "type": "object",
+        "properties": {
+          "workspace_id":        { "type": "string" },
+          "active_runs":         { "type": "integer" },
+          "max_concurrent_runs": { "type": "integer" },
+          "runs_this_hour":      { "type": "integer" },
+          "max_runs_per_hour":   { "type": "integer" },
+          "tokens_today":        { "type": "integer", "format": "int64" },
+          "max_tokens_per_day":  { "type": "integer", "format": "int64" },
+          "storage_mb":          { "type": "integer", "format": "int64" },
+          "max_storage_mb":      { "type": "integer", "format": "int64" }
+        },
+        "required": ["workspace_id"]
       }
     }
   },
@@ -605,6 +755,251 @@ pub const OPENAPI_JSON: &str = r##"{
         "security": [],
         "operationId": "getSwaggerUi",
         "responses": { "200": { "description": "Interactive API explorer", "content": { "text/html": {} } } }
+      }
+    },
+    "/v1/system/info": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Comprehensive system information",
+        "description": "Returns build metadata, runtime capabilities, deployment mode, store backend, uptime, and sanitised environment config (secrets masked).",
+        "operationId": "getSystemInfo",
+        "responses": {
+          "200": { "description": "System info", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SystemInfo" } } } }
+        }
+      }
+    },
+    "/v1/system/role": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Current process deployment role",
+        "description": "Returns the RFC 011 process role (all, api, worker) and which subsystems are active.",
+        "operationId": "getSystemRole",
+        "responses": {
+          "200": { "description": "Process role", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SystemRole" } } } }
+        }
+      }
+    },
+    "/v1/templates": {
+      "get": {
+        "tags": ["Templates"],
+        "summary": "List starter templates",
+        "description": "Returns summaries of all registered starter templates (RFC 012). Built-in templates include simple-chatbot, code-reviewer, and data-analyst.",
+        "operationId": "listTemplates",
+        "responses": {
+          "200": { "description": "Template summaries", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/TemplateSummary" } } } } }
+        }
+      }
+    },
+    "/v1/templates/{id}": {
+      "get": {
+        "tags": ["Templates"],
+        "summary": "Get template detail",
+        "description": "Returns the full template including all file contents (prompts, configs, eval suites).",
+        "operationId": "getTemplate",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Template ID (e.g. simple-chatbot, code-reviewer, data-analyst)" }],
+        "responses": {
+          "200": { "description": "Full template with files", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Template" } } } },
+          "404": { "description": "Template not found" }
+        }
+      }
+    },
+    "/v1/templates/{id}/apply": {
+      "post": {
+        "tags": ["Templates"],
+        "summary": "Apply template to a project",
+        "description": "Scaffolds a project by creating the template's file tree under `projects/{project_id}/`. Returns the list of created file paths.",
+        "operationId": "applyTemplate",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApplyTemplateRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Files created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApplyTemplateResult" } } } },
+          "404": { "description": "Template not found" }
+        }
+      }
+    },
+    "/v1/entitlements": {
+      "get": {
+        "tags": ["Entitlements"],
+        "summary": "Current plan and usage limits",
+        "description": "Returns the tenant's plan tier, current usage counters, limits, and enabled features (RFC 014). Pass `?tenant_id=` to query a specific tenant; defaults to 'default'.",
+        "operationId": "getEntitlements",
+        "parameters": [
+          { "name": "tenant_id", "in": "query", "required": false, "schema": { "type": "string", "default": "default" } }
+        ],
+        "responses": {
+          "200": { "description": "Usage report", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsageReport" } } } },
+          "404": { "description": "No plan assigned to tenant" }
+        }
+      }
+    },
+    "/v1/entitlements/usage": {
+      "get": {
+        "tags": ["Entitlements"],
+        "summary": "Detailed usage breakdown",
+        "description": "Per-resource usage with remaining capacity and percentage used. Useful for dashboard gauges and quota warnings.",
+        "operationId": "getEntitlementUsage",
+        "parameters": [
+          { "name": "tenant_id", "in": "query", "required": false, "schema": { "type": "string", "default": "default" } }
+        ],
+        "responses": {
+          "200": { "description": "Detailed usage", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DetailedUsageReport" } } } },
+          "404": { "description": "No plan assigned to tenant" }
+        }
+      }
+    },
+    "/v1/admin/rebuild-projections": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Rebuild all read-model projections",
+        "description": "Performs a snapshot → replay cycle: exports the current event log and replays every event through `apply_projection`. Use after schema changes or bug fixes that affect projection logic.",
+        "operationId": "rebuildProjections",
+        "responses": {
+          "200": { "description": "Rebuild result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RebuildProjectionsResponse" } } } }
+        }
+      }
+    },
+    "/v1/admin/event-count": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "Event log cardinality",
+        "description": "Total event count and per-type breakdown. Useful for health checks and spotting unexpected event distributions.",
+        "operationId": "getEventCount",
+        "responses": {
+          "200": { "description": "Event counts", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EventCountResponse" } } } }
+        }
+      }
+    },
+    "/v1/admin/event-log": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "Raw event log viewer",
+        "description": "Paginated raw event log with optional position-based cursor. Max 500 per page.",
+        "operationId": "getEventLog",
+        "parameters": [
+          { "name": "from",  "in": "query", "schema": { "type": "integer", "default": 0 }, "description": "Start position (1-based)" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100, "maximum": 500 } }
+        ],
+        "responses": {
+          "200": { "description": "Event page with has_more flag", "content": { "application/json": { "schema": { "type": "object", "properties": { "events": { "type": "array", "items": { "$ref": "#/components/schemas/EventEnvelope" } }, "has_more": { "type": "boolean" } } } } } }
+        }
+      }
+    },
+    "/v1/admin/snapshot": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Export full event log snapshot",
+        "description": "Downloads the complete in-memory event log as a JSON file attachment. Use for backups before destructive operations.",
+        "operationId": "createSnapshot",
+        "responses": {
+          "200": { "description": "JSON snapshot file", "content": { "application/json": { "schema": { "type": "object", "description": "StoreSnapshot with all events in position order" } } } }
+        }
+      }
+    },
+    "/v1/admin/restore": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Restore from snapshot",
+        "description": "Clears all in-memory state and replays the uploaded event log. Irreversible — take a snapshot first.",
+        "operationId": "restoreSnapshot",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "description": "StoreSnapshot previously exported via /v1/admin/snapshot" } } }
+        },
+        "responses": {
+          "200": { "description": "Restore result", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "event_count": { "type": "integer" }, "replayed": { "type": "integer" } } } } } }
+        }
+      }
+    },
+    "/v1/bundles/export": {
+      "post": {
+        "tags": ["Bundles"],
+        "summary": "Export project artifacts as a portable bundle",
+        "description": "Exports prompt assets, releases, and knowledge documents from a project into the RFC 013 CairnBundle format.",
+        "operationId": "exportBundle",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExportBundleRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "CairnBundle envelope", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/v1/bundles/import": {
+      "post": {
+        "tags": ["Bundles"],
+        "summary": "Import a bundle into a project",
+        "description": "Validates, plans, and executes import of a CairnBundle into the target project. Supports skip/overwrite/rename conflict strategies.",
+        "operationId": "importBundle",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImportBundleRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Import result with per-artifact outcomes", "content": { "application/json": { "schema": { "type": "object", "properties": { "artifacts_imported": { "type": "integer" }, "artifacts_skipped": { "type": "integer" }, "outcomes": { "type": "array", "items": { "type": "object" } } } } } } },
+          "400": { "description": "Bundle validation failed" }
+        }
+      }
+    },
+    "/v1/overview": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "High-level operator overview",
+        "description": "Combines status and dashboard: store backend, deployment mode, uptime, active counts, cost summary, feature flags.",
+        "operationId": "getOverview",
+        "responses": { "200": { "description": "Overview data" } }
+      }
+    },
+    "/v1/prompts/assets": {
+      "get": {
+        "tags": ["Prompts"],
+        "summary": "List prompt assets",
+        "operationId": "listPromptAssets",
+        "parameters": [
+          { "name": "limit",  "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": { "200": { "description": "Prompt asset list" } }
+      }
+    },
+    "/v1/prompts/releases": {
+      "get": {
+        "tags": ["Prompts"],
+        "summary": "List prompt releases",
+        "operationId": "listPromptReleases",
+        "parameters": [
+          { "name": "limit",  "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": { "200": { "description": "Prompt release list" } }
+      }
+    },
+    "/v1/notifications": {
+      "get": {
+        "tags": ["Notifications"],
+        "summary": "List notifications",
+        "operationId": "listNotifications",
+        "responses": { "200": { "description": "Notification list" } }
+      }
+    },
+    "/v1/notifications/read-all": {
+      "post": {
+        "tags": ["Notifications"],
+        "summary": "Mark all notifications as read",
+        "operationId": "markAllNotificationsRead",
+        "responses": { "200": { "description": "Marked read" } }
+      }
+    },
+    "/v1/notifications/{id}/read": {
+      "post": {
+        "tags": ["Notifications"],
+        "summary": "Mark a single notification as read",
+        "operationId": "markNotificationRead",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Marked read" } }
       }
     }
   }
