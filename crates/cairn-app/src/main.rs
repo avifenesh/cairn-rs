@@ -11,6 +11,7 @@ mod openapi_spec;
 mod templates;
 mod entitlements;
 mod bundles;
+mod validate;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -1745,6 +1746,15 @@ async fn create_session_handler(
     State(state): State<AppState>,
     Json(body): Json<CreateSessionBody>,
 ) -> impl axum::response::IntoResponse {
+    if let Err(msg) = validate::check_all(&[
+        validate::valid_id("tenant_id", &body.tenant_id),
+        validate::valid_id("workspace_id", &body.workspace_id),
+        validate::valid_id("project_id", &body.project_id),
+        validate::valid_id("session_id", &body.session_id),
+    ]) {
+        return bad_request(msg).into_response();
+    }
+
     let project = ProjectKey::new(
         body.tenant_id.as_deref().unwrap_or("default"),
         body.workspace_id.as_deref().unwrap_or("default"),
@@ -1774,6 +1784,17 @@ async fn create_run_handler(
     State(state): State<AppState>,
     Json(body): Json<CreateRunBody>,
 ) -> impl axum::response::IntoResponse {
+    if let Err(msg) = validate::check_all(&[
+        validate::valid_id("tenant_id", &body.tenant_id),
+        validate::valid_id("workspace_id", &body.workspace_id),
+        validate::valid_id("project_id", &body.project_id),
+        validate::valid_id("session_id", &body.session_id),
+        validate::valid_id("run_id", &body.run_id),
+        validate::valid_id("parent_run_id", &body.parent_run_id),
+    ]) {
+        return bad_request(msg).into_response();
+    }
+
     let project = ProjectKey::new(
         body.tenant_id.as_deref().unwrap_or("default"),
         body.workspace_id.as_deref().unwrap_or("default"),
@@ -2225,6 +2246,14 @@ async fn resolve_approval_handler(
     Path(id): Path<String>,
     Json(body): Json<ResolveApprovalBody>,
 ) -> impl axum::response::IntoResponse {
+    if let Err(msg) = validate::check_all(&[
+        validate::require_id("id", &id),
+        validate::max_len_str("decision", &body.decision, 32),
+        validate::max_len("reason", &body.reason, validate::MAX_DESC_LEN),
+    ]) {
+        return Err(bad_request(msg));
+    }
+
     let approval_id = ApprovalId::new(id);
     let decision = match body.decision.to_lowercase().as_str() {
         "approved" | "approve" => ApprovalDecision::Approved,
@@ -3455,6 +3484,16 @@ async fn ollama_generate_handler(
     State(state): State<AppState>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
+    if let Err(msg) = validate::check_all(&[
+        validate::valid_id("model", &body.model),
+        validate::max_len_str("prompt", &body.prompt, validate::MAX_PROMPT_LEN),
+    ]) {
+        return bad_request(msg).into_response();
+    }
+    if body.prompt.is_empty() && body.messages.as_ref().map_or(true, |m| m.is_empty()) {
+        return bad_request("prompt or messages is required").into_response();
+    }
+
     let Some(provider) = &state.ollama else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -4666,6 +4705,16 @@ async fn claim_task_handler(
     Path(id): Path<String>,
     Json(body): Json<ClaimTaskRequest>,
 ) -> impl axum::response::IntoResponse {
+    if let Err(msg) = validate::check_all(&[
+        validate::require_id("id", &id),
+        validate::require_id("worker_id", &body.worker_id),
+    ]) {
+        return Err(bad_request(msg));
+    }
+    if body.lease_duration_ms > 3_600_000 {
+        return Err(bad_request("lease_duration_ms must not exceed 3,600,000 (1 hour)"));
+    }
+
     let task_id = TaskId::new(id);
     match state.runtime.tasks.claim(&task_id, body.worker_id, body.lease_duration_ms).await {
         Ok(record) => Ok((StatusCode::OK, Json(record))),
@@ -5133,6 +5182,15 @@ async fn bundle_export_handler(
 async fn bundle_import_handler(
     Json(body): Json<bundles::ImportRequest>,
 ) -> impl IntoResponse {
+    if let Err(msg) = validate::check_all(&[
+        validate::require_id("project_id", &body.project_id),
+    ]) {
+        return Err(bad_request(msg));
+    }
+    if body.existing_ids.len() > 10_000 {
+        return Err(bad_request("existing_ids exceeds maximum of 10,000 entries"));
+    }
+
     // Validate the bundle.
     let validation = bundles::validate_bundle(&body.bundle);
     if !validation.valid {
