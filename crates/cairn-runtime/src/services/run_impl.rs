@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{QuotaReadModel, RunReadModel, RunRecord, SessionReadModel};
+use cairn_store::projections::{ApprovalReadModel, QuotaReadModel, RunReadModel, RunRecord, SessionReadModel};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -67,7 +67,7 @@ impl<S: EventLog + RunReadModel + SessionReadModel + 'static> RunServiceImpl<S> 
 #[async_trait]
 impl<S> RunService for RunServiceImpl<S>
 where
-    S: EventLog + RunReadModel + SessionReadModel + QuotaReadModel + 'static,
+    S: EventLog + RunReadModel + SessionReadModel + QuotaReadModel + ApprovalReadModel + 'static,
 {
     async fn start(
         &self,
@@ -173,6 +173,13 @@ where
         trigger: ResumeTrigger,
         target: RunResumeTarget,
     ) -> Result<RunRecord, RuntimeError> {
+        // Block resume while the run has pending (unresolved) approvals.
+        if ApprovalReadModel::has_pending_for_run(self.store.as_ref(), run_id).await? {
+            return Err(RuntimeError::PolicyDenied {
+                reason: format!("run {} has pending approvals", run_id.as_str()),
+            });
+        }
+
         let run = self.get_run(run_id).await?;
         let to = match target {
             RunResumeTarget::Pending => RunState::Pending,
@@ -201,6 +208,34 @@ where
 
         self.store.append(&[event]).await?;
         self.get_run(run_id).await
+    }
+
+    async fn enter_waiting_approval(
+        &self,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError> {
+        self.transition_run(run_id, RunState::WaitingApproval, None).await
+    }
+
+    async fn resolve_approval(
+        &self,
+        run_id: &RunId,
+        decision: ApprovalDecision,
+    ) -> Result<RunRecord, RuntimeError> {
+        match decision {
+            ApprovalDecision::Approved => {
+                let run = self.transition_run(run_id, RunState::Running, None).await?;
+                derive_and_update_session(self.store.as_ref(), &run.session_id).await?;
+                Ok(run)
+            }
+            ApprovalDecision::Rejected => {
+                let run = self
+                    .transition_run(run_id, RunState::Failed, Some(FailureClass::ApprovalRejected))
+                    .await?;
+                derive_and_update_session(self.store.as_ref(), &run.session_id).await?;
+                Ok(run)
+            }
+        }
     }
 }
 
@@ -406,6 +441,10 @@ where
     ///
     /// Emits a `CheckpointStrategySet` event. The `strategy` string describes
     /// the trigger kind: "periodic", "on_tool_call", or "manual".
+    ///
+    /// Strategies containing "auto" or "on_task_complete" enable
+    /// `trigger_on_task_complete`, which creates a checkpoint automatically
+    /// when any task in the run completes.
     pub async fn set_checkpoint_strategy(
         &self,
         run_id: &cairn_domain::RunId,
@@ -416,6 +455,9 @@ where
             .unwrap()
             .as_millis() as u64;
 
+        let trigger_on_task_complete =
+            strategy.contains("auto") || strategy.contains("on_task_complete");
+
         let event = super::event_helpers::make_envelope(
             cairn_domain::RuntimeEvent::CheckpointStrategySet(
                 cairn_domain::CheckpointStrategySet {
@@ -425,7 +467,7 @@ where
                     run_id: Some(run_id.clone()),
                     interval_ms: 0,
                     max_checkpoints: 0,
-                    trigger_on_task_complete: false,
+                    trigger_on_task_complete,
                 },
             ),
         );

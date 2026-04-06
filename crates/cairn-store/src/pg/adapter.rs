@@ -12,9 +12,9 @@ use sqlx::PgPool;
 use crate::db::{Backend, DbAdapter};
 use crate::error::StoreError;
 use crate::projections::{
-    ApprovalReadModel, ApprovalRecord, CheckpointReadModel, CheckpointRecord, MailboxReadModel,
-    MailboxRecord, RunReadModel, RunRecord, SessionReadModel, SessionRecord, TaskReadModel,
-    TaskRecord, ToolInvocationReadModel,
+    ApprovalReadModel, ApprovalRecord, CheckpointReadModel, CheckpointRecord,
+    CheckpointStrategyReadModel, MailboxReadModel, MailboxRecord, RunReadModel, RunRecord,
+    SessionReadModel, SessionRecord, TaskReadModel, TaskRecord, ToolInvocationReadModel,
 };
 
 /// Postgres-backed database adapter.
@@ -387,6 +387,25 @@ impl ApprovalReadModel for PgAdapter {
         .map_err(|e| StoreError::Internal(e.to_string()))?;
 
         rows.into_iter().map(ApprovalRow::into_record).collect()
+    }
+
+    async fn has_pending_for_run(&self, run_id: &RunId) -> Result<bool, StoreError> {
+        let count: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM approvals WHERE run_id = $1 AND decision IS NULL",
+        )
+        .bind(run_id.as_str())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        Ok(count.0 > 0)
+    }
+}
+
+#[async_trait]
+impl CheckpointStrategyReadModel for PgAdapter {
+    async fn get_by_run(&self, run_id: &RunId) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
+        let _ = run_id;
+        Ok(None)
     }
 }
 

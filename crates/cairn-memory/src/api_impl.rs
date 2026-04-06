@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cairn_api::endpoints::ListQuery;
@@ -13,9 +13,15 @@ use cairn_api::http::ListResponse;
 use cairn_api::memory_api::{
     CreateMemoryRequest, MemoryEndpoints, MemoryItem, MemorySearchQuery, MemoryStatus,
 };
-use cairn_domain::ProjectKey;
+use cairn_domain::{ChunkId, KnowledgeDocumentId, ProjectKey, SourceId};
 
+use crate::in_memory::InMemoryDocumentStore;
+use crate::ingest::{ChunkRecord, SourceType};
+use crate::pipeline::DocumentStore;
 use crate::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
+
+/// Source ID marker for memory items stored in the document store.
+const MEMORY_SOURCE_ID: &str = "__cairn_memory";
 
 /// Memory endpoint implementation backed by cairn-memory services.
 ///
@@ -36,17 +42,31 @@ impl MemoryProposalHook for NoOpProposalHook {
 
 pub struct MemoryApiImpl<R: RetrievalService> {
     retrieval: R,
-    items: Mutex<HashMap<String, MemoryItem>>,
+    store: Arc<InMemoryDocumentStore>,
     next_id: Mutex<u64>,
     proposal_hook: Box<dyn MemoryProposalHook>,
 }
 
 impl<R: RetrievalService> MemoryApiImpl<R> {
-    pub fn new(retrieval: R) -> Self {
+    pub fn new(retrieval: R, store: Arc<InMemoryDocumentStore>) -> Self {
+        // Recover next_id from existing memory items so IDs never collide after restart.
+        let max_id = store
+            .all_chunks()
+            .iter()
+            .filter(|c| c.source_id.as_str() == MEMORY_SOURCE_ID)
+            .filter_map(|c| {
+                c.chunk_id
+                    .as_str()
+                    .strip_prefix("mem_")
+                    .and_then(|n| n.parse::<u64>().ok())
+            })
+            .max()
+            .unwrap_or(0);
+
         Self {
             retrieval,
-            items: Mutex::new(HashMap::new()),
-            next_id: Mutex::new(1),
+            store,
+            next_id: Mutex::new(max_id + 1),
             proposal_hook: Box::new(NoOpProposalHook),
         }
     }
@@ -55,6 +75,46 @@ impl<R: RetrievalService> MemoryApiImpl<R> {
     pub fn with_proposal_hook(mut self, hook: Box<dyn MemoryProposalHook>) -> Self {
         self.proposal_hook = hook;
         self
+    }
+}
+
+/// Reconstruct a `MemoryItem` from a `ChunkRecord` that was stored
+/// with the `__cairn_memory` source marker.
+fn chunk_to_memory_item(chunk: &ChunkRecord) -> MemoryItem {
+    let meta = chunk.provenance_metadata.as_ref();
+
+    let status = meta
+        .and_then(|m| m.get("status"))
+        .and_then(|v| v.as_str())
+        .map(|s| match s {
+            "accepted" => MemoryStatus::Accepted,
+            "rejected" => MemoryStatus::Rejected,
+            _ => MemoryStatus::Proposed,
+        })
+        .unwrap_or(MemoryStatus::Proposed);
+
+    let category = meta
+        .and_then(|m| m.get("category"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_owned());
+
+    let source = meta
+        .and_then(|m| m.get("source"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_owned());
+
+    let confidence = meta
+        .and_then(|m| m.get("confidence"))
+        .and_then(|v| v.as_f64());
+
+    MemoryItem {
+        id: chunk.chunk_id.as_str().to_owned(),
+        content: chunk.text.clone(),
+        category,
+        status,
+        source,
+        confidence,
+        created_at: format!("{}", chunk.created_at),
     }
 }
 
@@ -67,11 +127,15 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
         _project: &ProjectKey,
         query: &ListQuery,
     ) -> Result<ListResponse<MemoryItem>, Self::Error> {
-        let items = self.items.lock().unwrap();
+        let chunks = self.store.all_chunks();
         let limit = query.limit.unwrap_or(20).min(100);
         let offset = query.offset.unwrap_or(0);
 
-        let mut results: Vec<MemoryItem> = items.values().cloned().collect();
+        let mut results: Vec<MemoryItem> = chunks
+            .iter()
+            .filter(|c| c.source_id.as_str() == MEMORY_SOURCE_ID)
+            .map(chunk_to_memory_item)
+            .collect();
         results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
         let total = results.len();
@@ -121,17 +185,50 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
 
     async fn create(
         &self,
-        _project: &ProjectKey,
+        project: &ProjectKey,
         request: &CreateMemoryRequest,
     ) -> Result<MemoryItem, Self::Error> {
-        let mut next_id = self.next_id.lock().unwrap();
-        let id = format!("mem_{}", *next_id);
-        *next_id += 1;
+        let id = {
+            let mut next_id = self.next_id.lock().unwrap();
+            let id = format!("mem_{}", *next_id);
+            *next_id += 1;
+            id
+        };
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
+
+        let metadata = serde_json::json!({
+            "type": "memory_item",
+            "status": "proposed",
+            "category": request.category,
+            "source": "assistant",
+        });
+
+        let chunk = ChunkRecord {
+            chunk_id: ChunkId::new(&id),
+            document_id: KnowledgeDocumentId::new(&id),
+            source_id: SourceId::new(MEMORY_SOURCE_ID),
+            source_type: SourceType::PlainText,
+            project: project.clone(),
+            text: request.content.clone(),
+            position: 0,
+            created_at: now,
+            updated_at: None,
+            provenance_metadata: Some(metadata),
+            credibility_score: None,
+            graph_linkage: None,
+            embedding: None,
+            content_hash: None,
+            entities: vec![],
+        };
+
+        self.store
+            .insert_chunks(&[chunk])
+            .await
+            .map_err(|e| e.to_string())?;
 
         let item = MemoryItem {
             id: id.clone(),
@@ -143,29 +240,42 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
             created_at: format!("{now}"),
         };
 
-        self.items.lock().unwrap().insert(id, item.clone());
         self.proposal_hook.on_proposed(&item);
         Ok(item)
     }
 
     async fn accept(&self, memory_id: &str) -> Result<(), Self::Error> {
-        let mut items = self.items.lock().unwrap();
-        if let Some(item) = items.get_mut(memory_id) {
-            item.status = MemoryStatus::Accepted;
-            Ok(())
-        } else {
-            Err(format!("memory not found: {memory_id}"))
+        let mut chunks = self.store.chunks_mut();
+        let chunk = chunks
+            .iter_mut()
+            .find(|c| c.chunk_id.as_str() == memory_id && c.source_id.as_str() == MEMORY_SOURCE_ID)
+            .ok_or_else(|| format!("memory not found: {memory_id}"))?;
+
+        if let Some(obj) = chunk
+            .provenance_metadata
+            .as_mut()
+            .and_then(|m| m.as_object_mut())
+        {
+            obj.insert("status".to_owned(), serde_json::json!("accepted"));
         }
+        Ok(())
     }
 
     async fn reject(&self, memory_id: &str) -> Result<(), Self::Error> {
-        let mut items = self.items.lock().unwrap();
-        if let Some(item) = items.get_mut(memory_id) {
-            item.status = MemoryStatus::Rejected;
-            Ok(())
-        } else {
-            Err(format!("memory not found: {memory_id}"))
+        let mut chunks = self.store.chunks_mut();
+        let chunk = chunks
+            .iter_mut()
+            .find(|c| c.chunk_id.as_str() == memory_id && c.source_id.as_str() == MEMORY_SOURCE_ID)
+            .ok_or_else(|| format!("memory not found: {memory_id}"))?;
+
+        if let Some(obj) = chunk
+            .provenance_metadata
+            .as_mut()
+            .and_then(|m| m.as_object_mut())
+        {
+            obj.insert("status".to_owned(), serde_json::json!("rejected"));
         }
+        Ok(())
     }
 }
 
@@ -177,7 +287,6 @@ use cairn_api::memory_api::{
     AddDocumentToCorpusRequest, AddSourceTagsRequest, CorpusEndpoints, CorpusRecord,
     CreateCorpusRequest, SourceTagsEndpoints, SourceTagsResponse,
 };
-use crate::in_memory::InMemoryDocumentStore;
 
 /// Corpus API implementation backed by InMemoryDocumentStore.
 pub struct CorpusApiImpl {
@@ -418,8 +527,8 @@ mod tests {
             .await
             .unwrap();
 
-        let retrieval = InMemoryRetrieval::new(store);
-        let api = MemoryApiImpl::new(retrieval);
+        let retrieval = InMemoryRetrieval::new(store.clone());
+        let api = MemoryApiImpl::new(retrieval, store);
 
         let results = api
             .search(
@@ -439,8 +548,8 @@ mod tests {
     #[tokio::test]
     async fn memory_crud_lifecycle() {
         let store = Arc::new(InMemoryDocumentStore::new());
-        let retrieval = InMemoryRetrieval::new(store);
-        let api = MemoryApiImpl::new(retrieval);
+        let retrieval = InMemoryRetrieval::new(store.clone());
+        let api = MemoryApiImpl::new(retrieval, store);
         let project = ProjectKey::new("t", "w", "p");
 
         let item = api

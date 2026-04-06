@@ -51,8 +51,8 @@ impl InMemoryServices {
         let chunker = ParagraphChunker::default();
         let pipeline = IngestPipeline::new(store.clone(), chunker);
         let retrieval = InMemoryRetrieval::new(store.clone());
-        let deep_search = IterativeDeepSearch::new(InMemoryRetrieval::new(store));
-        let memory_api = MemoryApiImpl::new(retrieval);
+        let deep_search = IterativeDeepSearch::new(InMemoryRetrieval::new(store.clone()));
+        let memory_api = MemoryApiImpl::new(retrieval, store);
         let feed = FeedStore::new();
         let diagnostics = InMemoryDiagnostics::new();
 

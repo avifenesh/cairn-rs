@@ -14,7 +14,7 @@
 //!  └─ get_usage(tenant) → UsageReport
 //! ```
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};

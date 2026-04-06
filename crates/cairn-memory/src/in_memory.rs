@@ -46,6 +46,7 @@ pub struct ExportableDocument {
 pub struct InMemoryDocumentStore {
     docs: Mutex<HashMap<String, (IngestStatus, ProjectKey, SourceType)>>,
     chunks: Mutex<Vec<ChunkRecord>>,
+    schedules: Mutex<HashMap<String, RefreshSchedule>>,
 }
 
 impl InMemoryDocumentStore {
@@ -53,6 +54,7 @@ impl InMemoryDocumentStore {
         Self {
             docs: Mutex::new(HashMap::new()),
             chunks: Mutex::new(Vec::new()),
+            schedules: Mutex::new(HashMap::new()),
         }
     }
 
@@ -130,18 +132,32 @@ impl InMemoryDocumentStore {
     /// List all known sources for a project.
     pub fn list_sources(&self, project: &cairn_domain::ProjectKey) -> Vec<SourceSummary> {
         let chunks = self.chunks.lock().unwrap();
-        let mut seen = std::collections::HashSet::new();
-        chunks.iter()
-            .filter(|c| &c.project == project)
-            .filter_map(|c| {
-                if seen.insert(c.source_id.as_str().to_owned()) {
-                    Some(SourceSummary {
-                        source_id: c.source_id.clone(),
-                        document_count: 1,
-                        avg_quality_score: 0.0,
-                        last_ingested_at_ms: Some(c.created_at),
-                    })
-                } else { None }
+        // Count distinct document_ids per source_id.
+        let mut source_docs: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        let mut source_last_ts: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        let mut source_ids: std::collections::HashMap<String, cairn_domain::SourceId> =
+            std::collections::HashMap::new();
+        for c in chunks.iter().filter(|c| &c.project == project) {
+            let key = c.source_id.as_str().to_owned();
+            source_docs
+                .entry(key.clone())
+                .or_default()
+                .insert(c.document_id.as_str().to_owned());
+            let ts = source_last_ts.entry(key.clone()).or_insert(0);
+            if c.created_at > *ts {
+                *ts = c.created_at;
+            }
+            source_ids.entry(key).or_insert_with(|| c.source_id.clone());
+        }
+        source_ids
+            .into_iter()
+            .map(|(key, source_id)| SourceSummary {
+                source_id,
+                document_count: source_docs.get(&key).map_or(0, |docs| docs.len() as u64),
+                avg_quality_score: 0.0,
+                last_ingested_at_ms: source_last_ts.get(&key).copied(),
             })
             .collect()
     }
@@ -170,9 +186,13 @@ impl InMemoryDocumentStore {
         chunks.iter().any(|c| &c.source_id == source_id)
     }
 
-    /// Get a refresh schedule for a source (always None in stub).
-    pub fn get_refresh_schedule(&self, _source_id: &cairn_domain::SourceId) -> Option<RefreshSchedule> {
-        None
+    /// Get a refresh schedule for a source.
+    pub fn get_refresh_schedule(&self, source_id: &cairn_domain::SourceId) -> Option<RefreshSchedule> {
+        let schedules = self.schedules.lock().unwrap();
+        schedules
+            .values()
+            .find(|s| s.source_id == *source_id)
+            .cloned()
     }
 
     /// Create a refresh schedule for a source.
@@ -187,23 +207,46 @@ impl InMemoryDocumentStore {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        RefreshSchedule {
-            schedule_id: format!("sched_{}", now),
+        let schedule = RefreshSchedule {
+            schedule_id: format!("sched_{}_{}", source_id.as_str(), now),
             source_id: source_id.clone(),
             interval_ms,
             last_refresh_ms: None,
             enabled: true,
             refresh_url,
+        };
+        self.schedules
+            .lock()
+            .unwrap()
+            .insert(schedule.schedule_id.clone(), schedule.clone());
+        schedule
+    }
+
+    /// List all due refresh schedules (interval elapsed since last refresh).
+    pub fn list_due_schedules(&self, now_ms: u64) -> Vec<RefreshSchedule> {
+        let schedules = self.schedules.lock().unwrap();
+        schedules
+            .values()
+            .filter(|s| {
+                if !s.enabled {
+                    return false;
+                }
+                match s.last_refresh_ms {
+                    None => true, // never refreshed — always due
+                    Some(last) => now_ms.saturating_sub(last) >= s.interval_ms,
+                }
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Update the last refresh timestamp for a schedule.
+    pub fn update_last_refresh_ms(&self, schedule_id: &str, now_ms: u64) {
+        let mut schedules = self.schedules.lock().unwrap();
+        if let Some(sched) = schedules.get_mut(schedule_id) {
+            sched.last_refresh_ms = Some(now_ms);
         }
     }
-
-    /// List all due refresh schedules (always empty in stub).
-    pub fn list_due_schedules(&self, _now_ms: u64) -> Vec<RefreshSchedule> {
-        vec![]
-    }
-
-    /// Update the last refresh timestamp for a schedule (no-op in stub).
-    pub fn update_last_refresh_ms(&self, _schedule_id: &str, _now_ms: u64) {}
 }
 
 impl Default for InMemoryDocumentStore {
@@ -290,11 +333,13 @@ pub struct InMemoryRetrieval {
     store: std::sync::Arc<InMemoryDocumentStore>,
     graph: Option<std::sync::Arc<cairn_graph::in_memory::InMemoryGraphStore>>,
     embedder: Option<std::sync::Arc<dyn crate::pipeline::EmbeddingProvider>>,
+    /// Tracks per-chunk last-retrieval timestamps for recency_of_use scoring.
+    last_retrieved: Mutex<HashMap<String, u64>>,
 }
 
 impl InMemoryRetrieval {
     pub fn new(store: std::sync::Arc<InMemoryDocumentStore>) -> Self {
-        Self { store, graph: None, embedder: None }
+        Self { store, graph: None, embedder: None, last_retrieved: Mutex::new(HashMap::new()) }
     }
 
     /// Create with a diagnostics adapter (stub — diagnostics adapter is ignored in in-memory backend).
@@ -302,7 +347,7 @@ impl InMemoryRetrieval {
         store: std::sync::Arc<InMemoryDocumentStore>,
         _diagnostics: std::sync::Arc<dyn crate::diagnostics::DiagnosticsService>,
     ) -> Self {
-        Self { store, graph: None, embedder: None }
+        Self { store, graph: None, embedder: None, last_retrieved: Mutex::new(HashMap::new()) }
     }
 
     /// Attach a graph store for graph-proximity scoring.
@@ -433,6 +478,9 @@ impl RetrievalService for InMemoryRetrieval {
 
         let mut scoring_dims: Vec<String> = Vec::new();
 
+        // Snapshot last-retrieval timestamps for recency_of_use scoring.
+        let last_retrieved_snap = self.last_retrieved.lock().unwrap().clone();
+
         let mut results: Vec<RetrievalResult> = scored
             .into_iter()
             .map(|(chunk, lexical_score, semantic_score)| {
@@ -452,6 +500,25 @@ impl RetrievalService for InMemoryRetrieval {
                     .map(|s| s.clamp(0.0, 1.0))
                     .unwrap_or(0.0);
 
+                // Recency of use: None if never retrieved, tiered score otherwise.
+                let recency_of_use = last_retrieved_snap
+                    .get(chunk.chunk_id.as_str())
+                    .map(|&last_ms| {
+                        let age_ms = now.saturating_sub(last_ms);
+                        const HOUR_MS: u64 = 3_600_000;
+                        const DAY_MS: u64 = 86_400_000;
+                        const WEEK_MS: u64 = 7 * DAY_MS;
+                        if age_ms <= HOUR_MS {
+                            1.0
+                        } else if age_ms <= DAY_MS {
+                            0.5
+                        } else if age_ms <= WEEK_MS {
+                            0.25
+                        } else {
+                            0.1
+                        }
+                    });
+
                 let breakdown = ScoringBreakdown {
                     semantic_relevance: semantic_score,
                     lexical_relevance: lexical_score,
@@ -460,7 +527,7 @@ impl RetrievalService for InMemoryRetrieval {
                     source_credibility: credibility,
                     corroboration: 0.0,
                     graph_proximity: 0.0,
-                    recency_of_use: Some(0.0),
+                    recency_of_use,
                 };
 
                 let final_score = retrieval::compute_final_score(&breakdown, &policy.weights);
@@ -472,6 +539,88 @@ impl RetrievalService for InMemoryRetrieval {
                 }
             })
             .collect();
+
+        // Apply corroboration: a chunk scores higher when independent sources confirm
+        // the same fact. For each result, count how many other results from DIFFERENT
+        // sources corroborate it. Two chunks corroborate if:
+        // - Both have embeddings AND cosine similarity > 0.8; OR
+        // - Either lacks an embedding AND both share ≥50% of query words.
+        {
+            let total_others = results.len().saturating_sub(1).max(1) as f64;
+
+            // Pre-compute per-chunk query-word coverage for lexical fallback.
+            let query_words: Vec<String> = query_lower.split_whitespace().map(|w| w.to_owned()).collect();
+            let word_count = query_words.len().max(1);
+
+            struct ChunkInfo {
+                source_id: String,
+                matched_words: HashSet<String>,
+                has_embedding: bool,
+            }
+            let infos: Vec<ChunkInfo> = results
+                .iter()
+                .map(|r| {
+                    let text_lower = r.chunk.text.to_lowercase();
+                    let matched: HashSet<String> = query_words
+                        .iter()
+                        .filter(|w| text_lower.contains(w.as_str()))
+                        .cloned()
+                        .collect();
+                    ChunkInfo {
+                        source_id: r.chunk.source_id.as_str().to_owned(),
+                        matched_words: matched,
+                        has_embedding: r.chunk.embedding.is_some(),
+                    }
+                })
+                .collect();
+
+            for i in 0..results.len() {
+                let mut corroborating = 0usize;
+                for j in 0..results.len() {
+                    if i == j {
+                        continue;
+                    }
+                    // Different sources only.
+                    if infos[i].source_id == infos[j].source_id {
+                        continue;
+                    }
+                    // Embedding path: both have embeddings → cosine > 0.8.
+                    if infos[i].has_embedding && infos[j].has_embedding {
+                        if let (Some(ei), Some(ej)) =
+                            (&results[i].chunk.embedding, &results[j].chunk.embedding)
+                        {
+                            if crate::reranking::cosine_similarity(ei, ej) > 0.8 {
+                                corroborating += 1;
+                            }
+                        }
+                    } else {
+                        // Lexical fallback: ≥50% shared query words.
+                        let shared = infos[i]
+                            .matched_words
+                            .intersection(&infos[j].matched_words)
+                            .count();
+                        if shared * 2 >= word_count {
+                            corroborating += 1;
+                        }
+                    }
+                }
+                if corroborating > 0 {
+                    results[i].breakdown.corroboration =
+                        (corroborating as f64 / total_others).min(1.0);
+                    results[i].score = retrieval::compute_final_score(
+                        &results[i].breakdown,
+                        &policy.weights,
+                    );
+                }
+            }
+
+            // Re-sort after corroboration update.
+            results.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
 
         // Apply graph proximity: for each result, count how many OTHER result documents
         // are graph neighbors of this result's document_id. Normalize to [0, 1].
@@ -569,6 +718,16 @@ impl RetrievalService for InMemoryRetrieval {
             }
         };
 
+        // Record retrieval timestamps for returned chunks so subsequent
+        // queries see positive recency_of_use.
+        {
+            let record_now = retrieval::now_ms();
+            let mut lr = self.last_retrieved.lock().unwrap();
+            for r in &results {
+                lr.insert(r.chunk.chunk_id.as_str().to_owned(), record_now);
+            }
+        }
+
         let elapsed = start.elapsed().as_millis() as u64;
         let results_returned = results.len();
 
@@ -607,21 +766,8 @@ impl InMemoryRetrieval {
 
     /// List all known sources for a project.
     pub fn list_sources(&self, project: &cairn_domain::ProjectKey) -> Vec<SourceSummary> {
-        let chunks = self.store.chunks.lock().unwrap();
-        let mut seen = std::collections::HashSet::new();
-        chunks.iter()
-            .filter(|c| &c.project == project)
-            .filter_map(|c| {
-                if seen.insert(c.source_id.as_str().to_owned()) {
-                    Some(SourceSummary {
-                        source_id: c.source_id.clone(),
-                        document_count: 1,
-                        avg_quality_score: 0.0,
-                        last_ingested_at_ms: Some(c.created_at),
-                    })
-                } else { None }
-            })
-            .collect()
+        // Delegate to the underlying store to get correct document counts.
+        self.store.list_sources(project)
     }
 
     /// Check if a source is active (has any chunks).
@@ -647,36 +793,27 @@ impl InMemoryRetrieval {
     pub fn create_refresh_schedule(
         &self,
         source_id: &cairn_domain::SourceId,
-        _project: &cairn_domain::ProjectKey,
+        project: &cairn_domain::ProjectKey,
         interval_ms: u64,
         refresh_url: Option<String>,
     ) -> RefreshSchedule {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        RefreshSchedule {
-            schedule_id: format!("sched_{}", now),
-            source_id: source_id.clone(),
-            interval_ms,
-            last_refresh_ms: None,
-            enabled: true,
-            refresh_url,
-        }
+        self.store.create_refresh_schedule(source_id, project, interval_ms, refresh_url)
     }
 
-    /// Get a refresh schedule for a source (always None in stub).
-    pub fn get_refresh_schedule(&self, _source_id: &cairn_domain::SourceId) -> Option<RefreshSchedule> {
-        None
+    /// Get a refresh schedule for a source.
+    pub fn get_refresh_schedule(&self, source_id: &cairn_domain::SourceId) -> Option<RefreshSchedule> {
+        self.store.get_refresh_schedule(source_id)
     }
 
-    /// List all due refresh schedules (always empty in stub).
-    pub fn list_due_schedules(&self, _now_ms: u64) -> Vec<RefreshSchedule> {
-        vec![]
+    /// List all due refresh schedules.
+    pub fn list_due_schedules(&self, now_ms: u64) -> Vec<RefreshSchedule> {
+        self.store.list_due_schedules(now_ms)
     }
 
-    /// Update the last refresh timestamp for a schedule (no-op in stub).
-    pub fn update_last_refresh_ms(&self, _schedule_id: &str, _now_ms: u64) {}
+    /// Update the last refresh timestamp for a schedule.
+    pub fn update_last_refresh_ms(&self, schedule_id: &str, now_ms: u64) {
+        self.store.update_last_refresh_ms(schedule_id, now_ms);
+    }
 }
 
 /// RFC 003 §6: "why-this-result" explanation for a specific chunk + query pair.

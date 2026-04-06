@@ -2968,8 +2968,12 @@ async fn runtime_stream_emits_frame_after_run_creation() {
 
 #[tokio::test]
 async fn memory_and_provider_routes_round_trip() {
+    let config = BootstrapConfig {
+        mode: cairn_api::bootstrap::DeploymentMode::SelfHostedTeam,
+        ..BootstrapConfig::default()
+    };
     let (app, _runtime, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
+        AppBootstrap::router_with_runtime_and_tokens(config)
             .await
             .unwrap();
     tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
@@ -3521,8 +3525,12 @@ async fn plugin_eval_score_route_returns_exact_match_score() {
 
 #[tokio::test]
 async fn full_workspace_operator_journey_over_http() {
+    let config = BootstrapConfig {
+        mode: cairn_api::bootstrap::DeploymentMode::SelfHostedTeam,
+        ..BootstrapConfig::default()
+    };
     let (app, _runtime, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
+        AppBootstrap::router_with_runtime_and_tokens(config)
             .await
             .unwrap();
     tokens.register("test-token".to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("tenant_e2e_http") });

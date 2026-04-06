@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cairn_domain::providers::RunCostAlert;
 use cairn_domain::{
-    RunCostAlertSet, RunCostAlertTriggered, RunCostUpdated, RuntimeEvent, RunId, TenantId,
+    RunCostAlertSet, RunCostAlertTriggered, RuntimeEvent, RunId, TenantId,
 };
 use cairn_store::projections::{RunCostAlertReadModel, RunCostReadModel};
 use cairn_store::EventLog;
@@ -105,7 +105,7 @@ where
 mod tests {
     use super::*;
     use cairn_domain::{
-        EventEnvelope, EventId, EventSource, SessionId, TenantId,
+        EventEnvelope, EventId, EventSource, RunCostUpdated, SessionId, TenantId,
     };
     use cairn_store::InMemoryStore;
 

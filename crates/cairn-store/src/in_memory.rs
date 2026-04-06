@@ -897,6 +897,9 @@ impl InMemoryStore {
                 });
             }
             RuntimeEvent::ProviderBindingCreated(e) => {
+                // Use the event position as created_at when the event's timestamp is 0,
+                // ensuring stable creation-order sorting in list_active.
+                let effective_created_at = if e.created_at > 0 { e.created_at } else { event.position.0 };
                 state.provider_bindings.insert(e.provider_binding_id.as_str().to_owned(),
                     cairn_domain::providers::ProviderBindingRecord {
                         provider_binding_id: e.provider_binding_id.clone(),
@@ -906,7 +909,7 @@ impl InMemoryStore {
                         operation_kind: e.operation_kind,
                         settings: e.settings.clone(),
                         active: e.active,
-                        created_at: e.created_at,
+                        created_at: effective_created_at,
                     }
                 );
             }
@@ -1758,7 +1761,7 @@ impl RunReadModel for InMemoryStore {
             .runs
             .values()
             .filter(|r| r.session_id == *session_id && r.parent_run_id.is_none())
-            .max_by_key(|r| r.created_at)
+            .max_by_key(|r| (r.created_at, r.run_id.as_str().to_owned()))
             .cloned())
     }
 
@@ -1899,6 +1902,14 @@ impl ApprovalReadModel for InMemoryStore {
         results.sort_by_key(|a| (a.created_at, a.approval_id.as_str().to_owned()));
         let results = results.into_iter().skip(offset).take(limit).collect();
         Ok(results)
+    }
+
+    async fn has_pending_for_run(&self, run_id: &RunId) -> Result<bool, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state
+            .approvals
+            .values()
+            .any(|a| a.run_id.as_ref() == Some(run_id) && a.decision.is_none()))
     }
 }
 
@@ -3705,10 +3716,15 @@ impl crate::projections::ProviderBindingReadModel for InMemoryStore {
         operation: cairn_domain::providers::OperationKind,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        let results: Vec<_> = state.provider_bindings.values()
+        let mut results: Vec<_> = state.provider_bindings.values()
             .filter(|b| &b.project == project && b.active && b.operation_kind == operation)
             .cloned()
             .collect();
+        // Stable creation-order: sort by created_at, then by binding ID for determinism.
+        results.sort_by(|a, b| {
+            a.created_at.cmp(&b.created_at)
+                .then_with(|| a.provider_binding_id.as_str().cmp(b.provider_binding_id.as_str()))
+        });
         Ok(results)
     }
 }
@@ -3795,7 +3811,10 @@ impl crate::projections::GuardrailReadModel for InMemoryStore {
     async fn list_policies(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize) -> Result<Vec<cairn_domain::policy::GuardrailPolicy>, StoreError> {
         let _ = tenant_id;
         let state = self.state.lock().unwrap();
-        Ok(state.guardrail_policies.values().skip(offset).take(limit).cloned().collect())
+        let mut policies: Vec<_> = state.guardrail_policies.values().cloned().collect();
+        // Sort by policy_id (timestamp-based) for deterministic creation-order iteration.
+        policies.sort_by(|a, b| a.policy_id.cmp(&b.policy_id));
+        Ok(policies.into_iter().skip(offset).take(limit).collect())
     }
 }
 
@@ -4377,29 +4396,244 @@ impl InMemoryStore {
     }
 
     /// Compact event log stub — returns a basic report.
-    pub fn compact_event_log(&self, _tenant_id: &cairn_domain::TenantId, _retain_last_n: Option<u64>) -> serde_json::Value {
-        serde_json::json!({"events_compacted": 0, "retained": 0})
+    pub fn compact_event_log(&self, tenant_id: &cairn_domain::TenantId, retain_last_n: Option<u64>) -> serde_json::Value {
+        let retain = retain_last_n.unwrap_or(100) as usize;
+        let mut state = self.state.lock().unwrap();
+        let events_before = state.events.len() as u64;
+
+        if state.events.len() <= retain {
+            return serde_json::json!({
+                "events_before": events_before,
+                "events_after": events_before,
+                "events_compacted": 0,
+                "retained": events_before
+            });
+        }
+
+        // Keep only the last `retain` events.
+        let start = state.events.len() - retain;
+        let retained_events: Vec<StoredEvent> = state.events.drain(start..).collect();
+        state.events.clear();
+        state.events = retained_events;
+
+        // Clear all projections.
+        state.sessions.clear();
+        state.runs.clear();
+        state.tasks.clear();
+        state.approvals.clear();
+        state.checkpoints.clear();
+        state.mailbox_messages.clear();
+        state.tool_invocations.clear();
+        state.signals.clear();
+        state.ingest_jobs.clear();
+        state.eval_runs.clear();
+        state.eval_datasets.clear();
+        state.eval_rubrics.clear();
+        state.eval_baselines.clear();
+        state.checkpoint_strategies.clear();
+        state.prompt_assets.clear();
+        state.prompt_versions.clear();
+        state.prompt_releases.clear();
+        state.tenants.clear();
+        state.workspaces.clear();
+        state.projects.clear();
+        state.route_decisions.clear();
+        state.provider_calls.clear();
+        state.approval_policies.clear();
+        state.external_workers.clear();
+        state.session_costs.clear();
+        state.run_costs.clear();
+        state.llm_traces.clear();
+        state.task_deps.clear();
+        state.operator_profiles.clear();
+        state.full_operator_profiles.clear();
+        state.workspace_members.clear();
+        state.signal_subscriptions.clear();
+        state.provider_health_records.clear();
+        state.provider_pools.clear();
+        state.default_settings.clear();
+        state.credentials.clear();
+        state.channels.clear();
+        state.channel_messages.clear();
+        state.credential_rotations.clear();
+        state.licenses.clear();
+        state.entitlement_overrides.clear();
+        state.notification_prefs.clear();
+        state.notification_records.clear();
+        state.guardrail_policies.clear();
+        state.provider_budgets.clear();
+        state.provider_connections.clear();
+        state.quotas.clear();
+        state.provider_bindings.clear();
+        state.provider_health_schedules.clear();
+        state.run_sla_configs.clear();
+        state.run_sla_breaches.clear();
+        state.run_cost_alerts.clear();
+        state.retention_policies.clear();
+        state.route_policies.clear();
+        state.resource_shares.clear();
+        state.snapshots.clear();
+        state.command_id_index.clear();
+
+        // Rebuild projections from retained events.
+        for event in state.events.clone() {
+            Self::apply_projection(&mut state, &event);
+        }
+
+        // Emit compaction event.
+        let now = now_millis();
+        let up_to_position = state.events.first().map(|e| e.position.0).unwrap_or(0);
+        let compaction_event = StoredEvent {
+            position: EventPosition(state.next_position),
+            envelope: cairn_domain::EventEnvelope::for_runtime_event(
+                cairn_domain::EventId::new(format!("evt_compact_{now}")),
+                cairn_domain::EventSource::Runtime,
+                cairn_domain::RuntimeEvent::EventLogCompacted(cairn_domain::EventLogCompacted {
+                    up_to_position,
+                    compacted_at_ms: now,
+                    tenant_id: tenant_id.clone(),
+                    events_before,
+                    events_after: state.events.len() as u64,
+                }),
+            ),
+            stored_at: now,
+        };
+        state.next_position += 1;
+        state.events.push(compaction_event);
+
+        serde_json::json!({
+            "events_before": events_before,
+            "events_after": state.events.len() as u64 - 1, // exclude the compaction event itself
+            "events_compacted": events_before - retain as u64,
+            "retained": retain as u64
+        })
     }
 
-    /// Create snapshot stub.
+    /// Create a snapshot capturing all events up to the current position.
     pub fn create_snapshot(&self, tenant_id: &cairn_domain::TenantId) -> cairn_domain::compaction::Snapshot {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
+        let state = self.state.lock().unwrap();
+        let event_position = state.next_position.saturating_sub(1);
+
+        // Serialize events as compressed_state so restore can replay them.
+        let compressed_state =
+            serde_json::to_vec(&state.events).unwrap_or_default();
+
+        // Simple hash of the compressed state for integrity check.
+        let state_hash = format!("{:016x}", {
+            let mut h: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
+            for &byte in &compressed_state {
+                h ^= byte as u64;
+                h = h.wrapping_mul(0x100000001b3); // FNV prime
+            }
+            h
+        });
+
         cairn_domain::compaction::Snapshot {
             snapshot_id: format!("snap_{}", now),
             tenant_id: tenant_id.clone(),
-            event_position: self.state.lock().unwrap().next_position.saturating_sub(1),
-            state_hash: String::new(),
+            event_position,
+            state_hash,
             created_at_ms: now,
-            compressed_state: vec![],
+            compressed_state,
         }
     }
 
-    /// Restore from snapshot stub — no-op for in-memory store.
-    pub fn restore_from_snapshot(&self, _snapshot: &cairn_domain::compaction::Snapshot) -> serde_json::Value {
-        serde_json::json!({"restored": true, "events_replayed": 0})
+    /// Restore from a snapshot: replace events and rebuild projections.
+    pub fn restore_from_snapshot(&self, snapshot: &cairn_domain::compaction::Snapshot) -> serde_json::Value {
+        let restored_events: Vec<StoredEvent> =
+            serde_json::from_slice(&snapshot.compressed_state).unwrap_or_default();
+        let events_before;
+        let events_after;
+
+        {
+            let mut state = self.state.lock().unwrap();
+            events_before = state.events.len() as u64;
+
+            // Replace events with snapshot contents.
+            state.events = restored_events.clone();
+            events_after = state.events.len() as u64;
+
+            // Reset position to after last snapshot event.
+            state.next_position = state
+                .events
+                .last()
+                .map(|e| e.position.0 + 1)
+                .unwrap_or(1);
+
+            // Clear all projections and rebuild.
+            state.sessions.clear();
+            state.runs.clear();
+            state.tasks.clear();
+            state.approvals.clear();
+            state.checkpoints.clear();
+            state.mailbox_messages.clear();
+            state.tool_invocations.clear();
+            state.signals.clear();
+            state.ingest_jobs.clear();
+            state.eval_runs.clear();
+            state.eval_datasets.clear();
+            state.eval_rubrics.clear();
+            state.eval_baselines.clear();
+            state.checkpoint_strategies.clear();
+            state.prompt_assets.clear();
+            state.prompt_versions.clear();
+            state.prompt_releases.clear();
+            state.tenants.clear();
+            state.workspaces.clear();
+            state.projects.clear();
+            state.route_decisions.clear();
+            state.provider_calls.clear();
+            state.approval_policies.clear();
+            state.external_workers.clear();
+            state.session_costs.clear();
+            state.run_costs.clear();
+            state.llm_traces.clear();
+            state.task_deps.clear();
+            state.operator_profiles.clear();
+            state.full_operator_profiles.clear();
+            state.workspace_members.clear();
+            state.signal_subscriptions.clear();
+            state.provider_health_records.clear();
+            state.provider_pools.clear();
+            state.default_settings.clear();
+            state.credentials.clear();
+            state.channels.clear();
+            state.channel_messages.clear();
+            state.credential_rotations.clear();
+            state.licenses.clear();
+            state.entitlement_overrides.clear();
+            state.notification_prefs.clear();
+            state.notification_records.clear();
+            state.guardrail_policies.clear();
+            state.provider_budgets.clear();
+            state.provider_connections.clear();
+            state.quotas.clear();
+            state.provider_bindings.clear();
+            state.provider_health_schedules.clear();
+            state.run_sla_configs.clear();
+            state.run_sla_breaches.clear();
+            state.run_cost_alerts.clear();
+            state.retention_policies.clear();
+            state.route_policies.clear();
+            state.resource_shares.clear();
+            state.snapshots.clear();
+            state.command_id_index.clear();
+
+            for event in state.events.clone() {
+                Self::apply_projection(&mut state, &event);
+            }
+        }
+
+        serde_json::json!({
+            "restored": true,
+            "events_before": events_before,
+            "events_after": events_after,
+            "events_replayed": events_after
+        })
     }
 
     /// Delete a signal subscription.

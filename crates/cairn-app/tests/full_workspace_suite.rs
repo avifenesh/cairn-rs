@@ -97,8 +97,12 @@ fn three_doc_bundle(
 }
 
 async fn app_with_token() -> axum::Router {
+    let config = BootstrapConfig {
+        mode: cairn_api::bootstrap::DeploymentMode::SelfHostedTeam,
+        ..BootstrapConfig::default()
+    };
     let (app, _runtime, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
+        AppBootstrap::router_with_runtime_and_tokens(config)
             .await
             .unwrap();
     tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });

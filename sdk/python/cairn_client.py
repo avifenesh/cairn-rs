@@ -434,6 +434,65 @@ class CairnClient:
 
     # ── Approvals ─────────────────────────────────────────────────────────────
 
+    def request_approval(
+        self,
+        approval_id: str,
+        run_id: str,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
+        project_id: str = "default",
+        requirement: str = "required",
+    ) -> dict:
+        """
+        POST /v1/approvals — request an approval gate for a run.
+
+        The associated run transitions to ``waiting_approval`` until the
+        gate is resolved.
+
+        :param approval_id:  Unique approval identifier.
+        :param run_id:       Run to block on this approval.
+        :param tenant_id:    Tenant scope (default: "default").
+        :param workspace_id: Workspace scope (default: "default").
+        :param project_id:   Project scope (default: "default").
+        :param requirement:  ``"required"`` or ``"advisory"``
+                             (default: ``"required"``).
+        :returns: :class:`ApprovalRecord` dict.
+        """
+        return self._post("/v1/approvals", {
+            "tenant_id":    tenant_id,
+            "workspace_id": workspace_id,
+            "project_id":   project_id,
+            "approval_id":  approval_id,
+            "run_id":       run_id,
+            "requirement":  requirement,
+        })
+
+    def approve_approval(self, approval_id: str) -> dict:
+        """
+        POST /v1/approvals/:id/approve — approve a pending gate directly.
+
+        The associated run transitions from ``waiting_approval`` to
+        ``running``.
+
+        :param approval_id: The approval to approve.
+        :returns: Updated :class:`ApprovalRecord`.
+        :raises CairnHTTPError: 404 if approval not found.
+        """
+        return self._post(f"/v1/approvals/{approval_id}/approve")
+
+    def reject_approval(self, approval_id: str) -> dict:
+        """
+        POST /v1/approvals/:id/reject — reject a pending gate directly.
+
+        The associated run transitions from ``waiting_approval`` to
+        ``failed`` with failure_class ``ApprovalRejected``.
+
+        :param approval_id: The approval to reject.
+        :returns: Updated :class:`ApprovalRecord`.
+        :raises CairnHTTPError: 404 if approval not found.
+        """
+        return self._post(f"/v1/approvals/{approval_id}/reject")
+
     def get_pending_approvals(
         self,
         tenant_id: str | None = None,
@@ -529,6 +588,56 @@ class CairnClient:
         """
         return self._get("/v1/providers/ollama/models")
 
+    # ── Provider connections ──────────────────────────────────────────────────
+
+    def create_provider_connection(
+        self,
+        tenant_id: str,
+        provider_connection_id: str,
+        provider_family: str,
+        adapter_type: str,
+    ) -> dict:
+        """
+        POST /v1/providers/connections — register a new provider connection.
+
+        Entitlement-gated: requires a tier that supports external providers
+        (returns 403 in ``local_eval`` tier).
+
+        :param tenant_id:              Tenant that owns the connection.
+        :param provider_connection_id: Unique connection identifier.
+        :param provider_family:        Provider family (e.g. ``"openai"``).
+        :param adapter_type:           Adapter type (e.g. ``"responses_api"``).
+        :returns: Created provider connection record.
+        :raises CairnHTTPError: 403 if the entitlement tier does not allow
+                                external provider connections.
+        """
+        return self._post("/v1/providers/connections", {
+            "tenant_id":              tenant_id,
+            "provider_connection_id": provider_connection_id,
+            "provider_family":        provider_family,
+            "adapter_type":           adapter_type,
+        })
+
+    def list_provider_connections(
+        self,
+        tenant_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list:
+        """
+        GET /v1/providers/connections — list provider connections for a tenant.
+
+        :param tenant_id: Tenant to scope the listing to.
+        :param limit:     Maximum connections to return (default 50).
+        :param offset:    Pagination offset (default 0).
+        :returns: List of provider connection record dicts.
+        """
+        return self._get("/v1/providers/connections", {
+            "tenant_id": tenant_id,
+            "limit": limit,
+            "offset": offset,
+        })
+
     # ── Memory / knowledge store ──────────────────────────────────────────────
 
     def ingest(
@@ -590,6 +699,55 @@ class CairnClient:
             "workspace_id": workspace_id,
             "project_id":   project_id,
         })
+
+    def list_sources(
+        self,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
+        project_id: str = "default",
+    ) -> list:
+        """
+        GET /v1/sources — list knowledge sources and their document counts.
+
+        :param tenant_id:    Tenant scope (default: "default").
+        :param workspace_id: Workspace scope (default: "default").
+        :param project_id:   Project scope (default: "default").
+        :returns: List of ``{"source_id": str, "document_count": int, ...}``.
+        """
+        return self._get("/v1/sources", {
+            "tenant_id":    tenant_id,
+            "workspace_id": workspace_id,
+            "project_id":   project_id,
+        })
+
+    # ── Bundles ──────────────────────────────────────────────────────────────
+
+    def apply_bundle(self, bundle: dict) -> dict:
+        """
+        POST /v1/bundles/apply — import a curated knowledge bundle.
+
+        :param bundle: Full bundle envelope dict (with ``bundle_schema_version``,
+                       ``artifacts``, etc.).
+        :returns: Import report with ``create_count``, ``skip_count``, etc.
+        """
+        return self._post("/v1/bundles/apply", {"bundle": bundle})
+
+    def export_bundle(
+        self,
+        project: str,
+        source_ids: str | None = None,
+    ) -> dict:
+        """
+        GET /v1/bundles/export — export documents as a bundle.
+
+        :param project:    Project path as ``"tenant/workspace/project"``.
+        :param source_ids: Comma-separated source IDs to filter by.
+        :returns: Bundle envelope dict with ``artifact_count`` and ``artifacts``.
+        """
+        params: dict[str, Any] = {"project": project}
+        if source_ids:
+            params["source_ids"] = source_ids
+        return self._get("/v1/bundles/export", params)
 
     # ── Costs ─────────────────────────────────────────────────────────────────
 

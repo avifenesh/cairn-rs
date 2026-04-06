@@ -133,6 +133,9 @@ pub use aggregate::InMemoryServices;
 // ── Ollama local LLM + embedding providers ────────────────────────────────────
 pub use services::{OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OllamaTagsResponse};
 
+// ── OpenAI-compatible inference provider ─────────────────────────────────────
+pub use services::OpenAiCompatProvider;
+
 // ── RFC 009: Provider routing + health tracking ──────────────────────────────
 pub use services::{
     DispatchEntry, ProviderHealthTracker, ProviderRouter, RoutableProvider, RoutingConfig,
@@ -157,8 +160,24 @@ pub use services::{
     WorkspaceQuotaPolicy, WorkspaceUsage, WorkspaceUsageReport,
 };
 
-/// Noop tracing hook — sets a trace ID in thread-local state (stub).
-pub fn set_current_trace_id(_trace_id: &str) {}
+std::thread_local! {
+    static CURRENT_TRACE_ID: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
+}
+
+/// Set the current trace ID for event correlation (RFC 011).
+///
+/// Called by the request middleware to propagate the X-Trace-Id header
+/// into events emitted during request handling via `make_envelope`.
+pub fn set_current_trace_id(trace_id: &str) {
+    CURRENT_TRACE_ID.with(|cell| {
+        *cell.borrow_mut() = trace_id.to_owned();
+    });
+}
+
+/// Read the current thread-local trace ID (empty string if unset).
+pub fn get_current_trace_id() -> String {
+    CURRENT_TRACE_ID.with(|cell| cell.borrow().clone())
+}
 
 
 

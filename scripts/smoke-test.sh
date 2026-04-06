@@ -18,6 +18,10 @@ SESSION_ID="sess_${RUN_ID}"
 WORKER_ID="worker_${RUN_ID}"
 TASK_ID="task_${RUN_ID}"
 APPR_ID="appr_${RUN_ID}"
+BUNDLE_ID="bundle_${RUN_ID}"
+GATE_APPR_ID="gate_${RUN_ID}"
+GATE_RUN_ID="grun_${RUN_ID}"
+GATE_SESSION_ID="gsess_${RUN_ID}"
 
 # ── Colour ────────────────────────────────────────────────────────────────────
 if [ -t 2 ]; then
@@ -225,10 +229,19 @@ chk "GET /v1/providers/health" 200 GET /v1/providers/health
 # =============================================================================
 section "11. Ollama"
 
-chk "GET /v1/providers/ollama/models" 200 GET /v1/providers/ollama/models
-MNAME=$(printf '%s' "$_BODY" | python3 -c \
-  "import sys,json; m=json.load(sys.stdin).get('models',[]); print(next((x for x in m if 'embed' not in x),m[0] if m else ''))" 2>/dev/null || true)
-MCNT=$(jf count)
+api GET /v1/providers/ollama/models
+if [ "$_HTTP" = "503" ]; then
+  log_skip "Ollama not configured (HTTP 503)"
+  MNAME=""
+elif [ "$_HTTP" = "200" ]; then
+  log_ok "GET /v1/providers/ollama/models (HTTP 200)"
+  MNAME=$(printf '%s' "$_BODY" | python3 -c \
+    "import sys,json; m=json.load(sys.stdin).get('models',[]); print(next((x for x in m if 'embed' not in x),m[0] if m else ''))" 2>/dev/null || true)
+  MCNT=$(jf count)
+else
+  log_fail "GET /v1/providers/ollama/models (HTTP $_HTTP)"
+  MNAME=""
+fi
 
 if [ -n "$MNAME" ]; then
   log_ok "  Ollama: ${MCNT} model(s); selected=${MNAME}"
@@ -288,6 +301,77 @@ api POST /v1/admin/tenants '{"tenant_id":"smoke_admin_t","name":"Smoke Tenant"}'
 section "16. Evals"
 
 chk "GET /v1/evals/runs" 200 GET /v1/evals/runs
+
+# =============================================================================
+section "17. Approval gate flow (via events)"
+
+# Create a dedicated session + run for the gate test
+chk "POST gate session" 201 POST /v1/sessions \
+  "{\"tenant_id\":\"smoke\",\"workspace_id\":\"default\",\"project_id\":\"test\",\"session_id\":\"${GATE_SESSION_ID}\"}"
+chk "POST gate run" 201 POST /v1/runs \
+  "{\"tenant_id\":\"smoke\",\"workspace_id\":\"default\",\"project_id\":\"test\",\"session_id\":\"${GATE_SESSION_ID}\",\"run_id\":\"${GATE_RUN_ID}\"}"
+
+# Request approval via event append (the runtime service transitions the run)
+chk "POST event ApprovalRequested (gate)" 201 POST /v1/events/append \
+  "[{\"event_id\":\"evt_gate_${RUN_ID}\",\"source\":${SOURCE},\"ownership\":${OWNERSHIP},\"causation_id\":null,\"correlation_id\":null,\"payload\":{\"event\":\"approval_requested\",\"project\":${PROJECT},\"approval_id\":\"${GATE_APPR_ID}\",\"run_id\":\"${GATE_RUN_ID}\",\"task_id\":null,\"requirement\":\"required\"}}]"
+
+sleep 0.4
+
+chk "GET /v1/approvals/pending (gate)" 200 GET \
+  "/v1/approvals/pending?tenant_id=smoke&workspace_id=default&project_id=test"
+
+# Resolve the gate via /v1/approvals/:id/resolve
+chk "POST resolve gate" 200 POST \
+  "/v1/approvals/${GATE_APPR_ID}/resolve" '{"decision":"approved","reason":"smoke gate"}'
+[ "$(jf decision)" = "approved" ] \
+  && log_ok "  gate decision=approved" \
+  || log_fail "  gate decision='$(jf decision)'"
+
+# =============================================================================
+section "18. Bundle export"
+
+chk "POST /v1/bundles/export" 200 POST /v1/bundles/export \
+  '{"project_id":"test","tenant_id":"smoke","workspace_id":"default"}'
+
+# =============================================================================
+section "19. Entitlements & templates"
+
+# Entitlements may 404 when no plan is assigned to the tenant — acceptable in smoke mode
+api GET /v1/entitlements
+[[ "$_HTTP" =~ ^(200|404)$ ]] \
+  && log_ok "GET /v1/entitlements (HTTP $_HTTP)" \
+  || log_fail "GET /v1/entitlements (unexpected HTTP $_HTTP)"
+
+api GET /v1/entitlements/usage
+[[ "$_HTTP" =~ ^(200|404)$ ]] \
+  && log_ok "GET /v1/entitlements/usage (HTTP $_HTTP)" \
+  || log_fail "GET /v1/entitlements/usage (unexpected HTTP $_HTTP)"
+
+chk "GET /v1/templates" 200 GET /v1/templates
+
+# =============================================================================
+section "20. Memory CRUD"
+
+# Ingest additional documents
+chk "POST /v1/memory/ingest (doc 2)" 200 POST /v1/memory/ingest \
+  "{\"source_id\":\"smoke_crud\",\"document_id\":\"cdoc1_${RUN_ID}\",\"content\":\"Memory CRUD test document about quantum computing.\",\"tenant_id\":\"smoke\",\"workspace_id\":\"default\",\"project_id\":\"test\"}"
+chk "POST /v1/memory/ingest (doc 3)" 200 POST /v1/memory/ingest \
+  "{\"source_id\":\"smoke_crud\",\"document_id\":\"cdoc2_${RUN_ID}\",\"content\":\"Memory CRUD test document about neural networks.\",\"tenant_id\":\"smoke\",\"workspace_id\":\"default\",\"project_id\":\"test\"}"
+
+# Search across the CRUD documents
+chk "GET /v1/memory/search (quantum)" 200 GET \
+  "/v1/memory/search?query_text=quantum&tenant_id=smoke&workspace_id=default&project_id=test&limit=5"
+RESULT_COUNT=$(printf '%s' "$_BODY" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); print(len(d.get('results',[])))" 2>/dev/null || echo 0)
+[ "${RESULT_COUNT:-0}" -ge 1 ] \
+  && log_ok "  search found ${RESULT_COUNT} result(s)" \
+  || log_fail "  search found ${RESULT_COUNT:-0} results (expected ≥ 1)"
+
+# Get a specific document
+chk "GET /v1/memory/documents/:id" 200 GET "/v1/memory/documents/cdoc1_${RUN_ID}"
+
+# Memory diagnostics
+chk "GET /v1/memory/diagnostics" 200 GET "/v1/memory/diagnostics"
 
 # =============================================================================
 TOTAL=$(( PASS + FAIL + SKIP ))

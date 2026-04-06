@@ -585,6 +585,66 @@ export class CairnClient {
   // ── Approvals ───────────────────────────────────────────────────────────────
 
   /**
+   * `POST /v1/approvals` — request an approval gate for a run.
+   *
+   * The associated run transitions to `waiting_approval` until the gate
+   * is resolved.
+   *
+   * @param params.approval_id  - Unique approval identifier
+   * @param params.run_id       - Run to block on this approval
+   * @param params.tenant_id    - Tenant (defaults to `"default"`)
+   * @param params.workspace_id - Workspace (defaults to `"default"`)
+   * @param params.project_id   - Project (defaults to `"default"`)
+   * @param params.requirement  - `"required"` or `"advisory"` (defaults to `"required"`)
+   */
+  async requestApproval(params: {
+    approval_id:  string;
+    run_id:       string;
+    tenant_id?:   string;
+    workspace_id?: string;
+    project_id?:  string;
+    requirement?: ApprovalRequirement;
+  }): Promise<Approval> {
+    const { data } = await this.fetch<Approval>("POST", "/v1/approvals", {
+      tenant_id:    params.tenant_id    ?? "default",
+      workspace_id: params.workspace_id ?? "default",
+      project_id:   params.project_id   ?? "default",
+      approval_id:  params.approval_id,
+      run_id:       params.run_id,
+      requirement:  params.requirement  ?? "required",
+    });
+    return data;
+  }
+
+  /**
+   * `POST /v1/approvals/:id/approve` — approve a pending gate directly.
+   *
+   * The associated run transitions from `waiting_approval` to `running`.
+   *
+   * @param approvalId - Approval ID
+   */
+  async approveApproval(approvalId: string): Promise<Approval> {
+    const { data } = await this.fetch<Approval>(
+      "POST", `/v1/approvals/${approvalId}/approve`,
+    );
+    return data;
+  }
+
+  /**
+   * `POST /v1/approvals/:id/reject` — reject a pending gate directly.
+   *
+   * The associated run transitions from `waiting_approval` to `failed`.
+   *
+   * @param approvalId - Approval ID
+   */
+  async rejectApproval(approvalId: string): Promise<Approval> {
+    const { data } = await this.fetch<Approval>(
+      "POST", `/v1/approvals/${approvalId}/reject`,
+    );
+    return data;
+  }
+
+  /**
    * `GET /v1/approvals/pending` — fetch all pending (undecided) approvals.
    * Returns a {@link PagedResult} with pagination header metadata.
    *
@@ -708,6 +768,100 @@ export class CairnClient {
       "GET", "/v1/providers/ollama/models",
     );
     return data.models;
+  }
+
+  // ── Provider connections ────────────────────────────────────────────────────
+
+  /**
+   * `POST /v1/providers/connections` — register a new provider connection.
+   *
+   * Entitlement-gated: requires a tier that supports external providers
+   * (returns 403 in `local_eval` tier).
+   *
+   * @param params.tenant_id              - Tenant that owns the connection
+   * @param params.provider_connection_id - Unique connection identifier
+   * @param params.provider_family        - Provider family (e.g. `"openai"`, `"anthropic"`)
+   * @param params.adapter_type           - Adapter type (e.g. `"responses_api"`, `"chat_completions"`)
+   */
+  async createProviderConnection(params: {
+    tenant_id:              string;
+    provider_connection_id: string;
+    provider_family:        string;
+    adapter_type:           string;
+  }): Promise<Record<string, unknown>> {
+    const { data } = await this.fetch<Record<string, unknown>>(
+      "POST", "/v1/providers/connections", params,
+    );
+    return data;
+  }
+
+  /**
+   * `GET /v1/providers/connections` — list all registered provider connections
+   * for a tenant.
+   *
+   * @param tenantId - Tenant to scope the listing to
+   * @param limit    - Maximum connections to return (default 50)
+   * @param offset   - Skip this many results (default 0)
+   */
+  async listProviderConnections(
+    tenantId: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<Array<Record<string, unknown>>> {
+    const { data } = await this.fetch<Array<Record<string, unknown>>>(
+      "GET", "/v1/providers/connections", undefined,
+      { tenant_id: tenantId, limit, offset },
+    );
+    return data;
+  }
+
+  // ── Sources ─────────────────────────────────────────────────────────────────
+
+  /**
+   * `GET /v1/sources` — list knowledge sources with document counts.
+   *
+   * @param params.tenant_id    - Tenant scope
+   * @param params.workspace_id - Workspace scope
+   * @param params.project_id   - Project scope
+   */
+  async listSources(params: {
+    tenant_id:    string;
+    workspace_id: string;
+    project_id:   string;
+  }): Promise<Array<{ source_id: string; document_count: number }>> {
+    const { data } = await this.fetch<Array<{ source_id: string; document_count: number }>>(
+      "GET", "/v1/sources", undefined, params,
+    );
+    return data;
+  }
+
+  // ── Bundles ────────────────────────────────────────────────────────────────
+
+  /**
+   * `POST /v1/bundles/apply` — import a curated knowledge bundle.
+   *
+   * @param bundle - Full bundle envelope object
+   * @returns Import report with create/skip/conflict counts
+   */
+  async applyBundle(bundle: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const { data } = await this.fetch<Record<string, unknown>>(
+      "POST", "/v1/bundles/apply", { bundle },
+    );
+    return data;
+  }
+
+  /**
+   * `GET /v1/bundles/export` — export documents as a bundle.
+   *
+   * @param project   - Project path as `"tenant/workspace/project"`
+   * @param sourceIds - Optional comma-separated source IDs to filter by
+   */
+  async exportBundle(project: string, sourceIds?: string): Promise<Record<string, unknown>> {
+    const { data } = await this.fetch<Record<string, unknown>>(
+      "GET", "/v1/bundles/export", undefined,
+      { project, source_ids: sourceIds },
+    );
+    return data;
   }
 
   // ── Events ──────────────────────────────────────────────────────────────────

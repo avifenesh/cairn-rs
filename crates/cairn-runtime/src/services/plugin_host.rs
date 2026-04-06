@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use cairn_plugin_proto::manifest::PluginManifestWire;
 use cairn_plugin_proto::wire::{
-    self, JsonRpcRequest, JsonRpcResponse, ToolDescriptorWire, ToolsListResult,
+    self, JsonRpcRequest, JsonRpcResponse, ToolsListResult,
 };
 
 use super::plugin_capability_registry::CapabilityRegistry;

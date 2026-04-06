@@ -34,4 +34,7 @@ pub trait ApprovalReadModel: Send + Sync {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ApprovalRecord>, StoreError>;
+
+    /// Check if a run has any pending (unresolved) approvals.
+    async fn has_pending_for_run(&self, run_id: &RunId) -> Result<bool, StoreError>;
 }

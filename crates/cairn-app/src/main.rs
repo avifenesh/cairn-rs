@@ -6,11 +6,16 @@
 //!   cairn-app --port 8080             # custom port
 //!   cairn-app --addr 0.0.0.0          # bind all interfaces
 //!
+#[allow(dead_code)]
 mod sse_hooks;
 mod openapi_spec;
+#[allow(dead_code)]
 mod templates;
+#[allow(dead_code)]
 mod entitlements;
+#[allow(dead_code)]
 mod bundles;
+#[allow(dead_code)]
 mod validate;
 
 use std::collections::HashMap;
@@ -49,7 +54,7 @@ use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
 use cairn_runtime::tenants::TenantService;
-use cairn_runtime::{InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider};
+use cairn_runtime::{InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OpenAiCompatProvider};
 use cairn_domain::providers::EmbeddingProvider as _;
 use cairn_store::projections::{ApprovalReadModel, AuditLogReadModel, EvalRunReadModel, LlmCallTraceReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
 use cairn_store::{EventLog, EventPosition, StoredEvent};
@@ -59,6 +64,7 @@ use cairn_store::pg::PgMigrationRunner;
 use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
+use async_trait::async_trait;
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::{IngestRequest, IngestService, SourceType};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
@@ -117,6 +123,35 @@ const RATE_LIMIT_IP: u32 = 100;
 /// Window duration.
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 
+// ── Pipeline embedding bridge ────────────────────────────────────────────────
+
+/// Bridges the domain-level [`cairn_domain::providers::EmbeddingProvider`]
+/// (batch, model-aware) to the pipeline-level
+/// [`cairn_memory::pipeline::EmbeddingProvider`] (single-text) used by
+/// [`IngestPipeline`].
+struct OpenAiCompatPipelineEmbedder {
+    provider: Arc<OpenAiCompatProvider>,
+    model_id: String,
+}
+
+impl OpenAiCompatPipelineEmbedder {
+    fn new(provider: Arc<OpenAiCompatProvider>, model_id: impl Into<String>) -> Self {
+        Self { provider, model_id: model_id.into() }
+    }
+}
+
+#[async_trait]
+impl cairn_memory::pipeline::EmbeddingProvider for OpenAiCompatPipelineEmbedder {
+    async fn embed(&self, text: &str) -> Result<Vec<f32>, cairn_memory::ingest::IngestError> {
+        use cairn_domain::providers::EmbeddingProvider as DomainEmbedder;
+        let resp = self.provider
+            .embed(&self.model_id, vec![text.to_owned()])
+            .await
+            .map_err(|e| cairn_memory::ingest::IngestError::EmbeddingFailed(e.to_string()))?;
+        Ok(resp.embeddings.into_iter().next().unwrap_or_default())
+    }
+}
+
 // ── App state ────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -139,6 +174,9 @@ struct AppState {
     ingest: Arc<IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>>,
     /// Ollama local LLM provider — Some when OLLAMA_HOST is set and reachable.
     ollama: Option<Arc<OllamaProvider>>,
+    /// OpenAI-compatible provider — Some when OPENAI_COMPAT_BASE_URL is set.
+    #[allow(dead_code)]
+    openai_compat: Option<Arc<OpenAiCompatProvider>>,
     /// Rolling request metrics — updated by the metrics middleware on every request.
     metrics: Arc<std::sync::RwLock<AppMetrics>>,
     /// Per-key sliding-window rate-limit buckets.
@@ -2412,6 +2450,7 @@ async fn provider_health_handler(
 ) -> impl axum::response::IntoResponse {
     // Collect unique tenants from provider connections, then union health records.
     // In practice each deployment has one tenant, so we scan all records directly.
+    #[allow(unused_imports)]
     use cairn_domain::TenantId;
     // Use the store's full scan: list health for the default tenant first,
     // then fall back to listing all provider connections to derive tenants.
@@ -4505,10 +4544,6 @@ async fn main() {
     // ── App state ─────────────────────────────────────────────────────────────
     let runtime = Arc::new(InMemoryServices::new());
     let doc_store = Arc::new(InMemoryDocumentStore::new());
-    let ingest_pipeline = Arc::new(IngestPipeline::new(
-        doc_store.clone(),
-        ParagraphChunker { max_chunk_size: 512 },
-    ));
     let retrieval = Arc::new(InMemoryRetrieval::new(doc_store.clone()));
 
     // ── Ollama local LLM provider (optional) ─────────────────────────────────
@@ -4533,6 +4568,31 @@ async fn main() {
         None
     };
 
+    // ── OpenAI-compatible provider (optional) ────────────────────────────────
+    let openai_compat: Option<Arc<OpenAiCompatProvider>> =
+        if let Some(provider) = OpenAiCompatProvider::from_env() {
+            eprintln!("openai-compat: configured at {}", provider.base_url());
+            Some(Arc::new(provider))
+        } else {
+            None
+        };
+
+    // ── Ingest pipeline (with optional embedding provider) ──────────────────
+    let pipeline = IngestPipeline::new(
+        doc_store.clone(),
+        ParagraphChunker { max_chunk_size: 512 },
+    );
+    let ingest_pipeline = Arc::new(if let Some(ref compat) = openai_compat {
+        eprintln!("ingest: embedding via openai-compat (qwen3-embedding:8b)");
+        let embedder = OpenAiCompatPipelineEmbedder::new(
+            compat.clone(),
+            "qwen3-embedding:8b",
+        );
+        pipeline.with_embedder(Arc::new(embedder))
+    } else {
+        pipeline
+    });
+
     let state = AppState {
         runtime,
         started_at: Arc::new(Instant::now()),
@@ -4544,6 +4604,7 @@ async fn main() {
         retrieval,
         ingest: ingest_pipeline,
         ollama,
+        openai_compat,
         metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
         request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
@@ -5122,7 +5183,7 @@ async fn bundle_export_handler(
 
     // Collect artifacts from the store.
     let prompts = state.runtime.store.list_all_prompt_assets(1000, 0).await.unwrap_or_default();
-    let releases = state.runtime.store.list_all_prompt_releases(1000, 0).await.unwrap_or_default();
+    let _releases = state.runtime.store.list_all_prompt_releases(1000, 0).await.unwrap_or_default();
     let bindings = state.runtime.store.list_all_provider_bindings(1000, 0).await.unwrap_or_default();
 
     let bundle_prompts: Vec<bundles::BundlePrompt> = prompts
@@ -5488,6 +5549,7 @@ mod tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
@@ -7096,6 +7158,7 @@ mod tests {
             retrieval,
             ingest,
             ollama: None,
+            openai_compat: None,
             metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
@@ -7635,6 +7698,7 @@ mod run_events_tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
@@ -7823,6 +7887,7 @@ mod tool_invocations_tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
@@ -8042,6 +8107,7 @@ mod provider_health_tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),

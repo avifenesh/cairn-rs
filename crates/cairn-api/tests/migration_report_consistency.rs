@@ -239,31 +239,31 @@ fn owner_map_and_sse_gap_report_agree_on_feed_poll_and_memory_gap_states() {
     let memory_owner = markdown_row(&owner_map, "memory_proposed");
     let memory_gap = markdown_row(&sse_gap_report, "memory_proposed");
     assert!(
-        memory_owner.contains("no runtime publisher mapping yet"),
-        "owner map should keep the memory_proposed ownership gap explicit",
+        memory_owner.contains("dedicated non-runtime builder present"),
+        "owner map should reflect the memory_proposed builder wired to SSE broadcast",
     );
     assert!(
-        memory_gap.contains("`no_runtime_or_dedicated_publisher_mapping_yet`"),
-        "SSE gap report should keep the memory_proposed publisher gap explicit",
+        memory_gap.contains("`supported_via_dedicated_builder`"),
+        "SSE gap report should treat memory_proposed as builder-backed",
     );
 }
 
 #[test]
-fn sse_payload_handoff_keeps_memory_proposed_gap_explicit() {
+fn sse_payload_handoff_reflects_memory_proposed_builder_wired() {
     let payload_handoff = read_report("tests/fixtures/migration/phase0_sse_payload_handoff.md");
     let memory_handoff = markdown_row(&payload_handoff, "memory_proposed");
 
     assert!(
-        memory_handoff.contains("`no_runtime_mapping_yet`"),
-        "payload handoff should keep the memory_proposed runtime-owner gap explicit",
+        memory_handoff.contains("`build_memory_proposed_frame(item, eventId)`"),
+        "payload handoff should show the memory_proposed builder as the runtime source",
     );
     assert!(
-        memory_handoff.contains("`owner_and_builder_missing`"),
-        "payload handoff should keep the memory_proposed builder gap explicit",
+        memory_handoff.contains("`covered`"),
+        "payload handoff should treat memory_proposed as covered",
     );
     assert!(
-        memory_handoff.contains("`decide_memory_owner_then_add_builder`"),
-        "payload handoff should keep the memory_proposed follow-up explicit",
+        memory_handoff.contains("`none`"),
+        "payload handoff should show no remaining follow-up for memory_proposed",
     );
 }
 

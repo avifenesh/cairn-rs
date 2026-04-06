@@ -78,7 +78,6 @@ impl MarkdownParser {
         let mut code_lang: Option<String> = None;
         let mut code_buf = String::new();
         let mut in_frontmatter = false;
-        let mut frontmatter_started = false;
 
         for (line_idx, line) in input.lines().enumerate() {
             let trimmed = line.trim();
@@ -86,7 +85,6 @@ impl MarkdownParser {
             // YAML frontmatter: --- block at top of file.
             if line_idx == 0 && trimmed == "---" {
                 in_frontmatter = true;
-                frontmatter_started = true;
                 continue;
             }
             if in_frontmatter {

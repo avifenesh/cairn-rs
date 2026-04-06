@@ -280,8 +280,8 @@ async fn chunk_similarity_api_search_delegates() {
         .await
         .unwrap();
 
-    let retrieval = InMemoryRetrieval::new(store);
-    let api = MemoryApiImpl::new(retrieval);
+    let retrieval = InMemoryRetrieval::new(store.clone());
+    let api = MemoryApiImpl::new(retrieval, store);
 
     let results = api
         .search(
@@ -322,8 +322,8 @@ async fn chunk_similarity_api_search_returns_scored() {
         .await
         .unwrap();
 
-    let retrieval = InMemoryRetrieval::new(store);
-    let api = MemoryApiImpl::new(retrieval);
+    let retrieval = InMemoryRetrieval::new(store.clone());
+    let api = MemoryApiImpl::new(retrieval, store);
 
     let results = api
         .search(

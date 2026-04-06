@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{TaskDependencyReadModel, TaskDependencyRecord, TaskReadModel, TaskRecord};
+use cairn_store::projections::{CheckpointStrategyReadModel, TaskDependencyReadModel, TaskDependencyRecord, TaskReadModel, TaskRecord};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -65,7 +65,7 @@ impl<S: EventLog + TaskReadModel + TaskDependencyReadModel + 'static> TaskServic
 #[async_trait]
 impl<S> TaskService for TaskServiceImpl<S>
 where
-    S: EventLog + TaskReadModel + TaskDependencyReadModel + 'static,
+    S: EventLog + TaskReadModel + TaskDependencyReadModel + CheckpointStrategyReadModel + 'static,
 {
     async fn submit(
         &self,
@@ -185,6 +185,33 @@ where
             task_id,
             now_ms,
         ).await;
+
+        // Auto-checkpoint: if the parent run has a strategy with
+        // trigger_on_task_complete, emit a CheckpointRecorded event.
+        if let Some(ref run_id) = result.parent_run_id {
+            if let Ok(Some(strategy)) =
+                CheckpointStrategyReadModel::get_by_run(self.store.as_ref(), run_id).await
+            {
+                if strategy.trigger_on_task_complete {
+                    let cp_id = CheckpointId::new(format!(
+                        "cp_auto_{}_{}_{now_ms}",
+                        run_id.as_str(),
+                        task_id.as_str()
+                    ));
+                    let event = make_envelope(RuntimeEvent::CheckpointRecorded(
+                        CheckpointRecorded {
+                            project: result.project.clone(),
+                            run_id: run_id.clone(),
+                            checkpoint_id: cp_id,
+                            disposition: CheckpointDisposition::Latest,
+                            data: None,
+                        },
+                    ));
+                    let _ = self.store.append(&[event]).await;
+                }
+            }
+        }
+
         Ok(result)
     }
 

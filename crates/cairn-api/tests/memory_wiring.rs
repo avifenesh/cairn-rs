@@ -13,8 +13,8 @@ fn project() -> ProjectKey {
 
 fn make_api() -> MemoryApiImpl<InMemoryRetrieval> {
     let store = Arc::new(InMemoryDocumentStore::new());
-    let retrieval = InMemoryRetrieval::new(store);
-    MemoryApiImpl::new(retrieval)
+    let retrieval = InMemoryRetrieval::new(store.clone());
+    MemoryApiImpl::new(retrieval, store)
 }
 
 #[tokio::test]

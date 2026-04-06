@@ -63,7 +63,7 @@ runtime_source_for_event() {
       printf '`build_streaming_sse_frame(StreamingOutput::AssistantReasoning, taskId, eventId)`'
       ;;
     memory_proposed)
-      printf '`no_runtime_mapping_yet`'
+      printf '`build_memory_proposed_frame(item, eventId)` via `SseMemoryProposalHook`'
       ;;
     *)
       printf '`unknown`'
@@ -145,7 +145,7 @@ builder_direction_for_event() {
       printf '`keep_existing_streaming_builder`'
       ;;
     memory_proposed)
-      printf '`decide_memory_owner_then_add_builder`'
+      printf '`keep_existing_memory_proposed_builder`'
       ;;
     *)
       printf '`classify`'
@@ -177,7 +177,7 @@ status_for_event() {
       printf '`shaped_builder_present_fixture_alignment_remaining`'
       ;;
     memory_proposed)
-      printf '`owner_and_builder_missing`'
+      printf '`covered`'
       ;;
     *)
       printf '`unknown`'
@@ -191,10 +191,10 @@ exact_followup_for_event() {
       printf '`none`'
       ;;
     task_update)
-      printf '`either prefer the existing exact enriched builder or populate task.type/title/description/progress/createdAt/updatedAt on the generic runtime path from task metadata/read models`'
+      printf '`either prefer the existing exact enriched builder or use build_sse_frame_with_current_state(...) to populate task.type/title/description/progress/createdAt/updatedAt on the generic runtime path from task metadata/read models`'
       ;;
     approval_required)
-      printf '`either prefer the existing exact enriched builder or populate approval.type/title/description/context/createdAt on the generic runtime path from approval metadata/read-model context`'
+      printf '`either prefer the existing exact enriched builder or use build_sse_frame_with_current_state(...) to populate approval.type/title/description/context/createdAt on the generic runtime path from approval metadata/read-model context`'
       ;;
     assistant_tool_call)
       printf '`preserve the existing exact start shape, keep the now-stable completed/failed taskId/toolName/phase semantics, and add richer result/error detail next`'
@@ -215,7 +215,7 @@ exact_followup_for_event() {
       printf '`keep the current streaming builder path, but pass assembled final message text instead of the empty placeholder when emitting assistant_end`'
       ;;
     memory_proposed)
-      printf '`decide whether this is a memory-service publisher or proposal workflow publisher, then emit the full memory envelope`'
+      printf '`none`'
       ;;
     *)
       printf '`classify`'

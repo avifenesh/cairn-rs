@@ -6,6 +6,7 @@
 /// Maximum length for identifier fields (tenant_id, session_id, run_id, etc.).
 pub const MAX_ID_LEN: usize = 128;
 /// Maximum length for name fields.
+#[allow(dead_code)]
 pub const MAX_NAME_LEN: usize = 256;
 /// Maximum length for description / reason fields.
 pub const MAX_DESC_LEN: usize = 4096;
@@ -13,6 +14,7 @@ pub const MAX_DESC_LEN: usize = 4096;
 pub const MAX_PROMPT_LEN: usize = 100_000;
 
 /// Validate that a required string field is present and non-empty.
+#[allow(dead_code)]
 pub fn require(field: &str, value: &Option<String>) -> Result<(), String> {
     match value {
         Some(v) if !v.trim().is_empty() => Ok(()),
@@ -69,6 +71,7 @@ pub fn require_id(field: &str, value: &str) -> Result<(), String> {
 }
 
 /// Validate that a numeric value is positive (> 0).
+#[allow(dead_code)]
 pub fn positive_u64(field: &str, value: u64) -> Result<(), String> {
     if value == 0 {
         Err(format!("{field} must be greater than 0"))

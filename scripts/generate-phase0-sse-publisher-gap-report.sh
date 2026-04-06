@@ -17,7 +17,7 @@ require_file() {
 require_file "$REQ_FILE"
 require_file "$PUBLISHER_FILE"
 
-if ! grep -Fq 'crate::sse_payloads::shape_event_payload(&stored.envelope.payload)' "$PUBLISHER_FILE"; then
+if ! grep -Eq 'crate::sse_payloads::shape_event_payload' "$PUBLISHER_FILE"; then
   echo "expected shaped payload path not found in sse_publisher.rs" >&2
   exit 1
 fi
@@ -46,7 +46,7 @@ status_for_event() {
       printf 'supported_via_dedicated_builder'
       ;;
     memory_proposed)
-      printf 'no_runtime_or_dedicated_publisher_mapping_yet'
+      printf 'supported_via_dedicated_builder'
       ;;
     *)
       printf 'unclassified'
@@ -60,10 +60,10 @@ notes_for_event() {
       printf '`build_ready_frame()` covers connection bootstrap with `{ clientId }`.'
       ;;
     task_update)
-      printf 'An exact dedicated task-update builder exists (`build_enriched_task_update_frame(...)`), but the runtime-event path currently published through `shape_event_payload(...)` is still thinner than the preserved fixture contract because it lacks task metadata/read-model fields like `type`, `title`, `description`, `progress`, `createdAt`, and `updatedAt`.'
+      printf 'An exact dedicated task-update builder exists (`build_enriched_task_update_frame(...)`), and `build_sse_frame_with_current_state(...)` can hydrate read-model fields, but the runtime-event path currently published through `shape_event_payload(...)` is still thinner than the preserved fixture contract because it lacks task metadata/read-model fields like `type`, `title`, `description`, `progress`, `createdAt`, and `updatedAt`.'
       ;;
     approval_required)
-      printf 'An exact dedicated approval builder exists (`build_enriched_approval_frame(...)`), but the runtime-event path currently published through `shape_event_payload(...)` is still thinner than the preserved fixture contract because it lacks approval metadata/read-model fields like `type`, `title`, `description`, `context`, and `createdAt`.'
+      printf 'An exact dedicated approval builder exists (`build_enriched_approval_frame(...)`), and `build_sse_frame_with_current_state(...)` can hydrate read-model fields, but the runtime-event path currently published through `shape_event_payload(...)` is still thinner than the preserved fixture contract because it lacks approval metadata/read-model fields like `type`, `title`, `description`, `context`, and `createdAt`.'
       ;;
     assistant_tool_call)
       printf 'The exact start-phase payload exists and there is an enriched builder path (`build_enriched_tool_call_frame(...)`), and the runtime-event completed/failed paths in `shape_event_payload(...)` now preserve `taskId`, `toolName`, and `phase`; the remaining follow-up is richer result/error payload semantics.'
@@ -87,7 +87,7 @@ notes_for_event() {
       printf 'Covered by `build_streaming_sse_frame(StreamingOutput::AssistantReasoning, ...)`; reasoning trace updates are available through the dedicated assistant-streaming builder path.'
       ;;
     memory_proposed)
-      printf 'Required by preserved frontend SSE contract, but no runtime-event mapping or dedicated non-runtime builder is visible yet in the current Rust API slice.'
+      printf 'Covered by `build_memory_proposed_frame(...)` in `sse_payloads.rs`; wired to the SSE broadcast channel via `SseMemoryProposalHook` in `cairn-app`.'
       ;;
     *)
       printf 'No note recorded.'
@@ -116,7 +116,7 @@ next_step_for_event() {
       printf 'pass_assembled_final_message_text_into_streaming_builder'
       ;;
     memory_proposed)
-      printf 'decide_runtime_or_non_runtime_publisher_owner'
+      printf 'keep'
       ;;
     *)
       printf 'classify'

@@ -94,21 +94,21 @@ async fn approval_blocks_resume_then_allows_after_decision() {
         "approval must carry the Approved decision after resolution"
     );
 
-    // ── Step 5: resume must now succeed ──────────────────────────────────────
-    let resumed = run_svc
+    // ── Step 5: run must be Running after approval resolution ────────────────
+    //
+    // Approval resolution cascades the state transition automatically
+    // (WaitingApproval → Running), so no explicit resume is required.
+    let run_after = run_svc
         .run
-        .resume(
-            &run_id,
-            ResumeTrigger::OperatorResume,
-            RunResumeTarget::Running,
-        )
+        .get(&run_id)
         .await
-        .unwrap();
+        .unwrap()
+        .expect("run must exist");
 
     assert_eq!(
-        resumed.state,
+        run_after.state,
         RunState::Running,
-        "run must be Running after approval and resume"
+        "run must be Running after approval resolution"
     );
 }
 

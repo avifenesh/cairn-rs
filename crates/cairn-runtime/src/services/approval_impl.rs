@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{ApprovalReadModel, ApprovalRecord};
+use cairn_store::projections::{ApprovalReadModel, ApprovalRecord, RunReadModel};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -22,7 +22,7 @@ impl<S> ApprovalServiceImpl<S> {
 #[async_trait]
 impl<S> ApprovalService for ApprovalServiceImpl<S>
 where
-    S: EventLog + ApprovalReadModel + 'static,
+    S: EventLog + ApprovalReadModel + RunReadModel + 'static,
 {
     async fn request(
         &self,
@@ -32,6 +32,7 @@ where
         task_id: Option<TaskId>,
         requirement: ApprovalRequirement,
     ) -> Result<ApprovalRecord, RuntimeError> {
+        let saved_run_id = run_id.clone();
         let event = make_envelope(RuntimeEvent::ApprovalRequested(ApprovalRequested {
             project: project.clone(),
             approval_id: approval_id.clone(),
@@ -41,6 +42,27 @@ where
         }));
 
         self.store.append(&[event]).await?;
+
+        // Transition the associated run to WaitingApproval.
+        if let Some(ref rid) = saved_run_id {
+            if let Some(run) = RunReadModel::get(self.store.as_ref(), rid).await? {
+                if can_transition_run_state(run.state, RunState::WaitingApproval) {
+                    let transition_event =
+                        make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+                            project: project.clone(),
+                            run_id: rid.clone(),
+                            transition: StateTransition {
+                                from: Some(run.state),
+                                to: RunState::WaitingApproval,
+                            },
+                            failure_class: None,
+                            pause_reason: None,
+                            resume_trigger: None,
+                        }));
+                    self.store.append(&[transition_event]).await?;
+                }
+            }
+        }
 
         ApprovalReadModel::get(self.store.as_ref(), &approval_id)
             .await?
@@ -79,39 +101,38 @@ where
 
         self.store.append(&[event]).await?;
 
-        // TODO(RFC-010): Signal the blocked run/task after approval resolution.
-        //
-        // Current gap: `ApprovalResolved` is appended to the event log but the
-        // associated run remains suspended indefinitely — nothing unblocks it.
-        //
-        // Intended flow (requires access to a RunService or direct store writes):
-        //
-        //   if let Some(run_id) = &approval.run_id {
-        //       match decision {
-        //           ApprovalDecision::Approved => {
-        //               // Transition the run from Paused → Running via RunStateChanged
-        //               // with ResumeTrigger::OperatorResume so downstream workers
-        //               // know the run is cleared to continue.
-        //               run_service
-        //                   .transition_run(run_id, RunState::Running, Some(ResumeTrigger::OperatorResume), None)
-        //                   .await?;
-        //           }
-        //           ApprovalDecision::Rejected => {
-        //               // Transition the run to Failed with FailureClass::ApprovalRejected
-        //               // so it surfaces in the operator error inbox and is not retried.
-        //               run_service
-        //                   .transition_run(run_id, RunState::Failed, None, Some(FailureClass::ApprovalRejected))
-        //                   .await?;
-        //           }
-        //       }
-        //   }
-        //
-        // Blocking factor: `ApprovalServiceImpl` holds only a store handle (`Arc<S>`),
-        // not a RunService reference. Options to resolve:
-        //   (a) Inject `Arc<dyn RunService>` alongside the store here, or
-        //   (b) Handle the cascade in a domain-event reactor that subscribes to
-        //       `ApprovalResolved` and drives the run state machine separately.
-        // Option (b) keeps this service single-responsibility and avoids circular deps.
+        // Cascade the decision to the associated run's state machine.
+        if let Some(ref run_id) = approval.run_id {
+            if let Some(run) = RunReadModel::get(self.store.as_ref(), run_id).await? {
+                let (to_state, failure_class, resume_trigger) = match decision {
+                    ApprovalDecision::Approved => (
+                        RunState::Running,
+                        None,
+                        Some(ResumeTrigger::OperatorResume),
+                    ),
+                    ApprovalDecision::Rejected => (
+                        RunState::Failed,
+                        Some(FailureClass::ApprovalRejected),
+                        None,
+                    ),
+                };
+                if can_transition_run_state(run.state, to_state) {
+                    let transition_event =
+                        make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+                            project: run.project.clone(),
+                            run_id: run_id.clone(),
+                            transition: StateTransition {
+                                from: Some(run.state),
+                                to: to_state,
+                            },
+                            failure_class,
+                            pause_reason: None,
+                            resume_trigger,
+                        }));
+                    self.store.append(&[transition_event]).await?;
+                }
+            }
+        }
 
         ApprovalReadModel::get(self.store.as_ref(), approval_id)
             .await?

@@ -248,15 +248,12 @@ async fn run_with_approval_gate() {
         .unwrap();
     assert_eq!(resolved.decision, Some(ApprovalDecision::Approved));
 
-    // Advance through the canonical RFC 005 run lifecycle before completion.
+    // Approval resolution auto-transitions the run from WaitingApproval → Running.
     let run = run_svc
-        .resume(
-            &RunId::new("run_1"),
-            ResumeTrigger::RuntimeSignal,
-            RunResumeTarget::Running,
-        )
+        .get(&RunId::new("run_1"))
         .await
-        .unwrap();
+        .unwrap()
+        .expect("run must exist");
     assert_eq!(run.state, RunState::Running);
 
     let run = run_svc.complete(&RunId::new("run_1")).await.unwrap();

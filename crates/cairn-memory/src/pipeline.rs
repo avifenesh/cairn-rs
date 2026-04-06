@@ -186,6 +186,25 @@ pub fn compute_content_hash(text: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Compute a chunk quality score from text characteristics.
+///
+/// Score = (alphanumeric_ratio * 0.7 + length_factor * 0.3) * provenance_boost.
+/// Provenance-bearing chunks get a 1.2x boost (capped at 1.0);
+/// chunks without provenance are penalized to 0.8x.
+fn compute_chunk_quality(text: &str, has_provenance: bool) -> f64 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    let alnum = text.chars().filter(|c| c.is_alphanumeric()).count() as f64 / text.len() as f64;
+    let length_factor = (text.len() as f64 / 100.0).min(1.0);
+    let base = alnum * 0.7 + length_factor * 0.3;
+    if has_provenance {
+        (base * 1.2).min(1.0)
+    } else {
+        base * 0.8
+    }
+}
+
 fn make_chunk(
     text: &str,
     position: u32,
@@ -207,6 +226,8 @@ fn make_chunk(
         "created_at": created_at,
     });
 
+    let quality = compute_chunk_quality(&trimmed, true);
+
     ChunkRecord {
         chunk_id,
         document_id: document_id.clone(),
@@ -218,7 +239,7 @@ fn make_chunk(
         created_at,
         updated_at: None,
         provenance_metadata: Some(provenance),
-        credibility_score: None,
+        credibility_score: Some(quality),
         graph_linkage: None,
         embedding: None,
         content_hash: Some(content_hash),

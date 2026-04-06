@@ -108,6 +108,9 @@ pub use ollama_provider::{OllamaModel, OllamaProvider, OllamaTagsResponse};
 pub mod ollama_embedding;
 pub use ollama_embedding::OllamaEmbeddingProvider;
 
+pub mod openai_compat_provider;
+pub use openai_compat_provider::OpenAiCompatProvider;
+
 pub mod provider_health_tracker;
 pub use provider_health_tracker::ProviderHealthTracker;
 

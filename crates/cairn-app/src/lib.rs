@@ -98,7 +98,7 @@ use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, R
 use cairn_runtime::{
     set_current_trace_id, NotificationService, RunCostAlertService, RunSlaService,
     ApprovalPolicyService, ApprovalService, AuditService, BudgetService, ChannelService,
-    CheckpointService, CredentialService, DefaultsService, EvalRunService, ExternalWorkerService,
+    CheckpointService, CredentialService, DefaultsService, ExternalWorkerService,
     GuardrailService, InMemoryServices, IngestJobService, LicenseService, MailboxService,
     OperatorProfileService, ProjectService, PromptAssetService, PromptReleaseService,
     PromptVersionService, ProviderBindingService, ProviderConnectionConfig,
@@ -109,11 +109,11 @@ use cairn_runtime::{
 };
 use cairn_store::projections::{
     ApprovalReadModel, AuditLogReadModel, CheckpointReadModel, CheckpointStrategyReadModel,
-    EvalRunReadModel, MailboxReadModel, OperatorInterventionReadModel,
+    OperatorInterventionReadModel,
     PauseScheduleReadModel, PromptReleaseReadModel, PromptVersionReadModel,
-    ProviderBindingReadModel, ProviderConnectionReadModel, QuotaReadModel, RetentionPolicyReadModel, RoutePolicyReadModel,
+    QuotaReadModel, RetentionPolicyReadModel, RoutePolicyReadModel,
     LlmCallTraceReadModel, RunCostReadModel, RunReadModel, RunRecord, SessionCostReadModel, SessionRecord,
-    SignalReadModel, TaskDependencyReadModel, TaskLeaseExpiredReadModel, TaskReadModel, TaskRecord, RecoveryEscalationReadModel, ToolInvocationReadModel,
+    TaskDependencyReadModel, TaskLeaseExpiredReadModel, TaskReadModel, TaskRecord, RecoveryEscalationReadModel, ToolInvocationReadModel,
     WorkspaceMembershipReadModel,
 };
 use cairn_store::{EntityRef, EventLog, EventPosition, StoredEvent};
@@ -538,6 +538,8 @@ struct AppState {
     plugin_host: Arc<Mutex<StdioPluginHost>>,
     rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
     metrics: Arc<AppMetrics>,
+    #[allow(dead_code)]
+    memory_proposal_hook: Arc<sse_hooks::SseMemoryProposalHook>,
     started_at: Instant,
 }
 
@@ -597,6 +599,11 @@ impl AppState {
             std::collections::VecDeque::<(u64, SseFrame)>::with_capacity(10_000),
         ));
         let sse_seq = Arc::new(std::sync::atomic::AtomicU64::new(1));
+        let memory_proposal_hook = Arc::new(sse_hooks::SseMemoryProposalHook::with_sse_channel(
+            runtime_sse_tx.clone(),
+            sse_event_buffer.clone(),
+            sse_seq.clone(),
+        ));
 
         runtime
             .tenants
@@ -653,6 +660,7 @@ impl AppState {
             plugin_host,
             rate_limits,
             metrics,
+            memory_proposal_hook,
             started_at: Instant::now(),
             runtime_sse_tx,
             sse_event_buffer,
@@ -910,6 +918,7 @@ where
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct CreateEvalRunRequest {
     tenant_id: String,
     workspace_id: String,
@@ -925,6 +934,7 @@ struct CreateEvalRunRequest {
 }
 
 impl CreateEvalRunRequest {
+    #[allow(dead_code)]
     fn project(&self) -> ProjectKey {
         ProjectKey::new(
             self.tenant_id.as_str(),
@@ -1116,6 +1126,7 @@ impl EvalExportQuery {
         )
     }
 
+    #[allow(dead_code)]
     fn format(&self) -> &str {
         self.format.as_deref().unwrap_or("json")
     }
@@ -1538,6 +1549,7 @@ impl CreateProviderBindingRequest {
 /// send from the UI/CLI (capability, preferred_model_ids, etc.).
 /// Unknown fields are silently ignored so both shapes deserialize correctly.
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct CreateRoutePolicyRuleRequest {
     #[serde(default)]
     rule_id: String,
@@ -1626,27 +1638,32 @@ struct CreateWorkspaceRequest {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct TenantPath {
     tenant_id: String,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct TenantIdPath {
     id: String,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct WorkspacePath {
     workspace_id: String,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct WorkspaceMemberPath {
     workspace_id: String,
     member_id: String,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct CredentialPath {
     tenant_id: String,
     id: String,
@@ -1699,6 +1716,7 @@ struct SetRetentionPolicyRequest {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct RequestApprovalRequest {
     tenant_id: String,
     workspace_id: String,
@@ -1918,6 +1936,7 @@ struct CreateRunRequest {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct SpawnSubagentRunRequest {
     session_id: String,
     parent_task_id: Option<String>,
@@ -2017,6 +2036,7 @@ impl HasProjectScope for TaskListQuery {
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize)]
+#[allow(dead_code)]
 struct FeedListQuery {
     tenant_id: Option<String>,
     workspace_id: Option<String>,
@@ -2102,6 +2122,7 @@ struct RegisteredWorkerResponse {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct SuspendWorkerRequest {
     reason: String,
 }
@@ -2190,18 +2211,21 @@ struct RunInterventionRequest {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct ClaimTaskRequest {
     worker_id: String,
     lease_duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct HeartbeatTaskRequest {
     worker_id: String,
     lease_extension_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, ToSchema)]
+#[allow(dead_code)]
 struct CreateTaskRequest {
     tenant_id: String,
     workspace_id: String,
@@ -2213,6 +2237,7 @@ struct CreateTaskRequest {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct SetTaskPriorityRequest {
     priority: u8,
 }
@@ -2301,11 +2326,13 @@ struct ToolInvocationListQuery {
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize)]
+#[allow(dead_code)]
 struct PluginLogListQuery {
     limit: Option<usize>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct PluginEvalScoreRequest {
     input: serde_json::Value,
     expected: Option<serde_json::Value>,
@@ -2525,6 +2552,7 @@ impl ApprovalPolicyListQuery {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct DelegateApprovalRequest {
     delegated_to: String,
 }
@@ -2540,6 +2568,7 @@ struct CreatePromptAssetRequest {
 }
 
 impl CreatePromptAssetRequest {
+    #[allow(dead_code)]
     fn workspace(&self) -> WorkspaceKey {
         WorkspaceKey::new(
             self.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
@@ -2560,6 +2589,7 @@ struct CreatePromptVersionRequest {
 }
 
 impl CreatePromptVersionRequest {
+    #[allow(dead_code)]
     fn workspace(&self) -> WorkspaceKey {
         WorkspaceKey::new(
             self.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
@@ -2610,6 +2640,7 @@ struct StartRolloutRequest {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct PromptVersionDiffQuery {
     compare_to: String,
 }
@@ -2621,6 +2652,7 @@ struct RunReplayQuery {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct RunEventsQuery {
     from: Option<u64>,
     limit: Option<usize>,
@@ -2683,6 +2715,7 @@ struct PromptVersionDiffResponse {
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
+#[allow(dead_code)]
 struct ReplayTaskStateView {
     task_id: String,
     state: String,
@@ -2697,6 +2730,7 @@ struct ReplayResult {
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
+#[allow(dead_code)]
 struct RunEventListEntry {
     position: u64,
     event_type: String,
@@ -2825,6 +2859,7 @@ impl DeepSearchHttpRequest {
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
+#[allow(dead_code)]
 struct MemoryProvenanceResponse {
     source: Option<GraphNode>,
     document: Option<GraphNode>,
@@ -2838,6 +2873,7 @@ struct TlsSettingsResponse {
     expires_at: Option<String>,
 }
 
+#[allow(dead_code)]
 struct AppProviderBootstrap<'a> {
     provider_connections: &'a dyn ProviderConnectionService,
     provider_bindings: &'a dyn ProviderBindingService,
@@ -4074,11 +4110,11 @@ async fn request_id_middleware(mut request: Request, next: Next) -> Response {
 
 /// RFC 011 extension types for tracing context in request extensions.
 #[derive(Clone, Debug)]
-struct RequestId(String);
+struct RequestId(#[allow(dead_code)] String);
 #[derive(Clone, Debug)]
-struct TraceId(String);
+struct TraceId(#[allow(dead_code)] String);
 #[derive(Clone, Debug)]
-struct SpanId(String);
+struct SpanId(#[allow(dead_code)] String);
 
 fn auth_exempt_path(path: &str) -> bool {
     matches!(
@@ -4828,7 +4864,7 @@ async fn stats_handler(
     let total_sessions: u64 = SessionReadModel::list_active(store, usize::MAX)
         .await.unwrap_or_default().len() as u64;
 
-    let total_runs: u64 = match state.runtime.runs.list_by_session(
+    let _total_runs: u64 = match state.runtime.runs.list_by_session(
         &cairn_domain::SessionId::new("__stats__"), usize::MAX, 0,
     ).await {
         Ok(_) => 0, // session-scoped — use read_stream count instead
@@ -6666,6 +6702,7 @@ async fn revoke_workspace_share_handler(
 /// Credential deletion is modelled as a revoke: the record is retained with
 /// `active = false` for audit history.  Returns 404 when the credential does
 /// not exist or was already revoked.
+#[allow(dead_code)]
 async fn delete_credential_handler(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<AuthPrincipal>,
@@ -6710,6 +6747,7 @@ async fn delete_credential_handler(
 /// infrastructure defined in RFC 008.  Workspace-scoped shares are already
 /// available via `POST /v1/admin/workspaces/:id/shares`.
 /// This endpoint is reserved for the future per-resource surface.
+#[allow(dead_code)]
 async fn share_resource_handler(
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -6728,6 +6766,7 @@ async fn share_resource_handler(
 /// Workspace share revocation is available at
 /// `DELETE /v1/admin/workspaces/:id/shares/:share_id`.
 /// This endpoint is reserved for the future per-resource sharing surface.
+#[allow(dead_code)]
 async fn revoke_resource_share_handler(
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -11076,6 +11115,7 @@ async fn not_found_handler() -> impl IntoResponse {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct CreateModelComparisonRequest {
     tenant_id: Option<String>,
     dataset_id: String,
@@ -11084,11 +11124,13 @@ struct CreateModelComparisonRequest {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct SubmitModelComparisonResultRequest {
     binding_id: String,
     metrics: EvalMetrics,
 }
 
+#[allow(dead_code)]
 async fn create_model_comparison_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateModelComparisonRequest>,
@@ -11105,6 +11147,7 @@ async fn create_model_comparison_handler(
     (StatusCode::CREATED, Json(comparison)).into_response()
 }
 
+#[allow(dead_code)]
 async fn get_model_comparison_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -11116,6 +11159,7 @@ async fn get_model_comparison_handler(
     }
 }
 
+#[allow(dead_code)]
 async fn submit_model_comparison_result_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -14321,6 +14365,7 @@ fn parse_tool_invocation_state(value: &str) -> Result<ToolInvocationState, Strin
         .map_err(|_| format!("invalid tool invocation state: {value}"))
 }
 
+#[allow(dead_code)]
 fn prompt_release_state_to_string(state: cairn_domain::PromptReleaseState) -> String {
     match state {
         cairn_domain::PromptReleaseState::Draft => "draft",
@@ -14572,6 +14617,7 @@ where
 ///
 /// Unlike `POST /v1/providers/run-health-checks` (which only runs *due*
 /// scheduled checks), this endpoint always runs and returns a full snapshot.
+#[allow(dead_code)]
 async fn check_provider_health_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
@@ -14605,6 +14651,7 @@ async fn check_provider_health_handler(
 // ── send_notification_handler ────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
+#[allow(dead_code)]
 struct SendNotificationRequest {
     /// Target operator ID. Defaults to "system" for broadcast notifications.
     #[serde(default = "default_operator_id")]
@@ -14618,7 +14665,9 @@ struct SendNotificationRequest {
     severity: String,
 }
 
+#[allow(dead_code)]
 fn default_operator_id() -> String { "system".to_owned() }
+#[allow(dead_code)]
 fn default_severity()    -> String { "info".to_owned() }
 
 /// `POST /v1/notifications/send` — dispatch an ad-hoc notification through
@@ -14626,6 +14675,7 @@ fn default_severity()    -> String { "info".to_owned() }
 ///
 /// Calls `notify_if_applicable` so only operators subscribed to `event_type`
 /// receive the notification. Returns the list of dispatched records.
+#[allow(dead_code)]
 async fn send_notification_handler(
     State(state): State<Arc<AppState>>,
     tenant_scope: TenantScope,
@@ -14661,6 +14711,7 @@ async fn send_notification_handler(
 
 // ── Stub handlers for routes added to catalog but not yet implemented ───────
 
+#[allow(unused_macros)]
 macro_rules! stub_handler {
     ($name:ident) => {
         async fn $name() -> impl IntoResponse {
@@ -14674,6 +14725,7 @@ macro_rules! stub_handler {
 ///
 /// Alias for `save_checkpoint_handler`; provides the `record_checkpoint_handler`
 /// name expected by the preserved route catalog and audit tests.
+#[allow(dead_code)]
 async fn record_checkpoint_handler(
     state: State<Arc<AppState>>,
     path: Path<String>,
@@ -14686,6 +14738,7 @@ async fn record_checkpoint_handler(
 ///
 /// Alias for `start_prompt_rollout_handler`; provides the `start_rollout_handler`
 /// name expected by the preserved route catalog and SSE integration tests.
+#[allow(dead_code)]
 async fn start_rollout_handler(
     state: State<Arc<AppState>>,
     path: Path<String>,
@@ -14697,6 +14750,7 @@ async fn start_rollout_handler(
 
 /// `POST /v1/admin/tenants/:id/snapshot` — create a tenant state snapshot.
 /// Delegates to create_snapshot_handler (catalog-compatibility alias).
+#[allow(dead_code)]
 async fn create_tenant_snapshot_handler(
     state: State<Arc<AppState>>,
     path: Path<String>,
@@ -14706,6 +14760,7 @@ async fn create_tenant_snapshot_handler(
 
 /// `POST /v1/admin/tenants/:id/restore` — restore tenant state from latest snapshot.
 /// Delegates to restore_from_snapshot_handler (catalog-compatibility alias).
+#[allow(dead_code)]
 async fn restore_tenant_snapshot_handler(
     state: State<Arc<AppState>>,
     path: Path<String>,
@@ -14715,6 +14770,7 @@ async fn restore_tenant_snapshot_handler(
 
 /// `POST /v1/prompts/releases/:id/request-approval` — request approval for a release.
 /// Delegates to request_prompt_release_approval_handler (catalog-compatibility alias).
+#[allow(dead_code)]
 async fn request_approval_for_release_handler(
     state: State<Arc<AppState>>,
     path: Path<String>,

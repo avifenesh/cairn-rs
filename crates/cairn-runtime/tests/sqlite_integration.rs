@@ -186,6 +186,9 @@ impl ApprovalReadModel for SqliteStore {
     ) -> Result<Vec<ApprovalRecord>, StoreError> {
         ApprovalReadModel::list_pending(&self.adapter, p, l, o).await
     }
+    async fn has_pending_for_run(&self, run_id: &RunId) -> Result<bool, StoreError> {
+        ApprovalReadModel::has_pending_for_run(&self.adapter, run_id).await
+    }
 }
 
 #[async_trait]
@@ -253,6 +256,13 @@ impl TaskDependencyReadModel for SqliteStore {
         _resolved_at_ms: u64,
     ) -> Result<(), StoreError> {
         Ok(())
+    }
+}
+
+#[async_trait]
+impl CheckpointStrategyReadModel for SqliteStore {
+    async fn get_by_run(&self, run_id: &RunId) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
+        CheckpointStrategyReadModel::get_by_run(&self.adapter, run_id).await
     }
 }
 

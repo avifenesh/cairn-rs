@@ -38,8 +38,8 @@ async fn memory_search_flows_through_real_retrieval_service() {
         .unwrap();
 
     // Build MemoryApiImpl with same backing store.
-    let retrieval = InMemoryRetrieval::new(store);
-    let api = MemoryApiImpl::new(retrieval);
+    let retrieval = InMemoryRetrieval::new(store.clone());
+    let api = MemoryApiImpl::new(retrieval, store);
 
     // Search through the API trait — must find the doc.
     let results = api

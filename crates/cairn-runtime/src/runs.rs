@@ -62,6 +62,22 @@ pub trait RunService: Send + Sync {
         trigger: ResumeTrigger,
         target: RunResumeTarget,
     ) -> Result<RunRecord, RuntimeError>;
+
+    /// Transition a run to WaitingApproval (approval gate).
+    async fn enter_waiting_approval(
+        &self,
+        run_id: &RunId,
+    ) -> Result<RunRecord, RuntimeError>;
+
+    /// Transition a run out of WaitingApproval after approval resolution.
+    ///
+    /// On approve: resumes to Running.
+    /// On reject: fails with FailureClass::ApprovalRejected.
+    async fn resolve_approval(
+        &self,
+        run_id: &RunId,
+        decision: cairn_domain::ApprovalDecision,
+    ) -> Result<RunRecord, RuntimeError>;
 }
 
 #[cfg(test)]

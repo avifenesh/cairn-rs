@@ -5,7 +5,6 @@
 //! provider configs) that can be applied to a project with a single POST.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -136,10 +135,12 @@ impl TemplateRegistry {
     }
 
     /// Number of registered templates.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.templates.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.templates.is_empty()
     }
