@@ -24,6 +24,7 @@ import {
   CheckSquare,
   Zap,
   Calculator,
+  Layers,
   Coins,
   Database,
   Settings,
@@ -84,6 +85,7 @@ type Option = NavOption | ActionOption | QuickJumpOption;
 
 const NAV_OPTIONS: NavOption[] = [
   { kind: 'page', id: 'dashboard',  label: 'Dashboard',  description: 'Overview and live metrics',          icon: LayoutDashboard, shortcut: [MOD, '1'] },
+  { kind: 'page', id: 'workspaces', label: 'Workspaces',  description: 'Workspace browser and switcher',           icon: Layers },
   { kind: 'page', id: 'sessions',   label: 'Sessions',    description: 'Conversation sessions',              icon: MonitorPlay,     shortcut: [MOD, '2'] },
   { kind: 'page', id: 'runs',       label: 'Runs',        description: 'Active and historical runs',         icon: Play,            shortcut: [MOD, '3'] },
   { kind: 'page', id: 'tasks',      label: 'Tasks',       description: 'Task queue and worker activity',     icon: ListChecks,      shortcut: [MOD, '4'] },

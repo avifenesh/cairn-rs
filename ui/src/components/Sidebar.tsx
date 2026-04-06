@@ -9,6 +9,7 @@ import {
   FlaskConical,
   KeyRound,
   ServerCrash,
+  Layers,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -35,6 +36,7 @@ import type { ReactNode } from 'react';
 
 export type NavPage =
   | 'dashboard'
+  | 'workspaces'
   | 'sessions'
   | 'runs'
   | 'tasks'
@@ -81,6 +83,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Overview',
     items: [
       { id: 'dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
+      { id: 'workspaces', label: 'Workspaces', icon: Layers         },
     ],
   },
   {

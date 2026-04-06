@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Loader2, Check, X, Radio, Wifi } from "lucide-react";
+import { useState, useCallback } from "react";
+import { RefreshCw, Loader2, Check, X, Radio, Wifi, ShieldCheck } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
@@ -431,6 +432,170 @@ function TransportSection() {
   );
 }
 
+// ── CORS diagnostics ──────────────────────────────────────────────────────────
+
+const CORS_HEADERS_OF_INTEREST = [
+  "access-control-allow-origin",
+  "access-control-allow-methods",
+  "access-control-allow-headers",
+  "access-control-max-age",
+] as const;
+
+type CorsHeader = typeof CORS_HEADERS_OF_INTEREST[number];
+
+interface PreflightResult {
+  status:  number;
+  ok:      boolean;
+  latency: number;
+  headers: Partial<Record<CorsHeader, string>>;
+  error?:  string;
+}
+
+function CorsDiagnosticsSection({ deploymentMode }: { deploymentMode?: string }) {
+  const [result, setResult]   = useState<PreflightResult | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const corsMode = deploymentMode === "self_hosted_team"
+    ? "same-origin (team)"
+    : "wildcard (*)";
+
+  const allowedOrigins = deploymentMode === "self_hosted_team"
+    ? ["same-origin only — configure a reverse proxy for cross-origin access"]
+    : ["* (any origin)"];
+
+  const runPreflight = useCallback(async () => {
+    setTesting(true);
+    setResult(null);
+    const t0 = performance.now();
+    try {
+      const resp = await fetch("/v1/rate-limit", {
+        method: "OPTIONS",
+        headers: {
+          "Access-Control-Request-Method":  "GET",
+          "Access-Control-Request-Headers": "Authorization, Content-Type",
+        },
+      });
+      const latency = Math.round(performance.now() - t0);
+      const headers: Partial<Record<CorsHeader, string>> = {};
+      for (const h of CORS_HEADERS_OF_INTEREST) {
+        const v = resp.headers.get(h);
+        if (v) headers[h] = v;
+      }
+      setResult({ status: resp.status, ok: resp.ok || resp.status === 204, latency, headers });
+    } catch (err) {
+      const latency = Math.round(performance.now() - t0);
+      setResult({ status: 0, ok: false, latency, headers: {}, error: String(err) });
+    } finally {
+      setTesting(false);
+    }
+  }, []);
+
+  const fmtHeader = (h: CorsHeader): string => {
+    return h.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("-");
+  };
+
+  const fmtMaxAge = (v?: string) => {
+    if (!v) return null;
+    const secs = parseInt(v, 10);
+    if (isNaN(secs)) return v;
+    if (secs >= 3600) return `${secs / 3600}h (${v}s)`;
+    return `${secs}s`;
+  };
+
+  return (
+    <Section title="CORS Diagnostics">
+      {/* Static config */}
+      <KV label="CORS mode" value={
+        <span className={clsx(
+          "font-mono text-[11px] px-1.5 py-0.5 rounded border",
+          deploymentMode === "self_hosted_team"
+            ? "text-amber-300 bg-amber-950/30 border-amber-800/30"
+            : "text-emerald-300 bg-emerald-950/30 border-emerald-800/30",
+        )}>
+          {corsMode}
+        </span>
+      } />
+      <KV label="Allowed origins" value={
+        <div className="flex flex-col items-end gap-1">
+          {allowedOrigins.map(o => (
+            <span key={o} className="font-mono text-[11px] text-zinc-400 max-w-[280px] truncate text-right" title={o}>{o}</span>
+          ))}
+        </div>
+      } />
+      <KV label="Allowed methods" value={
+        <span className="font-mono text-[11px] text-zinc-400">GET POST PUT DELETE PATCH OPTIONS</span>
+      } />
+      <KV label="Allowed headers" value={
+        <span className="font-mono text-[11px] text-zinc-400">Authorization, Content-Type</span>
+      } />
+      <KV label="Max-Age (cache)" value={
+        <span className="font-mono text-[11px] text-zinc-400">86400s (24 h)</span>
+      } />
+
+      {/* Preflight test */}
+      <div className="flex items-center justify-between py-2.5 border-b border-zinc-800">
+        <span className="text-[12px] text-zinc-500">Preflight test</span>
+        <button
+          onClick={() => void runPreflight()}
+          disabled={testing}
+          className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-800
+                     text-[11px] font-medium text-zinc-300 hover:text-zinc-100 hover:border-zinc-600
+                     disabled:opacity-40 px-2.5 py-1 transition-colors"
+        >
+          {testing
+            ? <Loader2 size={11} className="animate-spin" />
+            : <ShieldCheck size={11} />}
+          {testing ? "Testing…" : "Run OPTIONS /v1/rate-limit"}
+        </button>
+      </div>
+
+      {/* Results */}
+      {result && (
+        <div className="py-3 space-y-2">
+          {/* Status line */}
+          <div className="flex items-center gap-2 pb-2 border-b border-zinc-800/60">
+            <span className={clsx(
+              "inline-flex items-center gap-1 text-[11px] font-medium rounded px-2 py-0.5 border",
+              result.ok
+                ? "text-emerald-400 bg-emerald-950/40 border-emerald-800/30"
+                : "text-red-400 bg-red-950/40 border-red-800/30",
+            )}>
+              {result.ok ? <Check size={10} strokeWidth={2.5} /> : <X size={10} />}
+              {result.status > 0 ? `HTTP ${result.status}` : "Network error"}
+            </span>
+            <span className="text-[11px] text-zinc-600 font-mono">{result.latency} ms</span>
+            {result.error && (
+              <span className="text-[11px] text-red-400 truncate max-w-xs" title={result.error}>
+                {result.error}
+              </span>
+            )}
+          </div>
+
+          {/* Response headers */}
+          {CORS_HEADERS_OF_INTEREST.map(h => {
+            const raw = result.headers[h];
+            const display = h === "access-control-max-age"
+              ? (fmtMaxAge(raw) ?? <span className="text-zinc-700">absent</span>)
+              : raw ?? <span className="text-zinc-700">absent</span>;
+            const present = raw !== undefined;
+            return (
+              <div key={h} className="flex items-start justify-between gap-4 text-[11px]">
+                <span className="font-mono text-zinc-600 shrink-0">{fmtHeader(h)}</span>
+                <span className={clsx(
+                  "font-mono truncate text-right max-w-[260px]",
+                  present ? "text-zinc-300" : "text-zinc-700 italic",
+                )} title={raw}>
+                  {display}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function SettingsPage() {
@@ -549,6 +714,9 @@ export function SettingsPage() {
 
             {/* Transport */}
             <TransportSection />
+
+            {/* CORS */}
+            <CorsDiagnosticsSection deploymentMode={s?.deployment_mode} />
 
             {/* System info — version, features, environment */}
             {sysLoading ? (

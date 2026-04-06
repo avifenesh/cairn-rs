@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cairn — Offline</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #09090b;
+      color: #e4e4e7;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    .card {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 16px;
+      padding: 2.5rem 2rem;
+      max-width: 380px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+    }
+
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 48px;
+      height: 48px;
+      background: #6366f1;
+      border-radius: 12px;
+      margin-bottom: 1.5rem;
+    }
+
+    .logo svg { width: 22px; height: 22px; }
+
+    .icon-wrap {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 52px;
+      height: 52px;
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 50%;
+      margin-bottom: 1.25rem;
+    }
+
+    h1 {
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: #f4f4f5;
+      margin-bottom: 0.5rem;
+    }
+
+    p {
+      font-size: 0.8125rem;
+      color: #71717a;
+      line-height: 1.6;
+    }
+
+    .divider { height: 1px; background: #27272a; margin: 1.5rem 0; }
+
+    .hint {
+      font-size: 0.75rem;
+      color: #52525b;
+      font-family: ui-monospace, monospace;
+    }
+
+    button {
+      margin-top: 1.5rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 150ms;
+    }
+    button:hover { background: #4f46e5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <!-- cairn wordmark -->
+    <div class="logo">
+      <svg viewBox="0 0 22 22" fill="none">
+        <rect x="2"  y="2"  width="7" height="7" rx="1.5" fill="white" opacity="0.9"/>
+        <rect x="13" y="2"  width="7" height="7" rx="1.5" fill="white" opacity="0.55"/>
+        <rect x="2"  y="13" width="7" height="7" rx="1.5" fill="white" opacity="0.55"/>
+        <rect x="13" y="13" width="7" height="7" rx="1.5" fill="white" opacity="0.9"/>
+      </svg>
+    </div>
+
+    <!-- offline icon -->
+    <div class="icon-wrap">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <line x1="1" y1="1" x2="23" y2="23"/>
+        <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/>
+        <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/>
+        <path d="M10.71 5.05A16 16 0 0 1 22.56 9"/>
+        <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/>
+        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+        <line x1="12" y1="20" x2="12.01" y2="20"/>
+      </svg>
+    </div>
+
+    <h1>You're offline</h1>
+    <p>
+      cairn can't reach the server right now.<br/>
+      Check your network and try again.
+    </p>
+
+    <div class="divider"></div>
+
+    <p class="hint">
+      Cached pages are still accessible — use the back button or reload when reconnected.
+    </p>
+
+    <button onclick="location.reload()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"/>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+      </svg>
+      Try again
+    </button>
+  </div>
+</body>
+</html>

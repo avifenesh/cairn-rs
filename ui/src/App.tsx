@@ -14,8 +14,10 @@ import { EvalsPage } from './pages/EvalsPage';
 // ── Lazily-loaded pages (loaded on first navigation) ─────────────────────────
 const RunDetailPage      = lazy(() => import('./pages/RunDetailPage').then(m => ({ default: m.RunDetailPage })));
 const SessionDetailPage  = lazy(() => import('./pages/SessionDetailPage').then(m => ({ default: m.SessionDetailPage })));
-const EvalComparisonPage = lazy(() => import('./pages/EvalComparisonPage').then(m => ({ default: m.EvalComparisonPage })));
+const EvalComparisonPage    = lazy(() => import('./pages/EvalComparisonPage').then(m => ({ default: m.EvalComparisonPage })));
+const ProjectDashboardPage  = lazy(() => import('./pages/ProjectDashboardPage').then(m => ({ default: m.ProjectDashboardPage })));
 const PlaygroundPage     = lazy(() => import('./pages/PlaygroundPage').then(m => ({ default: m.PlaygroundPage })));
+const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage').then(m => ({ default: m.WorkspacesPage })));
 const WorkersPage        = lazy(() => import('./pages/WorkersPage').then(m => ({ default: m.WorkersPage })));
 const TestHarnessPage    = lazy(() => import('./pages/TestHarnessPage').then(m => ({ default: m.TestHarnessPage })));
 const MetricsPage        = lazy(() => import('./pages/MetricsPage').then(m => ({ default: m.MetricsPage })));
@@ -95,6 +97,15 @@ function renderRoute(route: Route): React.ReactNode {
       </Guarded>
     );
   }
+  if (route.kind === 'project-dashboard') {
+    return (
+      <Guarded name="Project Dashboard">
+        <Suspense fallback={<PageLoader />}>
+          <ProjectDashboardPage projectId={route.projectId} />
+        </Suspense>
+      </Guarded>
+    );
+  }
 
   const page = (route as { kind: 'page'; page: NavPage }).page;
 
@@ -103,6 +114,7 @@ function renderRoute(route: Route): React.ReactNode {
     case 'dashboard':  return <Guarded name="Dashboard"><DashboardPage /></Guarded>;
     case 'runs':       return <Guarded name="Runs"><RunsPage /></Guarded>;
     case 'tasks':      return <Guarded name="Tasks"><TasksPage /></Guarded>;
+    case 'workspaces':  return <WorkspacesPage />;
     case 'sessions':   return <Guarded name="Sessions"><SessionsPage /></Guarded>;
     case 'approvals':  return <Guarded name="Approvals"><ApprovalsPage /></Guarded>;
     case 'evals':      return <Guarded name="Evaluations"><EvalsPage /></Guarded>;

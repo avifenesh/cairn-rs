@@ -2,13 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Anti-FOUC: apply dark class before first paint based on stored preference -->
+    <!-- Anti-FOUC: apply dark/compact classes before first paint -->
     <script>
       try {
         var t = localStorage.getItem('cairn_theme') || 'dark';
         if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
         }
+        var prefs = JSON.parse(localStorage.getItem('cairn_preferences') || '{}');
+        if (prefs.compactMode) document.documentElement.classList.add('compact');
       } catch(e) {}
     </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

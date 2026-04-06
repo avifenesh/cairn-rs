@@ -2747,6 +2747,157 @@ async fn list_request_logs_handler(
     })))
 }
 
+// ── OpenTelemetry OTLP trace export ──────────────────────────────────────────
+
+/// Query params for `GET /v1/traces/export`.
+#[derive(Deserialize)]
+struct TraceExportQuery {
+    /// Export format.  Only `otlp` is supported today; kept for future extensibility.
+    #[serde(default)]
+    format: Option<String>,
+    /// Maximum number of spans to include (default 200, max 2 000).
+    #[serde(default)]
+    limit:  Option<usize>,
+}
+
+/// Convert a UUID string (with hyphens) to a 32-char lowercase hex trace ID.
+/// OTLP requires exactly 32 hex characters (128-bit trace ID).
+fn uuid_to_trace_id(uuid: &str) -> String {
+    uuid.replace('-', "")
+}
+
+/// Derive an 8-byte (16 hex char) span ID from the request ID.
+/// We take the last 16 hex chars of the trace ID so trace and span share a root.
+fn uuid_to_span_id(uuid: &str) -> String {
+    let hex = uuid.replace('-', "");
+    hex[hex.len().saturating_sub(16)..].to_owned()
+}
+
+/// Format a Unix-nanosecond timestamp as the string integer OTLP expects.
+fn ns_to_otlp_time(ns: u64) -> String {
+    ns.to_string()
+}
+
+/// Build a single OTLP JSON span from a `LogEntry`.
+fn log_entry_to_otlp_span(entry: &LogEntry) -> serde_json::Value {
+    let trace_id = uuid_to_trace_id(&entry.request_id);
+    let span_id  = uuid_to_span_id(&entry.request_id);
+
+    let start_ns = entry.start_time_unix_ns;
+    let end_ns   = start_ns + entry.latency_ms * 1_000_000;
+
+    // OTLP span status: 1 = OK, 2 = ERROR
+    let (status_code, status_msg) = if entry.status >= 500 {
+        (2i32, "Internal Server Error")
+    } else if entry.status >= 400 {
+        (2i32, "Client Error")
+    } else {
+        (1i32, "")
+    };
+
+    // Build attributes following OpenTelemetry HTTP semantic conventions.
+    let mut attrs = vec![
+        serde_json::json!({ "key": "http.method",       "value": { "stringValue": entry.method } }),
+        serde_json::json!({ "key": "http.target",       "value": { "stringValue": entry.path  } }),
+        serde_json::json!({ "key": "http.status_code",  "value": { "intValue": entry.status.to_string() } }),
+        serde_json::json!({ "key": "http.flavor",       "value": { "stringValue": "1.1" } }),
+        serde_json::json!({ "key": "net.host.name",     "value": { "stringValue": "cairn-app" } }),
+        serde_json::json!({ "key": "cairn.request_id",  "value": { "stringValue": entry.request_id } }),
+        serde_json::json!({ "key": "cairn.latency_ms",  "value": { "intValue": entry.latency_ms.to_string() } }),
+    ];
+    if let Some(q) = &entry.query {
+        attrs.push(serde_json::json!({ "key": "http.url", "value": { "stringValue": format!("{}?{}", entry.path, q) } }));
+    }
+
+    serde_json::json!({
+        "traceId":    trace_id,
+        "spanId":     span_id,
+        "parentSpanId": "",
+        "name":       format!("{} {}", entry.method, entry.path),
+        "kind":       2,             // SPAN_KIND_SERVER
+        "startTimeUnixNano": ns_to_otlp_time(start_ns),
+        "endTimeUnixNano":   ns_to_otlp_time(end_ns),
+        "attributes": attrs,
+        "droppedAttributesCount": 0,
+        "events":     [],
+        "droppedEventsCount": 0,
+        "links":      [],
+        "droppedLinksCount": 0,
+        "status": {
+            "code":    status_code,
+            "message": status_msg,
+        }
+    })
+}
+
+/// `GET /v1/traces/export?format=otlp&limit=200`
+///
+/// Returns HTTP request spans formatted as OTLP (OpenTelemetry Protocol) JSON.
+/// Compatible with Jaeger, Zipkin (via OTLP bridge), Grafana Tempo, and any
+/// OTLP-capable tracing backend.
+///
+/// Each span represents one HTTP request processed by cairn-app:
+/// - `traceId` / `spanId` derived from the internal request UUID
+/// - `startTimeUnixNano` / `endTimeUnixNano` from wall-clock + latency
+/// - Attributes follow the OpenTelemetry HTTP semantic conventions
+///
+/// The `resourceSpans[0].resource` identifies the service (`cairn-app`).
+async fn export_otlp_handler(
+    State(state): State<AppState>,
+    Query(q): Query<TraceExportQuery>,
+) -> impl IntoResponse {
+    // Only "otlp" format supported; reject unknown formats.
+    if let Some(ref fmt) = q.format {
+        if fmt != "otlp" {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("unsupported format '{fmt}'; only 'otlp' is supported"),
+                })),
+            ).into_response();
+        }
+    }
+
+    let limit = q.limit.unwrap_or(200).min(2_000);
+
+    let entries: Vec<LogEntry> = match state.request_log.read() {
+        Ok(log) => log.tail(limit, &[]).into_iter().cloned().collect(),
+        Err(_)  => vec![],
+    };
+
+    let spans: Vec<serde_json::Value> = entries
+        .iter()
+        .map(log_entry_to_otlp_span)
+        .collect();
+
+    let body = serde_json::json!({
+        "resourceSpans": [{
+            "resource": {
+                "attributes": [
+                    { "key": "service.name",      "value": { "stringValue": "cairn-app" } },
+                    { "key": "service.version",   "value": { "stringValue": env!("CARGO_PKG_VERSION") } },
+                    { "key": "service.namespace",  "value": { "stringValue": "cairn-rs" } },
+                    { "key": "telemetry.sdk.name",     "value": { "stringValue": "cairn-native" } },
+                    { "key": "telemetry.sdk.language", "value": { "stringValue": "rust" } },
+                ]
+            },
+            "scopeSpans": [{
+                "scope": {
+                    "name":    "cairn.http",
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+                "spans": spans,
+            }]
+        }]
+    });
+
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        Json(body),
+    ).into_response()
+}
+
 // ── Admin snapshot / restore ──────────────────────────────────────────────────
 
 /// `POST /v1/admin/snapshot` — export the full InMemory event log as a
@@ -4217,6 +4368,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/admin/tenants",  post(create_tenant_handler))
         .route("/v1/admin/audit-log", get(list_audit_log_handler))
         .route("/v1/admin/logs",     get(list_request_logs_handler))
+        .route("/v1/traces/export", get(export_otlp_handler))
         .route("/v1/admin/snapshot", post(admin_snapshot_handler))
         .route("/v1/admin/restore",  post(admin_restore_handler))
         // Notifications

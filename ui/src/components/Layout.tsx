@@ -9,7 +9,7 @@ import { type BreadcrumbItem } from './Breadcrumb';
 
 // All top-level pages — must match NavPage union in Sidebar.tsx
 const VALID_PAGES: NavPage[] = [
-  'dashboard',
+  'dashboard', 'workspaces',
   'sessions', 'runs', 'tasks', 'workers', 'orchestration', 'approvals', 'prompts',
   'traces', 'memory', 'sources', 'costs', 'cost-calc', 'evals', 'graph', 'audit-log', 'logs', 'metrics',
   'providers', 'plugins', 'credentials', 'channels', 'deployment', 'playground', 'test-harness', 'api-docs', 'settings', 'profile',
@@ -23,6 +23,7 @@ export type Route =
   | { kind: 'run-detail'; runId: string }
   | { kind: 'session-detail'; sessionId: string }
   | { kind: 'eval-compare'; leftId: string; rightId: string }
+  | { kind: 'project-dashboard'; projectId: string }
   | { kind: 'not-found'; hash: string };
 
 export function parseRoute(hash: string): Route {
@@ -32,6 +33,9 @@ export function parseRoute(hash: string): Route {
   }
   if (h.startsWith('session/') && h.length > 8) {
     return { kind: 'session-detail', sessionId: h.slice(8) };
+  }
+  if (h.startsWith('project/') && h.length > 8) {
+    return { kind: 'project-dashboard', projectId: h.slice('project/'.length) };
   }
   if (h.startsWith('eval-compare/')) {
     const parts = h.slice('eval-compare/'.length).split('/');
@@ -54,6 +58,7 @@ export function currentRoute(): Route {
 
 export const PAGE_TITLES: Record<NavPage, string> = {
   dashboard:   'Dashboard',
+  workspaces:  'Workspaces',
   sessions:    'Sessions',
   runs:        'Runs',
   tasks:       'Tasks',
@@ -84,6 +89,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
 };
 
 const PAGE_GROUP: Partial<Record<NavPage, string>> = {
+  workspaces:  'Overview',
   sessions:    'Operations',
   runs:        'Operations',
   tasks:       'Operations',
@@ -145,10 +151,11 @@ export function buildBreadcrumbs(route: Route): BreadcrumbItem[] {
 }
 
 function activePage(route: Route): NavPage {
-  if (route.kind === 'run-detail')    return 'runs';
-  if (route.kind === 'session-detail') return 'sessions';
-  if (route.kind === 'eval-compare')  return 'evals';
-  if (route.kind === 'not-found')     return 'dashboard';
+  if (route.kind === 'run-detail')        return 'runs';
+  if (route.kind === 'session-detail')    return 'sessions';
+  if (route.kind === 'eval-compare')      return 'evals';
+  if (route.kind === 'project-dashboard') return 'dashboard';
+  if (route.kind === 'not-found')         return 'dashboard';
   return route.page;
 }
 
