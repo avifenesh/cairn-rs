@@ -1502,6 +1502,151 @@ async fn list_run_tasks_handler(
     }
 }
 
+/// `POST /v1/runs/:id/tasks` — explicitly create a task within a run.
+///
+/// Submits the task through the `TaskService`, which appends a `TaskCreated`
+/// event and projects it into the read model.  The new task starts in the
+/// `queued` state, ready to be claimed by a worker.
+///
+/// Body: `{ "name": "...", "description": "...", "metadata": {...} }`
+/// All fields except `name` are optional; `task_id` is auto-generated.
+#[derive(Deserialize)]
+struct CreateTaskBody {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    metadata: Option<serde_json::Value>,
+    #[serde(default)]
+    task_id: Option<String>,
+}
+
+async fn create_run_task_handler(
+    State(state): State<AppState>,
+    Path(run_id_str): Path<String>,
+    Json(body): Json<CreateTaskBody>,
+) -> impl axum::response::IntoResponse {
+    let run_id = RunId::new(&run_id_str);
+
+    let run = match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
+        Ok(None) => return Err(not_found(format!("run {run_id_str} not found"))),
+        Err(e)   => return Err(internal_error(e.to_string())),
+        Ok(Some(r)) => r,
+    };
+
+    let task_id = TaskId::new(
+        body.task_id.as_deref()
+            .unwrap_or(&uuid::Uuid::new_v4().to_string()),
+    );
+
+    match state.runtime.tasks.submit(&run.project, task_id, Some(run_id), None, 0).await {
+        Ok(record) => {
+            let mut value = serde_json::to_value(&record).unwrap_or_default();
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("name".to_owned(),        serde_json::json!(body.name));
+                obj.insert("description".to_owned(), serde_json::json!(body.description));
+                obj.insert("metadata".to_owned(),    body.metadata.unwrap_or(serde_json::json!({})));
+            }
+            Ok((StatusCode::CREATED, Json(value)))
+        }
+        Err(e) => Err(internal_error(e.to_string())),
+    }
+}
+
+/// `POST /v1/tasks/:id/start` — transition a claimed (leased) task to running.
+///
+/// Valid only when the task is in `leased` state.  Appends a
+/// `TaskStateChanged(leased → running)` event.
+async fn start_task_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl axum::response::IntoResponse {
+    let task_id = TaskId::new(id.clone());
+    match state.runtime.tasks.start(&task_id).await {
+        Ok(record) => Ok((StatusCode::OK, Json(record))),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") || msg.contains("NotFound") {
+                Err(not_found(format!("task {id} not found")))
+            } else {
+                Err(bad_request(msg))
+            }
+        }
+    }
+}
+
+/// `POST /v1/tasks/:id/complete` — mark a running task as completed.
+///
+/// Terminal transition.  Resolves any downstream tasks that declared a
+/// dependency on this task (they transition from `waiting_dependency` to
+/// `queued`).  Optional `result` payload is echoed in the response.
+///
+/// Body: `{ "result": {...} }` (optional)
+#[derive(Deserialize)]
+struct CompleteTaskBody {
+    #[serde(default)]
+    result: Option<serde_json::Value>,
+}
+
+async fn complete_task_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<CompleteTaskBody>,
+) -> impl axum::response::IntoResponse {
+    let task_id = TaskId::new(id.clone());
+    match state.runtime.tasks.complete(&task_id).await {
+        Ok(record) => {
+            let mut value = serde_json::to_value(&record).unwrap_or_default();
+            if let (Some(obj), Some(result)) = (value.as_object_mut(), body.result) {
+                obj.insert("result".to_owned(), result);
+            }
+            Ok((StatusCode::OK, Json(value)))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") || msg.contains("NotFound") {
+                Err(not_found(format!("task {id} not found")))
+            } else {
+                Err(bad_request(msg))
+            }
+        }
+    }
+}
+
+/// `POST /v1/tasks/:id/fail` — mark a running or claimed task as failed.
+///
+/// Body: `{ "error": "reason string" }`
+/// The `error` string is echoed in the response alongside the updated record.
+#[derive(Deserialize)]
+struct FailTaskBody {
+    error: String,
+}
+
+async fn fail_task_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<FailTaskBody>,
+) -> impl axum::response::IntoResponse {
+    let task_id = TaskId::new(id.clone());
+    match state.runtime.tasks.fail(&task_id, cairn_domain::FailureClass::ExecutionError).await {
+        Ok(record) => {
+            let mut value = serde_json::to_value(&record).unwrap_or_default();
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("error".to_owned(), serde_json::json!(body.error));
+            }
+            Ok((StatusCode::OK, Json(value)))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") || msg.contains("NotFound") {
+                Err(not_found(format!("task {id} not found")))
+            } else {
+                Err(bad_request(msg))
+            }
+        }
+    }
+}
+
 /// `GET /v1/runs/:id/approvals` — list all approvals for a run.
 ///
 /// Returns approvals in all states (pending and resolved) ordered by
@@ -4862,7 +5007,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/runs/:id/cost", get(get_run_cost_handler))
         .route("/v1/runs/:id/events", get(list_run_events_handler))
         .route("/v1/runs/:id/tool-invocations", get(list_run_tool_invocations_handler))
-        .route("/v1/runs/:id/tasks",     get(list_run_tasks_handler))
+        .route("/v1/runs/:id/tasks",     get(list_run_tasks_handler).post(create_run_task_handler))
         .route("/v1/runs/:id/approvals", get(list_run_approvals_handler))
         .route("/v1/runs/:id/export",    get(export_run_handler))
         .route("/v1/sessions", get(list_sessions_handler).post(create_session_handler))
@@ -4882,7 +5027,10 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/events/append", post(append_events_handler))
         .route("/v1/tasks", get(list_all_tasks_handler))
         .route("/v1/tasks/batch/cancel", post(batch_cancel_tasks_handler))
-        .route("/v1/tasks/:id/claim", post(claim_task_handler))
+        .route("/v1/tasks/:id/claim",         post(claim_task_handler))
+        .route("/v1/tasks/:id/start",         post(start_task_handler))
+        .route("/v1/tasks/:id/complete",      post(complete_task_handler))
+        .route("/v1/tasks/:id/fail",          post(fail_task_handler))
         .route("/v1/tasks/:id/release-lease", post(release_task_lease_handler))
         .route("/v1/traces", get(list_all_traces_handler))
         .route("/v1/sessions/:id/llm-traces", get(list_session_traces_handler))
@@ -4891,8 +5039,11 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/admin/audit-log", get(list_audit_log_handler))
         .route("/v1/admin/logs",     get(list_request_logs_handler))
         .route("/v1/traces/export", get(export_otlp_handler))
-        .route("/v1/admin/snapshot", post(admin_snapshot_handler))
-        .route("/v1/admin/restore",  post(admin_restore_handler))
+        .route("/v1/admin/snapshot",             post(admin_snapshot_handler))
+        .route("/v1/admin/restore",              post(admin_restore_handler))
+        .route("/v1/admin/rebuild-projections",  post(rebuild_projections_handler))
+        .route("/v1/admin/event-count",          get(event_count_handler))
+        .route("/v1/admin/event-log",            get(admin_event_log_handler))
         // Notifications
         .route("/v1/notifications",            get(list_notifications_handler))
         .route("/v1/notifications/read-all",   post(mark_all_notifications_read_handler))
