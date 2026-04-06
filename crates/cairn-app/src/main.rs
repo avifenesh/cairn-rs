@@ -4992,6 +4992,38 @@ async fn metrics_prometheus_handler(State(state): State<AppState>) -> impl IntoR
     )
 }
 
+// ── RFC 014: Entitlement handlers ────────────────────────────────────────────
+
+/// `GET /v1/entitlements` — current plan + usage + limits for the default tenant.
+async fn entitlements_handler(
+    State(state): State<AppState>,
+    Query(q): Query<TenantQuery>,
+) -> impl IntoResponse {
+    let tenant_id = q.tenant_id.as_deref().unwrap_or("default");
+    match state.entitlements.get_usage(tenant_id) {
+        Some(report) => Ok(Json(report)),
+        None => Err(not_found(format!("no plan assigned to tenant '{tenant_id}'"))),
+    }
+}
+
+/// `GET /v1/entitlements/usage` — detailed usage breakdown.
+async fn entitlements_usage_handler(
+    State(state): State<AppState>,
+    Query(q): Query<TenantQuery>,
+) -> impl IntoResponse {
+    let tenant_id = q.tenant_id.as_deref().unwrap_or("default");
+    match state.entitlements.get_detailed_usage(tenant_id) {
+        Some(report) => Ok(Json(report)),
+        None => Err(not_found(format!("no plan assigned to tenant '{tenant_id}'"))),
+    }
+}
+
+#[derive(Deserialize)]
+struct TenantQuery {
+    #[serde(default)]
+    tenant_id: Option<String>,
+}
+
 // ── RFC 012: Template handlers ───────────────────────────────────────────────
 
 /// `GET /v1/templates` — list all available starter templates.
@@ -5089,6 +5121,9 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/notifications/read-all",   post(mark_all_notifications_read_handler))
         .route("/v1/notifications/:id/read",   post(mark_notification_read_handler))
         .route("/v1/evals/runs", get(list_evals_handler))
+        // RFC 014: entitlement gating
+        .route("/v1/entitlements",       get(entitlements_handler))
+        .route("/v1/entitlements/usage", get(entitlements_usage_handler))
         // RFC 012: onboarding templates
         .route("/v1/templates",          get(list_templates_handler))
         .route("/v1/templates/:id",      get(get_template_handler))
@@ -5259,6 +5294,7 @@ mod tests {
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+        entitlements: Arc::new(entitlements::EntitlementService::new()),
             }
         }
     }
@@ -6865,6 +6901,7 @@ mod tests {
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+        entitlements: Arc::new(entitlements::EntitlementService::new()),
         };
         let app = build_router(state);
 
@@ -7402,6 +7439,7 @@ mod run_events_tests {
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+        entitlements: Arc::new(entitlements::EntitlementService::new()),
             }
         }
     }
@@ -7588,6 +7626,7 @@ mod tool_invocations_tests {
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+        entitlements: Arc::new(entitlements::EntitlementService::new()),
             }
         }
     }
@@ -7805,6 +7844,7 @@ mod provider_health_tests {
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+        entitlements: Arc::new(entitlements::EntitlementService::new()),
             }
         }
     }
