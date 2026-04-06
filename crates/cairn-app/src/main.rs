@@ -326,6 +326,20 @@ impl RequestLogBuffer {
     }
 }
 
+// ── Request-ID type ──────────────────────────────────────────────────────────
+
+/// A per-request correlation ID stored in request extensions.
+///
+/// Populated by `metrics_middleware` before calling `next.run()` so every
+/// downstream handler and future middleware can read it without re-extracting
+/// from the response (which is unavailable until after the handler returns).
+///
+/// Preference order:
+///   1. Client-supplied `X-Request-ID` header (validated: ASCII, ≤ 128 chars).
+///   2. Freshly generated UUID v4.
+#[derive(Clone, Debug)]
+pub struct RequestId(pub String);
+
 // ── Response types ───────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -799,12 +813,29 @@ async fn rate_limit_status_handler(
 ///   3. Updates the rolling metrics counters and latency ring.
 async fn metrics_middleware(
     State(state): State<AppState>,
-    request: Request<Body>,
+    mut request: Request<Body>,
     next: Next,
 ) -> Response {
     use uuid::Uuid;
 
-    let request_id         = Uuid::new_v4().to_string();
+    // 1. Determine the request ID:
+    //    - Use the client-supplied X-Request-ID if it is safe ASCII and ≤ 128 chars.
+    //    - Otherwise generate a fresh UUID v4.
+    let request_id: String = request
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| {
+            let len = s.len();
+            len > 0 && len <= 128 && s.bytes().all(|b| b.is_ascii_graphic())
+        })
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    // 2. Store the ID in request extensions so downstream handlers can read it
+    //    via `Extension<RequestId>` without re-reading the (now-outgoing) header.
+    request.extensions_mut().insert(RequestId(request_id.clone()));
+
     let method             = request.method().to_string();
     let path               = request.uri().path().to_owned();
     let query              = request.uri().query().map(|q| q.to_owned());
@@ -818,7 +849,8 @@ async fn metrics_middleware(
     let latency_ms = start.elapsed().as_millis() as u64;
     let status     = response.status().as_u16();
 
-    // Inject request ID into response header so clients can correlate.
+    // 3. Echo the (original or generated) ID back to the client.
+    //    Clients that supplied their own ID get it reflected unchanged.
     if let Ok(val) = axum::http::HeaderValue::from_str(&request_id) {
         response.headers_mut().insert("x-request-id", val);
     }
@@ -2998,6 +3030,123 @@ async fn admin_restore_handler(
         "ok":           true,
         "event_count":  event_count,
         "replayed":     replayed,
+    })))
+}
+
+// ── Projection rebuild + event inspection handlers ────────────────────────────
+
+/// `POST /v1/admin/rebuild-projections` — replay the full event log through
+/// all in-memory projections, rebuilding every read model from scratch.
+///
+/// This is the primary operational recovery tool: if a projection diverges
+/// from the event log (e.g. after a bug fix), call this endpoint to restore
+/// consistency without losing events.
+///
+/// Internally the handler performs a snapshot → restore cycle: it exports the
+/// current event log and immediately replays it, which exercises
+/// `apply_projection` on every stored event in order.
+///
+/// Returns: `{ events_replayed: N, duration_ms: N }`
+async fn rebuild_projections_handler(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let t0 = std::time::Instant::now();
+    let snap = state.runtime.store.dump_events();
+    let events_replayed = state.runtime.store.load_snapshot(snap);
+    let duration_ms = t0.elapsed().as_millis() as u64;
+
+    tracing::info!(events_replayed, duration_ms, "projections rebuilt");
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "events_replayed": events_replayed,
+        "duration_ms":     duration_ms,
+    })))
+}
+
+/// `GET /v1/admin/event-count` — total event count and a per-type breakdown.
+///
+/// Returns: `{ total: N, by_type: { "session_created": 5, ... } }`
+///
+/// Useful for a quick health check on event log cardinality and for spotting
+/// unexpected event type distributions.
+async fn event_count_handler(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let events = match state.runtime.store.read_stream(None, usize::MAX).await {
+        Ok(v)  => v,
+        Err(e) => return Err(internal_error(e.to_string())),
+    };
+
+    let total = events.len() as u64;
+    let mut by_type: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    for ev in &events {
+        *by_type.entry(event_type_name(&ev.envelope.payload).to_owned()).or_insert(0) += 1;
+    }
+
+    // Sort the breakdown for deterministic output.
+    let mut sorted: Vec<(String, u64)> = by_type.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let by_type_obj: serde_json::Map<String, serde_json::Value> = sorted
+        .into_iter()
+        .map(|(k, v)| (k, serde_json::Value::Number(v.into())))
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "total":   total,
+        "by_type": serde_json::Value::Object(by_type_obj),
+    })))
+}
+
+/// `GET /v1/admin/event-log?from=0&limit=100` — paginated raw event access.
+///
+/// Returns events in ascending position order.  Each event includes its
+/// position, stored_at timestamp, event type name, and the full payload.
+///
+/// Query params:
+/// - `from`  — return events with position ≥ this value (default: 0 = all)
+/// - `limit` — max events per page (default: 100, max: 500)
+///
+/// Returns: `{ events: [...], total: N, has_more: bool }`
+#[derive(Deserialize)]
+struct EventLogQuery {
+    #[serde(default)]
+    from:  u64,
+    #[serde(default = "default_event_log_limit")]
+    limit: usize,
+}
+
+fn default_event_log_limit() -> usize { 100 }
+
+async fn admin_event_log_handler(
+    State(state): State<AppState>,
+    Query(q): Query<EventLogQuery>,
+) -> impl IntoResponse {
+    let limit = q.limit.min(500);
+    let after = if q.from > 0 { Some(EventPosition(q.from - 1)) } else { None };
+
+    let events = match state.runtime.store.read_stream(after, limit + 1).await {
+        Ok(v)  => v,
+        Err(e) => return Err(internal_error(e.to_string())),
+    };
+
+    let has_more = events.len() > limit;
+    let page: Vec<serde_json::Value> = events
+        .into_iter()
+        .take(limit)
+        .map(|e| serde_json::json!({
+            "position":   e.position.0,
+            "stored_at":  e.stored_at,
+            "event_type": event_type_name(&e.envelope.payload),
+            "event_id":   e.envelope.event_id.as_str(),
+            "payload":    e.envelope.payload,
+        }))
+        .collect();
+
+    let total = page.len();
+    Ok(Json(serde_json::json!({
+        "events":   page,
+        "total":    total,
+        "has_more": has_more,
     })))
 }
 
