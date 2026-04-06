@@ -397,3 +397,45 @@ where
         self.transition_task(task_id, TaskState::Queued, None).await
     }
 }
+
+// ── Subagent linkage (RFC 005) ───────────────────────────────────────────────
+
+impl<S> TaskServiceImpl<S>
+where
+    S: EventLog + TaskReadModel + TaskDependencyReadModel + 'static,
+{
+    /// Spawn a child task linked to a parent run/task and emit `SubagentSpawned`.
+    ///
+    /// Creates the child task via `TaskCreated`, then emits `SubagentSpawned`
+    /// so the projection links parent_run_id / parent_task_id on the child.
+    pub async fn spawn_subagent(
+        &self,
+        project: &ProjectKey,
+        parent_run_id: RunId,
+        parent_task_id: Option<TaskId>,
+        child_task_id: TaskId,
+        child_session_id: SessionId,
+        child_run_id: Option<RunId>,
+    ) -> Result<TaskRecord, RuntimeError> {
+        let events = vec![
+            make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
+                project: project.clone(),
+                task_id: child_task_id.clone(),
+                parent_run_id: Some(parent_run_id.clone()),
+                parent_task_id: parent_task_id.clone(),
+                prompt_release_id: None,
+            })),
+            make_envelope(RuntimeEvent::SubagentSpawned(SubagentSpawned {
+                project: project.clone(),
+                parent_run_id,
+                parent_task_id,
+                child_task_id: child_task_id.clone(),
+                child_session_id,
+                child_run_id,
+            })),
+        ];
+
+        self.store.append(&events).await?;
+        self.get_task(&child_task_id).await
+    }
+}

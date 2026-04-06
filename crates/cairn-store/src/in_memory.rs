@@ -275,7 +275,9 @@ impl InMemoryStore {
                         rec.retry_count += 1;
                     }
                     // RFC 002: clear lease fields when transitioning back to Queued.
-                    if e.transition.to == TaskState::Queued {
+                    // RFC 005: also clear lease on Paused — a paused task must not
+                    // expire while suspended (the lease timer is logically stopped).
+                    if matches!(e.transition.to, TaskState::Queued | TaskState::Paused) {
                         rec.lease_owner = None;
                         rec.lease_expires_at = None;
                     }
@@ -1046,9 +1048,16 @@ impl InMemoryStore {
                     }
                 }
             }
+            // RFC 005: link child task to parent run/task on subagent spawn.
+            RuntimeEvent::SubagentSpawned(e) => {
+                if let Some(rec) = state.tasks.get_mut(e.child_task_id.as_str()) {
+                    rec.parent_run_id = Some(e.parent_run_id.clone());
+                    rec.parent_task_id = e.parent_task_id.clone();
+                    rec.updated_at = now;
+                }
+            }
             // Audit/linkage events that don't update core projections.
             RuntimeEvent::CheckpointRestored(_)
-            | RuntimeEvent::SubagentSpawned(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
             | RuntimeEvent::UserMessageAppended(_) => {}
