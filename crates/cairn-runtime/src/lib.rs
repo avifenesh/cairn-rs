@@ -133,6 +133,30 @@ pub use aggregate::InMemoryServices;
 // ── Ollama local LLM + embedding providers ────────────────────────────────────
 pub use services::{OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OllamaTagsResponse};
 
+// ── RFC 009: Provider routing + health tracking ──────────────────────────────
+pub use services::{
+    DispatchEntry, ProviderHealthTracker, ProviderRouter, RoutableProvider, RoutingConfig,
+    RoutingOutcome,
+};
+
+// ── RFC 007: Plugin lifecycle management ─────────────────────────────────────
+pub use services::{
+    CapabilityRegistry, DeliveryFailure, PluginError, PluginEventRouter, PluginHealthMonitor,
+    PluginHost, PluginState,
+};
+
+// ── RFC 006: Prompt release pipeline ─────────────────────────────────────────
+pub use services::{
+    DiffKind, DiffLine, PromptReleasePipeline, RolloutState, RolloutStatus, RoutingDecision,
+    VersionDiff,
+};
+
+// ── RFC 008: Tenant isolation + workspace quotas ─────────────────────────────
+pub use services::{
+    IsolationViolation, QuotaViolation, TenantAccessPolicy, WorkspaceQuotaManager,
+    WorkspaceQuotaPolicy, WorkspaceUsage, WorkspaceUsageReport,
+};
+
 /// Noop tracing hook — sets a trace ID in thread-local state (stub).
 pub fn set_current_trace_id(_trace_id: &str) {}
 

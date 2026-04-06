@@ -8,6 +8,8 @@
 //!
 mod sse_hooks;
 mod openapi_spec;
+mod templates;
+mod entitlements;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -142,6 +144,10 @@ struct AppState {
     request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
     /// In-memory notification buffer — populated by event-driven hooks.
     notifications: Arc<std::sync::RwLock<NotificationBuffer>>,
+    /// RFC 012: onboarding starter templates.
+    templates: Arc<templates::TemplateRegistry>,
+    /// RFC 014: entitlement gating and usage metering.
+    entitlements: Arc<entitlements::EntitlementService>,
 }
 
 // ── Notification buffer ───────────────────────────────────────────────────────
@@ -4490,6 +4496,8 @@ async fn main() {
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
         request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+        entitlements: Arc::new(entitlements::EntitlementService::new()),
     };
 
     // ── Demo seed data (local mode only) ─────────────────────────────────────
@@ -4984,6 +4992,38 @@ async fn metrics_prometheus_handler(State(state): State<AppState>) -> impl IntoR
     )
 }
 
+// ── RFC 012: Template handlers ───────────────────────────────────────────────
+
+/// `GET /v1/templates` — list all available starter templates.
+async fn list_templates_handler(
+    State(state): State<AppState>,
+) -> Json<Vec<templates::TemplateSummary>> {
+    Json(state.templates.list())
+}
+
+/// `GET /v1/templates/:id` — get full template detail with file contents.
+async fn get_template_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.templates.get(&id) {
+        Some(t) => Ok(Json(t.clone())),
+        None => Err(not_found(format!("template not found: {id}"))),
+    }
+}
+
+/// `POST /v1/templates/:id/apply` — apply a template to a project.
+async fn apply_template_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<templates::ApplyRequest>,
+) -> impl IntoResponse {
+    match state.templates.apply(&id, &body.project_id) {
+        Some(result) => Ok(Json(result)),
+        None => Err(not_found(format!("template not found: {id}"))),
+    }
+}
+
 fn build_router(state: AppState) -> Router {
     Router::new()
         // ── Public (no auth required) ─────────────────────────────────────
@@ -5049,6 +5089,10 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/notifications/read-all",   post(mark_all_notifications_read_handler))
         .route("/v1/notifications/:id/read",   post(mark_notification_read_handler))
         .route("/v1/evals/runs", get(list_evals_handler))
+        // RFC 012: onboarding templates
+        .route("/v1/templates",          get(list_templates_handler))
+        .route("/v1/templates/:id",      get(get_template_handler))
+        .route("/v1/templates/:id/apply", post(apply_template_handler))
         // Ollama local LLM provider
         .route("/v1/providers/ollama/models",          get(ollama_models_handler))
         .route("/v1/providers/ollama/models/:name/info", get(ollama_model_info_handler))
@@ -5214,6 +5258,7 @@ mod tests {
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
             }
         }
     }
@@ -6819,6 +6864,7 @@ mod tests {
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         };
         let app = build_router(state);
 
@@ -7355,6 +7401,7 @@ mod run_events_tests {
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
             }
         }
     }
@@ -7540,6 +7587,7 @@ mod tool_invocations_tests {
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
             }
         }
     }
@@ -7756,6 +7804,7 @@ mod provider_health_tests {
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
             }
         }
     }

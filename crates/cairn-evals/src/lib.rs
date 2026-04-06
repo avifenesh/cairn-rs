@@ -15,10 +15,11 @@ pub mod selectors;
 pub mod services;
 
 pub use matrices::{
-    EvalMetrics, GuardrailMatrix, GuardrailPolicyRow, MatrixCategory,
-    MemorySourceQualityMatrix, MemorySourceQualityRow, PermissionMatrix, PermissionRow,
-    PromptComparisonMatrix, PromptComparisonRow, ProviderRoutingMatrix, ProviderRoutingRow,
-    SkillHealthMatrix, SkillHealthRow,
+    DimensionScore, EvalMetrics, GuardrailMatrix, GuardrailPolicyRow, MatrixCategory,
+    MemorySourceQualityMatrix, MemorySourceQualityRow, MetricDelta, ModelEvalCell,
+    ModelEvalMatrix, PermissionMatrix, PermissionRow, PromptComparisonMatrix,
+    PromptComparisonRow, ProviderRoutingMatrix, ProviderRoutingRow, RubricDimensionDef,
+    RubricScoringResult, RunComparison, SkillHealthMatrix, SkillHealthRow,
 };
 pub use prompts::{
     PromptAsset, PromptAssetStatus, PromptFormat, PromptKind, PromptRelease, PromptReleaseState,

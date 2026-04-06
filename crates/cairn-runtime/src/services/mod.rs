@@ -107,3 +107,35 @@ pub use ollama_provider::{OllamaModel, OllamaProvider, OllamaTagsResponse};
 
 pub mod ollama_embedding;
 pub use ollama_embedding::OllamaEmbeddingProvider;
+
+pub mod provider_health_tracker;
+pub use provider_health_tracker::ProviderHealthTracker;
+
+pub mod plugin_health_monitor;
+pub use plugin_health_monitor::PluginHealthMonitor;
+
+pub mod plugin_capability_registry;
+pub use plugin_capability_registry::CapabilityRegistry;
+
+pub mod plugin_host;
+pub use plugin_host::{PluginError, PluginHost, PluginState};
+
+pub mod plugin_event_router;
+pub use plugin_event_router::{DeliveryFailure, PluginEventRouter};
+
+pub mod provider_router;
+pub use provider_router::{
+    DispatchEntry, ProviderRouter, RoutableProvider, RoutingConfig, RoutingOutcome,
+};
+
+pub mod prompt_release_pipeline;
+pub use prompt_release_pipeline::{
+    DiffKind, DiffLine, PromptReleasePipeline, RolloutState, RolloutStatus,
+    RoutingDecision, VersionDiff,
+};
+
+pub mod workspace_quota;
+pub use workspace_quota::{
+    IsolationViolation, QuotaViolation, TenantAccessPolicy, WorkspaceQuotaManager,
+    WorkspaceQuotaPolicy, WorkspaceUsage, WorkspaceUsageReport,
+};

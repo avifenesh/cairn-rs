@@ -289,11 +289,12 @@ impl crate::ingest::DocumentVersionReadModel for InMemoryDocumentStore {
 pub struct InMemoryRetrieval {
     store: std::sync::Arc<InMemoryDocumentStore>,
     graph: Option<std::sync::Arc<cairn_graph::in_memory::InMemoryGraphStore>>,
+    embedder: Option<std::sync::Arc<dyn crate::pipeline::EmbeddingProvider>>,
 }
 
 impl InMemoryRetrieval {
     pub fn new(store: std::sync::Arc<InMemoryDocumentStore>) -> Self {
-        Self { store, graph: None }
+        Self { store, graph: None, embedder: None }
     }
 
     /// Create with a diagnostics adapter (stub — diagnostics adapter is ignored in in-memory backend).
@@ -301,7 +302,7 @@ impl InMemoryRetrieval {
         store: std::sync::Arc<InMemoryDocumentStore>,
         _diagnostics: std::sync::Arc<dyn crate::diagnostics::DiagnosticsService>,
     ) -> Self {
-        Self { store, graph: None }
+        Self { store, graph: None, embedder: None }
     }
 
     /// Attach a graph store for graph-proximity scoring.
@@ -312,24 +313,48 @@ impl InMemoryRetrieval {
         self.graph = Some(graph);
         self
     }
+
+    /// Attach an embedding provider for vector and hybrid retrieval modes.
+    pub fn with_embedder(
+        mut self,
+        embedder: std::sync::Arc<dyn crate::pipeline::EmbeddingProvider>,
+    ) -> Self {
+        self.embedder = Some(embedder);
+        self
+    }
 }
 
 #[async_trait]
 impl RetrievalService for InMemoryRetrieval {
     async fn query(&self, query: RetrievalQuery) -> Result<RetrievalResponse, RetrievalError> {
-        // Mode honesty: VectorOnly is not supported in the in-memory backend.
-        // Hybrid explicitly falls back to lexical-only and reports it in diagnostics.
-        let effective_mode = match query.mode {
-            RetrievalMode::VectorOnly => {
-                return Err(RetrievalError::Internal(
-                    "VectorOnly mode is not supported in the in-memory backend. \
-                     Use LexicalOnly or Hybrid (which falls back to lexical)."
-                        .to_owned(),
-                ));
+        // Embed the query text for vector/hybrid modes.
+        let query_embedding = if matches!(query.mode, RetrievalMode::VectorOnly | RetrievalMode::Hybrid) {
+            match &self.embedder {
+                Some(e) => {
+                    let emb = e.embed(&query.query_text).await
+                        .map_err(|e| RetrievalError::EmbeddingFailed(e.to_string()))?;
+                    if emb.is_empty() { None } else { Some(emb) }
+                }
+                None if query.mode == RetrievalMode::VectorOnly => {
+                    return Err(RetrievalError::Internal(
+                        "VectorOnly mode requires an embedding provider on InMemoryRetrieval. \
+                         Use LexicalOnly or configure an embedder with with_embedder()."
+                            .to_owned(),
+                    ));
+                }
+                None => None, // Hybrid without embedder → lexical fallback
             }
-            RetrievalMode::Hybrid => RetrievalMode::LexicalOnly, // explicit fallback
+        } else {
+            None
+        };
+
+        let effective_mode = match query.mode {
+            RetrievalMode::Hybrid if query_embedding.is_none() => RetrievalMode::LexicalOnly,
             other => other,
         };
+
+        let use_lexical = matches!(effective_mode, RetrievalMode::LexicalOnly | RetrievalMode::Hybrid);
+        let use_vector = matches!(effective_mode, RetrievalMode::VectorOnly | RetrievalMode::Hybrid);
 
         let start = std::time::Instant::now();
         let chunks = self.store.all_chunks();
@@ -337,7 +362,7 @@ impl RetrievalService for InMemoryRetrieval {
 
         let words: Vec<&str> = query_lower.split_whitespace().collect();
 
-        let mut scored: Vec<(ChunkRecord, f64)> = chunks
+        let mut scored: Vec<(ChunkRecord, f64, f64)> = chunks
             .into_iter()
             .filter(|c| c.project == query.project)
             .filter(|c| {
@@ -345,11 +370,9 @@ impl RetrievalService for InMemoryRetrieval {
                     c.provenance_metadata
                         .as_ref()
                         .is_some_and(|m| {
-                            // Direct key match: check scalar string value.
                             if let Some(v) = m.get(&f.key).and_then(|v| v.as_str()) {
                                 return v == f.value;
                             }
-                            // Tag filter: "tag" checks membership in "tags" array.
                             if f.key == "tag" {
                                 if let Some(arr) = m.get("tags").and_then(|v| v.as_array()) {
                                     return arr.iter().any(|v| v.as_str() == Some(&f.value));
@@ -360,17 +383,42 @@ impl RetrievalService for InMemoryRetrieval {
                 })
             })
             .filter_map(|c| {
-                let text_lower = c.text.to_lowercase();
-                let matches = words.iter().filter(|w| text_lower.contains(*w)).count();
-                if matches == 0 {
-                    return None;
+                let lexical_score = if use_lexical {
+                    let text_lower = c.text.to_lowercase();
+                    let matches = words.iter().filter(|w| text_lower.contains(*w)).count();
+                    matches as f64 / words.len().max(1) as f64
+                } else {
+                    0.0
+                };
+
+                let semantic_score = if use_vector {
+                    match (&query_embedding, &c.embedding) {
+                        (Some(qe), Some(ce)) => crate::reranking::cosine_similarity(qe, ce).max(0.0),
+                        _ => 0.0,
+                    }
+                } else {
+                    0.0
+                };
+
+                match effective_mode {
+                    RetrievalMode::LexicalOnly if lexical_score == 0.0 => None,
+                    RetrievalMode::VectorOnly if semantic_score == 0.0 => None,
+                    RetrievalMode::Hybrid if lexical_score == 0.0 && semantic_score == 0.0 => None,
+                    _ => Some((c, lexical_score, semantic_score)),
                 }
-                let score = matches as f64 / words.len().max(1) as f64;
-                Some((c, score))
             })
             .collect();
 
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            let key = |item: &(ChunkRecord, f64, f64)| -> f64 {
+                match effective_mode {
+                    RetrievalMode::VectorOnly => item.2,
+                    RetrievalMode::LexicalOnly => item.1,
+                    RetrievalMode::Hybrid => item.1 + item.2,
+                }
+            };
+            key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // For MMR, keep a larger candidate pool so diversity selection has room.
         let candidate_limit = if query.reranker == RerankerStrategy::Mmr {
@@ -387,7 +435,7 @@ impl RetrievalService for InMemoryRetrieval {
 
         let mut results: Vec<RetrievalResult> = scored
             .into_iter()
-            .map(|(chunk, lexical_score)| {
+            .map(|(chunk, lexical_score, semantic_score)| {
                 let fresh = retrieval::freshness_score(
                     chunk.created_at,
                     now,
@@ -405,17 +453,14 @@ impl RetrievalService for InMemoryRetrieval {
                     .unwrap_or(0.0);
 
                 let breakdown = ScoringBreakdown {
+                    semantic_relevance: semantic_score,
                     lexical_relevance: lexical_score,
                     freshness: fresh,
                     staleness_penalty: stale,
-                    // RFC 003: source_credibility populated from the chunk record so
-                    // operator feedback (which updates chunk.credibility_score) is
-                    // reflected in subsequent retrieval scores.
                     source_credibility: credibility,
                     corroboration: 0.0,
                     graph_proximity: 0.0,
                     recency_of_use: Some(0.0),
-                    ..ScoringBreakdown::default()
                 };
 
                 let final_score = retrieval::compute_final_score(&breakdown, &policy.weights);
@@ -504,15 +549,23 @@ impl RetrievalService for InMemoryRetrieval {
         let candidates_generated = results.len();
 
         // Apply reranking if requested.
+        let base_stages = match effective_mode {
+            RetrievalMode::VectorOnly => vec![CandidateStage::Vector],
+            RetrievalMode::Hybrid => vec![CandidateStage::Lexical, CandidateStage::Vector, CandidateStage::Merged],
+            _ => vec![CandidateStage::Lexical],
+        };
+
         let (results, stages) = match query.reranker {
             RerankerStrategy::Mmr => {
                 let reranked = mmr_rerank(&results, query.limit, 0.5);
-                (reranked, vec![CandidateStage::Lexical, CandidateStage::Reranked])
+                let mut stages = base_stages;
+                stages.push(CandidateStage::Reranked);
+                (reranked, stages)
             }
             _ => {
                 let mut r = results;
                 r.truncate(query.limit);
-                (r, vec![CandidateStage::Lexical])
+                (r, base_stages)
             }
         };
 
@@ -713,7 +766,7 @@ mod tests {
     use super::*;
     use crate::ingest::{IngestRequest, IngestService};
     use crate::pipeline::{IngestPipeline, ParagraphChunker};
-    use crate::retrieval::{RerankerStrategy, RetrievalMode};
+    use crate::retrieval::{CandidateStage, RerankerStrategy, RetrievalMode};
     use std::sync::Arc;
 
     /// End-to-end test: ingest plain text documents, then query retrieval.
@@ -1088,5 +1141,214 @@ mod tests {
             assert!(result.breakdown.freshness > 0.0);
             assert!(result.score > 0.0);
         }
+    }
+
+    // --- Vector and Hybrid retrieval tests (RFC 003) ---
+
+    /// Deterministic mock embedding provider for tests.
+    struct MockEmbedder;
+
+    #[async_trait::async_trait]
+    impl crate::pipeline::EmbeddingProvider for MockEmbedder {
+        async fn embed(&self, text: &str) -> Result<Vec<f32>, crate::ingest::IngestError> {
+            let bytes = text.as_bytes();
+            let dim = 16;
+            let mut embedding = vec![0.0f32; dim];
+            for (i, b) in bytes.iter().enumerate() {
+                embedding[i % dim] += *b as f32;
+            }
+            let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if norm > 0.0 {
+                for v in &mut embedding {
+                    *v /= norm;
+                }
+            }
+            Ok(embedding)
+        }
+    }
+
+    /// VectorOnly mode works when an embedding provider is configured.
+    #[tokio::test]
+    async fn vector_only_with_embedder_returns_results() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
+        let chunker = ParagraphChunker { max_chunk_size: 500 };
+        let pipeline = IngestPipeline::new(store.clone(), chunker)
+            .with_embedder(embedder.clone());
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_vec1"),
+                source_id: SourceId::new("src"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Rust is a systems programming language focused on safety.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
+            })
+            .await
+            .unwrap();
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_vec2"),
+                source_id: SourceId::new("src"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Python is a dynamic scripting language for data science.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
+            })
+            .await
+            .unwrap();
+
+        // Verify chunks have embeddings from the pipeline.
+        let chunks = store.all_chunks();
+        assert!(chunks.iter().all(|c| c.embedding.is_some()), "pipeline should embed chunks");
+
+        let retrieval = InMemoryRetrieval::new(store).with_embedder(embedder);
+
+        let response = retrieval
+            .query(RetrievalQuery {
+                project: ProjectKey::new("t", "w", "p"),
+                query_text: "Rust systems programming safety".to_owned(),
+                mode: RetrievalMode::VectorOnly,
+                reranker: RerankerStrategy::None,
+                limit: 5,
+                metadata_filters: vec![],
+                scoring_policy: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(!response.results.is_empty());
+        assert_eq!(response.diagnostics.mode_used, RetrievalMode::VectorOnly);
+        assert!(response.diagnostics.stages_used.contains(&CandidateStage::Vector));
+
+        // VectorOnly: semantic populated, lexical zero.
+        for r in &response.results {
+            assert!(r.breakdown.semantic_relevance > 0.0);
+            assert_eq!(r.breakdown.lexical_relevance, 0.0);
+        }
+    }
+
+    /// Hybrid mode with embedder combines lexical and vector scores.
+    #[tokio::test]
+    async fn hybrid_mode_with_embedder_combines_scores() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
+        let chunker = ParagraphChunker { max_chunk_size: 500 };
+        let pipeline = IngestPipeline::new(store.clone(), chunker)
+            .with_embedder(embedder.clone());
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_hyb1"),
+                source_id: SourceId::new("src"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Rust borrow checker ensures memory safety without garbage collection."
+                    .to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
+            })
+            .await
+            .unwrap();
+
+        let retrieval = InMemoryRetrieval::new(store).with_embedder(embedder);
+
+        let response = retrieval
+            .query(RetrievalQuery {
+                project: ProjectKey::new("t", "w", "p"),
+                query_text: "borrow checker memory".to_owned(),
+                mode: RetrievalMode::Hybrid,
+                reranker: RerankerStrategy::None,
+                limit: 5,
+                metadata_filters: vec![],
+                scoring_policy: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.diagnostics.mode_used, RetrievalMode::Hybrid);
+        assert!(response.diagnostics.stages_used.contains(&CandidateStage::Lexical));
+        assert!(response.diagnostics.stages_used.contains(&CandidateStage::Vector));
+        assert!(response.diagnostics.stages_used.contains(&CandidateStage::Merged));
+
+        // Both dimensions should be populated.
+        for r in &response.results {
+            assert!(r.breakdown.lexical_relevance > 0.0, "hybrid should have lexical score");
+            assert!(r.breakdown.semantic_relevance > 0.0, "hybrid should have semantic score");
+        }
+    }
+
+    /// VectorOnly returns more relevant results first (cosine ordering).
+    #[tokio::test]
+    async fn vector_only_ranks_by_similarity() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
+        let chunker = ParagraphChunker { max_chunk_size: 500 };
+        let pipeline = IngestPipeline::new(store.clone(), chunker)
+            .with_embedder(embedder.clone());
+
+        // Ingest two docs: one closely matching the query, one distant.
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_close"),
+                source_id: SourceId::new("src"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Rust systems programming language safety performance.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
+            })
+            .await
+            .unwrap();
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_distant"),
+                source_id: SourceId::new("src"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Cooking recipes for Italian pasta and Mediterranean salads.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
+            })
+            .await
+            .unwrap();
+
+        let retrieval = InMemoryRetrieval::new(store).with_embedder(embedder);
+
+        let response = retrieval
+            .query(RetrievalQuery {
+                project: ProjectKey::new("t", "w", "p"),
+                query_text: "Rust systems programming language safety performance".to_owned(),
+                mode: RetrievalMode::VectorOnly,
+                reranker: RerankerStrategy::None,
+                limit: 5,
+                metadata_filters: vec![],
+                scoring_policy: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(response.results.len() >= 2);
+        // The closely matching doc should score higher.
+        assert_eq!(
+            response.results[0].chunk.document_id,
+            KnowledgeDocumentId::new("doc_close"),
+            "closer semantic match should rank first"
+        );
     }
 }

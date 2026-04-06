@@ -11,6 +11,7 @@ path = "src/lib.rs"
 [dependencies]
 cairn-domain = { path = "../cairn-domain" }
 cairn-store = { path = "../cairn-store" }
+cairn-plugin-proto = { path = "../cairn-plugin-proto" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 async-trait = "0.1"

@@ -69,6 +69,15 @@ impl GraphQueryService for TestGraph {
     ) -> Result<Vec<(GraphEdge, GraphNode)>, GraphQueryError> {
         Ok(vec![])
     }
+    async fn find_edges_by_source(&self, _: &str, _: Option<EdgeKind>, _: usize) -> Result<Vec<GraphEdge>, GraphQueryError> {
+        Ok(vec![])
+    }
+    async fn find_edges_by_target(&self, _: &str, _: Option<EdgeKind>, _: usize) -> Result<Vec<GraphEdge>, GraphQueryError> {
+        Ok(vec![])
+    }
+    async fn shortest_path(&self, _: &str, _: &str, _: Option<EdgeKind>, _: u32) -> Result<Option<Subgraph>, GraphQueryError> {
+        Ok(None)
+    }
 }
 
 #[tokio::test]

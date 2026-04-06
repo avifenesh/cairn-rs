@@ -265,6 +265,84 @@ impl GraphQueryService for InMemoryGraphStore {
 
         Ok(results)
     }
+
+    async fn find_edges_by_source(
+        &self,
+        source_node_id: &str,
+        edge_filter: Option<EdgeKind>,
+        limit: usize,
+    ) -> Result<Vec<GraphEdge>, GraphQueryError> {
+        let edges = self.edges.lock().unwrap();
+        let mut results = Vec::new();
+        for edge in edges.iter() {
+            if edge.source_node_id == source_node_id {
+                if let Some(kind) = edge_filter {
+                    if edge.kind != kind {
+                        continue;
+                    }
+                }
+                results.push(edge.clone());
+                if results.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    async fn find_edges_by_target(
+        &self,
+        target_node_id: &str,
+        edge_filter: Option<EdgeKind>,
+        limit: usize,
+    ) -> Result<Vec<GraphEdge>, GraphQueryError> {
+        let edges = self.edges.lock().unwrap();
+        let mut results = Vec::new();
+        for edge in edges.iter() {
+            if edge.target_node_id == target_node_id {
+                if let Some(kind) = edge_filter {
+                    if edge.kind != kind {
+                        continue;
+                    }
+                }
+                results.push(edge.clone());
+                if results.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    async fn shortest_path(
+        &self,
+        from_node_id: &str,
+        to_node_id: &str,
+        edge_filter: Option<EdgeKind>,
+        max_depth: u32,
+    ) -> Result<Option<Subgraph>, GraphQueryError> {
+        let nodes = self.nodes.lock().unwrap().clone();
+        let edges = self.edges.lock().unwrap().clone();
+
+        if from_node_id == to_node_id {
+            if let Some(node) = nodes.get(from_node_id) {
+                return Ok(Some(Subgraph {
+                    nodes: vec![node.clone()],
+                    edges: vec![],
+                }));
+            }
+            return Ok(None);
+        }
+
+        Ok(bfs_shortest_path(
+            from_node_id,
+            to_node_id,
+            max_depth,
+            &nodes,
+            &edges,
+            edge_filter,
+        ))
+    }
 }
 
 /// BFS bidirectional: follow edges in both directions from root, optionally filtered by edge kind.
@@ -418,6 +496,87 @@ fn bfs_upstream(
         nodes: result_nodes,
         edges: result_edges,
     }
+}
+
+/// BFS shortest path between two nodes, following edges bidirectionally.
+///
+/// Returns `None` if no path exists within `max_depth`.
+fn bfs_shortest_path(
+    from_id: &str,
+    to_id: &str,
+    max_depth: u32,
+    nodes: &HashMap<String, GraphNode>,
+    edges: &[GraphEdge],
+    edge_filter: Option<EdgeKind>,
+) -> Option<Subgraph> {
+    use std::collections::VecDeque;
+
+    // BFS with parent tracking: parent[node_id] = (parent_node_id, edge_index)
+    let mut parent: HashMap<String, (String, usize)> = HashMap::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<(String, u32)> = VecDeque::new();
+
+    visited.insert(from_id.to_owned());
+    queue.push_back((from_id.to_owned(), 0));
+
+    while let Some((current, depth)) = queue.pop_front() {
+        if depth >= max_depth {
+            continue;
+        }
+
+        for (ei, edge) in edges.iter().enumerate() {
+            if let Some(kind) = edge_filter {
+                if edge.kind != kind {
+                    continue;
+                }
+            }
+
+            let neighbor = if edge.source_node_id == current {
+                &edge.target_node_id
+            } else if edge.target_node_id == current {
+                &edge.source_node_id
+            } else {
+                continue;
+            };
+
+            if visited.contains(neighbor.as_str()) {
+                continue;
+            }
+
+            visited.insert(neighbor.clone());
+            parent.insert(neighbor.clone(), (current.clone(), ei));
+
+            if neighbor == to_id {
+                // Reconstruct path.
+                let mut path_nodes = Vec::new();
+                let mut path_edges = Vec::new();
+                let mut cursor = to_id.to_owned();
+
+                while let Some((prev, edge_idx)) = parent.get(&cursor) {
+                    path_edges.push(edges[*edge_idx].clone());
+                    if let Some(node) = nodes.get(&cursor) {
+                        path_nodes.push(node.clone());
+                    }
+                    cursor = prev.clone();
+                }
+                // Add the source node.
+                if let Some(node) = nodes.get(from_id) {
+                    path_nodes.push(node.clone());
+                }
+                path_nodes.reverse();
+                path_edges.reverse();
+
+                return Some(Subgraph {
+                    nodes: path_nodes,
+                    edges: path_edges,
+                });
+            }
+
+            queue.push_back((neighbor.clone(), depth + 1));
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -637,6 +796,185 @@ mod tests {
             "docs"
         );
     }
+
+    // ── Gap 1: Edge query tests ──────────────────────────────────────────
+
+    async fn build_chain_graph() -> Arc<InMemoryGraphStore> {
+        // A --Triggered--> B --Spawned--> C --UsedTool--> D
+        let store = Arc::new(InMemoryGraphStore::new());
+        for (id, kind) in [
+            ("a", NodeKind::Session),
+            ("b", NodeKind::Run),
+            ("c", NodeKind::Task),
+            ("d", NodeKind::ToolInvocation),
+        ] {
+            store
+                .add_node(GraphNode {
+                    node_id: id.to_owned(),
+                    kind,
+                    project: None,
+                    created_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        for (src, tgt, kind) in [
+            ("a", "b", EdgeKind::Triggered),
+            ("b", "c", EdgeKind::Spawned),
+            ("c", "d", EdgeKind::UsedTool),
+        ] {
+            store
+                .add_edge(GraphEdge {
+                    source_node_id: src.to_owned(),
+                    target_node_id: tgt.to_owned(),
+                    kind,
+                    created_at: 10,
+                })
+                .await
+                .unwrap();
+        }
+        store
+    }
+
+    #[tokio::test]
+    async fn find_edges_by_source_returns_outgoing() {
+        let store = build_chain_graph().await;
+        let edges = store.find_edges_by_source("a", None, 100).await.unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].target_node_id, "b");
+        assert_eq!(edges[0].kind, EdgeKind::Triggered);
+    }
+
+    #[tokio::test]
+    async fn find_edges_by_source_with_filter() {
+        let store = build_chain_graph().await;
+        // "b" has one outgoing Spawned edge. Filtering by Triggered returns nothing.
+        let edges = store
+            .find_edges_by_source("b", Some(EdgeKind::Triggered), 100)
+            .await
+            .unwrap();
+        assert!(edges.is_empty());
+
+        let edges = store
+            .find_edges_by_source("b", Some(EdgeKind::Spawned), 100)
+            .await
+            .unwrap();
+        assert_eq!(edges.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn find_edges_by_target_returns_incoming() {
+        let store = build_chain_graph().await;
+        let edges = store.find_edges_by_target("d", None, 100).await.unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].source_node_id, "c");
+    }
+
+    #[tokio::test]
+    async fn find_edges_by_target_respects_limit() {
+        let store = Arc::new(InMemoryGraphStore::new());
+        store
+            .add_node(GraphNode {
+                node_id: "target".into(),
+                kind: NodeKind::Task,
+                project: None,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+        for i in 0..5 {
+            store
+                .add_node(GraphNode {
+                    node_id: format!("src_{i}"),
+                    kind: NodeKind::Run,
+                    project: None,
+                    created_at: 1,
+                })
+                .await
+                .unwrap();
+            store
+                .add_edge(GraphEdge {
+                    source_node_id: format!("src_{i}"),
+                    target_node_id: "target".into(),
+                    kind: EdgeKind::Spawned,
+                    created_at: 10,
+                })
+                .await
+                .unwrap();
+        }
+        let edges = store.find_edges_by_target("target", None, 3).await.unwrap();
+        assert_eq!(edges.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn shortest_path_direct_neighbor() {
+        let store = build_chain_graph().await;
+        let path = store.shortest_path("a", "b", None, 10).await.unwrap();
+        let path = path.expect("path should exist");
+        assert_eq!(path.nodes.len(), 2);
+        assert_eq!(path.edges.len(), 1);
+        assert_eq!(path.nodes[0].node_id, "a");
+        assert_eq!(path.nodes[1].node_id, "b");
+    }
+
+    #[tokio::test]
+    async fn shortest_path_multi_hop() {
+        let store = build_chain_graph().await;
+        // a -> b -> c -> d, shortest path from a to d is 3 hops
+        let path = store.shortest_path("a", "d", None, 10).await.unwrap();
+        let path = path.expect("path should exist");
+        assert_eq!(path.nodes.len(), 4);
+        assert_eq!(path.edges.len(), 3);
+        let ids: Vec<&str> = path.nodes.iter().map(|n| n.node_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "c", "d"]);
+    }
+
+    #[tokio::test]
+    async fn shortest_path_same_node() {
+        let store = build_chain_graph().await;
+        let path = store.shortest_path("b", "b", None, 10).await.unwrap();
+        let path = path.expect("same-node path");
+        assert_eq!(path.nodes.len(), 1);
+        assert!(path.edges.is_empty());
+    }
+
+    #[tokio::test]
+    async fn shortest_path_no_path() {
+        let store = Arc::new(InMemoryGraphStore::new());
+        for id in ["x", "y"] {
+            store
+                .add_node(GraphNode {
+                    node_id: id.to_owned(),
+                    kind: NodeKind::Task,
+                    project: None,
+                    created_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        // No edge between x and y.
+        let path = store.shortest_path("x", "y", None, 10).await.unwrap();
+        assert!(path.is_none());
+    }
+
+    #[tokio::test]
+    async fn shortest_path_respects_max_depth() {
+        let store = build_chain_graph().await;
+        // a to d is 3 hops. Max depth 2 should not find it.
+        let path = store.shortest_path("a", "d", None, 2).await.unwrap();
+        assert!(path.is_none());
+    }
+
+    #[tokio::test]
+    async fn shortest_path_with_edge_filter() {
+        let store = build_chain_graph().await;
+        // Only follow Triggered edges — can't reach d from a.
+        let path = store
+            .shortest_path("a", "d", Some(EdgeKind::Triggered), 10)
+            .await
+            .unwrap();
+        assert!(path.is_none());
+    }
 }
 
 #[async_trait::async_trait]
@@ -653,5 +991,33 @@ impl GraphQueryService for std::sync::Arc<InMemoryGraphStore> {
         limit: usize,
     ) -> Result<Vec<(crate::projections::GraphEdge, crate::projections::GraphNode)>, GraphQueryError> {
         GraphQueryService::neighbors(self.as_ref(), node_id, edge_filter, direction, limit).await
+    }
+
+    async fn find_edges_by_source(
+        &self,
+        source_node_id: &str,
+        edge_filter: Option<crate::projections::EdgeKind>,
+        limit: usize,
+    ) -> Result<Vec<crate::projections::GraphEdge>, GraphQueryError> {
+        GraphQueryService::find_edges_by_source(self.as_ref(), source_node_id, edge_filter, limit).await
+    }
+
+    async fn find_edges_by_target(
+        &self,
+        target_node_id: &str,
+        edge_filter: Option<crate::projections::EdgeKind>,
+        limit: usize,
+    ) -> Result<Vec<crate::projections::GraphEdge>, GraphQueryError> {
+        GraphQueryService::find_edges_by_target(self.as_ref(), target_node_id, edge_filter, limit).await
+    }
+
+    async fn shortest_path(
+        &self,
+        from_node_id: &str,
+        to_node_id: &str,
+        edge_filter: Option<crate::projections::EdgeKind>,
+        max_depth: u32,
+    ) -> Result<Option<Subgraph>, GraphQueryError> {
+        GraphQueryService::shortest_path(self.as_ref(), from_node_id, to_node_id, edge_filter, max_depth).await
     }
 }

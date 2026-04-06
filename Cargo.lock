@@ -502,6 +502,7 @@ dependencies = [
  "cairn-domain",
  "cairn-evals",
  "cairn-memory",
+ "cairn-plugin-proto",
  "cairn-store",
  "reqwest",
  "serde",

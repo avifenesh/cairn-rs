@@ -202,3 +202,91 @@ pub struct GuardrailMatrix {
 pub struct MemorySourceQualityMatrix {
     pub rows: Vec<MemorySourceQualityRow>,
 }
+
+// ── RFC 004 Gap 4: Model × Eval Suite Matrix ────────────────────────────────
+
+/// A single cell in the model × eval_suite matrix.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelEvalCell {
+    pub model_id: String,
+    pub eval_suite: String,
+    pub eval_run_id: String,
+    pub metrics: EvalMetrics,
+}
+
+/// Matrix view: model_id × eval_suite with scores.
+///
+/// Rows are grouped by model_id. Each row contains cells for each eval
+/// suite the model was evaluated against. Makes it easy to compare how
+/// different models perform across the same set of eval suites.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ModelEvalMatrix {
+    pub model_ids: Vec<String>,
+    pub eval_suites: Vec<String>,
+    pub cells: Vec<ModelEvalCell>,
+}
+
+impl ModelEvalMatrix {
+    /// Look up the cell for a specific model + suite combination.
+    pub fn cell(&self, model_id: &str, eval_suite: &str) -> Option<&ModelEvalCell> {
+        self.cells
+            .iter()
+            .find(|c| c.model_id == model_id && c.eval_suite == eval_suite)
+    }
+}
+
+// ── RFC 004 Gap 3: Run-to-run comparison ─────────────────────────────────────
+
+/// Delta for one metric when comparing two eval runs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MetricDelta {
+    pub metric: String,
+    pub baseline_value: f64,
+    pub candidate_value: f64,
+    pub delta: f64,
+    /// True if the delta represents a regression (worse than baseline).
+    pub is_regression: bool,
+}
+
+/// Result of comparing two eval runs, with per-metric deltas and regression flags.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RunComparison {
+    pub baseline_run_id: String,
+    pub candidate_run_id: String,
+    pub deltas: Vec<MetricDelta>,
+    pub regressions: Vec<String>,
+    pub improvements: Vec<String>,
+    /// True when no regressions were detected.
+    pub passed: bool,
+}
+
+// ── RFC 004 Gap 2: Rubric scoring result ─────────────────────────────────────
+
+/// Score for one rubric dimension.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DimensionScore {
+    pub dimension: String,
+    pub weight: f64,
+    pub score: f64,
+    pub weighted_score: f64,
+}
+
+/// A rubric dimension definition used for inline scoring (Gap 2).
+///
+/// Simpler than `RubricDimension` from cairn-domain — no scoring function
+/// or plugin reference. The `criteria` field names a metric from EvalMetrics.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RubricDimensionDef {
+    pub dimension: String,
+    pub weight: f32,
+    /// Name of an EvalMetrics field (e.g. "task_success_rate", "latency_p50_ms").
+    pub criteria: String,
+}
+
+/// Result of scoring an eval run against a rubric definition.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RubricScoringResult {
+    pub eval_run_id: String,
+    pub dimensions: Vec<DimensionScore>,
+    pub overall_score: f64,
+}

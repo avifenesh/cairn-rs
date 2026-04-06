@@ -63,6 +63,34 @@ pub trait GraphQueryService: Send + Sync {
         direction: TraversalDirection,
         limit: usize,
     ) -> Result<Vec<(GraphEdge, GraphNode)>, GraphQueryError>;
+
+    /// Find all edges originating from a given source node.
+    async fn find_edges_by_source(
+        &self,
+        source_node_id: &str,
+        edge_filter: Option<EdgeKind>,
+        limit: usize,
+    ) -> Result<Vec<GraphEdge>, GraphQueryError>;
+
+    /// Find all edges targeting a given node.
+    async fn find_edges_by_target(
+        &self,
+        target_node_id: &str,
+        edge_filter: Option<EdgeKind>,
+        limit: usize,
+    ) -> Result<Vec<GraphEdge>, GraphQueryError>;
+
+    /// Find the shortest path between two nodes using BFS.
+    ///
+    /// Returns `None` if no path exists within `max_depth` hops.
+    /// The path includes both endpoint nodes and all edges traversed.
+    async fn shortest_path(
+        &self,
+        from_node_id: &str,
+        to_node_id: &str,
+        edge_filter: Option<EdgeKind>,
+        max_depth: u32,
+    ) -> Result<Option<Subgraph>, GraphQueryError>;
 }
 
 /// Graph query errors.

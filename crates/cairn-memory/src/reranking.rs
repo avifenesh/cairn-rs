@@ -128,7 +128,7 @@ fn pairwise_similarity(a: &RetrievalResult, b: &RetrievalResult) -> f64 {
 }
 
 /// Cosine similarity between two embedding vectors.
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+pub(crate) fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     let len = a.len().min(b.len());
     if len == 0 {
         return 0.0;

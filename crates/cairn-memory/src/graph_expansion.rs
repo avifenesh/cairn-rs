@@ -158,6 +158,34 @@ mod tests {
             let neighbors = self.neighbors.lock().unwrap();
             Ok(neighbors.get(node_id).cloned().unwrap_or_default())
         }
+
+        async fn find_edges_by_source(
+            &self,
+            _source_node_id: &str,
+            _edge_filter: Option<EdgeKind>,
+            _limit: usize,
+        ) -> Result<Vec<GraphEdge>, GraphQueryError> {
+            Ok(vec![])
+        }
+
+        async fn find_edges_by_target(
+            &self,
+            _target_node_id: &str,
+            _edge_filter: Option<EdgeKind>,
+            _limit: usize,
+        ) -> Result<Vec<GraphEdge>, GraphQueryError> {
+            Ok(vec![])
+        }
+
+        async fn shortest_path(
+            &self,
+            _from_node_id: &str,
+            _to_node_id: &str,
+            _edge_filter: Option<EdgeKind>,
+            _max_depth: u32,
+        ) -> Result<Option<Subgraph>, GraphQueryError> {
+            Ok(None)
+        }
     }
 
     fn make_result(doc_id: &str) -> RetrievalResult {
