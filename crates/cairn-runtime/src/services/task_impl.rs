@@ -439,3 +439,125 @@ where
         self.get_task(&child_task_id).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use cairn_domain::*;
+    use cairn_store::projections::TaskReadModel;
+    use cairn_store::InMemoryStore;
+
+    use super::TaskServiceImpl;
+    use crate::tasks::TaskService;
+
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
+
+    #[tokio::test]
+    async fn pause_clears_lease_timer() {
+        let store = Arc::new(InMemoryStore::new());
+        let svc = TaskServiceImpl::new(store.clone());
+
+        let task_id = TaskId::new("task_pause");
+        svc.submit(&project(), task_id.clone(), None, None, 0)
+            .await
+            .unwrap();
+
+        // Claim a lease
+        let claimed = svc.claim(&task_id, "worker-1".into(), 60_000).await.unwrap();
+        assert!(claimed.lease_owner.is_some());
+        assert!(claimed.lease_expires_at.is_some());
+
+        // Start running
+        svc.start(&task_id).await.unwrap();
+
+        // Pause — should clear lease fields
+        let paused = svc
+            .pause(
+                &task_id,
+                PauseReason {
+                    kind: PauseReasonKind::OperatorPause,
+                    detail: None,
+                    resume_after_ms: None,
+                    actor: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(paused.state, TaskState::Paused);
+        assert!(
+            paused.lease_owner.is_none(),
+            "pause must clear lease_owner"
+        );
+        assert!(
+            paused.lease_expires_at.is_none(),
+            "pause must clear lease_expires_at"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_from_pause_to_queued() {
+        let store = Arc::new(InMemoryStore::new());
+        let svc = TaskServiceImpl::new(store.clone());
+
+        let task_id = TaskId::new("task_resume");
+        svc.submit(&project(), task_id.clone(), None, None, 0)
+            .await
+            .unwrap();
+
+        svc.claim(&task_id, "w".into(), 60_000).await.unwrap();
+        svc.start(&task_id).await.unwrap();
+        svc.pause(
+            &task_id,
+            PauseReason {
+                kind: PauseReasonKind::OperatorPause,
+                detail: None,
+                resume_after_ms: None,
+                actor: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let resumed = svc
+            .resume(&task_id, ResumeTrigger::OperatorResume, TaskResumeTarget::Queued)
+            .await
+            .unwrap();
+
+        assert_eq!(resumed.state, TaskState::Queued);
+        assert!(resumed.resume_trigger.is_some());
+    }
+
+    #[tokio::test]
+    async fn spawn_subagent_links_child_to_parent() {
+        let store = Arc::new(InMemoryStore::new());
+        let svc = TaskServiceImpl::new(store.clone());
+
+        let parent_task_id = TaskId::new("parent_task");
+        svc.submit(&project(), parent_task_id.clone(), None, None, 0)
+            .await
+            .unwrap();
+
+        let child = svc
+            .spawn_subagent(
+                &project(),
+                RunId::new("parent_run"),
+                Some(parent_task_id.clone()),
+                TaskId::new("child_task"),
+                SessionId::new("child_sess"),
+                Some(RunId::new("child_run")),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(child.task_id, TaskId::new("child_task"));
+        assert_eq!(child.parent_run_id.as_ref().unwrap(), &RunId::new("parent_run"));
+        assert_eq!(
+            child.parent_task_id.as_ref().unwrap(),
+            &parent_task_id
+        );
+    }
+}

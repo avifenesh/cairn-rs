@@ -402,12 +402,35 @@ where
             .ok_or_else(|| crate::error::RuntimeError::Internal("subagent run not found after create".into()))
     }
 
-    /// Set a checkpoint strategy for a run (stub — records as event only).
+    /// Set a checkpoint strategy for a run.
+    ///
+    /// Emits a `CheckpointStrategySet` event. The `strategy` string describes
+    /// the trigger kind: "periodic", "on_tool_call", or "manual".
     pub async fn set_checkpoint_strategy(
         &self,
-        _run_id: &cairn_domain::RunId,
-        _strategy: String,
+        run_id: &cairn_domain::RunId,
+        strategy: String,
     ) -> Result<(), crate::error::RuntimeError> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let event = super::event_helpers::make_envelope(
+            cairn_domain::RuntimeEvent::CheckpointStrategySet(
+                cairn_domain::CheckpointStrategySet {
+                    strategy_id: format!("strat_{}_{}", run_id.as_str(), now_ms),
+                    description: strategy,
+                    set_at_ms: now_ms,
+                    run_id: Some(run_id.clone()),
+                    interval_ms: 0,
+                    max_checkpoints: 0,
+                    trigger_on_task_complete: false,
+                },
+            ),
+        );
+
+        self.store.append(&[event]).await?;
         Ok(())
     }
 }

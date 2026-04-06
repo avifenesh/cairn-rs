@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{CheckpointReadModel, CheckpointRecord};
+use cairn_store::projections::{CheckpointReadModel, CheckpointRecord, CheckpointStrategyReadModel};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -22,7 +22,7 @@ impl<S> CheckpointServiceImpl<S> {
 #[async_trait]
 impl<S> CheckpointService for CheckpointServiceImpl<S>
 where
-    S: EventLog + CheckpointReadModel + 'static,
+    S: EventLog + CheckpointReadModel + CheckpointStrategyReadModel + 'static,
 {
     async fn save(
         &self,
@@ -65,6 +65,52 @@ where
         limit: usize,
     ) -> Result<Vec<CheckpointRecord>, RuntimeError> {
         Ok(self.store.list_by_run(run_id, limit).await?)
+    }
+
+    async fn set_strategy(
+        &self,
+        run_id: &RunId,
+        strategy_id: String,
+        description: String,
+        interval_ms: u64,
+        max_checkpoints: u32,
+        trigger_on_task_complete: bool,
+    ) -> Result<CheckpointStrategy, RuntimeError> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let event = make_envelope(RuntimeEvent::CheckpointStrategySet(
+            CheckpointStrategySet {
+                strategy_id: strategy_id.clone(),
+                description: description.clone(),
+                set_at_ms: now_ms,
+                run_id: Some(run_id.clone()),
+                interval_ms,
+                max_checkpoints,
+                trigger_on_task_complete,
+            },
+        ));
+
+        self.store.append(&[event]).await?;
+
+        // Return the strategy from the projection (validates round-trip).
+        CheckpointStrategyReadModel::get_by_run(self.store.as_ref(), run_id)
+            .await
+            .map_err(RuntimeError::Store)?
+            .ok_or_else(|| {
+                RuntimeError::Internal("checkpoint strategy not found after set".into())
+            })
+    }
+
+    async fn get_strategy(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<CheckpointStrategy>, RuntimeError> {
+        CheckpointStrategyReadModel::get_by_run(self.store.as_ref(), run_id)
+            .await
+            .map_err(RuntimeError::Store)
     }
 }
 
@@ -196,5 +242,38 @@ mod tests {
         let cp_b = svc.get(&CheckpointId::new("cp_b")).await.unwrap().unwrap();
         assert_eq!(cp_a.disposition, CheckpointDisposition::Latest);
         assert_eq!(cp_b.disposition, CheckpointDisposition::Latest);
+    }
+
+    #[tokio::test]
+    async fn set_strategy_records_and_retrieves() {
+        let store = Arc::new(InMemoryStore::new());
+        let svc = CheckpointServiceImpl::new(store.clone());
+        let run_id = RunId::new("run_strat");
+
+        let strat = svc
+            .set_strategy(&run_id, "s1".into(), "periodic".into(), 30_000, 5, true)
+            .await
+            .unwrap();
+
+        assert_eq!(strat.strategy_id, "s1");
+        assert_eq!(strat.interval_ms, 30_000);
+        assert_eq!(strat.max_checkpoints, 5);
+        assert!(strat.trigger_on_task_complete);
+
+        // get_strategy round-trips
+        let got = svc.get_strategy(&run_id).await.unwrap().unwrap();
+        assert_eq!(got.strategy_id, "s1");
+    }
+
+    #[tokio::test]
+    async fn get_strategy_returns_none_without_set() {
+        let store = Arc::new(InMemoryStore::new());
+        let svc = CheckpointServiceImpl::new(store);
+
+        assert!(svc
+            .get_strategy(&RunId::new("no_such"))
+            .await
+            .unwrap()
+            .is_none());
     }
 }

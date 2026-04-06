@@ -4,7 +4,7 @@
 //! They are immutable once created; one may be marked latest.
 
 use async_trait::async_trait;
-use cairn_domain::{CheckpointId, ProjectKey, RunId};
+use cairn_domain::{CheckpointId, CheckpointStrategy, ProjectKey, RunId};
 use cairn_store::projections::CheckpointRecord;
 
 use crate::error::RuntimeError;
@@ -43,4 +43,23 @@ pub trait CheckpointService: Send + Sync {
         run_id: &RunId,
         limit: usize,
     ) -> Result<Vec<CheckpointRecord>, RuntimeError>;
+
+    /// Set the checkpoint strategy for a run (periodic / on_tool_call / manual).
+    ///
+    /// Emits `CheckpointStrategySet` so the projection records the strategy.
+    async fn set_strategy(
+        &self,
+        run_id: &RunId,
+        strategy_id: String,
+        description: String,
+        interval_ms: u64,
+        max_checkpoints: u32,
+        trigger_on_task_complete: bool,
+    ) -> Result<CheckpointStrategy, RuntimeError>;
+
+    /// Get the current checkpoint strategy for a run.
+    async fn get_strategy(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<CheckpointStrategy>, RuntimeError>;
 }

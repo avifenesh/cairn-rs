@@ -198,9 +198,9 @@ async fn recovery_requeues_expired_leased_tasks() {
     assert_eq!(summary.scanned, 1);
     assert_eq!(summary.actions.len(), 1);
 
-    // Task should be in RetryableFailed state
+    // RFC 005: recovery sweep completes the full cycle — task is requeued.
     let task = task_svc.get(&TaskId::new("task_1")).await.unwrap().unwrap();
-    assert_eq!(task.state, TaskState::RetryableFailed);
+    assert_eq!(task.state, TaskState::Queued);
 }
 
 // -- End-to-end with approvals --
