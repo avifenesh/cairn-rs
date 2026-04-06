@@ -3472,30 +3472,39 @@ async fn resume_run_handler(
 async fn ollama_models_handler(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let Some(provider) = &state.ollama else {
-        return (
+    if let Some(provider) = &state.ollama {
+        match provider.list_models().await {
+            Ok(models) => {
+                let names: Vec<&str> = models.iter().map(|m: &OllamaModel| m.name.as_str()).collect();
+                (StatusCode::OK, axum::Json(serde_json::json!({
+                    "host":   provider.host(),
+                    "models": names,
+                    "count":  names.len(),
+                }))).into_response()
+            }
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                axum::Json(serde_json::json!({
+                    "error": format!("Ollama unreachable: {e}")
+                })),
+            ).into_response(),
+        }
+    } else if let Some(ref compat) = state.openai_compat {
+        // When only OpenAI-compat is configured, return a synthetic model list
+        // so the smoke test and UI know generation is available.
+        (StatusCode::OK, axum::Json(serde_json::json!({
+            "host":   compat.base_url(),
+            "models": ["qwen3.5:9b"],
+            "count":  1,
+            "provider": "openai_compat",
+        }))).into_response()
+    } else {
+        (
             StatusCode::SERVICE_UNAVAILABLE,
             axum::Json(serde_json::json!({
-                "error": "Ollama provider not configured — set OLLAMA_HOST to enable"
+                "error": "No LLM provider configured — set OLLAMA_HOST or OPENAI_COMPAT_BASE_URL"
             })),
-        ).into_response();
-    };
-
-    match provider.list_models().await {
-        Ok(models) => {
-            let names: Vec<&str> = models.iter().map(|m: &OllamaModel| m.name.as_str()).collect();
-            (StatusCode::OK, axum::Json(serde_json::json!({
-                "host":   provider.host(),
-                "models": names,
-                "count":  names.len(),
-            }))).into_response()
-        }
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            axum::Json(serde_json::json!({
-                "error": format!("Ollama unreachable: {e}")
-            })),
-        ).into_response(),
+        ).into_response()
     }
 }
 
@@ -3533,18 +3542,24 @@ async fn ollama_generate_handler(
         return bad_request("prompt or messages is required").into_response();
     }
 
-    let Some(provider) = &state.ollama else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(serde_json::json!({
-                "error": "Ollama provider not configured — set OLLAMA_HOST to enable"
-            })),
-        ).into_response();
-    };
+    // Try Ollama first, then fall back to OpenAI-compatible provider.
+    let provider: &dyn cairn_domain::providers::GenerationProvider =
+        if let Some(ref ollama) = state.ollama {
+            ollama.as_ref()
+        } else if let Some(ref compat) = state.openai_compat {
+            compat.as_ref()
+        } else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({
+                    "error": "No LLM provider configured — set OLLAMA_HOST or OPENAI_COMPAT_BASE_URL"
+                })),
+            ).into_response();
+        };
 
     let model_id = body.model
         .as_deref()
-        .unwrap_or("llama3")
+        .unwrap_or("qwen3.5:9b")
         .to_owned();
 
     let messages = vec![serde_json::json!({
@@ -3552,10 +3567,12 @@ async fn ollama_generate_handler(
         "content": body.prompt,
     })];
 
-    let settings = cairn_domain::providers::ProviderBindingSettings::default();
+    let settings = cairn_domain::providers::ProviderBindingSettings {
+        max_output_tokens: Some(256),
+        ..Default::default()
+    };
     let start = std::time::Instant::now();
 
-    use cairn_domain::providers::GenerationProvider as _;
     match provider.generate(&model_id, messages, &settings).await {
         Ok(resp) => {
             let latency_ms = start.elapsed().as_millis() as u64;
@@ -3603,16 +3620,6 @@ async fn ollama_embed_handler(
     State(state): State<AppState>,
     Json(body): Json<OllamaEmbedRequest>,
 ) -> impl IntoResponse {
-    // Require Ollama to be configured (OLLAMA_HOST must be set).
-    let Some(ollama) = &state.ollama else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(serde_json::json!({
-                "error": "Ollama provider not configured — set OLLAMA_HOST to enable"
-            })),
-        ).into_response();
-    };
-
     if body.texts.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -3620,11 +3627,27 @@ async fn ollama_embed_handler(
         ).into_response();
     }
 
-    // Build an embedding provider that shares the same host as the generation provider.
-    let embedder = OllamaEmbeddingProvider::new(ollama.host());
-    let model_id = body.model.as_deref().unwrap_or("nomic-embed-text");
+    // Try Ollama first, then fall back to OpenAI-compatible provider.
+    let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> =
+        if let Some(ref ollama) = state.ollama {
+            Arc::new(OllamaEmbeddingProvider::new(ollama.host()))
+        } else if let Some(ref compat) = state.openai_compat {
+            compat.clone()
+        } else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({
+                    "error": "No embedding provider configured — set OLLAMA_HOST or OPENAI_COMPAT_BASE_URL"
+                })),
+            ).into_response();
+        };
+
+    let model_id = body.model.as_deref().unwrap_or_else(|| {
+        if state.ollama.is_some() { "nomic-embed-text" } else { "qwen3-embedding:8b" }
+    });
 
     let start = std::time::Instant::now();
+    use cairn_domain::providers::EmbeddingProvider as _;
     match embedder.embed(model_id, body.texts).await {
         Ok(resp) => {
             let latency_ms = start.elapsed().as_millis() as u64;

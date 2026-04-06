@@ -253,7 +253,7 @@ pub const OPENAPI_JSON: &str = r##"{
           "format":     { "type": "string", "enum": ["json","yaml"], "default": "json" }
         }
       },
-      "ImportBundleRequest": {
+      "ApplyBundleRequest": {
         "type": "object",
         "properties": {
           "project_id":        { "type": "string" },
@@ -541,6 +541,24 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Resolved approval" } }
       }
     },
+    "/v1/approvals/{id}/approve": {
+      "post": {
+        "tags": ["Approvals"],
+        "summary": "Approve a pending approval (sugar for resolve with decision=approved)",
+        "operationId": "approveApproval",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Approved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApprovalRecord" } } } } }
+      }
+    },
+    "/v1/approvals/{id}/reject": {
+      "post": {
+        "tags": ["Approvals"],
+        "summary": "Reject a pending approval (sugar for resolve with decision=rejected)",
+        "operationId": "rejectApproval",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Rejected", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApprovalRecord" } } } } }
+      }
+    },
     "/v1/providers": {
       "get": {
         "tags": ["Providers"],
@@ -555,6 +573,30 @@ pub const OPENAPI_JSON: &str = r##"{
         "summary": "Provider health status",
         "operationId": "getProviderHealth",
         "responses": { "200": { "description": "Health records" } }
+      }
+    },
+    "/v1/providers/connections": {
+      "get": {
+        "tags": ["Providers"],
+        "summary": "List provider connections",
+        "operationId": "listProviderConnections",
+        "parameters": [
+          { "name": "tenant_id", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "limit",     "in": "query", "schema": { "type": "integer", "default": 50 } },
+          { "name": "offset",    "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": { "200": { "description": "Provider connection list" } }
+      },
+      "post": {
+        "tags": ["Providers"],
+        "summary": "Register a provider connection (entitlement-gated)",
+        "description": "Creates a new provider connection. Requires a tier that supports external providers (returns 403 in local_eval tier).",
+        "operationId": "createProviderConnection",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "tenant_id": { "type": "string" }, "provider_connection_id": { "type": "string" }, "provider_family": { "type": "string" }, "adapter_type": { "type": "string" } }, "required": ["tenant_id", "provider_connection_id", "provider_family", "adapter_type"] } } } },
+        "responses": {
+          "201": { "description": "Provider connection created" },
+          "403": { "description": "Entitlement tier does not allow external provider connections" }
+        }
       }
     },
     "/v1/providers/ollama/models": {
@@ -928,15 +970,15 @@ pub const OPENAPI_JSON: &str = r##"{
         }
       }
     },
-    "/v1/bundles/import": {
+    "/v1/bundles/apply": {
       "post": {
         "tags": ["Bundles"],
-        "summary": "Import a bundle into a project",
-        "description": "Validates, plans, and executes import of a CairnBundle into the target project. Supports skip/overwrite/rename conflict strategies.",
-        "operationId": "importBundle",
+        "summary": "Apply a bundle to a project",
+        "description": "Validates, plans, and applies a CairnBundle into the target project with conflict resolution. Supports skip/overwrite/rename strategies.",
+        "operationId": "applyBundle",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImportBundleRequest" } } }
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApplyBundleRequest" } } }
         },
         "responses": {
           "200": { "description": "Import result with per-artifact outcomes", "content": { "application/json": { "schema": { "type": "object", "properties": { "artifacts_imported": { "type": "integer" }, "artifacts_skipped": { "type": "integer" }, "outcomes": { "type": "array", "items": { "type": "object" } } } } } } },

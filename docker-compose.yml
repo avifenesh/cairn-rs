@@ -57,6 +57,10 @@ services:
       OLLAMA_HOST: "http://ollama:11434"
       # Mode: "local" (default, no auth enforcement) or "team" (requires token).
       CAIRN_MODE: "${CAIRN_MODE:-local}"
+      # Optional: OpenAI-compatible provider for external LLM + embedding.
+      # Set both in .env or shell to activate; omit to use Ollama only.
+      OPENAI_COMPAT_BASE_URL: "${OPENAI_COMPAT_BASE_URL:-}"
+      OPENAI_COMPAT_API_KEY: "${OPENAI_COMPAT_API_KEY:-}"
     depends_on:
       ollama:
         condition: service_healthy

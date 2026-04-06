@@ -804,3 +804,18 @@ Nothing. No entitlement, license, feature gating, or commercial packaging types 
 - [x] RFC 014: Phase 1 gap analysis — 10 gaps across entitlements, licensing, feature gating, product tiers
 - [x] RFC 014: Phase 2+3 — ProductTier (LocalEval/TeamSelfHosted/EnterpriseSelfHosted), Entitlement (4 categories), EntitlementSet, LicenseRecord, FeatureFlag, DefaultFeatureGate with V1 capability mappings, EntitlementChangeRecord
 - [x] RFC 014: Phase 5 — marked complete
+
+## Session 2026-04-06: Market-Ready Quality Pass
+
+Multi-agent hardening session. All pre-existing test failures resolved, real provider wired.
+
+- Durable MemoryApiImpl — replaced volatile HashMap with DocumentStore-backed persistence
+- Chunk quality scoring — compute_chunk_quality() in pipeline make_chunk()
+- Corroboration pass — cross-result scoring in InMemoryRetrieval (lexical ≥50% + embedding cosine >0.8)
+- Recency-of-use — per-chunk retrieval timestamp tracking with tiered decay
+- cairn-store latest_root_run — added run_id tiebreaker matching Pg/SQLite adapters
+- cairn-runtime RunCostUpdated import fix — restored test-module import stripped by linter
+- OpenAI-compatible provider adapter — GenerationProvider + EmbeddingProvider (reqwest, Bearer auth)
+- Pipeline embedding wired — IngestPipeline.with_embedder() using qwen3-embedding:8b via agntic.garden
+- SDK updates — TypeScript + Python: added createProviderConnection / list methods
+- Final sweep: 2,636 passed, 0 failed, 7 ignored across 12 crates

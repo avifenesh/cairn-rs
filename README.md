@@ -50,9 +50,19 @@ curl http://localhost:3000/health
 
 # With Ollama for local LLM support
 OLLAMA_HOST=http://localhost:11434 cargo run -p cairn-app
+
+# With any OpenAI-compatible provider (vLLM, LiteLLM, Together, etc.)
+OPENAI_COMPAT_BASE_URL=https://your-server/v1 \
+OPENAI_COMPAT_API_KEY=your-key \
+  cargo run -p cairn-app
 ```
 
 Default bearer token: `dev-admin-token`. Set `CAIRN_ADMIN_TOKEN` to override.
+
+When `OPENAI_COMPAT_BASE_URL` is set, generation and embedding endpoints
+automatically use the OpenAI-compatible provider as a fallback when Ollama is
+not configured. Reasoning models (e.g. Qwen 3.5) are supported — the adapter
+extracts `reasoning` field content when the model's `content` field is empty.
 
 ### Docker
 
@@ -127,6 +137,8 @@ State is always derived from the log. Postgres stores events for durability and 
 |----------|---------|-------------|
 | `CAIRN_ADMIN_TOKEN` | `dev-admin-token` | Bearer token for the admin account. Required in team mode. |
 | `OLLAMA_HOST` | _(unset)_ | Ollama base URL, e.g. `http://localhost:11434`. Enables local LLM endpoints. |
+| `OPENAI_COMPAT_BASE_URL` | _(unset)_ | Base URL for any OpenAI-compatible API (must include `/v1`). Falls back when Ollama is unset. |
+| `OPENAI_COMPAT_API_KEY` | _(unset)_ | API key for the OpenAI-compatible provider. |
 
 ### CLI flags
 
@@ -160,12 +172,14 @@ All `/v1/` routes require `Authorization: Bearer <token>`. `/health` and `/v1/st
 | **Sessions** | `GET/POST /v1/sessions`, `GET /v1/sessions/:id`, `GET /v1/sessions/:id/runs` |
 | **Runs** | `GET/POST /v1/runs`, `GET /v1/runs/:id`, `POST /v1/runs/:id/pause`, `POST /v1/runs/:id/resume`, `GET /v1/runs/:id/events`, `GET /v1/runs/:id/cost` |
 | **Tasks** | `GET /v1/tasks`, `POST /v1/tasks/:id/claim`, `POST /v1/tasks/:id/complete`, `POST /v1/tasks/:id/cancel`, `POST /v1/tasks/:id/release-lease` |
-| **Approvals** | `GET /v1/approvals/pending`, `POST /v1/approvals/:id/resolve`, `POST /v1/approvals/:id/deny` |
+| **Approvals** | `POST /v1/approvals` (create gate), `GET /v1/approvals/pending`, `POST /v1/approvals/:id/approve`, `POST /v1/approvals/:id/reject`, `POST /v1/approvals/:id/resolve` |
 | **Prompts** | `GET /v1/prompts/assets`, `GET /v1/prompts/releases`, `POST /v1/prompts/releases/:id/transition`, `POST /v1/prompts/releases/:id/activate` |
 | **Events** | `GET /v1/events` (cursor replay), `POST /v1/events/append` (idempotent write), `GET /v1/stream` (SSE live feed) |
 | **Providers** | `GET /v1/providers`, `GET /v1/providers/health`, `POST /v1/providers/connections`, `POST /v1/providers/bindings` |
 | **Ollama** | `GET /v1/providers/ollama/models`, `POST /v1/providers/ollama/generate`, `POST /v1/providers/ollama/stream` |
-| **Memory** | `POST /v1/memory/ingest`, `GET /v1/memory/search`, `POST /v1/memory/deep-search`, `POST /v1/memory/feedback` |
+| **Memory** | `POST /v1/memory/ingest`, `GET /v1/memory/search`, `GET /v1/memory/documents/:id`, `GET /v1/memory/diagnostics`, `POST /v1/memory/feedback` |
+| **Sources** | `GET /v1/sources`, `GET /v1/sources/:id`, `POST /v1/sources` |
+| **Bundles** | `POST /v1/bundles/import`, `POST /v1/bundles/export` |
 | **Evals** | `POST /v1/evals/runs`, `POST /v1/evals/runs/:id/start`, `POST /v1/evals/runs/:id/complete`, `GET /v1/evals/scorecard/:asset_id` |
 | **Costs** | `GET /v1/costs`, `GET /v1/traces`, `GET /v1/sessions/:id/llm-traces` |
 | **Admin** | `POST /v1/admin/tenants`, `GET /v1/settings`, `GET /v1/db/status` |
@@ -188,11 +202,15 @@ cargo build --workspace
 # Run the server (in-memory, local mode)
 cargo run -p cairn-app
 
-# Run all tests (excluding cairn-app integration tests)
-cargo test --workspace --exclude cairn-app
+# Run all 2 700+ tests
+cargo test --workspace
 
-# Run the bootstrap integration tests
-cargo test -p cairn-app --test bootstrap_server
+# Run the end-to-end integration suite (6 full-workflow tests)
+cargo test -p cairn-app --test full_workspace_suite
+
+# Run the 81-check smoke test against a running server
+CAIRN_ADMIN_TOKEN=cairn-demo-token cargo run -p cairn-app &
+CAIRN_TOKEN=cairn-demo-token ./scripts/smoke-test.sh
 
 # UI development server (proxies /v1/* to localhost:3000)
 cd ui && npm install && npm run dev

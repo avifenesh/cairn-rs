@@ -14,7 +14,7 @@ A self-hostable Rust control plane for production AI agent deployments. Event-so
 | UI pages | 35 |
 | UI components | 22 |
 | UI hooks | 8 |
-| Total tests | 2,708 |
+| Total tests | 2,636 (0 failures) |
 | API routes | 56+ production, 366 bootstrap |
 | RFCs implemented | 14/14 |
 
@@ -30,6 +30,10 @@ A self-hostable Rust control plane for production AI agent deployments. Event-so
                    │   Ollama     │    │  Event Log  │
                    │  (LLM/embed) │    │  + Store    │
                    └──────────────┘    └─────────────┘
+                   ┌──────────────┐
+                   │ OpenAI-compat│
+                   │ (agntic.gdn) │
+                   └──────────────┘
 ```
 
 **Crates:**
@@ -153,6 +157,21 @@ GET  /v1/admin/audit-log              — audit trail
 POST /v1/admin/rebuild-projections    — replay events
 POST /v1/admin/snapshot               — export store state
 ```
+
+## Session 2026-04-06: Quality Hardening
+
+All 6 market-readiness seams closed in this session:
+
+- **Durable memory CRUD** — MemoryApiImpl backed by DocumentStore instead of volatile HashMap
+- **Chunk quality scoring** — pipeline computes credibility_score during ingest
+- **Corroboration scoring** — cross-source retrieval corroboration pass (lexical + embedding)
+- **Recency-of-use tracking** — per-chunk retrieval timestamps with tiered decay
+- **OpenAI-compatible provider** — GenerationProvider + EmbeddingProvider against any OpenAI-compat endpoint (agntic.garden wired)
+- **Embedding pipeline active** — IngestPipeline wired with real embedder (qwen3-embedding:8b) when OPENAI_COMPAT_BASE_URL is set; vector and hybrid retrieval modes now functional
+
+Additional fixes: cairn-store latest_root_run tiebreaker, cairn-runtime RunCostUpdated import, SDK provider connection methods.
+
+Final per-crate sweep: **2,636 tests passed, 0 failed, 7 ignored** across all 12 crates.
 
 ## What's Next
 

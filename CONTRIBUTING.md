@@ -13,6 +13,7 @@ development workflow, testing, and the pull-request process.
 | Node.js | 22 | Required only for UI development |
 | npm | 10 | Bundled with Node.js 22 |
 | Ollama | any | Optional; enables local LLM tests |
+| curl | any | Required for the smoke test (`scripts/smoke-test.sh`) |
 
 Install Rust via [rustup](https://rustup.rs). Node.js via
 [nvm](https://github.com/nvm-sh/nvm) or the official installer.
@@ -59,6 +60,11 @@ cargo run -p cairn-app -- --db cairn.db
 # With Ollama for local LLM support
 OLLAMA_HOST=http://localhost:11434 cargo run -p cairn-app
 
+# With any OpenAI-compatible provider
+OPENAI_COMPAT_BASE_URL=https://your-server/v1 \
+OPENAI_COMPAT_API_KEY=your-key \
+  cargo run -p cairn-app
+
 # Bind all interfaces (for Docker / WSL access)
 cargo run -p cairn-app -- --addr 0.0.0.0 --port 3000
 ```
@@ -95,21 +101,28 @@ cargo build -p cairn-app # rust-embed picks up ui/dist/
 ## Testing
 
 ```bash
-# Full workspace (recommended before opening a PR)
+# Full workspace — 2 700+ tests (recommended before opening a PR)
 cargo test --workspace
 
 # A single crate
 cargo test -p cairn-runtime
 
-# Integration tests only (bootstrap server round-trips)
-cargo test -p cairn-app --test bootstrap_server
+# End-to-end workflow tests (approval gates, bundles, prompts, evals)
+cargo test -p cairn-app --test full_workspace_suite
+
+# Smoke test against a running server (81 checks)
+CAIRN_ADMIN_TOKEN=cairn-demo-token cargo run -p cairn-app &
+CAIRN_TOKEN=cairn-demo-token ./scripts/smoke-test.sh
 
 # UI type-check
 cd ui && npx tsc --noEmit
 ```
 
-The integration test suite in `crates/cairn-app/tests/bootstrap_server.rs`
-covers all 51 HTTP endpoints end-to-end against an in-memory store.
+The `full_workspace_suite` covers 6 end-to-end workflows (approval gate flow,
+bundle import/export, prompt lifecycle, eval runs, operator setup, tool
+invocations). The smoke test validates the real HTTP server binary across 20
+sections including health, sessions, runs, tasks, approvals, events, memory,
+SSE, admin, LLM generation, and more.
 
 ---
 

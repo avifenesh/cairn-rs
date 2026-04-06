@@ -14,6 +14,12 @@
 #
 # With Ollama:
 #   docker run -p 3000:3000 -e OLLAMA_HOST=http://host.docker.internal:11434 cairn-rs
+#
+# With OpenAI-compatible provider (e.g. agntic.garden):
+#   docker run -p 3000:3000 \
+#     -e OPENAI_COMPAT_BASE_URL=https://agntic.garden/inference/v1 \
+#     -e OPENAI_COMPAT_API_KEY=your-key \
+#     cairn-rs
 
 # ── Stage 0: UI builder ───────────────────────────────────────────────────────
 FROM node:22-slim AS ui-builder
@@ -128,6 +134,11 @@ ENV CAIRN_ADMIN_TOKEN=dev-admin-token
 
 # Ollama base URL — override to connect to a local or remote Ollama instance.
 ENV OLLAMA_HOST=
+
+# OpenAI-compatible provider — optional, enables external LLM + embedding.
+# Set both to activate; omit to use Ollama only.
+ENV OPENAI_COMPAT_BASE_URL=
+ENV OPENAI_COMPAT_API_KEY=
 
 EXPOSE 3000
 
