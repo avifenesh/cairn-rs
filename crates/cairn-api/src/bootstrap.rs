@@ -21,6 +21,63 @@ pub enum ServerRole {
     PluginHost,
 }
 
+/// High-level process role for multi-process deployment (RFC 011).
+///
+/// Parsed from the `--role` CLI flag. Controls whether this process
+/// serves HTTP, runs background workers, or both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessRole {
+    /// Serve HTTP routes only — no background task processing.
+    ApiOnly,
+    /// Run task claim/execute loop only — no HTTP server.
+    WorkerOnly,
+    /// Both HTTP + background workers (default, current behavior).
+    AllInOne,
+}
+
+impl ProcessRole {
+    /// Parse from CLI string. Returns `AllInOne` for unrecognized values.
+    pub fn from_str_loose(s: &str) -> Self {
+        match s {
+            "api" | "api-only" | "api_only" => ProcessRole::ApiOnly,
+            "worker" | "worker-only" | "worker_only" => ProcessRole::WorkerOnly,
+            "all" | "all-in-one" | "all_in_one" => ProcessRole::AllInOne,
+            _ => ProcessRole::AllInOne,
+        }
+    }
+
+    /// Whether this role should start the HTTP server.
+    pub fn serves_http(self) -> bool {
+        matches!(self, ProcessRole::ApiOnly | ProcessRole::AllInOne)
+    }
+
+    /// Whether this role should start background workers.
+    pub fn runs_workers(self) -> bool {
+        matches!(self, ProcessRole::WorkerOnly | ProcessRole::AllInOne)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProcessRole::ApiOnly => "api_only",
+            ProcessRole::WorkerOnly => "worker_only",
+            ProcessRole::AllInOne => "all_in_one",
+        }
+    }
+}
+
+impl Default for ProcessRole {
+    fn default() -> Self {
+        ProcessRole::AllInOne
+    }
+}
+
+impl std::fmt::Display for ProcessRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Storage backend selection per RFC 011.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,6 +115,8 @@ pub struct BootstrapConfig {
     pub listen_addr: String,
     pub listen_port: u16,
     pub roles: Vec<ServerRole>,
+    /// High-level process role (parsed from `--role` CLI flag).
+    pub process_role: ProcessRole,
     pub storage: StorageBackend,
     pub encryption_key: EncryptionKeySource,
     /// TLS configuration (optional; None disables TLS).
@@ -81,6 +140,7 @@ impl Default for BootstrapConfig {
                 ServerRole::Scheduler,
                 ServerRole::PluginHost,
             ],
+            process_role: ProcessRole::AllInOne,
             storage: StorageBackend::default(),
             encryption_key: EncryptionKeySource::LocalAuto,
             tls_enabled: false,
@@ -103,6 +163,7 @@ impl BootstrapConfig {
                 ServerRole::Scheduler,
                 ServerRole::PluginHost,
             ],
+            process_role: ProcessRole::AllInOne,
             storage: StorageBackend::Postgres {
                 connection_url: connection_url.into(),
             },
@@ -272,6 +333,41 @@ mod tests {
         };
         let errs = config.validate().unwrap_err();
         assert!(errs.contains(&ConfigValidationError::MissingEncryptionKeyInTeamMode));
+    }
+
+    #[test]
+    fn default_process_role_is_all_in_one() {
+        let config = BootstrapConfig::default();
+        assert_eq!(config.process_role, ProcessRole::AllInOne);
+        assert!(config.process_role.serves_http());
+        assert!(config.process_role.runs_workers());
+    }
+
+    #[test]
+    fn process_role_api_only_flags() {
+        let role = ProcessRole::ApiOnly;
+        assert!(role.serves_http());
+        assert!(!role.runs_workers());
+        assert_eq!(role.as_str(), "api_only");
+    }
+
+    #[test]
+    fn process_role_worker_only_flags() {
+        let role = ProcessRole::WorkerOnly;
+        assert!(!role.serves_http());
+        assert!(role.runs_workers());
+        assert_eq!(role.as_str(), "worker_only");
+    }
+
+    #[test]
+    fn process_role_parse_variants() {
+        assert_eq!(ProcessRole::from_str_loose("api"), ProcessRole::ApiOnly);
+        assert_eq!(ProcessRole::from_str_loose("api-only"), ProcessRole::ApiOnly);
+        assert_eq!(ProcessRole::from_str_loose("worker"), ProcessRole::WorkerOnly);
+        assert_eq!(ProcessRole::from_str_loose("worker_only"), ProcessRole::WorkerOnly);
+        assert_eq!(ProcessRole::from_str_loose("all"), ProcessRole::AllInOne);
+        assert_eq!(ProcessRole::from_str_loose("all-in-one"), ProcessRole::AllInOne);
+        assert_eq!(ProcessRole::from_str_loose("unknown"), ProcessRole::AllInOne);
     }
 
     #[test]

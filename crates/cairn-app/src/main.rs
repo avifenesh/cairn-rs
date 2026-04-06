@@ -148,6 +148,8 @@ struct AppState {
     templates: Arc<templates::TemplateRegistry>,
     /// RFC 014: entitlement gating and usage metering.
     entitlements: Arc<entitlements::EntitlementService>,
+    /// RFC 011: high-level process role (api / worker / all).
+    process_role: cairn_api::bootstrap::ProcessRole,
 }
 
 // ── Notification buffer ───────────────────────────────────────────────────────
@@ -4023,6 +4025,12 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
                     }
                 }
             }
+            "--role" => {
+                i += 1;
+                if i < args.len() {
+                    config.process_role = cairn_api::bootstrap::ProcessRole::from_str_loose(&args[i]);
+                }
+            }
             "--encryption-key-env" => {
                 i += 1;
                 if i < args.len() {
@@ -4498,6 +4506,7 @@ async fn main() {
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         entitlements: Arc::new(entitlements::EntitlementService::new()),
+        process_role: config.process_role,
     };
 
     // ── Demo seed data (local mode only) ─────────────────────────────────────
@@ -4992,6 +5001,17 @@ async fn metrics_prometheus_handler(State(state): State<AppState>) -> impl IntoR
     )
 }
 
+// ── RFC 011: Server role handler ─────────────────────────────────────────────
+
+/// `GET /v1/system/role` — returns the current process role.
+async fn system_role_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "role": state.process_role.as_str(),
+        "serves_http": state.process_role.serves_http(),
+        "runs_workers": state.process_role.runs_workers(),
+    }))
+}
+
 // ── RFC 014: Entitlement handlers ────────────────────────────────────────────
 
 /// `GET /v1/entitlements` — current plan + usage + limits for the default tenant.
@@ -5295,6 +5315,7 @@ mod tests {
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         entitlements: Arc::new(entitlements::EntitlementService::new()),
+        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
     }
@@ -6902,6 +6923,7 @@ mod tests {
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         entitlements: Arc::new(entitlements::EntitlementService::new()),
+        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
         };
         let app = build_router(state);
 
@@ -7440,6 +7462,7 @@ mod run_events_tests {
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         entitlements: Arc::new(entitlements::EntitlementService::new()),
+        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
     }
@@ -7627,6 +7650,7 @@ mod tool_invocations_tests {
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         entitlements: Arc::new(entitlements::EntitlementService::new()),
+        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
     }
@@ -7845,6 +7869,7 @@ mod provider_health_tests {
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         entitlements: Arc::new(entitlements::EntitlementService::new()),
+        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
     }
