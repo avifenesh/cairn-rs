@@ -127,96 +127,96 @@ These `current_state_plus_audit` entities are classified in RFC 002 but implemen
 
 No pgvector/HNSW columns, no SQLite brute-force vector, VectorOnly unimplemented.
 
-- [ ] pgvector extension + embedding column on chunks table
-- [ ] HNSW index for Postgres
-- [ ] SQLite brute-force vector search
-- [ ] VectorOnly mode implementation
+- [x] pgvector extension + embedding column on chunks table
+- [x] HNSW index for Postgres
+- [x] SQLite brute-force vector search
+- [x] VectorOnly mode implementation
 
 #### 2. Embedding pipeline — STUB ONLY
 
 EmbeddingProvider trait exists, no concrete impl, pipeline skips embed, chunks have no embedding field.
 
-- [ ] Concrete EmbeddingProvider impl (hosted provider adapter)
-- [ ] Wire embedding step into IngestPipeline
-- [ ] Add embedding vector field to ChunkRecord
+- [x] Concrete EmbeddingProvider impl (hosted provider adapter)
+- [x] Wire embedding step into IngestPipeline
+- [x] Add embedding vector field to ChunkRecord
 
 #### 3. Chunk model enrichment — MISSING
 
-- [ ] Typed ChunkId (currently bare String)
-- [ ] Provenance metadata fields
-- [ ] Credibility metadata fields
-- [ ] Graph linkage field
-- [ ] Embedding vector field
-- [ ] updated_at timestamp
+- [x] Typed ChunkId (currently bare String)
+- [x] Provenance metadata fields
+- [x] Credibility metadata fields
+- [x] Graph linkage field
+- [x] Embedding vector field
+- [x] updated_at timestamp
 
 #### 4. Format parsers — STUB ONLY
 
 Markdown/HTML/StructuredJson enum variants exist, no parsing logic, no normalization step.
 
-- [ ] Markdown parser/normalizer
-- [ ] HTML parser/normalizer
-- [ ] StructuredJson parser/normalizer
-- [ ] Normalization pipeline step
+- [x] Markdown parser/normalizer
+- [x] HTML parser/normalizer
+- [x] StructuredJson parser/normalizer
+- [x] Normalization pipeline step
 
 #### 5. Ingest pipeline — INCOMPLETE
 
-- [ ] Normalization step
-- [ ] Metadata extraction step
-- [ ] Deduplication step
+- [x] Normalization step
+- [x] Metadata extraction step
+- [x] Deduplication step
 
 #### 6. Scoring implementation — TYPES ONLY
 
 All 8 ScoringBreakdown fields declared, only lexical_relevance populated.
 
-- [ ] Freshness/staleness calculators
-- [ ] Source credibility calculator
-- [ ] Corroboration calculator
-- [ ] Graph proximity calculator
-- [ ] Recency of use calculator
-- [ ] Operator-tunable ScoringPolicy/ScoringWeights types
+- [x] Freshness/staleness calculators
+- [x] Source credibility calculator
+- [x] Corroboration calculator
+- [x] Graph proximity calculator
+- [x] Recency of use calculator
+- [x] Operator-tunable ScoringPolicy/ScoringWeights types
 
 #### 7. Reranking — ENUM ONLY
 
 MMR and ProviderReranker enum variants exist, no implementation in any backend.
 
-- [ ] MMR reranking implementation
-- [ ] Provider-based reranker integration
+- [x] MMR reranking implementation
+- [x] Provider-based reranker integration
 
 #### 8. Metadata filtering — TYPE ONLY
 
 MetadataFilter type exists on RetrievalQuery, no backend implements it.
 
-- [ ] Implement metadata filtering in Pg backend
-- [ ] Implement metadata filtering in SQLite backend
-- [ ] Implement metadata filtering in in-memory backend
+- [x] Implement metadata filtering in Pg backend
+- [x] Implement metadata filtering in SQLite backend
+- [x] Implement metadata filtering in in-memory backend
 
 #### 9. Memory ingest job entity — MISSING
 
-- [ ] IngestJobId in cairn-domain
-- [ ] RuntimeCommand/Event variants for ingest jobs
-- [ ] IngestJobReadModel + store projection
+- [x] IngestJobId in cairn-domain
+- [x] RuntimeCommand/Event variants for ingest jobs
+- [x] IngestJobReadModel + store projection
 
 #### 10. Deep search enrichment — BASIC
 
-- [ ] Graph expansion hooks
-- [ ] Synthesis inputs type
-- [ ] Quality gates (acceptance thresholds, convergence checks)
-- [ ] Improved query decomposition (KeywordDecomposer is basic)
+- [x] Graph expansion hooks
+- [x] Synthesis inputs type
+- [x] Quality gates (acceptance thresholds, convergence checks)
+- [x] Improved query decomposition (KeywordDecomposer is basic)
 
 #### 11. Diagnostics completeness — PARTIAL
 
-- [ ] Candidate-generation stages reporting
-- [ ] Scoring dimensions that contributed
-- [ ] Effective scoring policy applied
-- [ ] Why-this-result explanations
-- [ ] Top-hit inspection
-- [ ] Benchmark/eval views
+- [x] Candidate-generation stages reporting
+- [x] Scoring dimensions that contributed
+- [x] Effective scoring policy applied
+- [x] Why-this-result explanations
+- [x] Top-hit inspection
+- [x] Benchmark/eval views
 
 #### 12. Operator-tunable scoring policy — MISSING
 
-- [ ] ScoringPolicy type
-- [ ] ScoringWeights type
-- [ ] Per-project/workspace weight presets
+- [x] ScoringPolicy type
+- [x] ScoringWeights type
+- [x] Per-project/workspace weight presets
 
 ### Phase plan
 
@@ -257,62 +257,62 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 #### Graph gaps
 
 1. ApprovedBy edge not projected — EventProjector doesn't emit ApprovedBy edge on ApprovalResolved
-- [ ] Add ApprovedBy edge projection in EventProjector
+- [x] Add ApprovedBy edge projection in EventProjector
 
 2. Memory/Skill/ChannelTarget nodes never created — NodeKind variants exist but no projector creates them
-- [ ] Wire Memory/Skill/ChannelTarget node creation in relevant projectors
+- [x] Wire Memory/Skill/ChannelTarget node creation in relevant projectors
 
 3. Signal/IngestJob events not projected to graph — EventProjector has no-op arms for these
-- [ ] Add Signal node projection on SignalIngested
-- [ ] Add IngestJob node projection on IngestJobStarted/IngestJobCompleted
+- [x] Add Signal node projection on SignalIngested
+- [x] Add IngestJob node projection on IngestJobStarted/IngestJobCompleted
 
 4. No per-variant graph query dispatch — GraphQueryService::query exists but no impl dispatches on GraphQuery variants
-- [ ] Implement ExecutionTrace, DependencyPath, PromptProvenance, RetrievalProvenance, DecisionInvolvement, EvalLineage queries
+- [x] Implement ExecutionTrace, DependencyPath, PromptProvenance, RetrievalProvenance, DecisionInvolvement, EvalLineage queries
 
 5. No InMemory GraphQueryService — only PgGraphStore implements GraphQueryService
-- [ ] Add InMemoryGraphStore implementing GraphProjection + GraphQueryService
+- [x] Add InMemoryGraphStore implementing GraphProjection + GraphQueryService
 
 6. No concrete GraphExpansionHook — only NoOp exists
-- [ ] Implement a concrete graph expansion hook for deep search
+- [x] Implement a concrete graph expansion hook for deep search
 
 7. Provenance chain skeleton — GraphProvenanceService::provenance_chain returns empty chain
-- [ ] Implement provenance chain traversal
+- [x] Implement provenance chain traversal
 
 8. No project scope on GraphNode — GraphNode has node_id, kind, created_at but no project field
-- [ ] Add project: Option<ProjectKey> to GraphNode
+- [x] Add project: Option<ProjectKey> to GraphNode
 
 #### Eval gaps
 
 9. No RuntimeCommand/Event for eval lifecycle — evals don't flow through event log
-- [ ] Add StartEvalRun/CompleteEvalRun command variants
-- [ ] Add EvalRunStarted/EvalRunCompleted event variants
+- [x] Add StartEvalRun/CompleteEvalRun command variants
+- [x] Add EvalRunStarted/EvalRunCompleted event variants
 
 10. EvalRunService in-memory only — not backed by event log or store
-- [ ] Make EvalRunService event-sourced via store
+- [x] Make EvalRunService event-sourced via store
 
 11. Scorecard not persisted — types exist but no storage or query service
-- [ ] Add scorecard storage and query service
+- [x] Add scorecard storage and query service
 
 12. 5 of 6 matrix row types missing — only PromptComparisonRow exists
-- [ ] Add ProviderRoutingRow, PermissionRow, MemorySourceQualityRow, SkillHealthRow, GuardrailPolicyRow
+- [x] Add ProviderRoutingRow, PermissionRow, MemorySourceQualityRow, SkillHealthRow, GuardrailPolicyRow
 
 13. No matrix storage/query service — matrix types have no backing store
-- [ ] Add MatrixReadModel trait + storage
+- [x] Add MatrixReadModel trait + storage
 
 14. No output_artifacts or DatasetSource struct — EvalRun references dataset_source as Option<String>
-- [ ] Add DatasetSource struct and output_artifacts field
+- [x] Add DatasetSource struct and output_artifacts field
 
 15. Graph-eval integration manual not event-driven — GraphIntegration methods must be called explicitly
-- [ ] Wire graph-eval integration through event projector
+- [x] Wire graph-eval integration through event projector
 
 16. No graph edges from eval -> outcomes — no edges connecting eval runs to the outcomes they measured
-- [ ] Add EvaluatedBy edges from eval projector
+- [x] Add EvaluatedBy edges from eval projector
 
 17. on_prompt_used untyped string — GraphIntegration::on_prompt_used takes bare strings
-- [ ] Use typed PromptReleaseId/RunId
+- [x] Use typed PromptReleaseId/RunId
 
 18. No operator matrix threshold config — no types for operator-configurable threshold/highlight policies
-- [ ] Add MatrixThresholdPolicy type
+- [x] Add MatrixThresholdPolicy type
 
 ### Phase plan
 
@@ -336,68 +336,68 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 #### Session gaps
 
 1. No auto session derivation trigger — derive_session_state() exists but nothing calls it when runs complete
-- [ ] Auto-derive session state on run terminal transition
+- [x] Auto-derive session state on run terminal transition
 
 2. No session complete/fail methods — SessionService has create/get/list but no explicit complete/fail/archive
-- [ ] Add complete/fail/archive methods to SessionService
+- [x] Add complete/fail/archive methods to SessionService
 
 #### Run gaps
 
 3. Pause reason discarded — RunServiceImpl::pause takes _reason (unused), never recorded in events
-- [ ] Record PauseReason in RunStateChanged or dedicated RunPaused event
+- [x] Record PauseReason in RunStateChanged or dedicated RunPaused event
 
 4. Resume trigger discarded — RunServiceImpl::resume takes _trigger (unused), not recorded
-- [ ] Record ResumeTrigger in events
+- [x] Record ResumeTrigger in events
 
 5. No pause_reason/resume_trigger on RunRecord — projection doesn't track last pause reason or resume trigger
-- [ ] Add pause_reason and last_resume_trigger fields to RunRecord
+- [x] Add pause_reason and last_resume_trigger fields to RunRecord
 
 6. No resume_after timer — ResumeTrigger::ResumeAfterTimer exists but no scheduling mechanism
-- [ ] Add resume_after_ms field, timer-based resume (deferred to runtime scheduler)
+- [x] Add resume_after_ms field, timer-based resume (deferred to runtime scheduler)
 
 7. No duplicate start guard — RunService::start doesn't check if run already exists
-- [ ] Add existence check before creating run
+- [x] Add existence check before creating run
 
 #### Task gaps
 
 8. No waiting_approval/waiting_dependency service methods — TaskState has these states but no service methods to enter them
-- [ ] Add enter_waiting_approval/enter_waiting_dependency to TaskService
+- [x] Add enter_waiting_approval/enter_waiting_dependency to TaskService
 
 9. No dead_letter service method — DeadLettered state exists, recovery can dead-letter, but no explicit TaskService::dead_letter()
-- [ ] Add dead_letter method to TaskService
+- [x] Add dead_letter method to TaskService
 
 10. No retry count on TaskRecord — recovery heuristic for retry vs dead-letter is fragile
-- [ ] Add retry_count field to TaskRecord, increment on RetryableFailed
+- [x] Add retry_count field to TaskRecord, increment on RetryableFailed
 
 11. No leased→running validation — ClaimTask moves to Leased but no validation that running must follow leased
-- [ ] Add state guard in task start/transition
+- [x] Add state guard in task start/transition
 
 #### Checkpoint gaps
 
 12. No supersede in checkpoint service — saving new Latest doesn't mark previous as Superseded
-- [ ] Auto-supersede previous Latest when saving new checkpoint
+- [x] Auto-supersede previous Latest when saving new checkpoint
 
 13. No restore method wired — CheckpointService::restore exists but doesn't emit CheckpointRestored event properly
-- [ ] Wire restore to emit CheckpointRestored + RunStateChanged
+- [x] Wire restore to emit CheckpointRestored + RunStateChanged
 
 14. No checkpoint data/payload field — CheckpointRecord has no payload/data field for actual checkpoint content
-- [ ] Add checkpoint_data or payload field
+- [x] Add checkpoint_data or payload field
 
 #### Recovery gaps
 
 15. Stale dependencies stub — resolve_stale_dependencies works but incomplete: doesn't check child failure propagation
-- [ ] Propagate child failure to parent (fail parent if child failed)
+- [x] Propagate child failure to parent (fail parent if child failed)
 
 16. No CheckpointRestored emission in recovery — recover_interrupted_runs returns action but doesn't emit restore event
-- [ ] Emit CheckpointRestored event in recovery
+- [x] Emit CheckpointRestored event in recovery
 
 17. Fragile retry heuristic — retry vs dead-letter based on failure_class pattern matching, not retry count
-- [ ] Use retry_count for retry/dead-letter decision
+- [x] Use retry_count for retry/dead-letter decision
 
 #### Cross-cutting gaps
 
 18. No resume_after_ms on PauseRun/PauseTask commands — RFC 005 says pause accepts optional resume-after timestamp
-- [ ] Add resume_after_ms: Option<u64> to PauseRun and PauseTask commands
+- [x] Add resume_after_ms: Option<u64> to PauseRun and PauseTask commands
 
 ### Phase plan
 
@@ -433,65 +433,65 @@ MetadataFilter type exists on RetrievalQuery, no backend implements it.
 
 Prompt create/transition/activate/rollback don't flow through the event log.
 
-- [ ] Add CreatePromptAsset, CreatePromptVersion, CreatePromptRelease commands
-- [ ] Add PromptAssetCreated, PromptVersionCreated, PromptReleaseCreated, PromptReleaseStateChanged events
+- [x] Add CreatePromptAsset, CreatePromptVersion, CreatePromptRelease commands
+- [x] Add PromptAssetCreated, PromptVersionCreated, PromptReleaseCreated, PromptReleaseStateChanged events
 
 #### 2. No store-backed persistence — ALL IN-MEMORY
 
 PromptReleaseService and EvalRunService use HashMap/Vec, not event-sourced.
 
-- [ ] Event-source prompt asset/version/release through cairn-store EventLog
-- [ ] Wire InMemoryStore projections for prompt entities
+- [x] Event-source prompt asset/version/release through cairn-store EventLog
+- [x] Wire InMemoryStore projections for prompt entities
 
 #### 3. No PromptAssetService or PromptVersionService — MISSING
 
 Only PromptReleaseService exists. No service for creating/managing assets and versions.
 
-- [ ] Add PromptAssetService (create, get, list, deprecate)
-- [ ] Add PromptVersionService (create, get, list_by_asset)
+- [x] Add PromptAssetService (create, get, list, deprecate)
+- [x] Add PromptVersionService (create, get, list_by_asset)
 
 #### 4. No read model traits in cairn-store — MISSING
 
 No PromptAssetReadModel, PromptVersionReadModel, or PromptReleaseReadModel.
 
-- [ ] Add read model traits + InMemoryStore impls
+- [x] Add read model traits + InMemoryStore impls
 
 #### 5. No release action persistence — MISSING
 
 ReleaseAction type exists but actions not stored durably. No audit trail query service.
 
-- [ ] Persist release actions through events
-- [ ] Add release action query service
+- [x] Persist release actions through events
+- [x] Add release action query service
 
 #### 6. No runtime prompt binding on runs/tasks — MISSING
 
 RFC 006 says runs/tasks/tool_invocations must record prompt_release_id. No such fields exist.
 
-- [ ] Add prompt_release_id fields to RunRecord/TaskRecord/ToolInvocationRecord
+- [x] Add prompt_release_id fields to RunRecord/TaskRecord/ToolInvocationRecord
 
 #### 7. No approval integration — MISSING
 
 PromptReleaseState has Proposed/Approved/Rejected but no connection to runtime ApprovalService.
 
-- [ ] Wire release approval through the runtime approval model
+- [x] Wire release approval through the runtime approval model
 
 #### 8. No approval policy type — MISSING
 
 RFC 006 defines approval policy (default requires review, project can relax). No ApprovalPolicy type.
 
-- [ ] Add PromptApprovalPolicy type (Standard/Regulated presets)
+- [x] Add PromptApprovalPolicy type (Standard/Regulated presets)
 
 #### 9. GraphIntegration uses untyped strings — MINOR
 
 on_prompt_used takes bare &str parameters instead of typed IDs.
 
-- [ ] Use typed PromptReleaseId/RunId
+- [x] Use typed PromptReleaseId/RunId
 
 #### 10. No operator read models — MISSING
 
 RFC 006 requires prompt asset list/detail, version history, release list/detail, comparison, approval queue.
 
-- [ ] Add operator-facing read model endpoints
+- [x] Add operator-facing read model endpoints
 
 ### Phase plan
 
@@ -519,62 +519,62 @@ RFC 006 requires prompt asset list/detail, version history, release list/detail,
 
 PluginHost trait exists but no concrete host that manages spawn/handshake/shutdown lifecycle.
 
-- [ ] Implement StdioPluginHost with lifecycle management
+- [x] Implement StdioPluginHost with lifecycle management
 
 #### 2. No concrete PermissionGate impl — MISSING
 
 PermissionGate trait exists but no policy-backed concrete checker.
 
-- [ ] Implement PolicyBackedPermissionGate
+- [x] Implement PolicyBackedPermissionGate
 
 #### 3. No SupervisedBoundary/SandboxedBoundary impls — STUB ONLY
 
 Config types exist but no actual process isolation enforcement.
 
-- [ ] Implement SupervisedBoundary (env restriction, working dir scope)
-- [ ] Implement SandboxedBoundary stub (document concrete backend requirements)
+- [x] Implement SupervisedBoundary (env restriction, working dir scope)
+- [x] Implement SandboxedBoundary stub (document concrete backend requirements)
 
 #### 4. Missing 6/11 RPC builders — INCOMPLETE
 
 Only initialize/shutdown/tools_list/tools_invoke/health_check are bridged. Missing: signals.poll, channels.deliver, hooks.post_turn, policy.evaluate, eval.score, cancel.
 
-- [ ] Add bridge functions for remaining 6 RPC methods
+- [x] Add bridge functions for remaining 6 RPC methods
 
 #### 5. No notification handler — MISSING
 
 log.emit/progress.update/event.emit defined in proto but no host-side handler.
 
-- [ ] Add NotificationHandler trait + impl for log/progress/event notifications
+- [x] Add NotificationHandler trait + impl for log/progress/event notifications
 
 #### 6. No end-to-end plugin execution — MISSING
 
 No wiring from PluginHost→transport→invoke→result pipeline.
 
-- [ ] Wire full plugin invocation pipeline: discover → spawn → handshake → invoke → shutdown
+- [x] Wire full plugin invocation pipeline: discover → spawn → handshake → invoke → shutdown
 
 #### 7. No concurrency enforcement — MISSING
 
 PluginLimits.max_concurrency declared but not enforced by host.
 
-- [ ] Add semaphore-based concurrency limiter per plugin
+- [x] Add semaphore-based concurrency limiter per plugin
 
 #### 8. No health check — MISSING
 
 health.check method defined, bridge exists, but no periodic health monitor or restart logic.
 
-- [ ] Add health check loop + restart-on-failure
+- [x] Add health check loop + restart-on-failure
 
 #### 9. No plugin registry — MISSING
 
 Manifests loaded but no durable registry or list-installed-plugins query.
 
-- [ ] Add PluginRegistry with discover-from-directory and list_plugins
+- [x] Add PluginRegistry with discover-from-directory and list_plugins
 
 #### 10. No cancel dispatcher — MISSING
 
 cancel method defined in proto but no host-side cancel for in-flight invocations.
 
-- [ ] Add cancellation token propagation to in-flight invocations
+- [x] Add cancellation token propagation to in-flight invocations
 
 ### Phase plan
 
@@ -605,62 +605,62 @@ cancel method defined in proto but no host-side cancel for in-flight invocations
 
 Only scope keys exist. No durable entity types for tenants, workspaces, or projects.
 
-- [ ] Add TenantRecord, WorkspaceRecord, ProjectRecord structs
+- [x] Add TenantRecord, WorkspaceRecord, ProjectRecord structs
 
 #### 2. No CRUD services — MISSING
 
 No TenantService, WorkspaceService, or ProjectService for lifecycle management.
 
-- [ ] Add tenant/workspace/project CRUD services
+- [x] Add tenant/workspace/project CRUD services
 
 #### 3. No OperatorProfile record or service — MISSING
 
 OperatorProfileKey exists but no profile struct with preferences, no CRUD.
 
-- [ ] Add OperatorProfile struct with preferences
-- [ ] Add OperatorProfileService
+- [x] Add OperatorProfile struct with preferences
+- [x] Add OperatorProfileService
 
 #### 4. No credential model — MISSING
 
 RFC 008 says tenant-scoped credentials for providers/channels. Nothing exists.
 
-- [ ] Add CredentialRecord and CredentialService
+- [x] Add CredentialRecord and CredentialService
 
 #### 5. No defaults layering service — MISSING
 
 RFC 008 defines system→tenant→workspace→project→operator-local precedence.
 
-- [ ] Add DefaultsResolver with layered precedence
+- [x] Add DefaultsResolver with layered precedence
 
 #### 6. No workspace membership model — MISSING
 
 RFC 008 says workspace-scoped team membership and roles.
 
-- [ ] Add WorkspaceMembership type and service
+- [x] Add WorkspaceMembership type and service
 
 #### 7. No role-based permissions — MISSING
 
 RFC 008 says permissions evaluated against actor+tenant+workspace+project+capability.
 
-- [ ] Add multi-scope permission evaluator
+- [x] Add multi-scope permission evaluator
 
 #### 8. No lifecycle commands/events — MISSING
 
 No RuntimeCommand/Event for tenant/workspace/project creation.
 
-- [ ] Add TenantCreated, WorkspaceCreated, ProjectCreated events
+- [x] Add TenantCreated, WorkspaceCreated, ProjectCreated events
 
 #### 9. No store projections — MISSING
 
 No read model traits for tenant/workspace/project entities.
 
-- [ ] Add TenantReadModel, WorkspaceReadModel, ProjectReadModel
+- [x] Add TenantReadModel, WorkspaceReadModel, ProjectReadModel
 
 #### 10. No API scope context enforcement — MISSING
 
 RFC 008 says every API request operates in explicit scope context.
 
-- [ ] Add scope context extraction and enforcement
+- [x] Add scope context extraction and enforcement
 
 ### Phase plan
 
