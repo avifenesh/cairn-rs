@@ -72,10 +72,14 @@ class CairnClient:
         base_url: str,
         token: str,
         timeout: int = 30,
+        generate_timeout: int = 120,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        # LLM generation can be much slower than regular API calls — use a
+        # separate (longer) timeout so ordinary endpoints stay snappy.
+        self.generate_timeout = generate_timeout
         self._session = requests.Session()
         self._session.headers.update({
             "Authorization": f"Bearer {token}",
@@ -507,7 +511,13 @@ class CairnClient:
         body: dict[str, Any] = {"model": model, "prompt": prompt}
         if messages is not None:
             body["messages"] = messages
-        return self._post("/v1/providers/ollama/generate", body)
+        # Temporarily override timeout for generation (LLMs are slow).
+        saved = self.timeout
+        self.timeout = self.generate_timeout
+        try:
+            return self._post("/v1/providers/ollama/generate", body)
+        finally:
+            self.timeout = saved
 
     def list_ollama_models(self) -> dict:
         """
