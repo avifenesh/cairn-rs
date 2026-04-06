@@ -108,10 +108,16 @@ jobs:
       - name: cargo test --tests (non-app)
         run: cargo test --workspace --exclude cairn-app --tests
         timeout-minutes: 8
-      # Bootstrap server tests (51/51 HTTP surface gate)
-      - name: bootstrap server tests
-        run: cargo test -p cairn-app --test bootstrap_server
-        timeout-minutes: 6
+      # cairn-app integration tests (HTTP surface + end-to-end workflows)
+      - name: cairn-app integration tests
+        run: >
+          cargo test -p cairn-app
+          --test bootstrap_server
+          --test full_workspace_suite
+          --test source_refresh
+          --test request_tracing
+          --test entitlement_gates
+        timeout-minutes: 8
 
   # ── 5. UI build ──────────────────────────────────────────────────────────────
   ui-build:

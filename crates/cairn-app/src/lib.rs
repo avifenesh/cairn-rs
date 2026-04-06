@@ -230,27 +230,27 @@ struct MailboxMessageView {
 }
 
 #[derive(Clone, Debug)]
-struct AppMailboxMessage {
+pub struct AppMailboxMessage {
     sender_id: Option<String>,
     body: Option<String>,
     delivered: bool,
 }
 
 #[derive(Clone, Debug, Default)]
-struct AppSourceMetadata {
+pub struct AppSourceMetadata {
     name: Option<String>,
     description: Option<String>,
 }
 
 /// Cached prompt version content and template vars (not in event payload).
 #[derive(Clone, Debug, Default)]
-struct AppVersionContent {
+pub struct AppVersionContent {
     content: String,
     template_vars: Vec<PromptTemplateVar>,
 }
 
 #[derive(Clone, Debug)]
-struct PendingIngestJobPayload {
+pub struct PendingIngestJobPayload {
     project: ProjectKey,
     source_id: SourceId,
     document_id: KnowledgeDocumentId,
@@ -259,7 +259,7 @@ struct PendingIngestJobPayload {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct RateLimitBucket {
+pub struct RateLimitBucket {
     count: u32,
     window_started_ms: u64,
 }
@@ -368,7 +368,7 @@ impl Default for HistogramSample {
 }
 
 #[derive(Default)]
-struct AppMetrics {
+pub struct AppMetrics {
     request_totals: Mutex<HashMap<RequestCountKey, u64>>,
     request_durations: Mutex<HashMap<RequestDurationKey, HistogramSample>>,
     active_runs_total: AtomicU64,
@@ -503,48 +503,48 @@ impl AppMetrics {
 }
 
 #[derive(Clone)]
-struct AppState {
-    config: BootstrapConfig,
-    runtime: Arc<InMemoryServices>,
-    evals: Arc<ProductEvalRunService>,
-    eval_baselines: Arc<EvalBaselineServiceImpl>,
-    eval_datasets: Arc<EvalDatasetServiceImpl>,
+pub struct AppState {
+    pub config: BootstrapConfig,
+    pub runtime: Arc<InMemoryServices>,
+    pub evals: Arc<ProductEvalRunService>,
+    pub eval_baselines: Arc<EvalBaselineServiceImpl>,
+    pub eval_datasets: Arc<EvalDatasetServiceImpl>,
     #[allow(dead_code)]
-    model_comparisons: Arc<ModelComparisonServiceImpl>,
-    eval_rubrics: Arc<EvalRubricServiceImpl>,
-    runtime_sse_tx: broadcast::Sender<SseFrame>,
+    pub model_comparisons: Arc<ModelComparisonServiceImpl>,
+    pub eval_rubrics: Arc<EvalRubricServiceImpl>,
+    pub runtime_sse_tx: broadcast::Sender<SseFrame>,
     /// Ring buffer of the last 10,000 SSE frames with monotonic sequence IDs.
     /// Clients use Last-Event-ID to replay missed events after reconnect (RFC 002).
-    sse_event_buffer: Arc<std::sync::RwLock<std::collections::VecDeque<(u64, SseFrame)>>>,
+    pub sse_event_buffer: Arc<std::sync::RwLock<std::collections::VecDeque<(u64, SseFrame)>>>,
     /// Monotonic counter for SSE frame sequence IDs.
-    sse_seq: Arc<std::sync::atomic::AtomicU64>,
-    graph: Arc<InMemoryGraphStore>,
-    document_store: Arc<InMemoryDocumentStore>,
-    retrieval: Arc<InMemoryRetrieval>,
-    deep_search: Arc<AppDeepSearch>,
-    ingest: Arc<AppIngestPipeline>,
-    diagnostics: Arc<InMemoryDiagnostics>,
-    feed: Arc<FeedStore>,
-    bundle_import: Arc<InMemoryImportService>,
-    bundle_export: Arc<InMemoryExportService>,
-    source_metadata: Arc<Mutex<HashMap<String, AppSourceMetadata>>>,
+    pub sse_seq: Arc<std::sync::atomic::AtomicU64>,
+    pub graph: Arc<InMemoryGraphStore>,
+    pub document_store: Arc<InMemoryDocumentStore>,
+    pub retrieval: Arc<InMemoryRetrieval>,
+    pub deep_search: Arc<AppDeepSearch>,
+    pub ingest: Arc<AppIngestPipeline>,
+    pub diagnostics: Arc<InMemoryDiagnostics>,
+    pub feed: Arc<FeedStore>,
+    pub bundle_import: Arc<InMemoryImportService>,
+    pub bundle_export: Arc<InMemoryExportService>,
+    pub source_metadata: Arc<Mutex<HashMap<String, AppSourceMetadata>>>,
     /// Cache of prompt version content + template vars, keyed by version_id.
-    version_content: Arc<Mutex<HashMap<String, AppVersionContent>>>,
-    pending_ingest_jobs: Arc<Mutex<HashMap<String, PendingIngestJobPayload>>>,
-    mailbox_messages: Arc<Mutex<HashMap<String, AppMailboxMessage>>>,
-    templates: Arc<StarterTemplateRegistry>,
-    service_tokens: Arc<ServiceTokenRegistry>,
-    plugin_registry: Arc<InMemoryPluginRegistry>,
-    plugin_host: Arc<Mutex<StdioPluginHost>>,
-    rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
-    metrics: Arc<AppMetrics>,
+    pub version_content: Arc<Mutex<HashMap<String, AppVersionContent>>>,
+    pub pending_ingest_jobs: Arc<Mutex<HashMap<String, PendingIngestJobPayload>>>,
+    pub mailbox_messages: Arc<Mutex<HashMap<String, AppMailboxMessage>>>,
+    pub templates: Arc<StarterTemplateRegistry>,
+    pub service_tokens: Arc<ServiceTokenRegistry>,
+    pub plugin_registry: Arc<InMemoryPluginRegistry>,
+    pub plugin_host: Arc<Mutex<StdioPluginHost>>,
+    pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
+    pub metrics: Arc<AppMetrics>,
     #[allow(dead_code)]
-    memory_proposal_hook: Arc<sse_hooks::SseMemoryProposalHook>,
-    started_at: Instant,
+    pub memory_proposal_hook: Arc<sse_hooks::SseMemoryProposalHook>,
+    pub started_at: Instant,
 }
 
 impl AppState {
-    async fn new(config: BootstrapConfig) -> Result<Self, String> {
+    pub async fn new(config: BootstrapConfig) -> Result<Self, String> {
         let runtime = Arc::new(InMemoryServices::new());
         let graph = Arc::new(InMemoryGraphStore::new());
         let plugin_registry = Arc::new(InMemoryPluginRegistry::new());
@@ -3013,8 +3013,20 @@ impl AppBootstrap {
         Ok((router, runtime, graph, service_tokens))
     }
 
-    fn build_router(state: Arc<AppState>) -> Router {
-        let cors = cors_layer(&state.config);
+    /// Build the catalog-driven routes WITHOUT state resolution or middleware.
+    ///
+    /// Returns a `Router<Arc<AppState>>` so callers can `.route()` additional
+    /// handlers that share the same `State<Arc<AppState>>`, then resolve state
+    /// and apply middleware:
+    ///
+    /// ```ignore
+    /// let routes = AppBootstrap::build_catalog_routes()
+    ///     .route("/v1/extra", get(my_handler))
+    ///     .fallback(not_found_handler)
+    ///     .with_state(state.clone());
+    /// let app = AppBootstrap::apply_middleware(routes, state);
+    /// ```
+    pub fn build_catalog_routes() -> Router<Arc<AppState>> {
         preserved_route_catalog()
             .into_iter()
             .fold(Router::new(), |router, entry| {
@@ -3867,8 +3879,15 @@ impl AppBootstrap {
             .route("/v1/trace/:trace_id", get(get_trace_handler))
             .route("/v1/export/:format", get(export_bundle_by_format_handler))
             .route("/healthz", get(health_handler)) // alias for k8s liveness probes
-            .fallback(not_found_handler)
-            .with_state(state.clone())
+    }
+
+    /// Apply the standard middleware stack (auth, CORS, rate-limit, tracing)
+    /// to a state-resolved `Router<()>`.
+    ///
+    /// Call this after merging additional routes with [`build_catalog_routes`].
+    pub fn apply_middleware(router: Router, state: Arc<AppState>) -> Router {
+        let cors = cors_layer(&state.config);
+        router
             .layer(from_fn_with_state(state.clone(), auth_middleware))
             .layer(cors)
             .layer(from_fn(request_id_middleware))
@@ -3878,6 +3897,14 @@ impl AppBootstrap {
                 rate_limit_middleware,
             ))
             .layer(from_fn_with_state(state, observability_middleware))
+    }
+
+    /// Build the complete router: catalog routes + fallback + state + middleware.
+    fn build_router(state: Arc<AppState>) -> Router {
+        let routes = Self::build_catalog_routes()
+            .fallback(not_found_handler)
+            .with_state(state.clone());
+        Self::apply_middleware(routes, state)
     }
 
     pub async fn serve_with_listener(

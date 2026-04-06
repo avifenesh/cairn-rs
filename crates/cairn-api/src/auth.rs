@@ -74,6 +74,16 @@ impl ServiceTokenRegistry {
     pub fn is_empty(&self) -> bool {
         self.tokens.read().unwrap().is_empty()
     }
+
+    /// Return all (token, principal) pairs. Used to sync registries in tests.
+    pub fn all_entries(&self) -> Vec<(String, AuthPrincipal)> {
+        self.tokens
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
 }
 
 /// `Authenticator` implementation backed by a `ServiceTokenRegistry`.
