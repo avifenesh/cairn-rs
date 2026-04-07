@@ -924,6 +924,9 @@ trait HasProjectScope {
 #[derive(Clone, Debug)]
 struct TenantScope {
     tenant_id: TenantId,
+    /// `true` when the request was authenticated with the admin service account.
+    /// Admin tokens bypass per-tenant scope checks so they can access any tenant.
+    is_admin: bool,
 }
 
 impl TenantScope {
@@ -1015,7 +1018,8 @@ fn validate_project_scope<T: HasProjectScope>(
     value: T,
 ) -> Result<(TenantScope, ProjectKey, T), AppApiError> {
     let project = value.project();
-    if project.tenant_id != *tenant.tenant_id() {
+    // Admin tokens have cross-tenant access — skip the scope check.
+    if !tenant.is_admin && project.tenant_id != *tenant.tenant_id() {
         return Err(tenant_scope_mismatch_error());
     }
 
@@ -1035,7 +1039,13 @@ where
             .get::<TenantId>()
             .map(|t| t.clone())
             .ok_or_else(unauthorized_api_error)?;
-        Ok(Self { tenant_id })
+        // Admin service account bypasses per-tenant scope checks.
+        let is_admin = parts
+            .extensions
+            .get::<AuthPrincipal>()
+            .map(is_admin_principal)
+            .unwrap_or(false);
+        Ok(Self { tenant_id, is_admin })
     }
 }
 
@@ -1070,11 +1080,16 @@ where
     type Rejection = AppApiError;
 
     async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let is_admin = request
+            .extensions()
+            .get::<AuthPrincipal>()
+            .map(is_admin_principal)
+            .unwrap_or(false);
         let tenant = request
             .extensions()
             .get::<TenantId>()
             .map(|t| t.clone())
-            .map(|tenant_id| TenantScope { tenant_id })
+            .map(|tenant_id| TenantScope { tenant_id, is_admin })
             .ok_or_else(unauthorized_api_error)?;
         let Json(value) = Json::<T>::from_request(request, state)
             .await
@@ -1591,6 +1606,19 @@ struct TenantScopedQuery {
     tenant_id: String,
     limit: Option<usize>,
     offset: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+struct OptionalTenantScopedQuery {
+    tenant_id: Option<String>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+impl OptionalTenantScopedQuery {
+    fn tenant_id(&self) -> &str {
+        self.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID)
+    }
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -4026,6 +4054,7 @@ impl AppBootstrap {
             .route("/v1/tool-invocations/:id/cancel", post(cancel_tool_invocation_handler))
             // ── Checkpoints ───────────────────────────────────────────────────────────
             .route("/v1/checkpoints/:id", get(get_checkpoint_handler))
+            .route("/v1/checkpoints/:id/restore", post(restore_checkpoint_handler))
             // ── Plugins ───────────────────────────────────────────────────────────────
             .route("/v1/plugins/:id", get(get_plugin_handler).delete(unregister_plugin_handler))
             .route("/v1/plugins/:id/health", get(plugin_health_handler))
@@ -7841,7 +7870,7 @@ async fn worker_report_handler(
         Err(err) => return err.into_response(),
     }
 
-    if body.project().tenant_id != *tenant_scope.tenant_id() {
+    if !tenant_scope.is_admin && body.project().tenant_id != *tenant_scope.tenant_id() {
         return tenant_scope_mismatch_error().into_response();
     }
 
@@ -7876,7 +7905,7 @@ async fn worker_heartbeat_handler(
         Err(err) => return err.into_response(),
     }
 
-    if body.project().tenant_id != *tenant_scope.tenant_id() {
+    if !tenant_scope.is_admin && body.project().tenant_id != *tenant_scope.tenant_id() {
         return tenant_scope_mismatch_error().into_response();
     }
 
@@ -8253,7 +8282,8 @@ async fn replay_run_to_checkpoint_handler(
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
     let run = match state.runtime.runs.get(&run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
+        Ok(Some(run))
+            if tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id() => run,
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response()
@@ -8602,7 +8632,7 @@ async fn orchestrate_run_handler(
         None => return AppApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "no_brain_provider",
-            "No LLM provider configured. Set CAIRN_BRAIN_URL or OLLAMA_HOST.",
+            "No LLM provider configured. Add one via POST /v1/providers/connections, or set CAIRN_BRAIN_URL / OPENROUTER_API_KEY / OLLAMA_HOST.",
         ).into_response(),
     };
 
@@ -10360,6 +10390,56 @@ async fn get_checkpoint_handler(
     }
 }
 
+/// `POST /v1/checkpoints/:id/restore` — restore a run to a specific checkpoint.
+///
+/// Alias for `POST /v1/runs/:run_id/replay-to-checkpoint?checkpoint_id=<id>`.
+/// Looks up the checkpoint by ID to resolve the owning run, then replays the
+/// run's event log up to the position where the checkpoint was recorded.
+async fn restore_checkpoint_handler(
+    State(state): State<Arc<AppState>>,
+    Path(checkpoint_id_str): Path<String>,
+) -> impl IntoResponse {
+    let checkpoint_id = CheckpointId::new(&checkpoint_id_str);
+
+    // Resolve the checkpoint → run_id.
+    let checkpoint = match CheckpointReadModel::get(state.runtime.store.as_ref(), &checkpoint_id).await {
+        Ok(Some(c)) => c,
+        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "checkpoint not found")
+            .into_response(),
+        Err(err) => return store_error_response(err),
+    };
+
+    // Find the event-log position at which the checkpoint was recorded.
+    let position = match checkpoint_recorded_position(
+        state.runtime.store.as_ref(),
+        &checkpoint.checkpoint_id,
+        &checkpoint.run_id,
+    )
+    .await
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => return AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "checkpoint event not found in event log",
+        )
+        .into_response(),
+        Err(err) => return store_error_response(err),
+    };
+
+    match build_run_replay_result(
+        state.as_ref(),
+        &checkpoint.run_id,
+        None,
+        Some(position.0),
+    )
+    .await
+    {
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Err(err) => store_error_response(err),
+    }
+}
+
 async fn save_checkpoint_handler(
     State(state): State<Arc<AppState>>,
     Path(run_id): Path<String>,
@@ -11896,9 +11976,9 @@ async fn submit_model_comparison_result_handler(
 
 async fn list_eval_runs_handler(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<ProjectScopedQuery>,
+    Query(query): Query<OptionalProjectScopedQuery>,
 ) -> impl IntoResponse {
-    let project_id = ProjectId::new(query.project_id);
+    let project_id = query.project().project_id;
     let limit = query.limit.unwrap_or(100);
     let offset = query.offset.unwrap_or(0);
     let mut items = state.evals.list_by_project(&project_id);
@@ -12551,11 +12631,11 @@ async fn get_provider_routing_matrix_handler(
 
 async fn get_scorecard_handler(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<ProjectScopedQuery>,
+    Query(query): Query<OptionalProjectScopedQuery>,
     Path(asset_id): Path<String>,
 ) -> impl IntoResponse {
     let scorecard = state.evals.build_scorecard(
-        &ProjectId::new(query.project_id),
+        &query.project().project_id,
         &PromptAssetId::new(asset_id),
     );
     (StatusCode::OK, Json(scorecard)).into_response()
@@ -13553,7 +13633,7 @@ async fn channel_for_tenant(
 ) -> Result<ChannelRecord, Response> {
     match state.runtime.channels.get(channel_id).await {
         Ok(Some(channel)) => {
-            if channel.project.tenant_id != *tenant.tenant_id() {
+            if !tenant.is_admin && channel.project.tenant_id != *tenant.tenant_id() {
                 Err(tenant_scope_mismatch_error().into_response())
             } else {
                 Ok(channel)
@@ -14281,13 +14361,13 @@ async fn create_provider_connection_handler(
 )]
 async fn list_provider_bindings_handler(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<TenantScopedQuery>,
+    Query(query): Query<OptionalTenantScopedQuery>,
 ) -> impl IntoResponse {
     match state
         .runtime
         .provider_bindings
         .list(
-            &TenantId::new(query.tenant_id),
+            &TenantId::new(query.tenant_id()),
             query.limit.unwrap_or(100),
             query.offset.unwrap_or(0),
         )
