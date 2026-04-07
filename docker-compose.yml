@@ -12,8 +12,9 @@
 # Wipe everything including downloaded models:
 #   docker compose down -v
 #
-# Pull a model into Ollama after startup:
-#   docker compose exec ollama ollama pull llama3.2
+# Pull a model into Ollama after startup (for local-only mode without agntic.garden):
+#   docker compose exec ollama ollama pull qwen3.5:9b   # worker/everyday tasks
+#   docker compose exec ollama ollama pull nomic-embed-text  # embeddings
 #
 # Override the admin token via env file:
 #   echo 'CAIRN_ADMIN_TOKEN=my-secret-token' > .env
@@ -57,10 +58,15 @@ services:
       OLLAMA_HOST: "http://ollama:11434"
       # Mode: "local" (default, no auth enforcement) or "team" (requires token).
       CAIRN_MODE: "${CAIRN_MODE:-local}"
-      # Optional: OpenAI-compatible provider for external LLM + embedding.
-      # Set both in .env or shell to activate; omit to use Ollama only.
-      OPENAI_COMPAT_BASE_URL: "${OPENAI_COMPAT_BASE_URL:-}"
+      # ── Inference endpoints (agntic.garden split API) ─────────────────────
+      # Brain tier: heavy generation (gemma-4-31B). Set CAIRN_BRAIN_URL to activate.
+      CAIRN_BRAIN_URL: "${CAIRN_BRAIN_URL:-}"
+      # Worker tier: everyday generation + embeddings (qwen3.5). Set CAIRN_WORKER_URL to activate.
+      CAIRN_WORKER_URL: "${CAIRN_WORKER_URL:-}"
+      # Shared API key for both endpoints.
       OPENAI_COMPAT_API_KEY: "${OPENAI_COMPAT_API_KEY:-}"
+      # Legacy single-endpoint fallback (superseded by CAIRN_WORKER_URL above).
+      OPENAI_COMPAT_BASE_URL: "${OPENAI_COMPAT_BASE_URL:-}"
     depends_on:
       ollama:
         condition: service_healthy

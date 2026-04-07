@@ -23,7 +23,9 @@
 #   CAIRN_TOKEN=cairn-demo-token ./scripts/e2e-agent-workflow.sh
 #
 #   # With real LLM:
-#   OPENAI_COMPAT_BASE_URL=https://... OPENAI_COMPAT_API_KEY=... \
+#   CAIRN_BRAIN_URL=https://agntic.garden/inference/brain/v1 \
+#   CAIRN_WORKER_URL=https://agntic.garden/inference/worker/v1 \
+#   CAIRN_BRAIN_KEY=Cairn-Inference-2026! CAIRN_WORKER_KEY=Cairn-Inference-2026! \
 #     CAIRN_ADMIN_TOKEN=cairn-demo-token cargo run -p cairn-app &
 #   CAIRN_TOKEN=cairn-demo-token ./scripts/e2e-agent-workflow.sh
 #
@@ -157,7 +159,7 @@ step "Call LLM to generate a response"
 PROMPT="Summarize in one sentence: cairn-rs is an open-source Rust control plane for production AI agent deployments with event sourcing, approval gates, and real-time SSE streaming."
 
 post /v1/providers/ollama/generate "{
-  \"model\":\"qwen3.5:9b\",
+  \"model\":\"cyankiwi/gemma-4-31B-it-AWQ-4bit\",
   \"prompt\":\"${PROMPT}\"
 }" "$LLM_TIMEOUT"
 
@@ -175,7 +177,7 @@ if [ "$STATUS" = "200" ]; then
 elif [ "$STATUS" = "503" ]; then
   LLM_TEXT="cairn-rs is a Rust-based agent control plane with event sourcing and approval workflows."
   ok "No LLM provider — using synthetic response"
-  info "(set OLLAMA_HOST or OPENAI_COMPAT_BASE_URL for real generation)"
+  info "(set OLLAMA_HOST, CAIRN_WORKER_URL, or CAIRN_BRAIN_URL for real generation)"
 else
   fail "LLM HTTP ${STATUS}: ${RESP}"
 fi
@@ -186,7 +188,7 @@ step "Complete the task with the LLM result"
 LLM_ESC=$(printf '%s' "$LLM_TEXT" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" 2>/dev/null)
 
 post "/v1/tasks/${TASK_ID}/complete" "{
-  \"result\":{\"summary\":${LLM_ESC},\"model\":\"qwen3.5:9b\"}
+  \"result\":{\"summary\":${LLM_ESC},\"model\":\"cyankiwi/gemma-4-31B-it-AWQ-4bit\"}
 }"
 [ "$STATUS" = "200" ] || fail "complete task HTTP ${STATUS}: ${RESP}"
 [ "$(jf state)" = "completed" ] || fail "task state=$(jf state) (expected completed)"

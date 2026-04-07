@@ -51,7 +51,13 @@ curl http://localhost:3000/health
 # With Ollama for local LLM support
 OLLAMA_HOST=http://localhost:11434 cargo run -p cairn-app
 
-# With any OpenAI-compatible provider (vLLM, LiteLLM, Together, etc.)
+# With the agntic.garden split inference API (brain + worker tiers)
+CAIRN_BRAIN_URL=https://agntic.garden/inference/brain/v1 \
+CAIRN_WORKER_URL=https://agntic.garden/inference/worker/v1 \
+OPENAI_COMPAT_API_KEY=Cairn-Inference-2026! \
+  cargo run -p cairn-app
+
+# With any other OpenAI-compatible provider (legacy single-endpoint)
 OPENAI_COMPAT_BASE_URL=https://your-server/v1 \
 OPENAI_COMPAT_API_KEY=your-key \
   cargo run -p cairn-app
@@ -59,10 +65,13 @@ OPENAI_COMPAT_API_KEY=your-key \
 
 Default bearer token: `dev-admin-token`. Set `CAIRN_ADMIN_TOKEN` to override.
 
-When `OPENAI_COMPAT_BASE_URL` is set, generation and embedding endpoints
-automatically use the OpenAI-compatible provider as a fallback when Ollama is
-not configured. Reasoning models (e.g. Qwen 3.5) are supported — the adapter
-extracts `reasoning` field content when the model's `content` field is empty.
+**Inference providers:** cairn-rs supports a split-tier inference API:
+- **Brain** (`CAIRN_BRAIN_URL`): heavy generation — default model `cyankiwi/gemma-4-31B-it-AWQ-4bit`
+- **Worker** (`CAIRN_WORKER_URL`): everyday generation + embeddings — default model `qwen3.5:9b`
+- Both read `OPENAI_COMPAT_API_KEY` for auth.
+- Legacy `OPENAI_COMPAT_BASE_URL` still works and maps to the worker path.
+
+All model names are hot-reloadable via `PUT /v1/settings/defaults/system/<key>` — no restart required.
 
 ### Docker
 
@@ -82,7 +91,8 @@ Schema migrations run automatically on first boot. Ollama models are cached in
 a Docker volume; pull additional models with:
 
 ```bash
-docker compose exec ollama ollama pull qwen3:8b
+docker compose exec ollama ollama pull qwen3.5:9b        # worker/everyday generation
+docker compose exec ollama ollama pull nomic-embed-text  # embeddings
 ```
 
 ### After startup
@@ -137,8 +147,12 @@ State is always derived from the log. Postgres stores events for durability and 
 |----------|---------|-------------|
 | `CAIRN_ADMIN_TOKEN` | `dev-admin-token` | Bearer token for the admin account. Required in team mode. |
 | `OLLAMA_HOST` | _(unset)_ | Ollama base URL, e.g. `http://localhost:11434`. Enables local LLM endpoints. |
-| `OPENAI_COMPAT_BASE_URL` | _(unset)_ | Base URL for any OpenAI-compatible API (must include `/v1`). Falls back when Ollama is unset. |
-| `OPENAI_COMPAT_API_KEY` | _(unset)_ | API key for the OpenAI-compatible provider. |
+| `CAIRN_BRAIN_URL` | _(unset)_ | Heavy/generate provider base URL (e.g. `https://…/brain/v1`). Used for generation. |
+| `CAIRN_BRAIN_KEY` | _(unset)_ | API key for the brain provider. |
+| `CAIRN_WORKER_URL` | _(unset)_ | Light/embed provider base URL (e.g. `https://…/worker/v1`). Used for embedding. |
+| `CAIRN_WORKER_KEY` | _(unset)_ | API key for the worker provider. |
+| `OPENAI_COMPAT_BASE_URL` | _(unset)_ | Legacy: maps to both BRAIN and WORKER when set. Superseded by the split vars above. |
+| `OPENAI_COMPAT_API_KEY` | _(unset)_ | Legacy: API key for the legacy single-endpoint provider. |
 
 ### CLI flags
 
