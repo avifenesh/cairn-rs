@@ -47,6 +47,7 @@ impl TestGraph {
             target_node_id: from_doc.to_owned(),
             kind: edge_kind,
             created_at: 0,
+            confidence: None,
         };
         let node = GraphNode {
             node_id: to_doc.to_owned(),

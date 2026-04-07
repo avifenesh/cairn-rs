@@ -39,6 +39,7 @@ async fn add_doc_edge(graph: &InMemoryGraphStore, from: &str, to: &str) {
             target_node_id: to.to_owned(),
             kind: EdgeKind::DerivedFrom,
             created_at: cairn_memory::retrieval::now_ms(),
+            confidence: None,
         })
         .await
         .unwrap();

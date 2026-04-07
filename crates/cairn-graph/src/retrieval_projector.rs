@@ -55,6 +55,7 @@ impl<P: GraphProjection> RetrievalGraphProjector<P> {
                 target_node_id: document_id.as_str().to_owned(),
                 kind: EdgeKind::DerivedFrom,
                 created_at: ts,
+                confidence: None,
             })
             .await
     }
@@ -82,6 +83,7 @@ impl<P: GraphProjection> RetrievalGraphProjector<P> {
                     target_node_id: chunk_id.clone(),
                     kind: EdgeKind::EmbeddedAs,
                     created_at: ts,
+                    confidence: None,
                 })
                 .await?;
         }
@@ -101,6 +103,7 @@ impl<P: GraphProjection> RetrievalGraphProjector<P> {
                 target_node_id: chunk_id.to_owned(),
                 kind: EdgeKind::Cited,
                 created_at: ts,
+                confidence: None,
             })
             .await
     }
@@ -118,6 +121,7 @@ impl<P: GraphProjection> RetrievalGraphProjector<P> {
                 target_node_id: chunk_id.to_owned(),
                 kind: EdgeKind::ReadFrom,
                 created_at: ts,
+                confidence: None,
             })
             .await
     }

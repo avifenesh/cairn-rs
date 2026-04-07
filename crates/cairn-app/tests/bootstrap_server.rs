@@ -2738,6 +2738,7 @@ async fn memory_graph_expansion_finds_related_documents_and_route() {
             target_node_id: "doc_graph_seed_http_1".to_owned(),
             kind: EdgeKind::Spawned,
             created_at: 1,
+            confidence: None,
         })
         .await
         .unwrap();

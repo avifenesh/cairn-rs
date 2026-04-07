@@ -311,6 +311,7 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::ProjectCreated(_)
             | RuntimeEvent::RouteDecisionMade(_)
             | RuntimeEvent::ProviderCallCompleted(_)
+            | RuntimeEvent::OutcomeRecorded(_)
             | RuntimeEvent::ProviderBudgetSet(_)
             | RuntimeEvent::ChannelCreated(_)
             | RuntimeEvent::ChannelMessageSent(_)
@@ -397,6 +398,9 @@ impl<P: GraphProjection> EventProjector<P> {
                     edges += 1;
                 }
             }
+
+            // OutcomeRecorded: feedback signal — no graph projection needed.
+            RuntimeEvent::OutcomeRecorded(_) => {}
         }
 
         Ok((nodes, edges))
@@ -432,6 +436,7 @@ impl<P: GraphProjection> EventProjector<P> {
                 target_node_id: target.to_owned(),
                 kind,
                 created_at: ts,
+                confidence: None,
             })
             .await
     }

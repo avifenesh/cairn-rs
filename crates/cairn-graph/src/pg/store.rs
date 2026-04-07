@@ -280,6 +280,7 @@ impl EdgeRow {
             target_node_id: self.target_node_id,
             kind: parse_edge_kind(&self.kind).unwrap_or(EdgeKind::Triggered),
             created_at: self.created_at as u64,
+            confidence: None,
         }
     }
 }
@@ -338,6 +339,7 @@ async fn fetch_neighbor_rows(
             target_node_id: r.target_node_id,
             kind: parse_edge_kind(&r.kind).unwrap_or(EdgeKind::Triggered),
             created_at: r.created_at as u64,
+            confidence: None,
         });
         nodes.push(GraphNode {
             node_id: r.node_id,

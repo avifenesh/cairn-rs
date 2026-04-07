@@ -5265,6 +5265,7 @@ fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::SoulPatchProposed(_) => "soul_patch_proposed",
         RuntimeEvent::SoulPatchApplied(_) => "soul_patch_applied",
         RuntimeEvent::SpendAlertTriggered(_) => "spend_alert_triggered",
+        RuntimeEvent::OutcomeRecorded(_) => "outcome_recorded",
     }
 }
 
@@ -5665,7 +5666,8 @@ fn event_message(event: &RuntimeEvent) -> String {
             | RuntimeEvent::ResourceShareRevoked(_)
             | RuntimeEvent::SoulPatchProposed(_)
             | RuntimeEvent::SoulPatchApplied(_)
-            | RuntimeEvent::SpendAlertTriggered(_) => "unknown".to_string(),
+            | RuntimeEvent::SpendAlertTriggered(_)
+            | RuntimeEvent::OutcomeRecorded(_) => "unknown".to_string(),
     }
 }
 

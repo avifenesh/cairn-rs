@@ -318,10 +318,45 @@ impl DocumentStore for InMemoryDocumentStore {
 impl crate::ingest::DocumentVersionReadModel for InMemoryDocumentStore {
     async fn list_versions(
         &self,
-        _document_id: &KnowledgeDocumentId,
+        document_id: &KnowledgeDocumentId,
         _limit: usize,
     ) -> Result<Vec<crate::ingest::DocumentVersion>, IngestError> {
-        Ok(vec![])
+        // Only return a version if the document exists and has been ingested.
+        let exists = self
+            .docs
+            .lock()
+            .unwrap()
+            .contains_key(document_id.as_str());
+        if !exists {
+            return Ok(vec![]);
+        }
+
+        // Derive version metadata from the document's chunks.
+        let chunks = self.chunks.lock().unwrap();
+        let doc_chunks: Vec<_> = chunks
+            .iter()
+            .filter(|c| c.document_id == *document_id)
+            .collect();
+        if doc_chunks.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let content_hash = doc_chunks
+            .first()
+            .and_then(|c| c.content_hash.clone())
+            .unwrap_or_default();
+        let ingested_at_ms = doc_chunks
+            .iter()
+            .map(|c| c.created_at)
+            .min()
+            .unwrap_or(0);
+
+        Ok(vec![crate::ingest::DocumentVersion {
+            document_id: document_id.clone(),
+            version: 1,
+            content_hash,
+            ingested_at_ms,
+        }])
     }
 }
 

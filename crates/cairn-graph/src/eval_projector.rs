@@ -57,6 +57,7 @@ impl<P: GraphProjection> EvalGraphProjector<P> {
                 target_node_id: version_id.as_str().to_owned(),
                 kind: EdgeKind::DerivedFrom,
                 created_at: ts,
+                confidence: None,
             })
             .await
     }
@@ -84,6 +85,7 @@ impl<P: GraphProjection> EvalGraphProjector<P> {
                 target_node_id: release_id.as_str().to_owned(),
                 kind: EdgeKind::ReleasedAs,
                 created_at: ts,
+                confidence: None,
             })
             .await
     }
@@ -101,6 +103,7 @@ impl<P: GraphProjection> EvalGraphProjector<P> {
                 target_node_id: rolled_back_to_id.as_str().to_owned(),
                 kind: EdgeKind::RolledBackTo,
                 created_at: ts,
+                confidence: None,
             })
             .await
     }
@@ -129,6 +132,7 @@ impl<P: GraphProjection> EvalGraphProjector<P> {
                     target_node_id: eval_run_id.as_str().to_owned(),
                     kind: EdgeKind::EvaluatedBy,
                     created_at: ts,
+                    confidence: None,
                 })
                 .await?;
         }
@@ -149,6 +153,7 @@ impl<P: GraphProjection> EvalGraphProjector<P> {
                 target_node_id: release_id.as_str().to_owned(),
                 kind: EdgeKind::UsedPrompt,
                 created_at: ts,
+                confidence: None,
             })
             .await
     }

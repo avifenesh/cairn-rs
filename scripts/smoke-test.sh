@@ -372,11 +372,7 @@ RESULT_COUNT=$(printf '%s' "$_BODY" | python3 -c \
   && log_ok "  search found ${RESULT_COUNT} result(s)" \
   || log_fail "  search found ${RESULT_COUNT:-0} results (expected ≥ 1)"
 
-# Get a specific document by ID (may be 404 if ingest pipeline hasn't synced to version store)
-api GET "/v1/memory/documents/cdoc1_${RUN_ID}?tenant_id=default&workspace_id=default&project_id=default"
-[[ "$_HTTP" =~ ^(200|404)$ ]] \
-  && log_ok "GET /v1/memory/documents/:id (HTTP $_HTTP)" \
-  || log_fail "GET /v1/memory/documents/:id (unexpected HTTP $_HTTP)"
+chk "GET /v1/memory/documents/:id" 200 GET "/v1/memory/documents/cdoc1_${RUN_ID}"
 
 # Memory diagnostics
 chk "GET /v1/memory/diagnostics" 200 GET "/v1/memory/diagnostics?tenant_id=default&workspace_id=default&project_id=default"

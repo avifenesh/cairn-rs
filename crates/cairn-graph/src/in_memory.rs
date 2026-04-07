@@ -215,6 +215,30 @@ impl GraphQueryService for InMemoryGraphStore {
                     Some(&eval_edges),
                 ))
             }
+
+            GraphQuery::MultiHop {
+                start_node_id,
+                max_hops,
+                min_confidence,
+                direction,
+            } => match direction {
+                TraversalDirection::Downstream => Ok(bfs_with_confidence(
+                    &start_node_id,
+                    max_hops,
+                    min_confidence,
+                    &nodes,
+                    &edges,
+                    BfsDirection::Downstream,
+                )),
+                TraversalDirection::Upstream => Ok(bfs_with_confidence(
+                    &start_node_id,
+                    max_hops,
+                    min_confidence,
+                    &nodes,
+                    &edges,
+                    BfsDirection::Upstream,
+                )),
+            },
         }
     }
 
@@ -498,6 +522,85 @@ fn bfs_upstream(
     }
 }
 
+/// Direction hint for the confidence-aware BFS.
+enum BfsDirection {
+    Downstream,
+    Upstream,
+}
+
+/// BFS traversal with optional confidence filtering.
+///
+/// Walks edges in the specified direction up to `max_hops`, skipping edges
+/// whose `confidence` is `Some(c)` with `c < min_confidence`.  Edges with
+/// `confidence: None` are always traversed.
+fn bfs_with_confidence(
+    root_id: &str,
+    max_hops: u32,
+    min_confidence: Option<f64>,
+    nodes: &HashMap<String, GraphNode>,
+    edges: &[GraphEdge],
+    direction: BfsDirection,
+) -> Subgraph {
+    let mut result_nodes = Vec::new();
+    let mut seen_edges: HashSet<usize> = HashSet::new();
+    let mut result_edges = Vec::new();
+    let mut visited = HashSet::new();
+    let mut frontier = vec![root_id.to_owned()];
+
+    for _depth in 0..max_hops {
+        if frontier.is_empty() {
+            break;
+        }
+        let mut next = Vec::new();
+        for nid in &frontier {
+            if !visited.insert(nid.clone()) {
+                continue;
+            }
+            if let Some(node) = nodes.get(nid.as_str()) {
+                result_nodes.push(node.clone());
+            }
+            for (ei, edge) in edges.iter().enumerate() {
+                // Confidence gate: skip edges below threshold.
+                if let Some(threshold) = min_confidence {
+                    if let Some(c) = edge.confidence {
+                        if c < threshold {
+                            continue;
+                        }
+                    }
+                }
+
+                let neighbor = match direction {
+                    BfsDirection::Downstream => {
+                        if edge.source_node_id == *nid {
+                            &edge.target_node_id
+                        } else {
+                            continue;
+                        }
+                    }
+                    BfsDirection::Upstream => {
+                        if edge.target_node_id == *nid {
+                            &edge.source_node_id
+                        } else {
+                            continue;
+                        }
+                    }
+                };
+
+                if seen_edges.insert(ei) {
+                    result_edges.push(edge.clone());
+                }
+                next.push(neighbor.clone());
+            }
+        }
+        frontier = next;
+    }
+
+    Subgraph {
+        nodes: result_nodes,
+        edges: result_edges,
+    }
+}
+
 /// BFS shortest path between two nodes, following edges bidirectionally.
 ///
 /// Returns `None` if no path exists within `max_depth`.
@@ -722,6 +825,7 @@ mod tests {
                 target_node_id: "b".to_owned(),
                 kind: EdgeKind::Spawned,
                 created_at: 10,
+                confidence: None,
             })
             .await
             .unwrap();
@@ -731,6 +835,7 @@ mod tests {
                 target_node_id: "c".to_owned(),
                 kind: EdgeKind::UsedTool,
                 created_at: 11,
+                confidence: None,
             })
             .await
             .unwrap();
@@ -829,6 +934,7 @@ mod tests {
                     target_node_id: tgt.to_owned(),
                     kind,
                     created_at: 10,
+                    confidence: None,
                 })
                 .await
                 .unwrap();
@@ -898,6 +1004,7 @@ mod tests {
                     target_node_id: "target".into(),
                     kind: EdgeKind::Spawned,
                     created_at: 10,
+                    confidence: None,
                 })
                 .await
                 .unwrap();
@@ -974,6 +1081,182 @@ mod tests {
             .await
             .unwrap();
         assert!(path.is_none());
+    }
+
+    // ── MultiHop BFS tests ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn multi_hop_downstream_walks_chain() {
+        // A --Triggered--> B --Spawned--> C --UsedTool--> D
+        let store = build_chain_graph().await;
+
+        let subgraph = store
+            .query(GraphQuery::MultiHop {
+                start_node_id: "a".to_owned(),
+                max_hops: 4,
+                min_confidence: None,
+                direction: TraversalDirection::Downstream,
+            })
+            .await
+            .unwrap();
+
+        let ids: Vec<&str> = subgraph.nodes.iter().map(|n| n.node_id.as_str()).collect();
+        assert!(ids.contains(&"a"));
+        assert!(ids.contains(&"b"));
+        assert!(ids.contains(&"c"));
+        assert!(ids.contains(&"d"));
+        assert_eq!(subgraph.edges.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn multi_hop_respects_max_hops() {
+        let store = build_chain_graph().await;
+
+        // Only 2 hops from a: should reach a, b, c but not d.
+        let subgraph = store
+            .query(GraphQuery::MultiHop {
+                start_node_id: "a".to_owned(),
+                max_hops: 2,
+                min_confidence: None,
+                direction: TraversalDirection::Downstream,
+            })
+            .await
+            .unwrap();
+
+        let ids: Vec<&str> = subgraph.nodes.iter().map(|n| n.node_id.as_str()).collect();
+        assert!(ids.contains(&"a"));
+        assert!(ids.contains(&"b"));
+        assert!(!ids.contains(&"d"), "d is 3 hops away, should not be reached");
+    }
+
+    #[tokio::test]
+    async fn multi_hop_upstream() {
+        let store = build_chain_graph().await;
+
+        let subgraph = store
+            .query(GraphQuery::MultiHop {
+                start_node_id: "d".to_owned(),
+                max_hops: 10,
+                min_confidence: None,
+                direction: TraversalDirection::Upstream,
+            })
+            .await
+            .unwrap();
+
+        let ids: Vec<&str> = subgraph.nodes.iter().map(|n| n.node_id.as_str()).collect();
+        assert!(ids.contains(&"d"));
+        assert!(ids.contains(&"c"));
+        assert!(ids.contains(&"b"));
+        assert!(ids.contains(&"a"));
+    }
+
+    #[tokio::test]
+    async fn multi_hop_filters_by_confidence() {
+        let store = Arc::new(InMemoryGraphStore::new());
+
+        // Build: X --high(0.9)--> Y --low(0.3)--> Z
+        for id in ["x", "y", "z"] {
+            store
+                .add_node(GraphNode {
+                    node_id: id.to_owned(),
+                    kind: NodeKind::Document,
+                    project: None,
+                    created_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        store
+            .add_edge(GraphEdge {
+                source_node_id: "x".to_owned(),
+                target_node_id: "y".to_owned(),
+                kind: EdgeKind::DerivedFrom,
+                created_at: 10,
+                confidence: Some(0.9),
+            })
+            .await
+            .unwrap();
+        store
+            .add_edge(GraphEdge {
+                source_node_id: "y".to_owned(),
+                target_node_id: "z".to_owned(),
+                kind: EdgeKind::DerivedFrom,
+                created_at: 11,
+                confidence: Some(0.3),
+            })
+            .await
+            .unwrap();
+
+        // Without confidence filter: reaches all three.
+        let all = store
+            .query(GraphQuery::MultiHop {
+                start_node_id: "x".to_owned(),
+                max_hops: 5,
+                min_confidence: None,
+                direction: TraversalDirection::Downstream,
+            })
+            .await
+            .unwrap();
+        assert_eq!(all.nodes.len(), 3);
+
+        // With min_confidence=0.5: the 0.3 edge is pruned, so z is unreachable.
+        let filtered = store
+            .query(GraphQuery::MultiHop {
+                start_node_id: "x".to_owned(),
+                max_hops: 5,
+                min_confidence: Some(0.5),
+                direction: TraversalDirection::Downstream,
+            })
+            .await
+            .unwrap();
+        let ids: Vec<&str> = filtered.nodes.iter().map(|n| n.node_id.as_str()).collect();
+        assert!(ids.contains(&"x"));
+        assert!(ids.contains(&"y"));
+        assert!(!ids.contains(&"z"), "z should be pruned by confidence filter");
+        assert_eq!(filtered.edges.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn multi_hop_handles_cycles() {
+        let store = Arc::new(InMemoryGraphStore::new());
+
+        // Build cycle: A -> B -> C -> A
+        for id in ["a", "b", "c"] {
+            store
+                .add_node(GraphNode {
+                    node_id: id.to_owned(),
+                    kind: NodeKind::Task,
+                    project: None,
+                    created_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        for (src, tgt) in [("a", "b"), ("b", "c"), ("c", "a")] {
+            store
+                .add_edge(GraphEdge {
+                    source_node_id: src.to_owned(),
+                    target_node_id: tgt.to_owned(),
+                    kind: EdgeKind::Spawned,
+                    created_at: 10,
+                    confidence: None,
+                })
+                .await
+                .unwrap();
+        }
+
+        // Should terminate despite cycle, visiting each node exactly once.
+        let subgraph = store
+            .query(GraphQuery::MultiHop {
+                start_node_id: "a".to_owned(),
+                max_hops: 10,
+                min_confidence: None,
+                direction: TraversalDirection::Downstream,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(subgraph.nodes.len(), 3, "cycle detection should prevent infinite traversal");
     }
 }
 

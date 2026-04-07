@@ -68,6 +68,10 @@ pub struct GraphEdge {
     pub target_node_id: String,
     pub kind: EdgeKind,
     pub created_at: u64,
+    /// Optional confidence score (0.0–1.0) for knowledge/retrieval edges.
+    /// Used by multi-hop traversals to prune low-confidence paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 /// Graph projection service that builds graph structure from runtime events.

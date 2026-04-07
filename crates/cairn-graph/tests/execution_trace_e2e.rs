@@ -40,6 +40,7 @@ fn edge(src: &str, tgt: &str, kind: EdgeKind) -> GraphEdge {
         target_node_id: tgt.to_owned(),
         kind,
         created_at: 1_700_000_000_001,
+        confidence: None,
     }
 }
 

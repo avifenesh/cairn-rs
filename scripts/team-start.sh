@@ -85,7 +85,7 @@ if [[ "$USE_BEDROCK" == "1" ]]; then
   WRK_CMD="CLAUDE_CODE_USE_BEDROCK=1 claude --dangerously-skip-permissions --model \"$WORKER_MODEL\""
 else
   MGR_CMD="claude --dangerously-skip-permissions"
-  WRK_CMD="claude --dangerously-skip-permissions"
+  WRK_CMD="claude --dangerously-skip-permissions --model \"$WORKER_MODEL\""
 fi
 
 # ── Launch agents ─────────────────────────────────────────────────────────────

@@ -222,6 +222,7 @@ mod tests {
                 target_node_id: "doc_1".to_owned(),
                 kind: EdgeKind::DerivedFrom,
                 created_at: 0,
+                confidence: None,
             },
             GraphNode {
                 node_id: "doc_related".to_owned(),
@@ -250,6 +251,7 @@ mod tests {
                     target_node_id: "doc_1".to_owned(),
                     kind: EdgeKind::Cited,
                     created_at: 0,
+                    confidence: None,
                 },
                 GraphNode {
                     node_id: format!("related_{i}"),
@@ -289,6 +291,7 @@ mod tests {
                     target_node_id: doc.to_string(),
                     kind: EdgeKind::DerivedFrom,
                     created_at: 0,
+                    confidence: None,
                 },
                 GraphNode {
                     node_id: "shared_related".to_owned(),

@@ -29,6 +29,18 @@ pub enum GraphQuery {
     DecisionInvolvement { decision_node_id: String },
     /// Eval-to-asset lineage for prompt releases and provider routes.
     EvalLineage { eval_run_node_id: String },
+    /// Generic multi-hop BFS traversal from a start node.
+    ///
+    /// Walks edges up to `max_hops` with cycle detection. When
+    /// `min_confidence` is set, edges whose `confidence` field is
+    /// `Some(c)` with `c < min_confidence` are skipped (edges with
+    /// `confidence: None` are always traversed).
+    MultiHop {
+        start_node_id: String,
+        max_hops: u32,
+        min_confidence: Option<f64>,
+        direction: TraversalDirection,
+    },
 }
 
 /// Traversal direction for dependency queries.
