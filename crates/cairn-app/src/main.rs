@@ -3744,7 +3744,7 @@ async fn main() {
     }
 
     // ── Lib.rs AppState (catalog-driven router, shared runtime) ─────────────
-    let lib_state = Arc::new(
+    let mut lib_state = Arc::new(
         cairn_app::AppState::new(BootstrapConfig::default())
             .await
             .expect("failed to initialise lib AppState"),
@@ -3886,6 +3886,24 @@ async fn main() {
     let openai_compat: Option<Arc<OpenAiCompatProvider>> = openai_compat_brain
         .clone()
         .or_else(|| openai_compat_worker.clone());
+
+    // ── Wire brain provider into lib_state for the orchestrate endpoint ──────
+    // Priority: brain → worker → Ollama.  The orchestrate handler reads
+    // lib_state.brain_provider so it can construct LlmDecidePhase.
+    // Arc::get_mut is safe here: lib_state has not been cloned yet.
+    {
+        use cairn_domain::providers::GenerationProvider;
+        let brain: Option<Arc<dyn GenerationProvider>> =
+            openai_compat_brain.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>)
+            .or_else(|| openai_compat_worker.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>))
+            .or_else(|| ollama.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>));
+        if let Some(b) = brain {
+            let lib_mut = Arc::get_mut(&mut lib_state)
+                .expect("lib_state must not be cloned before brain_provider is wired");
+            lib_mut.brain_provider = Some(b);
+            eprintln!("brain provider: wired to lib_state");
+        }
+    }
 
     // ── Binary-specific state (shares runtime + tokens with lib.rs) ────────
     let state = AppState {

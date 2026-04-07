@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 cairn-api = { path = "../cairn-api" }
 cairn-memory = { path = "../cairn-memory" }
-
+cairn-orchestrator = { path = "../cairn-orchestrator" }
 cairn-runtime = { path = "../cairn-runtime" }
 cairn-evals = { path = "../cairn-evals" }
 cairn-graph = { path = "../cairn-graph" }

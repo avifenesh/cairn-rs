@@ -378,6 +378,7 @@ dependencies = [
  "cairn-evals",
  "cairn-graph",
  "cairn-memory",
+ "cairn-orchestrator",
  "cairn-runtime",
  "cairn-store",
  "cairn-tools",

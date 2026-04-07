@@ -443,13 +443,18 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use cairn_domain::{ActionProposal, ActionType, ProjectKey, RunId, SessionId};
+    use cairn_domain::{
+        EventEnvelope, EventId, EventSource, RunStateChanged, StateTransition,
+        lifecycle::RunState,
+    };
     use cairn_runtime::{
-        InMemoryServices, SessionService,
+        InMemoryServices, RunService, SessionService,
         services::{
             ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl,
             RunServiceImpl, TaskServiceImpl, ToolInvocationServiceImpl,
         },
     };
+    use cairn_store::EventLog;
 
     use crate::context::{DecideOutput, LoopSignal, OrchestrationContext};
 
@@ -505,11 +510,28 @@ mod tests {
         }
     }
 
-    /// Seed a session + pending run so service calls that require prior state
-    /// (complete, fail, approve) have something to operate on.
+    /// Seed a session + a run in `Running` state so `complete`/`fail`/`approve`
+    /// transitions are valid.
     async fn setup_run(svc: &Arc<InMemoryServices>) {
         svc.sessions.create(&project(), session_id()).await.unwrap();
         svc.runs.start(&project(), &session_id(), run_id(), None).await.unwrap();
+
+        // RunService::complete requires Running state.  Emit a transition event.
+        svc.store.append(&[EventEnvelope::for_runtime_event(
+            EventId::new("evt_run_start_exec_test"),
+            EventSource::Runtime,
+            cairn_domain::RuntimeEvent::RunStateChanged(RunStateChanged {
+                project: project(),
+                run_id:  run_id(),
+                transition: StateTransition {
+                    from: Some(RunState::Pending),
+                    to:   RunState::Running,
+                },
+                failure_class: None,
+                pause_reason:  None,
+                resume_trigger: None,
+            }),
+        )]).await.unwrap();
     }
 
     // ─────────────────────────────────────────────────────────────────────────

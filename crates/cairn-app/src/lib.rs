@@ -581,6 +581,10 @@ pub struct AppState {
     #[allow(dead_code)]
     pub memory_proposal_hook: Arc<sse_hooks::SseMemoryProposalHook>,
     pub started_at: Instant,
+    /// Brain LLM provider for orchestration — set post-construction by main.rs
+    /// once the concrete provider (Ollama or OpenAI-compat) is configured.
+    /// `None` means orchestration is unavailable until a provider is configured.
+    pub brain_provider: Option<Arc<dyn cairn_domain::providers::GenerationProvider>>,
 }
 
 impl AppState {
@@ -804,6 +808,7 @@ impl AppState {
             model_comparisons,
             eval_rubrics,
             graph,
+            brain_provider: None,
         })
     }
 }
@@ -3774,6 +3779,7 @@ impl AppBootstrap {
             )
             .route("/v1/runs/:id/spawn", post(spawn_subagent_run_handler))
             .route("/v1/runs/:id/children", get(list_child_runs_handler))
+            .route("/v1/runs/:id/orchestrate", post(orchestrate_run_handler))
             .route("/v1/plugins/:id/capabilities", get(plugin_capabilities_handler))
             .route("/v1/plugins/:id/tools", get(plugin_tools_handler))
             .route("/v1/plugins/tools/search", get(plugin_tools_search_handler))
@@ -8323,6 +8329,134 @@ async fn list_child_runs_handler(
         )
             .into_response(),
         Err(err) => runtime_error_response(err),
+    }
+}
+
+// ── Orchestrator entry point ──────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct OrchestrateRequest {
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default)]
+    model_id: Option<String>,
+    #[serde(default)]
+    max_iterations: Option<u32>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
+
+struct StubExecutePhase;
+
+#[async_trait::async_trait]
+impl cairn_orchestrator::ExecutePhase for StubExecutePhase {
+    async fn execute(
+        &self,
+        _ctx: &cairn_orchestrator::OrchestrationContext,
+        decide: &cairn_orchestrator::DecideOutput,
+    ) -> Result<cairn_orchestrator::ExecuteOutcome, cairn_orchestrator::OrchestratorError> {
+        use cairn_domain::ActionType;
+        use cairn_orchestrator::{ActionResult, ActionStatus, ExecuteOutcome, LoopSignal};
+        let primary = decide.proposals.iter()
+            .max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        let (signal, status) = match primary.map(|p| &p.action_type) {
+            Some(ActionType::CompleteRun) => (LoopSignal::Done, ActionStatus::Succeeded),
+            Some(ActionType::EscalateToOperator) => {
+                let reason = primary.map(|p| p.description.clone())
+                    .unwrap_or_else(|| "escalated by LLM".to_owned());
+                (LoopSignal::Failed { reason }, ActionStatus::Succeeded)
+            }
+            _ => (LoopSignal::Continue, ActionStatus::Succeeded),
+        };
+        let results = decide.proposals.iter().map(|p| ActionResult {
+            proposal: p.clone(), status: status.clone(),
+            tool_output: None, invocation_id: None,
+        }).collect();
+        Ok(ExecuteOutcome { results, loop_signal: signal })
+    }
+}
+
+/// POST /v1/runs/:id/orchestrate — trigger the GATHER → DECIDE → EXECUTE loop.
+async fn orchestrate_run_handler(
+    State(state): State<Arc<AppState>>,
+    Path(run_id_str): Path<String>,
+    Json(body): Json<OrchestrateRequest>,
+) -> impl IntoResponse {
+    use cairn_domain::RunId;
+    use cairn_orchestrator::{
+        LlmDecidePhase, LoopConfig, LoopTermination, OrchestrationContext, OrchestratorLoop,
+        StandardGatherPhase,
+    };
+    use cairn_store::projections::RunReadModel;
+
+    let run_id = RunId::new(run_id_str);
+    let run = match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response(),
+        Err(e) => return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response(),
+    };
+
+    let brain = match &state.brain_provider {
+        Some(p) => p.clone(),
+        None => return AppApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no_brain_provider",
+            "No LLM provider configured. Set CAIRN_BRAIN_URL or OLLAMA_HOST.",
+        ).into_response(),
+    };
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_millis() as u64;
+
+    let ctx = OrchestrationContext {
+        project: run.project.clone(),
+        session_id: run.session_id.clone(),
+        run_id: run.run_id.clone(),
+        task_id: None,
+        iteration: 0,
+        goal: body.goal.unwrap_or_else(|| "Execute the run objective.".to_owned()),
+        agent_type: run.agent_role_id.unwrap_or_else(|| "orchestrator".to_owned()),
+        run_started_at_ms: now_ms,
+    };
+
+    let model_id = body.model_id
+        .unwrap_or_else(|| "cyankiwi/gemma-4-31B-it-AWQ-4bit".to_owned());
+
+    let gather = StandardGatherPhase::builder(state.runtime.store.clone())
+        .with_retrieval(state.retrieval.clone())
+        .with_graph(state.graph.clone())
+        .with_defaults(state.runtime.store.clone())
+        .with_checkpoints(state.runtime.store.clone())
+        .build();
+
+    let decide  = LlmDecidePhase::new(brain, model_id.clone());
+    let execute = StubExecutePhase;
+
+    let mut cfg = LoopConfig::default();
+    if let Some(m) = body.max_iterations { cfg.max_iterations = m; }
+    if let Some(t) = body.timeout_ms     { cfg.timeout_ms = t; }
+
+    match OrchestratorLoop::new(gather, decide, execute, cfg).run(ctx).await {
+        Ok(LoopTermination::Completed { summary }) => (StatusCode::OK, Json(serde_json::json!({
+            "termination": "completed", "summary": summary, "model_id": model_id,
+        }))).into_response(),
+        Ok(LoopTermination::Failed { reason }) => (StatusCode::OK, Json(serde_json::json!({
+            "termination": "failed", "reason": reason,
+        }))).into_response(),
+        Ok(LoopTermination::MaxIterationsReached) => (StatusCode::OK, Json(serde_json::json!({
+            "termination": "max_iterations_reached",
+        }))).into_response(),
+        Ok(LoopTermination::TimedOut) => (StatusCode::OK, Json(serde_json::json!({
+            "termination": "timed_out",
+        }))).into_response(),
+        Ok(LoopTermination::WaitingApproval { approval_id }) => (StatusCode::ACCEPTED, Json(serde_json::json!({
+            "termination": "waiting_approval", "approval_id": approval_id.as_str(),
+        }))).into_response(),
+        Ok(LoopTermination::WaitingSubagent { child_task_id }) => (StatusCode::ACCEPTED, Json(serde_json::json!({
+            "termination": "waiting_subagent", "child_task_id": child_task_id.as_str(),
+        }))).into_response(),
+        Err(e) => AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "orchestration_error", format!("{e}")).into_response(),
     }
 }
 
