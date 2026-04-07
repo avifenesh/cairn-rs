@@ -159,7 +159,7 @@ step "Call LLM to generate a response"
 PROMPT="Summarize in one sentence: cairn-rs is an open-source Rust control plane for production AI agent deployments with event sourcing, approval gates, and real-time SSE streaming."
 
 post /v1/providers/ollama/generate "{
-  \"model\":\"cyankiwi/gemma-4-31B-it-AWQ-4bit\",
+  \"model\":\"qwen3.5:9b\",
   \"prompt\":\"${PROMPT}\"
 }" "$LLM_TIMEOUT"
 
@@ -188,7 +188,7 @@ step "Complete the task with the LLM result"
 LLM_ESC=$(printf '%s' "$LLM_TEXT" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" 2>/dev/null)
 
 post "/v1/tasks/${TASK_ID}/complete" "{
-  \"result\":{\"summary\":${LLM_ESC},\"model\":\"cyankiwi/gemma-4-31B-it-AWQ-4bit\"}
+  \"result\":{\"summary\":${LLM_ESC},\"model\":\"qwen3.5:9b\"}
 }"
 [ "$STATUS" = "200" ] || fail "complete task HTTP ${STATUS}: ${RESP}"
 [ "$(jf state)" = "completed" ] || fail "task state=$(jf state) (expected completed)"
