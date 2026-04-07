@@ -2358,7 +2358,7 @@ async fn ollama_models_handler(
             if host.is_empty() { host = brain.base_url().to_owned(); }
         }
         if let Some(ref or_) = state.openai_compat_openrouter {
-            models.push("qwen/qwen3-coder:free");
+            models.push("openrouter/free");
             models.push("google/gemma-3-4b-it:free");
             models.push("google/gemma-3-27b-it:free");
             models.push("meta-llama/llama-3.3-70b-instruct:free");
@@ -2663,7 +2663,9 @@ fn openai_model_obj_to_discovered(obj: &serde_json::Value) -> Option<DiscoveredM
 fn known_context_window(model_id: &str) -> Option<u32> {
     let lower = model_id.to_lowercase();
     // ── OpenRouter free tier ──────────────────────────────────────────────────
-    if lower.contains("qwen3-coder") {
+    if lower == "openrouter/free" {
+        Some(200_000) // openrouter/free — auto-routes to available free models, 200K listed context
+    } else if lower.contains("qwen3-coder") {
         Some(262_144) // qwen/qwen3-coder:free — 262K context
     } else if lower.contains("gemma-3-27b") || lower.contains("gemma3-27b") {
         Some(131_072) // google/gemma-3-27b-it — 131K context
@@ -2851,7 +2853,7 @@ async fn ollama_generate_handler(
         && state.openai_compat_worker.is_none()
         && state.ollama.is_none();
     let default_model = if openrouter_only {
-        "qwen/qwen3-coder:free".to_owned()
+        "openrouter/free".to_owned()
     } else {
         state.runtime.runtime_config.default_generate_model().await
     };
@@ -2863,7 +2865,8 @@ async fn ollama_generate_handler(
     // Route to the appropriate tier based on model name.
     // Brain tier: heavy models (gemma, cyankiwi, qwen3-coder, …).
     // Worker tier: light models (qwen3.5, phi, llama, gemma-3-4b, …) or Ollama fallback.
-    let is_brain_model = model_id.to_lowercase().contains("gemma-3-27b")
+    let is_brain_model = model_id.to_lowercase() == "openrouter/free"
+        || model_id.to_lowercase().contains("gemma-3-27b")
         || model_id.to_lowercase().contains("qwen3-coder")
         || model_id.to_lowercase().contains("gemma-4")
         || model_id.to_lowercase().contains("gemma4")
@@ -4079,12 +4082,12 @@ async fn main() {
         })
     };
     // ── OpenRouter provider (zero-cost path via OPENROUTER_API_KEY) ─────────────
-    // Brain model:  qwen/qwen3-coder:free  (262 K context)
+    // Brain model:  openrouter/free  (200K context, auto-routes to available free models)
     // Worker model: google/gemma-3-4b-it:free  (32 K context)
     let openai_compat_openrouter: Option<Arc<OpenAiCompatProvider>> = {
         use cairn_runtime::RuntimeConfig;
         RuntimeConfig::openrouter_api_key().map(|key| {
-            eprintln!("openai-compat (openrouter): configured — brain=qwen/qwen3-coder:free worker=google/gemma-3-4b-it:free");
+            eprintln!("openai-compat (openrouter): configured — brain=openrouter/free worker=google/gemma-3-4b-it:free");
             Arc::new(OpenAiCompatProvider::new(
                 "https://openrouter.ai/api/v1".to_owned(),
                 key,
