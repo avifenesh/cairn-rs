@@ -8580,6 +8580,23 @@ async fn orchestrate_run_handler(
         Err(e) => return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response(),
     };
 
+    // Transition run to Running if it's still Pending
+    if run.state == cairn_domain::RunState::Pending {
+        use cairn_domain::{RuntimeEvent, RunStateChanged, StateTransition, RunState};
+        use cairn_runtime::services::event_helpers::make_envelope;
+        let evt = make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: run.project.clone(),
+            run_id: run.run_id.clone(),
+            transition: StateTransition { from: Some(RunState::Pending), to: RunState::Running },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }));
+        if let Err(e) = state.runtime.store.append(&[evt]).await {
+            tracing::warn!("failed to transition run to running: {e}");
+        }
+    }
+
     let brain = match &state.brain_provider {
         Some(p) => p.clone(),
         None => return AppApiError::new(
@@ -8605,8 +8622,10 @@ async fn orchestrate_run_handler(
         discovered_tool_names: vec![],
     };
 
-    let model_id = body.model_id
-        .unwrap_or_else(|| "cyankiwi/gemma-4-31B-it-AWQ-4bit".to_owned());
+    let model_id = match body.model_id {
+        Some(m) => m,
+        None => state.runtime.runtime_config.default_brain_model().await,
+    };
 
     let gather = StandardGatherPhase::builder(state.runtime.store.clone())
         .with_retrieval(state.retrieval.clone())
