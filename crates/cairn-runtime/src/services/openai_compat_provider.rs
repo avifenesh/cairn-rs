@@ -129,18 +129,41 @@ impl OpenAiCompatProvider {
         Some(Self::new(base_url.trim_end_matches('/'), api_key))
     }
 
-    /// Create a brain-tier provider from `CAIRN_BRAIN_URL` + `OPENAI_COMPAT_API_KEY`.
+    /// Create a brain-tier provider from `CAIRN_BRAIN_URL` + key.
     ///
     /// Returns `None` when `CAIRN_BRAIN_URL` is unset.
     pub fn from_brain_env() -> Option<Self> {
         let base_url = std::env::var("CAIRN_BRAIN_URL").ok()?;
-        let api_key = std::env::var("OPENAI_COMPAT_API_KEY").ok()?;
+        let api_key = std::env::var("CAIRN_BRAIN_KEY")
+            .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
+            .ok()?;
         Some(Self::new(base_url.trim_end_matches('/'), api_key))
+    }
+
+    /// Create a provider pointed at OpenRouter's OpenAI-compatible API.
+    ///
+    /// Reads `OPENROUTER_API_KEY` (preferred), then falls back to
+    /// `CAIRN_BRAIN_KEY` and `OPENAI_COMPAT_API_KEY` so a single key
+    /// env var covers multiple providers.
+    ///
+    /// Base URL is always `https://openrouter.ai/api/v1`.
+    /// Returns `None` when no API key is configured.
+    pub fn from_openrouter_env() -> Option<Self> {
+        let api_key = std::env::var("OPENROUTER_API_KEY")
+            .or_else(|_| std::env::var("CAIRN_BRAIN_KEY"))
+            .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
+            .ok()?;
+        Some(Self::new("https://openrouter.ai/api/v1", api_key))
     }
 
     /// Return the base URL this provider is configured for.
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Return the API key this provider is configured with.
+    pub fn api_key(&self) -> &str {
+        &self.api_key
     }
 }
 

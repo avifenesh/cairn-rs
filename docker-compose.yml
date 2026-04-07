@@ -67,6 +67,10 @@ services:
       OPENAI_COMPAT_API_KEY: "${OPENAI_COMPAT_API_KEY:-}"
       # Legacy single-endpoint fallback (superseded by CAIRN_WORKER_URL above).
       OPENAI_COMPAT_BASE_URL: "${OPENAI_COMPAT_BASE_URL:-}"
+      # OpenRouter — zero-cost LLM access via https://openrouter.ai (no self-hosted GPU needed).
+      # Brain model: qwen/qwen3-coder:free (262K ctx)  Worker model: google/gemma-3-4b-it:free (32K ctx)
+      # Get a free key at https://openrouter.ai/keys
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
     depends_on:
       ollama:
         condition: service_healthy

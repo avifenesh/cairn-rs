@@ -131,7 +131,9 @@ struct AppState {
     openai_compat_brain: Option<Arc<OpenAiCompatProvider>>,
     /// Light/embed+worker provider: CAIRN_WORKER_URL (qwen3.5, qwen3-embedding)
     openai_compat_worker: Option<Arc<OpenAiCompatProvider>>,
-    /// Backward-compat alias: first of brain/worker that is configured.
+    /// OpenRouter provider: OPENROUTER_API_KEY activates https://openrouter.ai/api/v1
+    openai_compat_openrouter: Option<Arc<OpenAiCompatProvider>>,
+    /// Backward-compat alias: first of brain/worker/openrouter that is configured.
     openai_compat: Option<Arc<OpenAiCompatProvider>>,
     metrics: Arc<std::sync::RwLock<AppMetrics>>,
     rate_limits: RateLimitTable,
@@ -2355,11 +2357,18 @@ async fn ollama_models_handler(
             models.push("cyankiwi/gemma-4-31B-it-AWQ-4bit");
             if host.is_empty() { host = brain.base_url().to_owned(); }
         }
+        if let Some(ref or_) = state.openai_compat_openrouter {
+            models.push("qwen/qwen3-coder:free");
+            models.push("google/gemma-3-4b-it:free");
+            models.push("google/gemma-3-27b-it:free");
+            models.push("meta-llama/llama-3.3-70b-instruct:free");
+            if host.is_empty() { host = or_.base_url().to_owned(); }
+        }
         if models.is_empty() {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 axum::Json(serde_json::json!({
-                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, or CAIRN_WORKER_URL"
+                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, CAIRN_WORKER_URL, or OPENROUTER_API_KEY"
                 })),
             ).into_response();
         }
@@ -2653,7 +2662,17 @@ fn openai_model_obj_to_discovered(obj: &serde_json::Value) -> Option<DiscoveredM
 /// Used as a fallback when the provider doesn't report context_length.
 fn known_context_window(model_id: &str) -> Option<u32> {
     let lower = model_id.to_lowercase();
-    if lower.contains("gemma-4") || lower.contains("gemma4") || lower.contains("cyankiwi") {
+    // ── OpenRouter free tier ──────────────────────────────────────────────────
+    if lower.contains("qwen3-coder") {
+        Some(262_144) // qwen/qwen3-coder:free — 262K context
+    } else if lower.contains("gemma-3-27b") || lower.contains("gemma3-27b") {
+        Some(131_072) // google/gemma-3-27b-it — 131K context
+    } else if lower.contains("gemma-3-4b") || lower.contains("gemma3-4b") {
+        Some(32_768)  // google/gemma-3-4b-it — 32K context
+    } else if lower.contains("llama-3.3-70b") {
+        Some(65_536)  // meta-llama/llama-3.3-70b-instruct — 65K context
+    // ── agntic.garden / self-hosted ──────────────────────────────────────────
+    } else if lower.contains("gemma-4") || lower.contains("gemma4") || lower.contains("cyankiwi") {
         Some(131_072) // gemma-4-31B: 128K context
     } else if lower.contains("qwen3.5") || lower.contains("qwen3-embedding") {
         Some(32_768) // qwen3.5:9b / qwen3-embedding:8b: 32K context
@@ -2824,17 +2843,30 @@ async fn ollama_generate_handler(
         return bad_request("prompt or messages is required").into_response();
     }
 
-    // Provider priority for generation: Ollama → brain → worker → legacy.
-    let default_model = state.runtime.runtime_config.default_generate_model().await;
+    // Provider priority for generation: Ollama → brain → worker → OpenRouter.
+    // When OpenRouter is the only configured provider, use its free-tier defaults
+    // so callers that omit the model field get a working model automatically.
+    let openrouter_only = state.openai_compat_openrouter.is_some()
+        && state.openai_compat_brain.is_none()
+        && state.openai_compat_worker.is_none()
+        && state.ollama.is_none();
+    let default_model = if openrouter_only {
+        "qwen/qwen3-coder:free".to_owned()
+    } else {
+        state.runtime.runtime_config.default_generate_model().await
+    };
     let model_id = body.model
         .as_deref()
         .unwrap_or(&default_model)
         .to_owned();
 
     // Route to the appropriate tier based on model name.
-    // Brain tier: heavy models (gemma, cyankiwi, …).
-    // Worker tier: light models (qwen3.5, phi, llama, …) or Ollama fallback.
-    let is_brain_model = model_id.to_lowercase().contains("gemma")
+    // Brain tier: heavy models (gemma, cyankiwi, qwen3-coder, …).
+    // Worker tier: light models (qwen3.5, phi, llama, gemma-3-4b, …) or Ollama fallback.
+    let is_brain_model = model_id.to_lowercase().contains("gemma-3-27b")
+        || model_id.to_lowercase().contains("qwen3-coder")
+        || model_id.to_lowercase().contains("gemma-4")
+        || model_id.to_lowercase().contains("gemma4")
         || model_id.to_lowercase().contains("cyankiwi")
         || model_id.to_lowercase().contains("brain");
 
@@ -2842,25 +2874,29 @@ async fn ollama_generate_handler(
         if let Some(ref ollama) = state.ollama {
             ollama.as_ref()
         } else if is_brain_model {
-            // Brain-tier model — prefer brain, fall back to worker.
+            // Brain-tier model — prefer brain, fall back to worker, then OpenRouter.
             if let Some(ref brain) = state.openai_compat_brain {
                 brain.as_ref()
             } else if let Some(ref worker) = state.openai_compat_worker {
                 worker.as_ref()
+            } else if let Some(ref or_) = state.openai_compat_openrouter {
+                or_.as_ref()
             } else {
                 return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
-                    "error": "Brain provider not configured — set CAIRN_BRAIN_URL"
+                    "error": "Brain provider not configured — set CAIRN_BRAIN_URL or OPENROUTER_API_KEY"
                 }))).into_response();
             }
         } else {
-            // Worker-tier model — prefer worker, fall back to brain.
+            // Worker-tier model — prefer worker, fall back to brain, then OpenRouter.
             if let Some(ref worker) = state.openai_compat_worker {
                 worker.as_ref()
             } else if let Some(ref brain) = state.openai_compat_brain {
                 brain.as_ref()
+            } else if let Some(ref or_) = state.openai_compat_openrouter {
+                or_.as_ref()
             } else {
                 return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
-                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, or CAIRN_WORKER_URL"
+                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, CAIRN_WORKER_URL, or OPENROUTER_API_KEY"
                 }))).into_response();
             }
         };
@@ -2952,7 +2988,7 @@ async fn ollama_embed_handler(
         ).into_response();
     }
 
-    // Provider priority for embedding: Ollama → worker → brain → legacy.
+    // Provider priority for embedding: Ollama → worker → brain → OpenRouter.
     let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> =
         if let Some(ref ollama) = state.ollama {
             Arc::new(OllamaEmbeddingProvider::new(ollama.host()))
@@ -2960,11 +2996,13 @@ async fn ollama_embed_handler(
             worker.clone()
         } else if let Some(ref brain) = state.openai_compat_brain {
             brain.clone()
+        } else if let Some(ref or_) = state.openai_compat_openrouter {
+            or_.clone()
         } else {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 axum::Json(serde_json::json!({
-                    "error": "No embedding provider configured — set OLLAMA_HOST, CAIRN_WORKER_URL, or CAIRN_BRAIN_URL"
+                    "error": "No embedding provider configured — set OLLAMA_HOST, CAIRN_WORKER_URL, CAIRN_BRAIN_URL, or OPENROUTER_API_KEY"
                 })),
             ).into_response();
         };
@@ -3023,14 +3061,16 @@ async fn ollama_stream_handler(
         if let Some(ref o) = state.ollama {
             (format!("{}/v1/chat/completions", o.host()), String::new())
         } else if let Some(ref brain) = state.openai_compat_brain {
-            (format!("{}/chat/completions", brain.base_url()), String::new())
+            (format!("{}/chat/completions", brain.base_url()), brain.api_key().to_owned())
         } else if let Some(ref worker) = state.openai_compat_worker {
-            (format!("{}/chat/completions", worker.base_url()), String::new())
+            (format!("{}/chat/completions", worker.base_url()), worker.api_key().to_owned())
+        } else if let Some(ref or_) = state.openai_compat_openrouter {
+            (format!("{}/chat/completions", or_.base_url()), or_.api_key().to_owned())
         } else {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 axum::Json(serde_json::json!({
-                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, or CAIRN_WORKER_URL"
+                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, CAIRN_WORKER_URL, or OPENROUTER_API_KEY"
                 })),
             ).into_response();
         };
@@ -4038,10 +4078,25 @@ async fn main() {
             Arc::new(OpenAiCompatProvider::new(url, worker_key))
         })
     };
+    // ── OpenRouter provider (zero-cost path via OPENROUTER_API_KEY) ─────────────
+    // Brain model:  qwen/qwen3-coder:free  (262 K context)
+    // Worker model: google/gemma-3-4b-it:free  (32 K context)
+    let openai_compat_openrouter: Option<Arc<OpenAiCompatProvider>> = {
+        use cairn_runtime::RuntimeConfig;
+        RuntimeConfig::openrouter_api_key().map(|key| {
+            eprintln!("openai-compat (openrouter): configured — brain=qwen/qwen3-coder:free worker=google/gemma-3-4b-it:free");
+            Arc::new(OpenAiCompatProvider::new(
+                "https://openrouter.ai/api/v1".to_owned(),
+                key,
+            ))
+        })
+    };
+
     // Legacy alias: expose the first configured provider as `openai_compat`.
     let openai_compat: Option<Arc<OpenAiCompatProvider>> = openai_compat_brain
         .clone()
-        .or_else(|| openai_compat_worker.clone());
+        .or_else(|| openai_compat_worker.clone())
+        .or_else(|| openai_compat_openrouter.clone());
 
     // ── Wire brain provider into lib_state for the orchestrate endpoint ──────
     // Priority: brain → worker → Ollama.  The orchestrate handler reads
@@ -4052,6 +4107,7 @@ async fn main() {
         let brain: Option<Arc<dyn GenerationProvider>> =
             openai_compat_brain.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>)
             .or_else(|| openai_compat_worker.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>))
+            .or_else(|| openai_compat_openrouter.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>))
             .or_else(|| ollama.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>));
         if let Some(b) = brain {
             let lib_mut = Arc::get_mut(&mut lib_state)
@@ -4089,6 +4145,7 @@ async fn main() {
         ollama,
         openai_compat_brain,
         openai_compat_worker,
+        openai_compat_openrouter,
         openai_compat,
         metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
@@ -4653,6 +4710,7 @@ mod tests {
                 ollama: None,
                 openai_compat_brain: None,
                 openai_compat_worker: None,
+                openai_compat_openrouter: None,
                 openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
@@ -6227,6 +6285,7 @@ mod tests {
             ollama: None,
             openai_compat_brain: None,
                 openai_compat_worker: None,
+                openai_compat_openrouter: None,
                 openai_compat: None,
             metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
@@ -6783,6 +6842,7 @@ mod run_events_tests {
                 ollama: None,
                 openai_compat_brain: None,
                 openai_compat_worker: None,
+                openai_compat_openrouter: None,
                 openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
@@ -6979,6 +7039,7 @@ mod tool_invocations_tests {
                 ollama: None,
                 openai_compat_brain: None,
                 openai_compat_worker: None,
+                openai_compat_openrouter: None,
                 openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
@@ -7204,6 +7265,7 @@ mod provider_health_tests {
                 ollama: None,
                 openai_compat_brain: None,
                 openai_compat_worker: None,
+                openai_compat_openrouter: None,
                 openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),

@@ -129,6 +129,16 @@ impl RuntimeConfig {
         .await
     }
 
+    /// API key for OpenRouter (https://openrouter.ai).
+    ///
+    /// Returns `None` when `OPENROUTER_API_KEY` is not set, which is the signal
+    /// to skip OpenRouter provider construction at startup.
+    ///
+    /// Not hot-reloadable — process restart required to pick up a new key.
+    pub fn openrouter_api_key() -> Option<String> {
+        std::env::var("OPENROUTER_API_KEY").ok().filter(|k| !k.is_empty())
+    }
+
     /// Default model for SSE token-streaming.
     ///
     /// Key: `stream_model` · Env: `CAIRN_DEFAULT_STREAM_MODEL` · Default: `qwen3.5:9b`
