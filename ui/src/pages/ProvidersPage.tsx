@@ -102,19 +102,69 @@ function StatCard({ label, value, sub, accent = "default" }: {
 // ── Model settings popover ────────────────────────────────────────────────────
 
 function ModelSettingsRow({ connectionId, modelId }: { connectionId: string; modelId: string }) {
-  const toast = useToast();
+  const toast       = useToast();
   const [open, setOpen] = useState(false);
-  const [maxTokens, setMaxTokens] = useState("");
-  const [temperature, setTemperature] = useState("");
-  const [thinking, setThinking] = useState(false);
-  const [saving, setSaving] = useState(false);
 
+  // ── Field state ───────────────────────────────────────────────────────────
+  const [contextWindow,   setContextWindow]   = useState("");
+  const [maxOutputTokens, setMaxOutputTokens] = useState("");
+  const [temperature,     setTemperature]     = useState("");
+  const [thinking,        setThinking]        = useState(false);
+  const [saving,          setSaving]          = useState(false);
+  const [loaded,          setLoaded]          = useState(false);
+
+  // ── Load stored values once when the popover opens ────────────────────────
+  const base = `model:${modelId}`;
+  const loadDefaults = async () => {
+    if (loaded) return;
+    setLoaded(true);
+    const keys = ["context_window", "max_output_tokens", "temperature", "thinking_mode"] as const;
+    const results = await Promise.allSettled(
+      keys.map(k => defaultApi.resolveDefaultSetting(`${base}:${k}`))
+    );
+    const [ctx, out, temp, think] = results;
+    if (ctx.status === "fulfilled"  && ctx.value)   setContextWindow(String(ctx.value.value));
+    if (out.status === "fulfilled"  && out.value)   setMaxOutputTokens(String(out.value.value));
+    if (temp.status === "fulfilled" && temp.value)  setTemperature(String(temp.value.value));
+    if (think.status === "fulfilled" && think.value) setThinking(think.value.value === true || think.value.value === "true");
+  };
+
+  const handleOpen = () => {
+    setOpen(v => {
+      if (!v) void loadDefaults();
+      return !v;
+    });
+  };
+
+  // ── Auto-fill max_output_tokens from context_window ───────────────────────
+  const ctxNum = parseInt(contextWindow, 10) || 0;
+  const outNum = parseInt(maxOutputTokens, 10) || (ctxNum > 0 ? Math.round(ctxNum / 4) : 0);
+
+  const handleCtxChange = (v: string) => {
+    setContextWindow(v);
+    const n = parseInt(v, 10);
+    if (!isNaN(n) && n > 0 && !maxOutputTokens) {
+      setMaxOutputTokens(String(Math.round(n / 4)));
+    }
+  };
+
+  // ── Budget bar computation ────────────────────────────────────────────────
+  const SYS_ESTIMATE = 500; // rough system-prompt overhead in tokens
+  const inputBudget  = ctxNum > 0 ? Math.max(0, ctxNum - outNum - SYS_ESTIMATE) : 0;
+
+  const sysPct   = ctxNum > 0 ? (SYS_ESTIMATE / ctxNum) * 100 : 0;
+  const outPct   = ctxNum > 0 ? (outNum        / ctxNum) * 100 : 0;
+  const inPct    = ctxNum > 0 ? (inputBudget   / ctxNum) * 100 : 0;
+
+  const fmtK = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
+
+  // ── Save ─────────────────────────────────────────────────────────────────
   const save = async () => {
     setSaving(true);
     const writes: Promise<unknown>[] = [];
-    const base = `model:${modelId}`;
-    if (maxTokens.trim())  writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:max_tokens`, Number(maxTokens)));
-    if (temperature.trim()) writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:temperature`, Number(temperature)));
+    if (contextWindow.trim())   writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:context_window`,   parseInt(contextWindow, 10)));
+    if (maxOutputTokens.trim()) writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:max_output_tokens`, parseInt(maxOutputTokens, 10)));
+    if (temperature.trim())     writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:temperature`,       parseFloat(temperature)));
     writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:thinking_mode`, thinking));
     try {
       await Promise.all(writes);
@@ -127,71 +177,152 @@ function ModelSettingsRow({ connectionId, modelId }: { connectionId: string; mod
     }
   };
 
-  // Suppress unused warning — connectionId used for future keying
-  void connectionId;
+  void connectionId; // used for future connection-scoped keying
 
   return (
     <div className="relative">
       <button
-        onClick={() => setOpen(v => !v)}
+        onClick={handleOpen}
         className="flex items-center gap-1 text-zinc-600 hover:text-zinc-400 transition-colors px-1.5 py-0.5 rounded"
         title="Model settings"
       >
         <Settings size={11} />
         <span className="text-[10px]">Settings</span>
       </button>
+
       {open && (
-        <div className="absolute right-0 top-6 z-50 w-60 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-3 space-y-3">
+        <div className="absolute right-0 top-6 z-50 w-80 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-4 space-y-4">
+          {/* Header */}
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-zinc-300 truncate max-w-[180px]" title={modelId}>{modelId}</span>
-            <button onClick={() => setOpen(false)} className="text-zinc-600 hover:text-zinc-400"><X size={12} /></button>
+            <span className="text-[12px] font-medium text-zinc-200 truncate max-w-[220px]" title={modelId}>
+              {modelId}
+            </span>
+            <button onClick={() => setOpen(false)} className="text-zinc-600 hover:text-zinc-400">
+              <X size={13} />
+            </button>
           </div>
 
+          {/* Context window */}
           <label className="block">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Max tokens</span>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Context window (tokens)</span>
+              {ctxNum > 0 && (
+                <span className="text-[10px] text-zinc-600 font-mono">{fmtK(ctxNum)}</span>
+              )}
+            </div>
             <input
-              type="number" min={1} max={128000}
-              value={maxTokens}
-              onChange={e => setMaxTokens(e.target.value)}
-              placeholder="e.g. 4096"
-              className="mt-1 w-full rounded bg-zinc-950 border border-zinc-800 px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+              type="number" min={1024} max={2_000_000} step={1024}
+              value={contextWindow}
+              onChange={e => handleCtxChange(e.target.value)}
+              placeholder="e.g. 32768 · 131072 · 200000"
+              className="w-full rounded bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
             />
           </label>
 
+          {/* Max output tokens */}
           <label className="block">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Temperature (0–2)</span>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Max output tokens</span>
+              {ctxNum > 0 && !maxOutputTokens && (
+                <span className="text-[10px] text-zinc-700 italic">default ≈ {fmtK(Math.round(ctxNum / 4))}</span>
+              )}
+            </div>
+            <input
+              type="number" min={1} max={ctxNum > 0 ? ctxNum : 128000}
+              value={maxOutputTokens}
+              onChange={e => setMaxOutputTokens(e.target.value)}
+              placeholder={ctxNum > 0 ? `e.g. ${fmtK(Math.round(ctxNum / 4))}` : "e.g. 4096"}
+              className="w-full rounded bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
+            />
+          </label>
+
+          {/* Context budget bar */}
+          {ctxNum > 0 && (
+            <div className="space-y-1.5">
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Context budget</span>
+              {/* Segmented bar */}
+              <div className="h-4 rounded overflow-hidden flex bg-zinc-950 border border-zinc-800">
+                {sysPct > 0 && (
+                  <div
+                    className="h-full bg-amber-500/70 transition-all"
+                    style={{ width: `${Math.min(sysPct, 100)}%` }}
+                    title={`System prompt ~${fmtK(SYS_ESTIMATE)} tokens`}
+                  />
+                )}
+                {inPct > 0 && (
+                  <div
+                    className="h-full bg-indigo-500/70 transition-all"
+                    style={{ width: `${Math.min(inPct, 100)}%` }}
+                    title={`Input budget ~${fmtK(inputBudget)} tokens`}
+                  />
+                )}
+                {outPct > 0 && (
+                  <div
+                    className="h-full bg-emerald-500/70 transition-all"
+                    style={{ width: `${Math.min(outPct, 100)}%` }}
+                    title={`Output budget ~${fmtK(outNum)} tokens`}
+                  />
+                )}
+              </div>
+              {/* Legend */}
+              <div className="flex items-center gap-3 text-[10px]">
+                <span className="flex items-center gap-1 text-amber-400">
+                  <span className="w-2 h-2 rounded-sm bg-amber-500/70 shrink-0" />
+                  System ~{fmtK(SYS_ESTIMATE)}
+                </span>
+                <span className="flex items-center gap-1 text-indigo-400">
+                  <span className="w-2 h-2 rounded-sm bg-indigo-500/70 shrink-0" />
+                  Input {fmtK(inputBudget)}
+                </span>
+                <span className="flex items-center gap-1 text-emerald-400">
+                  <span className="w-2 h-2 rounded-sm bg-emerald-500/70 shrink-0" />
+                  Output {fmtK(outNum)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Temperature */}
+          <label className="block">
+            <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Temperature (0\u20132)</span>
             <div className="flex items-center gap-2 mt-1">
               <input
                 type="range" min={0} max={2} step={0.05}
-                value={temperature || 0.7}
+                value={parseFloat(temperature) || 0.7}
                 onChange={e => setTemperature(e.target.value)}
                 className="flex-1 accent-indigo-500"
               />
-              <span className="text-[11px] text-zinc-400 w-8 text-right font-mono">{temperature || "0.70"}</span>
+              <span className="text-[11px] text-zinc-400 w-8 text-right font-mono">
+                {temperature ? parseFloat(temperature).toFixed(2) : "0.70"}
+              </span>
             </div>
           </label>
 
-          <label className="flex items-center gap-2 cursor-pointer">
+          {/* Thinking mode toggle */}
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-[11px] text-zinc-400">Thinking mode</span>
             <div
               onClick={() => setThinking(v => !v)}
               className={clsx(
-                "w-8 h-4 rounded-full border transition-colors relative",
+                "w-9 h-5 rounded-full border transition-colors relative shrink-0",
                 thinking ? "bg-indigo-600 border-indigo-500" : "bg-zinc-800 border-zinc-700",
               )}
             >
-              <div className={clsx("absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform",
-                thinking ? "translate-x-4" : "translate-x-0.5")} />
+              <div className={clsx(
+                "absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform shadow-sm",
+                thinking ? "translate-x-4" : "translate-x-0.5",
+              )} />
             </div>
-            <span className="text-[11px] text-zinc-400">Thinking mode</span>
           </label>
 
+          {/* Save */}
           <button
             onClick={save}
             disabled={saving}
-            className="w-full h-7 rounded bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium transition-colors flex items-center justify-center gap-1.5"
+            className="w-full h-8 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium transition-colors flex items-center justify-center gap-1.5"
           >
             {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-            {saving ? "Saving…" : "Save defaults"}
+            {saving ? "Saving\u2026" : "Save defaults"}
           </button>
         </div>
       )}
