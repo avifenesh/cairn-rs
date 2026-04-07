@@ -36,6 +36,7 @@ struct State {
     tool_invocations: HashMap<String, ToolInvocationRecord>,
     signals: HashMap<String, cairn_domain::SignalRecord>,
     ingest_jobs: HashMap<String, cairn_domain::IngestJobRecord>,
+    scheduled_tasks: HashMap<String, cairn_domain::ScheduledTaskRecord>,
     eval_runs: HashMap<String, crate::projections::EvalRunRecord>,
     outcomes: HashMap<String, crate::projections::OutcomeRecord>,
     eval_datasets: HashMap<String, cairn_domain::EvalDataset>,
@@ -121,6 +122,7 @@ impl InMemoryStore {
                 tool_invocations: HashMap::new(),
                 signals: HashMap::new(),
                 ingest_jobs: HashMap::new(),
+                scheduled_tasks: HashMap::new(),
                 eval_runs: HashMap::new(),
                 outcomes: HashMap::new(),
                 eval_datasets: HashMap::new(),
@@ -1067,6 +1069,22 @@ impl InMemoryStore {
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
             | RuntimeEvent::UserMessageAppended(_) => {}
+            RuntimeEvent::ScheduledTaskCreated(e) => {
+                state.scheduled_tasks.insert(
+                    e.scheduled_task_id.as_str().to_owned(),
+                    cairn_domain::ScheduledTaskRecord {
+                        scheduled_task_id: e.scheduled_task_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        name: e.name.clone(),
+                        cron_expression: e.cron_expression.clone(),
+                        last_run_at: None,
+                        next_run_at: e.next_run_at,
+                        enabled: true,
+                        created_at: e.created_at,
+                        updated_at: e.created_at,
+                    },
+                );
+            }
             RuntimeEvent::RouteDecisionMade(e) => {
                 state.route_decisions.insert(
                     e.route_decision_id.as_str().to_owned(),
@@ -2121,6 +2139,52 @@ impl IngestJobReadModel for InMemoryStore {
         results.sort_by_key(|j| j.created_at);
         let results = results.into_iter().skip(offset).take(limit).collect();
         Ok(results)
+    }
+}
+
+// -- ScheduledTaskReadModel --
+
+#[async_trait]
+impl crate::projections::ScheduledTaskReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        id: &cairn_domain::ScheduledTaskId,
+    ) -> Result<Option<cairn_domain::ScheduledTaskRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.scheduled_tasks.get(id.as_str()).cloned())
+    }
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::ScheduledTaskRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<cairn_domain::ScheduledTaskRecord> = state
+            .scheduled_tasks
+            .values()
+            .filter(|t| &t.tenant_id == tenant_id)
+            .cloned()
+            .collect();
+        results.sort_by_key(|t| t.created_at);
+        Ok(results.into_iter().skip(offset).take(limit).collect())
+    }
+
+    async fn list_due(
+        &self,
+        now_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<cairn_domain::ScheduledTaskRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<cairn_domain::ScheduledTaskRecord> = state
+            .scheduled_tasks
+            .values()
+            .filter(|t| t.enabled && t.next_run_at.map_or(false, |nxt| nxt <= now_ms))
+            .cloned()
+            .collect();
+        results.sort_by_key(|t| t.next_run_at);
+        Ok(results.into_iter().take(limit).collect())
     }
 }
 

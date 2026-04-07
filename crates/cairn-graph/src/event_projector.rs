@@ -312,6 +312,7 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::RouteDecisionMade(_)
             | RuntimeEvent::ProviderCallCompleted(_)
             | RuntimeEvent::OutcomeRecorded(_)
+            | RuntimeEvent::ScheduledTaskCreated(_)
             | RuntimeEvent::ProviderBudgetSet(_)
             | RuntimeEvent::ChannelCreated(_)
             | RuntimeEvent::ChannelMessageSent(_)
@@ -399,8 +400,6 @@ impl<P: GraphProjection> EventProjector<P> {
                 }
             }
 
-            // OutcomeRecorded: feedback signal — no graph projection needed.
-            RuntimeEvent::OutcomeRecorded(_) => {}
         }
 
         Ok((nodes, edges))

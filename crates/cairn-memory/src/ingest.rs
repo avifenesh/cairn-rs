@@ -52,6 +52,17 @@ pub struct ChunkRecord {
     /// Contains persons, organizations, and locations in a flat deduplicated list.
     #[serde(default)]
     pub entities: Vec<String>,
+    /// The embedding model used to produce `embedding`.
+    ///
+    /// Stored at ingest time by the pipeline. Used by `re_embed_all` to detect
+    /// chunks whose embeddings are stale because the model changed (Go PR #1223).
+    #[serde(default)]
+    pub embedding_model_id: Option<String>,
+    /// Set to `true` by `re_embed_all` when the embedding model changes.
+    ///
+    /// Cleared once the chunk is re-embedded with the new model.
+    #[serde(default)]
+    pub needs_reembed: bool,
 }
 
 /// Request to ingest a document into the owned retrieval pipeline.

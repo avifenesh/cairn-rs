@@ -47,6 +47,11 @@ pub struct InMemoryDocumentStore {
     docs: Mutex<HashMap<String, (IngestStatus, ProjectKey, SourceType)>>,
     chunks: Mutex<Vec<ChunkRecord>>,
     schedules: Mutex<HashMap<String, RefreshSchedule>>,
+    /// Tracks the last embedding model used across all chunks.
+    ///
+    /// Used as the sentinel for detecting when the model changes and
+    /// all accepted memories need re-embedding (Go PR #1223).
+    last_embedding_model_id: Mutex<Option<String>>,
 }
 
 impl InMemoryDocumentStore {
@@ -55,7 +60,58 @@ impl InMemoryDocumentStore {
             docs: Mutex::new(HashMap::new()),
             chunks: Mutex::new(Vec::new()),
             schedules: Mutex::new(HashMap::new()),
+            last_embedding_model_id: Mutex::new(None),
         }
+    }
+
+    /// Return the embedding model last used to embed chunks in this store.
+    ///
+    /// `None` when no chunks have been embedded yet.
+    pub fn last_embedding_model_id(&self) -> Option<String> {
+        self.last_embedding_model_id.lock().unwrap().clone()
+    }
+
+    /// Set the active embedding model sentinel.
+    ///
+    /// Called by the ingest pipeline after embedding a batch of chunks.
+    pub fn set_embedding_model_id(&self, model_id: impl Into<String>) {
+        *self.last_embedding_model_id.lock().unwrap() = Some(model_id.into());
+    }
+
+    /// Mark all embedded chunks for re-embedding with `new_model_id`.
+    ///
+    /// Ported from Go PR #1223 (`ReembedAll`): when the embedding model
+    /// changes, all accepted memories become stale. This method:
+    /// 1. Clears `embedding` on every chunk that has one.
+    /// 2. Sets `needs_reembed = true` on those chunks.
+    /// 3. Records the target model in `embedding_model_id` so the re-embed
+    ///    job knows which model to use.
+    /// 4. Updates the store sentinel to `new_model_id`.
+    ///
+    /// Returns the number of chunks marked.
+    pub fn re_embed_all(&self, new_model_id: &str) -> usize {
+        let mut chunks = self.chunks.lock().unwrap();
+        let mut count = 0;
+        for chunk in chunks.iter_mut() {
+            if chunk.embedding.is_some() {
+                chunk.embedding = None;
+                chunk.needs_reembed = true;
+                chunk.embedding_model_id = Some(new_model_id.to_owned());
+                count += 1;
+            }
+        }
+        // Update the sentinel even if no chunks existed yet, so future ingests
+        // know which model is current.
+        *self.last_embedding_model_id.lock().unwrap() = Some(new_model_id.to_owned());
+        count
+    }
+
+    /// Return the number of chunks currently flagged as needing re-embedding.
+    pub fn pending_reembed_count(&self) -> usize {
+        self.chunks.lock().unwrap()
+            .iter()
+            .filter(|c| c.needs_reembed)
+            .count()
     }
 
     /// Get all stored chunks (for retrieval queries).
@@ -1522,5 +1578,176 @@ mod tests {
             KnowledgeDocumentId::new("doc_close"),
             "closer semantic match should rank first"
         );
+    }
+
+    // ── Go PR #1223: ReembedAll — model sentinel + stale-embedding detection ──
+
+    /// Pipeline stores the embedding model ID on each chunk at ingest time.
+    #[tokio::test]
+    async fn pipeline_stores_embedding_model_id_on_chunks() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
+        let chunker = ParagraphChunker { max_chunk_size: 500 };
+        let pipeline = IngestPipeline::new(store.clone(), chunker)
+            .with_embedder(embedder)
+            .with_embedding_model_id("nomic-embed-v1.5");
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_emb_id"),
+                source_id: SourceId::new("src"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Rust is a systems programming language.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
+            })
+            .await
+            .unwrap();
+
+        let chunks = store.all_chunks();
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert_eq!(
+                chunk.embedding_model_id.as_deref(),
+                Some("nomic-embed-v1.5"),
+                "model ID must be stored alongside every embedding"
+            );
+            assert!(chunk.embedding.is_some(), "embedding must be present");
+            assert!(!chunk.needs_reembed, "fresh chunks must not be flagged for re-embedding");
+        }
+    }
+
+    /// When no model ID is configured, embedding_model_id stays None.
+    #[tokio::test]
+    async fn pipeline_without_model_id_leaves_field_none() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
+        let chunker = ParagraphChunker { max_chunk_size: 500 };
+        let pipeline = IngestPipeline::new(store.clone(), chunker)
+            .with_embedder(embedder);
+        // no with_embedding_model_id call
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_no_mid"),
+                source_id: SourceId::new("src"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "Python is a high-level language.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
+            })
+            .await
+            .unwrap();
+
+        let chunks = store.all_chunks();
+        for chunk in &chunks {
+            assert!(chunk.embedding.is_some());
+            assert!(
+                chunk.embedding_model_id.is_none(),
+                "no model ID should be stored when pipeline has none configured"
+            );
+        }
+    }
+
+    /// re_embed_all clears embeddings and flags chunks; sentinel is updated.
+    #[tokio::test]
+    async fn re_embed_all_marks_stale_chunks_and_updates_sentinel() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
+        let chunker = ParagraphChunker { max_chunk_size: 200 };
+        let pipeline = IngestPipeline::new(store.clone(), chunker)
+            .with_embedder(embedder)
+            .with_embedding_model_id("nomic-embed-v1");
+
+        // Ingest two documents so we have multiple embedded chunks.
+        for (i, content) in [
+            "Rust ownership model provides memory safety without GC.",
+            "Python uses reference counting and a garbage collector.",
+        ].iter().enumerate() {
+            pipeline
+                .submit(IngestRequest {
+                    document_id: KnowledgeDocumentId::new(format!("doc_reemb_{i}")),
+                    source_id: SourceId::new("src"),
+                    source_type: SourceType::PlainText,
+                    project: ProjectKey::new("t", "w", "p"),
+                    content: content.to_string(),
+                    import_id: None,
+                    corpus_id: None,
+                    bundle_source_id: None,
+                    tags: vec![],
+                })
+                .await
+                .unwrap();
+        }
+
+        let before_chunks = store.all_chunks();
+        let embedded_count = before_chunks.iter().filter(|c| c.embedding.is_some()).count();
+        assert!(embedded_count > 0, "chunks must have embeddings before re_embed_all");
+
+        // Simulate model upgrade.
+        let marked = store.re_embed_all("nomic-embed-v2");
+
+        assert_eq!(marked, embedded_count, "re_embed_all must mark exactly the embedded chunks");
+        assert_eq!(
+            store.last_embedding_model_id().as_deref(),
+            Some("nomic-embed-v2"),
+            "sentinel must be updated to the new model"
+        );
+        assert_eq!(
+            store.pending_reembed_count(),
+            embedded_count,
+            "all previously embedded chunks must be pending re-embedding"
+        );
+
+        let after_chunks = store.all_chunks();
+        for chunk in &after_chunks {
+            if chunk.needs_reembed {
+                assert!(
+                    chunk.embedding.is_none(),
+                    "embedding must be cleared on re-embed flagged chunks"
+                );
+                assert_eq!(
+                    chunk.embedding_model_id.as_deref(),
+                    Some("nomic-embed-v2"),
+                    "target model must be recorded on flagged chunks"
+                );
+            }
+        }
+    }
+
+    /// Chunks without embeddings are not affected by re_embed_all.
+    #[tokio::test]
+    async fn re_embed_all_skips_unembedded_chunks() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        // Use a no-op embedder (default) — chunks get no embeddings.
+        let chunker = ParagraphChunker { max_chunk_size: 200 };
+        let pipeline = IngestPipeline::new(store.clone(), chunker);
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_nonemb"),
+                source_id: SourceId::new("src"),
+                source_type: SourceType::PlainText,
+                project: ProjectKey::new("t", "w", "p"),
+                content: "No embedder configured — chunks stay unembedded.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
+            })
+            .await
+            .unwrap();
+
+        let marked = store.re_embed_all("new-model");
+        assert_eq!(marked, 0, "no chunks should be marked when none have embeddings");
+        assert_eq!(store.pending_reembed_count(), 0);
+        // Sentinel still updated so future ingests use the new model.
+        assert_eq!(store.last_embedding_model_id().as_deref(), Some("new-model"));
     }
 }

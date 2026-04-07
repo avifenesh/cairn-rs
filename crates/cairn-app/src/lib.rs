@@ -5266,6 +5266,7 @@ fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::SoulPatchApplied(_) => "soul_patch_applied",
         RuntimeEvent::SpendAlertTriggered(_) => "spend_alert_triggered",
         RuntimeEvent::OutcomeRecorded(_) => "outcome_recorded",
+        RuntimeEvent::ScheduledTaskCreated(_) => "scheduled_task_created",
     }
 }
 
@@ -5667,7 +5668,8 @@ fn event_message(event: &RuntimeEvent) -> String {
             | RuntimeEvent::SoulPatchProposed(_)
             | RuntimeEvent::SoulPatchApplied(_)
             | RuntimeEvent::SpendAlertTriggered(_)
-            | RuntimeEvent::OutcomeRecorded(_) => "unknown".to_string(),
+            | RuntimeEvent::OutcomeRecorded(_)
+            | RuntimeEvent::ScheduledTaskCreated(_) => "unknown".to_string(),
     }
 }
 

@@ -2,8 +2,8 @@ use crate::errors::RuntimeEntityRef;
 use crate::ids::{
     ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, OutcomeId,
     PromptAssetId, PromptReleaseId, PromptVersionId, ProviderBindingId, ProviderCallId,
-    ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, SessionId,
-    SignalId, TaskId, TenantId, ToolInvocationId, WorkspaceId,
+    ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId,
+    ScheduledTaskId, SessionId, SignalId, TaskId, TenantId, ToolInvocationId, WorkspaceId,
 };
 use crate::lifecycle::{
     CheckpointDisposition, FailureClass, PauseReason, ResumeTrigger, RunState, SessionState,
@@ -206,6 +206,8 @@ pub enum RuntimeEvent {
     ToolInvocationProgressUpdated(ToolInvocationProgressUpdated),
     /// Go PR #1222: evaluator–optimizer feedback loop.
     OutcomeRecorded(OutcomeRecorded),
+    /// Go PR #1229: scheduled task registration.
+    ScheduledTaskCreated(ScheduledTaskCreated),
 }
 
 impl RuntimeEvent {
@@ -322,7 +324,8 @@ impl RuntimeEvent {
             | RuntimeEvent::TaskDependencyResolved(_)
             | RuntimeEvent::TaskLeaseExpired(_)
             | RuntimeEvent::TaskPriorityChanged(_)
-            | RuntimeEvent::ToolInvocationProgressUpdated(_) => {
+            | RuntimeEvent::ToolInvocationProgressUpdated(_)
+            | RuntimeEvent::ScheduledTaskCreated(_) => {
                 // These events are tenant-scoped rather than project-scoped.
                 // Return a static placeholder key.
                 static SYSTEM_KEY: std::sync::OnceLock<crate::tenancy::ProjectKey> = std::sync::OnceLock::new();
@@ -528,7 +531,8 @@ impl RuntimeEvent {
             | RuntimeEvent::TaskDependencyResolved(_)
             | RuntimeEvent::TaskLeaseExpired(_)
             | RuntimeEvent::TaskPriorityChanged(_)
-            | RuntimeEvent::ToolInvocationProgressUpdated(_) => None,
+            | RuntimeEvent::ToolInvocationProgressUpdated(_)
+            | RuntimeEvent::ScheduledTaskCreated(_) => None,
         }
     }
 }
@@ -894,6 +898,17 @@ pub struct OutcomeRecorded {
 // Manual Eq: f64 doesn't impl Eq, but we need Eq for RuntimeEvent.
 // Confidence is a display-only metric; bit-exact equality is acceptable.
 impl Eq for OutcomeRecorded {}
+
+/// A tenant-scoped scheduled task was registered (Go PR #1229).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledTaskCreated {
+    pub tenant_id: TenantId,
+    pub scheduled_task_id: ScheduledTaskId,
+    pub name: String,
+    pub cron_expression: String,
+    pub next_run_at: Option<u64>,
+    pub created_at: u64,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptAssetCreated {

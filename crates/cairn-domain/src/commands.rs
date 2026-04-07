@@ -1,8 +1,8 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
     ApprovalId, CheckpointId, CommandId, EvalRunId, IngestJobId, MailboxMessageId, OutcomeId,
-    PromptAssetId, PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, TenantId,
-    ToolInvocationId, WorkspaceId,
+    PromptAssetId, PromptReleaseId, PromptVersionId, RunId, ScheduledTaskId, SessionId, SignalId,
+    TaskId, TenantId, ToolInvocationId, WorkspaceId,
 };
 use crate::lifecycle::{FailureClass, PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget};
 use crate::policy::{ApprovalDecision, ExecutionClass};
@@ -116,6 +116,7 @@ pub enum RuntimeCommand {
     CreateTenant(CreateTenant),
     CreateWorkspace(CreateWorkspace),
     CreateProject(CreateProject),
+    CreateScheduledTask(CreateScheduledTask),
 }
 
 impl RuntimeCommand {
@@ -160,6 +161,7 @@ impl RuntimeCommand {
             RuntimeCommand::CreateTenant(command) => &command.project,
             RuntimeCommand::CreateWorkspace(command) => &command.project,
             RuntimeCommand::CreateProject(command) => &command.project,
+            RuntimeCommand::CreateScheduledTask(command) => &command.project,
         }
     }
 
@@ -297,6 +299,7 @@ impl RuntimeCommand {
             RuntimeCommand::CreateTenant(_) => None,
             RuntimeCommand::CreateWorkspace(_) => None,
             RuntimeCommand::CreateProject(_) => None,
+            RuntimeCommand::CreateScheduledTask(_) => None,
         }
     }
 }
@@ -616,6 +619,18 @@ pub struct CreateWorkspace {
 pub struct CreateProject {
     pub project: ProjectKey,
     pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateScheduledTask {
+    pub project: ProjectKey,
+    pub scheduled_task_id: ScheduledTaskId,
+    pub tenant_id: TenantId,
+    pub name: String,
+    pub cron_expression: String,
+    /// When this task should first fire (Unix ms). `None` means unscheduled
+    /// until a cron evaluator computes it.
+    pub next_run_at: Option<u64>,
 }
 
 #[cfg(test)]

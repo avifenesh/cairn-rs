@@ -223,6 +223,8 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
             embedding: None,
             content_hash: None,
             entities: vec![],
+            needs_reembed: false,
+            embedding_model_id: None,
         };
 
         self.store

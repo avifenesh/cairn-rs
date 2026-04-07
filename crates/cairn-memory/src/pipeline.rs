@@ -244,6 +244,8 @@ fn make_chunk(
         embedding: None,
         content_hash: Some(content_hash),
         entities: Vec::new(),
+        embedding_model_id: None,
+        needs_reembed: false,
     }
 }
 
@@ -553,6 +555,11 @@ pub struct IngestPipeline<S: DocumentStore, C: Chunker> {
     chunker: C,
     embedder: Arc<dyn EmbeddingProvider>,
     extractor: Option<Arc<dyn EntityExtractor>>,
+    /// Logical ID of the embedding model in use.
+    ///
+    /// Stored on each `ChunkRecord::embedding_model_id` so callers can
+    /// detect when the model has changed and trigger `re_embed_all`.
+    embedding_model_id: Option<String>,
 }
 
 impl<S: DocumentStore, C: Chunker> IngestPipeline<S, C> {
@@ -562,6 +569,7 @@ impl<S: DocumentStore, C: Chunker> IngestPipeline<S, C> {
             chunker,
             embedder: Arc::new(NoOpEmbeddingProvider),
             extractor: None,
+            embedding_model_id: None,
         }
     }
 
@@ -569,6 +577,14 @@ impl<S: DocumentStore, C: Chunker> IngestPipeline<S, C> {
     /// embeddings for each chunk during ingest.
     pub fn with_embedder(mut self, embedder: Arc<dyn EmbeddingProvider>) -> Self {
         self.embedder = embedder;
+        self
+    }
+
+    /// Set the logical embedding model ID recorded on each embedded chunk.
+    ///
+    /// Used by `re_embed_all` to detect stale embeddings when the model changes.
+    pub fn with_embedding_model_id(mut self, model_id: impl Into<String>) -> Self {
+        self.embedding_model_id = Some(model_id.into());
         self
     }
 
@@ -692,6 +708,8 @@ impl<S: DocumentStore + 'static, C: Chunker + 'static> IngestService for IngestP
             let embedding = self.embedder.embed(&chunk.text).await?;
             if !embedding.is_empty() {
                 chunk.embedding = Some(embedding);
+                chunk.embedding_model_id = self.embedding_model_id.clone();
+                chunk.needs_reembed = false;
             }
         }
 

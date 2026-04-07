@@ -79,6 +79,7 @@ define_id!(RouteDecisionId);
 define_id!(RunId);
 define_id!(SessionId);
 define_id!(SignalId);
+define_id!(ScheduledTaskId);
 define_id!(SourceId);
 define_id!(TaskId);
 define_id!(TenantId);

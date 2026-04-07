@@ -4,6 +4,7 @@
 //! emits events through the EventLog, and returns the updated projection.
 
 pub mod approval_impl;
+pub mod confidence_calibrator;
 pub mod approval_policy_impl;
 pub mod checkpoint_impl;
 pub mod eval_run_impl;
@@ -52,6 +53,7 @@ pub mod signal_router_impl;
 pub mod workspace_membership_impl;
 
 pub use approval_impl::ApprovalServiceImpl;
+pub use confidence_calibrator::{CalibrationAdjustment, ConfidenceCalibrator};
 pub use approval_policy_impl::ApprovalPolicyServiceImpl;
 pub use checkpoint_impl::CheckpointServiceImpl;
 pub use eval_run_impl::EvalRunServiceImpl;
