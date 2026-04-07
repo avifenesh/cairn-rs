@@ -113,26 +113,26 @@ RESULT_COUNT=$(echo "$SEARCH1" | python3 -c 'import sys,json; print(len(json.loa
 check "ownership query returns results" test "$RESULT_COUNT" -gt 0
 
 # The ownership doc should rank first for "ownership borrow checker"
-TOP_DOC=$(echo "$SEARCH1" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print(r[0]["document_id"] if r else "")' 2>/dev/null)
+TOP_DOC=$(echo "$SEARCH1" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print(r[0]["chunk"]["document_id"] if r else "")' 2>/dev/null || true)
 check "ownership doc ranks first" test "$TOP_DOC" = "doc_ownership"
 
 # Score should be positive
-TOP_SCORE=$(echo "$SEARCH1" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print("yes" if r and r[0]["score"]>0 else "no")' 2>/dev/null)
+TOP_SCORE=$(echo "$SEARCH1" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print("yes" if r and r[0]["score"]>0 else "no")' 2>/dev/null || true)
 check "top result has positive score" test "$TOP_SCORE" = "yes"
 
 # Search for concurrency — should find the concurrency doc
 SEARCH2=$(api_get "/v1/memory/search?tenant_id=$TENANT&workspace_id=$WORKSPACE&project_id=$PROJECT&query_text=concurrency+threads+Send+Sync&limit=5")
-TOP_DOC2=$(echo "$SEARCH2" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print(r[0]["document_id"] if r else "")' 2>/dev/null)
+TOP_DOC2=$(echo "$SEARCH2" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print(r[0]["chunk"]["document_id"] if r else "")' 2>/dev/null || true)
 check "concurrency doc ranks first for thread query" test "$TOP_DOC2" = "doc_concurrency"
 
 # Search for pasta — should find the cooking doc, not Rust docs
 SEARCH3=$(api_get "/v1/memory/search?tenant_id=$TENANT&workspace_id=$WORKSPACE&project_id=$PROJECT&query_text=carbonara+pasta+Italian&limit=5")
-TOP_DOC3=$(echo "$SEARCH3" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print(r[0]["document_id"] if r else "")' 2>/dev/null)
+TOP_DOC3=$(echo "$SEARCH3" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print(r[0]["chunk"]["document_id"] if r else "")' 2>/dev/null || true)
 check "pasta doc ranks first for cooking query" test "$TOP_DOC3" = "doc_pasta"
 
 # Cross-domain search: "Rust" should NOT return the pasta doc first
 SEARCH4=$(api_get "/v1/memory/search?tenant_id=$TENANT&workspace_id=$WORKSPACE&project_id=$PROJECT&query_text=Rust+memory+safety&limit=5")
-TOP_DOC4=$(echo "$SEARCH4" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print(r[0]["document_id"] if r else "")' 2>/dev/null)
+TOP_DOC4=$(echo "$SEARCH4" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("results",[]); print(r[0]["chunk"]["document_id"] if r else "")' 2>/dev/null || true)
 check "Rust query returns Rust doc (not pasta)" test "$TOP_DOC4" != "doc_pasta"
 
 # ── Step 4: Source document counts ───────────────────────────────────────────
