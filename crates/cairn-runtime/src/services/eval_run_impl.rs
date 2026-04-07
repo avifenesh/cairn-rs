@@ -54,6 +54,10 @@ where
             subject_kind,
             evaluator_type,
             started_at: now_millis(),
+            prompt_asset_id: None,
+            prompt_version_id: None,
+            prompt_release_id: None,
+            created_by: None,
         }));
 
         self.store.append(&[event]).await?;

@@ -288,6 +288,7 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
         RuntimeEvent::OutcomeRecorded(e) => {
             assert_eq!(eref, Some(RuntimeEntityRef::Run { run_id: e.run_id.clone() }));
         }
+        RuntimeEvent::ScheduledTaskCreated(_) => { assert!(eref.is_none()); }
     }
 }
 
@@ -420,6 +421,10 @@ fn all_variants() -> Vec<RuntimeEvent> {
             project: p(), eval_run_id: EvalRunId::new("er1"),
             subject_kind: "prompt_release".to_owned(),
             evaluator_type: "auto".to_owned(), started_at: ts,
+            prompt_asset_id: None,
+            prompt_version_id: None,
+            prompt_release_id: None,
+            created_by: None,
         }),
         RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
             project: p(), eval_run_id: EvalRunId::new("er1"),
@@ -433,6 +438,14 @@ fn all_variants() -> Vec<RuntimeEvent> {
             predicted_confidence: 0.85,
             actual_outcome: cairn_domain::events::ActualOutcome::Success,
             recorded_at: ts,
+        }),
+        RuntimeEvent::ScheduledTaskCreated(cairn_domain::events::ScheduledTaskCreated {
+            tenant_id: tid(),
+            scheduled_task_id: cairn_domain::ScheduledTaskId::new("sched1"),
+            name: "weekly_reflection".to_owned(),
+            cron_expression: "0 9 * * 1".to_owned(),
+            next_run_at: Some(ts + 1_000),
+            created_at: ts,
         }),
         RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
             project: p(), prompt_asset_id: PromptAssetId::new("pa1"),
@@ -811,9 +824,9 @@ fn all_variants() -> Vec<RuntimeEvent> {
 #[test]
 fn all_runtime_event_variants_covered_count() {
     let variants = all_variants();
-    // 112 variants in the RuntimeEvent enum.
-    assert_eq!(variants.len(), 112,
-        "all_variants() must construct exactly 112 RuntimeEvent instances");
+    // 113 variants in the RuntimeEvent enum.
+    assert_eq!(variants.len(), 113,
+        "all_variants() must construct exactly 113 RuntimeEvent instances");
 }
 
 #[test]

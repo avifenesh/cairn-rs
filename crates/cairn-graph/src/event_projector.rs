@@ -593,6 +593,10 @@ mod tests {
                 subject_kind: "prompt_release".to_owned(),
                 evaluator_type: "automated".to_owned(),
                 started_at: 100,
+                prompt_asset_id: None,
+                prompt_version_id: None,
+                prompt_release_id: None,
+                created_by: None,
             })),
             make_stored(RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
                 project: ProjectKey::new("t", "w", "p"),
@@ -631,6 +635,10 @@ mod tests {
                 subject_kind: "prompt_release".to_owned(),
                 evaluator_type: "automated".to_owned(),
                 started_at: 100,
+                prompt_asset_id: None,
+                prompt_version_id: None,
+                prompt_release_id: None,
+                created_by: None,
             })),
             make_stored(RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
                 project: ProjectKey::new("t", "w", "p"),

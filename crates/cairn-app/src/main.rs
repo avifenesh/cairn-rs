@@ -1910,7 +1910,7 @@ async fn db_status_handler(State(state): State<AppState>) -> Json<DbStatusRespon
             let runner = PgMigrationRunner::new(pool);
             match runner.applied().await {
                 Ok(applied) => {
-                    const TOTAL_KNOWN: usize = 19;
+                    const TOTAL_KNOWN: usize = 20;
                     let count = applied.len();
                     (Some(count), Some(count >= TOTAL_KNOWN))
                 }

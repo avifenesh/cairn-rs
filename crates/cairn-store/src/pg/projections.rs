@@ -88,8 +88,8 @@ impl PgSyncProjection {
 
             RuntimeEvent::TaskCreated(e) => {
                 sqlx::query(
-                    "INSERT INTO tasks (task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, state, version, created_at, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, 'queued', 1, $7, $7)",
+                    "INSERT INTO tasks (task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id, state, title, description, version, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, 'queued', NULL, NULL, 1, $7, $7)",
                 )
                 .bind(e.task_id.as_str())
                 .bind(e.project.tenant_id.as_str())
@@ -148,8 +148,8 @@ impl PgSyncProjection {
             RuntimeEvent::ApprovalRequested(e) => {
                 let requirement_str = enum_to_str(&e.requirement)?;
                 sqlx::query(
-                    "INSERT INTO approvals (approval_id, tenant_id, workspace_id, project_id, run_id, task_id, requirement, version, created_at, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8)",
+                    "INSERT INTO approvals (approval_id, tenant_id, workspace_id, project_id, run_id, task_id, requirement, title, description, version, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, 1, $8, $8)",
                 )
                 .bind(e.approval_id.as_str())
                 .bind(e.project.tenant_id.as_str())

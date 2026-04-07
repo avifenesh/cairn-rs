@@ -1,7 +1,7 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, OutcomeId,
-    PromptAssetId, PromptReleaseId, PromptVersionId, ProviderBindingId, ProviderCallId,
+    ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, OperatorId,
+    OutcomeId, PromptAssetId, PromptReleaseId, PromptVersionId, ProviderBindingId, ProviderCallId,
     ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId,
     ScheduledTaskId, SessionId, SignalId, TaskId, TenantId, ToolInvocationId, WorkspaceId,
 };
@@ -851,6 +851,16 @@ pub struct EvalRunStarted {
     pub subject_kind: String,
     pub evaluator_type: String,
     pub started_at: u64,
+    /// Prompt linkage — populated by the API eval surface so runs can be
+    /// reconstructed from the event log on restart.
+    #[serde(default)]
+    pub prompt_asset_id: Option<PromptAssetId>,
+    #[serde(default)]
+    pub prompt_version_id: Option<PromptVersionId>,
+    #[serde(default)]
+    pub prompt_release_id: Option<PromptReleaseId>,
+    #[serde(default)]
+    pub created_by: Option<OperatorId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

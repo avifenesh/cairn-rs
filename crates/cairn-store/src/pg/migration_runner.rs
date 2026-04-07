@@ -110,6 +110,11 @@ const MIGRATIONS: &[(u32, &str, &str)] = &[
         "create_workspace_members",
         include_str!("migrations/V019__create_workspace_members.sql"),
     ),
+    (
+        20,
+        "add_checkpoint_data_json",
+        include_str!("migrations/V020__add_checkpoint_data_json.sql"),
+    ),
 ];
 
 /// Return the compile-time migration registry as (version, name, sql) triples.
