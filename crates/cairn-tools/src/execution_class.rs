@@ -55,6 +55,8 @@ pub fn select_execution_config(manifest: &PluginManifest, mode: DeploymentMode) 
         (ExecutionClass::SupervisedProcess, DeploymentMode::Local) => {
             ExecutionClass::SupervisedProcess
         }
+        // Sensitive class: use sandboxed for isolation
+        (ExecutionClass::Sensitive, _) => ExecutionClass::SandboxedProcess,
     };
 
     let timeout_ms = manifest
@@ -73,7 +75,7 @@ pub fn select_execution_config(manifest: &PluginManifest, mode: DeploymentMode) 
                 ..Default::default()
             })
         }
-        ExecutionClass::SandboxedProcess => {
+        ExecutionClass::Sensitive | ExecutionClass::SandboxedProcess => {
             SelectedConfig::Sandboxed(SandboxedProcessConfig {
                 timeout_ms,
                 granted_permissions: manifest.permissions.permissions.clone(),

@@ -24,6 +24,8 @@ use cairn_domain::{
     providers::{GenerationProvider, ProviderBindingSettings},
 };
 
+use cairn_tools::builtins::{BuiltinToolDescriptor, BuiltinToolRegistry};
+
 use crate::context::{DecideOutput, GatherOutput, OrchestrationContext};
 use crate::decide::DecidePhase;
 use crate::error::OrchestratorError;
@@ -110,6 +112,7 @@ pub struct LlmDecidePhase {
     /// Token budget used by `PromptBuilder` to truncate context to fit the
     /// model's context window.  `None` = no truncation (legacy behaviour).
     token_budget: Option<TokenBudget>,
+    tools: Option<std::sync::Arc<BuiltinToolRegistry>>,
 }
 
 impl LlmDecidePhase {
@@ -124,6 +127,7 @@ impl LlmDecidePhase {
             },
             confidence_bias: 0.0,
             token_budget:    None,
+            tools:           None,
         }
     }
 
@@ -153,6 +157,11 @@ impl LlmDecidePhase {
     pub fn with_context_window(self, context_window_tokens: usize) -> Self {
         self.with_token_budget(TokenBudget::new(context_window_tokens))
     }
+
+    /// Attach a BuiltinToolRegistry; Core + Registered tools appear in the system prompt.
+    pub fn with_tools(mut self, registry: std::sync::Arc<BuiltinToolRegistry>) -> Self {
+        self.tools = Some(registry); self
+    }
 }
 
 #[async_trait]
@@ -162,7 +171,11 @@ impl DecidePhase for LlmDecidePhase {
         ctx: &OrchestrationContext,
         gather: &GatherOutput,
     ) -> Result<DecideOutput, OrchestratorError> {
-        let system = build_system_prompt(&ctx.agent_type);
+        let tool_descs: Vec<BuiltinToolDescriptor> = self.tools
+            .as_ref()
+            .map(|r| r.prompt_tools())
+            .unwrap_or_default();
+        let system = build_system_prompt(&ctx.agent_type, &tool_descs);
         let user   = build_user_message(ctx, gather, self.token_budget.as_ref());
         let messages = vec![
             serde_json::json!({ "role": "system", "content": system }),
@@ -235,7 +248,7 @@ impl DecidePhase for LlmDecidePhase {
 /// Uses `default_roles()` to look up the canonical system-prompt fragment for
 /// the matching role.  Falls back to a generic orchestrator prompt if the role
 /// is not registered.
-fn build_system_prompt(agent_type: &str) -> String {
+fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> String {
     let role_prompt = default_roles()
         .into_iter()
         .find(|r: &AgentRole| r.role_id == agent_type)
@@ -246,7 +259,7 @@ fn build_system_prompt(agent_type: &str) -> String {
                 .to_owned()
         });
 
-    format!(
+    let base = format!(
         "{role_prompt}\n\
          \n\
          ## Response format\n\
@@ -269,7 +282,22 @@ fn build_system_prompt(agent_type: &str) -> String {
          \n\
          Return ONLY the JSON array — no markdown fences, no prose.",
         action_types = r#""spawn_subagent"|"invoke_tool"|"create_memory"|"send_notification"|"complete_run"|"escalate_to_operator""#,
-    )
+    );
+
+    if !tools.is_empty() {
+        let lines = tools.iter()
+            .map(|t| format!("  - {}", t.prompt_line()))
+            .collect::<Vec<_>>()
+            .join("
+");
+        format!("{base}
+
+## Available tools
+For invoke_tool actions, set tool_name to one of these:
+{lines}", base = base)
+    } else {
+        base
+    }
 }
 
 /// Build the user message from `OrchestrationContext` + `GatherOutput`.

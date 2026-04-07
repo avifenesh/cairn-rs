@@ -1,6 +1,7 @@
 //! Tool invocation, permissions, plugin host integration, and execution isolation.
 
 pub mod builtin;
+pub mod builtins;
 pub mod execution_class;
 pub mod executor;
 pub mod graph_events;
@@ -22,6 +23,11 @@ pub mod supervised_process;
 pub mod transport;
 
 pub use builtin::{ToolDescriptor, ToolHost, ToolInput, ToolOutcome};
+pub use builtins::{
+    BuiltinToolDescriptor, BuiltinToolRegistry,
+    MemorySearchTool, MemoryStoreTool, ShellExecTool, WebFetchTool,
+    ToolError, ToolHandler, ToolResult, ToolTier,
+};
 pub use execution_class::{select_execution_config, SelectedConfig};
 pub use executor::{execute_builtin, ExecutionOutcome};
 pub use graph_events::{ToolInvocationNodeData, UsedToolEdgeData};
@@ -74,6 +80,11 @@ mod tests {
             }
             ExecutionClass::SandboxedProcess => {
                 let c = crate::SandboxedProcessConfig::default();
+                c.timeout_ms
+            }
+            // Sensitive uses supervised config (approval is handled at a higher layer).
+            ExecutionClass::Sensitive => {
+                let c = crate::SupervisedProcessConfig::default();
                 c.timeout_ms
             }
         };

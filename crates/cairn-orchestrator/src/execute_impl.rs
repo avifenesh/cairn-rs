@@ -31,6 +31,7 @@ use cairn_runtime::{
     services::{TaskServiceImpl, ToolInvocationService},
 };
 use cairn_store::InMemoryStore;
+use cairn_tools::builtins::BuiltinToolRegistry;
 
 use crate::context::{
     ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, LoopSignal, OrchestrationContext,
@@ -53,6 +54,10 @@ pub struct RuntimeExecutePhase {
     checkpoint_service:      Arc<dyn CheckpointService>,
     mailbox_service:         Arc<dyn MailboxService>,
     tool_invocation_service: Arc<dyn ToolInvocationService>,
+    /// Registered built-in tools (memory_search, memory_store, …).
+    /// When `Some`, tool names are looked up here before falling back to the
+    /// stub dispatcher.
+    tool_registry: Option<Arc<BuiltinToolRegistry>>,
     /// Save a checkpoint after every N-th successful tool call (1 = every call).
     checkpoint_every_n_tool_calls: u32,
 }
@@ -73,6 +78,7 @@ pub struct RuntimeExecutePhaseBuilder {
     checkpoint_service:      Option<Arc<dyn CheckpointService>>,
     mailbox_service:         Option<Arc<dyn MailboxService>>,
     tool_invocation_service: Option<Arc<dyn ToolInvocationService>>,
+    tool_registry:           Option<Arc<BuiltinToolRegistry>>,
     checkpoint_every_n_tool_calls: u32,
 }
 
@@ -95,6 +101,9 @@ impl RuntimeExecutePhaseBuilder {
     pub fn tool_invocation_service(mut self, s: Arc<dyn ToolInvocationService>) -> Self {
         self.tool_invocation_service = Some(s); self
     }
+    pub fn tool_registry(mut self, r: Arc<BuiltinToolRegistry>) -> Self {
+        self.tool_registry = Some(r); self
+    }
     pub fn checkpoint_every_n_tool_calls(mut self, n: u32) -> Self {
         self.checkpoint_every_n_tool_calls = n; self
     }
@@ -107,6 +116,7 @@ impl RuntimeExecutePhaseBuilder {
             mailbox_service:         self.mailbox_service.expect("mailbox_service required"),
             tool_invocation_service: self.tool_invocation_service
                 .expect("tool_invocation_service required"),
+            tool_registry:           self.tool_registry,
             checkpoint_every_n_tool_calls: self.checkpoint_every_n_tool_calls.max(1),
         }
     }
@@ -179,7 +189,22 @@ impl RuntimeExecutePhase {
                     .await
                     .map_err(OrchestratorError::Runtime)?;
 
-                match dispatch_tool(&tool_name, proposal.tool_args.as_ref()) {
+                // ── Tool dispatch: registry first, stub fallback ────────────
+                let tool_output_result = if let Some(ref registry) = self.tool_registry {
+                    // Look up the tool in the built-in registry.
+                    // `execute()` returns Result<ToolResult, ToolError>; map to
+                    // the flat Result<Value, String> expected below.
+                    registry.execute(
+                        &tool_name,
+                        &ctx.project,
+                        proposal.tool_args.clone().unwrap_or(serde_json::Value::Null),
+                    ).await.map(|r| r.output)
+                       .map_err(|e| e.to_string())
+                } else {
+                    dispatch_tool(&tool_name, proposal.tool_args.as_ref())
+                };
+
+                match tool_output_result {
                     Ok(output) => {
                         self.tool_invocation_service
                             .record_completed(

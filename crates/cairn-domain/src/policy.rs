@@ -32,6 +32,10 @@ pub enum ApprovalDecision {
 pub enum ExecutionClass {
     SupervisedProcess,
     SandboxedProcess,
+    /// A tool that requires operator approval before the orchestrator dispatches
+    /// it.  Any `ActionProposal` whose tool produces `ExecutionClass::Sensitive`
+    /// has `requires_approval = true` injected automatically by the execute phase.
+    Sensitive,
 }
 
 /// Stable pointer to the policy that produced a decision.
