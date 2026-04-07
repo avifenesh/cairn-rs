@@ -388,14 +388,15 @@ impl crate::ingest::DocumentVersionReadModel for InMemoryDocumentStore {
         }
 
         // Derive version metadata from the document's chunks.
+        // Chunks may be absent when the IngestPipeline deduplicated all of them
+        // (same content hash already in the project) — the document is still
+        // registered in `docs` and has a valid identity, so return a synthetic
+        // version record rather than an empty list.
         let chunks = self.chunks.lock().unwrap();
         let doc_chunks: Vec<_> = chunks
             .iter()
             .filter(|c| c.document_id == *document_id)
             .collect();
-        if doc_chunks.is_empty() {
-            return Ok(vec![]);
-        }
 
         let content_hash = doc_chunks
             .first()
