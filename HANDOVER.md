@@ -4,17 +4,17 @@
 
 A self-hostable Rust control plane for production AI agent deployments. Event-sourced architecture, multi-tenant, operator-focused. Single binary serves both the API and a React operator dashboard.
 
-## Project Stats (2026-04-06)
+## Project Stats (2026-04-07)
 
 | Metric | Count |
 |--------|-------|
-| Git commits | 407 |
-| Rust code | 168,828 lines across 13 crates |
+| Git commits | 430+ |
+| Rust code | 170,000+ lines across 14 crates |
 | TypeScript/TSX | 27,005 lines |
 | UI pages | 35 |
 | UI components | 22 |
 | UI hooks | 8 |
-| Total tests | 2,636 (0 failures) |
+| Total tests | 2,700+ (0 failures) |
 | API routes | 56+ production, 366 bootstrap |
 | RFCs implemented | 14/14 |
 
@@ -49,6 +49,7 @@ A self-hostable Rust control plane for production AI agent deployments. Event-so
 - `cairn-signal` — signal event processing
 - `cairn-channels` — notification channels
 - `cairn-plugin-proto` — JSON-RPC plugin protocol
+- `cairn-orchestrator` — GATHER → DECIDE → EXECUTE loop, GatherPhase/DecidePhase/ExecutePhase traits, OrchestratorLoop with checkpoint hook
 
 ## RFC Coverage
 
@@ -156,7 +157,47 @@ POST /v1/bundles/import               — import bundle
 GET  /v1/admin/audit-log              — audit trail
 POST /v1/admin/rebuild-projections    — replay events
 POST /v1/admin/snapshot               — export store state
+
+POST /v1/runs/:id/orchestrate         — trigger GATHER → DECIDE → EXECUTE loop
+                                        body: { goal, model_id, max_iterations, timeout_ms }
+                                        returns: { termination, summary|reason|approval_id }
+GET  /v1/settings/defaults/all        — bulk read all stored DefaultSettings
+PUT  /v1/settings/defaults/:scope/:scope_id/:key  — hot-reload any setting (model names, URLs)
 ```
+
+## Session 2026-04-07: Orchestrator + Persistence
+
+### Orchestrator (cairn-orchestrator crate — new)
+
+Complete GATHER → DECIDE → EXECUTE loop with all 7 steps wired:
+- **GatherPhase / StandardGatherPhase** — reads EventLog, RetrievalService, DefaultsReadModel, CheckpointReadModel, GraphQueryService
+- **DecidePhase / LlmDecidePhase** — calls brain LLM (agntic.garden), parses structured JSON proposals, applies confidence calibration
+- **ExecutePhase / RuntimeExecutePhase** — dispatches InvokeTool, SpawnSubagent, CompleteRun, EscalateToOperator, SendNotification, CreateMemory through real runtime services
+- **OrchestratorLoop** — 7-step body with timeout, approval gate, checkpoint hook, step summaries, tracing
+- **POST /v1/runs/:id/orchestrate** — wired with real services (StubExecutePhase removed)
+
+### Persistence
+
+- **SQLite + Postgres dual-write** — `InMemoryStore.set_secondary_log()` covers all 109 `store.append()` call sites; startup replay warms InMemoryStore from event log
+- **V020 migration registered** — `checkpoints.data_json` column now created
+- **Org hierarchy projections** — `TenantCreated/WorkspaceCreated/ProjectCreated` write to SQL tables
+
+### Config + Settings
+
+- **RuntimeConfig** — hot-reloadable model defaults: `CAIRN_BRAIN_URL`, `CAIRN_WORKER_URL`, `CAIRN_DEFAULT_GENERATE_MODEL`, etc. read from DefaultsService first, then env vars, then hardcoded defaults
+- **GET /v1/settings/defaults/all** — bulk read endpoint for SettingsPage
+- **Split inference API** — brain (heavy generation) / worker (everyday + embeddings)
+
+### Outcome tracking + confidence calibration
+
+- **OutcomeRecord** + **OutcomeReadModel** — evaluator-optimizer feedback loop (Go PR #1222)
+- **ConfidenceCalibrator** — 7-day window, per-agent-type adjustment
+
+### Other
+
+- **Provider routing safety tests** — 5 tests covering Go PR #1237-1240 patterns
+- **ReembedAll** — `InMemoryDocumentStore.re_embed_all()` + `embedding_model_id` on ChunkRecord
+- **Dead code cleanup** — 1715 lines removed from cairn-app/main.rs (68 warnings → 0)
 
 ## Session 2026-04-06: Quality Hardening
 
@@ -175,13 +216,13 @@ Final per-crate sweep: **2,636 tests passed, 0 failed, 7 ignored** across all 12
 
 ## What's Next
 
-1. **Real agent workloads** — connect actual AI agents, run multi-step tasks through the full lifecycle
-2. **Postgres in production** — switch from InMemory to Postgres for persistence
+1. **End-to-end orchestrator validation** — run `POST /v1/runs/:id/orchestrate` with a live brain provider (CAIRN_BRAIN_URL); smoke test section 21 currently skips when provider is offline (503)
+2. **Postgres in production** — SQLite + dual-write is proven; Postgres path validated by W1; 13 of 18 projection tables have write handlers (route_decisions + provider_calls deferred)
 3. **Multi-user auth** — proper user management beyond single admin token
 4. **Plugin ecosystem** — build and connect real plugins
 5. **Horizontal scaling** — test Worker-only + API-only deployment roles
-6. **Monitoring** — connect to Grafana/Prometheus via the /v1/metrics/prometheus endpoint
-7. **Load testing** — stress test with concurrent agent sessions
+6. **Load testing** — stress test with concurrent agent sessions + orchestrator loops
+7. **Monitoring** — connect to Grafana/Prometheus via /v1/metrics/prometheus
 
 ## Repository
 
