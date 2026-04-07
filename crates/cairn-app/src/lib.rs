@@ -543,6 +543,50 @@ impl AppMetrics {
     }
 }
 
+// ── OperatorTokenStore ────────────────────────────────────────────────────────
+
+/// Metadata for one operator API token.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct OperatorTokenRecord {
+    /// Opaque token identifier (e.g. `tok_<uuid>`). Used as the delete key.
+    pub token_id: String,
+    pub operator_id: String,
+    pub tenant_id: String,
+    /// Human-readable label.
+    pub name: String,
+    /// Unix-ms creation timestamp.
+    pub created_at: u64,
+    /// Optional expiry (Unix ms). `None` = never expires.
+    pub expires_at: Option<u64>,
+}
+
+/// Per-operator API token store — metadata + raw-token lookup for revocation.
+#[derive(Debug, Default)]
+pub struct OperatorTokenStore {
+    inner: std::sync::RwLock<std::collections::HashMap<String, (String, OperatorTokenRecord)>>,
+}
+
+impl OperatorTokenStore {
+    pub fn new() -> Self { Self::default() }
+
+    pub fn insert(&self, raw_token: String, record: OperatorTokenRecord) {
+        self.inner.write().unwrap().insert(record.token_id.clone(), (raw_token, record));
+    }
+
+    /// Raw token string for revocation — not exposed via API.
+    pub fn raw_token(&self, token_id: &str) -> Option<String> {
+        self.inner.read().unwrap().get(token_id).map(|(t, _)| t.clone())
+    }
+
+    pub fn remove(&self, token_id: &str) -> bool {
+        self.inner.write().unwrap().remove(token_id).is_some()
+    }
+
+    pub fn list(&self) -> Vec<OperatorTokenRecord> {
+        self.inner.read().unwrap().values().map(|(_, r)| r.clone()).collect()
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: BootstrapConfig,
@@ -575,6 +619,9 @@ pub struct AppState {
     pub mailbox_messages: Arc<Mutex<HashMap<String, AppMailboxMessage>>>,
     pub templates: Arc<StarterTemplateRegistry>,
     pub service_tokens: Arc<ServiceTokenRegistry>,
+    /// Per-operator API token metadata store (token_id → record + raw token).
+    /// Separate from `service_tokens` which only holds the auth lookup map.
+    pub operator_tokens: Arc<OperatorTokenStore>,
     pub plugin_registry: Arc<InMemoryPluginRegistry>,
     pub plugin_host: Arc<Mutex<StdioPluginHost>>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
@@ -796,6 +843,7 @@ impl AppState {
             mailbox_messages,
             templates: Arc::new(StarterTemplateRegistry::v1_defaults()),
             service_tokens,
+            operator_tokens: Arc::new(OperatorTokenStore::new()),
             plugin_registry,
             plugin_host,
             rate_limits,
@@ -3744,6 +3792,8 @@ impl AppBootstrap {
             .route("/metrics", get(metrics_handler))
             .route("/version", get(version_handler))
             .route("/v1/dashboard/activity", get(dashboard_activity_handler))
+            .route("/v1/agent-templates", get(list_agent_templates_handler))
+            .route("/v1/agent-templates/:id/instantiate", post(instantiate_agent_template_handler))
             .route(
                 "/v1/sessions",
                 get(list_sessions_handler).post(create_session_handler),
@@ -4028,6 +4078,9 @@ impl AppBootstrap {
             .route("/v1/providers/connections/:id/models", get(list_provider_models_handler).post(register_provider_model_handler))
             .route("/v1/providers/connections/:id/health-schedule", get(get_provider_health_schedule_handler).post(set_provider_health_schedule_handler))
             .route("/v1/providers/connections/:id/retry-policy", put(set_provider_retry_policy_handler))
+            // ── Auth tokens ───────────────────────────────────────────────────────────
+            .route("/v1/auth/tokens", post(create_auth_token_handler).get(list_auth_tokens_handler))
+            .route("/v1/auth/tokens/:id", delete(delete_auth_token_handler))
             // ── Events + Stats ───────────────────────────────────────────────────────
             .route("/v1/events/recent", get(recent_events_handler))
             .route("/v1/stats", get(stats_handler))
@@ -5824,6 +5877,154 @@ async fn get_onboarding_status_handler(
         query.template_id.as_deref(),
     );
     (StatusCode::OK, Json(checklist))
+}
+
+// ── Agent templates ───────────────────────────────────────────────────────────
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct AgentTemplate {
+    id:              String,
+    name:            String,
+    description:     String,
+    icon:            String,
+    default_prompt:  String,
+    default_tools:   Vec<String>,
+    approval_policy: String,
+    agent_role:      String,
+}
+
+fn agent_template_catalog() -> Vec<AgentTemplate> {
+    vec![
+        AgentTemplate {
+            id: "knowledge-assistant".to_owned(),
+            name: "Knowledge Assistant".to_owned(),
+            description: "Retrieval-aware agent that searches memory, stores new knowledge, \
+                          and fetches web pages to answer questions with cited sources.".to_owned(),
+            icon: "BookOpen".to_owned(),
+            default_prompt: "You are a helpful knowledge assistant. Search memory for relevant \
+                             information before answering. Store any new facts you discover. \
+                             Always cite your sources.".to_owned(),
+            default_tools: vec![
+                "memory_search".to_owned(), "memory_store".to_owned(), "web_fetch".to_owned(),
+            ],
+            approval_policy: "none".to_owned(),
+            agent_role: "researcher".to_owned(),
+        },
+        AgentTemplate {
+            id: "code-reviewer".to_owned(),
+            name: "Code Reviewer".to_owned(),
+            description: "Reads files, searches for patterns, inspects git history, and \
+                          scores code quality. Requires approval before posting comments.".to_owned(),
+            icon: "Code2".to_owned(),
+            default_prompt: "You are a thorough code reviewer. Read files under review, search \
+                             for anti-patterns, inspect recent git changes, and produce a \
+                             structured review with severity ratings.".to_owned(),
+            default_tools: vec![
+                "file_read".to_owned(), "grep_search".to_owned(),
+                "git_operations".to_owned(), "eval_score".to_owned(),
+            ],
+            approval_policy: "sensitive".to_owned(),
+            agent_role: "reviewer".to_owned(),
+        },
+        AgentTemplate {
+            id: "data-analyst".to_owned(),
+            name: "Data Analyst".to_owned(),
+            description: "Fetches data from HTTP APIs, extracts fields with JSONPath, \
+                          performs calculations, and reads reference files.".to_owned(),
+            icon: "BarChart3".to_owned(),
+            default_prompt: "You are a data analyst. Fetch data from the provided endpoints, \
+                             extract relevant fields, perform calculations, and summarise \
+                             your findings clearly with numbers.".to_owned(),
+            default_tools: vec![
+                "http_request".to_owned(), "json_extract".to_owned(),
+                "calculate".to_owned(), "file_read".to_owned(),
+            ],
+            approval_policy: "none".to_owned(),
+            agent_role: "executor".to_owned(),
+        },
+    ]
+}
+
+async fn list_agent_templates_handler() -> impl IntoResponse {
+    (StatusCode::OK, Json(agent_template_catalog()))
+}
+
+#[derive(serde::Deserialize)]
+struct InstantiateTemplateRequest {
+    goal: String,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    workspace_id: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+}
+
+async fn instantiate_agent_template_handler(
+    State(state): State<Arc<AppState>>,
+    Path(template_id): Path<String>,
+    Json(body): Json<InstantiateTemplateRequest>,
+) -> impl IntoResponse {
+    let catalog = agent_template_catalog();
+    let Some(template) = catalog.iter().find(|t| t.id == template_id) else {
+        return AppApiError::new(
+            StatusCode::NOT_FOUND, "not_found",
+            format!("agent template '{template_id}' not found"),
+        ).into_response();
+    };
+
+    if body.goal.trim().is_empty() {
+        return AppApiError::new(
+            StatusCode::BAD_REQUEST, "validation_error", "goal must not be empty",
+        ).into_response();
+    }
+
+    let t_id = TenantId::new(body.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID));
+    let w_id = WorkspaceId::new(body.workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID));
+    let p_id = ProjectId::new(body.project_id.as_deref().unwrap_or(DEFAULT_PROJECT_ID));
+    let project = ProjectKey::new(t_id.as_str(), w_id.as_str(), p_id.as_str());
+
+    let suffix = &now_ms().to_string()[8..]; // last 6 digits of epoch-ms for uniqueness
+    let sess_id = SessionId::new(format!("sess_tmpl_{}_{}", template.id, suffix));
+    let run_id  = RunId::new(format!("run_tmpl_{}_{}", template.id, suffix));
+
+    // Create session
+    let session = match state.runtime.sessions.create(&project, sess_id.clone()).await {
+        Ok(s) => s,
+        Err(e) => return AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR, "session_error", e.to_string(),
+        ).into_response(),
+    };
+
+    // Create run (use plain start; agent_role stored via defaults below)
+    let run = match state.runtime.runs.start(&project, &sess_id, run_id, None).await {
+        Ok(r) => r,
+        Err(e) => return AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR, "run_error", e.to_string(),
+        ).into_response(),
+    };
+
+    // Store goal and template config as tenant-scoped defaults for this run
+    let run_key = run.run_id.as_str().to_owned();
+    let _ = state.runtime.defaults.set(
+        cairn_domain::tenancy::Scope::Tenant, t_id.as_str().to_owned(),
+        format!("run:{run_key}:goal"), serde_json::json!(body.goal.trim()),
+    ).await;
+    let _ = state.runtime.defaults.set(
+        cairn_domain::tenancy::Scope::Tenant, t_id.as_str().to_owned(),
+        format!("run:{run_key}:agent_role"), serde_json::json!(template.agent_role),
+    ).await;
+
+    (StatusCode::CREATED, Json(serde_json::json!({
+        "template_id":    template.id,
+        "template_name":  template.name,
+        "session_id":     session.session_id.as_str(),
+        "run_id":         run.run_id.as_str(),
+        "goal":           body.goal.trim(),
+        "default_tools":  template.default_tools,
+        "agent_role":     template.agent_role,
+        "approval_policy": template.approval_policy,
+    }))).into_response()
 }
 
 async fn list_onboarding_templates_handler(
@@ -15412,6 +15613,126 @@ async fn unregister_plugin_handler(
     delete_plugin_handler(state, path).await
 }
 
+// ── Auth token handlers (/v1/auth/tokens) ─────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct CreateAuthTokenRequest {
+    operator_id: String,
+    tenant_id:   String,
+    name:        String,
+    expires_at:  Option<u64>,
+}
+
+/// `POST /v1/auth/tokens` — create an operator API token.
+/// Only the admin service account or System principal may call this.
+/// Returns the raw token once — it cannot be retrieved again.
+async fn create_auth_token_handler(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
+    Json(body): Json<CreateAuthTokenRequest>,
+) -> impl IntoResponse {
+    if !is_admin_principal(&principal) {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({
+            "error": "forbidden",
+            "detail": "only the admin token may create operator tokens"
+        }))).into_response();
+    }
+    if body.operator_id.trim().is_empty() {
+        return bad_request_response("operator_id must not be empty");
+    }
+    if body.name.trim().is_empty() {
+        return bad_request_response("name must not be empty");
+    }
+
+    let token_id  = format!("tok_{}", uuid::Uuid::new_v4().simple());
+    let raw_token = format!("sk_{}", uuid::Uuid::new_v4().simple());
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_millis() as u64;
+
+    let record = OperatorTokenRecord {
+        token_id:    token_id.clone(),
+        operator_id: body.operator_id.clone(),
+        tenant_id:   body.tenant_id.clone(),
+        name:        body.name.clone(),
+        created_at,
+        expires_at:  body.expires_at,
+    };
+
+    state.service_tokens.register(
+        raw_token.clone(),
+        AuthPrincipal::Operator {
+            operator_id: cairn_domain::ids::OperatorId::new(&body.operator_id),
+            tenant: cairn_domain::tenancy::TenantKey::new(
+                cairn_domain::TenantId::new(&body.tenant_id),
+            ),
+        },
+    );
+    state.operator_tokens.insert(raw_token.clone(), record);
+
+    (StatusCode::CREATED, Json(serde_json::json!({
+        "token":       raw_token,
+        "token_id":    token_id,
+        "operator_id": body.operator_id,
+        "tenant_id":   body.tenant_id,
+        "name":        body.name,
+        "created_at":  created_at,
+        "expires_at":  body.expires_at,
+    }))).into_response()
+}
+
+/// `GET /v1/auth/tokens` — list operator tokens (raw token redacted).
+async fn list_auth_tokens_handler(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
+) -> impl IntoResponse {
+    if !is_admin_principal(&principal) {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "forbidden" }))).into_response();
+    }
+    let tokens: Vec<serde_json::Value> = state.operator_tokens.list()
+        .into_iter()
+        .map(|r| serde_json::json!({
+            "token_id":    r.token_id,
+            "operator_id": r.operator_id,
+            "tenant_id":   r.tenant_id,
+            "name":        r.name,
+            "created_at":  r.created_at,
+            "expires_at":  r.expires_at,
+            "token":       "[redacted]",
+        }))
+        .collect();
+    let total = tokens.len();
+    Json(serde_json::json!({ "tokens": tokens, "total": total })).into_response()
+}
+
+/// `DELETE /v1/auth/tokens/:id` — revoke an operator token by token_id.
+async fn delete_auth_token_handler(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
+    Path(token_id): Path<String>,
+) -> impl IntoResponse {
+    if !is_admin_principal(&principal) {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "forbidden" }))).into_response();
+    }
+    let raw = match state.operator_tokens.raw_token(&token_id) {
+        Some(t) => t,
+        None => return (StatusCode::NOT_FOUND, Json(serde_json::json!({
+            "error": "not_found", "token_id": token_id
+        }))).into_response(),
+    };
+    state.service_tokens.revoke(&raw);
+    state.operator_tokens.remove(&token_id);
+    (StatusCode::OK, Json(serde_json::json!({ "revoked": true, "token_id": token_id }))).into_response()
+}
+
+/// `true` for the bootstrap admin service account or the System principal.
+fn is_admin_principal(principal: &AuthPrincipal) -> bool {
+    match principal {
+        AuthPrincipal::System => true,
+        AuthPrincipal::ServiceAccount { name, .. } => name == "admin",
+        AuthPrincipal::Operator { .. } => false,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -16863,6 +17184,90 @@ mod tests {
             state.evals.get(&EvalRunId::new("eval_replay_1")).is_some(),
             "eval run must be present after replay"
         );
+    }
+
+    // ── Auth token handler tests ───────────────────────────────────────────────
+
+    fn admin_principal() -> AuthPrincipal {
+        AuthPrincipal::ServiceAccount {
+            name: "admin".to_owned(),
+            tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new("default")),
+        }
+    }
+
+    fn operator_principal() -> AuthPrincipal {
+        AuthPrincipal::Operator {
+            operator_id: cairn_domain::ids::OperatorId::new("op_1"),
+            tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new("default")),
+        }
+    }
+
+    #[test]
+    fn is_admin_principal_recognises_admin_service_account() {
+        assert!(is_admin_principal(&admin_principal()));
+    }
+
+    #[test]
+    fn is_admin_principal_rejects_operator() {
+        assert!(!is_admin_principal(&operator_principal()));
+    }
+
+    #[test]
+    fn is_admin_principal_accepts_system() {
+        assert!(is_admin_principal(&AuthPrincipal::System));
+    }
+
+    #[test]
+    fn operator_token_store_insert_list_remove() {
+        let store = OperatorTokenStore::new();
+        let record = OperatorTokenRecord {
+            token_id:    "tok_1".to_owned(),
+            operator_id: "op_1".to_owned(),
+            tenant_id:   "t1".to_owned(),
+            name:        "ci-bot".to_owned(),
+            created_at:  0,
+            expires_at:  None,
+        };
+        store.insert("sk_raw".to_owned(), record);
+        assert_eq!(store.list().len(), 1);
+        assert_eq!(store.raw_token("tok_1").unwrap(), "sk_raw");
+        assert!(store.remove("tok_1"));
+        assert!(store.list().is_empty());
+    }
+
+    #[test]
+    fn token_store_raw_token_used_for_revocation() {
+        let store = OperatorTokenStore::new();
+        let record = OperatorTokenRecord {
+            token_id:    "tok_abc".to_owned(),
+            operator_id: "op_1".to_owned(),
+            tenant_id:   "t1".to_owned(),
+            name:        "deploy-bot".to_owned(),
+            created_at:  0,
+            expires_at:  None,
+        };
+        store.insert("sk_secret123".to_owned(), record);
+        assert_eq!(store.raw_token("tok_abc").unwrap(), "sk_secret123");
+        assert!(store.remove("tok_abc"));
+        assert!(store.raw_token("tok_abc").is_none());
+    }
+
+    #[test]
+    fn token_store_remove_nonexistent_returns_false() {
+        let store = OperatorTokenStore::new();
+        assert!(!store.remove("tok_ghost"));
+    }
+
+    #[test]
+    fn service_token_registry_revoke() {
+        use cairn_api::auth::ServiceTokenRegistry;
+        let reg = ServiceTokenRegistry::new();
+        reg.register("tok".to_owned(), AuthPrincipal::System);
+        assert!(reg.validate("tok").is_some());
+        assert!(reg.revoke("tok"));
+        assert!(reg.validate("tok").is_none());
+        // Second revoke is idempotent (returns false).
+        assert!(!reg.revoke("tok"));
     }
 
 

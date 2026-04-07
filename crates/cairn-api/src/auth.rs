@@ -75,6 +75,11 @@ impl ServiceTokenRegistry {
         self.tokens.read().unwrap().is_empty()
     }
 
+    /// Remove a token from the registry. Returns `true` if it existed.
+    pub fn revoke(&self, token: &str) -> bool {
+        self.tokens.write().unwrap().remove(token).is_some()
+    }
+
     /// Return all (token, principal) pairs. Used to sync registries in tests.
     pub fn all_entries(&self) -> Vec<(String, AuthPrincipal)> {
         self.tokens
