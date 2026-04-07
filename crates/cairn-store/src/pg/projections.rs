@@ -306,11 +306,6 @@ impl PgSyncProjection {
             | RuntimeEvent::IngestJobCompleted(_)
             | RuntimeEvent::EvalRunStarted(_)
             | RuntimeEvent::EvalRunCompleted(_)
-            | RuntimeEvent::TenantCreated(_)
-            | RuntimeEvent::WorkspaceCreated(_)
-            | RuntimeEvent::ProjectCreated(_)
-            | RuntimeEvent::RouteDecisionMade(_)
-            | RuntimeEvent::ProviderCallCompleted(_)
             | RuntimeEvent::OutcomeRecorded(_)
             | RuntimeEvent::ScheduledTaskCreated(_) => {}
             | RuntimeEvent::ProviderBudgetSet(_)
@@ -367,6 +362,51 @@ impl PgSyncProjection {
             | RuntimeEvent::ResourceShared(_)
             | RuntimeEvent::RoutePolicyUpdated(_) => {
                 // RoutePolicyUpdated carries only policy_id + updated_at_ms; no schema fields change.
+            }
+
+            RuntimeEvent::TenantCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO tenants (tenant_id, name, created_at, updated_at)
+                     VALUES ($1, $2, $3, $3)
+                     ON CONFLICT (tenant_id) DO NOTHING",
+                )
+                .bind(e.tenant_id.as_str())
+                .bind(&e.name)
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::WorkspaceCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO workspaces (workspace_id, tenant_id, name, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $4)
+                     ON CONFLICT (workspace_id) DO NOTHING",
+                )
+                .bind(e.workspace_id.as_str())
+                .bind(e.tenant_id.as_str())
+                .bind(&e.name)
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::ProjectCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO projects (project_id, workspace_id, tenant_id, name, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $5)
+                     ON CONFLICT (project_id) DO NOTHING",
+                )
+                .bind(e.project.project_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(&e.name)
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
             }
 
             RuntimeEvent::RoutePolicyCreated(e) => {
@@ -497,6 +537,91 @@ impl PgSyncProjection {
                 .bind(&e.to_state)
                 .bind(now)
                 .bind(e.prompt_release_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::RouteDecisionMade(e) => {
+                let operation_kind = enum_to_str(&e.operation_kind)?;
+                let final_status   = enum_to_str(&e.final_status)?;
+                let selector_ctx: Option<serde_json::Value> = None; // not carried by event
+                sqlx::query(
+                    "INSERT INTO route_decisions
+                         (route_decision_id, tenant_id, workspace_id, project_id,
+                          operation_kind, route_policy_id, terminal_route_attempt_id,
+                          selected_provider_binding_id, selected_route_attempt_id,
+                          selector_context, attempt_count, fallback_used, final_status,
+                          created_at)
+                     VALUES ($1, $2, $3, $4, $5, NULL, NULL, $6, NULL, $7, $8, $9, $10, $11)
+                     ON CONFLICT (route_decision_id) DO NOTHING",
+                )
+                .bind(e.route_decision_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(operation_kind)
+                .bind(e.selected_provider_binding_id.as_ref().map(|id| id.as_str()))
+                .bind(selector_ctx)
+                .bind(e.attempt_count as i32)
+                .bind(e.fallback_used)
+                .bind(final_status)
+                .bind(e.decided_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::ProviderCallCompleted(e) => {
+                let operation_kind = enum_to_str(&e.operation_kind)?;
+                let status         = enum_to_str(&e.status)?;
+                let error_class    = e.error_class.as_ref().map(enum_to_str).transpose()?;
+                // Derive latency from timestamps if not explicit.
+                let latency_ms: Option<i64> = e.latency_ms.map(|v| v as i64).or_else(|| {
+                    if e.started_at > 0 && e.finished_at >= e.started_at {
+                        Some((e.finished_at - e.started_at) as i64)
+                    } else {
+                        None
+                    }
+                });
+                sqlx::query(
+                    "INSERT INTO provider_calls
+                         (provider_call_id, route_decision_id, route_attempt_id,
+                          tenant_id, workspace_id, project_id,
+                          operation_kind, provider_binding_id, provider_connection_id,
+                          provider_adapter, provider_model_id,
+                          task_id, run_id, prompt_release_id, fallback_position,
+                          status, latency_ms, input_tokens, output_tokens, cost_micros,
+                          error_class, raw_error_message, retry_count, created_at)
+                     VALUES
+                         ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', $10,
+                          $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                          $20, $21, $22, $23)
+                     ON CONFLICT (provider_call_id) DO NOTHING",
+                )
+                .bind(e.provider_call_id.as_str())
+                .bind(e.route_decision_id.as_str())
+                .bind(e.route_attempt_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(operation_kind)
+                .bind(e.provider_binding_id.as_str())
+                .bind(e.provider_connection_id.as_str())
+                .bind(e.provider_model_id.as_str())
+                .bind(e.task_id.as_ref().map(|id| id.as_str()))
+                .bind(e.run_id.as_ref().map(|id| id.as_str()))
+                .bind(e.prompt_release_id.as_ref().map(|id| id.as_str()))
+                .bind(e.fallback_position as i32)
+                .bind(status)
+                .bind(latency_ms)
+                .bind(e.input_tokens.map(|v| v as i32))
+                .bind(e.output_tokens.map(|v| v as i32))
+                .bind(e.cost_micros.map(|v| v as i64))
+                .bind(error_class)
+                .bind(e.raw_error_message.as_deref())
+                .bind(e.retry_count as i32)
+                .bind(e.completed_at as i64)
                 .execute(&mut **tx)
                 .await
                 .map_err(|err| StoreError::Internal(err.to_string()))?;
