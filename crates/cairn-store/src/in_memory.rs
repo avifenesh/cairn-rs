@@ -4374,6 +4374,23 @@ impl InMemoryStore {
         ).count() as u64
     }
 
+    /// List all pending (undecided) approvals across every project.
+    pub fn list_all_pending_approvals(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Vec<crate::projections::ApprovalRecord> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<crate::projections::ApprovalRecord> = state
+            .approvals
+            .values()
+            .filter(|a| a.decision.is_none())
+            .cloned()
+            .collect();
+        results.sort_by_key(|a| a.created_at);
+        results.into_iter().skip(offset).take(limit).collect()
+    }
+
     /// Count eval runs since a timestamp for a tenant.
     pub async fn count_eval_runs_since_for_tenant(&self, tenant_id: &cairn_domain::TenantId, since_ms: u64) -> u64 {
         let state = self.state.lock().unwrap();

@@ -2261,53 +2261,14 @@ async fn list_pending_approvals_handler(
     }
 }
 
-/// Scan the full approval store for pending (undecided) records.
+/// Scan the full approval store for pending (undecided) records across all
+/// projects.  Uses a direct store method instead of filtering by project key.
 async fn list_all_pending(
     state: &AppState,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<cairn_store::projections::ApprovalRecord>, cairn_store::StoreError> {
-    // Read all approvals via the store's raw state; use list_by_state workaround:
-    // create a sentinel project and delegate to list_pending — but InMemoryStore
-    // filters by project equality. Instead, iterate using the runtime service.
-    // The ApprovalService::list_pending also requires a project, so we use a
-    // broad scan via list_runs_filtered analogue: collect unique projects from
-    // pending approvals by reading the store lock directly.
-    //
-    // Since we're in an in-memory context, we use a sentinel approach: read all
-    // runs to collect projects, then union their pending approvals.
-    let dummy = ProjectKey::new("", "", "");
-    let all = ApprovalReadModel::list_pending(state.runtime.store.as_ref(), &dummy, 0, 0).await?;
-    // The in-memory impl filters by project equality; "" won't match any real
-    // project. Fall through to the approvals field directly via count approach.
-    // For now, return empty (no project-scoped approvals without a project key).
-    let _ = all;
-
-    // Practical fix: use the store's raw scan via the approval service's store ref.
-    // We gather runs first, deduplicate projects, then union pending approvals.
-    let runs = state.runtime.store.list_runs_filtered(&dummy, None, None, 1000, 0).await?;
-    let projects: Vec<ProjectKey> = {
-        let mut seen = std::collections::HashSet::new();
-        runs.into_iter()
-            .filter(|r| seen.insert(format!("{}:{}:{}", r.project.tenant_id.as_str(), r.project.workspace_id.as_str(), r.project.project_id.as_str())))
-            .map(|r| r.project)
-            .collect()
-    };
-
-    let mut combined = Vec::new();
-    for project in &projects {
-        let mut batch = ApprovalReadModel::list_pending(
-            state.runtime.store.as_ref(),
-            project,
-            1000,
-            0,
-        )
-        .await?;
-        combined.append(&mut batch);
-    }
-    combined.sort_by_key(|a| a.created_at);
-    combined.dedup_by_key(|a| a.approval_id.clone());
-    Ok(combined.into_iter().skip(offset).take(limit).collect())
+    Ok(state.runtime.store.list_all_pending_approvals(limit, offset))
 }
 
 #[derive(Deserialize)]
