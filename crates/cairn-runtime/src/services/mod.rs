@@ -6,6 +6,7 @@
 pub mod approval_impl;
 pub mod confidence_calibrator;
 pub mod approval_policy_impl;
+pub mod orchestrator;
 pub mod checkpoint_impl;
 pub mod eval_run_impl;
 pub mod event_helpers;

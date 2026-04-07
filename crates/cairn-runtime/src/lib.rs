@@ -61,6 +61,7 @@ pub mod signal_routing;
 pub mod workspace_memberships;
 pub mod workspaces;
 pub mod runtime_config;
+pub mod context_builder;
 
 pub use approval_policies::ApprovalPolicyService;
 pub use approvals::ApprovalService;
@@ -97,6 +98,7 @@ pub use soul_guard::SoulGuard;
 pub use projects::ProjectService;
 pub use model_registry::ModelRegistry;
 pub use routing::RouteResolverService;
+pub use context_builder::{ContextBuilder, ContextBuildError, ContextBuilderInput, DefaultContextBuilder};
 pub use runtime_config::{
     RuntimeConfig,
     KEY_GENERATE_MODEL, KEY_BRAIN_MODEL, KEY_STREAM_MODEL, KEY_EMBED_MODEL,
@@ -167,6 +169,13 @@ pub use services::{
 pub use services::{
     IsolationViolation, QuotaViolation, TenantAccessPolicy, WorkspaceQuotaManager,
     WorkspaceQuotaPolicy, WorkspaceUsage, WorkspaceUsageReport,
+};
+
+/// Orchestrator LLM integration — PromptBuilder, ResponseParser, BrainLlmClient.
+/// ActionProposal and ActionType come from cairn_domain::orchestrator directly.
+pub use services::orchestrator::{
+    BrainLlmClient, ContextBundle, OrchestratorError,
+    PromptBuilder, ResponseParser, TaskSummary,
 };
 
 std::thread_local! {
