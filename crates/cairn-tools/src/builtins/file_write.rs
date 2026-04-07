@@ -58,7 +58,7 @@ impl FileWriteTool {
 impl ToolHandler for FileWriteTool {
     fn name(&self) -> &str { "file_write" }
 
-    fn tier(&self) -> ToolTier { ToolTier::Deferred }
+    fn tier(&self) -> ToolTier { ToolTier::Registered }
 
     fn description(&self) -> &str {
         "Write content to a file in the project workspace. \
@@ -313,8 +313,8 @@ mod tests {
     // ── metadata ──────────────────────────────────────────────────────────────
 
     #[test]
-    fn tier_is_deferred() {
-        assert_eq!(FileWriteTool::new("/tmp").tier(), ToolTier::Deferred);
+    fn tier_is_registered() {
+        assert_eq!(FileWriteTool::new("/tmp").tier(), ToolTier::Registered);
     }
 
     #[test]
