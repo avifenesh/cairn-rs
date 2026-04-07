@@ -310,7 +310,8 @@ impl SqliteSyncProjection {
             | RuntimeEvent::WorkspaceCreated(_)
             | RuntimeEvent::ProjectCreated(_)
             | RuntimeEvent::RouteDecisionMade(_)
-            | RuntimeEvent::ProviderCallCompleted(_) => {}
+            | RuntimeEvent::ProviderCallCompleted(_)
+            | RuntimeEvent::OutcomeRecorded(_) => {}
             | RuntimeEvent::ProviderBudgetSet(_)
             | RuntimeEvent::ChannelCreated(_)
             | RuntimeEvent::ChannelMessageSent(_)
@@ -376,7 +377,8 @@ impl SqliteSyncProjection {
             | RuntimeEvent::TaskDependencyResolved(_)
             | RuntimeEvent::TaskLeaseExpired(_)
             | RuntimeEvent::TaskPriorityChanged(_)
-            | RuntimeEvent::ToolInvocationProgressUpdated(_) => {}
+            | RuntimeEvent::ToolInvocationProgressUpdated(_)
+            | RuntimeEvent::OutcomeRecorded(_) => {}
         }
 
         Ok(())

@@ -314,7 +314,8 @@ impl PgSyncProjection {
             | RuntimeEvent::WorkspaceCreated(_)
             | RuntimeEvent::ProjectCreated(_)
             | RuntimeEvent::RouteDecisionMade(_)
-            | RuntimeEvent::ProviderCallCompleted(_) => {}
+            | RuntimeEvent::ProviderCallCompleted(_)
+            | RuntimeEvent::OutcomeRecorded(_) => {}
             | RuntimeEvent::ProviderBudgetSet(_)
             | RuntimeEvent::ChannelCreated(_)
             | RuntimeEvent::ChannelMessageSent(_)
@@ -430,7 +431,9 @@ impl PgSyncProjection {
             // RFC 005 approval policies — no durable table yet
             | RuntimeEvent::ApprovalPolicyCreated(_)
             // RFC 001 gradual rollout — state tracked via prompt_releases table
-            | RuntimeEvent::PromptRolloutStarted(_) => {}
+            | RuntimeEvent::PromptRolloutStarted(_)
+            // Outcome tracking — projected in-memory; no durable PG table yet
+            | RuntimeEvent::OutcomeRecorded(_) => {}
         }
 
         Ok(())

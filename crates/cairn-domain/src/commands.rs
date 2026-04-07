@@ -1,7 +1,7 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, CommandId, EvalRunId, IngestJobId, MailboxMessageId, PromptAssetId,
-    PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, TenantId,
+    ApprovalId, CheckpointId, CommandId, EvalRunId, IngestJobId, MailboxMessageId, OutcomeId,
+    PromptAssetId, PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId, TaskId, TenantId,
     ToolInvocationId, WorkspaceId,
 };
 use crate::lifecycle::{FailureClass, PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget};
@@ -108,6 +108,7 @@ pub enum RuntimeCommand {
     CompleteIngestJob(CompleteIngestJob),
     StartEvalRun(StartEvalRun),
     CompleteEvalRun(CompleteEvalRun),
+    RecordOutcome(RecordOutcome),
     CreatePromptAsset(CreatePromptAsset),
     CreatePromptVersion(CreatePromptVersion),
     CreatePromptRelease(CreatePromptRelease),
@@ -151,6 +152,7 @@ impl RuntimeCommand {
             RuntimeCommand::CompleteIngestJob(command) => &command.project,
             RuntimeCommand::StartEvalRun(command) => &command.project,
             RuntimeCommand::CompleteEvalRun(command) => &command.project,
+            RuntimeCommand::RecordOutcome(command) => &command.project,
             RuntimeCommand::CreatePromptAsset(command) => &command.project,
             RuntimeCommand::CreatePromptVersion(command) => &command.project,
             RuntimeCommand::CreatePromptRelease(command) => &command.project,
@@ -268,6 +270,9 @@ impl RuntimeCommand {
             }),
             RuntimeCommand::CompleteEvalRun(command) => Some(RuntimeEntityRef::EvalRun {
                 eval_run_id: command.eval_run_id.clone(),
+            }),
+            RuntimeCommand::RecordOutcome(command) => Some(RuntimeEntityRef::Run {
+                run_id: command.run_id.clone(),
             }),
             RuntimeCommand::CreatePromptAsset(command) => {
                 Some(RuntimeEntityRef::PromptAsset {
@@ -545,6 +550,20 @@ pub struct CompleteEvalRun {
     pub success: bool,
     pub error_message: Option<String>,
 }
+
+/// Record the outcome of an agent run for confidence calibration.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RecordOutcome {
+    pub project: ProjectKey,
+    pub outcome_id: OutcomeId,
+    pub run_id: RunId,
+    pub agent_type: String,
+    pub predicted_confidence: f64,
+    pub actual_outcome: crate::events::ActualOutcome,
+}
+
+// Manual Eq impl for f64 field (see OutcomeRecorded).
+impl Eq for RecordOutcome {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreatePromptAsset {

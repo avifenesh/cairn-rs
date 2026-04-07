@@ -62,6 +62,7 @@ define_id!(KnowledgeDocumentId);
 define_id!(KnowledgePackId);
 define_id!(MailboxMessageId);
 define_id!(OperatorId);
+define_id!(OutcomeId);
 define_id!(PolicyId);
 define_id!(ProjectId);
 define_id!(PromptAssetId);

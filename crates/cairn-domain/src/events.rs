@@ -1,9 +1,9 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, PromptAssetId,
-    PromptReleaseId, PromptVersionId, ProviderBindingId, ProviderCallId, ProviderConnectionId,
-    ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, SessionId, SignalId, TaskId, TenantId,
-    ToolInvocationId, WorkspaceId,
+    ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, OutcomeId,
+    PromptAssetId, PromptReleaseId, PromptVersionId, ProviderBindingId, ProviderCallId,
+    ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, SessionId,
+    SignalId, TaskId, TenantId, ToolInvocationId, WorkspaceId,
 };
 use crate::lifecycle::{
     CheckpointDisposition, FailureClass, PauseReason, ResumeTrigger, RunState, SessionState,
@@ -204,6 +204,8 @@ pub enum RuntimeEvent {
     TaskLeaseExpired(TaskLeaseExpired),
     TaskPriorityChanged(TaskPriorityChanged),
     ToolInvocationProgressUpdated(ToolInvocationProgressUpdated),
+    /// Go PR #1222: evaluator–optimizer feedback loop.
+    OutcomeRecorded(OutcomeRecorded),
 }
 
 impl RuntimeEvent {
@@ -254,6 +256,7 @@ impl RuntimeEvent {
             RuntimeEvent::SessionCostUpdated(event) => &event.project,
             RuntimeEvent::RunCostUpdated(event) => &event.project,
             RuntimeEvent::SpendAlertTriggered(event) => &event.project,
+            RuntimeEvent::OutcomeRecorded(event) => &event.project,
             RuntimeEvent::ProviderBudgetSet(_)
             | RuntimeEvent::ChannelCreated(_)
             | RuntimeEvent::ChannelMessageSent(_)
@@ -430,6 +433,9 @@ impl RuntimeEvent {
             }),
             RuntimeEvent::EvalRunCompleted(event) => Some(RuntimeEntityRef::EvalRun {
                 eval_run_id: event.eval_run_id.clone(),
+            }),
+            RuntimeEvent::OutcomeRecorded(event) => Some(RuntimeEntityRef::Run {
+                run_id: event.run_id.clone(),
             }),
             RuntimeEvent::PromptAssetCreated(event) => Some(RuntimeEntityRef::PromptAsset {
                 prompt_asset_id: event.prompt_asset_id.clone(),
@@ -853,6 +859,41 @@ pub struct EvalRunCompleted {
     pub subject_node_id: Option<String>,
     pub completed_at: u64,
 }
+
+/// Actual outcome classification for an agent execution.
+///
+/// Part of the evaluator–optimizer feedback loop (Go PR #1222): agents record
+/// predicted confidence before execution and actual outcome after, enabling
+/// self-correction of confidence calibration over time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActualOutcome {
+    Success,
+    Failure,
+    Partial,
+}
+
+/// Outcome recorded after an agent run completes.
+///
+/// Links a run to its predicted confidence and actual result, forming the
+/// feedback signal for confidence calibration and evaluator tuning.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutcomeRecorded {
+    pub project: ProjectKey,
+    pub outcome_id: OutcomeId,
+    pub run_id: RunId,
+    /// Agent type that produced this outcome (e.g. "code_review", "research").
+    pub agent_type: String,
+    /// Confidence the agent predicted before execution [0.0, 1.0].
+    pub predicted_confidence: f64,
+    /// What actually happened.
+    pub actual_outcome: ActualOutcome,
+    pub recorded_at: u64,
+}
+
+// Manual Eq: f64 doesn't impl Eq, but we need Eq for RuntimeEvent.
+// Confidence is a display-only metric; bit-exact equality is acceptable.
+impl Eq for OutcomeRecorded {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptAssetCreated {

@@ -37,6 +37,7 @@ struct State {
     signals: HashMap<String, cairn_domain::SignalRecord>,
     ingest_jobs: HashMap<String, cairn_domain::IngestJobRecord>,
     eval_runs: HashMap<String, crate::projections::EvalRunRecord>,
+    outcomes: HashMap<String, crate::projections::OutcomeRecord>,
     eval_datasets: HashMap<String, cairn_domain::EvalDataset>,
     eval_rubrics: HashMap<String, cairn_domain::EvalRubric>,
     eval_baselines: HashMap<String, cairn_domain::EvalBaseline>,
@@ -121,6 +122,7 @@ impl InMemoryStore {
                 signals: HashMap::new(),
                 ingest_jobs: HashMap::new(),
                 eval_runs: HashMap::new(),
+                outcomes: HashMap::new(),
                 eval_datasets: HashMap::new(),
                 eval_rubrics: HashMap::new(),
                 eval_baselines: HashMap::new(),
@@ -1414,6 +1416,20 @@ impl InMemoryStore {
                     rec.completed_at = Some(e.completed_at);
                 }
             }
+            RuntimeEvent::OutcomeRecorded(e) => {
+                state.outcomes.insert(
+                    e.outcome_id.as_str().to_owned(),
+                    crate::projections::OutcomeRecord {
+                        outcome_id: e.outcome_id.clone(),
+                        run_id: e.run_id.clone(),
+                        project: e.project.clone(),
+                        agent_type: e.agent_type.clone(),
+                        predicted_confidence: e.predicted_confidence,
+                        actual_outcome: e.actual_outcome.clone(),
+                        recorded_at: e.recorded_at,
+                    },
+                );
+            }
             RuntimeEvent::EvalDatasetCreated(e) => {
                 // tenant_id is not carried by this event; stored with empty sentinel.
                 // Use EvalSubjectKind::PromptRelease as default subject kind.
@@ -1630,6 +1646,7 @@ fn event_matches_entity(event: &RuntimeEvent, entity: &EntityRef) -> bool {
         (RuntimeEvent::IngestJobCompleted(e), EntityRef::IngestJob(id)) => e.job_id == *id,
         (RuntimeEvent::EvalRunStarted(e), EntityRef::EvalRun(id)) => e.eval_run_id == *id,
         (RuntimeEvent::EvalRunCompleted(e), EntityRef::EvalRun(id)) => e.eval_run_id == *id,
+        (RuntimeEvent::OutcomeRecorded(e), EntityRef::Run(id)) => e.run_id == *id,
         (RuntimeEvent::PromptAssetCreated(e), EntityRef::PromptAsset(id)) => {
             e.prompt_asset_id == *id
         }
@@ -2133,6 +2150,54 @@ impl EvalRunReadModel for InMemoryStore {
             .cloned()
             .collect();
         results.sort_by_key(|r| r.started_at);
+        let results = results.into_iter().skip(offset).take(limit).collect();
+        Ok(results)
+    }
+}
+
+// -- OutcomeReadModel --
+
+#[async_trait]
+impl OutcomeReadModel for InMemoryStore {
+    async fn get(
+        &self,
+        outcome_id: &cairn_domain::OutcomeId,
+    ) -> Result<Option<crate::projections::OutcomeRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        Ok(state.outcomes.get(outcome_id.as_str()).cloned())
+    }
+
+    async fn list_by_run(
+        &self,
+        run_id: &cairn_domain::RunId,
+        limit: usize,
+    ) -> Result<Vec<crate::projections::OutcomeRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<crate::projections::OutcomeRecord> = state
+            .outcomes
+            .values()
+            .filter(|r| r.run_id == *run_id)
+            .cloned()
+            .collect();
+        results.sort_by_key(|r| r.recorded_at);
+        results.truncate(limit);
+        Ok(results)
+    }
+
+    async fn list_by_project(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::projections::OutcomeRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<crate::projections::OutcomeRecord> = state
+            .outcomes
+            .values()
+            .filter(|r| r.project == *project)
+            .cloned()
+            .collect();
+        results.sort_by_key(|r| r.recorded_at);
         let results = results.into_iter().skip(offset).take(limit).collect();
         Ok(results)
     }

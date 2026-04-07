@@ -285,6 +285,9 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
         RuntimeEvent::TaskLeaseExpired(_) => { assert!(eref.is_none()); }
         RuntimeEvent::TaskPriorityChanged(_) => { assert!(eref.is_none()); }
         RuntimeEvent::ToolInvocationProgressUpdated(_) => { assert!(eref.is_none()); }
+        RuntimeEvent::OutcomeRecorded(e) => {
+            assert_eq!(eref, Some(RuntimeEntityRef::Run { run_id: e.run_id.clone() }));
+        }
     }
 }
 
@@ -421,6 +424,15 @@ fn all_variants() -> Vec<RuntimeEvent> {
         RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
             project: p(), eval_run_id: EvalRunId::new("er1"),
             success: true, error_message: None, subject_node_id: None, completed_at: ts,
+        }),
+        RuntimeEvent::OutcomeRecorded(cairn_domain::OutcomeRecorded {
+            project: p(),
+            outcome_id: cairn_domain::OutcomeId::new("oc1"),
+            run_id: RunId::new("r1"),
+            agent_type: "code_review".to_owned(),
+            predicted_confidence: 0.85,
+            actual_outcome: cairn_domain::events::ActualOutcome::Success,
+            recorded_at: ts,
         }),
         RuntimeEvent::PromptAssetCreated(PromptAssetCreated {
             project: p(), prompt_asset_id: PromptAssetId::new("pa1"),
@@ -799,9 +811,9 @@ fn all_variants() -> Vec<RuntimeEvent> {
 #[test]
 fn all_runtime_event_variants_covered_count() {
     let variants = all_variants();
-    // 111 variants in the RuntimeEvent enum.
-    assert_eq!(variants.len(), 111,
-        "all_variants() must construct exactly 111 RuntimeEvent instances");
+    // 112 variants in the RuntimeEvent enum.
+    assert_eq!(variants.len(), 112,
+        "all_variants() must construct exactly 112 RuntimeEvent instances");
 }
 
 #[test]
