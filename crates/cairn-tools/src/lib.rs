@@ -25,9 +25,14 @@ pub mod transport;
 pub use builtin::{ToolDescriptor, ToolHost, ToolInput, ToolOutcome};
 pub use builtins::{
     BuiltinToolDescriptor, BuiltinToolRegistry,
-    FileReadTool, FileWriteTool,
+    CancelTaskTool, FileReadTool, FileWriteTool, GetRunTool, GetTaskTool,
+    GitOperationsTool, HttpRequestTool, WaitForTaskTool,
     GraphQueryTool, ListRunsTool, EvalScoreTool, CreateTaskTool, MemorySearchTool, MemoryStoreTool,
-    ShellExecTool, ToolSearchTool, WebFetchTool,
+    CalculateTool, GlobFindTool, GrepSearchTool, JsonExtractTool,
+    NotifyOperatorTool, NotificationSink, NoopSink, ResolveApprovalTool,
+    ShellExecTool, SummarizeTextTool, ToolSearchTool, WebFetchTool,
+    UpdateMemoryTool, DeleteMemoryTool, ScheduleTaskTool, SearchEventsTool,
+    GetApprovalsTool, ScratchPadTool,
     ToolError, ToolHandler, ToolResult, ToolTier,
 };
 pub use execution_class::{select_execution_config, SelectedConfig};
