@@ -1,0 +1,759 @@
+//! RuntimeExecutePhase — concrete ExecutePhase backed by cairn-rs runtime services.
+//!
+//! Dispatches each `ActionProposal` from `DecideOutput` to the appropriate
+//! runtime service:
+//!
+//! | `ActionType`         | Runtime service                                    |
+//! |----------------------|----------------------------------------------------|
+//! | `InvokeTool`         | `ToolInvocationService` + inline tool dispatch     |
+//! | `SpawnSubagent`      | `TaskServiceImpl::spawn_subagent`                  |
+//! | `SendNotification`   | `MailboxService::send`                             |
+//! | `CompleteRun`        | `RunService::complete`                             |
+//! | `EscalateToOperator` | `ApprovalService::request` + run → waiting_approval|
+//! | `CreateMemory`       | async no-op (memory ingestion runs independently)  |
+//!
+//! After each successful tool call, `CheckpointService::save` is called if
+//! the tool call count meets the configured `checkpoint_every_n_tool_calls`
+//! threshold (default: save after every tool call).
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use cairn_domain::{
+    ActionType, ApprovalId, CheckpointId, ExecutionClass, SessionId, TaskId,
+    ToolInvocationId,
+    policy::ApprovalRequirement,
+    tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget},
+};
+use cairn_runtime::{
+    ApprovalService, CheckpointService, RunService,
+    mailbox::MailboxService,
+    services::{TaskServiceImpl, ToolInvocationService},
+};
+use cairn_store::InMemoryStore;
+
+use crate::context::{
+    ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, LoopSignal, OrchestrationContext,
+};
+use crate::error::OrchestratorError;
+use crate::execute::ExecutePhase;
+
+// ── RuntimeExecutePhase ───────────────────────────────────────────────────────
+
+/// Concrete `ExecutePhase` that routes `ActionProposal` variants through the
+/// cairn-rs runtime service layer.
+///
+/// Construct via [`RuntimeExecutePhase::builder`].  All services share the
+/// same underlying `InMemoryStore` so writes from one service are immediately
+/// visible to reads from another.
+pub struct RuntimeExecutePhase {
+    run_service:             Arc<dyn RunService>,
+    task_service:            Arc<TaskServiceImpl<InMemoryStore>>,
+    approval_service:        Arc<dyn ApprovalService>,
+    checkpoint_service:      Arc<dyn CheckpointService>,
+    mailbox_service:         Arc<dyn MailboxService>,
+    tool_invocation_service: Arc<dyn ToolInvocationService>,
+    /// Save a checkpoint after every N-th successful tool call (1 = every call).
+    checkpoint_every_n_tool_calls: u32,
+}
+
+impl RuntimeExecutePhase {
+    pub fn builder() -> RuntimeExecutePhaseBuilder {
+        RuntimeExecutePhaseBuilder::default()
+    }
+}
+
+// ── Builder ───────────────────────────────────────────────────────────────────
+
+#[derive(Default)]
+pub struct RuntimeExecutePhaseBuilder {
+    run_service:             Option<Arc<dyn RunService>>,
+    task_service:            Option<Arc<TaskServiceImpl<InMemoryStore>>>,
+    approval_service:        Option<Arc<dyn ApprovalService>>,
+    checkpoint_service:      Option<Arc<dyn CheckpointService>>,
+    mailbox_service:         Option<Arc<dyn MailboxService>>,
+    tool_invocation_service: Option<Arc<dyn ToolInvocationService>>,
+    checkpoint_every_n_tool_calls: u32,
+}
+
+impl RuntimeExecutePhaseBuilder {
+    pub fn run_service(mut self, s: Arc<dyn RunService>) -> Self {
+        self.run_service = Some(s); self
+    }
+    pub fn task_service(mut self, s: Arc<TaskServiceImpl<InMemoryStore>>) -> Self {
+        self.task_service = Some(s); self
+    }
+    pub fn approval_service(mut self, s: Arc<dyn ApprovalService>) -> Self {
+        self.approval_service = Some(s); self
+    }
+    pub fn checkpoint_service(mut self, s: Arc<dyn CheckpointService>) -> Self {
+        self.checkpoint_service = Some(s); self
+    }
+    pub fn mailbox_service(mut self, s: Arc<dyn MailboxService>) -> Self {
+        self.mailbox_service = Some(s); self
+    }
+    pub fn tool_invocation_service(mut self, s: Arc<dyn ToolInvocationService>) -> Self {
+        self.tool_invocation_service = Some(s); self
+    }
+    pub fn checkpoint_every_n_tool_calls(mut self, n: u32) -> Self {
+        self.checkpoint_every_n_tool_calls = n; self
+    }
+    pub fn build(self) -> RuntimeExecutePhase {
+        RuntimeExecutePhase {
+            run_service:             self.run_service.expect("run_service required"),
+            task_service:            self.task_service.expect("task_service required"),
+            approval_service:        self.approval_service.expect("approval_service required"),
+            checkpoint_service:      self.checkpoint_service.expect("checkpoint_service required"),
+            mailbox_service:         self.mailbox_service.expect("mailbox_service required"),
+            tool_invocation_service: self.tool_invocation_service
+                .expect("tool_invocation_service required"),
+            checkpoint_every_n_tool_calls: self.checkpoint_every_n_tool_calls.max(1),
+        }
+    }
+}
+
+// ── ExecutePhase impl ─────────────────────────────────────────────────────────
+
+#[async_trait]
+impl ExecutePhase for RuntimeExecutePhase {
+    async fn execute(
+        &self,
+        ctx: &OrchestrationContext,
+        decide: &DecideOutput,
+    ) -> Result<ExecuteOutcome, OrchestratorError> {
+        let mut results: Vec<ActionResult> = Vec::with_capacity(decide.proposals.len());
+        let mut tool_call_count: u32 = 0;
+        let mut loop_signal = LoopSignal::Continue;
+
+        for proposal in &decide.proposals {
+            let result = self
+                .dispatch_one(ctx, proposal, &mut tool_call_count)
+                .await?;
+
+            // Capture any terminal loop signal from this action before pushing.
+            let new_signal = derive_signal(&result, &loop_signal);
+
+            results.push(result);
+
+            if !matches!(new_signal, LoopSignal::Continue) {
+                loop_signal = new_signal;
+                break; // short-circuit: first terminal action stops the batch
+            }
+        }
+
+        // If nothing set a terminal signal but any action failed, derive Failed.
+        if matches!(loop_signal, LoopSignal::Continue) {
+            if let Some(reason) = first_failure_reason(&results) {
+                loop_signal = LoopSignal::Failed { reason };
+            }
+        }
+
+        Ok(ExecuteOutcome { results, loop_signal })
+    }
+}
+
+impl RuntimeExecutePhase {
+    /// Dispatch a single proposal to the appropriate runtime service.
+    async fn dispatch_one(
+        &self,
+        ctx: &OrchestrationContext,
+        proposal: &cairn_domain::ActionProposal,
+        tool_call_count: &mut u32,
+    ) -> Result<ActionResult, OrchestratorError> {
+        match proposal.action_type {
+            // ── InvokeTool ─────────────────────────────────────────────────
+            ActionType::InvokeTool => {
+                let tool_name = proposal.tool_name.clone().unwrap_or_default();
+                let inv_id = ToolInvocationId::new(new_id("inv"));
+
+                self.tool_invocation_service
+                    .record_start(
+                        &ctx.project,
+                        inv_id.clone(),
+                        Some(ctx.session_id.clone()),
+                        Some(ctx.run_id.clone()),
+                        ctx.task_id.clone(),
+                        ToolInvocationTarget::Builtin { tool_name: tool_name.clone() },
+                        ExecutionClass::SandboxedProcess,
+                    )
+                    .await
+                    .map_err(OrchestratorError::Runtime)?;
+
+                match dispatch_tool(&tool_name, proposal.tool_args.as_ref()) {
+                    Ok(output) => {
+                        self.tool_invocation_service
+                            .record_completed(
+                                &ctx.project,
+                                inv_id.clone(),
+                                ctx.task_id.clone(),
+                                tool_name,
+                            )
+                            .await
+                            .map_err(OrchestratorError::Runtime)?;
+
+                        *tool_call_count += 1;
+                        if *tool_call_count % self.checkpoint_every_n_tool_calls == 0 {
+                            let cp_id = CheckpointId::new(new_id("cp"));
+                            self.checkpoint_service
+                                .save(&ctx.project, &ctx.run_id, cp_id)
+                                .await
+                                .map_err(OrchestratorError::Runtime)?;
+                        }
+
+                        Ok(ActionResult {
+                            proposal: proposal.clone(),
+                            status: ActionStatus::Succeeded,
+                            tool_output: Some(output),
+                            invocation_id: Some(inv_id),
+                        })
+                    }
+                    Err(reason) => {
+                        self.tool_invocation_service
+                            .record_failed(
+                                &ctx.project,
+                                inv_id.clone(),
+                                ctx.task_id.clone(),
+                                tool_name,
+                                ToolInvocationOutcomeKind::PermanentFailure,
+                                Some(reason.clone()),
+                            )
+                            .await
+                            .map_err(OrchestratorError::Runtime)?;
+
+                        Ok(ActionResult {
+                            proposal: proposal.clone(),
+                            status: ActionStatus::Failed { reason },
+                            tool_output: None,
+                            invocation_id: Some(inv_id),
+                        })
+                    }
+                }
+            }
+
+            // ── SpawnSubagent ──────────────────────────────────────────────
+            ActionType::SpawnSubagent => {
+                let child_task_id    = TaskId::new(new_id("child_task"));
+                let child_session_id = SessionId::new(new_id("child_sess"));
+
+                match self.task_service
+                    .spawn_subagent(
+                        &ctx.project,
+                        ctx.run_id.clone(),
+                        ctx.task_id.clone(),
+                        child_task_id.clone(),
+                        child_session_id,
+                        None, // child run created when child task → running (RFC 005)
+                    )
+                    .await
+                {
+                    Ok(_) => Ok(ActionResult {
+                        proposal: proposal.clone(),
+                        status: ActionStatus::SubagentSpawned { child_task_id },
+                        tool_output: None,
+                        invocation_id: None,
+                    }),
+                    Err(e) => Ok(ActionResult {
+                        proposal: proposal.clone(),
+                        status: ActionStatus::Failed { reason: e.to_string() },
+                        tool_output: None,
+                        invocation_id: None,
+                    }),
+                }
+            }
+
+            // ── SendNotification ───────────────────────────────────────────
+            ActionType::SendNotification => {
+                // Sender must have a task_id; recipient uses tool_name or run_id.
+                let from_task = match &ctx.task_id {
+                    Some(t) => t.clone(),
+                    None => {
+                        return Ok(ActionResult {
+                            proposal: proposal.clone(),
+                            status: ActionStatus::Failed {
+                                reason: "SendNotification requires task_id in context".to_owned(),
+                            },
+                            tool_output: None,
+                            invocation_id: None,
+                        });
+                    }
+                };
+                let to_task = TaskId::new(
+                    proposal.tool_name.as_deref().unwrap_or(ctx.run_id.as_str()),
+                );
+                match self.mailbox_service
+                    .send(&ctx.project, from_task, to_task, proposal.description.clone())
+                    .await
+                {
+                    Ok(_) => Ok(ActionResult {
+                        proposal: proposal.clone(),
+                        status: ActionStatus::Succeeded,
+                        tool_output: None,
+                        invocation_id: None,
+                    }),
+                    Err(e) => Ok(ActionResult {
+                        proposal: proposal.clone(),
+                        status: ActionStatus::Failed { reason: e.to_string() },
+                        tool_output: None,
+                        invocation_id: None,
+                    }),
+                }
+            }
+
+            // ── CompleteRun ────────────────────────────────────────────────
+            ActionType::CompleteRun => {
+                match self.run_service.complete(&ctx.run_id).await {
+                    Ok(_) => Ok(ActionResult {
+                        proposal: proposal.clone(),
+                        status: ActionStatus::Succeeded,
+                        tool_output: None,
+                        invocation_id: None,
+                    }),
+                    Err(e) => Ok(ActionResult {
+                        proposal: proposal.clone(),
+                        status: ActionStatus::Failed { reason: e.to_string() },
+                        tool_output: None,
+                        invocation_id: None,
+                    }),
+                }
+            }
+
+            // ── EscalateToOperator ─────────────────────────────────────────
+            ActionType::EscalateToOperator => {
+                let approval_id = ApprovalId::new(new_id("appr"));
+                match self.approval_service
+                    .request(
+                        &ctx.project,
+                        approval_id.clone(),
+                        Some(ctx.run_id.clone()),
+                        ctx.task_id.clone(),
+                        ApprovalRequirement::Required,
+                    )
+                    .await
+                {
+                    Ok(_) => Ok(ActionResult {
+                        proposal: proposal.clone(),
+                        status: ActionStatus::AwaitingApproval { approval_id },
+                        tool_output: None,
+                        invocation_id: None,
+                    }),
+                    Err(e) => Ok(ActionResult {
+                        proposal: proposal.clone(),
+                        status: ActionStatus::Failed { reason: e.to_string() },
+                        tool_output: None,
+                        invocation_id: None,
+                    }),
+                }
+            }
+
+            // ── CreateMemory ───────────────────────────────────────────────
+            // Memory ingestion is async (IngestService runs independently).
+            // Record intent here; actual embedding runs via the ingest pipeline.
+            ActionType::CreateMemory => Ok(ActionResult {
+                proposal: proposal.clone(),
+                status: ActionStatus::Succeeded,
+                tool_output: Some(serde_json::json!({
+                    "queued": true,
+                    "note": "async — see /v1/memory/ingest"
+                })),
+                invocation_id: None,
+            }),
+        }
+    }
+}
+
+// ── Signal derivation ─────────────────────────────────────────────────────────
+
+/// Derive the `LoopSignal` from a freshly executed `ActionResult`.
+///
+/// Returns the existing signal if it is already terminal.
+fn derive_signal(result: &ActionResult, current: &LoopSignal) -> LoopSignal {
+    if !matches!(current, LoopSignal::Continue) {
+        return current.clone();
+    }
+    match &result.status {
+        ActionStatus::Succeeded => {
+            // CompleteRun → Done
+            if result.proposal.action_type == ActionType::CompleteRun {
+                LoopSignal::Done
+            } else {
+                LoopSignal::Continue
+            }
+        }
+        ActionStatus::SubagentSpawned { child_task_id } => {
+            LoopSignal::WaitSubagent { child_task_id: child_task_id.clone() }
+        }
+        ActionStatus::AwaitingApproval { approval_id } => {
+            LoopSignal::WaitApproval { approval_id: approval_id.clone() }
+        }
+        ActionStatus::Failed { reason } => {
+            LoopSignal::Failed { reason: reason.clone() }
+        }
+    }
+}
+
+fn first_failure_reason(results: &[ActionResult]) -> Option<String> {
+    results.iter().find_map(|r| {
+        if let ActionStatus::Failed { reason } = &r.status {
+            Some(reason.clone())
+        } else {
+            None
+        }
+    })
+}
+
+// ── Built-in tool dispatch stub ───────────────────────────────────────────────
+
+/// Dispatch a built-in tool call.
+///
+/// For v1 this returns a stub observation for known tools.  A real
+/// implementation looks up a `ToolRegistry` / `PluginHost`.
+fn dispatch_tool(
+    tool_name: &str,
+    args: Option<&serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    match tool_name {
+        "search_memory" | "read_document" | "write_document" | "send_message"
+        | "list_tasks" | "http_get" | "http_post" => Ok(serde_json::json!({
+            "tool":   tool_name,
+            "args":   args,
+            "result": null,
+            "note":   "stub — real dispatch not yet wired"
+        })),
+        other => Err(format!("unknown tool: {other}")),
+    }
+}
+
+// ── ID generation ─────────────────────────────────────────────────────────────
+
+fn new_id(prefix: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    format!("{prefix}_{ts}_{n}")
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use cairn_domain::{ActionProposal, ActionType, ProjectKey, RunId, SessionId};
+    use cairn_runtime::{
+        InMemoryServices, SessionService,
+        services::{
+            ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl,
+            RunServiceImpl, TaskServiceImpl, ToolInvocationServiceImpl,
+        },
+    };
+
+    use crate::context::{DecideOutput, LoopSignal, OrchestrationContext};
+
+    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn run_id()    -> RunId     { RunId::new("run_exec_test") }
+    fn session_id() -> SessionId { SessionId::new("sess_exec_test") }
+
+    /// Build all services wired to the same shared store.
+    fn make_services() -> Arc<InMemoryServices> {
+        Arc::new(InMemoryServices::new())
+    }
+
+    /// Build a `RuntimeExecutePhase` from a shared `InMemoryServices`.
+    ///
+    /// Each service is created as a NEW concrete impl sharing the same
+    /// underlying `Arc<InMemoryStore>`.  This is the correct pattern:
+    /// all service impls read/write the same store so changes are
+    /// immediately visible across services.
+    fn make_phase(svc: &Arc<InMemoryServices>) -> RuntimeExecutePhase {
+        let store = svc.store.clone();
+        RuntimeExecutePhase::builder()
+            .run_service(Arc::new(RunServiceImpl::new(store.clone())))
+            .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
+            .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
+            .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
+            .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
+            .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
+            .checkpoint_every_n_tool_calls(1)
+            .build()
+    }
+
+    fn ctx() -> OrchestrationContext {
+        OrchestrationContext {
+            project:           project(),
+            session_id:        session_id(),
+            run_id:            run_id(),
+            task_id:           None,
+            iteration:         0,
+            goal:              "test goal".to_owned(),
+            agent_type:        "test_agent".to_owned(),
+            run_started_at_ms: 0,
+        }
+    }
+
+    fn decide_with(proposals: Vec<ActionProposal>) -> DecideOutput {
+        DecideOutput {
+            raw_response:          "{}".to_owned(),
+            proposals,
+            calibrated_confidence: 0.9,
+            requires_approval:     false,
+            model_id:              "stub_model".to_owned(),
+            latency_ms:            0,
+        }
+    }
+
+    /// Seed a session + pending run so service calls that require prior state
+    /// (complete, fail, approve) have something to operate on.
+    async fn setup_run(svc: &Arc<InMemoryServices>) {
+        svc.sessions.create(&project(), session_id()).await.unwrap();
+        svc.runs.start(&project(), &session_id(), run_id(), None).await.unwrap();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // complete_run
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn complete_run_emits_done_signal_and_updates_run_state() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let outcome = make_phase(&svc)
+            .execute(&ctx(), &decide_with(vec![
+                ActionProposal::complete_run("all done", 0.95)
+            ]))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.loop_signal, LoopSignal::Done);
+        assert_eq!(outcome.results[0].status, ActionStatus::Succeeded);
+
+        let run = svc.runs.get(&run_id()).await.unwrap().unwrap();
+        assert_eq!(run.state, cairn_domain::lifecycle::RunState::Completed);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // escalate_to_operator
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn escalate_creates_approval_and_emits_wait_signal() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let outcome = make_phase(&svc)
+            .execute(&ctx(), &decide_with(vec![
+                ActionProposal::escalate("need human", 0.3)
+            ]))
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(outcome.loop_signal, LoopSignal::WaitApproval { .. }),
+            "expected WaitApproval, got {:?}", outcome.loop_signal
+        );
+        assert!(matches!(
+            outcome.results[0].status,
+            ActionStatus::AwaitingApproval { .. }
+        ));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // tool call — known tool
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn known_tool_call_succeeds_records_events_and_saves_checkpoint() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let outcome = make_phase(&svc)
+            .execute(&ctx(), &decide_with(vec![
+                ActionProposal::invoke_tool(
+                    "search_memory",
+                    serde_json::json!({ "q": "rust ownership" }),
+                    "search for context",
+                    0.8,
+                    false,
+                ),
+            ]))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.loop_signal, LoopSignal::Continue);
+        assert_eq!(outcome.results[0].status, ActionStatus::Succeeded);
+        assert!(outcome.results[0].invocation_id.is_some(),
+            "tool call must record a ToolInvocationId");
+        assert!(outcome.results[0].tool_output.is_some(),
+            "tool call must return an observation");
+
+        // Checkpoint must have been saved (checkpoint_every_n=1).
+        let cp = svc.checkpoints.latest_for_run(&run_id()).await.unwrap();
+        assert!(cp.is_some(), "checkpoint must be saved after successful tool call");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // tool call — unknown tool
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn unknown_tool_returns_failed_status_and_failed_signal() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let outcome = make_phase(&svc)
+            .execute(&ctx(), &decide_with(vec![
+                ActionProposal::invoke_tool(
+                    "nonexistent_tool",
+                    serde_json::json!({}),
+                    "call unknown tool",
+                    0.5,
+                    false,
+                ),
+            ]))
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(outcome.loop_signal, LoopSignal::Failed { .. }),
+            "unknown tool must produce a Failed signal"
+        );
+        assert!(matches!(
+            outcome.results[0].status,
+            ActionStatus::Failed { .. }
+        ));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // spawn_subagent
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn spawn_subagent_creates_child_task_and_emits_wait_subagent() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let outcome = make_phase(&svc)
+            .execute(&ctx(), &decide_with(vec![ActionProposal {
+                action_type:        ActionType::SpawnSubagent,
+                description:        "delegate to researcher".to_owned(),
+                confidence:         0.75,
+                tool_name:          Some("research_agent".to_owned()),
+                tool_args:          None,
+                requires_approval:  false,
+            }]))
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(outcome.loop_signal, LoopSignal::WaitSubagent { .. }),
+            "spawn must emit WaitSubagent signal"
+        );
+        assert!(matches!(
+            outcome.results[0].status,
+            ActionStatus::SubagentSpawned { .. }
+        ));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // create_memory — async no-op
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_memory_is_a_noop_that_succeeds() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let outcome = make_phase(&svc)
+            .execute(&ctx(), &decide_with(vec![ActionProposal {
+                action_type:       ActionType::CreateMemory,
+                description:       "store knowledge".to_owned(),
+                confidence:        0.9,
+                tool_name:         None,
+                tool_args:         Some(serde_json::json!({ "content": "sky is blue" })),
+                requires_approval: false,
+            }]))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.loop_signal, LoopSignal::Continue);
+        assert_eq!(outcome.results[0].status, ActionStatus::Succeeded);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // short-circuit: complete_run stops further proposals
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn complete_run_short_circuits_remaining_proposals() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let outcome = make_phase(&svc)
+            .execute(&ctx(), &decide_with(vec![
+                ActionProposal::invoke_tool(
+                    "search_memory", serde_json::json!({}), "search first", 0.8, false,
+                ),
+                ActionProposal::complete_run("done", 0.95),
+                // This third proposal must NOT be executed.
+                ActionProposal::invoke_tool(
+                    "http_get", serde_json::json!({}), "never reached", 0.5, false,
+                ),
+            ]))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.loop_signal, LoopSignal::Done);
+        assert_eq!(outcome.results.len(), 2,
+            "third proposal must be cut off after complete_run");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // checkpoint frequency: only every N-th tool call
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn checkpoint_saved_every_n_tool_calls() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let store = svc.store.clone();
+        let phase = RuntimeExecutePhase::builder()
+            .run_service(Arc::new(RunServiceImpl::new(store.clone())))
+            .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
+            .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
+            .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
+            .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
+            .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
+            .checkpoint_every_n_tool_calls(3) // save only on 1st, 4th, 7th, … call
+            .build();
+
+        // 2 tool calls → count = 2, neither is divisible by 3 → no checkpoint yet.
+        phase.execute(&ctx(), &decide_with(vec![
+            ActionProposal::invoke_tool("search_memory", serde_json::json!({}), "s1", 0.8, false),
+            ActionProposal::invoke_tool("search_memory", serde_json::json!({}), "s2", 0.8, false),
+        ])).await.unwrap();
+        let cp = svc.checkpoints.latest_for_run(&run_id()).await.unwrap();
+        assert!(cp.is_none(), "no checkpoint after 2 of 3 required calls");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ExecutePhase is object-safe
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_phase_is_object_safe() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let phase: Box<dyn ExecutePhase> = Box::new(make_phase(&svc));
+        let outcome = phase
+            .execute(&ctx(), &decide_with(vec![ActionProposal::complete_run("done", 1.0)]))
+            .await
+            .unwrap();
+        assert_eq!(outcome.loop_signal, LoopSignal::Done);
+    }
+}

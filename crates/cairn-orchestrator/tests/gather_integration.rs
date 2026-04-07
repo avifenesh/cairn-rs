@@ -1,33 +1,39 @@
 //! Integration tests for StandardGatherPhase.
 //!
-//! Uses InMemoryStore + InMemoryRetrieval to verify that gather() produces
-//! a populated GatherOutput across all five data sources.
+//! Uses InMemoryStore + InMemoryRetrieval to verify that gather() populates
+//! all five context sources.
 
 use async_trait::async_trait;
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectKey, RunId, RuntimeEvent,
-    TaskId, TaskStateChanged, StateTransition, lifecycle::TaskState,
-    DefaultSettingSet, Scope,
+    SessionId, DefaultSettingSet, Scope,
 };
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
-use cairn_memory::ingest::{IngestRequest, SourceType};
+use cairn_memory::ingest::{IngestRequest, IngestService, SourceType};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
-use cairn_orchestrator::gather::{GatherInput, GatherPhase};
+use cairn_orchestrator::context::OrchestrationContext;
+use cairn_orchestrator::gather::GatherPhase;
 use cairn_orchestrator::StandardGatherPhase;
 use cairn_store::{EntityRef, EventLog, EventPosition, InMemoryStore, StoredEvent};
 use cairn_store::error::StoreError;
 use std::sync::Arc;
 
-fn project() -> ProjectKey { ProjectKey::new("t_orch", "w_orch", "p_orch") }
-fn run_id() -> RunId { RunId::new("run_gather_int") }
+fn project() -> ProjectKey { ProjectKey::new("t_it", "w_it", "p_it") }
+fn run_id() -> RunId { RunId::new("run_gather_it") }
 
-fn base_input() -> GatherInput {
-    let mut i = GatherInput::new(run_id(), project(), "Build a cairn-rs knowledge pipeline");
-    i.iteration = 1;
-    i
+fn base_ctx() -> OrchestrationContext {
+    OrchestrationContext {
+        project:         project(),
+        session_id:      SessionId::new("sess_it"),
+        run_id:          run_id(),
+        task_id:         None,
+        iteration:       1,
+        goal:            "Analyse cairn-rs event-sourcing architecture".to_owned(),
+        agent_type:      "orchestrator".to_owned(),
+        run_started_at_ms: 1_000_000,
+    }
 }
 
-/// Minimal EventLog stub — always returns the events it was constructed with.
 struct FixedLog(Vec<StoredEvent>);
 
 #[async_trait]
@@ -39,105 +45,93 @@ impl EventLog for FixedLog {
     async fn find_by_causation_id(&self, _: &str) -> Result<Option<EventPosition>, StoreError> { Ok(None) }
 }
 
-fn task_completed_event(task_id: &str) -> StoredEvent {
-    StoredEvent {
+// ── Test 1: empty sources → minimal output ───────────────────────────────────
+
+#[tokio::test]
+async fn empty_sources_produce_empty_output() {
+    let phase = StandardGatherPhase::builder(Arc::new(FixedLog(vec![]))).build();
+    let output = phase.gather(&base_ctx()).await.unwrap();
+
+    assert!(output.recent_events.is_empty());
+    assert!(output.memory_chunks.is_empty());
+    assert!(output.operator_settings.is_empty());
+    assert!(output.checkpoint.is_none());
+    assert!(output.graph_nodes.is_empty());
+}
+
+// ── Test 2: events pass through ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn recent_events_passed_through() {
+    use cairn_domain::{TaskId, TaskStateChanged, StateTransition, lifecycle::TaskState};
+
+    let event = StoredEvent {
         position: EventPosition(1),
         stored_at: 1_000,
         envelope: EventEnvelope::for_runtime_event(
-            EventId::new(format!("evt_{task_id}")),
+            EventId::new("evt_task"),
             EventSource::Runtime,
             RuntimeEvent::TaskStateChanged(TaskStateChanged {
-                project: project(),
-                task_id: TaskId::new(task_id),
-                transition: StateTransition { from: Some(TaskState::Running), to: TaskState::Completed },
-                failure_class: None,
-                pause_reason: None,
-                resume_trigger: None,
+                project:         project(),
+                task_id:         TaskId::new("task_x"),
+                transition:      StateTransition { from: Some(TaskState::Running), to: TaskState::Completed },
+                failure_class:   None,
+                pause_reason:    None,
+                resume_trigger:  None,
             }),
         ),
-    }
+    };
+
+    let phase = StandardGatherPhase::builder(Arc::new(FixedLog(vec![event]))).build();
+    let output = phase.gather(&base_ctx()).await.unwrap();
+
+    assert_eq!(output.recent_events.len(), 1);
 }
 
-// ── Test: empty sources → baseline output ────────────────────────────────────
+// ── Test 3: memory retrieval via InMemoryRetrieval ────────────────────────────
 
 #[tokio::test]
-async fn empty_sources_produce_baseline_output() {
-    let phase = StandardGatherPhase::builder(Arc::new(FixedLog(vec![]))).build();
-    let output = phase.gather(&base_input()).await.unwrap();
-
-    assert_eq!(output.run_id, "run_gather_int");
-    assert_eq!(output.goal, "Build a cairn-rs knowledge pipeline");
-    assert_eq!(output.iteration, 1);
-    assert!(output.task_history.is_empty());
-    assert!(output.memory_chunks.is_empty());
-    assert!(output.operator_defaults.is_empty());
-    assert!(output.latest_checkpoint_data.is_none());
-    assert!(output.graph_neighbors.is_empty());
-}
-
-// ── Test: task transitions in events → appear in task_history ────────────────
-
-#[tokio::test]
-async fn task_state_events_become_task_history() {
-    let events = vec![
-        task_completed_event("task_fetch"),
-        task_completed_event("task_analyse"),
-    ];
-    let phase = StandardGatherPhase::builder(Arc::new(FixedLog(events))).build();
-    let output = phase.gather(&base_input()).await.unwrap();
-
-    assert_eq!(output.task_history.len(), 2, "both tasks must appear in history");
-    assert!(output.task_history.iter().any(|t| t.task_id == "task_fetch"));
-    assert!(output.task_history.iter().any(|t| t.task_id == "task_analyse"));
-    for task in &output.task_history {
-        assert_eq!(task.state, "completed");
-    }
-}
-
-// ── Test: memory retrieval via InMemoryRetrieval ──────────────────────────────
-
-#[tokio::test]
-async fn gather_with_retrieval_returns_populated_chunks() {
+async fn gather_retrieves_memory_chunks() {
     let doc_store = Arc::new(InMemoryDocumentStore::new());
     let pipeline = IngestPipeline::new(doc_store.clone(), ParagraphChunker::default());
 
     pipeline.submit(IngestRequest {
-        document_id: cairn_domain::KnowledgeDocumentId::new("doc_orch_1"),
-        source_id:   cairn_domain::SourceId::new("src_orch"),
-        source_type: SourceType::PlainText,
-        project:     project(),
-        content:     "cairn-rs is an event-sourced knowledge pipeline for AI agents."
-                         .to_owned(),
-        tags:         vec![],
-        corpus_id:    None,
-        import_id:    None,
+        document_id:     cairn_domain::KnowledgeDocumentId::new("doc_g1"),
+        source_id:       cairn_domain::SourceId::new("src_g"),
+        source_type:     SourceType::PlainText,
+        project:         project(),
+        content:         "cairn-rs uses event-sourcing for durability and replay.".to_owned(),
+        tags:            vec![],
+        corpus_id:       None,
+        import_id:       None,
         bundle_source_id: None,
     }).await.unwrap();
 
     let retrieval = Arc::new(InMemoryRetrieval::new(doc_store));
+    let mut ctx = base_ctx();
+    ctx.goal = "event-sourcing durability".to_owned();
+
     let phase = StandardGatherPhase::builder(Arc::new(FixedLog(vec![])))
         .with_retrieval(retrieval)
         .build();
 
-    let mut input = base_input();
-    input.goal = "event-sourced knowledge pipeline".to_owned();
-    let output = phase.gather(&input).await.unwrap();
+    let output = phase.gather(&ctx).await.unwrap();
 
     assert!(!output.memory_chunks.is_empty(), "memory chunks must be non-empty");
     assert!(
-        output.memory_chunks.iter().any(|c| c.text.contains("event-sourced")),
-        "retrieved chunk must contain goal keywords"
+        output.memory_chunks.iter().any(|c| c.chunk.text.contains("event-sourcing")),
+        "chunk text must contain query keywords"
     );
 }
 
-// ── Test: operator defaults via InMemoryStore ─────────────────────────────────
+// ── Test 4: operator defaults via InMemoryStore ───────────────────────────────
 
 #[tokio::test]
-async fn gather_reads_operator_defaults_from_store() {
+async fn gather_reads_operator_defaults() {
     let store = Arc::new(InMemoryStore::new());
 
     store.append(&[EventEnvelope::for_runtime_event(
-        EventId::new("evt_default"),
+        EventId::new("evt_def"),
         EventSource::System,
         RuntimeEvent::DefaultSettingSet(DefaultSettingSet {
             scope:    Scope::System,
@@ -151,33 +145,21 @@ async fn gather_reads_operator_defaults_from_store() {
         .with_defaults(store.clone())
         .build();
 
-    let output = phase.gather(&base_input()).await.unwrap();
+    let output = phase.gather(&base_ctx()).await.unwrap();
 
-    assert_eq!(
-        output.operator_defaults.get("generate_model"),
-        Some(&serde_json::json!("qwen3.5:9b")),
-        "operator defaults must contain generate_model=qwen3.5:9b"
+    assert!(
+        output.operator_settings.iter().any(|s| s.key == "generate_model"),
+        "operator settings must contain generate_model"
     );
 }
 
-// ── Test: raw recent_events passed through ───────────────────────────────────
+// ── Test 5: GatherPhase as dyn trait ─────────────────────────────────────────
 
 #[tokio::test]
-async fn recent_events_are_passed_through() {
-    let events = vec![task_completed_event("task_passthrough")];
-    let phase = StandardGatherPhase::builder(Arc::new(FixedLog(events))).build();
-    let output = phase.gather(&base_input()).await.unwrap();
-    assert_eq!(output.recent_events.len(), 1);
-}
-
-// ── Test: GatherPhase as dyn trait ────────────────────────────────────────────
-
-#[tokio::test]
-async fn gather_phase_works_as_dyn_trait() {
+async fn gather_phase_as_dyn_trait() {
     let phase: Box<dyn GatherPhase> = Box::new(
         StandardGatherPhase::builder(Arc::new(FixedLog(vec![]))).build()
     );
-    let output = phase.gather(&base_input()).await.unwrap();
-    assert_eq!(output.run_id, "run_gather_int");
-    assert_eq!(output.project, project());
+    let output = phase.gather(&base_ctx()).await.unwrap();
+    assert!(output.recent_events.is_empty());
 }

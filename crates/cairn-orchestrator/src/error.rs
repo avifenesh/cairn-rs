@@ -25,6 +25,10 @@ pub enum OrchestratorError {
     ApprovalDenied { approval_id: ApprovalId },
     /// A dependency (subagent) that was blocking the run failed.
     DependencyFailed { child_task_id: TaskId },
+    /// Memory retrieval or ingestion failed.
+    Memory(String),
+    /// Graph query failed.
+    Graph(String),
 }
 
 impl std::fmt::Display for OrchestratorError {
@@ -42,6 +46,8 @@ impl std::fmt::Display for OrchestratorError {
                 write!(f, "approval denied: {approval_id}"),
             OrchestratorError::DependencyFailed { child_task_id } =>
                 write!(f, "dependency failed: child task {child_task_id}"),
+            OrchestratorError::Memory(msg)   => write!(f, "memory error: {msg}"),
+            OrchestratorError::Graph(msg)    => write!(f, "graph error: {msg}"),
         }
     }
 }

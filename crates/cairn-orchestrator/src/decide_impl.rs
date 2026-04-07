@@ -20,7 +20,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use cairn_domain::{
     ActionProposal, ActionType,
-    agent_roles::{AgentRole, AgentRoleTier, default_roles},
+    agent_roles::{AgentRole, default_roles},
     providers::{GenerationProvider, ProviderBindingSettings},
 };
 
