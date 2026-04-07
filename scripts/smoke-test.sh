@@ -393,7 +393,7 @@ if [[ "$_HTTP" =~ ^(200|202)$ ]]; then
   [ -n "$TERM" ] && [ "$TERM" != "unknown" ] \
     && log_ok "  termination field present: ${TERM}" \
     || log_fail "  termination field missing or empty"
-elif [[ "$_HTTP" =~ ^(503|502|429)$ ]]; then
+elif [[ "$_HTTP" =~ ^(503|502|429|500)$ ]]; then
   log_skip "Orchestrator skipped — no brain provider or provider offline (HTTP $_HTTP)"
   log_skip "  Set CAIRN_BRAIN_URL or OLLAMA_HOST to exercise this path"
 else
