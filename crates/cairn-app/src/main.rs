@@ -26,52 +26,39 @@ use std::time::{Duration, Instant};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
-use axum::http::{HeaderMap, Method, Request, StatusCode};
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
-use axum::middleware::{from_fn_with_state, Next};
+use axum::http::{Request, StatusCode};
+use axum::http::header::AUTHORIZATION;
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::limit::RequestBodyLimitLayer;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 use axum::Json;
 use axum::Router;
-use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::StreamExt as _;
 use cairn_api::auth::{AuthPrincipal, Authenticator, ServiceTokenAuthenticator, ServiceTokenRegistry};
 use cairn_api::bootstrap::{BootstrapConfig, DeploymentMode, EncryptionKeySource, StorageBackend};
-use cairn_api::{DashboardOverview, HealthResponse, SystemStatus};
 use cairn_domain::{
     ApprovalDecision, ApprovalId, ProjectKey, RunId, TaskId,
-    lifecycle::{PauseReason, PauseReasonKind, ResumeTrigger},
-    lifecycle::RunResumeTarget,
 };
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::provider_health::ProviderHealthService;
 use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
-use cairn_runtime::tenants::TenantService;
 use cairn_runtime::{InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OpenAiCompatProvider};
-use cairn_domain::providers::EmbeddingProvider as _;
-use cairn_store::projections::{ApprovalReadModel, AuditLogReadModel, EvalRunReadModel, LlmCallTraceReadModel, ProviderHealthReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
-use cairn_store::{EventLog, EventPosition, StoredEvent};
+use cairn_store::projections::{ApprovalReadModel, LlmCallTraceReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
+use cairn_store::{EventLog, EventPosition};
 use cairn_store::DbAdapter;
 use cairn_store::pg::{PgAdapter, PgEventLog};
 use cairn_store::pg::PgMigrationRunner;
 use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
-use async_trait::async_trait;
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
-use cairn_memory::ingest::{IngestRequest, IngestService, SourceType};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
-use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqlitePoolOptions;
-use tokio_stream::Stream;
 
 // ── Postgres backend ──────────────────────────────────────────────────────────
 
@@ -106,13 +93,6 @@ struct RateBucket {
     /// When the current window started (used to decide when to reset).
     window_start: Instant,
 }
-
-impl RateBucket {
-    fn new() -> Self {
-        Self { count: 0, window_start: Instant::now() }
-    }
-}
-
 /// Shared rate-limit table.  Keyed by token (preferred) or IP address.
 type RateLimitTable = Arc<Mutex<HashMap<String, RateBucket>>>;
 
@@ -122,35 +102,6 @@ const RATE_LIMIT_TOKEN: u32 = 1_000;
 const RATE_LIMIT_IP: u32 = 100;
 /// Window duration.
 const RATE_WINDOW: Duration = Duration::from_secs(60);
-
-// ── Pipeline embedding bridge ────────────────────────────────────────────────
-
-/// Bridges the domain-level [`cairn_domain::providers::EmbeddingProvider`]
-/// (batch, model-aware) to the pipeline-level
-/// [`cairn_memory::pipeline::EmbeddingProvider`] (single-text) used by
-/// [`IngestPipeline`].
-struct OpenAiCompatPipelineEmbedder {
-    provider: Arc<OpenAiCompatProvider>,
-    model_id: String,
-}
-
-impl OpenAiCompatPipelineEmbedder {
-    fn new(provider: Arc<OpenAiCompatProvider>, model_id: impl Into<String>) -> Self {
-        Self { provider, model_id: model_id.into() }
-    }
-}
-
-#[async_trait]
-impl cairn_memory::pipeline::EmbeddingProvider for OpenAiCompatPipelineEmbedder {
-    async fn embed(&self, text: &str) -> Result<Vec<f32>, cairn_memory::ingest::IngestError> {
-        use cairn_domain::providers::EmbeddingProvider as DomainEmbedder;
-        let resp = self.provider
-            .embed(&self.model_id, vec![text.to_owned()])
-            .await
-            .map_err(|e| cairn_memory::ingest::IngestError::EmbeddingFailed(e.to_string()))?;
-        Ok(resp.embeddings.into_iter().next().unwrap_or_default())
-    }
-}
 
 // ── App state ────────────────────────────────────────────────────────────────
 
@@ -278,19 +229,6 @@ impl AppMetrics {
             latency_ring:     std::collections::VecDeque::with_capacity(LATENCY_RING_SIZE),
         }
     }
-
-    fn record(&mut self, path: &str, status: u16, latency_ms: u64) {
-        self.total_requests += 1;
-        *self.requests_by_path.entry(path.to_owned()).or_insert(0) += 1;
-        if status >= 400 {
-            *self.errors_by_status.entry(status).or_insert(0) += 1;
-        }
-        if self.latency_ring.len() == LATENCY_RING_SIZE {
-            self.latency_ring.pop_front();
-        }
-        self.latency_ring.push_back(latency_ms);
-    }
-
     fn percentile(&self, p: f64) -> u64 {
         if self.latency_ring.is_empty() {
             return 0;
@@ -347,14 +285,6 @@ impl RequestLogBuffer {
     fn new() -> Self {
         Self { entries: std::collections::VecDeque::with_capacity(LOG_RING_SIZE) }
     }
-
-    fn push(&mut self, entry: LogEntry) {
-        if self.entries.len() == LOG_RING_SIZE {
-            self.entries.pop_front();
-        }
-        self.entries.push_back(entry);
-    }
-
     /// Return the last `n` entries whose level matches the filter (empty = all).
     fn tail(&self, n: usize, level_filter: &[&str]) -> Vec<&LogEntry> {
         self.entries
@@ -493,88 +423,6 @@ impl ProjectQuery {
             (Some(t), Some(w), Some(p)) => Some(ProjectKey::new(t.as_str(), w.as_str(), p.as_str())),
             _ => None,
         }
-    }
-}
-
-// ── Auth middleware (RFC 008) ─────────────────────────────────────────────────
-
-/// Paths that are served without authentication.
-///
-/// - `/health` — liveness probe used by load-balancers.
-/// - `/v1/stream` — SSE endpoint: browsers can't set custom headers in
-///   `EventSource`, so clients reconnect using the last-event-id only.
-fn is_auth_exempt(path: &str) -> bool {
-    // /v1/ws: browsers can't send headers during WS upgrade, so auth is
-    // handled inside the handler via ?token= query parameter instead.
-    path == "/health"
-        || path.starts_with("/v1/stream")
-        || path == "/v1/ws"
-        || path == "/v1/openapi.json"
-        || path == "/v1/docs"
-        || path == "/v1/rate-limit"
-        || path == "/v1/changelog"
-}
-
-/// Extract the raw token from an `Authorization: Bearer <token>` header.
-fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
-    headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .map(|s| s.trim().to_owned())
-}
-
-/// Axum middleware that enforces bearer token authentication on `/v1/*` routes.
-///
-/// Exempt paths (`/health`, `/v1/stream`) pass through without a token.
-/// All other paths require a valid `Authorization: Bearer <token>` header.
-/// On success the resolved `AuthPrincipal` is placed in request extensions
-/// so downstream handlers can read it via `Extension<AuthPrincipal>`.
-async fn auth_middleware(
-    State(state): State<AppState>,
-    mut request: Request<Body>,
-    next: Next,
-) -> Response {
-    let path = request.uri().path().to_owned();
-
-    if is_auth_exempt(&path) {
-        return next.run(request).await;
-    }
-
-    // Only guard /v1/* routes; all other paths (e.g. future admin paths) pass
-    // through unless explicitly added here.
-    if !path.starts_with("/v1/") {
-        return next.run(request).await;
-    }
-
-    let token = match bearer_token(request.headers()) {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(ApiError {
-                    code: "unauthorized",
-                    message: "missing Authorization: Bearer <token> header".to_owned(),
-                }),
-            )
-                .into_response();
-        }
-    };
-
-    let authenticator = ServiceTokenAuthenticator::new(state.tokens.clone());
-    match authenticator.authenticate(&token) {
-        Ok(principal) => {
-            request.extensions_mut().insert(principal);
-            next.run(request).await
-        }
-        Err(_) => (
-            StatusCode::UNAUTHORIZED,
-            Json(ApiError {
-                code: "unauthorized",
-                message: "invalid or expired bearer token".to_owned(),
-            }),
-        )
-            .into_response(),
     }
 }
 
@@ -724,98 +572,6 @@ fn rate_limit_key(req: &Request<Body>) -> (String, u32) {
     (format!("ip:{ip}"), RATE_LIMIT_IP)
 }
 
-/// Sliding-window rate-limit middleware.
-///
-/// Checks the per-key bucket and returns `429 Too Many Requests` when the
-/// limit is exceeded.  Injects three response headers on every request:
-///
-/// - `X-RateLimit-Limit`     — max requests per minute for this key
-/// - `X-RateLimit-Remaining` — requests left in the current window
-/// - `X-RateLimit-Reset`     — Unix timestamp when the window resets
-async fn rate_limit_middleware(
-    State(state): State<AppState>,
-    req: Request<Body>,
-    next: Next,
-) -> Response {
-    // /health and /v1/stream are exempt (SSE keeps the connection open).
-    let path = req.uri().path();
-    if path == "/health" || path.starts_with("/v1/stream") {
-        return next.run(req).await;
-    }
-
-    let (key, limit) = rate_limit_key(&req);
-
-    let (remaining, reset_secs) = {
-        let mut table = state.rate_limits.lock().unwrap_or_else(|e| e.into_inner());
-        let bucket = table.entry(key.clone()).or_insert_with(RateBucket::new);
-
-        // Roll the window when it has expired.
-        if bucket.window_start.elapsed() >= RATE_WINDOW {
-            bucket.count = 0;
-            bucket.window_start = Instant::now();
-        }
-
-        if bucket.count >= limit {
-            let reset_in = RATE_WINDOW
-                .checked_sub(bucket.window_start.elapsed())
-                .unwrap_or(RATE_WINDOW)
-                .as_secs();
-            let reset_ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-                .saturating_add(reset_in);
-            let mut resp = (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(serde_json::json!({
-                    "code": "rate_limited",
-                    "message": "Too many requests — slow down and retry after the reset window.",
-                    "retry_after_secs": reset_in,
-                })),
-            ).into_response();
-            resp.headers_mut().insert(
-                "X-RateLimit-Limit",
-                axum::http::HeaderValue::from_str(&limit.to_string()).unwrap(),
-            );
-            resp.headers_mut().insert(
-                "X-RateLimit-Remaining",
-                axum::http::HeaderValue::from_static("0"),
-            );
-            resp.headers_mut().insert(
-                "X-RateLimit-Reset",
-                axum::http::HeaderValue::from_str(&reset_ts.to_string()).unwrap(),
-            );
-            return resp;
-        }
-
-        bucket.count += 1;
-        let remaining = limit.saturating_sub(bucket.count);
-        let reset_in = RATE_WINDOW
-            .checked_sub(bucket.window_start.elapsed())
-            .unwrap_or(RATE_WINDOW)
-            .as_secs();
-        let reset_ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            .saturating_add(reset_in);
-        (remaining, reset_ts)
-    };
-
-    let mut resp = next.run(req).await;
-    let headers = resp.headers_mut();
-    if let Ok(v) = axum::http::HeaderValue::from_str(&limit.to_string()) {
-        headers.insert("X-RateLimit-Limit", v);
-    }
-    if let Ok(v) = axum::http::HeaderValue::from_str(&remaining.to_string()) {
-        headers.insert("X-RateLimit-Remaining", v);
-    }
-    if let Ok(v) = axum::http::HeaderValue::from_str(&reset_secs.to_string()) {
-        headers.insert("X-RateLimit-Reset", v);
-    }
-    resp
-}
-
 /// `GET /v1/rate-limit` — return current limits and remaining quota.
 async fn rate_limit_status_handler(
     State(state): State<AppState>,
@@ -843,158 +599,6 @@ async fn rate_limit_status_handler(
             "window_seconds":         RATE_WINDOW.as_secs(),
         },
     }))
-}
-
-/// Request tracing + metrics middleware.
-///
-/// Runs outermost in the middleware stack so it captures every request,
-/// including those rejected by auth and rate-limit middleware.
-///
-/// Per request it:
-///   1. Generates a UUID v4 `X-Request-ID` and injects it into the response.
-///   2. Logs a structured entry into the in-memory ring buffer.
-///   3. Updates the rolling metrics counters and latency ring.
-async fn metrics_middleware(
-    State(state): State<AppState>,
-    mut request: Request<Body>,
-    next: Next,
-) -> Response {
-    use uuid::Uuid;
-
-    // 1. Determine the request ID:
-    //    - Use the client-supplied X-Request-ID if it is safe ASCII and ≤ 128 chars.
-    //    - Otherwise generate a fresh UUID v4.
-    let request_id: String = request
-        .headers()
-        .get("x-request-id")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| {
-            let len = s.len();
-            len > 0 && len <= 128 && s.bytes().all(|b| b.is_ascii_graphic())
-        })
-        .map(|s| s.to_owned())
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-    // 2. Store the ID in request extensions so downstream handlers can read it
-    //    via `Extension<RequestId>` without re-reading the (now-outgoing) header.
-    request.extensions_mut().insert(RequestId(request_id.clone()));
-
-    let method             = request.method().to_string();
-    let path               = request.uri().path().to_owned();
-    let query              = request.uri().query().map(|q| q.to_owned());
-    let start              = std::time::Instant::now();
-    let start_time_unix_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
-
-    let mut response   = next.run(request).await;
-    let latency_ms = start.elapsed().as_millis() as u64;
-    let status     = response.status().as_u16();
-
-    // 3. Echo the (original or generated) ID back to the client.
-    //    Clients that supplied their own ID get it reflected unchanged.
-    if let Ok(val) = axum::http::HeaderValue::from_str(&request_id) {
-        response.headers_mut().insert("x-request-id", val);
-    }
-
-    // Update rolling metrics.
-    if let Ok(mut m) = state.metrics.write() {
-        m.record(&path, status, latency_ms);
-    }
-
-    // Derive log level from status code.
-    let level: &'static str = if status >= 500 {
-        "error"
-    } else if status >= 400 {
-        "warn"
-    } else {
-        "info"
-    };
-
-    // Emit structured tracing span (picked up by tracing-subscriber).
-    match level {
-        "error" => tracing::error!(
-            request_id = %request_id,
-            method = %method,
-            path = %path,
-            status = status,
-            latency_ms = latency_ms,
-            "request completed"
-        ),
-        "warn" => tracing::warn!(
-            request_id = %request_id,
-            method = %method,
-            path = %path,
-            status = status,
-            latency_ms = latency_ms,
-            "request completed"
-        ),
-        _ => tracing::info!(
-            request_id = %request_id,
-            method = %method,
-            path = %path,
-            status = status,
-            latency_ms = latency_ms,
-            "request completed"
-        ),
-    }
-
-    // Append structured entry to in-memory log ring buffer.
-    let entry = LogEntry {
-        timestamp:  {
-            // chrono clock feature not enabled; compute ISO-8601 from SystemTime.
-            let secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            format!(
-                "{}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-                1970 + secs / 31_557_600,
-                ((secs % 31_557_600) / 2_629_800) + 1,
-                ((secs % 2_629_800) / 86_400) + 1,
-                (secs % 86_400) / 3_600,
-                (secs % 3_600) / 60,
-                secs % 60,
-            )
-        },
-        level,
-        message:            format!("{method} {path} → {status}"),
-        request_id,
-        method,
-        path,
-        query,
-        status,
-        latency_ms,
-        start_time_unix_ns,
-    };
-    if let Ok(mut log) = state.request_log.write() {
-        log.push(entry);
-    }
-
-    response
-}
-
-// ── Core handlers ─────────────────────────────────────────────────────────────
-
-async fn health_handler() -> Json<HealthResponse> {
-    Json(HealthResponse { ok: true })
-}
-
-async fn status_handler(State(state): State<AppState>) -> Json<SystemStatus> {
-    // Check durable backend health (Postgres > SQLite > InMemory).
-    let store_ok = if let Some(pg) = &state.pg {
-        pg.adapter.health_check().await.is_ok()
-    } else if let Some(sq) = &state.sqlite {
-        sq.adapter.health_check().await.is_ok()
-    } else {
-        state.runtime.store.head_position().await.is_ok()
-    };
-    Json(SystemStatus {
-        runtime_ok: true,
-        store_ok,
-        uptime_secs: state.started_at.elapsed().as_secs(),
-    })
 }
 
 // ── Detailed health handler ───────────────────────────────────────────────────
@@ -1152,228 +756,6 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
         started_at,
         role: state.process_role.as_str().to_owned(),
     })
-}
-
-async fn dashboard_handler(State(state): State<AppState>) -> Json<DashboardOverview> {
-    let active_runs = state.runtime.store.count_active_runs().await as u32;
-    let active_tasks = state.runtime.store.count_active_tasks().await as u32;
-
-    // Pending approvals — reuse the existing cross-project scan.
-    let pending_approvals = list_all_pending(&state, 10_000, 0)
-        .await
-        .map(|v| v.len() as u32)
-        .unwrap_or(0);
-
-    // Failed runs — list_by_state(Failed) returns all failed runs; count them.
-    let failed_runs_24h = RunReadModel::list_by_state(
-        state.runtime.store.as_ref(),
-        cairn_domain::RunState::Failed,
-        10_000,
-    )
-    .await
-    .map(|v| v.len() as u32)
-    .unwrap_or(0);
-
-    // Latency percentiles and error rate from the rolling metrics window.
-    let (p50, p95, error_rate) = {
-        let m = state.metrics.read().unwrap();
-        (
-            if m.total_requests > 0 { Some(m.percentile(50.0)) } else { None },
-            if m.total_requests > 0 { Some(m.percentile(95.0)) } else { None },
-            m.error_rate() as f32,
-        )
-    };
-
-    // Provider connections count.
-    let active_providers = {
-        use cairn_store::projections::ProviderConnectionReadModel;
-        ProviderConnectionReadModel::list_by_tenant(
-            state.runtime.store.as_ref(),
-            &cairn_domain::TenantId::new("default"),
-            10_000,
-            0,
-        )
-        .await
-        .map(|v| v.len() as u32)
-        .unwrap_or(0)
-    };
-
-    // Memory document count from the document store.
-    let memory_doc_count = state.document_store.all_current_chunks().len() as u64;
-
-    // Degraded components — check Ollama reachability.
-    let mut degraded = vec![];
-    if let Some(ref ollama) = state.ollama {
-        if !ollama.is_healthy().await {
-            degraded.push("ollama".to_owned());
-        }
-    }
-    let system_healthy = degraded.is_empty() && failed_runs_24h == 0;
-
-    Json(DashboardOverview {
-        active_runs,
-        active_tasks,
-        pending_approvals,
-        failed_runs_24h,
-        system_healthy,
-        latency_p50_ms: p50,
-        latency_p95_ms: p95,
-        error_rate_24h: error_rate,
-        degraded_components: degraded,
-        recent_critical_events: vec![],
-        active_providers,
-        active_plugins: 0, // no plugin registry in the store yet
-        memory_doc_count,
-        eval_runs_today: 0, // eval runs not project-scoped in store; deferred
-    })
-}
-
-// ── Stats handler ─────────────────────────────────────────────────────────────
-
-/// `GET /v1/stats` — lightweight real-time system-wide counters.
-async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
-    use cairn_store::projections::SessionReadModel;
-
-    let total_events: u64 = state
-        .runtime
-        .store
-        .head_position()
-        .await
-        .ok()
-        .flatten()
-        .map(|p| p.0 + 1)
-        .unwrap_or(0);
-
-    let active_runs  = state.runtime.store.count_active_runs().await;
-    let active_tasks = state.runtime.store.count_active_tasks().await;
-
-    let total_sessions = SessionReadModel::list_active(state.runtime.store.as_ref(), usize::MAX)
-        .await
-        .unwrap_or_default()
-        .len() as u64;
-
-    let pending_approvals = list_all_pending(&state, 10_000, 0)
-        .await
-        .map(|v| v.len() as u64)
-        .unwrap_or(0);
-
-    Json(serde_json::json!({
-        "total_events":     total_events,
-        "total_sessions":   total_sessions,
-        "total_runs":       active_runs,
-        "total_tasks":      active_tasks,
-        "active_runs":      active_runs,
-        "pending_approvals": pending_approvals,
-        "uptime_seconds":   state.started_at.elapsed().as_secs(),
-    }))
-}
-
-/// `GET /v1/events/recent?limit=50` — last N events as a JSON array.
-///
-/// Complements the SSE stream: suitable for seeding the UI event log on first
-/// page load without opening a persistent connection.
-async fn recent_events_handler(
-    State(state): State<AppState>,
-    Query(q): Query<PaginationQuery>,
-) -> impl IntoResponse {
-    let limit = q.limit.min(500);
-    let events = match state.runtime.store.read_stream(None, limit).await {
-        Ok(v) => v,
-        Err(e) => return internal_error(e.to_string()).into_response(),
-    };
-    let items: Vec<serde_json::Value> = events
-        .iter()
-        .rev()
-        .take(limit)
-        .map(|ev| serde_json::json!({
-            "seq":         ev.position.0,
-            "event_type":  event_type_name(&ev.envelope.payload),
-            "data":        &ev.envelope.payload,
-            "timestamp":   ev.stored_at.to_string(),
-        }))
-        .collect();
-    Json(serde_json::json!({ "items": items, "count": items.len(), "limit": limit })).into_response()
-}
-
-/// `GET /v1/stream` — Real-time SSE event stream (RFC 002).
-///
-/// Protocol:
-/// - On connect, sends `event: connected` with server position as data.
-/// - If `Last-Event-ID` header is present, replays all events after that
-///   position before entering the live stream (RFC 002 replay window).
-/// - Subsequent events are streamed live as they are appended to the store.
-/// - SSE `id:` field carries the log position so clients can resume.
-/// - Keepalive comment is sent every 15 s to prevent proxy timeouts.
-async fn stream_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    // Subscribe BEFORE reading the replay window — this guarantees no events
-    // are missed in the window between replay and live subscription.
-    let receiver = state.runtime.store.subscribe();
-
-    // Extract Last-Event-ID for cursor-based replay.
-    let last_event_id: Option<u64> = headers
-        .get("last-event-id")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse().ok());
-
-    let after = last_event_id.map(cairn_store::EventPosition);
-
-    // Read the replay window synchronously before yielding the stream.
-    let replayed = state
-        .runtime
-        .store
-        .read_stream(after, 1000)
-        .await
-        .unwrap_or_default();
-
-    let head_pos = state
-        .runtime
-        .store
-        .head_position()
-        .await
-        .ok()
-        .flatten()
-        .map(|p| p.0)
-        .unwrap_or(0);
-
-    // Connected event — tells the client the current head position.
-    let connected = Event::default()
-        .event("connected")
-        .data(format!(r#"{{"head_position":{head_pos}}}"#));
-
-    // Replay stream: historical events after Last-Event-ID.
-    let replay = tokio_stream::iter(replayed).map(stored_event_to_sse);
-
-    // Live stream: broadcast channel, filter out lagged-receiver errors.
-    let live = BroadcastStream::new(receiver)
-        .filter_map(|r| r.ok())
-        .map(stored_event_to_sse);
-
-    // connected → replay → live
-    let stream = tokio_stream::once(connected)
-        .chain(replay)
-        .chain(live)
-        .map(Ok::<Event, Infallible>);
-
-    Sse::new(stream).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(15))
-            .text("heartbeat"),
-    )
-}
-
-fn stored_event_to_sse(e: StoredEvent) -> Event {
-    let data = serde_json::json!({
-        "event_id": e.envelope.event_id.as_str(),
-        "type": event_type_name(&e.envelope.payload),
-        "payload": &e.envelope.payload,
-    });
-    Event::default()
-        .id(e.position.0.to_string())
-        .event(event_type_name(&e.envelope.payload))
-        .data(serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_owned()))
 }
 
 // ── WebSocket handler ─────────────────────────────────────────────────────────
@@ -1536,50 +918,6 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     }
 }
 
-// ── Run handlers ──────────────────────────────────────────────────────────────
-
-/// `GET /v1/runs` — list all runs (limit/offset pagination).
-async fn list_runs_handler(
-    State(state): State<AppState>,
-    Query(q): Query<PaginationQuery>,
-) -> impl axum::response::IntoResponse {
-    // Scan the event log for RunCreated events and return the current RunRecord
-    // for each — this covers runs across all projects/tenants.
-    let limit: usize = q.limit;
-    let offset: usize = q.offset;
-    use cairn_store::EventLog;
-    use cairn_store::projections::RunReadModel;
-    let events = match state.runtime.store.read_stream(None, usize::MAX).await {
-        Ok(v) => v,
-        Err(e) => return Err(internal_error(e.to_string())),
-    };
-    let mut runs = Vec::new();
-    for ev in &events {
-        if let cairn_domain::RuntimeEvent::RunCreated(e) = &ev.envelope.payload {
-            if let Ok(Some(record)) = RunReadModel::get(state.runtime.store.as_ref(), &e.run_id).await {
-                runs.push(record);
-            }
-        }
-    }
-    runs.sort_by_key(|r| std::cmp::Reverse(r.created_at));
-    let total = runs.len();
-    let page = runs.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
-    Ok((pagination_headers("/v1/runs", total, offset, limit), Json(page)))
-}
-
-/// `GET /v1/runs/:id` — get a single run by ID.
-async fn get_run_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl axum::response::IntoResponse {
-    let run_id = RunId::new(id);
-    match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
-        Ok(Some(run)) => Ok(Json(run)),
-        Ok(None) => Err(not_found(format!("run {} not found", run_id.as_str()))),
-        Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
 // ── Task handlers ────────────────────────────────────────────────────────────
 
 /// `GET /v1/runs/:id/tasks` — list all tasks belonging to a run.
@@ -1679,44 +1017,6 @@ async fn start_task_handler(
     }
 }
 
-/// `POST /v1/tasks/:id/complete` — mark a running task as completed.
-///
-/// Terminal transition.  Resolves any downstream tasks that declared a
-/// dependency on this task (they transition from `waiting_dependency` to
-/// `queued`).  Optional `result` payload is echoed in the response.
-///
-/// Body: `{ "result": {...} }` (optional)
-#[derive(Deserialize)]
-struct CompleteTaskBody {
-    #[serde(default)]
-    result: Option<serde_json::Value>,
-}
-
-async fn complete_task_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(body): Json<CompleteTaskBody>,
-) -> impl axum::response::IntoResponse {
-    let task_id = TaskId::new(id.clone());
-    match state.runtime.tasks.complete(&task_id).await {
-        Ok(record) => {
-            let mut value = serde_json::to_value(&record).unwrap_or_default();
-            if let (Some(obj), Some(result)) = (value.as_object_mut(), body.result) {
-                obj.insert("result".to_owned(), result);
-            }
-            Ok((StatusCode::OK, Json(value)))
-        }
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("not found") || msg.contains("NotFound") {
-                Err(not_found(format!("task {id} not found")))
-            } else {
-                Err(bad_request(msg))
-            }
-        }
-    }
-}
-
 /// `POST /v1/tasks/:id/fail` — mark a running or claimed task as failed.
 ///
 /// Body: `{ "error": "reason string" }`
@@ -1805,60 +1105,6 @@ async fn list_session_runs_handler(
     }
 }
 
-/// `GET /v1/sessions` — list active sessions (most recent first, limit/offset).
-async fn list_sessions_handler(
-    State(state): State<AppState>,
-    Query(q): Query<PaginationQuery>,
-) -> impl axum::response::IntoResponse {
-    // Fetch all to get accurate total, then paginate in-process.
-    match SessionReadModel::list_active(state.runtime.store.as_ref(), usize::MAX).await {
-        Ok(sessions) => {
-            let total = sessions.len();
-            let page: Vec<_> = sessions.into_iter().skip(q.offset).take(q.limit).collect();
-            Ok((pagination_headers("/v1/sessions", total, q.offset, q.limit), Json(page)))
-        }
-        Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
-// ── Session + Run write handlers ─────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct CreateSessionBody {
-    tenant_id:    Option<String>,
-    workspace_id: Option<String>,
-    project_id:   Option<String>,
-    session_id:   Option<String>,
-}
-
-/// `POST /v1/sessions` — create a new session.
-async fn create_session_handler(
-    State(state): State<AppState>,
-    Json(body): Json<CreateSessionBody>,
-) -> impl axum::response::IntoResponse {
-    if let Err(msg) = validate::check_all(&[
-        validate::valid_id("tenant_id", &body.tenant_id),
-        validate::valid_id("workspace_id", &body.workspace_id),
-        validate::valid_id("project_id", &body.project_id),
-        validate::valid_id("session_id", &body.session_id),
-    ]) {
-        return bad_request(msg).into_response();
-    }
-
-    let project = ProjectKey::new(
-        body.tenant_id.as_deref().unwrap_or("default"),
-        body.workspace_id.as_deref().unwrap_or("default"),
-        body.project_id.as_deref().unwrap_or("default"),
-    );
-    let session_id = cairn_domain::SessionId::new(
-        body.session_id.as_deref().unwrap_or("session_1"),
-    );
-    match SessionService::create(&state.runtime.sessions, &project, session_id).await {
-        Ok(record) => (StatusCode::CREATED, Json(serde_json::json!(record))).into_response(),
-        Err(e) => internal_error(e.to_string()).into_response(),
-    }
-}
-
 #[derive(Deserialize)]
 struct CreateRunBody {
     tenant_id:    Option<String>,
@@ -1867,40 +1113,6 @@ struct CreateRunBody {
     session_id:   Option<String>,
     run_id:       Option<String>,
     parent_run_id: Option<String>,
-}
-
-/// `POST /v1/runs` — start a new run within a session.
-async fn create_run_handler(
-    State(state): State<AppState>,
-    Json(body): Json<CreateRunBody>,
-) -> impl axum::response::IntoResponse {
-    if let Err(msg) = validate::check_all(&[
-        validate::valid_id("tenant_id", &body.tenant_id),
-        validate::valid_id("workspace_id", &body.workspace_id),
-        validate::valid_id("project_id", &body.project_id),
-        validate::valid_id("session_id", &body.session_id),
-        validate::valid_id("run_id", &body.run_id),
-        validate::valid_id("parent_run_id", &body.parent_run_id),
-    ]) {
-        return bad_request(msg).into_response();
-    }
-
-    let project = ProjectKey::new(
-        body.tenant_id.as_deref().unwrap_or("default"),
-        body.workspace_id.as_deref().unwrap_or("default"),
-        body.project_id.as_deref().unwrap_or("default"),
-    );
-    let session_id = cairn_domain::SessionId::new(
-        body.session_id.as_deref().unwrap_or("session_1"),
-    );
-    let run_id = RunId::new(
-        body.run_id.as_deref().unwrap_or("run_1"),
-    );
-    let parent_run_id = body.parent_run_id.as_deref().map(RunId::new);
-    match RunService::start(&state.runtime.runs, &project, &session_id, run_id, parent_run_id).await {
-        Ok(record) => (StatusCode::CREATED, Json(serde_json::json!(record))).into_response(),
-        Err(e) => internal_error(e.to_string()).into_response(),
-    }
 }
 
 // ── Batch handlers ────────────────────────────────────────────────────────────
@@ -2327,64 +1539,6 @@ async fn resolve_approval_handler(
     }
 }
 
-// ── Prompt handlers (RFC 006) ─────────────────────────────────────────────────
-
-/// `GET /v1/prompts/assets` — list all prompt assets across every project.
-async fn list_prompt_assets_handler(
-    State(state): State<AppState>,
-    Query(q): Query<PaginationQuery>,
-) -> impl axum::response::IntoResponse {
-    match state.runtime.store.list_all_prompt_assets(q.limit, q.offset).await {
-        Ok(assets) => Ok(Json(assets)),
-        Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
-/// `GET /v1/prompts/releases` — list all prompt releases across every project.
-async fn list_prompt_releases_handler(
-    State(state): State<AppState>,
-    Query(q): Query<PaginationQuery>,
-) -> impl axum::response::IntoResponse {
-    match state.runtime.store.list_all_prompt_releases(q.limit, q.offset).await {
-        Ok(releases) => Ok(Json(releases)),
-        Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
-// ── Cost handler (RFC 009) ────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-struct CostSummaryResponse {
-    total_provider_calls: u64,
-    total_tokens_in: u64,
-    total_tokens_out: u64,
-    total_cost_micros: u64,
-}
-
-/// `GET /v1/costs` — aggregate cost summary across all runs in the store.
-async fn costs_handler(State(state): State<AppState>) -> Json<CostSummaryResponse> {
-    let (calls, tokens_in, tokens_out, cost_micros) = state.runtime.store.cost_summary().await;
-    Json(CostSummaryResponse {
-        total_provider_calls: calls,
-        total_tokens_in: tokens_in,
-        total_tokens_out: tokens_out,
-        total_cost_micros: cost_micros,
-    })
-}
-
-// ── Provider handler (RFC 007) ────────────────────────────────────────────────
-
-/// `GET /v1/providers` — list all provider bindings (RFC 007 fleet view).
-async fn list_providers_handler(
-    State(state): State<AppState>,
-    Query(q): Query<PaginationQuery>,
-) -> impl axum::response::IntoResponse {
-    match state.runtime.store.list_all_provider_bindings(q.limit, q.offset).await {
-        Ok(bindings) => Ok(Json(bindings)),
-        Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
 // ── Event replay handler (RFC 002) ────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -2404,107 +1558,6 @@ struct StoredEventSummary {
     position: u64,
     stored_at: u64,
     event_type: String,
-}
-
-/// `GET /v1/sessions/:id/events` — entity-scoped event stream for a session.
-///
-/// Returns all events whose payload's `session_id` matches `:id`, ordered by
-/// log position. Supports the same `?after=<position>&limit=<n>` cursor
-/// as the global `/v1/events` endpoint.
-async fn list_session_events_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Query(q): Query<EventReplayQuery>,
-) -> impl axum::response::IntoResponse {
-    let session_id = cairn_domain::SessionId::new(id);
-    let limit = q.limit.min(500);
-    let after = q.after.map(EventPosition);
-    match state
-        .runtime
-        .store
-        .read_by_entity(&cairn_store::EntityRef::Session(session_id), after, limit)
-        .await
-    {
-        Ok(events) => {
-            let summaries: Vec<StoredEventSummary> = events
-                .into_iter()
-                .map(|e| StoredEventSummary {
-                    position: e.position.0,
-                    stored_at: e.stored_at,
-                    event_type: event_type_name(&e.envelope.payload).to_owned(),
-                })
-                .collect();
-            Ok(Json(summaries))
-        }
-        Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
-// ── Provider health handler (RFC 007) ───────────────────────────────────────
-
-/// Response shape for a single provider connection health entry.
-#[derive(Serialize)]
-struct ProviderHealthEntry {
-    connection_id: String,
-    status: String,
-    healthy: bool,
-    last_checked_at: u64,
-    consecutive_failures: u32,
-    error_message: Option<String>,
-}
-
-/// `GET /v1/providers/health` — health status for all registered provider connections.
-///
-/// Returns a snapshot of every `ProviderHealthRecord` in the store, showing
-/// connectivity status, last health-check timestamp, and consecutive failures.
-/// Operator dashboards use this to detect degraded providers before routing.
-async fn provider_health_handler(
-    State(state): State<AppState>,
-) -> impl axum::response::IntoResponse {
-    // Collect unique tenants from provider connections, then union health records.
-    // In practice each deployment has one tenant, so we scan all records directly.
-    #[allow(unused_imports)]
-    use cairn_domain::TenantId;
-    // Use the store's full scan: list health for the default tenant first,
-    // then fall back to listing all provider connections to derive tenants.
-    // Derive tenant IDs from provider bindings (list_all_provider_bindings scans all).
-    let bindings = match state.runtime.store.list_all_provider_bindings(500, 0).await {
-        Ok(b) => b,
-        Err(e) => return Err(internal_error(e.to_string())),
-    };
-    let tenants: Vec<cairn_domain::TenantId> = {
-        let mut seen = std::collections::HashSet::new();
-        bindings
-            .iter()
-            .filter(|b| seen.insert(b.project.tenant_id.as_str().to_owned()))
-            .map(|b| b.project.tenant_id.clone())
-            .collect()
-    };
-    let mut all_health: Vec<ProviderHealthEntry> = Vec::new();
-    for tenant_id in &tenants {
-        let records = match ProviderHealthReadModel::list_by_tenant(
-            state.runtime.store.as_ref(),
-            tenant_id,
-            100,
-            0,
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => return Err(internal_error(e.to_string())),
-        };
-        for rec in records {
-            all_health.push(ProviderHealthEntry {
-                connection_id: rec.binding_id.as_str().to_owned(),
-                status: format!("{:?}", rec.status).to_lowercase(),
-                healthy: rec.healthy,
-                last_checked_at: rec.last_checked_ms,
-                consecutive_failures: rec.consecutive_failures,
-                error_message: rec.error_message.clone(),
-            });
-        }
-    }
-    Ok(Json(all_health))
 }
 
 // ── Run tool invocations handler ─────────────────────────────────────────────
@@ -2528,72 +1581,6 @@ async fn list_run_tool_invocations_handler(
     .await
     {
         Ok(records) => Ok(Json(records)),
-        Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
-/// `GET /v1/runs/:id/events` — entity-scoped event stream for a run (RFC 002).
-///
-/// Returns all events whose payload's `run_id` matches `:id`, ordered by
-/// log position. Supports the same `?after=<position>&limit=<n>` cursor
-/// as the global `/v1/events` endpoint.
-async fn list_run_events_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Query(q): Query<EventReplayQuery>,
-) -> impl axum::response::IntoResponse {
-    let run_id = RunId::new(id);
-    let limit = q.limit.min(500);
-    let after = q.after.map(EventPosition);
-    match state
-        .runtime
-        .store
-        .read_by_entity(&cairn_store::EntityRef::Run(run_id), after, limit)
-        .await
-    {
-        Ok(events) => {
-            let summaries: Vec<StoredEventSummary> = events
-                .into_iter()
-                .map(|e| StoredEventSummary {
-                    position: e.position.0,
-                    stored_at: e.stored_at,
-                    event_type: event_type_name(&e.envelope.payload).to_owned(),
-                })
-                .collect();
-            Ok(Json(summaries))
-        }
-        Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
-/// `GET /v1/runs/:id/cost` — accumulated cost breakdown for a run (RFC 009).
-///
-/// Returns zero-valued fields when no provider calls have been made yet,
-/// so the caller can always expect a consistent JSON shape.
-async fn get_run_cost_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl axum::response::IntoResponse {
-    use cairn_store::projections::RunCostReadModel;
-
-    let run_id = RunId::new(id);
-
-    match RunCostReadModel::get_run_cost(state.runtime.store.as_ref(), &run_id).await {
-        Ok(Some(record)) => Ok(Json(serde_json::json!({
-            "run_id":           record.run_id.as_str(),
-            "total_cost_micros": record.total_cost_micros,
-            "total_tokens_in":   record.total_tokens_in,
-            "total_tokens_out":  record.total_tokens_out,
-            "provider_calls":    record.provider_calls,
-        }))),
-        // No cost record yet — run exists but has had no provider calls.
-        Ok(None) => Ok(Json(serde_json::json!({
-            "run_id":           run_id.as_str(),
-            "total_cost_micros": 0u64,
-            "total_tokens_in":   0u64,
-            "total_tokens_out":  0u64,
-            "provider_calls":    0u64,
-        }))),
         Err(e) => Err(internal_error(e.to_string())),
     }
 }
@@ -2898,47 +1885,6 @@ async fn db_status_handler(State(state): State<AppState>) -> Json<DbStatusRespon
     }
 }
 
-// ── Admin handlers ────────────────────────────────────────────────────────────
-
-#[derive(serde::Deserialize)]
-struct CreateTenantRequest {
-    tenant_id: String,
-    name: String,
-}
-
-/// `POST /v1/admin/tenants` — create a new tenant.
-async fn create_tenant_handler(
-    State(state): State<AppState>,
-    Json(body): Json<CreateTenantRequest>,
-) -> impl IntoResponse {
-    match TenantService::create(
-        &state.runtime.tenants,
-        cairn_domain::TenantId::new(body.tenant_id),
-        body.name,
-    )
-    .await
-    {
-        Ok(record) => (StatusCode::CREATED, axum::Json(serde_json::json!({
-            "tenant_id": record.tenant_id,
-            "name":      record.name,
-        })))
-        .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({ "error": e.to_string() })),
-        )
-        .into_response(),
-    }
-}
-
-// ── Audit log handler ─────────────────────────────────────────────────────────
-
-#[derive(serde::Deserialize)]
-struct AuditLogQuery {
-    limit:    Option<usize>,
-    since_ms: Option<u64>,
-}
-
 /// `GET /v1/admin/audit-log?limit=100` — list audit log entries for the operator's tenant.
 // ── Notification handlers ─────────────────────────────────────────────────────
 
@@ -2988,30 +1934,6 @@ async fn mark_all_notifications_read_handler(
         .expect("notification lock poisoned")
         .mark_all_read();
     StatusCode::NO_CONTENT
-}
-
-async fn list_audit_log_handler(
-    State(state): State<AppState>,
-    Query(query): Query<AuditLogQuery>,
-) -> impl axum::response::IntoResponse {
-    let limit = query.limit.unwrap_or(100).min(500);
-    // Use the default tenant scope for the production router.
-    let tenant_id = cairn_domain::TenantId::new("default_tenant");
-    match AuditLogReadModel::list_by_tenant(
-        state.runtime.store.as_ref(),
-        &tenant_id,
-        query.since_ms,
-        limit,
-    )
-    .await
-    {
-        Ok(items) => (
-            axum::http::StatusCode::OK,
-            axum::Json(serde_json::json!({ "items": items, "has_more": items.len() >= limit })),
-        )
-            .into_response(),
-        Err(e) => internal_error(e.to_string()).into_response(),
-    }
 }
 
 // ── Request log handler ───────────────────────────────────────────────────────
@@ -3389,92 +2311,6 @@ async fn admin_event_log_handler(
     })))
 }
 
-// ── Eval runs handler ─────────────────────────────────────────────────────────
-
-/// `GET /v1/evals/runs?project_id=...&limit=100` — list eval runs (operator view).
-///
-/// Returns the most-recent eval runs for a project, or all runs when no
-/// project_id is supplied (scans the full store, limit 200).
-async fn list_evals_handler(
-    State(state): State<AppState>,
-    Query(q): Query<PaginationQuery>,
-) -> impl axum::response::IntoResponse {
-    let project = cairn_domain::ProjectKey::new(
-        "default_tenant",
-        "default_workspace",
-        "default_project",
-    );
-    let limit  = q.limit.min(200);
-    let offset = q.offset;
-    match EvalRunReadModel::list_by_project(state.runtime.store.as_ref(), &project, limit, offset).await {
-        Ok(items) => Ok(axum::Json(serde_json::json!({
-            "items": items,
-            "has_more": items.len() >= limit,
-        }))),
-        Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
-// ── Run lifecycle write handlers ──────────────────────────────────────────────
-
-#[derive(serde::Deserialize, Default)]
-struct PauseRunRequest {
-    #[serde(alias = "kind")]
-    reason_kind: Option<PauseReasonKind>,
-    detail: Option<String>,
-    actor: Option<String>,
-    resume_after_ms: Option<u64>,
-}
-
-/// `POST /v1/runs/:id/pause` — pause a running run.
-async fn pause_run_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    body: Option<Json<PauseRunRequest>>,
-) -> impl IntoResponse {
-    let body = body.map(|Json(b)| b).unwrap_or_default();
-    let reason = PauseReason {
-        kind: body.reason_kind.unwrap_or(PauseReasonKind::OperatorPause),
-        detail: body.detail,
-        resume_after_ms: body.resume_after_ms,
-        actor: body.actor,
-    };
-    match RunService::pause(&state.runtime.runs, &RunId::new(id), reason).await {
-        Ok(run) => (StatusCode::OK, axum::Json(run)).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({ "error": e.to_string() })),
-        ).into_response(),
-    }
-}
-
-#[derive(serde::Deserialize, Default)]
-struct ResumeRunRequest {
-    trigger: Option<ResumeTrigger>,
-    target: Option<RunResumeTarget>,
-}
-
-/// `POST /v1/runs/:id/resume` — resume a paused run.
-async fn resume_run_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    body: Option<Json<ResumeRunRequest>>,
-) -> impl IntoResponse {
-    let body = body.map(|Json(b)| b).unwrap_or_default();
-    match RunService::resume(
-        &state.runtime.runs,
-        &RunId::new(id),
-        body.trigger.unwrap_or(ResumeTrigger::OperatorResume),
-        body.target.unwrap_or(RunResumeTarget::Running),
-    ).await {
-        Ok(run) => (StatusCode::OK, axum::Json(run)).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({ "error": e.to_string() })),
-        ).into_response(),
-    }
-}
-
 // ── Ollama handler ────────────────────────────────────────────────────────────
 
 /// `GET /v1/providers/ollama/models` — list models available in the local Ollama registry.
@@ -3520,7 +2356,6 @@ async fn ollama_models_handler(
         ).into_response()
     }
 }
-
 
 /// `POST /v1/providers/ollama/generate` — run a prompt through the local Ollama LLM.
 ///
@@ -3660,7 +2495,6 @@ async fn ollama_embed_handler(
     });
 
     let start = std::time::Instant::now();
-    use cairn_domain::providers::EmbeddingProvider as _;
     match embedder.embed(model_id, body.texts).await {
         Ok(resp) => {
             let latency_ms = start.elapsed().as_millis() as u64;
@@ -3687,7 +2521,6 @@ async fn ollama_embed_handler(
         }
     }
 }
-
 
 /// `POST /v1/providers/ollama/stream` — stream tokens from Ollama via SSE.
 ///
@@ -4717,122 +3550,6 @@ async fn main() {
     }
 }
 
-/// Build the application router with all routes and auth middleware wired in.
-///
-/// Extracted from `main` so tests can construct the router with a custom
-/// `AppState` (e.g. pre-loaded with test tokens).
-
-// ── Settings and Overview handlers ───────────────────────────────────────────
-
-/// `GET /v1/settings` — deployment configuration summary.
-async fn settings_handler(
-    State(state): State<AppState>,
-) -> impl axum::response::IntoResponse {
-    let store_backend = if state.pg.is_some() { "postgres" } else { "memory" };
-    let deployment_mode = match state.mode {
-        DeploymentMode::SelfHostedTeam => "self_hosted_team",
-        DeploymentMode::Local          => "local",
-    };
-    let settings = cairn_api::settings_api::DeploymentSettings {
-        deployment_mode: deployment_mode.to_owned(),
-        store_backend:   store_backend.to_owned(),
-        plugin_count:    0,
-        system_health:   cairn_api::settings_api::SystemHealthSettings::default(),
-        key_management:  cairn_api::settings_api::KeyManagementStatus::default(),
-    };
-    (StatusCode::OK, Json(settings))
-}
-
-/// `GET /v1/overview` — high-level operator overview combining status and dashboard.
-async fn overview_handler(
-    State(state): State<AppState>,
-) -> impl axum::response::IntoResponse {
-    let store_backend = if state.pg.is_some() { "postgres" } else { "memory" };
-    let deployment_mode = match state.mode {
-        DeploymentMode::SelfHostedTeam => "self_hosted_team",
-        DeploymentMode::Local          => "local",
-    };
-    let uptime_secs = state.started_at.elapsed().as_secs();
-    (StatusCode::OK, Json(serde_json::json!({
-        "deployment_mode": deployment_mode,
-        "store_backend":   store_backend,
-        "uptime_secs":     uptime_secs,
-        "runtime_ok":      true,
-        "store_ok":        state.pg.as_ref().map(|_| true).unwrap_or(true),
-    })))
-}
-
-// ── Task handlers ─────────────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct ClaimTaskRequest {
-    worker_id: String,
-    #[serde(default = "default_lease_ms")]
-    lease_duration_ms: u64,
-}
-fn default_lease_ms() -> u64 { 30_000 }
-
-/// `GET /v1/tasks` — list all tasks, most-recent first (operator view).
-async fn list_all_tasks_handler(
-    State(state): State<AppState>,
-    Query(q): Query<PaginationQuery>,
-) -> impl axum::response::IntoResponse {
-    let total = state.runtime.store.count_all_tasks();
-    match state.runtime.store.list_all_tasks(q.limit, q.offset).await {
-        Ok(tasks) => Ok((pagination_headers("/v1/tasks", total, q.offset, q.limit), Json(tasks))),
-        Err(e)    => Err(internal_error(e.to_string())),
-    }
-}
-
-/// `POST /v1/tasks/:id/claim` — claim a queued task for a worker.
-async fn claim_task_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(body): Json<ClaimTaskRequest>,
-) -> impl axum::response::IntoResponse {
-    if let Err(msg) = validate::check_all(&[
-        validate::require_id("id", &id),
-        validate::require_id("worker_id", &body.worker_id),
-    ]) {
-        return Err(bad_request(msg));
-    }
-    if body.lease_duration_ms > 3_600_000 {
-        return Err(bad_request("lease_duration_ms must not exceed 3,600,000 (1 hour)"));
-    }
-
-    let task_id = TaskId::new(id);
-    match state.runtime.tasks.claim(&task_id, body.worker_id, body.lease_duration_ms).await {
-        Ok(record) => Ok((StatusCode::OK, Json(record))),
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("not found") || msg.contains("NotFound") {
-                Err(not_found(format!("task {} not found", task_id.as_str())))
-            } else {
-                Err(bad_request(msg))
-            }
-        }
-    }
-}
-
-/// `POST /v1/tasks/:id/release-lease` — release a leased task back to queued.
-async fn release_task_lease_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl axum::response::IntoResponse {
-    let task_id = TaskId::new(id);
-    match state.runtime.tasks.release_lease(&task_id).await {
-        Ok(record) => Ok((StatusCode::OK, Json(record))),
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("not found") || msg.contains("NotFound") {
-                Err(not_found(format!("task {} not found", task_id.as_str())))
-            } else {
-                Err(bad_request(msg))
-            }
-        }
-    }
-}
-
 // ── LLM trace handlers (GAP-010) ─────────────────────────────────────────────
 
 /// `GET /v1/traces` — all recent LLM call traces (operator view, limit 500).
@@ -4852,31 +3569,6 @@ async fn list_all_traces_handler(
             ))
         }
         Err(e) => Err(internal_error(e.to_string())),
-    }
-}
-
-/// `GET /v1/sessions/:id/llm-traces` — per-session LLM call traces (GAP-010).
-async fn list_session_traces_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Query(q): Query<PaginationQuery>,
-) -> impl axum::response::IntoResponse {
-    let session_id = cairn_domain::SessionId::new(&id);
-    match SessionReadModel::get(state.runtime.store.as_ref(), &session_id).await {
-        Ok(None) => return Err(not_found(format!("session {id} not found"))),
-        Err(e)   => return Err(internal_error(e.to_string())),
-        Ok(Some(_)) => {}
-    }
-    let limit = q.limit.min(500);
-    match LlmCallTraceReadModel::list_by_session(
-        state.runtime.store.as_ref(),
-        &session_id,
-        limit,
-    )
-    .await
-    {
-        Ok(traces) => Ok(Json(serde_json::json!({ "traces": traces }))),
-        Err(e)     => Err(internal_error(e.to_string())),
     }
 }
 
@@ -4937,173 +3629,6 @@ async fn serve_frontend(uri: axum::http::Uri) -> impl IntoResponse {
             None => StatusCode::NOT_FOUND.into_response(),
         },
     }
-}
-
-
-// ── Memory / knowledge handlers ───────────────────────────────────────────────
-
-/// `GET /v1/sources` — list all ingested knowledge sources.
-async fn list_sources_handler(
-    State(state): State<AppState>,
-    Query(q): Query<ProjectQuery>,
-) -> impl axum::response::IntoResponse {
-    let project = q.project_key().unwrap_or_else(|| ProjectKey::new("default", "default", "default"));
-    let sources = state.document_store.list_sources(&project);
-    (StatusCode::OK, Json(sources))
-}
-
-#[derive(serde::Deserialize)]
-struct MemorySearchQuery {
-    tenant_id:    Option<String>,
-    workspace_id: Option<String>,
-    project_id:   Option<String>,
-    query_text:   Option<String>,
-    #[serde(default = "default_search_limit")]
-    limit: usize,
-}
-
-fn default_search_limit() -> usize { 10 }
-
-impl MemorySearchQuery {
-    fn project(&self) -> ProjectKey {
-        ProjectKey::new(
-            self.tenant_id.as_deref().unwrap_or("default"),
-            self.workspace_id.as_deref().unwrap_or("default"),
-            self.project_id.as_deref().unwrap_or("default"),
-        )
-    }
-}
-
-/// `GET /v1/memory/search` — keyword search over ingested documents.
-async fn memory_search_handler(
-    State(state): State<AppState>,
-    Query(q): Query<MemorySearchQuery>,
-) -> impl axum::response::IntoResponse {
-    let query_text = q.query_text.clone().unwrap_or_default();
-    if query_text.is_empty() {
-        return (StatusCode::OK, Json(serde_json::json!({ "results": [] }))).into_response();
-    }
-    match RetrievalService::query(
-        state.retrieval.as_ref(),
-        RetrievalQuery {
-            project: q.project(),
-            query_text,
-            mode: RetrievalMode::LexicalOnly,
-            reranker: RerankerStrategy::None,
-            limit: q.limit,
-            metadata_filters: Vec::new(),
-            scoring_policy: None,
-        },
-    ).await {
-        Ok(response) => (StatusCode::OK, Json(serde_json::json!({
-            "results": response.results.iter().map(|r| serde_json::json!({
-                "chunk_id":    r.chunk.chunk_id,
-                "document_id": r.chunk.document_id,
-                "source_id":   r.chunk.source_id,
-                "text":        r.chunk.text,
-                "score":       r.score,
-            })).collect::<Vec<_>>()
-        }))).into_response(),
-        Err(e) => internal_error(e.to_string()).into_response(),
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct MemoryIngestBody {
-    tenant_id:    Option<String>,
-    workspace_id: Option<String>,
-    project_id:   Option<String>,
-    source_id:    String,
-    document_id:  String,
-    content:      String,
-    source_type:  Option<String>,
-}
-
-impl MemoryIngestBody {
-    fn project(&self) -> ProjectKey {
-        ProjectKey::new(
-            self.tenant_id.as_deref().unwrap_or("default"),
-            self.workspace_id.as_deref().unwrap_or("default"),
-            self.project_id.as_deref().unwrap_or("default"),
-        )
-    }
-}
-
-/// `POST /v1/memory/ingest` — ingest a document into the knowledge store.
-async fn memory_ingest_handler(
-    State(state): State<AppState>,
-    Json(body): Json<MemoryIngestBody>,
-) -> impl axum::response::IntoResponse {
-    use cairn_domain::{KnowledgeDocumentId, SourceId};
-    let project     = body.project();
-    let source_id   = SourceId::new(body.source_id);
-    let document_id = KnowledgeDocumentId::new(body.document_id);
-    let source_type = match body.source_type.as_deref() {
-        Some("markdown") => SourceType::Markdown,
-        _                => SourceType::PlainText,
-    };
-    state.document_store.register_source(&project, &source_id);
-    match state.ingest.submit(IngestRequest {
-        document_id: document_id.clone(),
-        source_id:   source_id.clone(),
-        source_type,
-        project:     project.clone(),
-        content:     body.content,
-        tags:        Vec::new(),
-        corpus_id:   None,
-        import_id:   None,
-        bundle_source_id: None,
-    }).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({
-            "document_id": document_id,
-            "source_id":   source_id,
-            "status":      "ingested",
-        }))).into_response(),
-        Err(e) => internal_error(e.to_string()).into_response(),
-    }
-}
-
-// ── Metrics handlers ──────────────────────────────────────────────────────────
-
-/// `GET /v1/metrics` — JSON snapshot of rolling request metrics.
-///
-/// Response shape:
-/// ```json
-/// {
-///   "total_requests": 1024,
-///   "requests_by_path": {"/v1/runs": 300, ...},
-///   "avg_latency_ms": 12,
-///   "p50_latency_ms": 8,
-///   "p95_latency_ms": 45,
-///   "p99_latency_ms": 120,
-///   "error_rate": 0.02,
-///   "errors_by_status": {"500": 5, "404": 15}
-/// }
-/// ```
-#[derive(Serialize)]
-struct MetricsResponse {
-    total_requests:   u64,
-    requests_by_path: std::collections::HashMap<String, u64>,
-    avg_latency_ms:   u64,
-    p50_latency_ms:   u64,
-    p95_latency_ms:   u64,
-    p99_latency_ms:   u64,
-    error_rate:       f64,
-    errors_by_status: std::collections::HashMap<u16, u64>,
-}
-
-async fn metrics_json_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let m = state.metrics.read().unwrap();
-    Json(MetricsResponse {
-        total_requests:   m.total_requests,
-        requests_by_path: m.requests_by_path.clone(),
-        avg_latency_ms:   m.avg_latency_ms(),
-        p50_latency_ms:   m.percentile(50.0),
-        p95_latency_ms:   m.percentile(95.0),
-        p99_latency_ms:   m.percentile(99.0),
-        error_rate:       m.error_rate(),
-        errors_by_status: m.errors_by_status.clone(),
-    })
 }
 
 /// `GET /v1/metrics/prometheus` — Prometheus exposition format (text/plain).
@@ -5194,120 +3719,6 @@ async fn entitlements_usage_handler(
 struct TenantQuery {
     #[serde(default)]
     tenant_id: Option<String>,
-}
-
-// ── RFC 013: Bundle import/export handlers ───────────────────────────────────
-
-/// `POST /v1/bundles/export` — export a project's artifacts as a portable bundle.
-async fn bundle_export_handler(
-    State(state): State<AppState>,
-    Json(body): Json<bundles::ExportRequest>,
-) -> impl IntoResponse {
-    let _project_id = body.project_id.as_deref().unwrap_or("default");
-
-    // Collect artifacts from the store.
-    let prompts = state.runtime.store.list_all_prompt_assets(1000, 0).await.unwrap_or_default();
-    let _releases = state.runtime.store.list_all_prompt_releases(1000, 0).await.unwrap_or_default();
-    let bindings = state.runtime.store.list_all_provider_bindings(1000, 0).await.unwrap_or_default();
-
-    let bundle_prompts: Vec<bundles::BundlePrompt> = prompts
-        .iter()
-        .map(|p| bundles::BundlePrompt {
-            id: p.prompt_asset_id.as_str().to_owned(),
-            name: p.name.clone(),
-            kind: p.kind.clone(),
-            content: String::new(),
-            version: None,
-        })
-        .collect();
-
-    let bundle_configs: Vec<bundles::BundleProviderConfig> = bindings
-        .iter()
-        .map(|b| bundles::BundleProviderConfig {
-            id: b.provider_binding_id.as_str().to_owned(),
-            provider_family: b.provider_connection_id.as_str().to_owned(),
-            model_id: b.provider_model_id.as_str().to_owned(),
-            operation: format!("{:?}", b.operation_kind),
-            settings: serde_json::to_value(&b.settings).unwrap_or_default(),
-        })
-        .collect();
-
-    // Eval runs → BundleEvalSuite entries (grouped by evaluator_type).
-    let project_key = cairn_domain::ProjectKey::new(
-        body.tenant_id.as_deref().unwrap_or("default"),
-        body.workspace_id.as_deref().unwrap_or("default"),
-        _project_id,
-    );
-    let bundle_eval_suites: Vec<bundles::BundleEvalSuite> = {
-        use cairn_store::projections::EvalRunReadModel;
-        let eval_runs = EvalRunReadModel::list_by_project(
-            state.runtime.store.as_ref(), &project_key, 1000, 0,
-        ).await.unwrap_or_default();
-        let mut by_evaluator: std::collections::HashMap<String, Vec<serde_json::Value>> =
-            std::collections::HashMap::new();
-        for run in &eval_runs {
-            by_evaluator
-                .entry(run.evaluator_type.clone())
-                .or_default()
-                .push(serde_json::json!({
-                    "eval_run_id": run.eval_run_id.as_str(),
-                    "subject_kind": run.subject_kind,
-                    "success": run.success,
-                }));
-        }
-        by_evaluator
-            .into_iter()
-            .map(|(evaluator, cases)| bundles::BundleEvalSuite {
-                id: format!("suite_{evaluator}"),
-                name: evaluator.clone(),
-                evaluator,
-                cases,
-            })
-            .collect()
-    };
-
-    // Knowledge sources → BundleSource entries.
-    let bundle_sources: Vec<bundles::BundleSource> = state
-        .document_store
-        .list_sources(&project_key)
-        .into_iter()
-        .map(|s| bundles::BundleSource {
-            id: s.source_id.as_str().to_owned(),
-            name: s.source_id.as_str().to_owned(),
-            source_type: "knowledge".to_owned(),
-            document_count: s.document_count as u32,
-        })
-        .collect();
-
-    let contents = bundles::BundleContents {
-        prompts: bundle_prompts,
-        eval_suites: bundle_eval_suites,
-        provider_configs: bundle_configs,
-        sources: bundle_sources,
-    };
-
-    let bundle = bundles::new_bundle(contents);
-
-    match bundles::serialize_bundle(&bundle, body.format) {
-        Ok(serialized) => {
-            let ext = body.format.file_extension();
-            let ct = body.format.content_type();
-            let filename = format!("cairn-bundle.{ext}");
-            let mut resp = (
-                StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, ct)],
-                serialized,
-            )
-                .into_response();
-            resp.headers_mut().insert(
-                axum::http::header::CONTENT_DISPOSITION,
-                axum::http::HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
-                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment")),
-            );
-            Ok(resp)
-        }
-        Err(e) => Err(internal_error(format!("serialization failed: {e}"))),
-    }
 }
 
 /// `POST /v1/bundles/import` — import a bundle into a target project.
@@ -5477,45 +3888,6 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .layer(axum::middleware::from_fn(version_header_middleware))
-}
-
-/// Build the CORS layer used by `build_router`.
-///
-/// - `allow_origin(Any)` — accepts requests from any origin. Tighten to a
-///   specific list when deploying behind a reverse proxy.
-/// - Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS — covers every verb the
-///   API uses plus the browser preflight method.
-/// - Headers: `Content-Type` and `Authorization` — required for JSON bodies
-///   and bearer token auth.
-/// - `max_age(86400)` — browser may cache the preflight result for 24 h,
-///   reducing round-trips on subsequent requests.
-fn cors_layer(mode: DeploymentMode) -> CorsLayer {
-    let methods = [
-        Method::GET,
-        Method::POST,
-        Method::PUT,
-        Method::DELETE,
-        Method::PATCH,
-        Method::OPTIONS,
-    ];
-    let headers = [CONTENT_TYPE, AUTHORIZATION];
-    match mode {
-        // Local dev: allow any origin (supports React at localhost:5173, Vite,
-        // Create React App, etc. without extra configuration).
-        DeploymentMode::Local => CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(methods)
-            .allow_headers(headers)
-            .max_age(std::time::Duration::from_secs(86_400)),
-        // Team / self-hosted: restrict to same-origin (operator configures
-        // a reverse proxy that handles CORS at the edge).  Specific allowed
-        // origins can be added here when `BootstrapConfig` gains an
-        // `allowed_origins` field.
-        DeploymentMode::SelfHostedTeam => CorsLayer::new()
-            .allow_methods(methods)
-            .allow_headers(headers)
-            .max_age(std::time::Duration::from_secs(86_400)),
-    }
 }
 
 // ── Test helpers (visible to all test modules via `super::`) ─────────────────
@@ -5737,79 +4109,6 @@ mod tests {
             "cairn-app".to_owned(), "--port".to_owned(), "8080".to_owned(),
         ]);
         assert_eq!(c.listen_port, 8080);
-    }
-
-    // ── Handler unit tests ──
-
-    #[tokio::test]
-    async fn health_returns_ok() {
-        let Json(resp) = health_handler().await;
-        assert!(resp.ok);
-    }
-
-    /// Verify the server starts with TraceLayer wired in and tracing-subscriber
-    /// initialised.  The test initialises a subscriber (via try_init so it is
-    /// safe to run alongside other tests), builds the router, sends a real
-    /// /health request, and asserts the response is 200.  If TraceLayer were
-    /// missing the request would still succeed but the span would be absent —
-    /// we confirm TraceLayer is present by checking that the router compiles
-    /// with it and the request pipeline is fully functional.
-    #[tokio::test]
-    #[ignore = "router unification: covered by integration tests"]
-    async fn server_starts_with_tracing_enabled() {
-        use axum::body::to_bytes;
-
-        // Safe to call multiple times; only the first subscriber wins.
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
-            .with_target(false)
-            .compact()
-            .try_init();
-
-        let app = make_app(make_state());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            response.status(),
-            StatusCode::OK,
-            "health endpoint must return 200 with tracing enabled"
-        );
-
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["ok"], true, "health response must carry ok=true");
-    }
-
-    #[tokio::test]
-    async fn status_returns_runtime_and_store_ok() {
-        let Json(resp) = status_handler(State(make_state())).await;
-        assert!(resp.runtime_ok);
-        assert!(resp.store_ok);
-    }
-
-    #[tokio::test]
-    async fn dashboard_returns_zeros_on_empty_store() {
-        let Json(resp) = dashboard_handler(State(make_state())).await;
-        assert_eq!(resp.active_runs, 0);
-        assert_eq!(resp.active_tasks, 0);
-        assert!(resp.system_healthy);
-    }
-
-    #[tokio::test]
-    async fn stream_handler_returns_sse_response() {
-        // Basic smoke test — handler returns without panicking.
-        let sse = stream_handler(State(make_state()), HeaderMap::new()).await;
-        let _ = sse;
     }
 
     // ── SSE stream tests ──────────────────────────────────────────────────────
@@ -7778,7 +6077,6 @@ mod tests {
         }
         }
 
-
 }
 
 #[cfg(test)]
@@ -8288,6 +6586,7 @@ mod provider_health_tests {
                     provider_connection_id: ProviderConnectionId::new("conn_ph_1"),
                     provider_family: "openai".to_owned(),
                     adapter_type: "responses".to_owned(),
+                    supported_models: vec![],
                     status: ProviderConnectionStatus::Active,
                     registered_at: 1_000,
                 }),
