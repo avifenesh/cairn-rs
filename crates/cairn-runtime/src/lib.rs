@@ -99,8 +99,9 @@ pub use model_registry::ModelRegistry;
 pub use routing::RouteResolverService;
 pub use runtime_config::{
     RuntimeConfig,
-    KEY_GENERATE_MODEL, KEY_STREAM_MODEL, KEY_EMBED_MODEL,
+    KEY_GENERATE_MODEL, KEY_BRAIN_MODEL, KEY_STREAM_MODEL, KEY_EMBED_MODEL,
     KEY_OLLAMA_EMBED_MODEL, KEY_MAX_TOKENS, KEY_THINKING_MODEL_PREFIXES,
+    KEY_BRAIN_URL, KEY_WORKER_URL,
 };
 pub use sessions::SessionService;
 pub use signals::SignalService;

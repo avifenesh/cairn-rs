@@ -118,10 +118,22 @@ impl OpenAiCompatProvider {
 
     /// Create a provider from environment variables.
     ///
-    /// Reads `OPENAI_COMPAT_BASE_URL` and `OPENAI_COMPAT_API_KEY`.
-    /// Returns `None` when either variable is unset.
+    /// Reads `OPENAI_COMPAT_BASE_URL` (legacy) or `CAIRN_WORKER_URL` as a fallback,
+    /// plus `OPENAI_COMPAT_API_KEY`.
+    /// Returns `None` when no URL is configured.
     pub fn from_env() -> Option<Self> {
-        let base_url = std::env::var("OPENAI_COMPAT_BASE_URL").ok()?;
+        let base_url = std::env::var("OPENAI_COMPAT_BASE_URL")
+            .or_else(|_| std::env::var("CAIRN_WORKER_URL"))
+            .ok()?;
+        let api_key = std::env::var("OPENAI_COMPAT_API_KEY").ok()?;
+        Some(Self::new(base_url.trim_end_matches('/'), api_key))
+    }
+
+    /// Create a brain-tier provider from `CAIRN_BRAIN_URL` + `OPENAI_COMPAT_API_KEY`.
+    ///
+    /// Returns `None` when `CAIRN_BRAIN_URL` is unset.
+    pub fn from_brain_env() -> Option<Self> {
+        let base_url = std::env::var("CAIRN_BRAIN_URL").ok()?;
         let api_key = std::env::var("OPENAI_COMPAT_API_KEY").ok()?;
         Some(Self::new(base_url.trim_end_matches('/'), api_key))
     }

@@ -24,8 +24,10 @@ use cairn_store::projections::DefaultsReadModel;
 
 // ── Setting keys ──────────────────────────────────────────────────────────────
 
-/// DefaultsService key for the primary generation model.
+/// DefaultsService key for the primary generation model (worker/everyday path).
 pub const KEY_GENERATE_MODEL: &str = "generate_model";
+/// DefaultsService key for the brain model (compute-heavy / reasoning path).
+pub const KEY_BRAIN_MODEL: &str = "brain_model";
 /// DefaultsService key for the SSE streaming model.
 pub const KEY_STREAM_MODEL: &str = "stream_model";
 /// DefaultsService key for the embedding model (OpenAI-compat path).
@@ -36,6 +38,10 @@ pub const KEY_OLLAMA_EMBED_MODEL: &str = "ollama_embed_model";
 pub const KEY_MAX_TOKENS: &str = "max_tokens";
 /// DefaultsService key for comma-separated thinking-mode model prefixes.
 pub const KEY_THINKING_MODEL_PREFIXES: &str = "thinking_model_prefixes";
+/// DefaultsService key for the brain inference endpoint URL.
+pub const KEY_BRAIN_URL: &str = "brain_url";
+/// DefaultsService key for the worker inference endpoint URL.
+pub const KEY_WORKER_URL: &str = "worker_url";
 
 // ── RuntimeConfig ─────────────────────────────────────────────────────────────
 
@@ -77,12 +83,50 @@ impl RuntimeConfig {
 
     // ── Typed accessors ───────────────────────────────────────────────────────
 
-    /// Default model for generation requests (ollama generate, openai-compat).
+    /// Default model for generation requests (worker/everyday path, openai-compat).
     ///
     /// Key: `generate_model` · Env: `CAIRN_DEFAULT_GENERATE_MODEL` · Default: `qwen3.5:9b`
     pub async fn default_generate_model(&self) -> String {
         self.get_string(KEY_GENERATE_MODEL, "CAIRN_DEFAULT_GENERATE_MODEL", "qwen3.5:9b")
             .await
+    }
+
+    /// Default model for the brain (compute-heavy / reasoning) path.
+    ///
+    /// Key: `brain_model` · Env: `CAIRN_BRAIN_MODEL` · Default: `cyankiwi/gemma-4-31B-it-AWQ-4bit`
+    pub async fn default_brain_model(&self) -> String {
+        self.get_string(
+            KEY_BRAIN_MODEL,
+            "CAIRN_BRAIN_MODEL",
+            "cyankiwi/gemma-4-31B-it-AWQ-4bit",
+        )
+        .await
+    }
+
+    /// Base URL for the brain inference endpoint.
+    ///
+    /// Key: `brain_url` · Env: `CAIRN_BRAIN_URL`
+    /// Default: `https://agntic.garden/inference/brain/v1`
+    pub async fn brain_url(&self) -> String {
+        self.get_string(
+            KEY_BRAIN_URL,
+            "CAIRN_BRAIN_URL",
+            "https://agntic.garden/inference/brain/v1",
+        )
+        .await
+    }
+
+    /// Base URL for the worker inference endpoint (everyday generation + embeddings).
+    ///
+    /// Key: `worker_url` · Env: `CAIRN_WORKER_URL`
+    /// Default: `https://agntic.garden/inference/worker/v1`
+    pub async fn worker_url(&self) -> String {
+        self.get_string(
+            KEY_WORKER_URL,
+            "CAIRN_WORKER_URL",
+            "https://agntic.garden/inference/worker/v1",
+        )
+        .await
     }
 
     /// Default model for SSE token-streaming.
