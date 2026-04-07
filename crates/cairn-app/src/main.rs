@@ -3537,6 +3537,17 @@ async fn main() {
         }
     }
 
+    // ── Seed the service-layer event ID counter above existing events ─────────
+    // The make_envelope() counter starts at 0 on each process startup and
+    // generates IDs like "evt_<timestamp>_<n>".  Seeding with the current
+    // InMemory head position ensures IDs are unique across restarts even if
+    // two events happen to share the same millisecond timestamp.
+    {
+        let head = lib_state.runtime.store.head_position().await.unwrap_or(None);
+        let floor = head.map(|p| p.0).unwrap_or(0);
+        cairn_runtime::seed_event_counter(floor);
+    }
+
     // ── Ollama local LLM provider (optional) ─────────────────────────────────
     let ollama: Option<Arc<OllamaProvider>> = if let Some(provider) = OllamaProvider::from_env() {
         eprintln!("ollama: connecting to {}", provider.host());
@@ -3602,8 +3613,18 @@ async fn main() {
         eprintln!("store: service-layer events will dual-write to SQLite");
     }
 
-    // ── Demo seed data (local mode only) ─────────────────────────────────────
-    if state.mode == DeploymentMode::Local {
+    // ── Demo seed data (local mode only, only when event log is empty) ─────────
+    // Skip seeding when a durable backend (Postgres/SQLite) already has events
+    // from a previous run.  After startup replay the in-memory store's head
+    // position tells us whether there is pre-existing data to preserve.
+    let event_log_empty = state
+        .runtime
+        .store
+        .head_position()
+        .await
+        .unwrap_or(None)
+        .is_none();
+    if state.mode == DeploymentMode::Local && event_log_empty {
         seed_demo_data(&state).await;
     }
 

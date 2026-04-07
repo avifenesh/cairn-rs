@@ -129,6 +129,8 @@ pub use services::{
 };
 
 pub use aggregate::InMemoryServices;
+pub use services::confidence_calibrator::{CalibrationAdjustment, ConfidenceCalibrator};
+pub use services::event_helpers::seed_event_counter;
 
 // ── Ollama local LLM + embedding providers ────────────────────────────────────
 pub use services::{OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OllamaTagsResponse};
