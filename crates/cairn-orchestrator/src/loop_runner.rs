@@ -346,6 +346,23 @@ where
                 }
 
                 LoopSignal::Continue => {
+                    // Extract any tools discovered via tool_search this iteration
+                    // and carry them into the next iteration's context so that
+                    // LlmDecidePhase can inject their descriptors into the prompt.
+                    let newly_discovered = extract_tool_search_discoveries(&execute_outcome);
+                    if !newly_discovered.is_empty() {
+                        tracing::debug!(
+                            run_id    = %ctx.run_id,
+                            iteration = ctx.iteration,
+                            tools     = ?newly_discovered,
+                            "tool_search discovered new tools — injecting into next prompt"
+                        );
+                        for name in newly_discovered {
+                            if !ctx.discovered_tool_names.contains(&name) {
+                                ctx.discovered_tool_names.push(name);
+                            }
+                        }
+                    }
                     ctx.iteration = ctx.iteration.saturating_add(1);
                     tracing::debug!(
                         run_id    = %ctx.run_id,
@@ -367,6 +384,33 @@ where
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Extract tool names from any `tool_search` results in the execute outcome.
+///
+/// When the LLM calls `tool_search`, the execute phase stores the JSON result
+/// in `ActionResult::tool_output`.  This function parses the `matches` array
+/// and returns the discovered tool names so the loop runner can carry them into
+/// the next iteration's `OrchestrationContext::discovered_tool_names`.
+fn extract_tool_search_discoveries(outcome: &ExecuteOutcome) -> Vec<String> {
+    let mut names = Vec::new();
+    for result in &outcome.results {
+        // Only look at results for tool_search invocations
+        let is_tool_search = result.proposal.tool_name.as_deref() == Some("tool_search");
+        if !is_tool_search {
+            continue;
+        }
+        if let Some(output) = &result.tool_output {
+            if let Some(matches) = output.get("matches").and_then(|m| m.as_array()) {
+                for m in matches {
+                    if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
+                        names.push(name.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    names
+}
 
 /// Build a `StepSummary` from the completed iteration.
 fn build_step_summary(
@@ -480,6 +524,7 @@ mod tests {
             goal:             "test goal".to_owned(),
             agent_type:       "test_agent".to_owned(),
             run_started_at_ms: now_millis(),
+            discovered_tool_names: vec![],
         }
     }
 
@@ -749,5 +794,177 @@ mod tests {
         assert_eq!(summary.action_kind, "invoke_tool");
         assert!(summary.succeeded);
         assert!(summary.summary.contains("search"));
+    }
+
+    // ── tool_search discovery injection ──────────────────────────────────────
+
+    /// Verify that tool_search results in `tool_output` are extracted and
+    /// carried into `ctx.discovered_tool_names` for the next iteration.
+    #[test]
+    fn extract_tool_search_discoveries_finds_matches() {
+        let outcome = ExecuteOutcome {
+            results: vec![ActionResult {
+                proposal: ActionProposal {
+                    action_type:       ActionType::InvokeTool,
+                    description:       "search for tools".to_owned(),
+                    confidence:        0.8,
+                    tool_name:         Some("tool_search".to_owned()),
+                    tool_args:         None,
+                    requires_approval: false,
+                },
+                status:       ActionStatus::Succeeded,
+                tool_output:  Some(serde_json::json!({
+                    "matches": [
+                        { "name": "shell_exec",   "description": "run shell commands" },
+                        { "name": "graph_query",  "description": "query the graph" },
+                    ],
+                    "total": 2,
+                })),
+                invocation_id: None,
+            }],
+            loop_signal: LoopSignal::Continue,
+        };
+
+        let discovered = extract_tool_search_discoveries(&outcome);
+        assert_eq!(discovered.len(), 2);
+        assert!(discovered.contains(&"shell_exec".to_owned()));
+        assert!(discovered.contains(&"graph_query".to_owned()));
+    }
+
+    #[test]
+    fn extract_tool_search_discoveries_ignores_non_tool_search() {
+        let outcome = ExecuteOutcome {
+            results: vec![ActionResult {
+                proposal: ActionProposal {
+                    action_type: ActionType::InvokeTool,
+                    description: "call something else".to_owned(),
+                    confidence: 0.9,
+                    tool_name: Some("memory_search".to_owned()),
+                    tool_args: None,
+                    requires_approval: false,
+                },
+                status: ActionStatus::Succeeded,
+                tool_output: Some(serde_json::json!({
+                    "matches": [{ "name": "should_not_appear" }]
+                })),
+                invocation_id: None,
+            }],
+            loop_signal: LoopSignal::Continue,
+        };
+
+        let discovered = extract_tool_search_discoveries(&outcome);
+        assert!(discovered.is_empty(), "non-tool_search results must not produce discoveries");
+    }
+
+    #[test]
+    fn extract_tool_search_discoveries_empty_matches() {
+        let outcome = ExecuteOutcome {
+            results: vec![ActionResult {
+                proposal: ActionProposal {
+                    action_type: ActionType::InvokeTool,
+                    description: "search".to_owned(),
+                    confidence: 0.5,
+                    tool_name: Some("tool_search".to_owned()),
+                    tool_args: None,
+                    requires_approval: false,
+                },
+                status: ActionStatus::Succeeded,
+                tool_output: Some(serde_json::json!({ "matches": [], "total": 0 })),
+                invocation_id: None,
+            }],
+            loop_signal: LoopSignal::Continue,
+        };
+
+        let discovered = extract_tool_search_discoveries(&outcome);
+        assert!(discovered.is_empty());
+    }
+
+    /// Integration test: after a tool_search invocation, the loop carries the
+    /// discovered names into ctx.discovered_tool_names for the next iteration.
+    #[tokio::test]
+    async fn loop_runner_carries_discovered_tools_to_next_iteration() {
+        use std::sync::Mutex;
+
+        // Capture the ctx seen at each decide() call
+        struct CapturingDecide {
+            captured: std::sync::Arc<Mutex<Vec<Vec<String>>>>,
+            call_n:   Mutex<u32>,
+        }
+        #[async_trait]
+        impl DecidePhase for CapturingDecide {
+            async fn decide(
+                &self, ctx: &OrchestrationContext, _: &GatherOutput
+            ) -> Result<DecideOutput, OrchestratorError> {
+                self.captured.lock().unwrap()
+                    .push(ctx.discovered_tool_names.clone());
+                let n = { let mut g = self.call_n.lock().unwrap(); *g += 1; *g };
+                // First call: invoke tool_search; second call: done
+                let (action, tool_name, tool_args) = if n == 1 {
+                    (ActionType::InvokeTool, Some("tool_search".to_owned()),
+                     Some(serde_json::json!({"query":"shell"})))
+                } else {
+                    (ActionType::CompleteRun, None, None)
+                };
+                Ok(DecideOutput {
+                    raw_response: String::new(),
+                    proposals: vec![ActionProposal {
+                        action_type: action, description: "step".to_owned(),
+                        confidence: 0.9, tool_name, tool_args, requires_approval: false,
+                    }],
+                    calibrated_confidence: 0.9,
+                    requires_approval: false,
+                    model_id: "test".to_owned(),
+                    latency_ms: 0,
+                })
+            }
+        }
+
+        // Execute returns tool_search results on first call, Done on second
+        struct DiscoveryExecute { calls: Mutex<u32> }
+        #[async_trait]
+        impl ExecutePhase for DiscoveryExecute {
+            async fn execute(
+                &self, _: &OrchestrationContext, decide: &DecideOutput,
+            ) -> Result<ExecuteOutcome, OrchestratorError> {
+                let n = { let mut g = self.calls.lock().unwrap(); *g += 1; *g };
+                let (signal, tool_output) = if n == 1 {
+                    (LoopSignal::Continue, Some(serde_json::json!({
+                        "matches": [{"name":"shell_exec","description":"run shell"}],
+                        "total": 1,
+                    })))
+                } else {
+                    (LoopSignal::Done, None)
+                };
+                let results = decide.proposals.iter().map(|p| ActionResult {
+                    proposal: p.clone(), status: ActionStatus::Succeeded,
+                    tool_output: tool_output.clone(), invocation_id: None,
+                }).collect();
+                Ok(ExecuteOutcome { results, loop_signal: signal })
+            }
+        }
+
+        let shared_captured: std::sync::Arc<Mutex<Vec<Vec<String>>>> =
+            std::sync::Arc::new(Mutex::new(vec![]));
+        let capturing = CapturingDecide {
+            captured: shared_captured.clone(),
+            call_n:   Mutex::new(0),
+        };
+
+        let lp = OrchestratorLoop::new(
+            FixedGather, capturing,
+            DiscoveryExecute { calls: Mutex::new(0) },
+            LoopConfig { max_iterations: 5, ..Default::default() },
+        );
+
+        let result = lp.run(ctx()).await.unwrap();
+        assert!(matches!(result, LoopTermination::Completed { .. }));
+
+        let snapshots = shared_captured.lock().unwrap();
+        // First decide: no discovered tools yet
+        assert!(snapshots[0].is_empty(),
+            "iteration 0 must have no discovered tools yet");
+        // Second decide: shell_exec must be in discovered_tool_names
+        assert!(snapshots[1].contains(&"shell_exec".to_owned()),
+            "iteration 1 must see shell_exec from prior tool_search result");
     }
 }

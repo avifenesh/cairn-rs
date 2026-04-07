@@ -171,10 +171,30 @@ impl DecidePhase for LlmDecidePhase {
         ctx: &OrchestrationContext,
         gather: &GatherOutput,
     ) -> Result<DecideOutput, OrchestratorError> {
-        let tool_descs: Vec<BuiltinToolDescriptor> = self.tools
+        // Build the tool catalogue for this iteration:
+        // 1. Core + Registered tools (always included)
+        // 2. Deferred tools discovered via tool_search in prior iterations
+        //    (ctx.discovered_tool_names carries them across the loop boundary)
+        let mut tool_descs: Vec<BuiltinToolDescriptor> = self.tools
             .as_ref()
             .map(|r| r.prompt_tools())
             .unwrap_or_default();
+
+        if !ctx.discovered_tool_names.is_empty() {
+            if let Some(ref registry) = self.tools {
+                for name in &ctx.discovered_tool_names {
+                    // Use search_deferred to fetch the full descriptor for the
+                    // discovered tool (it's still Deferred in the registry).
+                    let matches = registry.search_deferred(name);
+                    for desc in matches {
+                        if !tool_descs.iter().any(|d| d.name == desc.name) {
+                            tool_descs.push(desc);
+                        }
+                    }
+                }
+            }
+        }
+
         let system = build_system_prompt(&ctx.agent_type, &tool_descs);
         let user   = build_user_message(ctx, gather, self.token_budget.as_ref());
         let messages = vec![
@@ -570,6 +590,7 @@ mod tests {
             goal:            "Summarise the cairn-rs architecture document.".to_owned(),
             agent_type:      "orchestrator".to_owned(),
             run_started_at_ms: 0,
+            discovered_tool_names: vec![],
         }
     }
 
@@ -581,7 +602,7 @@ mod tests {
 
     #[test]
     fn system_prompt_references_orchestrator_role() {
-        let sys = build_system_prompt("orchestrator");
+        let sys = build_system_prompt("orchestrator", &[]);
         assert!(sys.contains("orchestrator"), "should mention orchestrator role");
         assert!(sys.contains("JSON array"),   "should instruct JSON array return");
         assert!(sys.contains("spawn_subagent"), "should list spawn_subagent");
@@ -590,7 +611,7 @@ mod tests {
 
     #[test]
     fn system_prompt_fallback_for_unknown_role() {
-        let sys = build_system_prompt("wizard");
+        let sys = build_system_prompt("wizard", &[]);
         assert!(sys.contains("JSON array"), "fallback must still instruct JSON return");
     }
 

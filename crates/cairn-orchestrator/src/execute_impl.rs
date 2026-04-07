@@ -521,6 +521,7 @@ mod tests {
             goal:              "test goal".to_owned(),
             agent_type:        "test_agent".to_owned(),
             run_started_at_ms: 0,
+            discovered_tool_names: vec![],
         }
     }
 

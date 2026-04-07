@@ -29,6 +29,8 @@ pub enum SseEventName {
     CodingSessionEvent,
     AgentProgress,
     SkillActivated,
+    /// Operator notification emitted by the `notify_operator` built-in tool.
+    OperatorNotification,
 }
 
 impl SseEventName {
@@ -58,6 +60,7 @@ impl SseEventName {
             SseEventName::CodingSessionEvent => "coding_session_event",
             SseEventName::AgentProgress => "agent_progress",
             SseEventName::SkillActivated => "skill_activated",
+            SseEventName::OperatorNotification => "operator_notification",
         }
     }
 }

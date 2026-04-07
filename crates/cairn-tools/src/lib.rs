@@ -25,7 +25,8 @@ pub mod transport;
 pub use builtin::{ToolDescriptor, ToolHost, ToolInput, ToolOutcome};
 pub use builtins::{
     BuiltinToolDescriptor, BuiltinToolRegistry,
-    GraphQueryTool, ListRunsTool, MemorySearchTool, MemoryStoreTool,
+    FileReadTool, FileWriteTool,
+    GraphQueryTool, ListRunsTool, EvalScoreTool, CreateTaskTool, MemorySearchTool, MemoryStoreTool,
     ShellExecTool, ToolSearchTool, WebFetchTool,
     ToolError, ToolHandler, ToolResult, ToolTier,
 };

@@ -17,9 +17,14 @@ pub mod memory_search;
 pub mod memory_store;
 pub mod web_fetch;
 pub mod shell_exec;
+pub mod file_read;
+pub mod file_write;
 pub mod graph_query;
 pub mod list_runs;
+pub mod eval_score;
+pub mod create_task;
 pub mod tool_search;
+pub mod notify_operator;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,9 +38,14 @@ pub use memory_search::MemorySearchTool;
 pub use memory_store::MemoryStoreTool;
 pub use web_fetch::WebFetchTool;
 pub use shell_exec::ShellExecTool;
+pub use file_read::FileReadTool;
+pub use file_write::FileWriteTool;
 pub use graph_query::GraphQueryTool;
 pub use list_runs::ListRunsTool;
+pub use eval_score::EvalScoreTool;
+pub use create_task::CreateTaskTool;
 pub use tool_search::ToolSearchTool;
+pub use notify_operator::{NotifyOperatorTool, NotificationSink, NoopSink};
 
 // ── ToolTier ──────────────────────────────────────────────────────────────────
 

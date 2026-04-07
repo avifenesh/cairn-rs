@@ -8368,8 +8368,8 @@ async fn orchestrate_run_handler(
     };
     use cairn_store::projections::RunReadModel;
     use cairn_tools::{
-        BuiltinToolRegistry, MemorySearchTool, MemoryStoreTool, ToolSearchTool,
-        WebFetchTool, ShellExecTool,
+        BuiltinToolRegistry, MemorySearchTool, MemoryStoreTool, NotifyOperatorTool,
+        NotificationSink, ToolSearchTool, WebFetchTool, ShellExecTool,
     };
 
     let run_id = RunId::new(run_id_str);
@@ -8401,6 +8401,7 @@ async fn orchestrate_run_handler(
         goal: body.goal.unwrap_or_else(|| "Execute the run objective.".to_owned()),
         agent_type: run.agent_role_id.unwrap_or_else(|| "orchestrator".to_owned()),
         run_started_at_ms: now_ms,
+        discovered_tool_names: vec![],
     };
 
     let model_id = body.model_id
@@ -8412,6 +8413,46 @@ async fn orchestrate_run_handler(
         .with_defaults(state.runtime.store.clone())
         .with_checkpoints(state.runtime.store.clone())
         .build();
+
+    // ── SSE notification sink for notify_operator ───────────────────────────
+    // Wraps the broadcast channel so notify_operator can push realtime events.
+    struct SseSink {
+        tx:      tokio::sync::broadcast::Sender<cairn_api::sse::SseFrame>,
+        seq:     std::sync::Arc<std::sync::atomic::AtomicU64>,
+        buf:     std::sync::Arc<std::sync::RwLock<std::collections::VecDeque<(u64, cairn_api::sse::SseFrame)>>>,
+    }
+    #[async_trait::async_trait]
+    impl NotificationSink for SseSink {
+        async fn emit(&self, channel: &str, severity: &str, message: &str) {
+            let frame = cairn_api::sse::SseFrame {
+                event: cairn_api::sse::SseEventName::OperatorNotification,
+                data:  serde_json::json!({
+                    "channel":  channel,
+                    "severity": severity,
+                    "message":  message,
+                }),
+                id: None,
+            };
+            let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut frame_with_id = frame.clone();
+            frame_with_id.id = Some(seq.to_string());
+            {
+                let mut buf = self.buf.write().unwrap();
+                if buf.len() >= 10_000 { buf.pop_front(); }
+                buf.push_back((seq, frame_with_id));
+            }
+            let _ = self.tx.send(frame);
+        }
+    }
+    let sse_sink: std::sync::Arc<dyn NotificationSink> = std::sync::Arc::new(SseSink {
+        tx:  state.runtime_sse_tx.clone(),
+        seq: state.sse_seq.clone(),
+        buf: state.sse_event_buffer.clone(),
+    });
+    let mailbox_svc: std::sync::Arc<dyn cairn_runtime::MailboxService> =
+        std::sync::Arc::new(cairn_runtime::services::MailboxServiceImpl::new(
+            state.runtime.store.clone(),
+        ));
 
     // ── Build BuiltinToolRegistry ────────────────────────────────────────────
     // Prefer real memory tool implementations (wired at startup with live
@@ -8451,6 +8492,9 @@ async fn orchestrate_run_handler(
                 .register(store_tool.clone())
                 .register(web_fetch.clone())
                 .register(shell_exec.clone())
+                .register(std::sync::Arc::new(NotifyOperatorTool::new(
+                    Some(mailbox_svc.clone()), sse_sink.clone(),
+                )))
         );
 
         // Full registry with ToolSearchTool that can search the deferred tier.
@@ -8460,6 +8504,9 @@ async fn orchestrate_run_handler(
                 .register(store_tool)
                 .register(web_fetch)
                 .register(shell_exec)
+                .register(std::sync::Arc::new(NotifyOperatorTool::new(
+                    Some(mailbox_svc), sse_sink,
+                )))
                 .register(std::sync::Arc::new(ToolSearchTool::new(inner)))
         )
     };

@@ -35,6 +35,14 @@ pub struct OrchestrationContext {
     pub agent_type: String,
     /// Wall-clock millisecond timestamp when this run began (for timeout checks).
     pub run_started_at_ms: u64,
+    /// Deferred tool names discovered via `tool_search` in previous iterations.
+    ///
+    /// The loop runner populates this after execute when it detects a
+    /// `tool_search` result with matches.  `LlmDecidePhase` reads these names
+    /// and injects their descriptors into the *next* iteration's system prompt,
+    /// making discovered tools visible to the LLM without permanently promoting
+    /// them to Registered tier.
+    pub discovered_tool_names: Vec<String>,
 }
 
 // ── GatherOutput ─────────────────────────────────────────────────────────────

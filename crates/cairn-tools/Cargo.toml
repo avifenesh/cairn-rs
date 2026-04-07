@@ -21,5 +21,6 @@ reqwest  = { version = "0.12", features = ["json", "rustls-tls"], default-featur
 tokio    = { version = "1",    features = ["process", "time"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros", "process", "time"] }
+tokio    = { version = "1",    features = ["rt", "macros", "process", "time"] }
+tempfile = "3"
 
