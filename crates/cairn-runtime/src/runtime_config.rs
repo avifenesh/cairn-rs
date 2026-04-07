@@ -93,12 +93,15 @@ impl RuntimeConfig {
 
     /// Default model for the brain (compute-heavy / reasoning) path.
     ///
-    /// Key: `brain_model` · Env: `CAIRN_BRAIN_MODEL` · Default: `cyankiwi/gemma-4-31B-it-AWQ-4bit`
+    /// Key: `brain_model` · Env: `CAIRN_BRAIN_MODEL` · Default: `openrouter/auto`
+    ///
+    /// `openrouter/auto` auto-routes to the best available free model, avoiding
+    /// per-model rate limits.  Override via `CAIRN_BRAIN_MODEL` or the settings API.
     pub async fn default_brain_model(&self) -> String {
         self.get_string(
             KEY_BRAIN_MODEL,
             "CAIRN_BRAIN_MODEL",
-            "cyankiwi/gemma-4-31B-it-AWQ-4bit",
+            "openrouter/auto",
         )
         .await
     }

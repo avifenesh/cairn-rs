@@ -44,11 +44,12 @@ const CAIRN_CLOUD_CONNECTIONS = [
 const OPENROUTER_CONFIG = {
   id: "conn_openrouter",
   baseUrl: "https://openrouter.ai/api/v1",
-  models: ["qwen/qwen3-coder:free", "google/gemma-3-4b-it:free"],
-  brainModel: "qwen/qwen3-coder:free",
+  models: ["openrouter/free", "google/gemma-3-4b-it:free"],
+  brainModel: "openrouter/free",
   workerModel: "google/gemma-3-4b-it:free",
-  brainContext: "262K ctx",
+  brainContext: "200K ctx",
   workerContext: "32K ctx",
+  brainTooltip: "openrouter/free automatically routes to the best available free model on OpenRouter. The selected model may change as availability shifts.",
 } as const;
 
 const PROVIDER_KINDS: Record<Exclude<ProviderKind, "cairn_cloud" | "openrouter">, ProviderKindMeta> = {
@@ -813,11 +814,17 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-2">Pre-selected models</p>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between rounded bg-zinc-900 border border-zinc-800 px-3 py-2">
-                    <div>
-                      <p className="text-[11px] font-mono text-zinc-200">{OPENROUTER_CONFIG.brainModel}</p>
-                      <p className="text-[10px] text-zinc-600 mt-0.5">Brain — {OPENROUTER_CONFIG.brainContext} context</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-[11px] font-mono text-zinc-200">{OPENROUTER_CONFIG.brainModel}</p>
+                        <span
+                          title={OPENROUTER_CONFIG.brainTooltip}
+                          className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-zinc-700 text-zinc-400 text-[9px] font-bold cursor-help shrink-0"
+                        >?</span>
+                      </div>
+                      <p className="text-[10px] text-zinc-600 mt-0.5">Brain — {OPENROUTER_CONFIG.brainContext} context · auto-routes to best free model</p>
                     </div>
-                    <span className="text-[10px] text-violet-400 bg-violet-900/30 border border-violet-700/40 rounded px-1.5 py-0.5">free</span>
+                    <span className="text-[10px] text-violet-400 bg-violet-900/30 border border-violet-700/40 rounded px-1.5 py-0.5 ml-2 shrink-0">free</span>
                   </div>
                   <div className="flex items-center justify-between rounded bg-zinc-900 border border-zinc-800 px-3 py-2">
                     <div>
