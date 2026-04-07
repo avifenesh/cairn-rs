@@ -8534,7 +8534,16 @@ async fn orchestrate_run_handler(
         .checkpoint_every_n_tool_calls(cfg.checkpoint_every_n_tool_calls)
         .build();
 
-    match OrchestratorLoop::new(gather, decide, execute, cfg).run(ctx).await {
+    let emitter = std::sync::Arc::new(crate::sse_hooks::SseOrchestratorEmitter::new(
+        state.runtime_sse_tx.clone(),
+        state.sse_event_buffer.clone(),
+        state.sse_seq.clone(),
+    ));
+
+    match OrchestratorLoop::new(gather, decide, execute, cfg)
+        .with_emitter(emitter)
+        .run(ctx).await
+    {
         Ok(LoopTermination::Completed { summary }) => (StatusCode::OK, Json(serde_json::json!({
             "termination": "completed", "summary": summary, "model_id": model_id,
         }))).into_response(),

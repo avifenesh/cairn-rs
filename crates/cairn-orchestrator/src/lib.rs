@@ -18,6 +18,7 @@
 //! time so each phase can be tested and replaced independently.
 
 pub mod context;
+pub mod emitter;
 pub mod error;
 pub mod gather;
 pub mod decide;
@@ -31,6 +32,7 @@ pub use context::{
     ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput,
     LoopConfig, LoopSignal, LoopTermination, OrchestrationContext, StepSummary,
 };
+pub use emitter::{ChannelEmitter, NoOpEmitter, OrchestratorEvent, OrchestratorEventEmitter};
 pub use error::OrchestratorError;
 pub use gather::GatherPhase;
 pub use decide::DecidePhase;

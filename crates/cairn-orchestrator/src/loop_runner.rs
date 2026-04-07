@@ -32,6 +32,7 @@ use crate::context::{
     LoopTermination, OrchestrationContext, StepSummary,
 };
 use crate::decide::DecidePhase;
+use crate::emitter::{NoOpEmitter, OrchestratorEventEmitter};
 use crate::error::OrchestratorError;
 use crate::execute::ExecutePhase;
 use crate::gather::GatherPhase;
@@ -101,6 +102,7 @@ pub struct OrchestratorLoop<G, D, E> {
     execute: E,
     config:  LoopConfig,
     checkpoint_hook: Arc<dyn CheckpointHook>,
+    emitter: Arc<dyn OrchestratorEventEmitter>,
 }
 
 impl<G, D, E> OrchestratorLoop<G, D, E>
@@ -110,7 +112,7 @@ where
     E: ExecutePhase,
 {
     /// Construct a new loop with the given phases and configuration.
-    /// Uses `NoOpCheckpointHook` — call `with_checkpoint_hook` to override.
+    /// Uses `NoOpCheckpointHook` and `NoOpEmitter` — call the builder methods to override.
     pub fn new(gather: G, decide: D, execute: E, config: LoopConfig) -> Self {
         Self {
             gather,
@@ -118,12 +120,19 @@ where
             execute,
             config,
             checkpoint_hook: Arc::new(NoOpCheckpointHook),
+            emitter: Arc::new(NoOpEmitter),
         }
     }
 
     /// Replace the checkpoint hook (e.g., a durable Postgres checkpoint writer).
     pub fn with_checkpoint_hook(mut self, hook: Arc<dyn CheckpointHook>) -> Self {
         self.checkpoint_hook = hook;
+        self
+    }
+
+    /// Replace the event emitter (e.g., an SSE broadcaster for live progress).
+    pub fn with_emitter(mut self, emitter: Arc<dyn OrchestratorEventEmitter>) -> Self {
+        self.emitter = emitter;
         self
     }
 
@@ -141,6 +150,23 @@ where
         &self,
         mut ctx: OrchestrationContext,
     ) -> Result<LoopTermination, OrchestratorError> {
+        self.emitter.on_started(&ctx).await;
+        let result = self.run_inner(&mut ctx).await;
+        // Emit on_finished for every terminal outcome (Ok or infrastructure Err).
+        match &result {
+            Ok(t)  => self.emitter.on_finished(&ctx, t).await,
+            Err(_) => {
+                let term = LoopTermination::Failed { reason: "infrastructure error".to_owned() };
+                self.emitter.on_finished(&ctx, &term).await;
+            }
+        }
+        result
+    }
+
+    async fn run_inner(
+        &self,
+        ctx: &mut OrchestrationContext,
+    ) -> Result<LoopTermination, OrchestratorError> {
         let deadline_ms = ctx.run_started_at_ms
             .saturating_add(self.config.timeout_ms);
 
@@ -157,7 +183,6 @@ where
             timeout_s = self.config.timeout_ms / 1_000,
             "orchestrator loop starting"
         );
-
         for _iter in 0..self.config.max_iterations {
             // ── (1) Timeout check ─────────────────────────────────────────────
             let now_ms = now_millis();
@@ -192,6 +217,7 @@ where
                 recent_events = gather_output.recent_events.len(),
                 "gather complete"
             );
+            self.emitter.on_gather_completed(&ctx, &gather_output).await;
 
             // ── (3) DECIDE ────────────────────────────────────────────────────
             let decide_output = self.decide.decide(&ctx, &gather_output).await.map_err(|e| {
@@ -211,6 +237,7 @@ where
                 confidence = decide_output.calibrated_confidence,
                 "decide complete"
             );
+            self.emitter.on_decide_completed(&ctx, &decide_output).await;
 
             // ── (4) Approval pre-check ────────────────────────────────────────
             // When requires_approval is true, the execute phase emits an
@@ -271,6 +298,30 @@ where
                 "execute complete"
             );
 
+            // Emit per-action tool_called / tool_result events.
+            for result in &execute_outcome.results {
+                let tool_name = result.proposal.tool_name
+                    .as_deref()
+                    .unwrap_or_else(|| result.proposal.description.as_str());
+                self.emitter.on_tool_called(
+                    &ctx,
+                    tool_name,
+                    result.proposal.tool_args.as_ref(),
+                ).await;
+                let (succeeded, error) = match &result.status {
+                    ActionStatus::Succeeded => (true, None),
+                    ActionStatus::Failed { reason } => (false, Some(reason.as_str())),
+                    _ => (true, None),
+                };
+                self.emitter.on_tool_result(
+                    &ctx,
+                    tool_name,
+                    succeeded,
+                    result.tool_output.as_ref(),
+                    error,
+                ).await;
+            }
+
             // ── (6) CHECKPOINT ────────────────────────────────────────────────
             // Build a step summary for this iteration so the gather phase can
             // reconstruct history on the next run or after a resume.
@@ -299,6 +350,8 @@ where
                     "checkpoint saved"
                 );
             }
+
+            self.emitter.on_step_completed(&ctx, &decide_output, &execute_outcome).await;
 
             // ── (7) Loop signal ───────────────────────────────────────────────
             match execute_outcome.loop_signal {
