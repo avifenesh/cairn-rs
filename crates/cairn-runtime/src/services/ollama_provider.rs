@@ -26,6 +26,21 @@ use cairn_domain::providers::{
     GenerationProvider, GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
 };
 
+// ── Thinking-mode detection ───────────────────────────────────────────────────
+
+/// Return the list of model-name prefixes that require `think: false` to
+/// suppress chain-of-thought reasoning.
+///
+/// Reads `CAIRN_THINKING_MODELS` (comma-separated). Default: `"qwen3"`.
+fn thinking_model_prefixes() -> Vec<String> {
+    std::env::var("CAIRN_THINKING_MODELS")
+        .unwrap_or_else(|_| "qwen3".to_owned())
+        .split(',')
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 // ── Request / response shapes (OpenAI-compatible) ────────────────────────────
 
 /// Ollama-specific options block passed alongside the OpenAI-compat request.
@@ -184,13 +199,19 @@ impl GenerationProvider for OllamaProvider {
             .temperature_milli
             .map(|m| m as f32 / 1_000.0);
 
-        // Qwen3 models default to chain-of-thought reasoning, which adds several
+        // Some models default to chain-of-thought reasoning, which adds several
         // seconds of latency and hundreds of extra output tokens.  Passing
         // `options: { think: false }` via Ollama's extension field disables the
         // thinking pass and returns direct answers.  This is the documented API
         // approach; the `/no_think` suffix only works on the native `/api/chat`
         // endpoint, not on the OpenAI-compat `/v1/chat/completions` path.
-        let options = if model_id.contains("qwen3") {
+        //
+        // CAIRN_THINKING_MODELS controls which model-name prefixes receive this
+        // option. Default: "qwen3". Comma-separate for multiple families.
+        let options = if thinking_model_prefixes()
+            .iter()
+            .any(|prefix| model_id.contains(prefix.as_str()))
+        {
             Some(OllamaOptions { think: Some(false) })
         } else {
             None

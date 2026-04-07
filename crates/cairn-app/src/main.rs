@@ -103,6 +103,64 @@ const RATE_LIMIT_IP: u32 = 100;
 /// Window duration.
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 
+// ── Model defaults (env-var configurable) ────────────────────────────────────
+
+/// Runtime model defaults read from environment variables.
+///
+/// All values can be overridden without recompiling. Changing the provider's
+/// model listing API or upgrading to a new model only requires updating an
+/// env var rather than a code change.
+///
+/// | Env var                       | Default            | Used by                          |
+/// |-------------------------------|--------------------|----------------------------------|
+/// | `CAIRN_DEFAULT_GENERATE_MODEL`| `qwen3.5:9b`       | `/v1/providers/ollama/generate`  |
+/// | `CAIRN_DEFAULT_STREAM_MODEL`  | `qwen3.5:9b`       | `/v1/providers/ollama/stream`    |
+/// | `CAIRN_DEFAULT_EMBED_MODEL`   | `qwen3-embedding:8b`| `/v1/memory/embed`              |
+/// | `CAIRN_DEFAULT_OLLAMA_EMBED`  | `nomic-embed-text` | embed endpoint when Ollama active|
+/// | `CAIRN_THINKING_MODELS`       | `qwen3`            | models needing `think:false`     |
+struct ModelDefaults;
+
+impl ModelDefaults {
+    fn generate() -> String {
+        std::env::var("CAIRN_DEFAULT_GENERATE_MODEL")
+            .unwrap_or_else(|_| "qwen3.5:9b".to_owned())
+    }
+
+    fn stream() -> String {
+        std::env::var("CAIRN_DEFAULT_STREAM_MODEL")
+            .unwrap_or_else(|_| "qwen3.5:9b".to_owned())
+    }
+
+    /// Default embed model when OpenAI-compat is the active provider.
+    fn embed() -> String {
+        std::env::var("CAIRN_DEFAULT_EMBED_MODEL")
+            .unwrap_or_else(|_| "qwen3-embedding:8b".to_owned())
+    }
+
+    /// Default embed model when the local Ollama provider is active.
+    fn ollama_embed() -> String {
+        std::env::var("CAIRN_DEFAULT_OLLAMA_EMBED")
+            .unwrap_or_else(|_| "nomic-embed-text".to_owned())
+    }
+}
+
+/// Return `true` when `model_id` belongs to a model family that requires
+/// the `think: false` option to suppress chain-of-thought reasoning.
+///
+/// Controlled by `CAIRN_THINKING_MODELS` (comma-separated prefixes).
+/// Default: `"qwen3"`.
+///
+/// Example override: `CAIRN_THINKING_MODELS=qwen3,deepseek-r1`
+fn supports_thinking_mode(model_id: &str) -> bool {
+    let prefixes = std::env::var("CAIRN_THINKING_MODELS")
+        .unwrap_or_else(|_| "qwen3".to_owned());
+    prefixes
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .any(|prefix| model_id.contains(prefix))
+}
+
 // ── App state ────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -2405,9 +2463,10 @@ async fn ollama_generate_handler(
             ).into_response();
         };
 
+    let default_model = ModelDefaults::generate();
     let model_id = body.model
         .as_deref()
-        .unwrap_or("qwen3.5:9b")
+        .unwrap_or(&default_model)
         .to_owned();
 
     let messages = vec![serde_json::json!({
@@ -2490,8 +2549,10 @@ async fn ollama_embed_handler(
             ).into_response();
         };
 
+    let default_ollama_embed = ModelDefaults::ollama_embed();
+    let default_compat_embed = ModelDefaults::embed();
     let model_id = body.model.as_deref().unwrap_or_else(|| {
-        if state.ollama.is_some() { "nomic-embed-text" } else { "qwen3-embedding:8b" }
+        if state.ollama.is_some() { &default_ollama_embed } else { &default_compat_embed }
     });
 
     let start = std::time::Instant::now();
@@ -2544,7 +2605,8 @@ async fn ollama_stream_handler(
         ).into_response();
     };
 
-    let model_id = body.model.as_deref().unwrap_or("llama3").to_owned();
+    let default_stream = ModelDefaults::stream();
+    let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
     // Use full message history when provided; fall back to single-turn prompt.
     let messages: Vec<serde_json::Value> = body.messages.unwrap_or_else(|| {
         vec![serde_json::json!({"role": "user", "content": body.prompt})]
@@ -2569,7 +2631,7 @@ async fn ollama_stream_handler(
             "messages": messages,
             "stream":   true,
         });
-        if model_id.contains("qwen3") {
+        if supports_thinking_mode(&model_id) {
             req_body["options"] = serde_json::json!({ "think": false });
         }
 
@@ -6598,7 +6660,7 @@ mod provider_health_tests {
                     project: project.clone(),
                     provider_binding_id: ProviderBindingId::new("conn_ph_1"),
                     provider_connection_id: ProviderConnectionId::new("conn_ph_1"),
-                    provider_model_id: ProviderModelId::new("gpt-4o"),
+                    provider_model_id: ProviderModelId::new(ModelDefaults::generate()),
                     operation_kind: OperationKind::Generate,
                     settings: ProviderBindingSettings::default(),
                     policy_id: None,
@@ -6655,7 +6717,7 @@ mod provider_health_tests {
                     project: project.clone(),
                     provider_binding_id: ProviderBindingId::new("conn_ph_deg"),
                     provider_connection_id: ProviderConnectionId::new("conn_ph_deg"),
-                    provider_model_id: ProviderModelId::new("gpt-4o"),
+                    provider_model_id: ProviderModelId::new(ModelDefaults::generate()),
                     operation_kind: OperationKind::Generate,
                     settings: ProviderBindingSettings::default(),
                     policy_id: None,
