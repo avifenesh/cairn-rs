@@ -2846,17 +2846,7 @@ async fn ollama_generate_handler(
     }
 
     // Provider priority for generation: Ollama → brain → worker → OpenRouter.
-    // When OpenRouter is the only configured provider, use its free-tier defaults
-    // so callers that omit the model field get a working model automatically.
-    let openrouter_only = state.openai_compat_openrouter.is_some()
-        && state.openai_compat_brain.is_none()
-        && state.openai_compat_worker.is_none()
-        && state.ollama.is_none();
-    let default_model = if openrouter_only {
-        "openrouter/free".to_owned()
-    } else {
-        state.runtime.runtime_config.default_generate_model().await
-    };
+    let default_model = state.runtime.runtime_config.default_generate_model().await;
     let model_id = body.model
         .as_deref()
         .unwrap_or(&default_model)
