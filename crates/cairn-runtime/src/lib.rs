@@ -60,6 +60,7 @@ pub mod run_sla;
 pub mod signal_routing;
 pub mod workspace_memberships;
 pub mod workspaces;
+pub mod runtime_config;
 
 pub use approval_policies::ApprovalPolicyService;
 pub use approvals::ApprovalService;
@@ -96,6 +97,11 @@ pub use soul_guard::SoulGuard;
 pub use projects::ProjectService;
 pub use model_registry::ModelRegistry;
 pub use routing::RouteResolverService;
+pub use runtime_config::{
+    RuntimeConfig,
+    KEY_GENERATE_MODEL, KEY_STREAM_MODEL, KEY_EMBED_MODEL,
+    KEY_OLLAMA_EMBED_MODEL, KEY_MAX_TOKENS, KEY_THINKING_MODEL_PREFIXES,
+};
 pub use sessions::SessionService;
 pub use signals::SignalService;
 pub use tasks::TaskService;

@@ -103,64 +103,6 @@ const RATE_LIMIT_IP: u32 = 100;
 /// Window duration.
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 
-// ── Model defaults (env-var configurable) ────────────────────────────────────
-
-/// Runtime model defaults read from environment variables.
-///
-/// All values can be overridden without recompiling. Changing the provider's
-/// model listing API or upgrading to a new model only requires updating an
-/// env var rather than a code change.
-///
-/// | Env var                       | Default            | Used by                          |
-/// |-------------------------------|--------------------|----------------------------------|
-/// | `CAIRN_DEFAULT_GENERATE_MODEL`| `qwen3.5:9b`       | `/v1/providers/ollama/generate`  |
-/// | `CAIRN_DEFAULT_STREAM_MODEL`  | `qwen3.5:9b`       | `/v1/providers/ollama/stream`    |
-/// | `CAIRN_DEFAULT_EMBED_MODEL`   | `qwen3-embedding:8b`| `/v1/memory/embed`              |
-/// | `CAIRN_DEFAULT_OLLAMA_EMBED`  | `nomic-embed-text` | embed endpoint when Ollama active|
-/// | `CAIRN_THINKING_MODELS`       | `qwen3`            | models needing `think:false`     |
-struct ModelDefaults;
-
-impl ModelDefaults {
-    fn generate() -> String {
-        std::env::var("CAIRN_DEFAULT_GENERATE_MODEL")
-            .unwrap_or_else(|_| "qwen3.5:9b".to_owned())
-    }
-
-    fn stream() -> String {
-        std::env::var("CAIRN_DEFAULT_STREAM_MODEL")
-            .unwrap_or_else(|_| "qwen3.5:9b".to_owned())
-    }
-
-    /// Default embed model when OpenAI-compat is the active provider.
-    fn embed() -> String {
-        std::env::var("CAIRN_DEFAULT_EMBED_MODEL")
-            .unwrap_or_else(|_| "qwen3-embedding:8b".to_owned())
-    }
-
-    /// Default embed model when the local Ollama provider is active.
-    fn ollama_embed() -> String {
-        std::env::var("CAIRN_DEFAULT_OLLAMA_EMBED")
-            .unwrap_or_else(|_| "nomic-embed-text".to_owned())
-    }
-}
-
-/// Return `true` when `model_id` belongs to a model family that requires
-/// the `think: false` option to suppress chain-of-thought reasoning.
-///
-/// Controlled by `CAIRN_THINKING_MODELS` (comma-separated prefixes).
-/// Default: `"qwen3"`.
-///
-/// Example override: `CAIRN_THINKING_MODELS=qwen3,deepseek-r1`
-fn supports_thinking_mode(model_id: &str) -> bool {
-    let prefixes = std::env::var("CAIRN_THINKING_MODELS")
-        .unwrap_or_else(|_| "qwen3".to_owned());
-    prefixes
-        .split(',')
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .any(|prefix| model_id.contains(prefix))
-}
-
 // ── App state ────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -185,7 +127,6 @@ struct AppState {
     #[allow(dead_code)]
     ingest: Arc<IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>>,
     ollama: Option<Arc<OllamaProvider>>,
-    #[allow(dead_code)]
     openai_compat: Option<Arc<OpenAiCompatProvider>>,
     metrics: Arc<std::sync::RwLock<AppMetrics>>,
     rate_limits: RateLimitTable,
@@ -2415,6 +2356,286 @@ async fn ollama_models_handler(
     }
 }
 
+// ── Provider connection discovery ─────────────────────────────────────────────
+
+/// Unified model record returned by `discover-models`.
+#[derive(serde::Serialize, Clone, Debug)]
+struct DiscoveredModel {
+    model_id:       String,
+    name:           String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parameter_size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quantization:   Option<String>,
+    /// Inferred capabilities: "generate", "embed", "rerank".
+    capabilities:   Vec<String>,
+}
+
+/// Query params shared by `discover-models` and `test`.
+#[derive(serde::Deserialize, Default)]
+struct DiscoverModelsQuery {
+    /// Override endpoint URL (for ad-hoc discovery before connection is registered).
+    endpoint_url: Option<String>,
+    /// API key to use with `endpoint_url`.
+    api_key: Option<String>,
+}
+
+/// `GET /v1/providers/connections/:id/discover-models`
+///
+/// Queries the live provider endpoint for available models.
+///
+/// - `ollama`        → `GET {host}/api/tags`
+/// - `openai_compat` → `GET {base_url}/models`
+///
+/// Use `?endpoint_url=` for ad-hoc queries before registering the connection.
+async fn discover_models_handler(
+    State(state): State<AppState>,
+    Path(connection_id): Path<String>,
+    Query(query): Query<DiscoverModelsQuery>,
+) -> impl IntoResponse {
+    use cairn_domain::ProviderConnectionId;
+    use cairn_store::projections::ProviderConnectionReadModel;
+
+    let conn_id = ProviderConnectionId::new(connection_id.clone());
+    let adapter_type = match ProviderConnectionReadModel::get(
+        state.runtime.store.as_ref(),
+        &conn_id,
+    )
+    .await
+    {
+        Ok(Some(rec)) => rec.adapter_type.to_lowercase(),
+        Ok(None) => {
+            if query.endpoint_url.is_none() {
+                return (StatusCode::NOT_FOUND, axum::Json(serde_json::json!({
+                    "error": format!("provider connection '{connection_id}' not found"),
+                    "hint": "pass ?endpoint_url=... to discover without a registered connection",
+                }))).into_response();
+            }
+            "openai_compat".to_owned()
+        }
+        Err(e) => return internal_error(format!("store error: {e}")).into_response(),
+    };
+
+    if adapter_type == "ollama" {
+        discover_ollama_models_live(&state, query.endpoint_url.as_deref()).await
+    } else {
+        discover_openai_compat_models_live(&state, query.endpoint_url.as_deref(), query.api_key.as_deref()).await
+    }
+}
+
+async fn discover_ollama_models_live(state: &AppState, endpoint_override: Option<&str>) -> axum::response::Response {
+    let host = match endpoint_override {
+        Some(url) => url.trim_end_matches('/').to_owned(),
+        None => match &state.ollama {
+            Some(p) => p.host().to_owned(),
+            None => return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
+                "error": "Ollama not configured — set OLLAMA_HOST or pass ?endpoint_url="
+            }))).into_response(),
+        },
+    };
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
+    match client.get(format!("{host}/api/tags")).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<serde_json::Value>().await {
+                Ok(body) => {
+                    let models: Vec<DiscoveredModel> = body
+                        .get("models").and_then(|m| m.as_array())
+                        .map(|arr| arr.iter()
+                            .filter_map(|m| m.get("name")?.as_str())
+                            .map(ollama_name_to_discovered)
+                            .collect())
+                        .unwrap_or_default();
+                    (StatusCode::OK, axum::Json(serde_json::json!({
+                        "provider": "ollama",
+                        "endpoint": host,
+                        "models":   models,
+                    }))).into_response()
+                }
+                Err(e) => internal_error(format!("parse error: {e}")).into_response(),
+            }
+        }
+        Ok(resp) => (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({
+            "error": format!("Ollama returned HTTP {}", resp.status()),
+        }))).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({
+            "error": format!("Ollama unreachable: {e}"),
+        }))).into_response(),
+    }
+}
+
+async fn discover_openai_compat_models_live(
+    state: &AppState,
+    endpoint_override: Option<&str>,
+    api_key_override: Option<&str>,
+) -> axum::response::Response {
+    let (base_url, api_key) = match endpoint_override {
+        Some(url) => (url.trim_end_matches('/').to_owned(), api_key_override.map(str::to_owned).unwrap_or_default()),
+        None => match &state.openai_compat {
+            Some(p) => (p.base_url().to_owned(), std::env::var("OPENAI_COMPAT_API_KEY").unwrap_or_default()),
+            None => return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
+                "error": "OpenAI-compat not configured — set OPENAI_COMPAT_BASE_URL or pass ?endpoint_url="
+            }))).into_response(),
+        },
+    };
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
+    let mut req = client.get(format!("{base_url}/models"));
+    if !api_key.is_empty() {
+        req = req.header("Authorization", format!("Bearer {api_key}"));
+    }
+    match req.send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<serde_json::Value>().await {
+                Ok(body) => {
+                    let models: Vec<DiscoveredModel> = body
+                        .get("data").and_then(|d| d.as_array())
+                        .map(|arr| arr.iter()
+                            .filter_map(|m| m.get("id")?.as_str())
+                            .map(openai_id_to_discovered)
+                            .collect())
+                        .unwrap_or_default();
+                    (StatusCode::OK, axum::Json(serde_json::json!({
+                        "provider": "openai_compat",
+                        "endpoint": base_url,
+                        "models":   models,
+                    }))).into_response()
+                }
+                Err(e) => internal_error(format!("parse error: {e}")).into_response(),
+            }
+        }
+        Ok(resp) => (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({
+            "error": format!("Provider returned HTTP {}", resp.status()),
+        }))).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({
+            "error": format!("Provider unreachable: {e}"),
+        }))).into_response(),
+    }
+}
+
+fn ollama_name_to_discovered(name: &str) -> DiscoveredModel {
+    let (base, tag) = name.split_once(':').unwrap_or((name, ""));
+    let mut parts = tag.split('-');
+    let param_size = parts.next().filter(|s| !s.is_empty()).map(str::to_lowercase);
+    let quantization = parts
+        .filter(|s| s.to_lowercase().starts_with('q') || s.contains('_'))
+        .max_by_key(|s| s.len())
+        .map(str::to_owned);
+    let lower = base.to_lowercase();
+    let capabilities = if lower.contains("embed") || lower.contains("nomic") || lower.contains("all-minilm") {
+        vec!["embed".to_owned()]
+    } else if lower.contains("rerank") {
+        vec!["rerank".to_owned()]
+    } else {
+        vec!["generate".to_owned()]
+    };
+    DiscoveredModel { model_id: name.to_owned(), name: name.to_owned(), parameter_size: param_size, quantization, capabilities }
+}
+
+fn openai_id_to_discovered(id: &str) -> DiscoveredModel {
+    let lower = id.to_lowercase();
+    let capabilities = if lower.contains("embed") || lower.contains("embedding") {
+        vec!["embed".to_owned()]
+    } else if lower.contains("rerank") {
+        vec!["rerank".to_owned()]
+    } else {
+        vec!["generate".to_owned()]
+    };
+    DiscoveredModel { model_id: id.to_owned(), name: id.to_owned(), parameter_size: None, quantization: None, capabilities }
+}
+
+/// `GET /v1/providers/connections/:id/test`
+///
+/// Probes the provider endpoint and returns reachability + round-trip latency.
+///
+/// Response: `{ "ok": bool, "latency_ms": u64, "provider": str, "status": u16, "detail": str }`
+async fn test_connection_handler(
+    State(state): State<AppState>,
+    Path(connection_id): Path<String>,
+    Query(query): Query<DiscoverModelsQuery>,
+) -> impl IntoResponse {
+    use cairn_domain::ProviderConnectionId;
+    use cairn_store::projections::ProviderConnectionReadModel;
+
+    let conn_id = ProviderConnectionId::new(connection_id.clone());
+    let adapter_type = match ProviderConnectionReadModel::get(
+        state.runtime.store.as_ref(),
+        &conn_id,
+    )
+    .await
+    {
+        Ok(Some(rec)) => rec.adapter_type.to_lowercase(),
+        Ok(None) => {
+            if query.endpoint_url.is_none() {
+                return (StatusCode::NOT_FOUND, axum::Json(serde_json::json!({
+                    "error": format!("provider connection '{connection_id}' not found"),
+                    "hint": "pass ?endpoint_url=... to test without a registered connection",
+                }))).into_response();
+            }
+            "openai_compat".to_owned()
+        }
+        Err(e) => return internal_error(format!("store error: {e}")).into_response(),
+    };
+
+    let (probe_url, auth_header) = if adapter_type == "ollama" {
+        let host = query.endpoint_url.as_deref()
+            .map(|u| u.trim_end_matches('/').to_owned())
+            .or_else(|| state.ollama.as_ref().map(|p| p.host().to_owned()));
+        match host {
+            Some(h) => (format!("{h}/api/tags"), None),
+            None => return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "error": "Ollama not configured" }))).into_response(),
+        }
+    } else {
+        let base = query.endpoint_url.as_deref()
+            .map(|u| u.trim_end_matches('/').to_owned())
+            .or_else(|| state.openai_compat.as_ref().map(|p| p.base_url().to_owned()));
+        match base {
+            Some(b) => {
+                let key = query.api_key.clone()
+                    .or_else(|| std::env::var("OPENAI_COMPAT_API_KEY").ok())
+                    .unwrap_or_default();
+                let auth = if key.is_empty() { None } else { Some(format!("Bearer {key}")) };
+                (format!("{b}/models"), auth)
+            }
+            None => return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "error": "Provider not configured" }))).into_response(),
+        }
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
+    let start = std::time::Instant::now();
+    let mut req = client.get(&probe_url);
+    if let Some(auth) = auth_header {
+        req = req.header("Authorization", auth);
+    }
+    match req.send().await {
+        Ok(resp) => {
+            let latency_ms = start.elapsed().as_millis() as u64;
+            let ok = resp.status().is_success();
+            (StatusCode::OK, axum::Json(serde_json::json!({
+                "ok":         ok,
+                "latency_ms": latency_ms,
+                "provider":   adapter_type,
+                "status":     resp.status().as_u16(),
+                "detail":     if ok { "reachable" } else { "returned non-2xx" },
+            }))).into_response()
+        }
+        Err(e) => (StatusCode::OK, axum::Json(serde_json::json!({
+            "ok":         false,
+            "latency_ms": start.elapsed().as_millis() as u64,
+            "provider":   adapter_type,
+            "status":     0u16,
+            "detail":     format!("connection error: {e}"),
+        }))).into_response(),
+    }
+}
+
 /// `POST /v1/providers/ollama/generate` — run a prompt through the local Ollama LLM.
 ///
 /// Body: `{ "model": "llama3", "prompt": "Hello, world!" }`
@@ -2463,7 +2684,7 @@ async fn ollama_generate_handler(
             ).into_response();
         };
 
-    let default_model = ModelDefaults::generate();
+    let default_model = state.runtime.runtime_config.default_generate_model().await;
     let model_id = body.model
         .as_deref()
         .unwrap_or(&default_model)
@@ -2549,8 +2770,8 @@ async fn ollama_embed_handler(
             ).into_response();
         };
 
-    let default_ollama_embed = ModelDefaults::ollama_embed();
-    let default_compat_embed = ModelDefaults::embed();
+    let default_ollama_embed = state.runtime.runtime_config.default_ollama_embed_model().await;
+    let default_compat_embed = state.runtime.runtime_config.default_embed_model().await;
     let model_id = body.model.as_deref().unwrap_or_else(|| {
         if state.ollama.is_some() { &default_ollama_embed } else { &default_compat_embed }
     });
@@ -2605,8 +2826,10 @@ async fn ollama_stream_handler(
         ).into_response();
     };
 
-    let default_stream = ModelDefaults::stream();
+    let default_stream = state.runtime.runtime_config.default_stream_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
+    // Resolve thinking-mode flag before spawning (RuntimeConfig is not Send across spawn).
+    let disable_thinking = state.runtime.runtime_config.supports_thinking_mode(&model_id).await;
     // Use full message history when provided; fall back to single-turn prompt.
     let messages: Vec<serde_json::Value> = body.messages.unwrap_or_else(|| {
         vec![serde_json::json!({"role": "user", "content": body.prompt})]
@@ -2624,14 +2847,14 @@ async fn ollama_stream_handler(
             .expect("reqwest client");
 
         let url = format!("{host}/v1/chat/completions");
-        // Disable Qwen3's chain-of-thought reasoning pass via Ollama's options
-        // extension field — same approach as OllamaProvider::generate().
+        // Disable chain-of-thought reasoning for models that default to thinking mode
+        // (e.g. Qwen3). Controlled via RuntimeConfig / DefaultsService at runtime.
         let mut req_body = serde_json::json!({
             "model":    model_id,
             "messages": messages,
             "stream":   true,
         });
-        if supports_thinking_mode(&model_id) {
+        if disable_thinking {
             req_body["options"] = serde_json::json!({ "think": false });
         }
 
@@ -4011,6 +4234,9 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
         .route("/v1/templates/:id",       get(get_template_handler))
         .route("/v1/templates/:id/apply", post(apply_template_handler))
         // Ollama local LLM provider
+        // Provider connection discovery + health test
+        .route("/v1/providers/connections/:id/discover-models", get(discover_models_handler))
+        .route("/v1/providers/connections/:id/test",            get(test_connection_handler))
         .route("/v1/providers/ollama/models",            get(ollama_models_handler))
         .route("/v1/providers/ollama/models/:name/info", get(ollama_model_info_handler))
         .route("/v1/providers/ollama/generate",          post(ollama_generate_handler))
@@ -6757,7 +6983,7 @@ mod provider_health_tests {
                     project: project.clone(),
                     provider_binding_id: ProviderBindingId::new("conn_ph_1"),
                     provider_connection_id: ProviderConnectionId::new("conn_ph_1"),
-                    provider_model_id: ProviderModelId::new(ModelDefaults::generate()),
+                    provider_model_id: ProviderModelId::new(state.runtime.runtime_config.default_generate_model().await),
                     operation_kind: OperationKind::Generate,
                     settings: ProviderBindingSettings::default(),
                     policy_id: None,
@@ -6814,7 +7040,7 @@ mod provider_health_tests {
                     project: project.clone(),
                     provider_binding_id: ProviderBindingId::new("conn_ph_deg"),
                     provider_connection_id: ProviderConnectionId::new("conn_ph_deg"),
-                    provider_model_id: ProviderModelId::new(ModelDefaults::generate()),
+                    provider_model_id: ProviderModelId::new(state.runtime.runtime_config.default_generate_model().await),
                     operation_kind: OperationKind::Generate,
                     settings: ProviderBindingSettings::default(),
                     policy_id: None,

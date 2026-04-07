@@ -96,6 +96,13 @@ pub struct InMemoryServices {
 
     // ── Resource sharing ──────────────────────────────────────────────────
     pub resource_sharing: ResourceSharingServiceImpl<InMemoryStore>,
+
+    // ── Hot-reloadable configuration ──────────────────────────────────────
+    /// Typed accessors for model settings and operational knobs.
+    ///
+    /// Reads from the DefaultsService store first (changeable via API),
+    /// falls back to env vars, then hardcoded defaults.
+    pub runtime_config: std::sync::Arc<crate::runtime_config::RuntimeConfig>,
 }
 
 impl InMemoryServices {
@@ -150,6 +157,9 @@ impl InMemoryServices {
             audit: AuditServiceImpl::new(store.clone()),
             tool_invocations: ToolInvocationServiceImpl::new(store.clone()),
             resource_sharing: ResourceSharingServiceImpl::new(store.clone()),
+            runtime_config: std::sync::Arc::new(
+                crate::runtime_config::RuntimeConfig::new(store.clone()),
+            ),
             store,
         }
     }
