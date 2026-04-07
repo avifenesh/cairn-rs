@@ -1,12 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useRef } from "react";
 import {
   ArrowLeft, Loader2, Clock, Hash, Cpu, Download,
+  Brain, Search, Zap, CheckCircle2, Wrench, ChevronDown, ChevronRight,
+  Play, AlertTriangle,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
 import { GanttView } from "../components/TimelineView";
 import { CopyButton } from "../components/CopyButton";
 import { defaultApi } from "../lib/api";
+import { useEventStream } from "../hooks/useEventStream";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +51,237 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
       <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
       <p className="text-[20px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
       {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+// ── Orchestration timeline ────────────────────────────────────────────────────
+
+interface OrchestrationEntry {
+  id:        string;
+  type:      string;
+  ts:        number;
+  payload:   Record<string, unknown>;
+  expanded:  boolean;
+}
+
+const ORCH_TYPES = new Set([
+  "orchestrate_started", "gather_completed", "decide_completed",
+  "tool_called", "tool_result", "step_completed", "orchestrate_finished",
+  "operator_notification",
+]);
+
+function orchIcon(type: string) {
+  if (type === "orchestrate_started")  return <Play         size={12} className="text-emerald-400" />;
+  if (type === "orchestrate_finished") return <CheckCircle2 size={12} className="text-emerald-400" />;
+  if (type === "gather_completed")     return <Search        size={12} className="text-sky-400"     />;
+  if (type === "decide_completed")     return <Brain         size={12} className="text-indigo-400"  />;
+  if (type === "tool_called")          return <Wrench        size={12} className="text-amber-400"   />;
+  if (type === "tool_result")          return <Zap           size={12} className="text-teal-400"    />;
+  if (type === "step_completed")       return <ChevronRight  size={12} className="text-zinc-400"    />;
+  if (type === "operator_notification")return <AlertTriangle size={12} className="text-orange-400"  />;
+  return                                      <Hash          size={12} className="text-zinc-600"    />;
+}
+
+function orchColor(type: string): string {
+  if (type === "orchestrate_started" || type === "orchestrate_finished")
+    return "border-emerald-700/50 bg-emerald-950/20";
+  if (type === "gather_completed")     return "border-sky-700/50 bg-sky-950/20";
+  if (type === "decide_completed")     return "border-indigo-700/50 bg-indigo-950/20";
+  if (type.startsWith("tool"))         return "border-amber-700/50 bg-amber-950/20";
+  if (type === "operator_notification")return "border-orange-700/50 bg-orange-950/20";
+  return "border-zinc-700/50 bg-zinc-800/30";
+}
+
+function orchSummary(type: string, p: Record<string, unknown>): string {
+  switch (type) {
+    case "orchestrate_started":
+      return typeof p.goal === "string" ? `Goal: "${p.goal.slice(0, 80)}${p.goal.length > 80 ? "…" : ""}"` : "Started";
+    case "gather_completed": {
+      const chunks = typeof p.memory_chunks === "number" ? p.memory_chunks : 0;
+      const evts   = typeof p.recent_events === "number" ? p.recent_events : 0;
+      return `${chunks} memory chunk${chunks !== 1 ? "s" : ""}, ${evts} recent event${evts !== 1 ? "s" : ""}`;
+    }
+    case "decide_completed": {
+      const count = typeof p.proposals === "number" ? p.proposals : 0;
+      const first = typeof p.first_action === "string" ? p.first_action : "";
+      const conf  = typeof p.confidence  === "number" ? ` (${(p.confidence * 100).toFixed(0)}%)` : "";
+      return `${count} proposal${count !== 1 ? "s" : ""}${first ? ` · ${first}` : ""}${conf}`;
+    }
+    case "tool_called": {
+      const name = typeof p.tool_name === "string" ? p.tool_name : "unknown";
+      return `→ ${name}`;
+    }
+    case "tool_result": {
+      const name    = typeof p.tool_name === "string" ? p.tool_name : "unknown";
+      const success = p.success !== false;
+      return `${name} ${success ? "✓" : "✗"}`;
+    }
+    case "step_completed": {
+      const iter = typeof p.iteration === "number" ? p.iteration + 1 : "?";
+      const kind = typeof p.action_kind === "string" ? p.action_kind : "";
+      return `Iteration ${iter}${kind ? ` · ${kind}` : ""}`;
+    }
+    case "orchestrate_finished": {
+      const term = typeof p.termination === "string" ? p.termination : "unknown";
+      const summary = typeof p.summary === "string" ? ` — ${p.summary.slice(0, 60)}` : "";
+      return `${term}${summary}`;
+    }
+    case "operator_notification": {
+      const sev = typeof p.severity === "string" ? `[${p.severity}] ` : "";
+      const msg = typeof p.message  === "string" ? p.message.slice(0, 80) : "";
+      return `${sev}${msg}`;
+    }
+    default: return "";
+  }
+}
+
+function OrchestrationTimeline({ runId }: { runId: string }) {
+  const { events: streamEvents } = useEventStream();
+  const [entries, setEntries]     = useState<OrchestrationEntry[]>([]);
+  const [finished, setFinished]   = useState(false);
+  const seenRef = useRef(new Set<string>());
+
+  // Filter and accumulate orchestration events for this run
+  useEffect(() => {
+    const newEntries: OrchestrationEntry[] = [];
+
+    for (const ev of streamEvents) {
+      if (!ORCH_TYPES.has(ev.type)) continue;
+
+      const p = (ev.payload ?? {}) as Record<string, unknown>;
+      const evRunId = (p.run_id ?? p.runId) as string | undefined;
+      if (evRunId && evRunId !== runId) continue;
+
+      const uid = `${ev.type}-${ev.id}`;
+      if (seenRef.current.has(uid)) continue;
+      seenRef.current.add(uid);
+
+      newEntries.push({
+        id:       uid,
+        type:     ev.type,
+        ts:       ev.receivedAt,
+        payload:  p,
+        expanded: false,
+      });
+
+      if (ev.type === "orchestrate_finished") {
+        setFinished(true);
+      }
+    }
+
+    if (newEntries.length > 0) {
+      // streamEvents are newest-first; insert new entries at the end (chronological)
+      setEntries(prev => {
+        const merged = [...prev, ...newEntries];
+        merged.sort((a, b) => a.ts - b.ts);
+        return merged;
+      });
+    }
+  }, [streamEvents, runId]);
+
+  if (entries.length === 0) return null;
+
+  const toggleExpand = (id: string) =>
+    setEntries(prev => prev.map(e => e.id === id ? { ...e, expanded: !e.expanded } : e));
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
+          Orchestration Timeline
+        </p>
+        <div className="flex items-center gap-2">
+          {finished ? (
+            <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium">
+              <CheckCircle2 size={11} /> Complete
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-[10px] text-indigo-400 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              Live
+            </span>
+          )}
+          <span className="text-[10px] text-zinc-600">{entries.length} event{entries.length !== 1 ? "s" : ""}</span>
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div className="relative">
+        {/* Vertical track */}
+        <div className="absolute left-[18px] top-3 bottom-3 w-px bg-zinc-800" />
+
+        <div className="space-y-1">
+          {entries.map((entry) => {
+            const summary = orchSummary(entry.type, entry.payload);
+            const hasDetail = Object.keys(entry.payload).length > 0;
+
+            return (
+              <div key={entry.id} className="relative flex items-start gap-3">
+                {/* Icon dot */}
+                <div className="w-9 h-9 shrink-0 flex items-center justify-center relative z-10">
+                  <div className={clsx(
+                    "w-6 h-6 rounded-full border flex items-center justify-center",
+                    orchColor(entry.type),
+                  )}>
+                    {orchIcon(entry.type)}
+                  </div>
+                </div>
+
+                {/* Card */}
+                <div className={clsx(
+                  "flex-1 rounded-lg border px-3 py-2 min-w-0 transition-colors",
+                  orchColor(entry.type),
+                  hasDetail && "cursor-pointer hover:brightness-110",
+                )}
+                  onClick={() => hasDetail && toggleExpand(entry.id)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[11px] font-mono text-zinc-300 shrink-0">
+                        {entry.type.replace(/_/g, "\u00A0")}
+                      </span>
+                      {summary && (
+                        <span className="text-[11px] text-zinc-500 truncate">{summary}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] text-zinc-600 font-mono tabular-nums">
+                        {new Date(entry.ts).toLocaleTimeString(undefined, {
+                          hour: "2-digit", minute: "2-digit", second: "2-digit",
+                        })}
+                      </span>
+                      {hasDetail && (
+                        entry.expanded
+                          ? <ChevronDown size={11} className="text-zinc-600" />
+                          : <ChevronRight size={11} className="text-zinc-600" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expanded payload */}
+                  {entry.expanded && (
+                    <pre className="mt-2 text-[10px] text-zinc-400 font-mono bg-zinc-950/60 rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
+                      {JSON.stringify(entry.payload, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Live indicator at the bottom when still running */}
+          {!finished && (
+            <div className="relative flex items-center gap-3">
+              <div className="w-9 shrink-0 flex justify-center">
+                <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse relative z-10" />
+              </div>
+              <span className="text-[11px] text-zinc-600 italic">Waiting for next event…</span>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -196,6 +431,9 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
             sub={cost && cost.provider_calls > 0 ? `${cost.provider_calls} provider call${cost.provider_calls !== 1 ? "s" : ""}` : undefined}
           />
         </div>
+
+        {/* Orchestration live timeline — visible when SSE events arrive */}
+        <OrchestrationTimeline runId={runId} />
 
         {/* Task Gantt chart */}
         {tasks && tasks.length > 0 && run && (

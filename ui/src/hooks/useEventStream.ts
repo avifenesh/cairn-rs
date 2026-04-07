@@ -126,6 +126,10 @@ function connect() {
     'tool_invocation_started', 'tool_invocation_completed', 'assistant_tool_call',
     'checkpoint_recorded', 'checkpoint_restored',
     'provider_call_completed', 'provider_health_checked',
+    // Orchestration lifecycle events
+    'orchestrate_started', 'gather_completed', 'decide_completed',
+    'tool_called', 'tool_result', 'step_completed', 'orchestrate_finished',
+    'operator_notification',
   ];
   for (const type of NAMED_TYPES) {
     es.addEventListener(type, handleMessage);
