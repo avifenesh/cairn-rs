@@ -17,6 +17,7 @@ pub mod memory_search;
 pub mod memory_store;
 pub mod web_fetch;
 pub mod shell_exec;
+pub mod tool_search;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ pub use memory_search::MemorySearchTool;
 pub use memory_store::MemoryStoreTool;
 pub use web_fetch::WebFetchTool;
 pub use shell_exec::ShellExecTool;
+pub use tool_search::ToolSearchTool;
 
 // ── ToolTier ──────────────────────────────────────────────────────────────────
 
@@ -297,13 +299,23 @@ impl BuiltinToolRegistry {
     /// Descriptors for Deferred tools matching the given capability query.
     /// Used by the `tool_search` built-in to surface on-demand tools.
     pub fn search_deferred(&self, query: &str) -> Vec<BuiltinToolDescriptor> {
-        let q = query.to_lowercase();
+        let q_lower = query.to_lowercase();
+        // Split into words so "execute shell commands" matches "Execute a shell command".
+        let words: Vec<&str> = q_lower.split_whitespace().filter(|w| w.len() > 2).collect();
+
+        let matches_query = |h: &Arc<dyn ToolHandler>| -> bool {
+            let name = h.name().to_lowercase();
+            let desc = h.description().to_lowercase();
+            // Full-query substring match (fast path).
+            if name.contains(q_lower.as_str()) || desc.contains(q_lower.as_str()) {
+                return true;
+            }
+            // Word-level match: any meaningful query word appears in name or description.
+            words.iter().any(|w| name.contains(w) || desc.contains(w))
+        };
+
         let mut tools: Vec<BuiltinToolDescriptor> = self.tools.values()
-            .filter(|(h, tier)| {
-                *tier == ToolTier::Deferred
-                    && (h.name().to_lowercase().contains(&q)
-                        || h.description().to_lowercase().contains(&q))
-            })
+            .filter(|(h, tier)| *tier == ToolTier::Deferred && matches_query(h))
             .map(|(h, _)| BuiltinToolDescriptor::from_handler(h.as_ref()))
             .collect();
         tools.sort_by(|a, b| a.name.cmp(&b.name));
