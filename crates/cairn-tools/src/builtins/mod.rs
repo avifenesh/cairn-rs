@@ -17,6 +17,8 @@ pub mod memory_search;
 pub mod memory_store;
 pub mod web_fetch;
 pub mod shell_exec;
+pub mod graph_query;
+pub mod list_runs;
 pub mod tool_search;
 
 use std::collections::HashMap;
@@ -31,6 +33,8 @@ pub use memory_search::MemorySearchTool;
 pub use memory_store::MemoryStoreTool;
 pub use web_fetch::WebFetchTool;
 pub use shell_exec::ShellExecTool;
+pub use graph_query::GraphQueryTool;
+pub use list_runs::ListRunsTool;
 pub use tool_search::ToolSearchTool;
 
 // ── ToolTier ──────────────────────────────────────────────────────────────────

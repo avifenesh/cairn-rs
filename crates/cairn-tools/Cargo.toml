@@ -10,6 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 cairn-domain = { path = "../cairn-domain" }
+cairn-graph  = { path = "../cairn-graph" }
 cairn-plugin-proto = { path = "../cairn-plugin-proto" }
 cairn-runtime = { path = "../cairn-runtime" }
 cairn-store   = { path = "../cairn-store" }

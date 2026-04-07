@@ -7,6 +7,7 @@
 //!   cairn-app --addr 0.0.0.0          # bind all interfaces
 
 pub mod sse_hooks;
+pub mod tool_impls;
 
 use async_trait::async_trait;
 use axum::{
@@ -585,6 +586,9 @@ pub struct AppState {
     /// once the concrete provider (Ollama or OpenAI-compat) is configured.
     /// `None` means orchestration is unavailable until a provider is configured.
     pub brain_provider: Option<Arc<dyn cairn_domain::providers::GenerationProvider>>,
+    /// Built-in tool registry wired by main.rs with real memory backends.
+    /// `None` until set — orchestrate handler falls back to stub dispatcher.
+    pub tool_registry: Option<Arc<cairn_tools::BuiltinToolRegistry>>,
 }
 
 impl AppState {
@@ -809,6 +813,7 @@ impl AppState {
             eval_rubrics,
             graph,
             brain_provider: None,
+            tool_registry:  None,
         })
     }
 }
@@ -980,7 +985,7 @@ where
         let tenant_id = parts
             .extensions
             .get::<TenantId>()
-            .cloned()
+            .map(|t| t.clone())
             .ok_or_else(unauthorized_api_error)?;
         Ok(Self { tenant_id })
     }
@@ -1020,7 +1025,7 @@ where
         let tenant = request
             .extensions()
             .get::<TenantId>()
-            .cloned()
+            .map(|t| t.clone())
             .map(|tenant_id| TenantScope { tenant_id })
             .ok_or_else(unauthorized_api_error)?;
         let Json(value) = Json::<T>::from_request(request, state)
@@ -8362,6 +8367,10 @@ async fn orchestrate_run_handler(
         RunServiceImpl, TaskServiceImpl, ToolInvocationServiceImpl,
     };
     use cairn_store::projections::RunReadModel;
+    use cairn_tools::{
+        BuiltinToolRegistry, MemorySearchTool, MemoryStoreTool, ToolSearchTool,
+        WebFetchTool, ShellExecTool,
+    };
 
     let run_id = RunId::new(run_id_str);
     let run = match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
@@ -8404,7 +8413,59 @@ async fn orchestrate_run_handler(
         .with_checkpoints(state.runtime.store.clone())
         .build();
 
-    let decide = LlmDecidePhase::new(brain, model_id.clone());
+    // ── Build BuiltinToolRegistry ────────────────────────────────────────────
+    // Prefer real memory tool implementations (wired at startup with live
+    // RetrievalService + IngestPipeline).  Fall back to stubs otherwise.
+    let registry = {
+        // Concrete memory tools: use real impl when state.tool_registry is set,
+        // otherwise fall back to stubs (schema-correct but no backing service).
+        let (search_tool, store_tool): (
+            std::sync::Arc<dyn cairn_tools::ToolHandler>,
+            std::sync::Arc<dyn cairn_tools::ToolHandler>,
+        ) = if let Some(ref real) = state.tool_registry {
+            // Extract the real tools from the pre-built registry.
+            // If somehow not present, fall through to stubs.
+            let search: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+                real.get("memory_search")
+                    .unwrap_or_else(|| std::sync::Arc::new(MemorySearchTool::new()));
+            let store: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+                real.get("memory_store")
+                    .unwrap_or_else(|| std::sync::Arc::new(MemoryStoreTool::new()));
+            (search, store)
+        } else {
+            (
+                std::sync::Arc::new(MemorySearchTool::new()),
+                std::sync::Arc::new(MemoryStoreTool::new()),
+            )
+        };
+
+        let web_fetch: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(WebFetchTool::default());
+        let shell_exec: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(ShellExecTool::default());
+
+        // Build inner registry for ToolSearchTool (deferred tier).
+        let inner = std::sync::Arc::new(
+            BuiltinToolRegistry::new()
+                .register(search_tool.clone())
+                .register(store_tool.clone())
+                .register(web_fetch.clone())
+                .register(shell_exec.clone())
+        );
+
+        // Full registry with ToolSearchTool that can search the deferred tier.
+        std::sync::Arc::new(
+            BuiltinToolRegistry::new()
+                .register(search_tool)
+                .register(store_tool)
+                .register(web_fetch)
+                .register(shell_exec)
+                .register(std::sync::Arc::new(ToolSearchTool::new(inner)))
+        )
+    };
+
+    let decide = LlmDecidePhase::new(brain, model_id.clone())
+        .with_tools(registry.clone());
 
     // Build loop config first so checkpoint policy is available for execute.
     let mut cfg = LoopConfig::default();
@@ -8416,6 +8477,7 @@ async fn orchestrate_run_handler(
     // service are immediately visible to reads from another.
     let store = state.runtime.store.clone();
     let execute = RuntimeExecutePhase::builder()
+        .tool_registry(registry)
         .run_service(Arc::new(RunServiceImpl::new(store.clone())))
         .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
         .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
@@ -12359,7 +12421,7 @@ fn source_detail_for(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(source_id.as_str())
-        .cloned()
+        .map(|t| t.clone())
         .unwrap_or_default();
 
     Some(SourceDetailResponse {

@@ -25,7 +25,7 @@ pub mod transport;
 pub use builtin::{ToolDescriptor, ToolHost, ToolInput, ToolOutcome};
 pub use builtins::{
     BuiltinToolDescriptor, BuiltinToolRegistry,
-    MemorySearchTool, MemoryStoreTool, ShellExecTool, WebFetchTool,
+    MemorySearchTool, MemoryStoreTool, ShellExecTool, ToolSearchTool, WebFetchTool,
     ToolError, ToolHandler, ToolResult, ToolTier,
 };
 pub use execution_class::{select_execution_config, SelectedConfig};
