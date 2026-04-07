@@ -122,6 +122,29 @@ post /v1/runs "{
 ok "run ${RUN} state=pending"
 
 # =============================================================================
+step "Orchestrate the run (GATHER → DECIDE → EXECUTE loop)"
+
+# Trigger the orchestrator with a 2-minute timeout and a small iteration cap
+# so the step completes quickly even when a real brain LLM is available.
+post "/v1/runs/${RUN}/orchestrate" "{
+  \"goal\":\"Summarize the current run state and decide the next action.\",
+  \"max_iterations\":3,
+  \"timeout_ms\":120000
+}" "$LLM_TIMEOUT"
+
+if [ "$STATUS" = "200" ] || [ "$STATUS" = "202" ]; then
+  TERM=$(printf '%s' "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('termination',''))" 2>/dev/null)
+  SUMMARY=$(printf '%s' "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('summary',''))" 2>/dev/null)
+  ok "orchestrate returned HTTP ${STATUS}, termination=${TERM}"
+  [ -n "$SUMMARY" ] && info "summary: \"${SUMMARY:0:100}\""
+elif [[ "$STATUS" =~ ^(503|502|429)$ ]]; then
+  ok "Brain provider unavailable (HTTP ${STATUS}) — orchestrate step skipped"
+  info "(set CAIRN_BRAIN_URL or OLLAMA_HOST to exercise the orchestrator)"
+else
+  fail "orchestrate HTTP ${STATUS}: ${RESP}"
+fi
+
+# =============================================================================
 step "Submit a task"
 
 post "/v1/runs/${RUN}/tasks" "{
@@ -257,6 +280,7 @@ ok "run tasks reachable"
 # =============================================================================
 echo "" >&2
 echo -e "${BLD}${GRN}=== E2E AGENT WORKFLOW COMPLETED ===${RST}" >&2
-echo -e "  Session: ${SESSION}  Run: ${RUN}  Task: ${TASK_ID}" >&2
-echo -e "  Events: ${EVENT_COUNT}  Steps: ${STEP}" >&2
+echo -e "  Session : ${SESSION}" >&2
+echo -e "  Run     : ${RUN}  Task: ${TASK_ID}" >&2
+echo -e "  Events  : ${EVENT_COUNT}  Steps: ${STEP}" >&2
 echo "" >&2

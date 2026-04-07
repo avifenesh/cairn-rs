@@ -378,6 +378,30 @@ chk "GET /v1/memory/documents/:id" 200 GET "/v1/memory/documents/cdoc1_${RUN_ID}
 chk "GET /v1/memory/diagnostics" 200 GET "/v1/memory/diagnostics?tenant_id=default&workspace_id=default&project_id=default"
 
 # =============================================================================
+section "21. Orchestrator (optional — skipped when no brain provider)"
+
+# POST /v1/runs/:id/orchestrate — 200/202 = pass, 503 = skip (no provider),
+# 502/429 = skip (provider offline/throttled), anything else = fail.
+api POST "/v1/runs/${RUN_ID}/orchestrate" \
+  "{\"goal\":\"Summarize the current run state.\",\"max_iterations\":2,\"timeout_ms\":30000}"
+
+if [[ "$_HTTP" =~ ^(200|202)$ ]]; then
+  TERM=$(printf '%s' "$_BODY" | python3 -c \
+    "import sys,json; print(json.load(sys.stdin).get('termination',''))" 2>/dev/null || echo "unknown")
+  log_ok "POST /v1/runs/:id/orchestrate (HTTP $_HTTP, termination=${TERM})"
+  # Validate response shape: must have a termination field
+  [ -n "$TERM" ] && [ "$TERM" != "unknown" ] \
+    && log_ok "  termination field present: ${TERM}" \
+    || log_fail "  termination field missing or empty"
+elif [[ "$_HTTP" =~ ^(503|502|429)$ ]]; then
+  log_skip "Orchestrator skipped — no brain provider or provider offline (HTTP $_HTTP)"
+  log_skip "  Set CAIRN_BRAIN_URL or OLLAMA_HOST to exercise this path"
+else
+  log_fail "POST /v1/runs/:id/orchestrate (unexpected HTTP $_HTTP)"
+  [ -n "$_BODY" ] && echo -e "     ${RED}${_BODY:0:160}${RST}" >&2
+fi
+
+# =============================================================================
 TOTAL=$(( PASS + FAIL + SKIP ))
 echo "" >&2
 echo -e "${BLD}── Results $(printf '─%.0s' {1..36})${RST}" >&2
