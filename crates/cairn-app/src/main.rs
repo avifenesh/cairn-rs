@@ -2378,6 +2378,8 @@ struct DiscoverModelsQuery {
     endpoint_url: Option<String>,
     /// API key to use with `endpoint_url`.
     api_key: Option<String>,
+    /// Override adapter type: "ollama" | "openai_compat" (inferred from connection if absent).
+    adapter_type: Option<String>,
 }
 
 /// `GET /v1/providers/connections/:id/discover-models`
@@ -2411,10 +2413,12 @@ async fn discover_models_handler(
                     "hint": "pass ?endpoint_url=... to discover without a registered connection",
                 }))).into_response();
             }
-            "openai_compat".to_owned()
+            query.adapter_type.clone().unwrap_or_else(|| "openai_compat".to_owned())
         }
         Err(e) => return internal_error(format!("store error: {e}")).into_response(),
     };
+    // Allow query param to override stored adapter_type.
+    let adapter_type = query.adapter_type.as_deref().unwrap_or(&adapter_type).to_lowercase();
 
     if adapter_type == "ollama" {
         discover_ollama_models_live(&state, query.endpoint_url.as_deref()).await
@@ -2576,10 +2580,11 @@ async fn test_connection_handler(
                     "hint": "pass ?endpoint_url=... to test without a registered connection",
                 }))).into_response();
             }
-            "openai_compat".to_owned()
+            query.adapter_type.clone().unwrap_or_else(|| "openai_compat".to_owned())
         }
         Err(e) => return internal_error(format!("store error: {e}")).into_response(),
     };
+    let adapter_type = query.adapter_type.as_deref().unwrap_or(&adapter_type).to_lowercase();
 
     let (probe_url, auth_header) = if adapter_type == "ollama" {
         let host = query.endpoint_url.as_deref()

@@ -100,6 +100,11 @@ export function createApiClient(config: ApiClientConfig) {
       method: "POST",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+  const put  = <T>(path: string, body?: unknown) =>
+    apiFetch<T>(config, path, {
+      method: "PUT",
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
   const del  = <T>(path: string) => apiFetch<T>(config, path, { method: "DELETE" });
 
   /**
@@ -351,6 +356,39 @@ export function createApiClient(config: ApiClientConfig) {
       tokens_out: number | null;
       latency_ms: number;
     }> => post("/v1/providers/ollama/generate", body),
+
+    // ── Provider connections ─────────────────────────────────────────────────
+
+    /** GET /v1/providers/connections — list registered provider connections. */
+    listProviderConnections: (tenantId = "default"): Promise<{
+      items: import("./types").ProviderConnectionRecord[];
+      has_more: boolean;
+    }> => get(`/v1/providers/connections?tenant_id=${encodeURIComponent(tenantId)}`),
+
+    /** POST /v1/providers/connections — register a new provider connection. */
+    createProviderConnection: (body: {
+      tenant_id: string;
+      provider_connection_id: string;
+      provider_family: string;
+      adapter_type: string;
+      supported_models?: string[];
+    }): Promise<import("./types").ProviderConnectionRecord> =>
+      post("/v1/providers/connections", body),
+
+    /** GET /v1/providers/connections/:id/models — list models for a connection. */
+    listConnectionModels: (id: string): Promise<{ items: unknown[]; has_more: boolean }> =>
+      get(`/v1/providers/connections/${encodeURIComponent(id)}/models`),
+
+    // ── Default settings ─────────────────────────────────────────────────────
+
+    /** PUT /v1/settings/defaults/:scope/:scopeId/:key — persist a tenant-level default. */
+    setDefaultSetting: (scope: string, scopeId: string, key: string, value: unknown): Promise<unknown> =>
+      put(`/v1/settings/defaults/${encodeURIComponent(scope)}/${encodeURIComponent(scopeId)}/${encodeURIComponent(key)}`, { value }),
+
+    /** GET /v1/settings/defaults/resolve/:key — resolve effective default for a key.
+     *  project must be "tenant/workspace/project" format, e.g. "default/default/default". */
+    resolveDefaultSetting: (key: string, project = "default/default/default"): Promise<{ key: string; value: unknown } | null> =>
+      get(`/v1/settings/defaults/resolve/${encodeURIComponent(key)}?project=${encodeURIComponent(project)}`),
 
     // ── LLM Traces ───────────────────────────────────────────────────────────
 

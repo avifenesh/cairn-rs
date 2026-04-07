@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-import { useState, useCallback } from "react";
-import { RefreshCw, Loader2, Check, X, Radio, Wifi, ShieldCheck } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { RefreshCw, Loader2, Check, X, Radio, Wifi, ShieldCheck, SlidersHorizontal, Server } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
@@ -596,9 +596,285 @@ function CorsDiagnosticsSection({ deploymentMode }: { deploymentMode?: string })
   );
 }
 
+// ── Preferences tab ───────────────────────────────────────────────────────────
+
+type SaveState = "idle" | "saving" | "saved" | "error";
+
+/** A single tenant-level default setting row. */
+function PreferenceRow({
+  label,
+  description,
+  settingKey,
+  control,
+}: {
+  label:       string;
+  description: string;
+  settingKey:  string;
+  /** Render prop receives (currentValue, localValue, setLocal) — returns the form control. */
+  control: (
+    stored:   unknown,
+    local:    string,
+    setLocal: (v: string) => void,
+  ) => React.ReactNode;
+}) {
+  const qc = useQueryClient();
+  const [local, setLocal]     = useState<string>("");
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["defaults", settingKey],
+    queryFn:  () => defaultApi.resolveDefaultSetting(settingKey),
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  // Seed local from stored value on first load — but only if user hasn't started typing.
+  const storedStr = data?.value !== undefined ? String(data.value) : "";
+  const initialised = useRef(false);
+  useEffect(() => {
+    if (!initialised.current && storedStr !== "") {
+      setLocal(storedStr);
+      initialised.current = true;
+    }
+  }, [storedStr]);
+
+  const dirty = local !== storedStr && local !== "";
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      // Coerce to the right JSON type based on the key suffix.
+      let value: unknown = local;
+      if (settingKey === "approval_required") {
+        value = local === "true";
+      } else if (["max_tokens", "timeout_ms"].includes(settingKey)) {
+        value = Number(local);
+      } else if (settingKey === "temperature") {
+        value = parseFloat(local);
+      }
+      return defaultApi.setDefaultSetting("tenant", "default", settingKey, value);
+    },
+    onSuccess: () => {
+      setSaveState("saved");
+      void qc.invalidateQueries({ queryKey: ["defaults", settingKey] });
+      savedTimerRef.current = setTimeout(() => setSaveState("idle"), 2_500);
+    },
+    onError: () => setSaveState("error"),
+    onMutate: () => setSaveState("saving"),
+  });
+
+  // Clear timer on unmount.
+  useEffect(() => () => { if (savedTimerRef.current) clearTimeout(savedTimerRef.current); }, []);
+
+  const stored = data?.value;
+
+  return (
+    <div className="flex items-start justify-between py-4 border-b border-zinc-800 last:border-0 gap-6">
+      {/* Left: label + description + current stored value */}
+      <div className="shrink-0 w-56">
+        <p className="text-[13px] font-medium text-zinc-200">{label}</p>
+        <p className="text-[11px] text-zinc-600 mt-0.5 leading-relaxed">{description}</p>
+        {isLoading ? (
+          <span className="text-[10px] text-zinc-700 font-mono mt-1 block">loading…</span>
+        ) : stored !== undefined ? (
+          <span className="text-[10px] text-zinc-600 font-mono mt-1 block">
+            stored: <span className="text-zinc-500">{String(stored)}</span>
+          </span>
+        ) : (
+          <span className="text-[10px] text-zinc-700 italic mt-1 block">not set</span>
+        )}
+      </div>
+
+      {/* Right: control + save button */}
+      <div className="flex items-center gap-3 flex-1 justify-end">
+        <div className="flex-1 max-w-xs">
+          {control(stored, local, setLocal)}
+        </div>
+
+        <button
+          onClick={() => saveMutation.mutate()}
+          disabled={!dirty || saveState === "saving"}
+          className={clsx(
+            "flex items-center gap-1.5 px-3 h-8 rounded-md text-[12px] font-medium transition-all shrink-0 w-20 justify-center",
+            saveState === "saved"
+              ? "bg-emerald-700/30 border border-emerald-700/50 text-emerald-400"
+              : saveState === "error"
+                ? "bg-red-900/30 border border-red-700/40 text-red-400"
+                : dirty
+                  ? "bg-indigo-600 hover:bg-indigo-500 text-white border border-transparent"
+                  : "bg-zinc-800/60 border border-zinc-700 text-zinc-600 cursor-default",
+          )}
+        >
+          {saveState === "saving" ? (
+            <><Loader2 size={12} className="animate-spin" />Saving</>
+          ) : saveState === "saved" ? (
+            <><Check size={12} />Saved</>
+          ) : saveState === "error" ? (
+            <><X size={12} />Error</>
+          ) : (
+            "Save"
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Text input control for preference rows. */
+function PrefText({ local, setLocal, placeholder, mono = false }: {
+  local: string; setLocal: (v: string) => void; placeholder?: string; mono?: boolean;
+}) {
+  return (
+    <input
+      value={local}
+      onChange={e => setLocal(e.target.value)}
+      placeholder={placeholder}
+      className={clsx(
+        "w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-1.5 text-[13px] text-zinc-200 placeholder-zinc-600",
+        "focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors",
+        mono && "font-mono",
+      )}
+    />
+  );
+}
+
+/** Number input control for preference rows. */
+function PrefNumber({ local, setLocal, min, max, placeholder }: {
+  local: string; setLocal: (v: string) => void; min?: number; max?: number; placeholder?: string;
+}) {
+  return (
+    <input
+      type="number"
+      value={local}
+      onChange={e => setLocal(e.target.value)}
+      min={min}
+      max={max}
+      placeholder={placeholder}
+      className="w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-1.5 text-[13px] text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+    />
+  );
+}
+
+/** Slider + numeric display for temperature. */
+function PrefSlider({ local, setLocal }: { local: string; setLocal: (v: string) => void }) {
+  const v = parseFloat(local) || 0.7;
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        min={0} max={2} step={0.05}
+        value={v}
+        onChange={e => setLocal(e.target.value)}
+        className="flex-1 accent-indigo-500"
+      />
+      <input
+        type="number"
+        min={0} max={2} step={0.05}
+        value={local}
+        onChange={e => setLocal(e.target.value)}
+        className="w-16 rounded-md bg-zinc-900 border border-zinc-700 px-2 py-1.5 text-[12px] text-zinc-200 font-mono text-center focus:outline-none focus:border-indigo-500 transition-colors"
+      />
+    </div>
+  );
+}
+
+/** Toggle control for boolean preferences. */
+function PrefToggle({ local, setLocal }: { local: string; setLocal: (v: string) => void }) {
+  const on = local === "true";
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => setLocal(on ? "false" : "true")}
+        className={clsx(
+          "relative w-10 h-5 rounded-full border transition-colors",
+          on ? "bg-indigo-600 border-indigo-500" : "bg-zinc-800 border-zinc-700",
+        )}
+      >
+        <div className={clsx(
+          "absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform shadow-sm",
+          on ? "translate-x-5" : "translate-x-0.5",
+        )} />
+      </button>
+      <span className={clsx("text-[12px] font-medium", on ? "text-indigo-300" : "text-zinc-500")}>
+        {on ? "Enabled" : "Disabled"}
+      </span>
+    </div>
+  );
+}
+
+function PreferencesTab() {
+  return (
+    <div className="max-w-3xl space-y-6">
+      {/* Section: operator defaults */}
+      <div className="rounded-lg border border-zinc-800 overflow-hidden">
+        <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-zinc-800/40">
+          <p className="text-[12px] font-semibold text-zinc-300 uppercase tracking-wider">Operator Defaults</p>
+          <p className="text-[11px] text-zinc-600 mt-0.5">
+            Tenant-level defaults applied when no project-level or run-level override exists.
+            Saved to <code className="text-zinc-500 font-mono text-[10px]">PUT /v1/settings/defaults/tenant/default/:key</code>
+          </p>
+        </div>
+        <div className="px-5 bg-zinc-900/60">
+          <PreferenceRow
+            label="Default model"
+            description="Model ID used when no binding specifies one."
+            settingKey="default_model"
+            control={(_, local, setLocal) => (
+              <PrefText local={local} setLocal={setLocal} placeholder="e.g. gemma4, gpt-4o" mono />
+            )}
+          />
+          <PreferenceRow
+            label="Max output tokens"
+            description="Hard cap on output length. 0 = provider default."
+            settingKey="max_tokens"
+            control={(_, local, setLocal) => (
+              <PrefNumber local={local} setLocal={setLocal} min={0} max={128_000} placeholder="e.g. 4096" />
+            )}
+          />
+          <PreferenceRow
+            label="Temperature"
+            description="Sampling randomness (0 = deterministic, 2 = very creative)."
+            settingKey="temperature"
+            control={(_, local, setLocal) => (
+              <PrefSlider local={local} setLocal={setLocal} />
+            )}
+          />
+          <PreferenceRow
+            label="Request timeout"
+            description="Provider call timeout in milliseconds."
+            settingKey="timeout_ms"
+            control={(_, local, setLocal) => (
+              <PrefNumber local={local} setLocal={setLocal} min={1_000} max={600_000} placeholder="e.g. 30000" />
+            )}
+          />
+          <PreferenceRow
+            label="Approval required"
+            description="Require operator approval before any run executes."
+            settingKey="approval_required"
+            control={(_, local, setLocal) => (
+              <PrefToggle local={local || "false"} setLocal={setLocal} />
+            )}
+          />
+        </div>
+      </div>
+
+      {/* Hint about future per-project overrides */}
+      <p className="text-[11px] text-zinc-700 leading-relaxed px-1">
+        These defaults apply at the <code className="font-mono text-zinc-600">tenant/default</code> scope.
+        Project-level overrides can be set via <code className="font-mono text-zinc-600">PUT /v1/settings/defaults/project/:project_id/:key</code> once multi-tenant project isolation is enabled.
+      </p>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+type SettingsTab = "system" | "preferences";
+
 export function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("system");
+
   const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ["settings"],
     queryFn: () => defaultApi.getSettings(),
@@ -621,121 +897,139 @@ export function SettingsPage() {
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
         <span className="text-[13px] font-medium text-zinc-200">Settings</span>
-        {dataUpdatedAt > 0 && (
+        {activeTab === "system" && dataUpdatedAt > 0 && (
           <span className="text-[11px] text-zinc-600 font-mono">
             {new Date(dataUpdatedAt).toLocaleTimeString()}
           </span>
         )}
-        <button onClick={() => refetch()} disabled={isFetching}
-          className="ml-auto flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors">
-          <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        {activeTab === "system" && (
+          <button onClick={() => refetch()} disabled={isFetching}
+            className="ml-auto flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors">
+            <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        )}
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 px-4 h-9 border-b border-zinc-800 shrink-0 bg-zinc-900/80">
+        {([ ["system", "System", <Server size={12} />], ["preferences", "Preferences", <SlidersHorizontal size={12} />] ] as [SettingsTab, string, React.ReactNode][]).map(([tab, label, icon]) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={clsx(
+              "flex items-center gap-1.5 px-3 h-7 rounded text-[12px] font-medium transition-colors",
+              activeTab === tab
+                ? "bg-zinc-800 text-zinc-200"
+                : "text-zinc-600 hover:text-zinc-400",
+            )}
+          >
+            {icon}{label}
+          </button>
+        ))}
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-5">
-        {isLoading ? (
-          <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
-            <Loader2 size={16} className="animate-spin" />
-            <span className="text-[13px]">Loading settings…</span>
-          </div>
-        ) : s ? (
-          <div className="max-w-4xl space-y-4">
 
-            {/* Deployment */}
-            <Section title="Deployment">
-              <KV label="Mode"       value={<ModeBadge mode={s.deployment_mode} />} />
-              <KV label="Store"      value={<BackendBadge backend={s.store_backend} />} />
-              <KV label="Plugins"    value={s.plugin_count} mono />
-            </Section>
+        {/* ── Preferences tab ── */}
+        {activeTab === "preferences" && <PreferencesTab />}
 
-            {/* System health */}
-            <Section title="System Health">
-              <KV label="Providers"    value={s.system_health.provider_health_count} mono />
-              <KV label="Plugins"      value={s.system_health.plugin_health_count}  mono />
-              <KV label="Credentials"  value={s.system_health.credential_count}     mono />
-              <KV
-                label="Degraded components"
-                value={
-                  s.system_health.degraded_count > 0 ? (
-                    <span className="text-[12px] font-semibold text-red-400">
-                      {s.system_health.degraded_count}
-                    </span>
-                  ) : (
-                    <span className="text-[12px] text-emerald-400">None</span>
-                  )
-                }
-              />
-            </Section>
+        {/* ── System tab ── */}
+        {activeTab === "system" && (
+          isLoading ? (
+            <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+              <Loader2 size={16} className="animate-spin" />
+              <span className="text-[13px]">Loading settings…</span>
+            </div>
+          ) : s ? (
+            <div className="max-w-4xl space-y-4">
 
-            {/* Encryption */}
-            <Section title="Encryption">
-              <KV
-                label="Key configured"
-                value={<BoolChip value={s.key_management.encryption_key_configured} />}
-              />
-              <KV
-                label="Key version"
-                value={
-                  s.key_management.key_version != null
-                    ? <span className="font-mono">v{s.key_management.key_version}</span>
-                    : <span className="text-zinc-600">—</span>
-                }
-              />
-              <KV
-                label="Last rotation"
-                value={
-                  <span className="font-mono text-[12px]">
-                    {fmtTime(s.key_management.last_rotation_at)}
-                  </span>
-                }
-              />
-            </Section>
-
-            {/* TLS (via settings endpoint — no dedicated fields yet, show a read-only hint) */}
-            <Section title="TLS">
-              <KV
-                label="Status"
-                value={
-                  <span className="text-[12px] text-zinc-500 italic">
-                    Managed by the server — see{" "}
-                    <code className="text-zinc-400 bg-zinc-800 px-1 rounded text-[11px]">
-                      GET /v1/settings/tls
-                    </code>{" "}
-                    for certificate details.
-                  </span>
-                }
-              />
-            </Section>
-
-            {/* Environment variables */}
-            <EnvVarsSection settings={s} info={sysInfo} />
-
-            {/* Transport */}
-            <TransportSection />
-
-            {/* CORS */}
-            <CorsDiagnosticsSection deploymentMode={s?.deployment_mode} />
-
-            {/* System info — version, features, environment */}
-            {sysLoading ? (
-              <div className="flex items-center gap-2 py-4 text-zinc-600">
-                <Loader2 size={13} className="animate-spin" />
-                <span className="text-[12px]">Loading system info…</span>
-              </div>
-            ) : sysInfo ? (
-              <SystemInfoSections info={sysInfo} />
-            ) : (
-              <Section title="Build Information">
-                <div className="py-3 text-[12px] text-zinc-600 italic">
-                  System info unavailable — upgrade cairn-app for this endpoint.
-                </div>
+              <Section title="Deployment">
+                <KV label="Mode"       value={<ModeBadge mode={s.deployment_mode} />} />
+                <KV label="Store"      value={<BackendBadge backend={s.store_backend} />} />
+                <KV label="Plugins"    value={s.plugin_count} mono />
               </Section>
-            )}
 
-          </div>
-        ) : null}
+              <Section title="System Health">
+                <KV label="Providers"    value={s.system_health.provider_health_count} mono />
+                <KV label="Plugins"      value={s.system_health.plugin_health_count}  mono />
+                <KV label="Credentials"  value={s.system_health.credential_count}     mono />
+                <KV
+                  label="Degraded components"
+                  value={
+                    s.system_health.degraded_count > 0 ? (
+                      <span className="text-[12px] font-semibold text-red-400">
+                        {s.system_health.degraded_count}
+                      </span>
+                    ) : (
+                      <span className="text-[12px] text-emerald-400">None</span>
+                    )
+                  }
+                />
+              </Section>
+
+              <Section title="Encryption">
+                <KV
+                  label="Key configured"
+                  value={<BoolChip value={s.key_management.encryption_key_configured} />}
+                />
+                <KV
+                  label="Key version"
+                  value={
+                    s.key_management.key_version != null
+                      ? <span className="font-mono">v{s.key_management.key_version}</span>
+                      : <span className="text-zinc-600">—</span>
+                  }
+                />
+                <KV
+                  label="Last rotation"
+                  value={
+                    <span className="font-mono text-[12px]">
+                      {fmtTime(s.key_management.last_rotation_at)}
+                    </span>
+                  }
+                />
+              </Section>
+
+              <Section title="TLS">
+                <KV
+                  label="Status"
+                  value={
+                    <span className="text-[12px] text-zinc-500 italic">
+                      Managed by the server — see{" "}
+                      <code className="text-zinc-400 bg-zinc-800 px-1 rounded text-[11px]">
+                        GET /v1/settings/tls
+                      </code>{" "}
+                      for certificate details.
+                    </span>
+                  }
+                />
+              </Section>
+
+              <EnvVarsSection settings={s} info={sysInfo} />
+              <TransportSection />
+              <CorsDiagnosticsSection deploymentMode={s?.deployment_mode} />
+
+              {sysLoading ? (
+                <div className="flex items-center gap-2 py-4 text-zinc-600">
+                  <Loader2 size={13} className="animate-spin" />
+                  <span className="text-[12px]">Loading system info…</span>
+                </div>
+              ) : sysInfo ? (
+                <SystemInfoSections info={sysInfo} />
+              ) : (
+                <Section title="Build Information">
+                  <div className="py-3 text-[12px] text-zinc-600 italic">
+                    System info unavailable — upgrade cairn-app for this endpoint.
+                  </div>
+                </Section>
+              )}
+
+            </div>
+          ) : null
+        )}
+
       </div>
     </div>
   );

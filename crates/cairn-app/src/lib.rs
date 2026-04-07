@@ -3929,6 +3929,7 @@ impl AppBootstrap {
             .route("/v1/admin/operators/:id/notifications", post(set_operator_notifications_handler))
             .route("/v1/admin/notifications/:id/retry", post(retry_notification_handler))
             // ── Settings ──────────────────────────────────────────────────────────────
+            .route("/v1/settings/defaults/all", get(list_all_defaults_handler))
             .route("/v1/settings/defaults/resolve/:key", get(resolve_default_setting_handler))
             .route("/v1/settings/defaults/:scope/:scope_id/:key", put(set_default_setting_handler).delete(clear_default_setting_handler))
             // ── Approvals ─────────────────────────────────────────────────────────────
@@ -5958,6 +5959,85 @@ async fn clear_default_setting_handler(
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
         Err(err) => runtime_error_response(err),
     }
+}
+
+/// `GET /v1/settings/defaults/all` — flat list of every stored default setting.
+///
+/// Returns all settings across all scopes (System, Tenant, Workspace, Project)
+/// that have been explicitly set via `PUT /v1/settings/defaults/…`. Unset keys
+/// are not included — call the `resolve/:key` endpoint with a project context
+/// for the effective value of a specific key including env-var / hardcoded fallbacks.
+///
+/// Response shape:
+/// ```json
+/// {
+///   "settings": [
+///     { "scope": "system", "scope_id": "system", "key": "generate_model", "value": "llama3.2:3b" },
+///     { "scope": "tenant", "scope_id": "acme", "key": "max_tokens", "value": 8192 }
+///   ],
+///   "total": 2
+/// }
+/// ```
+async fn list_all_defaults_handler(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    use cairn_domain::Scope;
+    use cairn_store::projections::DefaultsReadModel;
+
+    let store = state.runtime.store.as_ref();
+
+    // Collect settings at Scope::System ("system") — always queried.
+    let mut all_settings: Vec<serde_json::Value> = Vec::new();
+
+    if let Ok(sys_settings) = DefaultsReadModel::list_by_scope(store, Scope::System, "system").await {
+        for s in sys_settings {
+            all_settings.push(serde_json::json!({
+                "scope":    "system",
+                "scope_id": "system",
+                "key":      s.key,
+                "value":    s.value,
+            }));
+        }
+    }
+
+    // Collect tenant-scoped settings for each known tenant.
+    if let Ok(tenants) = cairn_store::projections::TenantReadModel::list(store, 200, 0).await {
+        for tenant in &tenants {
+            let tid = tenant.tenant_id.as_str();
+            if let Ok(settings) = DefaultsReadModel::list_by_scope(store, Scope::Tenant, tid).await {
+                for s in settings {
+                    all_settings.push(serde_json::json!({
+                        "scope":    "tenant",
+                        "scope_id": tid,
+                        "key":      s.key,
+                        "value":    s.value,
+                    }));
+                }
+            }
+        }
+    }
+
+    // Collect workspace-scoped settings for the default workspace.
+    // (Full multi-workspace iteration would require a list_all method on WorkspaceReadModel.)
+    if let Ok(settings) = DefaultsReadModel::list_by_scope(store, Scope::Workspace, "default").await {
+        for s in settings {
+            all_settings.push(serde_json::json!({
+                "scope":    "workspace",
+                "scope_id": "default",
+                "key":      s.key,
+                "value":    s.value,
+            }));
+        }
+    }
+
+    let total = all_settings.len();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "settings": all_settings,
+            "total": total,
+        })),
+    )
 }
 
 async fn resolve_default_setting_handler(

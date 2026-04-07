@@ -5,6 +5,18 @@
  * camelCase only where the Rust side uses #[serde(rename_all = "camelCase")]).
  */
 
+// ── Provider connections (GET/POST /v1/providers/connections) ────────────────
+
+export interface ProviderConnectionRecord {
+  provider_connection_id: string;
+  tenant_id: string;
+  provider_family: string;
+  adapter_type: string;
+  supported_models: string[];
+  status: "active" | "disabled";
+  created_at: number;
+}
+
 // ── Provider health (GET /v1/providers/health) ───────────────────────────────
 
 export interface ProviderHealthEntry {

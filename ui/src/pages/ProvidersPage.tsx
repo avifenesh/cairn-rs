@@ -1,17 +1,72 @@
-import { useState, type FormEvent } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useState, type FormEvent, useId } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  RefreshCw, ServerCrash, Loader2,
-  Download, Trash2, Plus,
-  ChevronDown, ChevronRight,
-  HardDrive, Cpu as CpuIcon, Hash, FileType, Layers,
-  XCircle,
+  RefreshCw, ServerCrash, Loader2, Plus, Trash2, ChevronDown, ChevronRight,
+  Download, HardDrive, Cpu as CpuIcon, Hash, FileType, Layers, XCircle,
+  Zap, Globe, Server, Check, X, Settings, Tag, Sparkles,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
-import { HelpTooltip } from "../components/HelpTooltip";
-import type { ProviderHealthEntry } from "../lib/types";
+import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type ProviderKind = "cairn_cloud" | "openai_compat" | "ollama" | "local";
+
+interface ProviderKindMeta {
+  label: string;
+  description: string;
+  icon: React.ReactNode;
+  defaultFamily: string;
+  defaultAdapter: string;
+  defaultUrl: string;
+}
+
+// Pre-configured Cairn Cloud connections (agntic.garden)
+const CAIRN_CLOUD_CONNECTIONS = [
+  {
+    id: "conn_cairn_brain",
+    label: "Brain",
+    url: "https://agntic.garden/inference/brain/v1",
+    models: ["cyankiwi/gemma-4-31B-it-AWQ-4bit"],
+    description: "High-capability reasoning model",
+  },
+  {
+    id: "conn_cairn_worker",
+    label: "Worker",
+    url: "https://agntic.garden/inference/worker/v1",
+    models: ["qwen3.5:9b", "qwen3-embedding:8b"],
+    description: "Fast worker + embedding models",
+  },
+] as const;
+
+const PROVIDER_KINDS: Record<Exclude<ProviderKind, "cairn_cloud">, ProviderKindMeta> = {
+  openai_compat: {
+    label: "OpenAI-compatible",
+    description: "Any API serving the OpenAI chat/completions format — Groq, Together, custom endpoints.",
+    icon: <Globe size={16} />,
+    defaultFamily: "openai_compat",
+    defaultAdapter: "openai_compat",
+    defaultUrl: "https://api.openai.com",
+  },
+  ollama: {
+    label: "Ollama",
+    description: "Local Ollama instance running on this machine or your network.",
+    icon: <Server size={16} />,
+    defaultFamily: "ollama",
+    defaultAdapter: "ollama",
+    defaultUrl: "http://localhost:11434",
+  },
+  local: {
+    label: "Local / Custom",
+    description: "Custom provider with manual configuration.",
+    icon: <HardDrive size={16} />,
+    defaultFamily: "custom",
+    defaultAdapter: "custom",
+    defaultUrl: "",
+  },
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -22,7 +77,12 @@ function fmtTime(ms: number): string {
   });
 }
 
-// ── Stat card (left-border, no icon) ─────────────────────────────────────────
+function genConnectionId(family: string): string {
+  const ts = Date.now().toString(36).slice(-4);
+  return `conn_${family.replace(/[^a-z0-9]/gi, "_").toLowerCase()}_${ts}`;
+}
+
+// ── Stat card ─────────────────────────────────────────────────────────────────
 
 function StatCard({ label, value, sub, accent = "default" }: {
   label: string; value: string | number; sub?: string;
@@ -39,55 +99,733 @@ function StatCard({ label, value, sub, accent = "default" }: {
   );
 }
 
-// ── Provider health table row ─────────────────────────────────────────────────
+// ── Model settings popover ────────────────────────────────────────────────────
 
-function ProviderRow({ entry, even }: { entry: ProviderHealthEntry; even: boolean }) {
+function ModelSettingsRow({ connectionId, modelId }: { connectionId: string; modelId: string }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [maxTokens, setMaxTokens] = useState("");
+  const [temperature, setTemperature] = useState("");
+  const [thinking, setThinking] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    const writes: Promise<unknown>[] = [];
+    const base = `model:${modelId}`;
+    if (maxTokens.trim())  writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:max_tokens`, Number(maxTokens)));
+    if (temperature.trim()) writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:temperature`, Number(temperature)));
+    writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:thinking_mode`, thinking));
+    try {
+      await Promise.all(writes);
+      toast.success(`Settings saved for ${modelId}`);
+      setOpen(false);
+    } catch (e) {
+      toast.error(`Save failed: ${e instanceof Error ? e.message : "error"}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Suppress unused warning — connectionId used for future keying
+  void connectionId;
+
   return (
-    <tr className={clsx("border-b border-zinc-800/50 hover:bg-white/5 transition-colors", even ? "bg-zinc-900" : "bg-zinc-900/50")}>
-      <td className="px-4 h-9">
-        <div className="flex items-center gap-1.5">
-          <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0",
-            entry.healthy ? "bg-emerald-400" : "bg-red-400 animate-pulse")} />
-          <span className={clsx("text-[11px] font-medium", entry.healthy ? "text-emerald-400" : "text-red-400")}>
-            {entry.healthy ? "Healthy" : entry.status || "Unhealthy"}
-          </span>
-          <HelpTooltip
-            text={entry.healthy
-              ? "Provider is reachable and responding to health checks."
-              : "Provider is failing health checks. Check OLLAMA_HOST or API credentials. The pulsing dot means consecutive failures are accumulating."}
-            placement="right"
-          />
+    <div className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-zinc-600 hover:text-zinc-400 transition-colors px-1.5 py-0.5 rounded"
+        title="Model settings"
+      >
+        <Settings size={11} />
+        <span className="text-[10px]">Settings</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-6 z-50 w-60 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-zinc-300 truncate max-w-[180px]" title={modelId}>{modelId}</span>
+            <button onClick={() => setOpen(false)} className="text-zinc-600 hover:text-zinc-400"><X size={12} /></button>
+          </div>
+
+          <label className="block">
+            <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Max tokens</span>
+            <input
+              type="number" min={1} max={128000}
+              value={maxTokens}
+              onChange={e => setMaxTokens(e.target.value)}
+              placeholder="e.g. 4096"
+              className="mt-1 w-full rounded bg-zinc-950 border border-zinc-800 px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Temperature (0–2)</span>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="range" min={0} max={2} step={0.05}
+                value={temperature || 0.7}
+                onChange={e => setTemperature(e.target.value)}
+                className="flex-1 accent-indigo-500"
+              />
+              <span className="text-[11px] text-zinc-400 w-8 text-right font-mono">{temperature || "0.70"}</span>
+            </div>
+          </label>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <div
+              onClick={() => setThinking(v => !v)}
+              className={clsx(
+                "w-8 h-4 rounded-full border transition-colors relative",
+                thinking ? "bg-indigo-600 border-indigo-500" : "bg-zinc-800 border-zinc-700",
+              )}
+            >
+              <div className={clsx("absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform",
+                thinking ? "translate-x-4" : "translate-x-0.5")} />
+            </div>
+            <span className="text-[11px] text-zinc-400">Thinking mode</span>
+          </label>
+
+          <button
+            onClick={save}
+            disabled={saving}
+            className="w-full h-7 rounded bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium transition-colors flex items-center justify-center gap-1.5"
+          >
+            {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+            {saving ? "Saving…" : "Save defaults"}
+          </button>
         </div>
-      </td>
-      <td className="px-4 h-9 font-mono text-xs text-zinc-300 max-w-[200px] truncate" title={entry.connection_id}>
-        {entry.connection_id.length > 24 ? `${entry.connection_id.slice(0, 10)}…${entry.connection_id.slice(-8)}` : entry.connection_id}
-      </td>
-      <td className="px-4 h-9 text-[11px] text-zinc-500 font-mono">{fmtTime(entry.last_checked_at)}</td>
-      <td className="px-4 h-9 text-[11px] tabular-nums">
-        <span className={entry.consecutive_failures > 0 ? "text-red-400" : "text-zinc-600"}>
-          {entry.consecutive_failures}
-        </span>
-      </td>
-      <td className="px-4 h-9 text-[11px] text-red-400 font-mono truncate max-w-[160px]">
-        {entry.error_message ?? "—"}
-      </td>
-    </tr>
+      )}
+    </div>
   );
 }
 
-// ── Model info panel ──────────────────────────────────────────────────────────
+// ── Connection row ────────────────────────────────────────────────────────────
+
+function ConnectionRow({
+  record,
+  health,
+  even,
+  onDelete,
+}: {
+  record: ProviderConnectionRecord;
+  health?: ProviderHealthEntry;
+  even: boolean;
+  onDelete: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isHealthy = health?.healthy ?? null;
+
+  const familyColor: Record<string, string> = {
+    openai_compat: "text-sky-400 bg-sky-950/40 border-sky-800/40",
+    ollama:        "text-emerald-400 bg-emerald-950/40 border-emerald-800/40",
+    custom:        "text-zinc-400 bg-zinc-800/60 border-zinc-700",
+  };
+
+  const familyClass = familyColor[record.provider_family] ?? familyColor.custom;
+
+  return (
+    <>
+      <tr className={clsx("border-b border-zinc-800/50 hover:bg-white/5 transition-colors", even ? "bg-zinc-900" : "bg-zinc-900/50")}>
+        {/* Status */}
+        <td className="px-4 h-10 w-6">
+          <div className="flex items-center gap-1.5">
+            {isHealthy === null ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-zinc-700" title="No health data" />
+            ) : isHealthy ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Healthy" />
+            ) : (
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" title="Unhealthy" />
+            )}
+          </div>
+        </td>
+        {/* Connection ID */}
+        <td className="px-3 h-10">
+          <span className="text-xs font-mono text-zinc-300 truncate block max-w-[180px]" title={record.provider_connection_id}>
+            {record.provider_connection_id}
+          </span>
+        </td>
+        {/* Family */}
+        <td className="px-3 h-10">
+          <span className={clsx("text-[10px] font-medium px-1.5 py-0.5 rounded border", familyClass)}>
+            {record.provider_family}
+          </span>
+        </td>
+        {/* Adapter */}
+        <td className="px-3 h-10">
+          <span className="text-[11px] font-mono text-zinc-500">{record.adapter_type}</span>
+        </td>
+        {/* Models */}
+        <td className="px-3 h-10">
+          <div className="flex items-center gap-1 flex-wrap">
+            {record.supported_models.length === 0 ? (
+              <span className="text-[10px] text-zinc-700 italic">none</span>
+            ) : (
+              record.supported_models.slice(0, 3).map(m => (
+                <span key={m} className="flex items-center gap-0.5 text-[10px] font-mono text-zinc-400 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5">
+                  <Tag size={9} className="text-zinc-600" />{m}
+                </span>
+              ))
+            )}
+            {record.supported_models.length > 3 && (
+              <span className="text-[10px] text-zinc-600">+{record.supported_models.length - 3}</span>
+            )}
+          </div>
+        </td>
+        {/* Actions */}
+        <td className="px-3 h-10 text-right">
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="text-zinc-600 hover:text-zinc-400 transition-colors"
+              title={expanded ? "Collapse" : "Expand models"}
+            >
+              {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            </button>
+            <button
+              onClick={() => onDelete(record.provider_connection_id)}
+              className="text-zinc-600 hover:text-red-400 transition-colors"
+              title="Delete connection"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+        </td>
+      </tr>
+
+      {/* Expanded: per-model settings */}
+      {expanded && record.supported_models.length > 0 && (
+        <tr className={clsx("border-b border-zinc-800/50", even ? "bg-zinc-900" : "bg-zinc-900/50")}>
+          <td colSpan={6} className="px-4 pb-3 pt-1">
+            <div className="bg-zinc-950 rounded-md border border-zinc-800 overflow-hidden">
+              <div className="px-3 py-1.5 border-b border-zinc-800 flex items-center gap-2">
+                <span className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Models</span>
+                <span className="text-[10px] text-zinc-700">· defaults are tenant-scoped</span>
+              </div>
+              {record.supported_models.map((m, i) => (
+                <div key={m} className={clsx(
+                  "flex items-center justify-between px-3 h-8 border-b border-zinc-800/50 last:border-0",
+                  i % 2 === 0 ? "" : "bg-zinc-900/30",
+                )}>
+                  <span className="text-[11px] font-mono text-zinc-300">{m}</span>
+                  <ModelSettingsRow connectionId={record.provider_connection_id} modelId={m} />
+                </div>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+// ── Add Provider Modal ────────────────────────────────────────────────────────
+
+interface AddProviderModalProps {
+  onClose: () => void;
+  onCreated: () => void;
+}
+
+function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
+  const toast = useToast();
+  const formId = useId();
+
+  // Step: 0=type, 1=form, 2=models  (cairn_cloud skips to a dedicated confirm screen)
+  const [step, setStep] = useState<0 | 1 | 2>(0);
+  const [kind, setKind] = useState<ProviderKind>("openai_compat");
+
+  // Safe accessor — cairn_cloud doesn't have a PROVIDER_KINDS entry
+  const meta = kind !== "cairn_cloud" ? PROVIDER_KINDS[kind] : PROVIDER_KINDS.openai_compat;
+
+  // Form fields (used for single-connection flow)
+  const [connectionId, setConnectionId] = useState(() => genConnectionId("openai_compat"));
+  const [baseUrl,      setBaseUrl]       = useState(meta.defaultUrl);
+  const [apiKey,       setApiKey]        = useState("");
+  const [family,       setFamily]        = useState(meta.defaultFamily);
+  const [adapter,      setAdapter]       = useState(meta.defaultAdapter);
+
+  // Model entry (single-connection flow)
+  const [models, setModels]     = useState<string[]>([]);
+  const [modelInput, setModelInput] = useState("");
+
+  const selectKind = (k: ProviderKind) => {
+    setKind(k);
+    if (k === "cairn_cloud") return; // handled separately
+    const m = PROVIDER_KINDS[k];
+    setConnectionId(genConnectionId(m.defaultFamily));
+    setBaseUrl(m.defaultUrl);
+    setFamily(m.defaultFamily);
+    setAdapter(m.defaultAdapter);
+  };
+
+  const addModel = () => {
+    const v = modelInput.trim();
+    if (v && !models.includes(v)) setModels(prev => [...prev, v]);
+    setModelInput("");
+  };
+
+  const removeModel = (m: string) => setModels(prev => prev.filter(x => x !== m));
+
+  // Single-connection mutation (standard flow)
+  const createMutation = useMutation({
+    mutationFn: () =>
+      defaultApi.createProviderConnection({
+        tenant_id: "default",
+        provider_connection_id: connectionId.trim(),
+        provider_family: family.trim(),
+        adapter_type: adapter.trim(),
+        supported_models: models,
+      }),
+    onSuccess: () => {
+      toast.success(`Provider "${connectionId}" registered.`);
+      onCreated();
+      onClose();
+    },
+    onError: (e) => toast.error(`Failed: ${e instanceof Error ? e.message : "error"}`),
+  });
+
+  // Cairn Cloud dual-connection mutation
+  const cairnCloudMutation = useMutation({
+    mutationFn: async () => {
+      for (const conn of CAIRN_CLOUD_CONNECTIONS) {
+        await defaultApi.createProviderConnection({
+          tenant_id:              "default",
+          provider_connection_id: conn.id,
+          provider_family:        "openai_compat",
+          adapter_type:           "openai_compat",
+          supported_models:       [...conn.models],
+        });
+      }
+    },
+    onSuccess: () => {
+      toast.success("Cairn Cloud (agntic.garden) — 2 connections registered.");
+      onCreated();
+      onClose();
+    },
+    onError: (e) => toast.error(`Failed: ${e instanceof Error ? e.message : "error"}`),
+  });
+
+  const steps = ["Type", "Connection", "Models"];
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-40 bg-black/60" onClick={onClose} />
+
+      {/* Panel */}
+      <div className="fixed right-0 top-0 bottom-0 z-50 w-[480px] bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 h-12 border-b border-zinc-800 shrink-0">
+          <span className="text-[13px] font-medium text-zinc-200">Add Provider</span>
+          <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 transition-colors">
+            <XCircle size={16} />
+          </button>
+        </div>
+
+        {/* Stepper */}
+        <div className="flex items-center px-5 h-10 border-b border-zinc-800/60 shrink-0 gap-0">
+          {steps.map((s, i) => (
+            <div key={s} className="flex items-center">
+              <div className={clsx(
+                "flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded",
+                i === step
+                  ? "text-indigo-300"
+                  : i < step
+                    ? "text-zinc-400 cursor-pointer hover:text-zinc-300"
+                    : "text-zinc-700",
+              )}
+                onClick={() => i < step && setStep(i as 0 | 1 | 2)}
+              >
+                <span className={clsx(
+                  "w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-semibold",
+                  i === step ? "bg-indigo-600 text-white" : i < step ? "bg-zinc-700 text-zinc-300" : "bg-zinc-800 text-zinc-600",
+                )}>
+                  {i < step ? <Check size={9} strokeWidth={3} /> : i + 1}
+                </span>
+                {s}
+              </div>
+              {i < steps.length - 1 && (
+                <div className="w-6 h-px bg-zinc-800 mx-1" />
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+
+          {/* ── Step 0: Type selection ── */}
+          {step === 0 && (
+            <div className="space-y-3">
+              <p className="text-[12px] text-zinc-500 mb-4">
+                Choose the type of provider you want to connect.
+              </p>
+              {(Object.entries(PROVIDER_KINDS) as [ProviderKind, ProviderKindMeta][]).map(([k, m]) => (
+                <button
+                  key={k}
+                  onClick={() => { selectKind(k); setStep(1); }}
+                  className={clsx(
+                    "w-full flex items-start gap-3 p-4 rounded-lg border text-left transition-colors",
+                    kind === k
+                      ? "border-indigo-500/60 bg-indigo-950/30"
+                      : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-800/40",
+                  )}
+                >
+                  <span className={clsx("mt-0.5 shrink-0", kind === k ? "text-indigo-400" : "text-zinc-500")}>
+                    {m.icon}
+                  </span>
+                  <div>
+                    <p className="text-[13px] font-medium text-zinc-200">{m.label}</p>
+                    <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">{m.description}</p>
+                  </div>
+                  {kind === k && (
+                    <Check size={14} className="text-indigo-400 ml-auto mt-0.5 shrink-0" />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* ── Step 1: Connection form ── */}
+          {step === 1 && (
+            <form
+              id={`${formId}-form`}
+              onSubmit={(e: FormEvent) => { e.preventDefault(); setStep(2); }}
+              className="space-y-4"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-zinc-500">{meta.icon}</span>
+                <span className="text-[12px] font-medium text-zinc-300">{meta.label}</span>
+              </div>
+
+              <label className="block">
+                <span className="text-[11px] text-zinc-500 uppercase tracking-wide">Connection ID</span>
+                <input
+                  required
+                  value={connectionId}
+                  onChange={e => setConnectionId(e.target.value)}
+                  placeholder="conn_openai_abc1"
+                  className="mt-1.5 w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs text-zinc-200 font-mono placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                />
+                <p className="mt-1 text-[10px] text-zinc-600">Unique identifier for this connection. Cannot be changed later.</p>
+              </label>
+
+              {kind !== "local" && (
+                <label className="block">
+                  <span className="text-[11px] text-zinc-500 uppercase tracking-wide">Base URL</span>
+                  <input
+                    value={baseUrl}
+                    onChange={e => setBaseUrl(e.target.value)}
+                    placeholder={meta.defaultUrl || "https://…"}
+                    className="mt-1.5 w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  />
+                </label>
+              )}
+
+              {kind === "openai_compat" && (
+                <label className="block">
+                  <span className="text-[11px] text-zinc-500 uppercase tracking-wide">API Key</span>
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={e => setApiKey(e.target.value)}
+                    placeholder="sk-… (optional)"
+                    autoComplete="off"
+                    className="mt-1.5 w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <p className="mt-1 text-[10px] text-zinc-600">Stored as a credential. Leave blank for unauthenticated endpoints.</p>
+                </label>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-[11px] text-zinc-500 uppercase tracking-wide">Provider family</span>
+                  <input
+                    required
+                    value={family}
+                    onChange={e => setFamily(e.target.value)}
+                    className="mt-1.5 w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs text-zinc-200 font-mono placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] text-zinc-500 uppercase tracking-wide">Adapter type</span>
+                  <input
+                    required
+                    value={adapter}
+                    onChange={e => setAdapter(e.target.value)}
+                    className="mt-1.5 w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs text-zinc-200 font-mono placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  />
+                </label>
+              </div>
+            </form>
+          )}
+
+          {/* ── Step 2: Model discovery / manual entry ── */}
+          {step === 2 && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-[12px] text-zinc-300 font-medium">Add models</p>
+                <p className="text-[11px] text-zinc-500 mt-1 leading-relaxed">
+                  Enter the model IDs served through this connection.
+                  {kind === "ollama" && " Model discovery via Ollama is coming — enter IDs manually for now."}
+                  {kind === "openai_compat" && " Discovery from the base URL is coming — enter IDs manually for now."}
+                </p>
+              </div>
+
+              {/* Manual entry */}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Plus size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                  <input
+                    value={modelInput}
+                    onChange={e => setModelInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addModel(); } }}
+                    placeholder={
+                      kind === "openai_compat" ? "e.g. gemma4, qwen3.5:9b" :
+                      kind === "ollama"        ? "e.g. llama3.2, mistral" :
+                                                "model_id"
+                    }
+                    className="w-full rounded-md bg-zinc-900 border border-zinc-700 pl-7 pr-3 h-8 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={addModel}
+                  disabled={!modelInput.trim()}
+                  className="flex items-center gap-1.5 px-3 h-8 rounded-md bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-xs font-medium transition-colors"
+                >
+                  <Plus size={11} /> Add
+                </button>
+              </div>
+
+              {/* Discovery stub — placeholder for when W1 ships the endpoint */}
+              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-zinc-900/60 border border-zinc-800/60 border-dashed">
+                <Zap size={12} className="text-zinc-600 shrink-0" />
+                <span className="text-[11px] text-zinc-600">
+                  Auto-discover coming soon — will call{" "}
+                  <code className="text-zinc-500 font-mono text-[10px]">GET /v1/providers/connections/:id/discover-models</code>
+                </span>
+              </div>
+
+              {/* Model chips */}
+              {models.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-zinc-600 uppercase tracking-wide">{models.length} model{models.length !== 1 ? "s" : ""} added</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {models.map(m => (
+                      <span
+                        key={m}
+                        className="flex items-center gap-1 text-[11px] font-mono text-zinc-300 bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5"
+                      >
+                        {m}
+                        <button
+                          onClick={() => removeModel(m)}
+                          className="text-zinc-600 hover:text-red-400 transition-colors ml-0.5"
+                        >
+                          <X size={10} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {models.length === 0 && (
+                <p className="text-[11px] text-zinc-700 italic">
+                  You can register models later from the connection row.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-800 shrink-0 bg-zinc-950">
+          <button
+            onClick={() => step === 0 ? onClose() : setStep((step - 1) as 0 | 1 | 2)}
+            className="text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors px-3 py-1.5"
+          >
+            {step === 0 ? "Cancel" : "← Back"}
+          </button>
+
+          {step < 2 ? (
+            <button
+              type={step === 1 ? "submit" : "button"}
+              form={step === 1 ? `${formId}-form` : undefined}
+              onClick={step !== 1 ? () => setStep((step + 1) as 1 | 2) : undefined}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-medium transition-colors"
+            >
+              Next →
+            </button>
+          ) : (
+            <button
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-[12px] font-medium transition-colors"
+            >
+              {createMutation.isPending ? (
+                <><Loader2 size={12} className="animate-spin" /> Registering…</>
+              ) : (
+                <><Check size={12} /> Register Provider</>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Connections section ───────────────────────────────────────────────────────
+
+function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+
+  const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useQuery({
+    queryKey: ["provider-connections"],
+    queryFn:  () => defaultApi.listProviderConnections("default"),
+    staleTime: 30_000,
+  });
+
+  const { data: healthData } = useQuery({
+    queryKey: ["providers-health"],
+    queryFn:  () => defaultApi.getProviderHealth(),
+    refetchInterval: 20_000,
+  });
+
+  const entries: ProviderConnectionRecord[] = data?.items ?? [];
+  const healthMap = new Map<string, ProviderHealthEntry>(
+    (Array.isArray(healthData) ? healthData : []).map(h => [h.connection_id, h])
+  );
+
+  const healthy   = entries.filter(e => healthMap.get(e.provider_connection_id)?.healthy === true).length;
+  const unhealthy = entries.length - healthy;
+
+  // TODO: DELETE /v1/providers/connections/:id when endpoint lands
+  const handleDelete = (id: string) => {
+    if (!confirm(`Delete connection "${id}"?`)) return;
+    toast.info(`Delete not yet implemented — remove via API.`);
+    void id;
+  };
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+            Provider Connections
+          </p>
+          {entries.length > 0 && (
+            <span className="text-[11px] text-zinc-700">({entries.length})</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {dataUpdatedAt > 0 && (
+            <span className="text-[11px] font-mono text-zinc-700">
+              {new Date(dataUpdatedAt).toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            onClick={() => void qc.invalidateQueries({ queryKey: ["provider-connections"] })}
+            className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 transition-colors"
+          >
+            <RefreshCw size={11} /> Refresh
+          </button>
+          <button
+            onClick={onAdd}
+            className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-[11px] text-white font-medium transition-colors"
+          >
+            <Plus size={11} /> Add Provider
+          </button>
+        </div>
+      </div>
+
+      {/* Stat cards when there are connections */}
+      {!isLoading && entries.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <StatCard label="Total"    value={entries.length} />
+          <StatCard label="Healthy"  value={healthy}   accent="emerald" />
+          <StatCard label="Degraded" value={unhealthy}  accent={unhealthy > 0 ? "red" : "default"} />
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-zinc-800 bg-zinc-950">
+              <th className="px-4 h-8 w-6" />
+              <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Connection ID</th>
+              <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Family</th>
+              <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Adapter</th>
+              <th className="px-3 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Models</th>
+              <th className="px-3 h-8" />
+            </tr>
+          </thead>
+        </table>
+
+        {isError ? (
+          <div className="flex items-center gap-3 px-4 py-4">
+            <ServerCrash size={16} className="text-red-500 shrink-0" />
+            <span className="text-[12px] text-zinc-400">{error instanceof Error ? error.message : "Failed to load"}</span>
+          </div>
+        ) : isLoading ? (
+          <div className="flex items-center gap-2 px-4 h-10 text-[11px] text-zinc-600">
+            <Loader2 size={11} className="animate-spin" /> Loading…
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="px-4 py-10 text-center space-y-3">
+            <Server size={24} className="text-zinc-700 mx-auto" />
+            <p className="text-[12px] text-zinc-600">No provider connections registered.</p>
+            <button
+              onClick={onAdd}
+              className="inline-flex items-center gap-1.5 text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
+            >
+              <Plus size={11} /> Add your first provider
+            </button>
+          </div>
+        ) : (
+          <table className="w-full">
+            <tbody>
+              {entries.map((entry, i) => (
+                <ConnectionRow
+                  key={entry.provider_connection_id}
+                  record={entry}
+                  health={healthMap.get(entry.provider_connection_id)}
+                  even={i % 2 === 0}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Legacy health table header note */}
+      {entries.length > 0 && healthData && (
+        <p className="text-[10px] text-zinc-700 text-right">
+          Health data auto-refreshes every 20 s · last check{" "}
+          {Array.isArray(healthData) && healthData.length > 0
+            ? fmtTime(Math.max(...healthData.map(h => h.last_checked_at)))
+            : "never"}
+        </p>
+      )}
+
+      {/* Suppress unused import */}
+      {void refetch}
+    </section>
+  );
+}
+
+// ── Ollama section (preserved from original, minimal changes) ─────────────────
 
 function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }) {
-  // `enabled: true` is explicit here but redundant — the parent only mounts
-  // this panel when the user clicks the expand chevron, so the query fires
-  // lazily on demand, never on page load.  gcTime: Infinity keeps the result
-  // cached across close/reopen cycles for the lifetime of the page.
   const { data, isLoading, isError } = useQuery({
     queryKey: ["ollama-model-info", name],
     queryFn:  () => defaultApi.getOllamaModelInfo(name),
-    staleTime: 300_000,   // 5 min — model metadata rarely changes
-    gcTime:    Infinity,  // keep in cache after panel closes; avoids refetch on reopen
-    enabled:   !!name,    // guard against empty string (belt-and-suspenders)
+    staleTime: 300_000,
+    gcTime:    Infinity,
+    enabled:   !!name,
     retry: false,
   });
 
@@ -102,9 +840,7 @@ function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }
     <div className="bg-zinc-950 border border-zinc-800 rounded-md p-3 mt-1 space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-mono text-zinc-400">{name}</span>
-        <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 transition-colors">
-          <XCircle size={12} />
-        </button>
+        <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 transition-colors"><XCircle size={12} /></button>
       </div>
       {isLoading && <p className="text-[11px] text-zinc-600 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading…</p>}
       {isError   && <p className="text-[11px] text-red-400">Could not load model info.</p>}
@@ -132,8 +868,6 @@ function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }
   );
 }
 
-// ── Ollama section ────────────────────────────────────────────────────────────
-
 function OllamaSection() {
   const toast = useToast();
   const [expandedInfo, setExpandedInfo] = useState<string | null>(null);
@@ -160,14 +894,12 @@ function OllamaSection() {
     onError:   (e, model) => toast.error(`Failed to delete "${model}": ${e instanceof Error ? e.message : "error"}`),
   });
 
-  // Derived stat card values
   const embedModel   = models.find(m => m.includes("embed")) ?? null;
   const ollamaStatus = ollamaLoading ? "checking" : connected ? "connected" : "offline";
   const statusAccent = ollamaStatus === "connected" ? "emerald" : ollamaStatus === "checking" ? "default" : "red";
 
   return (
     <section className="space-y-4">
-      {/* Section header */}
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Ollama — Local LLM</p>
         <button onClick={() => refetch()}
@@ -176,14 +908,12 @@ function OllamaSection() {
         </button>
       </div>
 
-      {/* Stat cards */}
       <div className="grid grid-cols-3 gap-3">
         <StatCard label="Ollama Status"    value={ollamaStatus}     accent={statusAccent as "default" | "emerald" | "blue" | "red"} sub={connected ? ollamaData.host : "Set OLLAMA_HOST"} />
         <StatCard label="Models Available" value={models.length}    accent={models.length > 0 ? "blue" : "default"} />
         <StatCard label="Embedding Model"  value={embedModel ? "yes" : "none"} accent={embedModel ? "emerald" : "default"} sub={embedModel ?? "no embed model"} />
       </div>
 
-      {/* Connection info row */}
       <div className={clsx(
         "bg-zinc-900 border rounded-lg px-4 h-10 flex items-center justify-between",
         connected ? "border-zinc-800" : "border-zinc-800/50",
@@ -191,29 +921,18 @@ function OllamaSection() {
         <div className="flex items-center gap-2">
           <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", connected ? "bg-emerald-400" : "bg-red-400")} />
           <span className="text-xs text-zinc-400 font-medium">{connected ? "Connected" : "Not available"}</span>
-          {connected && (
-            <span className="text-[11px] font-mono text-zinc-600 ml-1">{ollamaData.host}</span>
-          )}
+          {connected && <span className="text-[11px] font-mono text-zinc-600 ml-1">{ollamaData.host}</span>}
         </div>
-        {connected && (
-          <span className="text-[11px] text-zinc-600">
-            {models.length} model{models.length !== 1 ? "s" : ""} installed
-          </span>
-        )}
-        {!connected && !ollamaLoading && (
-          <span className="text-[11px] text-zinc-600">Set OLLAMA_HOST env var and restart</span>
-        )}
+        {connected && <span className="text-[11px] text-zinc-600">{models.length} model{models.length !== 1 ? "s" : ""} installed</span>}
+        {!connected && !ollamaLoading && <span className="text-[11px] text-zinc-600">Set OLLAMA_HOST env var and restart</span>}
       </div>
 
-      {/* Model list */}
       {connected && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-          {/* Header */}
           <div className="flex items-center justify-between px-4 h-9 border-b border-zinc-800 bg-zinc-950">
             <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Installed Models</p>
             <p className="text-[10px] text-zinc-700 uppercase tracking-wider">Info · Delete</p>
           </div>
-
           {models.length === 0 ? (
             <p className="px-4 py-3 text-[11px] text-zinc-600 italic">No models installed.</p>
           ) : (
@@ -225,21 +944,12 @@ function OllamaSection() {
                   <div key={m} className={clsx("border-b border-zinc-800/50 last:border-0", i % 2 === 0 ? "bg-zinc-900" : "bg-zinc-900/50")}>
                     <div className="flex items-center justify-between px-4 h-9 hover:bg-white/5 transition-colors">
                       <span className="text-xs font-mono text-zinc-300 truncate flex-1">{m}</span>
-                      {/* Info toggle */}
-                      <button
-                        onClick={() => setExpandedInfo(isExpanded ? null : m)}
-                        className="text-zinc-600 hover:text-zinc-400 transition-colors ml-3"
-                        title="Show model info"
-                      >
+                      <button onClick={() => setExpandedInfo(isExpanded ? null : m)} className="text-zinc-600 hover:text-zinc-400 transition-colors ml-3" title="Show model info">
                         {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                       </button>
-                      {/* Delete */}
                       <button
-                        onClick={() => {
-                          if (confirm(`Delete "${m}"?`)) deleteModel.mutate(m);
-                        }}
+                        onClick={() => { if (confirm(`Delete "${m}"?`)) deleteModel.mutate(m); }}
                         disabled={isDeleting || deleteModel.isPending}
-                        title={`Delete ${m}`}
                         className="text-zinc-600 hover:text-red-400 disabled:opacity-30 transition-colors ml-2"
                       >
                         {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
@@ -255,40 +965,18 @@ function OllamaSection() {
               })}
             </div>
           )}
-
-          {/* Pull form */}
           <div className="border-t border-zinc-800 px-4 py-3">
-            <form
-              onSubmit={(e: FormEvent) => {
-                e.preventDefault();
-                const name = pullName.trim();
-                if (name) pullModel.mutate(name);
-              }}
-              className="flex gap-2"
-            >
+            <form onSubmit={(e: FormEvent) => { e.preventDefault(); const name = pullName.trim(); if (name) pullModel.mutate(name); }} className="flex gap-2">
               <div className="relative flex-1">
                 <Plus size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
-                <input
-                  value={pullName}
-                  onChange={e => setPullName(e.target.value)}
-                  placeholder="Pull model, e.g. llama3.2"
+                <input value={pullName} onChange={e => setPullName(e.target.value)} placeholder="Pull model, e.g. llama3.2"
                   disabled={pullModel.isPending}
-                  className="w-full rounded-md bg-zinc-950 border border-zinc-800 pl-7 pr-3 h-8
-                             text-xs text-zinc-200 placeholder-zinc-600
-                             focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500
-                             disabled:opacity-50 transition-colors"
+                  className="w-full rounded-md bg-zinc-950 border border-zinc-800 pl-7 pr-3 h-8 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 transition-colors"
                 />
               </div>
-              <button
-                type="submit"
-                disabled={!pullName.trim() || pullModel.isPending}
-                className="flex items-center gap-1.5 px-3 h-8 rounded-md bg-indigo-600 hover:bg-indigo-500
-                           disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium
-                           transition-colors whitespace-nowrap"
-              >
-                {pullModel.isPending
-                  ? <><Loader2 size={11} className="animate-spin" /> Pulling…</>
-                  : <><Download size={11} /> Pull</>}
+              <button type="submit" disabled={!pullName.trim() || pullModel.isPending}
+                className="flex items-center gap-1.5 px-3 h-8 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium transition-colors whitespace-nowrap">
+                {pullModel.isPending ? <><Loader2 size={11} className="animate-spin" /> Pulling…</> : <><Download size={11} /> Pull</>}
               </button>
             </form>
             {pullModel.isPending && (
@@ -304,90 +992,32 @@ function OllamaSection() {
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export function ProvidersPage() {
-  const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useQuery({
-    queryKey: ["providers-health"],
-    queryFn:  () => defaultApi.getProviderHealth(),
-    refetchInterval: 20_000,
-  });
+  const qc = useQueryClient();
+  const [showAddModal, setShowAddModal] = useState(false);
 
-  const entries: ProviderHealthEntry[] = Array.isArray(data) ? data : [];
-  const healthy   = entries.filter(e => e.healthy).length;
-  const unhealthy = entries.length - healthy;
-  const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : null;
+  const handleCreated = () => {
+    void qc.invalidateQueries({ queryKey: ["provider-connections"] });
+    void qc.invalidateQueries({ queryKey: ["providers-health"] });
+  };
 
   return (
     <div className="p-6 space-y-6">
-      {/* ── Cairn provider connections ────────────────────────────────── */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-            Provider Connections
-            {entries.length > 0 && <span className="ml-1.5 normal-case tracking-normal font-normal text-zinc-700">({entries.length})</span>}
-          </p>
-          <div className="flex items-center gap-2">
-            {lastUpdated && <span className="text-[11px] font-mono text-zinc-700">{lastUpdated}</span>}
-            <button onClick={() => refetch()}
-              className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 transition-colors">
-              <RefreshCw size={11} /> Refresh
-            </button>
-          </div>
-        </div>
+      {/* Connections with Add Provider button */}
+      <ConnectionsSection onAdd={() => setShowAddModal(true)} />
 
-        {/* Stat cards */}
-        {!isLoading && entries.length > 0 && (
-          <div className="grid grid-cols-3 gap-3">
-            <StatCard label="Total"    value={entries.length} />
-            <StatCard label="Healthy"  value={healthy}   accent="emerald" />
-            <StatCard label="Degraded" value={unhealthy}  accent={unhealthy > 0 ? "red" : "default"} />
-          </div>
-        )}
-
-        {/* Table */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-          <div className="border-b border-zinc-800 bg-zinc-950">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Status</th>
-                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Connection ID</th>
-                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Last Check</th>
-                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Failures</th>
-                  <th className="px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Error</th>
-                </tr>
-              </thead>
-            </table>
-          </div>
-
-          {isError ? (
-            <div className="flex items-center gap-3 px-4 py-4 text-sm">
-              <ServerCrash size={16} className="text-red-500 shrink-0" />
-              <span className="text-zinc-400">{error instanceof Error ? error.message : "Failed to load"}</span>
-            </div>
-          ) : isLoading ? (
-            <div className="flex items-center gap-2 px-4 h-10 text-[11px] text-zinc-600">
-              <Loader2 size={11} className="animate-spin" /> Loading…
-            </div>
-          ) : entries.length === 0 ? (
-            <div className="px-4 py-8 text-center text-[11px] text-zinc-600">
-              No provider connections registered
-            </div>
-          ) : (
-            <table className="w-full">
-              <tbody>
-                {entries.map((entry, i) => (
-                  <ProviderRow key={entry.connection_id} entry={entry} even={i % 2 === 0} />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </section>
-
-      {/* ── Ollama section ────────────────────────────────────────────── */}
+      {/* Ollama local LLM */}
       <OllamaSection />
+
+      {/* Add Provider slide-over */}
+      {showAddModal && (
+        <AddProviderModal
+          onClose={() => setShowAddModal(false)}
+          onCreated={handleCreated}
+        />
+      )}
     </div>
   );
 }
