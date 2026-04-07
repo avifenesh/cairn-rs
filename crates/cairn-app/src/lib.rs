@@ -8346,36 +8346,6 @@ struct OrchestrateRequest {
     timeout_ms: Option<u64>,
 }
 
-struct StubExecutePhase;
-
-#[async_trait::async_trait]
-impl cairn_orchestrator::ExecutePhase for StubExecutePhase {
-    async fn execute(
-        &self,
-        _ctx: &cairn_orchestrator::OrchestrationContext,
-        decide: &cairn_orchestrator::DecideOutput,
-    ) -> Result<cairn_orchestrator::ExecuteOutcome, cairn_orchestrator::OrchestratorError> {
-        use cairn_domain::ActionType;
-        use cairn_orchestrator::{ActionResult, ActionStatus, ExecuteOutcome, LoopSignal};
-        let primary = decide.proposals.iter()
-            .max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal));
-        let (signal, status) = match primary.map(|p| &p.action_type) {
-            Some(ActionType::CompleteRun) => (LoopSignal::Done, ActionStatus::Succeeded),
-            Some(ActionType::EscalateToOperator) => {
-                let reason = primary.map(|p| p.description.clone())
-                    .unwrap_or_else(|| "escalated by LLM".to_owned());
-                (LoopSignal::Failed { reason }, ActionStatus::Succeeded)
-            }
-            _ => (LoopSignal::Continue, ActionStatus::Succeeded),
-        };
-        let results = decide.proposals.iter().map(|p| ActionResult {
-            proposal: p.clone(), status: status.clone(),
-            tool_output: None, invocation_id: None,
-        }).collect();
-        Ok(ExecuteOutcome { results, loop_signal: signal })
-    }
-}
-
 /// POST /v1/runs/:id/orchestrate — trigger the GATHER → DECIDE → EXECUTE loop.
 async fn orchestrate_run_handler(
     State(state): State<Arc<AppState>>,
@@ -8385,7 +8355,11 @@ async fn orchestrate_run_handler(
     use cairn_domain::RunId;
     use cairn_orchestrator::{
         LlmDecidePhase, LoopConfig, LoopTermination, OrchestrationContext, OrchestratorLoop,
-        StandardGatherPhase,
+        RuntimeExecutePhase, StandardGatherPhase,
+    };
+    use cairn_runtime::services::{
+        ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl,
+        RunServiceImpl, TaskServiceImpl, ToolInvocationServiceImpl,
     };
     use cairn_store::projections::RunReadModel;
 
@@ -8430,12 +8404,26 @@ async fn orchestrate_run_handler(
         .with_checkpoints(state.runtime.store.clone())
         .build();
 
-    let decide  = LlmDecidePhase::new(brain, model_id.clone());
-    let execute = StubExecutePhase;
+    let decide = LlmDecidePhase::new(brain, model_id.clone());
 
+    // Build loop config first so checkpoint policy is available for execute.
     let mut cfg = LoopConfig::default();
     if let Some(m) = body.max_iterations { cfg.max_iterations = m; }
     if let Some(t) = body.timeout_ms     { cfg.timeout_ms = t; }
+
+    // Build RuntimeExecutePhase from the shared runtime store.
+    // All service impls share the same Arc<InMemoryStore> so writes from one
+    // service are immediately visible to reads from another.
+    let store = state.runtime.store.clone();
+    let execute = RuntimeExecutePhase::builder()
+        .run_service(Arc::new(RunServiceImpl::new(store.clone())))
+        .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
+        .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
+        .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
+        .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
+        .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
+        .checkpoint_every_n_tool_calls(cfg.checkpoint_every_n_tool_calls)
+        .build();
 
     match OrchestratorLoop::new(gather, decide, execute, cfg).run(ctx).await {
         Ok(LoopTermination::Completed { summary }) => (StatusCode::OK, Json(serde_json::json!({
