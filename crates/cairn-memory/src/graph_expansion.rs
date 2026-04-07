@@ -206,6 +206,8 @@ mod tests {
                 embedding: None,
                 content_hash: None,
                 entities: Vec::new(),
+                embedding_model_id: None,
+                needs_reembed: false,
             },
             score: 1.0,
             breakdown: ScoringBreakdown::default(),

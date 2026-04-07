@@ -34,6 +34,8 @@ fn make_chunk(id: &str, source: &str, text: &str, embedding: Option<Vec<f32>>) -
         embedding,
         content_hash: None,
         entities: vec![],
+        embedding_model_id: None,
+        needs_reembed: false,
     }
 }
 

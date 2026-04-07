@@ -112,6 +112,8 @@ async fn chunk_quality_scoring_poor_quality_chunk_scores_low() {
         embedding: None,
         content_hash: None,
         entities: vec![],
+        embedding_model_id: None,
+        needs_reembed: false,
     }]).await.unwrap();
 
     let chunks = store.all_current_chunks();

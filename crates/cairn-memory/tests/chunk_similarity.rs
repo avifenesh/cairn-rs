@@ -38,6 +38,8 @@ fn make_chunk(id: &str, doc: &str, text: &str) -> ChunkRecord {
         embedding: None,
         content_hash: None,
         entities: vec![],
+        embedding_model_id: None,
+        needs_reembed: false,
     }
 }
 

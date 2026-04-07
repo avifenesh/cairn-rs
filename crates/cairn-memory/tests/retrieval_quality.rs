@@ -418,6 +418,8 @@ async fn stale_chunks_score_lower_on_freshness() {
             embedding: None,
             content_hash: Some(compute_content_hash(&format!("{query_term} fresh"))),
             entities: vec![],
+            embedding_model_id: None,
+            needs_reembed: false,
         }],
     )
     .await
@@ -442,6 +444,8 @@ async fn stale_chunks_score_lower_on_freshness() {
             embedding: None,
             content_hash: Some(compute_content_hash(&format!("{query_term} stale"))),
             entities: vec![],
+            embedding_model_id: None,
+            needs_reembed: false,
         }],
     )
     .await

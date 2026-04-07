@@ -114,6 +114,8 @@ fn make_result(doc_id: &str, text: &str, score: f64) -> RetrievalResult {
             embedding: None,
             content_hash: None,
             entities: vec![],
+            embedding_model_id: None,
+            needs_reembed: false,
         },
         score,
         breakdown: ScoringBreakdown::default(),

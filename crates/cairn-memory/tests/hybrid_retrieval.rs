@@ -52,6 +52,8 @@ async fn hybrid_retrieval_lexical_chunk_ranks_by_word_overlap() {
                 embedding: None,
                 content_hash: None,
                 entities: vec![],
+                embedding_model_id: None,
+                needs_reembed: false,
             },
             // Chunk B: doesn't match query words at all.
             ChunkRecord {
@@ -70,6 +72,8 @@ async fn hybrid_retrieval_lexical_chunk_ranks_by_word_overlap() {
                 embedding: Some(vec![1.0_f32, 0.0, 0.0]),
                 content_hash: None,
                 entities: vec![],
+                embedding_model_id: None,
+                needs_reembed: false,
             },
             // Chunk C: matches 2 of 3 query words — extra noise.
             ChunkRecord {
@@ -88,6 +92,8 @@ async fn hybrid_retrieval_lexical_chunk_ranks_by_word_overlap() {
                 embedding: None,
                 content_hash: None,
                 entities: vec![],
+                embedding_model_id: None,
+                needs_reembed: false,
             },
         ])
         .await
@@ -172,6 +178,8 @@ async fn hybrid_retrieval_diagnostics_report_mode_and_stages() {
             embedding: Some(vec![1.0_f32, 0.0, 0.0]),
             content_hash: None,
             entities: vec![],
+            embedding_model_id: None,
+            needs_reembed: false,
         }])
         .await
         .unwrap();
@@ -228,6 +236,8 @@ async fn hybrid_retrieval_without_embedding_reports_lexical_mode() {
             embedding: None,
             content_hash: None,
             entities: vec![],
+            embedding_model_id: None,
+            needs_reembed: false,
         }])
         .await
         .unwrap();
@@ -283,6 +293,8 @@ async fn hybrid_retrieval_lexical_only_mode_unchanged() {
             embedding: Some(vec![1.0_f32, 0.0, 0.0]),
             content_hash: None,
             entities: vec![],
+            embedding_model_id: None,
+            needs_reembed: false,
         }])
         .await
         .unwrap();
