@@ -4,7 +4,7 @@
 //! entity read-model traits. Event append atomically updates sync projections.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -103,6 +103,16 @@ pub struct InMemoryStore {
     /// `BroadcastStreamRecvError::Lagged` and should reconnect with the last
     /// known position.
     event_tx: tokio::sync::broadcast::Sender<StoredEvent>,
+    /// Optional durable secondary event log (e.g. Postgres or SQLite).
+    ///
+    /// When set, every `append()` call dual-writes to this log AFTER the
+    /// in-memory write succeeds. This makes ALL service-layer events durable
+    /// without touching the 109 `store.append()` call sites across 42 files.
+    ///
+    /// Set via `set_secondary_log()` after construction. The secondary write
+    /// is best-effort: failures are logged but do NOT roll back the in-memory
+    /// write, preserving the existing availability guarantee.
+    secondary_log: std::sync::RwLock<Option<Arc<dyn EventLog + Send + Sync>>>,
 }
 
 impl InMemoryStore {
@@ -173,7 +183,19 @@ impl InMemoryStore {
                 snapshots: Vec::new(),
             }),
             event_tx,
+            secondary_log: std::sync::RwLock::new(None),
         }
+    }
+
+    /// Attach a durable secondary event log.
+    ///
+    /// After this call every `append()` will dual-write to `log` after the
+    /// in-memory write. Intended to be called once at startup, before the
+    /// HTTP server accepts traffic.
+    ///
+    /// Pass `Arc<PgEventLog>` or `Arc<SqliteEventLog>` — any `EventLog` impl works.
+    pub fn set_secondary_log(&self, log: Arc<dyn EventLog + Send + Sync>) {
+        *self.secondary_log.write().unwrap() = Some(log);
     }
 
     /// Subscribe to the real-time event broadcast (RFC 002).
@@ -1547,29 +1569,49 @@ impl EventLog for InMemoryStore {
         &self,
         events: &[EventEnvelope<RuntimeEvent>],
     ) -> Result<Vec<EventPosition>, StoreError> {
-        let mut state = self.state.lock().unwrap();
-        let now = now_millis();
-        let mut positions = Vec::with_capacity(events.len());
+        // Scope the MutexGuard so it is lexically dropped before any `.await`.
+        let positions = {
+            let mut state = self.state.lock().unwrap();
+            let now = now_millis();
+            let mut positions = Vec::with_capacity(events.len());
 
-        for envelope in events {
-            let pos = EventPosition(state.next_position);
-            state.next_position += 1;
+            for envelope in events {
+                let pos = EventPosition(state.next_position);
+                state.next_position += 1;
 
-            let stored = StoredEvent {
-                position: pos,
-                envelope: envelope.clone(),
-                stored_at: now,
-            };
+                let stored = StoredEvent {
+                    position: pos,
+                    envelope: envelope.clone(),
+                    stored_at: now,
+                };
 
-            // Push the original event BEFORE calling apply_projection so that
-            // any derived events inserted by the projection appear AFTER the
-            // original in the log, preserving strict position monotonicity.
-            state.events.push(stored.clone());
-            Self::apply_projection(&mut state, &stored);
-            positions.push(pos);
+                // Push the original event BEFORE calling apply_projection so that
+                // any derived events inserted by the projection appear AFTER the
+                // original in the log, preserving strict position monotonicity.
+                state.events.push(stored.clone());
+                Self::apply_projection(&mut state, &stored);
+                positions.push(pos);
 
-            // Broadcast to SSE subscribers; ignore send errors (no active receivers).
-            let _ = self.event_tx.send(stored);
+                // Broadcast to SSE subscribers; ignore send errors (no active receivers).
+                let _ = self.event_tx.send(stored);
+            }
+
+            positions
+            // `state` (MutexGuard) is dropped here, before any await point.
+        };
+
+        // Dual-write to durable secondary log (Postgres, SQLite) if configured.
+        // Best-effort: a secondary failure does NOT roll back the in-memory write,
+        // preserving the existing availability guarantee while adding durability.
+        let secondary = self.secondary_log.read().unwrap().clone();
+        if let Some(log) = secondary {
+            if let Err(e) = log.append(events).await {
+                eprintln!(
+                    "secondary event log write failed ({}); {} event(s) are in-memory only",
+                    e,
+                    events.len(),
+                );
+            }
         }
 
         Ok(positions)

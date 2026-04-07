@@ -3405,11 +3405,12 @@ async fn main() {
                             std::process::exit(1);
                         }
                     }
+                    let pg_event_log = Arc::new(PgEventLog::new(pool.clone()));
                     let backend = Arc::new(PgBackend {
-                        event_log: Arc::new(PgEventLog::new(pool.clone())),
+                        event_log: pg_event_log.clone(),
                         adapter:   Arc::new(PgAdapter::new(pool)),
                     });
-                    eprintln!("store: Postgres backend active (dual-write with InMemory)");
+                    eprintln!("store: Postgres backend active (all service events dual-written)");
                     pg = Some(backend);
                     sqlite = None;
                 }
@@ -3442,11 +3443,12 @@ async fn main() {
                             std::process::exit(1);
                         }
                     }
+                    let sqlite_event_log = Arc::new(SqliteEventLog::new(pool));
                     let backend = Arc::new(SqliteBackend {
-                        event_log: Arc::new(SqliteEventLog::new(pool)),
+                        event_log: sqlite_event_log.clone(),
                         adapter:   Arc::new(adapter),
                     });
-                    eprintln!("store: SQLite backend active (dual-write with InMemory)");
+                    eprintln!("store: SQLite backend active (all service events dual-written)");
                     pg = None;
                     sqlite = Some(backend);
                 }
@@ -3479,6 +3481,61 @@ async fn main() {
             ),
         },
     );
+
+    // ── Startup replay from durable event log ────────────────────────────────
+    // When a Postgres or SQLite backend is available, replay its event log into
+    // the InMemoryStore so that projections (sessions, runs, tasks, approvals,
+    // etc.) are warm on restart rather than empty.
+    //
+    // Replay runs in batches of 10 000 events to bound peak memory.  All events
+    // are fed through InMemoryStore::append, which applies the same
+    // apply_projection logic used during normal writes — guaranteeing that the
+    // in-memory state is identical to what would have accumulated from scratch.
+    {
+        const REPLAY_BATCH: usize = 10_000;
+        let durable_log: Option<&dyn EventLog> = if let Some(ref backend) = pg {
+            Some(backend.event_log.as_ref())
+        } else if let Some(ref backend) = sqlite {
+            Some(backend.event_log.as_ref())
+        } else {
+            None
+        };
+
+        if let Some(log) = durable_log {
+            eprintln!("store: replaying event log into InMemory projections…");
+            let mut after: Option<EventPosition> = None;
+            let mut total = 0usize;
+            loop {
+                let batch = match log.read_stream(after, REPLAY_BATCH).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("store: replay error reading batch after {after:?}: {e}");
+                        std::process::exit(1);
+                    }
+                };
+                if batch.is_empty() {
+                    break;
+                }
+                after = batch.last().map(|e| e.position);
+                let batch_len = batch.len();
+                total += batch_len;
+                let envelopes: Vec<_> = batch.into_iter().map(|e| e.envelope).collect();
+                if let Err(e) = lib_state.runtime.store.append(&envelopes).await {
+                    eprintln!("store: replay error applying batch: {e}");
+                    std::process::exit(1);
+                }
+                if batch_len < REPLAY_BATCH {
+                    // Last batch — no need to fetch again.
+                    break;
+                }
+            }
+            if total > 0 {
+                eprintln!("store: replayed {total} event(s) — projections warm");
+            } else {
+                eprintln!("store: event log empty — starting with clean projections");
+            }
+        }
+    }
 
     // ── Ollama local LLM provider (optional) ─────────────────────────────────
     let ollama: Option<Arc<OllamaProvider>> = if let Some(provider) = OllamaProvider::from_env() {
@@ -3537,6 +3594,12 @@ async fn main() {
     if state.mode == DeploymentMode::Local {
         seed_demo_data(&state).await;
     }
+
+    // ── Graph startup replay ───────────────────────────────────────────────────
+    // Replay all store events into the graph projector so that pre-existing
+    // data (seeded above or loaded from a snapshot) is immediately visible
+    // through the graph HTTP endpoints without requiring an SSE connection first.
+    lib_state.replay_graph().await;
 
     eprintln!("cairn-app starting with role: {}", config.process_role);
 

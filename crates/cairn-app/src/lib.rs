@@ -584,6 +584,26 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Replay all events from the store into the graph projector.
+    ///
+    /// Call this after any external seeding (e.g. demo data) that writes
+    /// to the runtime store outside of the normal API write path.  The
+    /// graph is otherwise populated lazily — only when API handlers call
+    /// `publish_runtime_frames_since` — so startup seeding leaves it empty
+    /// until this is called.
+    pub async fn replay_graph(&self) {
+        use cairn_store::event_log::EventLog;
+        match self.runtime.store.read_stream(None, usize::MAX).await {
+            Ok(events) => {
+                let projector = RuntimeGraphProjector::new(self.graph.clone());
+                if let Err(e) = projector.project_events(&events).await {
+                    eprintln!("graph replay: projection error: {e:?}");
+                }
+            }
+            Err(e) => eprintln!("graph replay: failed to read events: {e}"),
+        }
+    }
+
     pub async fn new(config: BootstrapConfig) -> Result<Self, String> {
         let runtime = Arc::new(InMemoryServices::new());
         let graph = Arc::new(InMemoryGraphStore::new());
@@ -3912,6 +3932,7 @@ impl AppBootstrap {
             .route("/v1/graph/prompt-provenance/:release_id", get(prompt_provenance_handler))
             .route("/v1/graph/retrieval-provenance/:run_id", get(retrieval_provenance_handler))
             .route("/v1/graph/provenance/:node_id", get(graph_provenance_handler))
+            .route("/v1/graph/multi-hop/:node_id", get(multi_hop_graph_handler))
             // ── Memory ────────────────────────────────────────────────────────────────
             .route("/v1/memory/provenance/:document_id", get(memory_provenance_handler))
             // ── Providers ─────────────────────────────────────────────────────────────
@@ -13204,6 +13225,43 @@ async fn graph_provenance_handler(
         )
         .into_response(),
     }
+}
+
+/// Query params for GET /v1/graph/multi-hop/:node_id
+#[derive(Clone, Debug, serde::Deserialize)]
+struct MultiHopQuery {
+    max_hops: Option<u32>,
+    /// Minimum edge confidence [0.0, 1.0]. Edges below this threshold are pruned.
+    min_confidence: Option<f64>,
+    /// "upstream" or "downstream" (default: downstream)
+    direction: Option<String>,
+}
+
+/// `GET /v1/graph/multi-hop/:node_id` — generic BFS traversal from a node.
+///
+/// Query params:
+/// - `max_hops` — how many hops to walk (default: 4)
+/// - `min_confidence` — prune edges whose confidence is below this value
+/// - `direction` — `upstream` or `downstream` (default: `downstream`)
+async fn multi_hop_graph_handler(
+    State(state): State<Arc<AppState>>,
+    Path(node_id): Path<String>,
+    Query(query): Query<MultiHopQuery>,
+) -> impl IntoResponse {
+    let direction = match query.direction.as_deref() {
+        Some("upstream") => TraversalDirection::Upstream,
+        _ => TraversalDirection::Downstream,
+    };
+    graph_query_response(
+        state.graph.as_ref(),
+        GraphQuery::MultiHop {
+            start_node_id: node_id,
+            max_hops: query.max_hops.unwrap_or(4),
+            min_confidence: query.min_confidence,
+            direction,
+        },
+    )
+    .await
 }
 
 async fn graph_query_response(
