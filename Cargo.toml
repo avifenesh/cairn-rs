@@ -13,6 +13,7 @@ members = [
     "crates/cairn-api",
     "crates/cairn-plugin-proto",
     "crates/cairn-app",
+    "crates/cairn-orchestrator",
 ]
 resolver = "2"
 

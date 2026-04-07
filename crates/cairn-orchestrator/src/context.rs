@@ -1,0 +1,207 @@
+//! Core types shared across all orchestrator phases.
+//!
+//! These types represent the data flowing between GatherPhase → DecidePhase
+//! → ExecutePhase, plus the loop control signals and configuration.
+
+use cairn_domain::{
+    ActionProposal, ApprovalId, DefaultSetting, ProjectKey, RunId, SessionId, TaskId,
+    ToolInvocationId,
+};
+use cairn_graph::GraphNode;
+use cairn_memory::retrieval::RetrievalResult;
+use cairn_store::projections::CheckpointRecord;
+use cairn_store::StoredEvent;
+use serde::{Deserialize, Serialize};
+
+// ── OrchestrationContext ──────────────────────────────────────────────────────
+
+/// Immutable context threaded through every phase of a single iteration.
+///
+/// Built once per run (or rebuilt from a checkpoint on resume) and passed
+/// by reference to all three phases.
+#[derive(Clone, Debug)]
+pub struct OrchestrationContext {
+    /// The project this execution belongs to.
+    pub project: ProjectKey,
+    pub session_id: SessionId,
+    pub run_id: RunId,
+    /// The task that holds the current execution lease, if any.
+    pub task_id: Option<TaskId>,
+    /// Which iteration of the loop we are on (0-based).
+    pub iteration: u32,
+    /// The original user goal / input message that started this run.
+    pub goal: String,
+    /// Agent type label used for routing, confidence calibration, and logging.
+    pub agent_type: String,
+    /// Wall-clock millisecond timestamp when this run began (for timeout checks).
+    pub run_started_at_ms: u64,
+}
+
+// ── GatherOutput ─────────────────────────────────────────────────────────────
+
+/// Context snapshot produced by the GatherPhase.
+///
+/// Everything the DecidePhase needs to build a decision prompt is
+/// contained in this struct.
+#[derive(Clone, Debug, Default)]
+pub struct GatherOutput {
+    /// Relevant memory chunks from semantic + lexical retrieval.
+    /// Source: `cairn_memory::RetrievalService::query`
+    pub memory_chunks: Vec<RetrievalResult>,
+
+    /// Recent events for the current run (tool calls, approvals, checkpoints).
+    /// Source: `cairn_store::EventLog::read_by_entity(EntityRef::Run(…))`
+    pub recent_events: Vec<StoredEvent>,
+
+    /// Graph neighbourhood nodes linked to this run/session (depth ≤ 2).
+    /// Source: `cairn_graph::GraphQueryService`
+    pub graph_nodes: Vec<GraphNode>,
+
+    /// Operator settings that apply to this project/tenant.
+    /// Source: `DefaultsReadModel::list_by_scope(Scope::Project, …)`
+    pub operator_settings: Vec<DefaultSetting>,
+
+    /// Most recent checkpoint for this run (for resume awareness).
+    /// Source: `CheckpointService::latest_for_run`
+    pub checkpoint: Option<CheckpointRecord>,
+
+    /// Compressed summaries of prior steps in this run.
+    pub step_history: Vec<StepSummary>,
+}
+
+/// A compressed record of what happened in a prior orchestration step.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StepSummary {
+    pub iteration: u32,
+    /// High-level kind: "tool_call", "subagent", "continue", "approval_wait", etc.
+    pub action_kind: String,
+    /// Human-readable or LLM-generated summary of the step.
+    pub summary: String,
+    /// Whether the step succeeded, failed, or is still pending.
+    pub succeeded: bool,
+}
+
+// ── DecideOutput ─────────────────────────────────────────────────────────────
+
+/// The proposed action set produced by the DecidePhase after calling the LLM.
+#[derive(Clone, Debug)]
+pub struct DecideOutput {
+    /// Raw LLM response text (retained for audit and replay).
+    pub raw_response: String,
+    /// Structured actions the LLM proposed (parsed from `raw_response`).
+    /// Re-uses `ActionProposal` from `cairn_domain::orchestrator`.
+    pub proposals: Vec<ActionProposal>,
+    /// Calibrated confidence after applying `ConfidenceCalibrator` adjustments.
+    pub calibrated_confidence: f64,
+    /// Whether any proposal requires operator approval before execution.
+    pub requires_approval: bool,
+    /// LLM model ID used for this decision.
+    pub model_id: String,
+    /// Round-trip latency of the LLM call in milliseconds.
+    pub latency_ms: u64,
+}
+
+// ── ExecuteOutcome ────────────────────────────────────────────────────────────
+
+/// What actually happened after running the proposals from `DecideOutput`.
+#[derive(Clone, Debug)]
+pub struct ExecuteOutcome {
+    /// Per-proposal results, in the same order as `decide_output.proposals`.
+    pub results: Vec<ActionResult>,
+    /// Loop control signal derived from the execution results.
+    pub loop_signal: LoopSignal,
+}
+
+/// The result of executing one `ActionProposal`.
+#[derive(Clone, Debug)]
+pub struct ActionResult {
+    /// The proposal that was (attempted to be) executed.
+    pub proposal: ActionProposal,
+    /// What happened when we tried to execute it.
+    pub status: ActionStatus,
+    /// For tool calls: the raw tool output (observation for next gather).
+    pub tool_output: Option<serde_json::Value>,
+    /// The `ToolInvocationId` recorded in the event log (for replay linkage).
+    pub invocation_id: Option<ToolInvocationId>,
+}
+
+/// Status of a single executed action.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ActionStatus {
+    /// The action completed without error.
+    Succeeded,
+    /// The action produced an error.
+    Failed { reason: String },
+    /// The action is blocked on an operator approval decision.
+    /// The run has been transitioned to `waiting_approval`.
+    AwaitingApproval { approval_id: ApprovalId },
+    /// A subagent was spawned.  `child_task_id` is the schedulable unit.
+    SubagentSpawned { child_task_id: TaskId },
+}
+
+// ── LoopSignal ────────────────────────────────────────────────────────────────
+
+/// Tells `OrchestratorLoop` what to do after an `ExecutePhase` completes.
+///
+/// Mirrors `cairn_agent::react::LoopSignal` but defined here to avoid
+/// a hard dependency on cairn-agent internals.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LoopSignal {
+    /// Continue to the next iteration.
+    Continue,
+    /// Agent declared its work done.
+    Done,
+    /// Agent (or execute phase) hit an unrecoverable error.
+    Failed { reason: String },
+    /// Run is now blocked on an approval; loop suspends.
+    WaitApproval { approval_id: ApprovalId },
+    /// Run is blocked waiting for a spawned subagent to finish.
+    WaitSubagent { child_task_id: TaskId },
+}
+
+// ── LoopTermination ──────────────────────────────────────────────────────────
+
+/// Why `OrchestratorLoop::run` returned.
+///
+/// The HTTP handler (or task worker) inspects this to decide what to do
+/// with the run and task lease.
+#[derive(Clone, Debug)]
+pub enum LoopTermination {
+    /// Agent declared itself done; run has been completed.
+    Completed { summary: String },
+    /// Agent or runtime hit an unrecoverable error; run has been failed.
+    Failed { reason: String },
+    /// Iteration cap reached; run has been failed with `MaxIterations`.
+    MaxIterationsReached,
+    /// Wall-clock timeout; run has been failed with `Timeout`.
+    TimedOut,
+    /// Run is waiting for operator approval; loop suspended.
+    /// Resume by re-entering the loop after `ApprovalResolved`.
+    WaitingApproval { approval_id: ApprovalId },
+    /// Run is waiting for a child subagent.  Loop suspended.
+    /// Resume when the child task completes (dependency sweep).
+    WaitingSubagent { child_task_id: TaskId },
+}
+
+// ── LoopConfig ───────────────────────────────────────────────────────────────
+
+/// Tuning parameters for `OrchestratorLoop`.
+#[derive(Clone, Debug)]
+pub struct LoopConfig {
+    /// Maximum iterations before the loop fails with `MaxIterations`.
+    pub max_iterations: u32,
+    /// Wall-clock timeout for the entire run in milliseconds.
+    pub timeout_ms: u64,
+    /// Save a checkpoint after every N tool calls (0 = every step).
+    pub checkpoint_every_n_tool_calls: u32,
+}
+
+impl Default for LoopConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: 20,
+            timeout_ms: 5 * 60 * 1_000, // 5 minutes
+            checkpoint_every_n_tool_calls: 1,
+        }
+    }
+}

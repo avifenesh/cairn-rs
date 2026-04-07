@@ -466,6 +466,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cairn-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cairn-domain",
+ "cairn-graph",
+ "cairn-memory",
+ "cairn-runtime",
+ "cairn-store",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "cairn-plugin-proto"
 version = "0.1.0"
 dependencies = [
@@ -482,6 +498,7 @@ dependencies = [
  "cairn-api",
  "cairn-domain",
  "cairn-evals",
+ "cairn-graph",
  "cairn-memory",
  "cairn-plugin-proto",
  "cairn-store",
