@@ -424,6 +424,46 @@ impl AppMetrics {
             .store(tasks as u64, Ordering::Relaxed);
     }
 
+    /// Approximate latency percentile (p50 or p95) from histogram buckets.
+    /// Returns `None` when no requests have been recorded.
+    fn latency_percentile(&self, p: f64) -> Option<u64> {
+        let durations = self.request_durations.lock().unwrap_or_else(|e| e.into_inner());
+        let mut total_count: u64 = 0;
+        let mut merged = [0u64; HTTP_DURATION_BUCKETS_MS.len()];
+        for sample in durations.values() {
+            total_count += sample.count;
+            for (i, &c) in sample.bucket_counts.iter().enumerate() {
+                merged[i] += c;
+            }
+        }
+        if total_count == 0 {
+            return None;
+        }
+        let target = ((p / 100.0) * total_count as f64).ceil() as u64;
+        let mut cumulative = 0u64;
+        for (i, &c) in merged.iter().enumerate() {
+            cumulative += c;
+            if cumulative >= target {
+                return Some(HTTP_DURATION_BUCKETS_MS[i]);
+            }
+        }
+        Some(*HTTP_DURATION_BUCKETS_MS.last().unwrap())
+    }
+
+    /// Fraction of requests with status >= 400 (0.0–1.0).
+    fn error_rate(&self) -> f32 {
+        let totals = self.request_totals.lock().unwrap_or_else(|e| e.into_inner());
+        let mut total: u64 = 0;
+        let mut errors: u64 = 0;
+        for (key, &count) in totals.iter() {
+            total += count;
+            if key.status >= 400 {
+                errors += count;
+            }
+        }
+        if total == 0 { 0.0 } else { errors as f32 / total as f32 }
+    }
+
     fn render_prometheus(&self) -> String {
         let totals = self
             .request_totals
@@ -3057,7 +3097,8 @@ impl AppBootstrap {
                     (HttpMethod::Get, "/v1/settings/defaults/resolve/:key") => {
                         router.route(&path, get(resolve_default_setting_handler))
                     }
-                    (HttpMethod::Get, "/v1/streams/runtime") => {
+                    (HttpMethod::Get, "/v1/stream")
+                    | (HttpMethod::Get, "/v1/streams/runtime") => {
                         router.route(&path, get(runtime_stream_handler))
                     }
                     (HttpMethod::Get, "/v1/admin/license") => {
@@ -3579,6 +3620,12 @@ impl AppBootstrap {
                     }
                     (HttpMethod::Get, "/v1/fleet") => {
                         router.route(&path, get(fleet_handler))
+                    }
+                    (HttpMethod::Get, "/v1/overview") => {
+                        router.route(&path, get(system_status_handler))
+                    }
+                    (HttpMethod::Get, "/v1/metrics") => {
+                        router.route(&path, get(metrics_handler))
                     }
                     (HttpMethod::Get, _) => router.route(&path, get(not_implemented_handler)),
                     (HttpMethod::Post, _) => router.route(&path, post(not_implemented_handler)),
@@ -5016,9 +5063,9 @@ async fn dashboard_handler(
             memory_doc_count: memory_doc_count.into(),
             eval_runs_today,
             system_healthy: degraded_components.is_empty(),
-            error_rate_24h: 0.0,
-            latency_p50_ms: None,
-            latency_p95_ms: None,
+            error_rate_24h: state.metrics.error_rate(),
+            latency_p50_ms: state.metrics.latency_percentile(50.0),
+            latency_p95_ms: state.metrics.latency_percentile(95.0),
         }),
     )
         .into_response()

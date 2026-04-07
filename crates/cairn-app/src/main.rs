@@ -5271,11 +5271,58 @@ async fn bundle_export_handler(
         })
         .collect();
 
+    // Eval runs → BundleEvalSuite entries (grouped by evaluator_type).
+    let project_key = cairn_domain::ProjectKey::new(
+        body.tenant_id.as_deref().unwrap_or("default"),
+        body.workspace_id.as_deref().unwrap_or("default"),
+        _project_id,
+    );
+    let bundle_eval_suites: Vec<bundles::BundleEvalSuite> = {
+        use cairn_store::projections::EvalRunReadModel;
+        let eval_runs = EvalRunReadModel::list_by_project(
+            state.runtime.store.as_ref(), &project_key, 1000, 0,
+        ).await.unwrap_or_default();
+        let mut by_evaluator: std::collections::HashMap<String, Vec<serde_json::Value>> =
+            std::collections::HashMap::new();
+        for run in &eval_runs {
+            by_evaluator
+                .entry(run.evaluator_type.clone())
+                .or_default()
+                .push(serde_json::json!({
+                    "eval_run_id": run.eval_run_id.as_str(),
+                    "subject_kind": run.subject_kind,
+                    "success": run.success,
+                }));
+        }
+        by_evaluator
+            .into_iter()
+            .map(|(evaluator, cases)| bundles::BundleEvalSuite {
+                id: format!("suite_{evaluator}"),
+                name: evaluator.clone(),
+                evaluator,
+                cases,
+            })
+            .collect()
+    };
+
+    // Knowledge sources → BundleSource entries.
+    let bundle_sources: Vec<bundles::BundleSource> = state
+        .document_store
+        .list_sources(&project_key)
+        .into_iter()
+        .map(|s| bundles::BundleSource {
+            id: s.source_id.as_str().to_owned(),
+            name: s.source_id.as_str().to_owned(),
+            source_type: "knowledge".to_owned(),
+            document_count: s.document_count as u32,
+        })
+        .collect();
+
     let contents = bundles::BundleContents {
         prompts: bundle_prompts,
-        eval_suites: vec![], // eval runs don't have a persistent "suite" — placeholder
+        eval_suites: bundle_eval_suites,
         provider_configs: bundle_configs,
-        sources: vec![],
+        sources: bundle_sources,
     };
 
     let bundle = bundles::new_bundle(contents);

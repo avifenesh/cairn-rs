@@ -383,6 +383,10 @@ pub fn execute_import(plan: &ImportPlan) -> ImportResult {
 pub struct ExportRequest {
     #[serde(default)]
     pub project_id: Option<String>,
+    #[serde(default)]
+    pub tenant_id: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     #[serde(default = "default_format")]
     pub format: BundleFormat,
 }

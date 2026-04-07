@@ -33,15 +33,10 @@ serde_json = "1.0"
 async-trait = "0.1"
 reqwest = { version = "0.12", features = ["json", "stream"], default-features = false }
 utoipa = "5"
-utoipa-swagger-ui = { version = "7", features = ["axum"] }
 uuid = { version = "1", features = ["v4"] }
 rustls = "0.22"
 rustls-pemfile = "2"
-rustls-pki-types = "1"
 x509-parser = "0.16"
-dashmap = "5"
-aes-gcm = "0.10"
-sha2 = "0.10"
 rust-embed = { version = "8", features = ["axum"] }
 mime_guess = "2"
 serde_yaml = "0.9"

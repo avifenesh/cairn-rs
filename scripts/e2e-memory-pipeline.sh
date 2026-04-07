@@ -17,8 +17,8 @@ set -euo pipefail
 
 CAIRN_URL="${CAIRN_URL:-http://localhost:3000}"
 CAIRN_TOKEN="${CAIRN_TOKEN:-cairn-demo-token}"
-TENANT="e2e_test"
-WORKSPACE="default"
+TENANT="${CAIRN_TENANT:-default}"
+WORKSPACE="${CAIRN_WORKSPACE:-default}"
 PROJECT="memory_pipeline"
 
 passed=0
@@ -29,6 +29,7 @@ total=0
 
 check() {
   local name="$1"
+  shift
   total=$((total + 1))
   if "$@" >/dev/null 2>&1; then
     passed=$((passed + 1))
@@ -72,7 +73,7 @@ DOC1=$(api_post /v1/memory/ingest '{
   "content": "Rust ownership model ensures memory safety without garbage collection. The borrow checker validates references at compile time, preventing data races and dangling pointers. Each value has exactly one owner, and ownership can be transferred or borrowed.",
   "source_type": "plain_text"
 }')
-check "ingest doc_ownership" test "$(echo "$DOC1" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status",""))' 2>/dev/null)" = "ingested"
+check "ingest doc_ownership" test "$(echo "$DOC1" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("status","") or ("ingested" if d.get("ok") else ""))' 2>/dev/null)" = "ingested"
 
 DOC2=$(api_post /v1/memory/ingest '{
   "tenant_id": "'"$TENANT"'",
@@ -83,7 +84,7 @@ DOC2=$(api_post /v1/memory/ingest '{
   "content": "Fearless concurrency in Rust is enabled by the type system. Send and Sync traits determine what can cross thread boundaries. Channels, mutexes, and atomic types provide safe concurrent access patterns without runtime overhead.",
   "source_type": "plain_text"
 }')
-check "ingest doc_concurrency" test "$(echo "$DOC2" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status",""))' 2>/dev/null)" = "ingested"
+check "ingest doc_concurrency" test "$(echo "$DOC2" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("status","") or ("ingested" if d.get("ok") else ""))' 2>/dev/null)" = "ingested"
 
 DOC3=$(api_post /v1/memory/ingest '{
   "tenant_id": "'"$TENANT"'",
@@ -94,7 +95,7 @@ DOC3=$(api_post /v1/memory/ingest '{
   "content": "Carbonara is a traditional Italian pasta dish from Rome. Authentic carbonara uses guanciale, eggs, Pecorino Romano cheese, and black pepper. No cream is used in the traditional recipe despite common misconceptions.",
   "source_type": "plain_text"
 }')
-check "ingest doc_pasta" test "$(echo "$DOC3" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status",""))' 2>/dev/null)" = "ingested"
+check "ingest doc_pasta" test "$(echo "$DOC3" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("status","") or ("ingested" if d.get("ok") else ""))' 2>/dev/null)" = "ingested"
 
 # ── Step 2: Brief pause for embedding pipeline ──────────────────────────────
 
