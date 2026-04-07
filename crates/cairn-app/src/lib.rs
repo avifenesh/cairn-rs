@@ -1455,6 +1455,9 @@ struct CreateProviderConnectionRequest {
     provider_connection_id: String,
     provider_family: String,
     adapter_type: String,
+    /// Model identifiers served through this connection (e.g. ["gemma4", "qwen3.5"]).
+    #[serde(default)]
+    supported_models: Vec<String>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -2939,6 +2942,7 @@ impl ProviderBindingBootstrapService for AppProviderBootstrap<'_> {
                     ProviderConnectionConfig {
                         provider_family: "openai".to_owned(),
                         adapter_type: "responses_api".to_owned(),
+                        supported_models: vec![],
                     },
                 )
                 .await
@@ -13544,6 +13548,7 @@ async fn create_provider_connection_handler(
             ProviderConnectionConfig {
                 provider_family: body.provider_family,
                 adapter_type: body.adapter_type,
+                supported_models: body.supported_models,
             },
         )
         .await

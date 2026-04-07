@@ -381,6 +381,10 @@ pub struct ProviderConnectionRecord {
     pub tenant_id: TenantId,
     pub provider_family: String,
     pub adapter_type: String,
+    /// Model identifiers served through this connection (e.g. ["gemma4", "qwen3.5"]).
+    /// Allows a single OpenAI-compatible endpoint to advertise multiple models.
+    #[serde(default)]
+    pub supported_models: Vec<String>,
     pub status: ProviderConnectionStatus,
     pub created_at: u64,
 }

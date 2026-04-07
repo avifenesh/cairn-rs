@@ -82,6 +82,7 @@ fn register_connection(
             provider_connection_id: ProviderConnectionId::new(conn_id),
             provider_family: family.to_owned(),
             adapter_type: format!("{family}_adapter"),
+            supported_models: vec![],
             status: ProviderConnectionStatus::Active,
             registered_at: ts,
         }),

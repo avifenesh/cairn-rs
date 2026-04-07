@@ -52,6 +52,7 @@ fn register_event(conn: &str, family: &str) -> EventEnvelope<RuntimeEvent> {
             provider_connection_id: conn_id(conn),
             provider_family: family.to_owned(),
             adapter_type: "responses".to_owned(),
+            supported_models: vec![],
             status: ProviderConnectionStatus::Active,
             registered_at: 1_000_000,
         }),

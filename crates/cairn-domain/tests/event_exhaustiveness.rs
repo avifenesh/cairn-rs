@@ -698,7 +698,7 @@ fn all_variants() -> Vec<RuntimeEvent> {
         RuntimeEvent::ProviderConnectionRegistered(ProviderConnectionRegistered {
             tenant: tkey(), provider_connection_id: ProviderConnectionId::new("conn1"),
             provider_family: "openai".to_owned(), adapter_type: "openai_adapter".to_owned(),
-            status: ProviderConnectionStatus::Active, registered_at: ts,
+            supported_models: vec![], status: ProviderConnectionStatus::Active, registered_at: ts,
         }),
         RuntimeEvent::ProviderHealthChecked(ProviderHealthChecked {
             tenant_id: tid(), connection_id: ProviderConnectionId::new("conn1"),

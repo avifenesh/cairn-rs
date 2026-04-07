@@ -67,6 +67,7 @@ where
                 provider_connection_id: provider_connection_id.clone(),
                 provider_family: config.provider_family,
                 adapter_type: config.adapter_type,
+                supported_models: config.supported_models,
                 status: ProviderConnectionStatus::Active,
                 registered_at,
             },
@@ -132,6 +133,7 @@ mod tests {
                 ProviderConnectionConfig {
                     provider_family: "openai".to_owned(),
                     adapter_type: "responses_api".to_owned(),
+                    supported_models: vec![],
                 },
             )
             .await

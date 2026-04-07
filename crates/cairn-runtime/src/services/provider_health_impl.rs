@@ -354,6 +354,7 @@ mod tests {
                 ProviderConnectionConfig {
                     provider_family: "openai".to_owned(),
                     adapter_type: "responses".to_owned(),
+                    supported_models: vec![],
                 },
             )
             .await
@@ -377,6 +378,7 @@ mod tests {
                 ProviderConnectionConfig {
                     provider_family: "anthropic".to_owned(),
                     adapter_type: "messages".to_owned(),
+                    supported_models: vec![],
                 },
             )
             .await
@@ -492,6 +494,7 @@ mod tests {
                 ProviderConnectionConfig {
                     provider_family: "openai".to_owned(),
                     adapter_type: "responses".to_owned(),
+                    supported_models: vec![],
                 },
             )
             .await

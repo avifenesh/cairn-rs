@@ -177,6 +177,7 @@ mod tests {
                 ProviderConnectionConfig {
                     provider_family: "openai".to_owned(),
                     adapter_type: "responses_api".to_owned(),
+                    supported_models: vec![],
                 },
             )
             .await

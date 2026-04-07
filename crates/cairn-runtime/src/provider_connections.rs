@@ -10,6 +10,8 @@ use crate::error::RuntimeError;
 pub struct ProviderConnectionConfig {
     pub provider_family: String,
     pub adapter_type: String,
+    /// Model identifiers served through this connection (e.g. ["gemma4", "qwen3.5"]).
+    pub supported_models: Vec<String>,
 }
 
 #[async_trait]

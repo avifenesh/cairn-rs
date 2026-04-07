@@ -799,6 +799,7 @@ impl InMemoryStore {
                         tenant_id: e.tenant.tenant_id.clone(),
                         provider_family: e.provider_family.clone(),
                         adapter_type: e.adapter_type.clone(),
+                        supported_models: e.supported_models.clone(),
                         status: e.status,
                         created_at: e.registered_at,
                     },

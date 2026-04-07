@@ -58,6 +58,7 @@ async fn register_connection(
             ProviderConnectionConfig {
                 provider_family: family.to_owned(),
                 adapter_type: "api".to_owned(),
+                supported_models: vec![],
             },
         )
         .await

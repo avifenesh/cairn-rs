@@ -1488,6 +1488,9 @@ pub struct ProviderConnectionRegistered {
     pub provider_connection_id: crate::ids::ProviderConnectionId,
     pub provider_family: String,
     pub adapter_type: String,
+    /// Model identifiers served through this connection.
+    #[serde(default)]
+    pub supported_models: Vec<String>,
     pub status: crate::providers::ProviderConnectionStatus,
     pub registered_at: u64,
 }
