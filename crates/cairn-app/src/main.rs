@@ -2385,6 +2385,9 @@ struct DiscoveredModel {
     quantization:   Option<String>,
     /// Inferred capabilities: "generate", "embed", "rerank".
     capabilities:   Vec<String>,
+    /// Maximum context window in tokens, if known (from /v1/models or /api/show).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_window_tokens: Option<u32>,
 }
 
 /// Query params shared by `discover-models` and `test`.
@@ -2461,13 +2464,21 @@ async fn discover_ollama_models_live(state: &AppState, endpoint_override: Option
         Ok(resp) if resp.status().is_success() => {
             match resp.json::<serde_json::Value>().await {
                 Ok(body) => {
-                    let models: Vec<DiscoveredModel> = body
+                    let names: Vec<String> = body
                         .get("models").and_then(|m| m.as_array())
                         .map(|arr| arr.iter()
-                            .filter_map(|m| m.get("name")?.as_str())
-                            .map(ollama_name_to_discovered)
+                            .filter_map(|m| m.get("name")?.as_str().map(str::to_owned))
                             .collect())
                         .unwrap_or_default();
+
+                    // Call /api/show for each model to get num_ctx.
+                    // Best-effort: silently ignore failures for individual models.
+                    let mut models: Vec<DiscoveredModel> = Vec::with_capacity(names.len());
+                    for name in &names {
+                        let ctx = fetch_ollama_context_window(&client, &host, name).await;
+                        models.push(ollama_name_to_discovered_with_ctx(name, ctx));
+                    }
+
                     (StatusCode::OK, axum::Json(serde_json::json!({
                         "provider": "ollama",
                         "endpoint": host,
@@ -2484,6 +2495,48 @@ async fn discover_ollama_models_live(state: &AppState, endpoint_override: Option
             "error": format!("Ollama unreachable: {e}"),
         }))).into_response(),
     }
+}
+
+/// Call Ollama's `POST /api/show` for a single model and extract `num_ctx`.
+///
+/// Returns `None` on any error (network, parse, field absent) so discovery
+/// can fall back to `known_context_window`.
+async fn fetch_ollama_context_window(
+    client: &reqwest::Client,
+    host: &str,
+    model_name: &str,
+) -> Option<u32> {
+    let resp = client
+        .post(format!("{host}/api/show"))
+        .json(&serde_json::json!({ "name": model_name }))
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    // Ollama /api/show nests context length as model_info.*.context_length
+    // or directly as model_info.llama.context_length.
+    // Try a few paths before giving up.
+    if let Some(n) = body.pointer("/model_info/llama.context_length")
+        .or_else(|| body.pointer("/model_info/context_length"))
+    {
+        return n.as_u64().map(|v| v as u32);
+    }
+    // Older Ollama versions expose it under /parameters/num_ctx.
+    if let Some(n) = body.pointer("/parameters/num_ctx") {
+        return n.as_u64().map(|v| v as u32);
+    }
+    // Some versions put it under /details/parameter_size or model_info flatly.
+    body.get("model_info")
+        .and_then(|mi| mi.as_object())
+        .and_then(|obj| {
+            obj.values()
+                .find_map(|v| v.as_u64().map(|n| n as u32))
+        })
+        .filter(|&n| n >= 512) // sanity: must be a plausible context size
 }
 
 async fn discover_openai_compat_models_live(
@@ -2512,11 +2565,12 @@ async fn discover_openai_compat_models_live(
         Ok(resp) if resp.status().is_success() => {
             match resp.json::<serde_json::Value>().await {
                 Ok(body) => {
+                    // Each item in `data` is a full model object — pass the
+                    // whole object so we can extract context_length / max_model_len.
                     let models: Vec<DiscoveredModel> = body
                         .get("data").and_then(|d| d.as_array())
                         .map(|arr| arr.iter()
-                            .filter_map(|m| m.get("id")?.as_str())
-                            .map(openai_id_to_discovered)
+                            .filter_map(|m| openai_model_obj_to_discovered(m))
                             .collect())
                         .unwrap_or_default();
                     (StatusCode::OK, axum::Json(serde_json::json!({
@@ -2537,7 +2591,7 @@ async fn discover_openai_compat_models_live(
     }
 }
 
-fn ollama_name_to_discovered(name: &str) -> DiscoveredModel {
+fn ollama_name_to_discovered_with_ctx(name: &str, ctx_window: Option<u32>) -> DiscoveredModel {
     let (base, tag) = name.split_once(':').unwrap_or((name, ""));
     let mut parts = tag.split('-');
     let param_size = parts.next().filter(|s| !s.is_empty()).map(str::to_lowercase);
@@ -2553,10 +2607,22 @@ fn ollama_name_to_discovered(name: &str) -> DiscoveredModel {
     } else {
         vec!["generate".to_owned()]
     };
-    DiscoveredModel { model_id: name.to_owned(), name: name.to_owned(), parameter_size: param_size, quantization, capabilities }
+    // Fall back to well-known defaults when the provider didn't report context length.
+    let ctx = ctx_window.or_else(|| known_context_window(name));
+    DiscoveredModel {
+        model_id: name.to_owned(),
+        name: name.to_owned(),
+        parameter_size: param_size,
+        quantization,
+        capabilities,
+        context_window_tokens: ctx,
+    }
 }
 
-fn openai_id_to_discovered(id: &str) -> DiscoveredModel {
+/// Convert a full OpenAI-compat model JSON object (from /v1/models `data` array)
+/// into a `DiscoveredModel`, extracting the context window if present.
+fn openai_model_obj_to_discovered(obj: &serde_json::Value) -> Option<DiscoveredModel> {
+    let id = obj.get("id")?.as_str()?;
     let lower = id.to_lowercase();
     let capabilities = if lower.contains("embed") || lower.contains("embedding") {
         vec!["embed".to_owned()]
@@ -2565,7 +2631,72 @@ fn openai_id_to_discovered(id: &str) -> DiscoveredModel {
     } else {
         vec!["generate".to_owned()]
     };
-    DiscoveredModel { model_id: id.to_owned(), name: id.to_owned(), parameter_size: None, quantization: None, capabilities }
+    // OpenAI-compat providers use various field names for context window.
+    let ctx = obj.get("context_length")
+        .or_else(|| obj.get("max_model_len"))
+        .or_else(|| obj.get("context_window"))
+        .and_then(|v| v.as_u64())
+        .map(|n| n as u32)
+        .or_else(|| known_context_window(id));
+    Some(DiscoveredModel {
+        model_id:              id.to_owned(),
+        name:                  id.to_owned(),
+        parameter_size:        None,
+        quantization:          None,
+        capabilities,
+        context_window_tokens: ctx,
+    })
+}
+
+/// Return the known context window size for well-known model families.
+///
+/// Used as a fallback when the provider doesn't report context_length.
+fn known_context_window(model_id: &str) -> Option<u32> {
+    let lower = model_id.to_lowercase();
+    if lower.contains("gemma-4") || lower.contains("gemma4") || lower.contains("cyankiwi") {
+        Some(131_072) // gemma-4-31B: 128K context
+    } else if lower.contains("qwen3.5") || lower.contains("qwen3-embedding") {
+        Some(32_768) // qwen3.5:9b / qwen3-embedding:8b: 32K context
+    } else if lower.contains("qwen2") || lower.contains("qwen3") {
+        Some(32_768)
+    } else if lower.contains("llama-3") || lower.contains("llama3") {
+        Some(131_072) // llama3.x: 128K
+    } else if lower.contains("llama-2") || lower.contains("llama2") {
+        Some(4_096)
+    } else if lower.contains("mistral") || lower.contains("mixtral") {
+        Some(32_768)
+    } else if lower.contains("phi-3") || lower.contains("phi3") {
+        Some(131_072)
+    } else if lower.contains("phi-2") || lower.contains("phi2") {
+        Some(2_048)
+    } else if lower.contains("nomic-embed") || lower.contains("all-minilm") {
+        Some(8_192)
+    } else {
+        None
+    }
+}
+
+/// Estimate input token count from text length (rough: 1 token ≈ 4 chars).
+fn estimate_tokens(text: &str) -> u32 {
+    ((text.len() as f64) / 4.0).ceil() as u32
+}
+
+/// Compute a safe `max_output_tokens` given the context window and input length.
+///
+/// Strategy:
+/// - Reserve `input_estimate + safety_margin` tokens for input + overhead.
+/// - Cap output at `context_window / 4` so one response can't consume the
+///   entire window (leaves room for multi-turn history).
+/// - Minimum output is always at least 256 tokens so short models don't
+///   truncate prematurely.
+///
+/// Returns `None` if context_window is unknown (caller should use its own
+/// default).
+fn compute_max_output_tokens(context_window: u32, input_estimate: u32) -> u32 {
+    const SAFETY_MARGIN: u32 = 512; // reserved for system prompt overhead
+    let available = context_window.saturating_sub(input_estimate + SAFETY_MARGIN);
+    let quarter_ctx = context_window / 4;
+    available.min(quarter_ctx).max(256)
 }
 
 /// `GET /v1/providers/connections/:id/test`
@@ -2674,6 +2805,9 @@ struct OllamaGenerateRequest {
     /// Each element must be `{"role": "user"|"assistant"|"system", "content": "..."}`.
     #[serde(default)]
     messages: Option<Vec<serde_json::Value>>,
+    /// Explicit max output tokens override.  When set, bypasses dynamic budgeting.
+    #[serde(default)]
+    max_tokens: Option<u32>,
 }
 
 async fn ollama_generate_handler(
@@ -2736,8 +2870,30 @@ async fn ollama_generate_handler(
         "content": body.prompt,
     })];
 
+    // ── Dynamic token budgeting ───────────────────────────────────────────────
+    // Estimate how many input tokens the prompt uses, then compute a safe
+    // max_output_tokens that fits within the model's context window.
+    //
+    // Fallback chain:
+    //   1. body.max_tokens (explicit caller override) — if set, honour it
+    //   2. known_context_window(model_id)             — model-family defaults
+    //   3. Hardcoded 8K conservative default           — unknown models
+    let input_tokens = estimate_tokens(&body.prompt)
+        + body.messages.as_ref().map(|m| {
+            m.iter().map(|msg| {
+                estimate_tokens(msg.get("content").and_then(|v| v.as_str()).unwrap_or(""))
+            }).sum::<u32>()
+        }).unwrap_or(0);
+
+    let max_output_tokens: u32 = if let Some(explicit) = body.max_tokens {
+        explicit
+    } else {
+        let ctx_window = known_context_window(&model_id).unwrap_or(8_192);
+        compute_max_output_tokens(ctx_window, input_tokens)
+    };
+
     let settings = cairn_domain::providers::ProviderBindingSettings {
-        max_output_tokens: Some(256),
+        max_output_tokens: Some(max_output_tokens),
         ..Default::default()
     };
     let start = std::time::Instant::now();

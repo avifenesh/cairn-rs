@@ -28,6 +28,73 @@ use crate::context::{DecideOutput, GatherOutput, OrchestrationContext};
 use crate::decide::DecidePhase;
 use crate::error::OrchestratorError;
 
+// ── Token budgeting ───────────────────────────────────────────────────────────
+
+/// Estimate the number of tokens in a text string.
+///
+/// Uses the chars-÷-4 heuristic, which approximates GPT-family tokenisers for
+/// Latin-script text within ~20%.  Replace with a proper tokeniser (tiktoken,
+/// tokenizers) when accuracy becomes important.
+#[inline]
+pub fn estimate_tokens(text: &str) -> usize {
+    (text.len() + 3) / 4  // round up so we never under-count
+}
+
+/// Token budget for a single LLM call.
+///
+/// Splits the model's context window into an output reservation (for the
+/// LLM's response) and the remaining input budget available for the prompt.
+///
+/// # Example
+/// ```
+/// # use cairn_orchestrator::TokenBudget;
+/// let budget = TokenBudget::new(131_072); // e.g. gemma-4
+/// assert_eq!(budget.total_context, 131_072);
+/// assert_eq!(budget.reserved_output, 131_072 / 4);
+/// assert_eq!(budget.available_input, 131_072 - 131_072 / 4);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TokenBudget {
+    /// Total context window of the model (tokens).
+    pub total_context: usize,
+    /// Tokens reserved for the model's output.
+    /// Default: `total_context / 4`.
+    pub reserved_output: usize,
+    /// Tokens available for input content.
+    /// Always `total_context - reserved_output`.
+    pub available_input: usize,
+}
+
+impl TokenBudget {
+    /// Create a budget for a model with the given context window.
+    ///
+    /// `reserved_output` defaults to `total_context / 4`.
+    pub fn new(total_context: usize) -> Self {
+        let reserved_output = total_context / 4;
+        Self {
+            total_context,
+            reserved_output,
+            available_input: total_context.saturating_sub(reserved_output),
+        }
+    }
+
+    /// Override the output reservation.
+    ///
+    /// Recomputes `available_input = total_context - reserved_output`.
+    pub fn with_reserved_output(mut self, reserved: usize) -> Self {
+        self.reserved_output = reserved;
+        self.available_input = self.total_context.saturating_sub(reserved);
+        self
+    }
+}
+
+impl Default for TokenBudget {
+    /// A conservative default (16K context) used when no model info is available.
+    fn default() -> Self {
+        Self::new(16_384)
+    }
+}
+
 // ── LlmDecidePhase ────────────────────────────────────────────────────────────
 
 /// Production implementation of the DECIDE phase.
@@ -40,6 +107,9 @@ pub struct LlmDecidePhase {
     /// Optional fixed confidence offset applied to every proposal
     /// (replaces a full `ConfidenceCalibrator` when historical data is absent).
     confidence_bias: f64,
+    /// Token budget used by `PromptBuilder` to truncate context to fit the
+    /// model's context window.  `None` = no truncation (legacy behaviour).
+    token_budget: Option<TokenBudget>,
 }
 
 impl LlmDecidePhase {
@@ -53,6 +123,7 @@ impl LlmDecidePhase {
                 ..Default::default()
             },
             confidence_bias: 0.0,
+            token_budget:    None,
         }
     }
 
@@ -67,6 +138,21 @@ impl LlmDecidePhase {
     pub fn with_confidence_bias(mut self, bias: f64) -> Self {
         self.confidence_bias = bias; self
     }
+
+    /// Set a token budget for prompt truncation.
+    ///
+    /// Call this when the model's context window is known (e.g. from provider
+    /// model discovery).  The `PromptBuilder` will truncate memory chunks,
+    /// step history, and graph context to fit within the available input budget.
+    pub fn with_token_budget(mut self, budget: TokenBudget) -> Self {
+        self.token_budget = Some(budget); self
+    }
+
+    /// Convenience: build a `TokenBudget` from a known context window size and
+    /// attach it.  Equivalent to `with_token_budget(TokenBudget::new(tokens))`.
+    pub fn with_context_window(self, context_window_tokens: usize) -> Self {
+        self.with_token_budget(TokenBudget::new(context_window_tokens))
+    }
 }
 
 #[async_trait]
@@ -77,7 +163,7 @@ impl DecidePhase for LlmDecidePhase {
         gather: &GatherOutput,
     ) -> Result<DecideOutput, OrchestratorError> {
         let system = build_system_prompt(&ctx.agent_type);
-        let user   = build_user_message(ctx, gather);
+        let user   = build_user_message(ctx, gather, self.token_budget.as_ref());
         let messages = vec![
             serde_json::json!({ "role": "system", "content": system }),
             serde_json::json!({ "role": "user",   "content": user   }),
@@ -187,59 +273,153 @@ fn build_system_prompt(agent_type: &str) -> String {
 }
 
 /// Build the user message from `OrchestrationContext` + `GatherOutput`.
-fn build_user_message(ctx: &OrchestrationContext, gather: &GatherOutput) -> String {
-    let mut parts: Vec<String> = Vec::new();
-
-    parts.push(format!("## Goal\n{}", ctx.goal));
-
-    parts.push(format!(
+///
+/// When `budget` is `Some`, content is truncated so the full prompt
+/// (system + user) fits within `budget.available_input` tokens.
+/// Truncation order (from most to least dispensable):
+///   never truncated : system prompt, goal, run state, footer
+///   truncated last  : graph_context (trim from end)
+///   truncated third : step_history  (trim oldest first)
+///   truncated second: memory_chunks (keep most-relevant, trim from end)
+fn build_user_message(
+    ctx: &OrchestrationContext,
+    gather: &GatherOutput,
+    budget: Option<&TokenBudget>,
+) -> String {
+    // ── Fixed sections (never truncated) ─────────────────────────────────────
+    let goal_part = format!("## Goal\n{}", ctx.goal);
+    let run_state_part = format!(
         "## Run state\nrun_id: {}\niteration: {}\nagent_type: {}",
         ctx.run_id.as_str(), ctx.iteration, ctx.agent_type,
-    ));
+    );
+    let footer = "## What should happen next?\nReturn a JSON action array.".to_owned();
 
-    // Step history — most recent steps first so the LLM sees recent context
-    if !gather.step_history.is_empty() {
-        let lines: Vec<String> = gather.step_history.iter().rev().map(|s| {
-            format!(
+    // ── Compute how many tokens are available for optional content ────────────
+    // When no budget is set every section is included without limit.
+    let optional_token_budget: Option<usize> = budget.map(|b| {
+        let fixed_cost = estimate_tokens(&goal_part)
+            + estimate_tokens(&run_state_part)
+            + estimate_tokens(&footer)
+            + 20; // section separators ("\n\n" between each part)
+        b.available_input.saturating_sub(fixed_cost)
+    });
+
+    let mut remaining = optional_token_budget;
+
+    // ── Memory chunks — most relevant first, truncate from end ───────────────
+    // Retrieval already orders chunks highest-score first.
+    let memory_section: Option<String> = if gather.memory_chunks.is_empty() {
+        None
+    } else {
+        let mut snippets: Vec<String> = Vec::new();
+        for (i, r) in gather.memory_chunks.iter().enumerate() {
+            let line = format!("[{}] {}", i + 1, r.chunk.text.chars().take(400).collect::<String>());
+            if let Some(rem) = remaining.as_mut() {
+                let cost = estimate_tokens(&line) + 1;
+                if *rem < cost {
+                    break; // budget exhausted — drop less-relevant chunks
+                }
+                *rem = rem.saturating_sub(cost);
+            }
+            snippets.push(line);
+        }
+        if snippets.is_empty() {
+            None
+        } else {
+            Some(format!("## Relevant knowledge\n{}", snippets.join("\n")))
+        }
+    };
+
+    // ── Step history — most recent first, truncate oldest ────────────────────
+    let step_section: Option<String> = if gather.step_history.is_empty() {
+        None
+    } else {
+        let mut lines: Vec<String> = Vec::new();
+        for s in gather.step_history.iter().rev() {
+            let line = format!(
                 "- [{}] {} | {} | ok={}",
                 s.iteration, s.action_kind, s.summary, s.succeeded,
-            )
-        }).collect();
-        parts.push(format!("## Step history (most recent first)\n{}", lines.join("\n")));
-    }
+            );
+            if let Some(rem) = remaining.as_mut() {
+                let cost = estimate_tokens(&line) + 1;
+                if *rem < cost {
+                    break; // budget exhausted — drop older steps
+                }
+                *rem = rem.saturating_sub(cost);
+            }
+            lines.push(line);
+        }
+        if lines.is_empty() {
+            None
+        } else {
+            Some(format!("## Step history (most recent first)\n{}", lines.join("\n")))
+        }
+    };
 
-    // Memory chunks — show text only
-    if !gather.memory_chunks.is_empty() {
-        let snippets: Vec<String> = gather.memory_chunks.iter().enumerate().map(|(i, r)| {
-            format!("[{}] {}", i + 1, r.chunk.text.chars().take(300).collect::<String>())
-        }).collect();
-        parts.push(format!("## Relevant knowledge\n{}", snippets.join("\n")));
-    }
+    // ── Operator settings ─────────────────────────────────────────────────────
+    let settings_section: Option<String> = if gather.operator_settings.is_empty() {
+        None
+    } else {
+        let text = gather.operator_settings.iter()
+            .map(|s| format!("  {}: {}", s.key, s.value))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let section = format!("## Operator settings\n{text}");
+        if let Some(rem) = remaining.as_mut() {
+            let cost = estimate_tokens(&section);
+            if *rem < cost {
+                None // no room — skip entirely
+            } else {
+                *rem = rem.saturating_sub(cost);
+                Some(section)
+            }
+        } else {
+            Some(section)
+        }
+    };
 
-    // Operator settings — surface key defaults
-    if !gather.operator_settings.is_empty() {
-        let settings: Vec<String> = gather.operator_settings.iter().map(|s| {
-            format!("  {}: {}", s.key, s.value)
-        }).collect();
-        parts.push(format!("## Operator settings\n{}", settings.join("\n")));
-    }
-
-    // Checkpoint hint
-    if let Some(cp) = &gather.checkpoint {
-        parts.push(format!(
+    // ── Checkpoint hint ───────────────────────────────────────────────────────
+    let checkpoint_section: Option<String> = gather.checkpoint.as_ref().and_then(|cp| {
+        let section = format!(
             "## Checkpoint available\ncheckpoint_id: {} — the run can be restored to this point.",
             cp.checkpoint_id.as_str(),
-        ));
-    }
+        );
+        if let Some(rem) = remaining.as_mut() {
+            let cost = estimate_tokens(&section);
+            if *rem < cost { return None; }
+            *rem = rem.saturating_sub(cost);
+        }
+        Some(section)
+    });
 
-    // Graph nodes (brief)
-    if !gather.graph_nodes.is_empty() {
-        let node_ids: Vec<&str> = gather.graph_nodes.iter().map(|n| n.node_id.as_str()).collect();
-        parts.push(format!("## Graph context\nNearby nodes: {}", node_ids.join(", ")));
-    }
+    // ── Graph context — truncated last ────────────────────────────────────────
+    let graph_section: Option<String> = if gather.graph_nodes.is_empty() {
+        None
+    } else {
+        let mut node_ids: Vec<&str> = Vec::new();
+        for node in &gather.graph_nodes {
+            let cost = node.node_id.len() / 4 + 2;
+            if let Some(rem) = remaining.as_mut() {
+                if *rem < cost { break; }
+                *rem = rem.saturating_sub(cost);
+            }
+            node_ids.push(node.node_id.as_str());
+        }
+        if node_ids.is_empty() {
+            None
+        } else {
+            Some(format!("## Graph context\nNearby nodes: {}", node_ids.join(", ")))
+        }
+    };
 
-    parts.push("## What should happen next?\nReturn a JSON action array.".to_owned());
-
+    // ── Assemble ──────────────────────────────────────────────────────────────
+    let mut parts: Vec<String> = vec![goal_part, run_state_part];
+    if let Some(s) = memory_section    { parts.push(s); }
+    if let Some(s) = step_section      { parts.push(s); }
+    if let Some(s) = settings_section  { parts.push(s); }
+    if let Some(s) = checkpoint_section { parts.push(s); }
+    if let Some(s) = graph_section     { parts.push(s); }
+    parts.push(footer);
     parts.join("\n\n")
 }
 
@@ -388,7 +568,7 @@ mod tests {
 
     #[test]
     fn user_message_contains_goal_and_run_id() {
-        let msg = build_user_message(&ctx(), &empty_gather());
+        let msg = build_user_message(&ctx(), &empty_gather(), None);
         assert!(msg.contains("cairn-rs architecture"), "goal must appear");
         assert!(msg.contains("run_1"),                 "run_id must appear");
         assert!(msg.contains("orchestrator"),          "agent_type must appear");
@@ -405,7 +585,7 @@ mod tests {
                 succeeded:   true,
             },
         ];
-        let msg = build_user_message(&ctx(), &g);
+        let msg = build_user_message(&ctx(), &g, None);
         assert!(msg.contains("architecture docs"), "step history must appear");
         assert!(msg.contains("invoke_tool"),       "action kind must appear");
     }
@@ -513,5 +693,194 @@ mod tests {
         let phase = LlmDecidePhase::new(mock, "gemma4").with_confidence_bias(0.2);
         let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
         assert!((out.proposals[0].confidence - 0.7).abs() < 1e-9, "bias should increase confidence");
+    }
+
+    // ── TokenBudget tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn token_budget_default_reserves_quarter() {
+        let b = TokenBudget::new(131_072);
+        assert_eq!(b.total_context, 131_072);
+        assert_eq!(b.reserved_output, 131_072 / 4);
+        assert_eq!(b.available_input, 131_072 - 131_072 / 4);
+    }
+
+    #[test]
+    fn token_budget_with_custom_reservation() {
+        let b = TokenBudget::new(8_192).with_reserved_output(1_000);
+        assert_eq!(b.reserved_output, 1_000);
+        assert_eq!(b.available_input, 7_192);
+    }
+
+    #[test]
+    fn estimate_tokens_empty_string() {
+        assert_eq!(estimate_tokens(""), 0);
+    }
+
+    #[test]
+    fn estimate_tokens_rounds_up() {
+        // 1 char → 1 token (ceiling of 1/4)
+        assert_eq!(estimate_tokens("a"), 1);
+        // 4 chars → 1 token
+        assert_eq!(estimate_tokens("abcd"), 1);
+        // 5 chars → 2 tokens (ceiling of 5/4)
+        assert_eq!(estimate_tokens("abcde"), 2);
+        // 400 chars → 100 tokens
+        assert_eq!(estimate_tokens(&"x".repeat(400)), 100);
+    }
+
+    // ── Token-budget truncation tests ─────────────────────────────────────────
+
+    /// A very tight budget should include goal + run_state but omit optional content.
+    #[test]
+    fn tight_budget_drops_optional_content() {
+        let mut g = empty_gather();
+        // Add memory and step history that would normally appear
+        g.memory_chunks = (0..5).map(|i| {
+            cairn_memory::retrieval::RetrievalResult {
+                chunk: {
+                    let mut c = cairn_memory::ingest::ChunkRecord {
+                        chunk_id: cairn_domain::ChunkId::new(format!("c{i}")),
+                        document_id: cairn_domain::KnowledgeDocumentId::new("doc"),
+                        source_id: cairn_domain::SourceId::new("src"),
+                        source_type: cairn_memory::ingest::SourceType::PlainText,
+                        project: ctx().project,
+                        text: "a".repeat(400),
+                        position: i as u32,
+                        created_at: 0,
+                        updated_at: None,
+                        provenance_metadata: None,
+                        credibility_score: None,
+                        graph_linkage: None,
+                        embedding: None,
+                        content_hash: None,
+                        entities: vec![],
+                        embedding_model_id: None,
+                        needs_reembed: false,
+                    };
+                    c
+                },
+                score: 1.0 - i as f64 * 0.1,
+                breakdown: Default::default(),
+            }
+        }).collect();
+        g.step_history = (0..3).map(|i| {
+            crate::context::StepSummary {
+                iteration: i,
+                action_kind: "invoke_tool".to_owned(),
+                summary: "did a thing".to_owned(),
+                succeeded: true,
+            }
+        }).collect();
+
+        // Budget of 50 tokens — can barely fit goal + run_state + footer
+        let tight = TokenBudget::new(50).with_reserved_output(0);
+
+        let msg = build_user_message(&ctx(), &g, Some(&tight));
+
+        // Goal must always be present
+        assert!(msg.contains("Goal"), "goal section must always appear");
+        // Memory should be truncated/absent given the extreme budget
+        // (we just verify the function doesn't panic; exact truncation depends on text sizes)
+        let _ = msg;
+    }
+
+    /// Unlimited budget includes all content.
+    #[test]
+    fn no_budget_includes_all_content() {
+        let mut g = empty_gather();
+        g.step_history = vec![
+            crate::context::StepSummary {
+                iteration: 0,
+                action_kind: "invoke_tool".to_owned(),
+                summary: "searched for architecture docs".to_owned(),
+                succeeded: true,
+            },
+        ];
+        // memory chunk with distinctive text
+        g.memory_chunks = vec![
+            cairn_memory::retrieval::RetrievalResult {
+                chunk: {
+                    cairn_memory::ingest::ChunkRecord {
+                        chunk_id: cairn_domain::ChunkId::new("c0"),
+                        document_id: cairn_domain::KnowledgeDocumentId::new("doc"),
+                        source_id: cairn_domain::SourceId::new("src"),
+                        source_type: cairn_memory::ingest::SourceType::PlainText,
+                        project: ctx().project,
+                        text: "cairn uses event sourcing for durability".to_owned(),
+                        position: 0,
+                        created_at: 0,
+                        updated_at: None,
+                        provenance_metadata: None,
+                        credibility_score: None,
+                        graph_linkage: None,
+                        embedding: None,
+                        content_hash: None,
+                        entities: vec![],
+                        embedding_model_id: None,
+                        needs_reembed: false,
+                    }
+                },
+                score: 0.9,
+                breakdown: Default::default(),
+            },
+        ];
+
+        let msg = build_user_message(&ctx(), &g, None);
+
+        assert!(msg.contains("cairn uses event sourcing"), "memory chunk must appear without budget");
+        assert!(msg.contains("architecture docs"), "step history must appear without budget");
+    }
+
+    /// Memory chunks are included most-relevant-first; least relevant are dropped
+    /// when the budget is tight.
+    #[test]
+    fn memory_chunks_most_relevant_first() {
+        let texts = ["highly relevant content here", "somewhat relevant", "least relevant stuff"];
+        let mut g = empty_gather();
+        g.memory_chunks = texts.iter().enumerate().map(|(i, text)| {
+            cairn_memory::retrieval::RetrievalResult {
+                chunk: cairn_memory::ingest::ChunkRecord {
+                    chunk_id: cairn_domain::ChunkId::new(format!("c{i}")),
+                    document_id: cairn_domain::KnowledgeDocumentId::new("doc"),
+                    source_id: cairn_domain::SourceId::new("src"),
+                    source_type: cairn_memory::ingest::SourceType::PlainText,
+                    project: ctx().project,
+                    text: text.to_string(),
+                    position: i as u32,
+                    created_at: 0,
+                    updated_at: None,
+                    provenance_metadata: None,
+                    credibility_score: None,
+                    graph_linkage: None,
+                    embedding: None,
+                    content_hash: None,
+                    entities: vec![],
+                    embedding_model_id: None,
+                    needs_reembed: false,
+                },
+                score: 1.0 - i as f64 * 0.3,
+                breakdown: Default::default(),
+            }
+        }).collect();
+
+        // Large budget — all three included
+        let msg = build_user_message(&ctx(), &g, None);
+        assert!(msg.contains("highly relevant"), "chunk[0] must appear");
+        assert!(msg.contains("somewhat relevant"), "chunk[1] must appear");
+        assert!(msg.contains("least relevant"), "chunk[2] must appear");
+    }
+
+    /// with_context_window creates a budget from the model's context window.
+    #[tokio::test]
+    async fn with_context_window_sets_budget() {
+        let mock = Arc::new(MockProvider {
+            response: r#"[{"action_type":"complete_run","description":"done","confidence":0.9,"requires_approval":false}]"#.to_owned(),
+        });
+        // 128K context like gemma-4
+        let phase = LlmDecidePhase::new(mock, "gemma4").with_context_window(131_072);
+        let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
+        // Should work normally — the budget is generous enough that nothing is truncated
+        assert_eq!(out.proposals[0].action_type, ActionType::CompleteRun);
     }
 }

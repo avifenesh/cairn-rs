@@ -34,7 +34,7 @@ pub use context::{
 pub use error::OrchestratorError;
 pub use gather::GatherPhase;
 pub use decide::DecidePhase;
-pub use decide_impl::LlmDecidePhase;
+pub use decide_impl::{estimate_tokens, LlmDecidePhase, TokenBudget};
 pub use execute::ExecutePhase;
 pub use loop_runner::OrchestratorLoop;
 
