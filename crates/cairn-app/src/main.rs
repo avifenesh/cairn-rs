@@ -3590,16 +3590,29 @@ async fn main() {
         process_role: config.process_role,
     };
 
+    // ── Wire secondary event log (covers all service-layer appends) ─────────
+    // All 109 store.append() call sites in 42 service files are covered by
+    // setting the secondary log here once. Any event written by RunService,
+    // TaskService, ApprovalService etc. is automatically dual-written.
+    if let Some(ref pg_backend) = state.pg {
+        state.runtime.store.set_secondary_log(pg_backend.event_log.clone());
+        eprintln!("store: service-layer events will dual-write to Postgres");
+    } else if let Some(ref sq_backend) = state.sqlite {
+        state.runtime.store.set_secondary_log(sq_backend.event_log.clone());
+        eprintln!("store: service-layer events will dual-write to SQLite");
+    }
+
     // ── Demo seed data (local mode only) ─────────────────────────────────────
     if state.mode == DeploymentMode::Local {
         seed_demo_data(&state).await;
     }
 
-    // ── Graph startup replay ───────────────────────────────────────────────────
-    // Replay all store events into the graph projector so that pre-existing
-    // data (seeded above or loaded from a snapshot) is immediately visible
-    // through the graph HTTP endpoints without requiring an SSE connection first.
+    // ── Startup replays ────────────────────────────────────────────────────────
+    // Replay all store events into in-memory projections so pre-existing data
+    // (seeded above or loaded from a snapshot) is immediately visible without
+    // requiring an SSE connection first.
     lib_state.replay_graph().await;
+    lib_state.replay_evals().await;
 
     eprintln!("cairn-app starting with role: {}", config.process_role);
 

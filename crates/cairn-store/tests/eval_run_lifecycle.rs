@@ -42,6 +42,10 @@ fn start_event(id: &str, subject_kind: &str, ts: u64) -> EventEnvelope<RuntimeEv
             subject_kind: subject_kind.to_owned(),
             evaluator_type: "llm_judge".to_owned(),
             started_at: ts,
+            prompt_asset_id: None,
+            prompt_version_id: None,
+            prompt_release_id: None,
+            created_by: None,
         }),
     )
 }
@@ -171,6 +175,10 @@ async fn list_by_project_returns_runs_in_order() {
         subject_kind: "prompt_release".to_owned(),
         evaluator_type: "auto".to_owned(),
         started_at: 500,
+        prompt_asset_id: None,
+        prompt_version_id: None,
+        prompt_release_id: None,
+        created_by: None,
     }))]).await.unwrap();
 
     let runs = EvalRunReadModel::list_by_project(store.as_ref(), &project(), 10, 0)
@@ -215,6 +223,10 @@ async fn eval_run_links_to_prompt_asset_id() {
             subject_kind: "prompt_asset".to_owned(),   // ← links to prompt asset
             evaluator_type: "regression_suite".to_owned(),
             started_at: 10_000,
+            prompt_asset_id: None,
+            prompt_version_id: None,
+            prompt_release_id: None,
+            created_by: None,
         })),
         ev("evt_complete_pa", RuntimeEvent::EvalRunCompleted(EvalRunCompleted {
             project: project(),
@@ -265,6 +277,10 @@ async fn eval_run_list_is_project_scoped() {
             subject_kind: "prompt_release".to_owned(),
             evaluator_type: "auto".to_owned(),
             started_at: 500,
+            prompt_asset_id: None,
+            prompt_version_id: None,
+            prompt_release_id: None,
+            created_by: None,
         })),
     ]).await.unwrap();
 

@@ -3524,6 +3524,156 @@ mod tests {
             .unwrap();
         assert!(other.is_empty());
     }
+
+    // ── Secondary event log (dual-write) ─────────────────────────────────────
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Minimal in-memory secondary log that counts appended events.
+    struct CountingLog {
+        count: Arc<AtomicUsize>,
+        events: Arc<Mutex<Vec<EventEnvelope<RuntimeEvent>>>>,
+    }
+
+    impl CountingLog {
+        fn new() -> (Arc<Self>, Arc<AtomicUsize>) {
+            let count = Arc::new(AtomicUsize::new(0));
+            let log = Arc::new(CountingLog {
+                count: count.clone(),
+                events: Arc::new(Mutex::new(Vec::new())),
+            });
+            (log, count)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl EventLog for CountingLog {
+        async fn append(
+            &self,
+            events: &[EventEnvelope<RuntimeEvent>],
+        ) -> Result<Vec<EventPosition>, crate::StoreError> {
+            self.count.fetch_add(events.len(), Ordering::SeqCst);
+            self.events.lock().unwrap().extend(events.iter().cloned());
+            Ok(events.iter().enumerate()
+                .map(|(i, _)| EventPosition(i as u64))
+                .collect())
+        }
+
+        async fn read_stream(
+            &self,
+            _after: Option<EventPosition>,
+            _limit: usize,
+        ) -> Result<Vec<StoredEvent>, crate::StoreError> {
+            Ok(vec![])
+        }
+
+        async fn head_position(&self) -> Result<Option<EventPosition>, crate::StoreError> {
+            Ok(None)
+        }
+
+        async fn read_by_entity(
+            &self,
+            _entity: &EntityRef,
+            _after: Option<EventPosition>,
+            _limit: usize,
+        ) -> Result<Vec<StoredEvent>, crate::StoreError> {
+            Ok(vec![])
+        }
+
+        async fn find_by_causation_id(
+            &self,
+            _causation_id: &str,
+        ) -> Result<Option<EventPosition>, crate::StoreError> {
+            Ok(None)
+        }
+    }
+
+    /// Secondary log receives all events appended to the primary store.
+    #[tokio::test]
+    async fn secondary_log_receives_all_appends() {
+        let store = Arc::new(InMemoryStore::new());
+        let (counting_log, count) = CountingLog::new();
+        store.set_secondary_log(counting_log);
+
+        let project = test_project();
+
+        // Append a session created event.
+        store.append(&[make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+            project: project.clone(),
+            session_id: SessionId::new("sess_sec_1"),
+        }))]).await.unwrap();
+
+        assert_eq!(count.load(Ordering::SeqCst), 1, "secondary must receive 1 event");
+
+        // Append two more events in a single batch.
+        store.append(&[
+            make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+                project: project.clone(),
+                session_id: SessionId::new("sess_sec_2"),
+            })),
+            make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+                project: project.clone(),
+                session_id: SessionId::new("sess_sec_3"),
+            })),
+        ]).await.unwrap();
+
+        assert_eq!(count.load(Ordering::SeqCst), 3, "secondary must receive all 3 events total");
+    }
+
+    /// Primary store is not affected when secondary log is absent.
+    #[tokio::test]
+    async fn no_secondary_log_works_normally() {
+        let store = InMemoryStore::new();
+        // No secondary log set — append must succeed normally.
+        let positions = store.append(&[make_envelope(RuntimeEvent::SessionCreated(
+            SessionCreated {
+                project: test_project(),
+                session_id: SessionId::new("sess_no_sec"),
+            },
+        ))]).await.unwrap();
+
+        assert_eq!(positions.len(), 1);
+        let sessions = SessionReadModel::list_active(&store, 10).await.unwrap();
+        assert_eq!(sessions.len(), 1);
+    }
+
+    /// Primary write is NOT rolled back when secondary fails.
+    #[tokio::test]
+    async fn secondary_failure_does_not_roll_back_primary() {
+        struct FailingLog;
+
+        #[async_trait::async_trait]
+        impl EventLog for FailingLog {
+            async fn append(
+                &self,
+                _events: &[EventEnvelope<RuntimeEvent>],
+            ) -> Result<Vec<EventPosition>, crate::StoreError> {
+                Err(crate::StoreError::Internal("secondary down".to_owned()))
+            }
+            async fn read_stream(&self, _: Option<EventPosition>, _: usize)
+                -> Result<Vec<StoredEvent>, crate::StoreError> { Ok(vec![]) }
+            async fn head_position(&self) -> Result<Option<EventPosition>, crate::StoreError> { Ok(None) }
+            async fn read_by_entity(&self, _: &EntityRef, _: Option<EventPosition>, _: usize)
+                -> Result<Vec<StoredEvent>, crate::StoreError> { Ok(vec![]) }
+            async fn find_by_causation_id(&self, _: &str)
+                -> Result<Option<EventPosition>, crate::StoreError> { Ok(None) }
+        }
+
+        let store = Arc::new(InMemoryStore::new());
+        store.set_secondary_log(Arc::new(FailingLog));
+
+        // The primary append must succeed despite secondary failure.
+        let positions = store.append(&[make_envelope(RuntimeEvent::SessionCreated(
+            SessionCreated {
+                project: test_project(),
+                session_id: SessionId::new("sess_resilient"),
+            },
+        ))]).await.unwrap();
+
+        assert_eq!(positions.len(), 1, "primary must succeed even when secondary fails");
+        let sessions = SessionReadModel::list_active(store.as_ref(), 10).await.unwrap();
+        assert_eq!(sessions.len(), 1, "primary projection must be updated");
+    }
 }
 
 
