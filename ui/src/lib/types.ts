@@ -17,6 +17,19 @@ export interface ProviderConnectionRecord {
   created_at: number;
 }
 
+// ── Agent templates (GET /v1/agent-templates) ────────────────────────────────
+
+export interface AgentTemplate {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  default_prompt: string;
+  default_tools: string[];
+  approval_policy: "none" | "sensitive" | "all";
+  agent_role: string;
+}
+
 // ── Provider health (GET /v1/providers/health) ───────────────────────────────
 
 export interface ProviderHealthEntry {

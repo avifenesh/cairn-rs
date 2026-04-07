@@ -28,6 +28,7 @@ import {
   Waves,
   Zap,
   CheckSquare,
+  Bot,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useQuery } from '@tanstack/react-query';
@@ -45,6 +46,7 @@ export type NavPage =
   | 'orchestration'
   | 'approvals'
   | 'prompts'
+  | 'agent-templates'
   | 'traces'
   | 'memory'
   | 'costs'
@@ -95,8 +97,9 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'tasks',     label: 'Tasks',     icon: ListChecks  },
       { id: 'workers',        label: 'Workers',        icon: Cpu       },
       { id: 'orchestration',  label: 'Orchestration',  icon: GitBranch },
-      { id: 'approvals', label: 'Approvals', icon: CheckSquare },
-      { id: 'prompts',   label: 'Prompts',   icon: FileText    },
+      { id: 'approvals',        label: 'Approvals',        icon: CheckSquare },
+      { id: 'prompts',          label: 'Prompts',          icon: FileText    },
+      { id: 'agent-templates',  label: 'Agent Templates',  icon: Bot         },
     ],
   },
   {

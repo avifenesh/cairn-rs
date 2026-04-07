@@ -10,7 +10,7 @@ import { type BreadcrumbItem } from './Breadcrumb';
 // All top-level pages — must match NavPage union in Sidebar.tsx
 const VALID_PAGES: NavPage[] = [
   'dashboard', 'workspaces',
-  'sessions', 'runs', 'tasks', 'workers', 'orchestration', 'approvals', 'prompts',
+  'sessions', 'runs', 'tasks', 'workers', 'orchestration', 'approvals', 'prompts', 'agent-templates',
   'traces', 'memory', 'sources', 'costs', 'cost-calc', 'evals', 'graph', 'audit-log', 'logs', 'metrics',
   'providers', 'plugins', 'credentials', 'channels', 'deployment', 'playground', 'test-harness', 'api-docs', 'settings', 'profile',
 ];
@@ -57,15 +57,16 @@ export function currentRoute(): Route {
 // ── Page metadata ─────────────────────────────────────────────────────────────
 
 export const PAGE_TITLES: Record<NavPage, string> = {
-  dashboard:   'Dashboard',
-  workspaces:  'Workspaces',
-  sessions:    'Sessions',
-  runs:        'Runs',
-  tasks:       'Tasks',
-  workers:         'Workers',
-  orchestration:   'Orchestration',
-  approvals:   'Approvals',
-  prompts:     'Prompts',
+  dashboard:          'Dashboard',
+  workspaces:         'Workspaces',
+  sessions:           'Sessions',
+  runs:               'Runs',
+  tasks:              'Tasks',
+  workers:            'Workers',
+  orchestration:      'Orchestration',
+  approvals:          'Approvals',
+  prompts:            'Prompts',
+  'agent-templates':  'Agent Templates',
   traces:      'Traces',
   memory:      'Memory',
   sources:     'Sources',
@@ -95,8 +96,9 @@ const PAGE_GROUP: Partial<Record<NavPage, string>> = {
   tasks:       'Operations',
   workers:         'Operations',
   orchestration:   'Operations',
-  approvals:   'Operations',
-  prompts:     'Operations',
+  approvals:          'Operations',
+  prompts:            'Operations',
+  'agent-templates':  'Operations',
   traces:      'Observability',
   memory:      'Observability',
   sources:     'Observability',

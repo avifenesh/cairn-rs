@@ -244,6 +244,15 @@ impl DecidePhase for LlmDecidePhase {
             }
         }
 
+        // Override requires_approval for inherently safe read-only actions.
+        // Models sometimes over-cautiously set this for web/memory reads — we
+        // correct it here so the approval gate only fires for genuinely sensitive actions.
+        for p in &mut proposals {
+            if p.requires_approval && is_safe_read_action(p) {
+                p.requires_approval = false;
+            }
+        }
+
         let requires_approval = proposals.iter().any(|p| p.requires_approval);
         let calibrated_confidence = proposals
             .iter()
@@ -269,55 +278,79 @@ impl DecidePhase for LlmDecidePhase {
 /// the matching role.  Falls back to a generic orchestrator prompt if the role
 /// is not registered.
 fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> String {
+    // Role identity — use registered role prompt or a directive default.
     let role_prompt = default_roles()
         .into_iter()
         .find(|r: &AgentRole| r.role_id == agent_type)
         .and_then(|r| r.system_prompt)
         .unwrap_or_else(|| {
-            "You are an AI orchestrator. Break down complex goals, delegate to sub-agents, \
-             and synthesise results."
+            // Directive default: tools first, complete when done, delegate only when necessary.
+            "You are a focused AI agent. Your job is to complete the given goal \
+             directly using the available tools. Do not delegate work to sub-agents \
+             unless the task is clearly multi-part and genuinely requires parallel execution."
                 .to_owned()
         });
 
-    let base = format!(
-        "{role_prompt}\n\
+    // Build the tool list section (shown only when tools are registered).
+    let tools_section = if !tools.is_empty() {
+        let lines = tools.iter()
+            .map(|t| format!("  - {}", t.prompt_line()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\n\n\
+             ## Available tools\n\
+             Use invoke_tool with one of these tool_name values:\n\
+             {lines}\n\
+             \n\
+             ## Tool usage rules — FOLLOW THESE EXACTLY\n\
+             1. ONLY call tools whose tool_name appears in the Available Tools list above.\n\
+             2. ALWAYS search memory first: invoke_tool memory_search before answering any question.\n\
+             3. If memory is empty or insufficient, try web_fetch or other listed tools.\n\
+             4. After gathering information, use create_memory to store key findings.\n\
+             5. When you have enough information to answer the goal, return complete_run immediately.\n\
+             6. If memory is empty AND no other tool can help, return complete_run with your best answer.\n\
+             7. ONLY use spawn_subagent when the goal explicitly requires separate parallel tasks.\n\
+             8. Do NOT invent tool names. Do NOT spawn sub-agents for simple retrieval or summarisation.\n\
+             9. Set requires_approval=false for ALL read/search/fetch/summarise actions.\n\
+                Set requires_approval=true ONLY for: file_write, shell_exec, cancel_task, \
+                or any action that modifies external state irreversibly."
+        )
+    } else {
+        String::new()
+    };
+
+    format!(
+        "{role_prompt}\
+         {tools_section}\n\
+         \n\
+         ## Decision rules\n\
+         - If the goal can be answered with available information → complete_run with summary.\n\
+         - If tools are available → invoke_tool before concluding you lack information.\n\
+         - If the task is clearly multi-part requiring separate agents → spawn_subagent per part.\n\
+         - If blocked and need human input → escalate_to_operator.\n\
+         - Prefer completing in fewer iterations; do not defer work unnecessarily.\n\
          \n\
          ## Response format\n\
          Respond ONLY with a JSON array of action objects. Each object MUST have:\n\
          - \"action_type\": one of {action_types}\n\
-         - \"description\": concise explanation of this action\n\
+         - \"description\": concise explanation\n\
          - \"confidence\": float 0.0–1.0\n\
-         - \"requires_approval\": true only when operator approval is needed\n\
-         - \"tool_name\" (optional): tool ID or sub-agent role for spawn/invoke actions\n\
-         - \"tool_args\" (optional): JSON arguments for the tool\n\
+         - \"requires_approval\": false for read/search/fetch/summarise actions; true ONLY for \
+           file writes, code execution, sending messages, or destructive actions\n\
+         - \"tool_name\" (for invoke_tool/spawn_subagent): tool ID or sub-agent role\n\
+         - \"tool_args\" (for invoke_tool/spawn_subagent/create_memory): JSON arguments\n\
          \n\
          Field conventions:\n\
-         - spawn_subagent: tool_name = \"researcher\"|\"executor\"|\"reviewer\",\
-           tool_args = {{\"goal\": \"...\"}}\n\
          - invoke_tool:    tool_name = tool ID,  tool_args = {{...}}\n\
+         - complete_run:   description = full answer/summary of what was accomplished\n\
+         - spawn_subagent: tool_name = \"researcher\"|\"executor\"|\"reviewer\",\
+           tool_args = {{\"goal\": \"specific sub-task goal\"}}\n\
          - create_memory:  tool_args = {{\"content\": \"...\"}}\n\
-         - send_notification: tool_args = {{\"to\": \"id\", \"message\": \"...\"}}\n\
-         - complete_run:   description = final summary\n\
-         - escalate_to_operator: description = why, requires_approval = true\n\
          \n\
-         Return ONLY the JSON array — no markdown fences, no prose.",
-        action_types = r#""spawn_subagent"|"invoke_tool"|"create_memory"|"send_notification"|"complete_run"|"escalate_to_operator""#,
-    );
-
-    if !tools.is_empty() {
-        let lines = tools.iter()
-            .map(|t| format!("  - {}", t.prompt_line()))
-            .collect::<Vec<_>>()
-            .join("
-");
-        format!("{base}
-
-## Available tools
-For invoke_tool actions, set tool_name to one of these:
-{lines}", base = base)
-    } else {
-        base
-    }
+         Return ONLY the JSON array — no markdown fences, no explanation text.",
+        action_types = r#""invoke_tool"|"complete_run"|"create_memory"|"spawn_subagent"|"send_notification"|"escalate_to_operator""#,
+    )
 }
 
 /// Build the user message from `OrchestrationContext` + `GatherOutput`.
@@ -340,7 +373,21 @@ fn build_user_message(
         "## Run state\nrun_id: {}\niteration: {}\nagent_type: {}",
         ctx.run_id.as_str(), ctx.iteration, ctx.agent_type,
     );
-    let footer = "## What should happen next?\nReturn a JSON action array.".to_owned();
+    let has_memory = !gather.memory_chunks.is_empty();
+    let memory_hint = if has_memory {
+        "Memory contains relevant information — use it to answer the goal, then complete_run.".to_owned()
+    } else {
+        "Memory is empty. You have enough knowledge to answer this goal directly. \
+         Return complete_run immediately with your best answer — do NOT call memory_search again \
+         if you already tried it and got no results."
+            .to_owned()
+    };
+    let footer = format!(
+        "## What should happen next?\n\
+         {memory_hint}\n\
+         Return a JSON action array. Use complete_run as soon as you can answer the goal. \
+         Do not spawn sub-agents for simple retrieval or summarisation."
+    );
 
     // ── Compute how many tokens are available for optional content ────────────
     // When no budget is set every section is included without limit.
@@ -532,6 +579,28 @@ fn parse_one(v: serde_json::Value) -> Option<ActionProposal> {
 /// Returns true when `proposals` is exactly a single `EscalateToOperator`
 /// whose description starts with "LLM returned a non-JSON response" —
 /// i.e. the fallback we emit on parse failure.
+/// Return `true` when an action proposal is inherently safe (read-only) and
+/// should never require approval, regardless of what the model returned.
+///
+/// Models sometimes over-cautiously set `requires_approval=true` for memory
+/// searches or HTTP GETs.  This guard corrects that before the approval gate.
+fn is_safe_read_action(proposal: &ActionProposal) -> bool {
+    use ActionType::{InvokeTool, CreateMemory, CompleteRun};
+    match proposal.action_type {
+        InvokeTool => {
+            let name = proposal.tool_name.as_deref().unwrap_or("").to_lowercase();
+            matches!(
+                name.as_str(),
+                "memory_search" | "web_fetch" | "http_request" | "get_run" | "get_task"
+                | "search_memory" | "list_runs" | "glob_find" | "grep_search"
+                | "read_document" | "file_read" | "graph_query" | "search_events"
+            )
+        }
+        CreateMemory | CompleteRun => true,
+        _ => false,
+    }
+}
+
 fn is_fallback_escalation(proposals: &[ActionProposal]) -> bool {
     proposals.len() == 1
         && proposals[0].action_type == ActionType::EscalateToOperator

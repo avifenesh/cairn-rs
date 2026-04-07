@@ -37,8 +37,9 @@ const CredentialsPage    = lazy(() => import('./pages/CredentialsPage').then(m =
 const ChannelsPage       = lazy(() => import('./pages/ChannelsPage').then(m => ({ default: m.ChannelsPage })));
 const LogsPage           = lazy(() => import('./pages/LogsPage').then(m => ({ default: m.LogsPage })));
 const AuditLogPage       = lazy(() => import('./pages/AuditLogPage').then(m => ({ default: m.AuditLogPage })));
-const SettingsPage       = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const ProfilePage        = lazy(() => import('./pages/ProfilePage').then(m => ({ default: m.ProfilePage })));
+const SettingsPage         = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const ProfilePage          = lazy(() => import('./pages/ProfilePage').then(m => ({ default: m.ProfilePage })));
+const AgentTemplatesPage   = lazy(() => import('./pages/AgentTemplatesPage').then(m => ({ default: m.AgentTemplatesPage })));
 import { NotFoundPage } from './pages/NotFoundPage';
 
 import { defaultApi, getStoredToken, clearStoredToken, ApiError } from './lib/api';
@@ -143,9 +144,10 @@ function renderRoute(route: Route): React.ReactNode {
       case 'graph':       return <GraphPage />;
       case 'api-docs':    return <ApiDocsPage />;
       case 'audit-log':   return <AuditLogPage />;
-      case 'settings':    return <SettingsPage />;
-      case 'profile':     return <ProfilePage />;
-      case 'playground':  return <PlaygroundPage />;
+      case 'settings':         return <SettingsPage />;
+      case 'profile':          return <ProfilePage />;
+      case 'playground':       return <PlaygroundPage />;
+      case 'agent-templates':  return <AgentTemplatesPage />;
       default:            return <NotFoundPage />;
     }
   })();

@@ -410,6 +410,22 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/admin/audit-log — list audit log entries (most recent first). */
     /** GET /v1/changelog — release notes array. Public endpoint. */
+    // ── Agent templates ──────────────────────────────────────────────────────
+    listAgentTemplates: (): Promise<import("./types").AgentTemplate[]> =>
+      get("/v1/agent-templates"),
+
+    instantiateAgentTemplate: (templateId: string, body: {
+      goal: string;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<{
+      template_id: string; template_name: string;
+      session_id: string; run_id: string;
+      goal: string; default_tools: string[];
+      agent_role: string; approval_policy: string;
+    }> => post(`/v1/agent-templates/${encodeURIComponent(templateId)}/instantiate`, body),
+
     getChangelog: (): Promise<import("./types").ChangelogEntry[]> =>
       get('/v1/changelog'),
 

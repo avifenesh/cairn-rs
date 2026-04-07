@@ -58,16 +58,26 @@ async fn setup_run() -> Arc<InMemoryServices> {
 }
 
 fn build_execute_phase(svc: &Arc<InMemoryServices>) -> RuntimeExecutePhase {
+    build_execute_phase_with_registry(svc, None)
+}
+
+fn build_execute_phase_with_registry(
+    svc: &Arc<InMemoryServices>,
+    registry: Option<Arc<cairn_tools::BuiltinToolRegistry>>,
+) -> RuntimeExecutePhase {
     let store = svc.store.clone();
-    RuntimeExecutePhase::builder()
+    let mut builder = RuntimeExecutePhase::builder()
         .run_service(Arc::new(RunServiceImpl::new(store.clone())))
         .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
         .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
         .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
         .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
         .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
-        .checkpoint_every_n_tool_calls(1)
-        .build()
+        .checkpoint_every_n_tool_calls(1);
+    if let Some(reg) = registry {
+        builder = builder.tool_registry(reg);
+    }
+    builder.build()
 }
 
 fn now_ms() -> u64 {
@@ -355,13 +365,29 @@ async fn live_openrouter_loop_completes() {
 
     let events_before = store.head_position().await.unwrap();
 
+    // Register only memory_search so the model has one valid read tool.
+    // When memory_search returns empty results (no ingested docs), the model
+    // should complete_run with its own knowledge rather than trying other tools.
+    // We intentionally exclude web_fetch to avoid the model attempting HTTP calls
+    // and then escalating when they return stub responses.
+    let tool_registry = {
+        use cairn_tools::builtins::{BuiltinToolRegistry, MemorySearchTool, MemoryStoreTool};
+        Arc::new(
+            BuiltinToolRegistry::new()
+                .register(Arc::new(MemorySearchTool::new()))
+                .register(Arc::new(MemoryStoreTool::new()))
+        )
+    };
+
     let gather  = StandardGatherPhase::builder(store.clone()).build();
-    let decide  = cairn_orchestrator::LlmDecidePhase::new(brain_provider, model_id.clone());
-    let execute = build_execute_phase(&svc);
+    let decide  = cairn_orchestrator::LlmDecidePhase::new(brain_provider, model_id.clone())
+        .with_tools(tool_registry.clone());
+    // Pass the same registry to the execute phase so tool dispatch succeeds.
+    let execute = build_execute_phase_with_registry(&svc, Some(tool_registry));
 
     let config = LoopConfig {
-        max_iterations: 3,
-        timeout_ms:     60_000, // 60-second wall-clock timeout
+        max_iterations: 4,      // give the model a few attempts to complete
+        timeout_ms:     90_000, // 90-second wall-clock timeout
         ..LoopConfig::default()
     };
 
@@ -372,17 +398,24 @@ async fn live_openrouter_loop_completes() {
 
     println!("termination: {termination:?}");
 
-    // Any non-error termination is acceptable — the LLM may:
-    //   • Complete in one shot                  → Completed
-    //   • Use all iterations without finishing  → MaxIterationsReached
-    //   • Decide to spawn a subagent            → WaitingSubagent (LLM worked correctly)
-    //   • Request operator approval             → WaitingApproval  (valid decision)
-    // We only fail if the loop itself errored or timed out unexpectedly.
+    // Primary goal: Completed (LLM used tools + wrote summary).
+    // Acceptable fallbacks: MaxIterationsReached (tried but ran out of turns),
+    //                       WaitingApproval/WaitingSubagent (valid LLM decisions).
+    // Failure modes: Failed (infrastructure error), TimedOut (network stall).
     assert!(
-        !matches!(termination, LoopTermination::Failed { .. } | LoopTermination::TimedOut),
-        "loop must not error or time out — got {termination:?}"
+        !matches!(termination, LoopTermination::TimedOut),
+        "loop must not time out — got {termination:?}"
     );
-    println!("loop terminated cleanly: {termination:?}");
+    // Prefer Completed; log a warning for other outcomes.
+    if matches!(termination, LoopTermination::Completed { .. }) {
+        println!("SUCCESS: loop completed — LLM answered the goal directly");
+    } else if let LoopTermination::Failed { reason } = &termination {
+        // Unknown tool = model still making up names. Fail the test.
+        panic!("FAIL: loop failed — {reason}");
+    } else {
+        println!("PARTIAL: loop terminated with {termination:?} (not ideal but acceptable)");
+    }
+    println!("loop terminated: {termination:?}");
 
     let events_after = store.head_position().await.unwrap();
     assert!(
