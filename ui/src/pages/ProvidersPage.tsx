@@ -459,7 +459,52 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
               <p className="text-[12px] text-zinc-500 mb-4">
                 Choose the type of provider you want to connect.
               </p>
-              {(Object.entries(PROVIDER_KINDS) as [ProviderKind, ProviderKindMeta][]).map(([k, m]) => (
+
+              {/* ── Cairn Cloud quick-start (featured) ── */}
+              <button
+                onClick={() => { selectKind("cairn_cloud"); setStep(1); }}
+                className={clsx(
+                  "w-full flex items-start gap-3 p-4 rounded-lg border text-left transition-colors",
+                  kind === "cairn_cloud"
+                    ? "border-emerald-500/60 bg-emerald-950/20"
+                    : "border-emerald-800/40 bg-emerald-950/10 hover:border-emerald-700/60 hover:bg-emerald-950/20",
+                )}
+              >
+                <span className={clsx("mt-0.5 shrink-0", kind === "cairn_cloud" ? "text-emerald-400" : "text-emerald-600")}>
+                  <Sparkles size={16} />
+                </span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-[13px] font-medium text-zinc-100">Cairn Cloud</p>
+                    <span className="text-[10px] font-medium text-emerald-400 bg-emerald-900/40 border border-emerald-700/40 rounded px-1.5 py-0.5">
+                      Recommended
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">
+                    agntic.garden — registers Brain (Gemma 4 31B) + Worker (Qwen 3.5 9B + embeddings) in one click.
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    {CAIRN_CLOUD_CONNECTIONS.map(c => (
+                      <span key={c.id} className="text-[10px] font-mono text-zinc-500 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5">
+                        {c.label}: {c.models.join(", ")}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                {kind === "cairn_cloud" && (
+                  <Check size={14} className="text-emerald-400 ml-auto mt-0.5 shrink-0" />
+                )}
+              </button>
+
+              {/* Divider */}
+              <div className="flex items-center gap-2 py-1">
+                <div className="flex-1 h-px bg-zinc-800" />
+                <span className="text-[10px] text-zinc-700 uppercase tracking-wide">or configure manually</span>
+                <div className="flex-1 h-px bg-zinc-800" />
+              </div>
+
+              {/* Standard provider types */}
+              {(Object.entries(PROVIDER_KINDS) as [Exclude<ProviderKind, "cairn_cloud">, ProviderKindMeta][]).map(([k, m]) => (
                 <button
                   key={k}
                   onClick={() => { selectKind(k); setStep(1); }}
@@ -485,8 +530,52 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
             </div>
           )}
 
-          {/* ── Step 1: Connection form ── */}
-          {step === 1 && (
+          {/* ── Step 1: Cairn Cloud confirm screen ── */}
+          {step === 1 && kind === "cairn_cloud" && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Sparkles size={14} className="text-emerald-400" />
+                <span className="text-[13px] font-medium text-zinc-200">Cairn Cloud — agntic.garden</span>
+              </div>
+              <p className="text-[12px] text-zinc-500 leading-relaxed">
+                Two connections will be registered immediately. No API key is required for the agntic.garden inference endpoints.
+              </p>
+              <div className="space-y-3">
+                {CAIRN_CLOUD_CONNECTIONS.map(conn => (
+                  <div key={conn.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[12px] font-medium text-zinc-200">{conn.label}</span>
+                      <code className="text-[10px] font-mono text-zinc-600">{conn.id}</code>
+                    </div>
+                    <p className="text-[11px] text-zinc-600 mb-2">{conn.description}</p>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-zinc-600 w-12 shrink-0">URL</span>
+                        <code className="text-[10px] font-mono text-zinc-400 truncate">{conn.url}</code>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-zinc-600 w-12 shrink-0">Models</span>
+                        <div className="flex flex-wrap gap-1">
+                          {conn.models.map(m => (
+                            <span key={m} className="text-[10px] font-mono text-zinc-300 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5">{m}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-md bg-emerald-950/20 border border-emerald-800/30">
+                <Check size={12} className="text-emerald-400 mt-0.5 shrink-0" />
+                <p className="text-[11px] text-emerald-300/70 leading-relaxed">
+                  You can add more models or edit connection settings later from the Providers table.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 1: Standard connection form ── */}
+          {step === 1 && kind !== "cairn_cloud" && (
             <form
               id={`${formId}-form`}
               onSubmit={(e: FormEvent) => { e.preventDefault(); setStep(2); }}
@@ -647,7 +736,20 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
             {step === 0 ? "Cancel" : "← Back"}
           </button>
 
-          {step < 2 ? (
+          {/* Cairn Cloud: step 1 shows "Register Both" immediately */}
+          {kind === "cairn_cloud" && step === 1 ? (
+            <button
+              onClick={() => cairnCloudMutation.mutate()}
+              disabled={cairnCloudMutation.isPending}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-[12px] font-medium transition-colors"
+            >
+              {cairnCloudMutation.isPending ? (
+                <><Loader2 size={12} className="animate-spin" /> Registering…</>
+              ) : (
+                <><Sparkles size={12} /> Register Both</>
+              )}
+            </button>
+          ) : step < 2 ? (
             <button
               type={step === 1 ? "submit" : "button"}
               form={step === 1 ? `${formId}-form` : undefined}

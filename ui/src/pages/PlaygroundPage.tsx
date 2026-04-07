@@ -957,8 +957,25 @@ export function PlaygroundPage() {
     retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
   });
 
-  const models      = modelsData?.models ?? [];
-  const ollamaDown  = !!modelsError;
+  // When Ollama is unavailable, fall back to models from registered provider connections
+  // (e.g. Cairn Cloud brain/worker).  The stream endpoint already falls through to
+  // openai_compat_brain/worker on the backend, so these model IDs work transparently.
+  const { data: connectionsData } = useQuery({
+    queryKey: ["provider-connections"],
+    queryFn:  () => defaultApi.listProviderConnections("default"),
+    retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
+    enabled: !!modelsError, // only fetch when Ollama is down
+  });
+
+  const ollamaModels: string[] = modelsData?.models ?? [];
+  const connectionModels: string[] = (connectionsData?.items ?? []).flatMap(c => c.supported_models ?? []);
+
+  // Deduplicate: Ollama models first, then any unique connection models
+  const models: string[] = ollamaModels.length > 0
+    ? ollamaModels
+    : [...new Set(connectionModels)];
+
+  const ollamaDown  = !!modelsError && connectionModels.length === 0;
   const activeModel = selectedModel || models[0] || "";
   const cmpModel    = compareModel  || models[1] || models[0] || "";
 
@@ -1091,9 +1108,14 @@ export function PlaygroundPage() {
           ) : ollamaDown ? (
             <span
               className="text-[11px] text-amber-600 cursor-help"
-              title={`Ollama is unreachable.\n\nTo fix:\n1. Install Ollama: https://ollama.ai\n2. Start it: ollama serve\n3. Set OLLAMA_HOST env var and restart cairn-app\n4. Pull a model: ollama pull llama3.2`}
+              title="Ollama unreachable and no provider connections configured."
             >
-              ⚠ Ollama offline
+              ⚠ No providers
+            </span>
+          ) : modelsError && connectionModels.length > 0 ? (
+            <span className="text-[11px] text-sky-400 flex items-center gap-1.5">
+              <Zap size={10} className="text-sky-500" />
+              {models.length} model{models.length !== 1 ? "s" : ""} (provider)
             </span>
           ) : (
             <span className="text-[11px] text-zinc-600 flex items-center gap-1.5 hidden sm:flex">

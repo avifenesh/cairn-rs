@@ -127,6 +127,11 @@ struct AppState {
     #[allow(dead_code)]
     ingest: Arc<IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>>,
     ollama: Option<Arc<OllamaProvider>>,
+    /// Heavy/generate provider: CAIRN_BRAIN_URL (gemma4 31B etc.)
+    openai_compat_brain: Option<Arc<OpenAiCompatProvider>>,
+    /// Light/embed+worker provider: CAIRN_WORKER_URL (qwen3.5, qwen3-embedding)
+    openai_compat_worker: Option<Arc<OpenAiCompatProvider>>,
+    /// Backward-compat alias: first of brain/worker that is configured.
     openai_compat: Option<Arc<OpenAiCompatProvider>>,
     metrics: Arc<std::sync::RwLock<AppMetrics>>,
     rate_limits: RateLimitTable,
@@ -2337,22 +2342,33 @@ async fn ollama_models_handler(
                 })),
             ).into_response(),
         }
-    } else if let Some(ref compat) = state.openai_compat {
-        // When only OpenAI-compat is configured, return a synthetic model list
-        // so the smoke test and UI know generation is available.
+    } else {
+        // No Ollama — report configured OpenAI-compat providers as synthetic model list.
+        let mut models: Vec<&str> = vec![];
+        let mut host = String::new();
+        if let Some(ref worker) = state.openai_compat_worker {
+            models.push("qwen3.5:9b");
+            models.push("qwen3-embedding:8b");
+            host = worker.base_url().to_owned();
+        }
+        if let Some(ref brain) = state.openai_compat_brain {
+            models.push("cyankiwi/gemma-4-31B-it-AWQ-4bit");
+            if host.is_empty() { host = brain.base_url().to_owned(); }
+        }
+        if models.is_empty() {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({
+                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, or CAIRN_WORKER_URL"
+                })),
+            ).into_response();
+        }
         (StatusCode::OK, axum::Json(serde_json::json!({
-            "host":   compat.base_url(),
-            "models": ["qwen3.5:9b"],
-            "count":  1,
+            "host":     host,
+            "models":   models,
+            "count":    models.len(),
             "provider": "openai_compat",
         }))).into_response()
-    } else {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(serde_json::json!({
-                "error": "No LLM provider configured — set OLLAMA_HOST or OPENAI_COMPAT_BASE_URL"
-            })),
-        ).into_response()
     }
 }
 
@@ -2674,26 +2690,46 @@ async fn ollama_generate_handler(
         return bad_request("prompt or messages is required").into_response();
     }
 
-    // Try Ollama first, then fall back to OpenAI-compatible provider.
-    let provider: &dyn cairn_domain::providers::GenerationProvider =
-        if let Some(ref ollama) = state.ollama {
-            ollama.as_ref()
-        } else if let Some(ref compat) = state.openai_compat {
-            compat.as_ref()
-        } else {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                axum::Json(serde_json::json!({
-                    "error": "No LLM provider configured — set OLLAMA_HOST or OPENAI_COMPAT_BASE_URL"
-                })),
-            ).into_response();
-        };
-
+    // Provider priority for generation: Ollama → brain → worker → legacy.
     let default_model = state.runtime.runtime_config.default_generate_model().await;
     let model_id = body.model
         .as_deref()
         .unwrap_or(&default_model)
         .to_owned();
+
+    // Route to the appropriate tier based on model name.
+    // Brain tier: heavy models (gemma, cyankiwi, …).
+    // Worker tier: light models (qwen3.5, phi, llama, …) or Ollama fallback.
+    let is_brain_model = model_id.to_lowercase().contains("gemma")
+        || model_id.to_lowercase().contains("cyankiwi")
+        || model_id.to_lowercase().contains("brain");
+
+    let provider: &dyn cairn_domain::providers::GenerationProvider =
+        if let Some(ref ollama) = state.ollama {
+            ollama.as_ref()
+        } else if is_brain_model {
+            // Brain-tier model — prefer brain, fall back to worker.
+            if let Some(ref brain) = state.openai_compat_brain {
+                brain.as_ref()
+            } else if let Some(ref worker) = state.openai_compat_worker {
+                worker.as_ref()
+            } else {
+                return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
+                    "error": "Brain provider not configured — set CAIRN_BRAIN_URL"
+                }))).into_response();
+            }
+        } else {
+            // Worker-tier model — prefer worker, fall back to brain.
+            if let Some(ref worker) = state.openai_compat_worker {
+                worker.as_ref()
+            } else if let Some(ref brain) = state.openai_compat_brain {
+                brain.as_ref()
+            } else {
+                return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
+                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, or CAIRN_WORKER_URL"
+                }))).into_response();
+            }
+        };
 
     let messages = vec![serde_json::json!({
         "role":    "user",
@@ -2760,17 +2796,19 @@ async fn ollama_embed_handler(
         ).into_response();
     }
 
-    // Try Ollama first, then fall back to OpenAI-compatible provider.
+    // Provider priority for embedding: Ollama → worker → brain → legacy.
     let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> =
         if let Some(ref ollama) = state.ollama {
             Arc::new(OllamaEmbeddingProvider::new(ollama.host()))
-        } else if let Some(ref compat) = state.openai_compat {
-            compat.clone()
+        } else if let Some(ref worker) = state.openai_compat_worker {
+            worker.clone()
+        } else if let Some(ref brain) = state.openai_compat_brain {
+            brain.clone()
         } else {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 axum::Json(serde_json::json!({
-                    "error": "No embedding provider configured — set OLLAMA_HOST or OPENAI_COMPAT_BASE_URL"
+                    "error": "No embedding provider configured — set OLLAMA_HOST, CAIRN_WORKER_URL, or CAIRN_BRAIN_URL"
                 })),
             ).into_response();
         };
@@ -2822,14 +2860,24 @@ async fn ollama_stream_handler(
     State(state): State<AppState>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
-    let Some(provider) = state.ollama.clone() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(serde_json::json!({
-                "error": "Ollama provider not configured — set OLLAMA_HOST to enable"
-            })),
-        ).into_response();
-    };
+    // Provider resolution: Ollama first, then OpenAI-compat brain, then worker.
+    // All three expose /v1/chat/completions (OpenAI wire format) so the same
+    // streaming logic applies — only URL construction differs.
+    let (stream_url, stream_api_key): (String, String) =
+        if let Some(ref o) = state.ollama {
+            (format!("{}/v1/chat/completions", o.host()), String::new())
+        } else if let Some(ref brain) = state.openai_compat_brain {
+            (format!("{}/chat/completions", brain.base_url()), String::new())
+        } else if let Some(ref worker) = state.openai_compat_worker {
+            (format!("{}/chat/completions", worker.base_url()), String::new())
+        } else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({
+                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, or CAIRN_WORKER_URL"
+                })),
+            ).into_response();
+        };
 
     let default_stream = state.runtime.runtime_config.default_stream_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
@@ -2840,18 +2888,17 @@ async fn ollama_stream_handler(
         vec![serde_json::json!({"role": "user", "content": body.prompt})]
     });
 
-    // Spawn a task that calls Ollama with stream=true and forwards chunks via channel.
+    // Spawn a task that calls the provider with stream=true and forwards chunks via channel.
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
 
     tokio::spawn(async move {
         let start   = std::time::Instant::now();
-        let host    = provider.host().to_owned();
         let client  = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(180))
             .build()
             .expect("reqwest client");
 
-        let url = format!("{host}/v1/chat/completions");
+        let url = stream_url;
         // Disable chain-of-thought reasoning for models that default to thinking mode
         // (e.g. Qwen3). Controlled via RuntimeConfig / DefaultsService at runtime.
         let mut req_body = serde_json::json!({
@@ -2863,7 +2910,11 @@ async fn ollama_stream_handler(
             req_body["options"] = serde_json::json!({ "think": false });
         }
 
-        let resp = match client.post(&url).json(&req_body).send().await {
+        let mut req = client.post(&url).json(&req_body);
+        if !stream_api_key.is_empty() {
+            req = req.bearer_auth(&stream_api_key);
+        }
+        let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
                 let _ = tx.send(Ok(Event::default()
@@ -3798,14 +3849,43 @@ async fn main() {
         None
     };
 
-    // ── OpenAI-compatible provider (optional) ────────────────────────────────
-    let openai_compat: Option<Arc<OpenAiCompatProvider>> =
-        if let Some(provider) = OpenAiCompatProvider::from_env() {
-            eprintln!("openai-compat: configured at {}", provider.base_url());
-            Some(Arc::new(provider))
-        } else {
-            None
-        };
+    // ── OpenAI-compatible providers (optional) ───────────────────────────────
+    // CAIRN_BRAIN_URL  — heavy model endpoint (generate, chat).
+    //   Model: cyankiwi/gemma-4-31B-it-AWQ-4bit  (or CAIRN_BRAIN_MODEL override)
+    // CAIRN_WORKER_URL — light model endpoint (generate fast, embed).
+    //   Model: qwen3.5:9b / qwen3-embedding:8b   (or CAIRN_WORKER_MODEL override)
+    //
+    // Legacy fallback: OPENAI_COMPAT_BASE_URL still works and maps to both.
+    let openai_compat_brain: Option<Arc<OpenAiCompatProvider>> = {
+        let brain_url = std::env::var("CAIRN_BRAIN_URL")
+            .or_else(|_| std::env::var("OPENAI_COMPAT_BASE_URL"))
+            .ok();
+        let brain_key = std::env::var("CAIRN_BRAIN_KEY")
+            .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
+            .unwrap_or_default();
+        brain_url.map(|url| {
+            let url = url.trim_end_matches('/').to_owned();
+            eprintln!("openai-compat (brain): configured at {url}");
+            Arc::new(OpenAiCompatProvider::new(url, brain_key))
+        })
+    };
+    let openai_compat_worker: Option<Arc<OpenAiCompatProvider>> = {
+        let worker_url = std::env::var("CAIRN_WORKER_URL")
+            .or_else(|_| std::env::var("OPENAI_COMPAT_BASE_URL"))
+            .ok();
+        let worker_key = std::env::var("CAIRN_WORKER_KEY")
+            .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
+            .unwrap_or_default();
+        worker_url.map(|url| {
+            let url = url.trim_end_matches('/').to_owned();
+            eprintln!("openai-compat (worker): configured at {url}");
+            Arc::new(OpenAiCompatProvider::new(url, worker_key))
+        })
+    };
+    // Legacy alias: expose the first configured provider as `openai_compat`.
+    let openai_compat: Option<Arc<OpenAiCompatProvider>> = openai_compat_brain
+        .clone()
+        .or_else(|| openai_compat_worker.clone());
 
     // ── Binary-specific state (shares runtime + tokens with lib.rs) ────────
     let state = AppState {
@@ -3819,6 +3899,8 @@ async fn main() {
         retrieval: lib_state.retrieval.clone(),
         ingest: lib_state.ingest.clone(),
         ollama,
+        openai_compat_brain,
+        openai_compat_worker,
         openai_compat,
         metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
         rate_limits: Arc::new(Mutex::new(HashMap::new())),
@@ -4381,6 +4463,8 @@ mod tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                openai_compat_brain: None,
+                openai_compat_worker: None,
                 openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
@@ -5953,7 +6037,9 @@ mod tests {
             retrieval,
             ingest,
             ollama: None,
-            openai_compat: None,
+            openai_compat_brain: None,
+                openai_compat_worker: None,
+                openai_compat: None,
             metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
@@ -6507,6 +6593,8 @@ mod run_events_tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                openai_compat_brain: None,
+                openai_compat_worker: None,
                 openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
@@ -6701,6 +6789,8 @@ mod tool_invocations_tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                openai_compat_brain: None,
+                openai_compat_worker: None,
                 openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
@@ -6924,6 +7014,8 @@ mod provider_health_tests {
                 retrieval,
                 ingest,
                 ollama: None,
+                openai_compat_brain: None,
+                openai_compat_worker: None,
                 openai_compat: None,
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
