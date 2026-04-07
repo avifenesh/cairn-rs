@@ -124,6 +124,163 @@ pub fn registered_migrations() -> &'static [(u32, &'static str, &'static str)] {
     MIGRATIONS
 }
 
+/// Split a SQL script into individual statements, correctly handling:
+///
+/// - `$$`-dollar-quoted blocks (PL/pgSQL function bodies, etc.)
+/// - single-line `--` comments
+/// - block `/* … */` comments
+///
+/// A `;` that appears inside a dollar-quoted block is treated as part of the
+/// block rather than a statement terminator.  This avoids the bug where naive
+/// `split(';')` breaks `CREATE FUNCTION … AS $$ … ; … $$`.
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    let mut statements: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = sql.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Dollar-quoted string: $tag$ … $tag$
+        // Detect opening $…$ tag.
+        if chars[i] == '$' {
+            // Collect the full dollar-quote tag (e.g. "$$" or "$body$").
+            let tag_start = i;
+            let mut j = i + 1;
+            while j < len && chars[j] != '$' {
+                j += 1;
+            }
+            if j < len {
+                // We found a closing '$' for the tag.
+                let tag: String = chars[tag_start..=j].iter().collect(); // includes both $
+                // Now scan forward to find the matching closing tag.
+                let closing_start = j + 1;
+                let tag_chars: Vec<char> = tag.chars().collect();
+                let tag_len = tag_chars.len();
+                let mut k = closing_start;
+                let mut found_close = false;
+                while k + tag_len <= len {
+                    let slice: Vec<char> = chars[k..k + tag_len].to_vec();
+                    if slice == tag_chars {
+                        // Found closing tag — include everything up to and
+                        // including the closing $tag$ in `current`.
+                        let block: String = chars[tag_start..k + tag_len].iter().collect();
+                        current.push_str(&block);
+                        i = k + tag_len;
+                        found_close = true;
+                        break;
+                    }
+                    k += 1;
+                }
+                if found_close {
+                    continue;
+                }
+                // No closing tag found — treat '$' as a literal character.
+            }
+            current.push(chars[i]);
+            i += 1;
+            continue;
+        }
+
+        // Single-line comment: -- … \n  — skip entirely, don't add to current.
+        if i + 1 < len && chars[i] == '-' && chars[i + 1] == '-' {
+            while i < len && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+
+        // Block comment: /* … */  — skip entirely.
+        if i + 1 < len && chars[i] == '/' && chars[i + 1] == '*' {
+            i += 2;
+            while i + 1 < len && !(chars[i] == '*' && chars[i + 1] == '/') {
+                i += 1;
+            }
+            if i + 1 < len {
+                i += 2; // skip closing */
+            }
+            continue;
+        }
+
+        // Statement terminator.
+        if chars[i] == ';' {
+            let stmt = current.trim().to_owned();
+            if !stmt.is_empty() {
+                statements.push(stmt);
+            }
+            current.clear();
+            i += 1;
+            continue;
+        }
+
+        current.push(chars[i]);
+        i += 1;
+    }
+
+    // Trailing statement without a final semicolon.
+    let stmt = current.trim().to_owned();
+    if !stmt.is_empty() {
+        statements.push(stmt);
+    }
+
+    statements
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_sql_statements;
+
+    #[test]
+    fn simple_statements_are_split() {
+        let sql = "CREATE TABLE a (id INT); CREATE TABLE b (id INT);";
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].starts_with("CREATE TABLE a"));
+        assert!(stmts[1].starts_with("CREATE TABLE b"));
+    }
+
+    #[test]
+    fn dollar_quoted_function_is_not_split() {
+        let sql = r#"
+CREATE OR REPLACE FUNCTION tsv_trigger() RETURNS trigger AS $$
+BEGIN
+    NEW.tsv := to_tsvector('english', NEW.text);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg BEFORE INSERT ON chunks FOR EACH ROW EXECUTE FUNCTION tsv_trigger();
+"#;
+        let stmts = split_sql_statements(sql);
+        // Should be exactly 2: the function and the trigger.
+        assert_eq!(stmts.len(), 2, "got: {stmts:?}");
+        assert!(stmts[0].contains("LANGUAGE plpgsql"), "first stmt: {}", stmts[0]);
+        assert!(stmts[1].contains("CREATE TRIGGER"), "second stmt: {}", stmts[1]);
+    }
+
+    #[test]
+    fn single_line_comments_are_handled() {
+        let sql = "-- comment\nCREATE TABLE a (id INT); -- trailing\nCREATE TABLE b (id INT);";
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 2);
+    }
+
+    #[test]
+    fn empty_input_returns_empty() {
+        assert!(split_sql_statements("").is_empty());
+        assert!(split_sql_statements("   -- just a comment\n   ").is_empty());
+    }
+
+    #[test]
+    fn v014_migration_splits_into_four_statements() {
+        // The actual V014 migration content should split into exactly 4 statements:
+        // ALTER TABLE, CREATE INDEX, CREATE FUNCTION, CREATE TRIGGER.
+        let sql = include_str!("../../migrations/V014__add_chunks_fts.sql");
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 4, "expected 4 statements, got {}: {stmts:?}", stmts.len());
+    }
+}
+
 impl PgMigrationRunner {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -195,9 +352,15 @@ impl PgMigrationRunner {
         let mut results = Vec::new();
 
         for (version, name, sql) in &pending {
-            // Execute the migration SQL (may contain multiple statements).
-            for statement in sql.split(';').filter(|s| !s.trim().is_empty()) {
-                sqlx::query(statement.trim())
+            // Execute the migration SQL statement by statement.
+            // Uses a dollar-quote-aware splitter so that PL/pgSQL function
+            // bodies like:
+            //   CREATE OR REPLACE FUNCTION … AS $$
+            //   BEGIN … ; … END;
+            //   $$ LANGUAGE plpgsql;
+            // are not incorrectly broken at the semicolons inside $$…$$.
+            for statement in split_sql_statements(sql) {
+                sqlx::query(&statement)
                     .execute(&mut *tx)
                     .await
                     .map_err(|e| StoreError::Migration(format!("V{version:03}__{name}: {e}")))?;
