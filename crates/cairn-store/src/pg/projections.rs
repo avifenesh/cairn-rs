@@ -306,10 +306,6 @@ impl PgSyncProjection {
             | RuntimeEvent::IngestJobCompleted(_)
             | RuntimeEvent::EvalRunStarted(_)
             | RuntimeEvent::EvalRunCompleted(_)
-            | RuntimeEvent::PromptAssetCreated(_)
-            | RuntimeEvent::PromptVersionCreated(_)
-            | RuntimeEvent::PromptReleaseCreated(_)
-            | RuntimeEvent::PromptReleaseTransitioned(_)
             | RuntimeEvent::TenantCreated(_)
             | RuntimeEvent::WorkspaceCreated(_)
             | RuntimeEvent::ProjectCreated(_)
@@ -414,6 +410,93 @@ impl PgSyncProjection {
                 )
                 .bind(e.workspace_key.workspace_id.as_str())
                 .bind(e.member_id.as_str())
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::PromptAssetCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO prompt_assets
+                         (prompt_asset_id, tenant_id, workspace_id, project_id, name, kind,
+                          scope, status, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, NULL, 'draft', $7, $8)
+                     ON CONFLICT (prompt_asset_id) DO NOTHING",
+                )
+                .bind(e.prompt_asset_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(&e.name)
+                .bind(&e.kind)
+                .bind(e.created_at as i64)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::PromptVersionCreated(e) => {
+                // Compute version_number as count of existing versions for this asset + 1.
+                let version_number: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM prompt_versions WHERE prompt_asset_id = $1",
+                )
+                .bind(e.prompt_asset_id.as_str())
+                .fetch_one(&mut **tx)
+                .await
+                .unwrap_or(0i64);
+
+                sqlx::query(
+                    "INSERT INTO prompt_versions
+                         (prompt_version_id, prompt_asset_id, tenant_id, workspace_id, project_id,
+                          version_number, content_hash, content, format, created_by, created_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, $8)
+                     ON CONFLICT (prompt_version_id) DO NOTHING",
+                )
+                .bind(e.prompt_version_id.as_str())
+                .bind(e.prompt_asset_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(version_number + 1)
+                .bind(&e.content_hash)
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::PromptReleaseCreated(e) => {
+                sqlx::query(
+                    "INSERT INTO prompt_releases
+                         (prompt_release_id, prompt_asset_id, prompt_version_id,
+                          tenant_id, workspace_id, project_id,
+                          release_tag, state, rollout_target, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', NULL, $8, $8)
+                     ON CONFLICT (prompt_release_id) DO NOTHING",
+                )
+                .bind(e.prompt_release_id.as_str())
+                .bind(e.prompt_asset_id.as_str())
+                .bind(e.prompt_version_id.as_str())
+                .bind(e.project.tenant_id.as_str())
+                .bind(e.project.workspace_id.as_str())
+                .bind(e.project.project_id.as_str())
+                .bind(e.release_tag.as_deref())
+                .bind(e.created_at as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+            }
+
+            RuntimeEvent::PromptReleaseTransitioned(e) => {
+                sqlx::query(
+                    "UPDATE prompt_releases
+                     SET state = $1, updated_at = $2
+                     WHERE prompt_release_id = $3",
+                )
+                .bind(&e.to_state)
+                .bind(now)
+                .bind(e.prompt_release_id.as_str())
                 .execute(&mut **tx)
                 .await
                 .map_err(|err| StoreError::Internal(err.to_string()))?;

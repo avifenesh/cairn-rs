@@ -767,6 +767,8 @@ struct ApprovalRow {
     task_id: Option<String>,
     requirement: String,
     decision: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
     version: i64,
     created_at: i64,
     updated_at: i64,
@@ -780,8 +782,8 @@ impl ApprovalRow {
             run_id: self.run_id.map(RunId::new),
             task_id: self.task_id.map(TaskId::new),
             requirement: parse_string_enum::<ApprovalRequirement>(&self.requirement)?,
-            title: None,
-            description: None,
+            title: self.title,
+            description: self.description,
             decision: self
                 .decision
                 .as_deref()

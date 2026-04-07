@@ -298,7 +298,7 @@ section "15. Admin"
 chk   "GET /v1/admin/audit-log" 200 GET "/v1/admin/audit-log?limit=5"
 # Accept 201 (created) or 400 (already exists from prior run) — both are correct
 api POST /v1/admin/tenants '{"tenant_id":"smoke_admin_t","name":"Smoke Tenant"}'
-[[ "$_HTTP" =~ ^(201|400)$ ]] \
+[[ "$_HTTP" =~ ^(201|400|409)$ ]] \
   && log_ok "POST /v1/admin/tenants (HTTP $_HTTP — created or already exists)" \
   || log_fail "POST /v1/admin/tenants (unexpected HTTP $_HTTP)"
 
