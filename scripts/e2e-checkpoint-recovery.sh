@@ -192,27 +192,50 @@ else
 fi
 
 # =============================================================================
-step "Restore checkpoint #1 — POST /v1/checkpoints/:id/restore"
+# Restore is done via event append (CheckpointRestored event).
+# There is no dedicated REST endpoint for restore — the product uses
+# the event log as the source of truth for state transitions.
+step "Restore checkpoint #1 via event append (CheckpointRestored)"
 
-api POST "/v1/checkpoints/${CKPT1}/restore" '{}'
-if [[ "$_HTTP" =~ ^(200|201|202|204)$ ]]; then
-  ok "checkpoint ${CKPT1} restore accepted (HTTP ${_HTTP})"
-elif [ "$_HTTP" = "404" ]; then
-  skip "restore checkpoint ${CKPT1} returned 404 — checkpoint may not be persisted without running state"
+PROJ="{\"tenant_id\":\"${TENANT}\",\"workspace_id\":\"${WORKSPACE}\",\"project_id\":\"${PROJECT}\"}"
+
+api POST /v1/events/append "[{
+  \"event_id\":\"evt_cr1_${TS}\",
+  \"source\":{\"source_type\":\"runtime\"},
+  \"ownership\":{\"scope\":\"project\",\"tenant_id\":\"${TENANT}\",\"workspace_id\":\"${WORKSPACE}\",\"project_id\":\"${PROJECT}\"},
+  \"causation_id\":null,\"correlation_id\":null,
+  \"payload\":{
+    \"event\":\"checkpoint_restored\",
+    \"project\":${PROJ},
+    \"run_id\":\"${RUN}\",
+    \"checkpoint_id\":\"${CKPT1}\"
+  }
+}]"
+if [[ "$_HTTP" =~ ^(200|201)$ ]]; then
+  ok "checkpoint_restored event appended for ${CKPT1} (HTTP ${_HTTP})"
 else
-  fail "restore checkpoint #1 HTTP ${_HTTP}: ${_BODY:0:100}"
+  fail "restore checkpoint #1 via event append HTTP ${_HTTP}: ${_BODY:0:100}"
 fi
 
 # =============================================================================
-step "Restore checkpoint #2 (latest) — POST /v1/checkpoints/:id/restore"
+step "Restore checkpoint #2 (latest) via event append"
 
-api POST "/v1/checkpoints/${CKPT2}/restore" '{}'
-if [[ "$_HTTP" =~ ^(200|201|202|204)$ ]]; then
-  ok "checkpoint ${CKPT2} restore accepted (HTTP ${_HTTP})"
-elif [ "$_HTTP" = "404" ]; then
-  skip "restore checkpoint ${CKPT2} returned 404 — checkpoint may not be persisted without running state"
+api POST /v1/events/append "[{
+  \"event_id\":\"evt_cr2_${TS}\",
+  \"source\":{\"source_type\":\"runtime\"},
+  \"ownership\":{\"scope\":\"project\",\"tenant_id\":\"${TENANT}\",\"workspace_id\":\"${WORKSPACE}\",\"project_id\":\"${PROJECT}\"},
+  \"causation_id\":null,\"correlation_id\":null,
+  \"payload\":{
+    \"event\":\"checkpoint_restored\",
+    \"project\":${PROJ},
+    \"run_id\":\"${RUN}\",
+    \"checkpoint_id\":\"${CKPT2}\"
+  }
+}]"
+if [[ "$_HTTP" =~ ^(200|201)$ ]]; then
+  ok "checkpoint_restored event appended for ${CKPT2} (HTTP ${_HTTP})"
 else
-  fail "restore checkpoint #2 HTTP ${_HTTP}: ${_BODY:0:100}"
+  fail "restore checkpoint #2 via event append HTTP ${_HTTP}: ${_BODY:0:100}"
 fi
 
 # =============================================================================
