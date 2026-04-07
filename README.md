@@ -61,6 +61,11 @@ OPENAI_COMPAT_API_KEY=Cairn-Inference-2026! \
 OPENAI_COMPAT_BASE_URL=https://your-server/v1 \
 OPENAI_COMPAT_API_KEY=your-key \
   cargo run -p cairn-app
+
+# With OpenRouter (free models available — great for testing)
+CAIRN_BRAIN_URL=https://openrouter.ai/api/v1 \
+OPENROUTER_API_KEY=sk-or-your-key-here \
+  cargo run -p cairn-app
 ```
 
 Default bearer token: `dev-admin-token`. Set `CAIRN_ADMIN_TOKEN` to override.
@@ -68,8 +73,11 @@ Default bearer token: `dev-admin-token`. Set `CAIRN_ADMIN_TOKEN` to override.
 **Inference providers:** cairn-rs supports a split-tier inference API:
 - **Brain** (`CAIRN_BRAIN_URL`): heavy generation — default model `cyankiwi/gemma-4-31B-it-AWQ-4bit`
 - **Worker** (`CAIRN_WORKER_URL`): everyday generation + embeddings — default model `qwen3.5:9b`
-- Both read `OPENAI_COMPAT_API_KEY` for auth.
+- Both read `OPENAI_COMPAT_API_KEY` for auth; `CAIRN_BRAIN_KEY` / `CAIRN_WORKER_KEY` take precedence when set.
 - Legacy `OPENAI_COMPAT_BASE_URL` still works and maps to the worker path.
+- **[OpenRouter](https://openrouter.ai)** — set `OPENROUTER_API_KEY` (preferred) or any of the above key vars.
+  Free-tier models include `qwen/qwen3-coder:free` (262K context), `deepseek/deepseek-chat:free`, and more.
+  OpenRouter exposes a standard OpenAI-compatible endpoint so no code changes are required.
 
 All model names are hot-reloadable via `PUT /v1/settings/defaults/system/<key>` — no restart required.
 
@@ -153,6 +161,7 @@ State is always derived from the log. Postgres stores events for durability and 
 | `CAIRN_WORKER_KEY` | _(unset)_ | API key for the worker provider. |
 | `OPENAI_COMPAT_BASE_URL` | _(unset)_ | Legacy: maps to both BRAIN and WORKER when set. Superseded by the split vars above. |
 | `OPENAI_COMPAT_API_KEY` | _(unset)_ | Legacy: API key for the legacy single-endpoint provider. |
+| `OPENROUTER_API_KEY` | _(unset)_ | API key for [OpenRouter](https://openrouter.ai). When set, `CAIRN_BRAIN_URL` can be pointed at `https://openrouter.ai/api/v1`. Free-tier models (e.g. `qwen/qwen3-coder:free`) work without a paid account. |
 
 ### CLI flags
 

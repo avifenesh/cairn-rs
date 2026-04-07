@@ -12,7 +12,7 @@ import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ProviderKind = "cairn_cloud" | "openai_compat" | "ollama" | "local";
+type ProviderKind = "cairn_cloud" | "openrouter" | "openai_compat" | "ollama" | "local";
 
 interface ProviderKindMeta {
   label: string;
@@ -41,7 +41,17 @@ const CAIRN_CLOUD_CONNECTIONS = [
   },
 ] as const;
 
-const PROVIDER_KINDS: Record<Exclude<ProviderKind, "cairn_cloud">, ProviderKindMeta> = {
+const OPENROUTER_CONFIG = {
+  id: "conn_openrouter",
+  baseUrl: "https://openrouter.ai/api/v1",
+  models: ["qwen/qwen3-coder:free", "google/gemma-3-4b-it:free"],
+  brainModel: "qwen/qwen3-coder:free",
+  workerModel: "google/gemma-3-4b-it:free",
+  brainContext: "262K ctx",
+  workerContext: "32K ctx",
+} as const;
+
+const PROVIDER_KINDS: Record<Exclude<ProviderKind, "cairn_cloud" | "openrouter">, ProviderKindMeta> = {
   openai_compat: {
     label: "OpenAI-compatible",
     description: "Any API serving the OpenAI chat/completions format — Groq, Together, custom endpoints.",
@@ -464,13 +474,14 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [kind, setKind] = useState<ProviderKind>("openai_compat");
 
-  // Safe accessor — cairn_cloud doesn't have a PROVIDER_KINDS entry
-  const meta = kind !== "cairn_cloud" ? PROVIDER_KINDS[kind] : PROVIDER_KINDS.openai_compat;
+  // Safe accessor — cairn_cloud and openrouter don't have PROVIDER_KINDS entries
+  const meta = (kind !== "cairn_cloud" && kind !== "openrouter") ? PROVIDER_KINDS[kind] : PROVIDER_KINDS.openai_compat;
 
   // Form fields (used for single-connection flow)
   const [connectionId, setConnectionId] = useState(() => genConnectionId("openai_compat"));
   const [baseUrl,      setBaseUrl]       = useState(meta.defaultUrl);
   const [apiKey,       setApiKey]        = useState("");
+  const [openrouterKey, setOpenrouterKey] = useState("");
   const [family,       setFamily]        = useState(meta.defaultFamily);
   const [adapter,      setAdapter]       = useState(meta.defaultAdapter);
 
@@ -480,7 +491,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
 
   const selectKind = (k: ProviderKind) => {
     setKind(k);
-    if (k === "cairn_cloud") return; // handled separately
+    if (k === "cairn_cloud" || k === "openrouter") return; // handled as presets
     const m = PROVIDER_KINDS[k];
     setConnectionId(genConnectionId(m.defaultFamily));
     setBaseUrl(m.defaultUrl);
@@ -529,6 +540,24 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
     },
     onSuccess: () => {
       toast.success("Cairn Cloud (agntic.garden) — 2 connections registered.");
+      onCreated();
+      onClose();
+    },
+    onError: (e) => toast.error(`Failed: ${e instanceof Error ? e.message : "error"}`),
+  });
+
+  // OpenRouter single-connection mutation
+  const openrouterMutation = useMutation({
+    mutationFn: () =>
+      defaultApi.createProviderConnection({
+        tenant_id:              "default",
+        provider_connection_id: OPENROUTER_CONFIG.id,
+        provider_family:        "openai_compat",
+        adapter_type:           "openai_compat",
+        supported_models:       [...OPENROUTER_CONFIG.models],
+      }),
+    onSuccess: () => {
+      toast.success("OpenRouter — connection registered.");
       onCreated();
       onClose();
     },
@@ -627,6 +656,43 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 )}
               </button>
 
+              {/* ── OpenRouter quick-start ── */}
+              <button
+                onClick={() => { selectKind("openrouter"); setStep(1); }}
+                className={clsx(
+                  "w-full flex items-start gap-3 p-4 rounded-lg border text-left transition-colors",
+                  kind === "openrouter"
+                    ? "border-violet-500/60 bg-violet-950/20"
+                    : "border-violet-800/40 bg-violet-950/10 hover:border-violet-700/60 hover:bg-violet-950/20",
+                )}
+              >
+                <span className={clsx("mt-0.5 shrink-0 font-bold text-[13px]", kind === "openrouter" ? "text-violet-400" : "text-violet-600")}>
+                  OR
+                </span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-[13px] font-medium text-zinc-100">OpenRouter</p>
+                    <span className="text-[10px] font-medium text-violet-400 bg-violet-900/40 border border-violet-700/40 rounded px-1.5 py-0.5">
+                      Free tier available
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">
+                    openrouter.ai — access 200+ models via one OpenAI-compatible endpoint. Free API key at openrouter.ai.
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[10px] font-mono text-zinc-500 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5">
+                      Brain: {OPENROUTER_CONFIG.brainModel} ({OPENROUTER_CONFIG.brainContext})
+                    </span>
+                    <span className="text-[10px] font-mono text-zinc-500 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5">
+                      Worker: {OPENROUTER_CONFIG.workerModel} ({OPENROUTER_CONFIG.workerContext})
+                    </span>
+                  </div>
+                </div>
+                {kind === "openrouter" && (
+                  <Check size={14} className="text-violet-400 ml-auto mt-0.5 shrink-0" />
+                )}
+              </button>
+
               {/* Divider */}
               <div className="flex items-center gap-2 py-1">
                 <div className="flex-1 h-px bg-zinc-800" />
@@ -705,8 +771,75 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
             </div>
           )}
 
+          {/* ── Step 1: OpenRouter confirm screen ── */}
+          {step === 1 && kind === "openrouter" && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-[13px] text-violet-400">OR</span>
+                <span className="text-[13px] font-medium text-zinc-200">OpenRouter</span>
+                <span className="text-[10px] font-medium text-violet-400 bg-violet-900/40 border border-violet-700/40 rounded px-1.5 py-0.5">Free tier available</span>
+              </div>
+              <p className="text-[12px] text-zinc-500 leading-relaxed">
+                One connection registers both models. Requires a free API key from{" "}
+                <span className="text-violet-400 font-mono text-[11px]">openrouter.ai</span>.
+              </p>
+
+              {/* Base URL (read-only) */}
+              <div>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Base URL</p>
+                <code className="text-[11px] font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 block">
+                  {OPENROUTER_CONFIG.baseUrl}
+                </code>
+              </div>
+
+              {/* API Key */}
+              <label className="block">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5">API Key <span className="text-red-400">*</span></p>
+                <input
+                  type="password"
+                  value={openrouterKey}
+                  onChange={e => setOpenrouterKey(e.target.value)}
+                  placeholder="sk-or-v1-…"
+                  autoComplete="off"
+                  className="w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 transition-colors"
+                />
+                <p className="mt-1 text-[10px] text-zinc-600">
+                  Get a free key at <span className="text-zinc-500 font-mono">openrouter.ai/settings/keys</span>. Never stored in plaintext.
+                </p>
+              </label>
+
+              {/* Pre-selected models */}
+              <div>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-2">Pre-selected models</p>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between rounded bg-zinc-900 border border-zinc-800 px-3 py-2">
+                    <div>
+                      <p className="text-[11px] font-mono text-zinc-200">{OPENROUTER_CONFIG.brainModel}</p>
+                      <p className="text-[10px] text-zinc-600 mt-0.5">Brain — {OPENROUTER_CONFIG.brainContext} context</p>
+                    </div>
+                    <span className="text-[10px] text-violet-400 bg-violet-900/30 border border-violet-700/40 rounded px-1.5 py-0.5">free</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded bg-zinc-900 border border-zinc-800 px-3 py-2">
+                    <div>
+                      <p className="text-[11px] font-mono text-zinc-200">{OPENROUTER_CONFIG.workerModel}</p>
+                      <p className="text-[10px] text-zinc-600 mt-0.5">Worker — {OPENROUTER_CONFIG.workerContext} context</p>
+                    </div>
+                    <span className="text-[10px] text-violet-400 bg-violet-900/30 border border-violet-700/40 rounded px-1.5 py-0.5">free</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-md bg-violet-950/20 border border-violet-800/30">
+                <Check size={12} className="text-violet-400 mt-0.5 shrink-0" />
+                <p className="text-[11px] text-violet-300/70 leading-relaxed">
+                  Both models are served through a single connection. You can add more models from the connections table after registering.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* ── Step 1: Standard connection form ── */}
-          {step === 1 && kind !== "cairn_cloud" && (
+          {step === 1 && kind !== "cairn_cloud" && kind !== "openrouter" && (
             <form
               id={`${formId}-form`}
               onSubmit={(e: FormEvent) => { e.preventDefault(); setStep(2); }}
@@ -867,7 +1000,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
             {step === 0 ? "Cancel" : "← Back"}
           </button>
 
-          {/* Cairn Cloud: step 1 shows "Register Both" immediately */}
+          {/* Preset quick-registers: step 1 shows the register button immediately */}
           {kind === "cairn_cloud" && step === 1 ? (
             <button
               onClick={() => cairnCloudMutation.mutate()}
@@ -878,6 +1011,19 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 <><Loader2 size={12} className="animate-spin" /> Registering…</>
               ) : (
                 <><Sparkles size={12} /> Register Both</>
+              )}
+            </button>
+          ) : kind === "openrouter" && step === 1 ? (
+            <button
+              onClick={() => openrouterMutation.mutate()}
+              disabled={openrouterMutation.isPending || !openrouterKey.trim()}
+              title={!openrouterKey.trim() ? "Enter your OpenRouter API key first" : undefined}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-[12px] font-medium transition-colors"
+            >
+              {openrouterMutation.isPending ? (
+                <><Loader2 size={12} className="animate-spin" /> Registering…</>
+              ) : (
+                <><Check size={12} /> Register OpenRouter</>
               )}
             </button>
           ) : step < 2 ? (

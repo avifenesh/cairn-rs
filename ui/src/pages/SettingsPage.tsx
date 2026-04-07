@@ -242,6 +242,19 @@ function EnvVarsSection({
       description: 'Base URL for the local Ollama API. Enables LLM generation, embedding, and model management.',
     },
     {
+      name: 'OPENROUTER_API_KEY',
+      current: <SecretChip status="unknown" />,
+      default_:    '(none)',
+      description: 'API key for OpenRouter (openrouter.ai). Enables 200+ models via the OpenAI-compatible endpoint. Get a free key at openrouter.ai/settings/keys.',
+      secret: true,
+    },
+    {
+      name: 'CAIRN_BRAIN_URL',
+      current: <span className="text-[11px] text-zinc-700 font-mono italic">not exposed</span>,
+      default_:    '(none)',
+      description: 'Base URL for the brain LLM provider (OpenAI-compatible). Used for orchestration and high-capability tasks.',
+    },
+    {
       name: 'CAIRN_STORAGE',
       current: settings
         ? <EnvValue value={settings.store_backend} />
