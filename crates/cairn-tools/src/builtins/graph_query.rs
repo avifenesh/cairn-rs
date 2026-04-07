@@ -212,7 +212,7 @@ mod tests {
         GraphEdge {
             source_node_id: src.to_owned(),
             target_node_id: tgt.to_owned(),
-            kind:           EdgeKind::SpawnedFrom,
+            kind:           EdgeKind::Spawned,
             created_at:     0,
             confidence:     None,
         }
