@@ -24,6 +24,7 @@ pub mod orchestrator;
 pub mod org;
 pub mod policy;
 pub mod prompts;
+pub mod provider_registry;
 pub mod providers;
 pub mod quotas;
 pub mod recovery;

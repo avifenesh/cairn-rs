@@ -2531,6 +2531,47 @@ async fn admin_event_log_handler(
     })))
 }
 
+// ── Provider registry handler ─────────────────────────────────────────────────
+
+/// `GET /v1/providers/registry` — list all known LLM providers with their
+/// API endpoints, env var names, available status, and known models.
+///
+/// This is reference data from the static provider registry. It does NOT
+/// reflect user-configured connections — use `GET /v1/providers/connections`
+/// for that. The registry helps clients auto-configure by showing which
+/// providers are available (env var set) and what models they support.
+async fn provider_registry_handler() -> impl axum::response::IntoResponse {
+    use cairn_domain::provider_registry;
+
+    let entries: Vec<serde_json::Value> = provider_registry::all()
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id,
+                "name": p.name,
+                "api_base": p.api_base,
+                "api_format": format!("{:?}", p.api_format).to_lowercase(),
+                "default_model": p.default_model,
+                "available": p.is_available(),
+                "requires_key": p.requires_key(),
+                "env_keys": p.env_keys,
+                "models": p.models.iter().map(|m| serde_json::json!({
+                    "id": m.id,
+                    "context_window": m.context_window,
+                    "capabilities": {
+                        "streaming": m.capabilities.streaming,
+                        "tool_use": m.capabilities.tool_use,
+                        "vision": m.capabilities.vision,
+                        "thinking": m.capabilities.thinking,
+                    },
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    (StatusCode::OK, Json(entries))
+}
+
 // ── Ollama handler ────────────────────────────────────────────────────────────
 
 /// `GET /v1/providers/ollama/models` — list models available in the local Ollama registry.
@@ -2938,33 +2979,22 @@ fn openai_model_obj_to_discovered(obj: &serde_json::Value) -> Option<DiscoveredM
 ///
 /// Used as a fallback when the provider doesn't report context_length.
 fn known_context_window(model_id: &str) -> Option<u32> {
+    // Use the provider registry for known models.
+    let ctx = cairn_domain::provider_registry::context_window_for(model_id);
+    // 128_000 is the registry's default — treat as "unknown" so callers
+    // can fall back to their own logic.
+    if ctx != 128_000 {
+        return Some(ctx as u32);
+    }
+    // Fallback: substring matching for models not in the static registry
+    // (e.g. Ollama local models, niche open-source variants).
     let lower = model_id.to_lowercase();
-    // ── OpenRouter free tier ──────────────────────────────────────────────────
-    if lower == "openrouter/free" {
-        Some(200_000) // openrouter/free — auto-routes to available free models, 200K listed context
-    } else if lower.contains("qwen3-coder") {
-        Some(262_144) // qwen/qwen3-coder:free — 262K context
-    } else if lower.contains("gemma-3-27b") || lower.contains("gemma3-27b") {
-        Some(131_072) // google/gemma-3-27b-it — 131K context
-    } else if lower.contains("gemma-3-4b") || lower.contains("gemma3-4b") {
-        Some(32_768) // google/gemma-3-4b-it — 32K context
-    } else if lower.contains("llama-3.3-70b") {
-        Some(65_536) // meta-llama/llama-3.3-70b-instruct — 65K context
-                     // ── agntic.garden / self-hosted ──────────────────────────────────────────
-    } else if lower.contains("gemma-4") || lower.contains("gemma4") || lower.contains("cyankiwi") {
-        Some(131_072) // gemma-4-31B: 128K context
-    } else if lower.contains("qwen3.5") || lower.contains("qwen3-embedding") {
-        Some(32_768) // qwen3.5:9b / qwen3-embedding:8b: 32K context
-    } else if lower.contains("qwen2") || lower.contains("qwen3") {
+    if lower.contains("qwen3-coder") {
+        Some(262_144)
+    } else if lower.contains("qwen") {
         Some(32_768)
-    } else if lower.contains("llama-3") || lower.contains("llama3") {
-        Some(131_072) // llama3.x: 128K
     } else if lower.contains("llama-2") || lower.contains("llama2") {
         Some(4_096)
-    } else if lower.contains("mistral") || lower.contains("mixtral") {
-        Some(32_768)
-    } else if lower.contains("phi-3") || lower.contains("phi3") {
-        Some(131_072)
     } else if lower.contains("phi-2") || lower.contains("phi2") {
         Some(2_048)
     } else if lower.contains("nomic-embed") || lower.contains("all-minilm") {
@@ -5196,6 +5226,7 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
             "/v1/providers/connections/:id/test",
             get(test_connection_handler),
         )
+        .route("/v1/providers/registry", get(provider_registry_handler))
         .route("/v1/providers/ollama/models", get(ollama_models_handler))
         .route(
             "/v1/providers/ollama/models/:name/info",
