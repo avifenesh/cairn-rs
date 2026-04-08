@@ -867,7 +867,6 @@ impl AppState {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
-#[allow(dead_code)]
 struct ProjectScopedQuery {
     tenant_id: String,
     workspace_id: String,
@@ -915,6 +914,14 @@ impl ProjectScopedQuery {
             self.workspace_id.as_str(),
             self.project_id.as_str(),
         )
+    }
+
+    fn limit(&self) -> usize {
+        self.limit.unwrap_or(100)
+    }
+
+    fn offset(&self) -> usize {
+        self.offset.unwrap_or(0)
     }
 }
 
@@ -1629,7 +1636,6 @@ struct AuditLogQuery {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, ToSchema)]
-#[allow(dead_code)]
 struct CreateProviderConnectionRequest {
     tenant_id: String,
     provider_connection_id: String,
@@ -12889,10 +12895,9 @@ async fn list_sources_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ProjectScopedQuery>,
 ) -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(state.document_store.list_sources(&query.project())),
-    )
+    let all = state.document_store.list_sources(&query.project());
+    let items: Vec<_> = all.into_iter().skip(query.offset()).take(query.limit()).collect();
+    (StatusCode::OK, Json(items))
 }
 
 fn source_detail_for(
@@ -14464,6 +14469,11 @@ async fn create_provider_connection_handler(
     if let Some(denied) = require_feature(&state.config, MULTI_PROVIDER) {
         return denied;
     }
+
+    let conn_id = body.provider_connection_id.clone();
+    let credential_id = body.credential_id.clone();
+    let endpoint_url = body.endpoint_url.clone();
+
     match state
         .runtime
         .provider_connections
@@ -14478,7 +14488,29 @@ async fn create_provider_connection_handler(
         )
         .await
     {
-        Ok(record) => (StatusCode::CREATED, Json(record)).into_response(),
+        Ok(record) => {
+            // Link credential to connection via defaults store so resolve-key can find it.
+            if let Some(cred_id) = credential_id {
+                let key = format!("provider_credential_{conn_id}");
+                let _ = state.runtime.defaults.set(
+                    cairn_domain::Scope::System,
+                    "system".to_owned(),
+                    key,
+                    serde_json::json!(cred_id),
+                ).await;
+            }
+            // Store endpoint_url if provided.
+            if let Some(url) = endpoint_url {
+                let key = format!("provider_endpoint_{conn_id}");
+                let _ = state.runtime.defaults.set(
+                    cairn_domain::Scope::System,
+                    "system".to_owned(),
+                    key,
+                    serde_json::json!(url),
+                ).await;
+            }
+            (StatusCode::CREATED, Json(record)).into_response()
+        }
         Err(err) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": err.to_string() })),
