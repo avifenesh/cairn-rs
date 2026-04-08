@@ -4364,6 +4364,10 @@ impl AppBootstrap {
                 "/v1/providers/connections/:id/resolve-key",
                 get(resolve_provider_key_handler),
             )
+            .route(
+                "/v1/providers/connections/:id",
+                delete(delete_provider_connection_handler),
+            )
             // ── Auth tokens ───────────────────────────────────────────────────────────
             .route(
                 "/v1/auth/tokens",
@@ -15293,6 +15297,49 @@ async fn resolve_provider_key_handler(
             AppApiError::new(StatusCode::NOT_FOUND, "no_credential", "no credential linked to this connection — store API key via POST /v1/admin/tenants/:id/credentials then link it")
                 .into_response()
         }
+    }
+}
+
+/// `DELETE /v1/providers/connections/:id` — remove a provider connection.
+async fn delete_provider_connection_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let conn_id = ProviderConnectionId::new(&id);
+    match state.runtime.provider_connections.get(&conn_id).await {
+        Ok(Some(_)) => {
+            // Deactivate by emitting a status change event.
+            let event = cairn_domain::EventEnvelope::for_runtime_event(
+                cairn_domain::EventId::new(format!("evt_del_conn_{}", now_ms())),
+                cairn_domain::EventSource::Runtime,
+                cairn_domain::RuntimeEvent::ProviderConnectionRegistered(
+                    cairn_domain::events::ProviderConnectionRegistered {
+                        tenant: cairn_domain::tenancy::TenantKey::new("default"),
+                        provider_connection_id: conn_id,
+                        provider_family: String::new(),
+                        adapter_type: String::new(),
+                        supported_models: vec![],
+                        status: cairn_domain::providers::ProviderConnectionStatus::Disabled,
+                        registered_at: now_ms(),
+                    },
+                ),
+            );
+            match state.runtime.store.append(&[event]).await {
+                Ok(_) => (
+                    StatusCode::OK,
+                    Json(serde_json::json!({ "deleted": true, "connection_id": id })),
+                )
+                    .into_response(),
+                Err(err) => store_error_response(err),
+            }
+        }
+        Ok(None) => AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "provider connection not found",
+        )
+        .into_response(),
+        Err(err) => runtime_error_response(err),
     }
 }
 

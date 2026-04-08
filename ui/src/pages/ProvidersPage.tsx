@@ -1087,11 +1087,15 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
   const healthy   = entries.filter(e => healthMap.get(e.provider_connection_id)?.healthy === true).length;
   const unhealthy = entries.length - healthy;
 
-  // TODO: DELETE /v1/providers/connections/:id when endpoint lands
   const handleDelete = (id: string) => {
     if (!confirm(`Delete connection "${id}"?`)) return;
-    toast.info(`Delete not yet implemented — remove via API.`);
-    void id;
+    fetch(`/v1/providers/connections/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${localStorage.getItem("cairn_token") ?? ""}` },
+    }).then(r => {
+      if (r.ok) { toast.success(`Connection ${id} deleted.`); refetch(); }
+      else toast.error(`Delete failed (HTTP ${r.status}).`);
+    }).catch(() => toast.error("Delete failed — network error."));
   };
 
   return (

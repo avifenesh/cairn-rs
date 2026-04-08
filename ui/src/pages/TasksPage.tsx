@@ -682,6 +682,8 @@ export function TasksPage() {
             </button>
           )}
           <button
+            onClick={() => refetch()}
+            disabled={isFetching}
           >
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
             Refresh

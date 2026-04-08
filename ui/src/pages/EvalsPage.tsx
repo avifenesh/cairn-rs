@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   FlaskConical,
   RefreshCw,
@@ -316,11 +316,24 @@ function CompareBanner({
 export function EvalsPage() {
   const [statusFilter, setStatusFilter] = useState<EvalRunStatus | "all">("all");
   const [selected, setSelected]         = useState<Set<string>>(new Set());
+  const qc = useQueryClient();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["evals"],
     queryFn:  () => defaultApi.getEvalRuns(200),
     refetchInterval: 20_000,
+  });
+
+  const createEval = useMutation({
+    mutationFn: () => {
+      const id = `eval_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      return defaultApi.createEvalRun({
+        eval_run_id: id,
+        subject_kind: "prompt_release",
+        evaluator_type: "accuracy",
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["evals"] }),
   });
 
   const runs = data?.items ?? [];
@@ -394,12 +407,14 @@ export function EvalsPage() {
         </select>
 
         <button
+          onClick={() => createEval.mutate()}
+          disabled={createEval.isPending}
           className="ml-auto flex items-center gap-1.5 rounded bg-indigo-600 hover:bg-indigo-500
-                     text-white text-[12px] font-medium px-3 py-1.5 transition-colors"
+                     text-white text-[12px] font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
           title="Create a new eval run"
         >
-          <Plus size={12} />
-          New Eval Run
+          {createEval.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+          {createEval.isPending ? "Creating…" : "New Eval Run"}
         </button>
 
         <button

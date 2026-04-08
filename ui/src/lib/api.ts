@@ -426,6 +426,16 @@ export function createApiClient(config: ApiClientConfig) {
     getEvalRuns: (limit = 100): Promise<import("./types").EvalRunsResponse> =>
       get(`/v1/evals/runs?limit=${limit}`),
 
+    /** POST /v1/evals/runs — create a new eval run. */
+    createEvalRun: (body: {
+      eval_run_id: string;
+      subject_kind: string;
+      evaluator_type: string;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<import("./types").EvalRunRecord> => post("/v1/evals/runs", withScope(body)),
+
     // ── Audit Log ────────────────────────────────────────────────────────────
 
     /** GET /v1/admin/audit-log — list audit log entries (most recent first). */
