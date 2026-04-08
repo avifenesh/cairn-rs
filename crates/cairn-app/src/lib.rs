@@ -8939,35 +8939,13 @@ async fn orchestrate_run_handler(
 /// Transitions the run to `Canceled` state and updates the parent session.
 async fn cancel_run_handler(
     State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<AuthPrincipal>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(&id);
-    let run = match state.runtime.runs.get(&run_id).await {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
-        }
-        Err(err) => return runtime_error_response(err),
-    };
 
     let before = current_event_head(&state).await;
     match state.runtime.runs.cancel(&run_id).await {
         Ok(record) => {
-            let _ = state
-                .runtime
-                .audit
-                .record(
-                    run.project.tenant_id.clone(),
-                    audit_actor_id(&principal),
-                    "cancel_run".to_owned(),
-                    "run".to_owned(),
-                    id,
-                    AuditOutcome::Success,
-                    serde_json::json!({ "previous_state": format!("{:?}", run.state) }),
-                )
-                .await;
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(record)).into_response()
         }

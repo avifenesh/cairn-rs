@@ -324,10 +324,10 @@ chk "GET /v1/evals/runs/:id" 200 GET "/v1/evals/runs/${EVAL_RUN_ID}"
 chk "POST /v1/evals/runs/:id/start" 200 POST "/v1/evals/runs/${EVAL_RUN_ID}/start" ""
 
 chk "POST /v1/evals/runs/:id/score" 200 POST "/v1/evals/runs/${EVAL_RUN_ID}/score" \
-  "{\"metrics\":{\"accuracy\":0.85,\"latency_p50_ms\":120.0}}"
+  "{\"metrics\":{\"accuracy\":0.85,\"latency_p50_ms\":120}}"
 
 chk "POST /v1/evals/runs/:id/complete" 200 POST "/v1/evals/runs/${EVAL_RUN_ID}/complete" \
-  "{\"metrics\":{\"accuracy\":0.85,\"latency_p50_ms\":120.0},\"cost\":0.05}"
+  "{\"metrics\":{\"accuracy\":0.85,\"latency_p50_ms\":120},\"cost\":0.05}"
 
 # =============================================================================
 section "17. Approval gate flow (via events)"
