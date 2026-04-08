@@ -206,7 +206,7 @@ where
             );
 
             // ── (2) GATHER ────────────────────────────────────────────────────
-            let gather_output = self.gather.gather(&ctx).await.map_err(|e| {
+            let gather_output = self.gather.gather(ctx).await.map_err(|e| {
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "gather failed");
                 e
             })?;
@@ -218,10 +218,10 @@ where
                 recent_events = gather_output.recent_events.len(),
                 "gather complete"
             );
-            self.emitter.on_gather_completed(&ctx, &gather_output).await;
+            self.emitter.on_gather_completed(ctx, &gather_output).await;
 
             // ── (3) DECIDE ────────────────────────────────────────────────────
-            let decide_output = self.decide.decide(&ctx, &gather_output).await.map_err(|e| {
+            let decide_output = self.decide.decide(ctx, &gather_output).await.map_err(|e| {
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "decide failed");
                 e
             })?;
@@ -240,7 +240,7 @@ where
                 confidence = decide_output.calibrated_confidence,
                 "decide complete"
             );
-            self.emitter.on_decide_completed(&ctx, &decide_output).await;
+            self.emitter.on_decide_completed(ctx, &decide_output).await;
 
             // ── (4) Approval pre-check ────────────────────────────────────────
             // When requires_approval is true, the execute phase emits an
@@ -253,7 +253,7 @@ where
                     "decision requires approval — suspending for ApprovalRequested"
                 );
 
-                let outcome = self.execute.execute(&ctx, &decide_output).await.map_err(|e| {
+                let outcome = self.execute.execute(ctx, &decide_output).await.map_err(|e| {
                     tracing::error!(run_id = %ctx.run_id, error = %e, "execute (approval gate) failed");
                     e
                 })?;
@@ -280,7 +280,7 @@ where
             }
 
             // ── (5) EXECUTE ───────────────────────────────────────────────────
-            let execute_outcome = self.execute.execute(&ctx, &decide_output).await.map_err(|e| {
+            let execute_outcome = self.execute.execute(ctx, &decide_output).await.map_err(|e| {
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "execute failed");
                 e
             })?;
@@ -311,9 +311,9 @@ where
                     .proposal
                     .tool_name
                     .as_deref()
-                    .unwrap_or_else(|| result.proposal.description.as_str());
+                    .unwrap_or(result.proposal.description.as_str());
                 self.emitter
-                    .on_tool_called(&ctx, tool_name, result.proposal.tool_args.as_ref())
+                    .on_tool_called(ctx, tool_name, result.proposal.tool_args.as_ref())
                     .await;
                 let (succeeded, error) = match &result.status {
                     ActionStatus::Succeeded => (true, None),
@@ -322,7 +322,7 @@ where
                 };
                 self.emitter
                     .on_tool_result(
-                        &ctx,
+                        ctx,
                         tool_name,
                         succeeded,
                         result.tool_output.as_ref(),
@@ -337,12 +337,12 @@ where
             // The execute phase has already handled per-tool-call checkpointing
             // (per LoopConfig::checkpoint_every_n_tool_calls); this step captures
             // the iteration-level summary and calls the injected checkpoint hook.
-            let step_summary = build_step_summary(&ctx, &decide_output, &execute_outcome);
+            let step_summary = build_step_summary(ctx, &decide_output, &execute_outcome);
             step_history.push(step_summary);
 
             if let Err(e) = self
                 .checkpoint_hook
-                .save(&ctx, &gather_output, &decide_output, &execute_outcome)
+                .save(ctx, &gather_output, &decide_output, &execute_outcome)
                 .await
             {
                 // Checkpoint failures are logged but do NOT abort the run.
@@ -362,7 +362,7 @@ where
             }
 
             self.emitter
-                .on_step_completed(&ctx, &decide_output, &execute_outcome)
+                .on_step_completed(ctx, &decide_output, &execute_outcome)
                 .await;
 
             // ── (7) Loop signal ───────────────────────────────────────────────

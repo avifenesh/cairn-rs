@@ -80,7 +80,7 @@ impl ToolHandler for GetApprovalsTool {
             .filter(|a| {
                 run_filter
                     .as_ref()
-                    .map_or(true, |rid| a.run_id.as_ref() == Some(rid))
+                    .is_none_or(|rid| a.run_id.as_ref() == Some(rid))
             })
             .map(|a| {
                 serde_json::json!({

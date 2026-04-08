@@ -176,7 +176,7 @@ pub use services::orchestrator::{
 };
 
 std::thread_local! {
-    static CURRENT_TRACE_ID: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
+    static CURRENT_TRACE_ID: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
 /// Set the current trace ID for event correlation (RFC 011).

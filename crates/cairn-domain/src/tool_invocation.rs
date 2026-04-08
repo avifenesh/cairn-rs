@@ -88,6 +88,7 @@ pub struct ToolInvocationRecord {
 }
 
 impl ToolInvocationRecord {
+    #[allow(clippy::too_many_arguments)]
     pub fn new_requested(
         invocation_id: ToolInvocationId,
         project: ProjectKey,

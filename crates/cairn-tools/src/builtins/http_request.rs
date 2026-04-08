@@ -174,7 +174,7 @@ impl ToolHandler for HttpRequestTool {
 
                 Ok(ToolResult::ok(serde_json::json!({
                     "status":  status,
-                    "ok":      status >= 200 && status < 300,
+                    "ok":      (200..300).contains(&status),
                     "headers": headers,
                     "body":    body_value,
                 })))

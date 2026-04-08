@@ -147,17 +147,14 @@ where
 
             // Reflect
             let advisory = self.driver.reflect(&ctx, &outcome).await;
-            match advisory {
-                ReflectionAdvisory::Escalate { reason } => {
-                    self.hooks.on_execution_failed(&run_id, &reason).await?;
-                    return Ok(ExecutionResult {
-                        session_id,
-                        run_id,
-                        iterations: ctx.iteration,
-                        final_outcome: StepOutcome::Failed { reason },
-                    });
-                }
-                _ => {}
+            if let ReflectionAdvisory::Escalate { reason } = advisory {
+                self.hooks.on_execution_failed(&run_id, &reason).await?;
+                return Ok(ExecutionResult {
+                    session_id,
+                    run_id,
+                    iterations: ctx.iteration,
+                    final_outcome: StepOutcome::Failed { reason },
+                });
             }
 
             // Check outcome

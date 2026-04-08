@@ -1066,7 +1066,7 @@ where
         let tenant_id = parts
             .extensions
             .get::<TenantId>()
-            .map(|t| t.clone())
+            .cloned()
             .ok_or_else(unauthorized_api_error)?;
         // Admin service account bypasses per-tenant scope checks.
         let is_admin = parts
@@ -1120,7 +1120,7 @@ where
         let tenant = request
             .extensions()
             .get::<TenantId>()
-            .map(|t| t.clone())
+            .cloned()
             .map(|tenant_id| TenantScope {
                 tenant_id,
                 is_admin,
@@ -9227,7 +9227,7 @@ async fn orchestrate_run_handler(
         let web_fetch: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(WebFetchTool::default());
         let shell_exec: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(ShellExecTool::default());
+            std::sync::Arc::new(ShellExecTool);
 
         // Build inner registry for ToolSearchTool (deferred tier).
         let inner = std::sync::Arc::new(
@@ -13600,7 +13600,7 @@ fn source_detail_for(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(source_id.as_str())
-        .map(|t| t.clone())
+        .cloned()
         .unwrap_or_default();
 
     Some(SourceDetailResponse {

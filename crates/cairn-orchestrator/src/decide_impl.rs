@@ -39,7 +39,7 @@ use crate::error::OrchestratorError;
 /// tokenizers) when accuracy becomes important.
 #[inline]
 pub fn estimate_tokens(text: &str) -> usize {
-    (text.len() + 3) / 4 // round up so we never under-count
+    text.len().div_ceil(4) // round up so we never under-count
 }
 
 /// Token budget for a single LLM call.

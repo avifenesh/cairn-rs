@@ -158,7 +158,10 @@ impl ToolHandler for FileReadTool {
 /// - absolute paths (`/etc/passwd`)
 /// - paths with `..` components (`../../../etc/passwd`)
 /// - paths with null bytes (defence-in-depth)
-pub(super) fn resolve_safe_path(root: &PathBuf, rel_path: &str) -> Result<PathBuf, ToolError> {
+pub(super) fn resolve_safe_path(
+    root: &std::path::Path,
+    rel_path: &str,
+) -> Result<PathBuf, ToolError> {
     if rel_path.contains('\0') {
         return Err(ToolError::InvalidArgs {
             field: "path".into(),
@@ -195,7 +198,7 @@ pub(super) fn resolve_safe_path(root: &PathBuf, rel_path: &str) -> Result<PathBu
         let canonical = abs
             .canonicalize()
             .map_err(|e| ToolError::Transient(e.to_string()))?;
-        let root_canon = root.canonicalize().unwrap_or_else(|_| root.clone());
+        let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         if !canonical.starts_with(&root_canon) {
             return Err(ToolError::InvalidArgs {
                 field: "path".into(),

@@ -27,12 +27,14 @@ pub enum ServerRole {
 /// serves HTTP, runs background workers, or both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ProcessRole {
     /// Serve HTTP routes only — no background task processing.
     ApiOnly,
     /// Run task claim/execute loop only — no HTTP server.
     WorkerOnly,
     /// Both HTTP + background workers (default, current behavior).
+    #[default]
     AllInOne,
 }
 
@@ -66,12 +68,6 @@ impl ProcessRole {
     }
 }
 
-impl Default for ProcessRole {
-    fn default() -> Self {
-        ProcessRole::AllInOne
-    }
-}
-
 impl std::fmt::Display for ProcessRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -81,16 +77,16 @@ impl std::fmt::Display for ProcessRole {
 /// Storage backend selection per RFC 011.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum StorageBackend {
+    #[default]
     InMemory,
-    Sqlite { path: String },
-    Postgres { connection_url: String },
-}
-
-impl Default for StorageBackend {
-    fn default() -> Self {
-        StorageBackend::InMemory
-    }
+    Sqlite {
+        path: String,
+    },
+    Postgres {
+        connection_url: String,
+    },
 }
 
 /// Encryption key source for credential encryption at rest (RFC 011).

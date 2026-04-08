@@ -26,6 +26,7 @@ pub struct SseMemoryProposalHook {
     /// Live SSE broadcast channel sender.
     sse_tx: Option<broadcast::Sender<SseFrame>>,
     /// Replay buffer shared with AppState for Last-Event-ID reconnect.
+    #[allow(clippy::type_complexity)]
     sse_buffer: Option<Arc<RwLock<VecDeque<(u64, SseFrame)>>>>,
     /// Monotonic sequence counter shared with AppState.
     sse_seq: Option<Arc<AtomicU64>>,

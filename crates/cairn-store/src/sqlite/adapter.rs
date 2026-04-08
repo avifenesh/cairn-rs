@@ -221,7 +221,7 @@ impl RunReadModel for SqliteAdapter {
         state: RunState,
         limit: usize,
     ) -> Result<Vec<RunRecord>, StoreError> {
-        let state_str = serde_json::to_value(&state)
+        let state_str = serde_json::to_value(state)
             .ok()
             .and_then(|v| v.as_str().map(String::from))
             .unwrap_or_else(|| format!("{state:?}").to_lowercase());

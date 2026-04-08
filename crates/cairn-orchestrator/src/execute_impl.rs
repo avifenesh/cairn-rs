@@ -238,7 +238,7 @@ impl RuntimeExecutePhase {
                             .map_err(OrchestratorError::Runtime)?;
 
                         *tool_call_count += 1;
-                        if *tool_call_count % self.checkpoint_every_n_tool_calls == 0 {
+                        if (*tool_call_count).is_multiple_of(self.checkpoint_every_n_tool_calls) {
                             let cp_id = CheckpointId::new(new_id("cp"));
                             self.checkpoint_service
                                 .save(&ctx.project, &ctx.run_id, cp_id)

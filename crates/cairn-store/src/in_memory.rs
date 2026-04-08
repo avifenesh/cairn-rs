@@ -2295,7 +2295,7 @@ impl crate::projections::ScheduledTaskReadModel for InMemoryStore {
         let mut results: Vec<cairn_domain::ScheduledTaskRecord> = state
             .scheduled_tasks
             .values()
-            .filter(|t| t.enabled && t.next_run_at.map_or(false, |nxt| nxt <= now_ms))
+            .filter(|t| t.enabled && t.next_run_at.is_some_and(|nxt| nxt <= now_ms))
             .cloned()
             .collect();
         results.sort_by_key(|t| t.next_run_at);

@@ -304,8 +304,8 @@ impl HtmlParser {
                 let tag_raw = tag.trim().to_owned();
                 let tag_lower = tag_raw.to_lowercase();
                 // Preserve the leading '/' for closing tags.
-                let tag_name = if tag_lower.starts_with('/') {
-                    let rest = tag_lower[1..]
+                let tag_name = if let Some(stripped) = tag_lower.strip_prefix('/') {
+                    let rest = stripped
                         .split(|c: char| c.is_whitespace())
                         .next()
                         .unwrap_or("");
@@ -489,12 +489,12 @@ fn extract_attr(tag: &str, attr_name: &str) -> Option<String> {
     let idx = tag.find(&search)?;
     let rest = &tag[idx + search.len()..];
     let rest = rest.trim_start();
-    if rest.starts_with('"') {
-        let end = rest[1..].find('"')?;
-        Some(rest[1..1 + end].to_owned())
-    } else if rest.starts_with('\'') {
-        let end = rest[1..].find('\'')?;
-        Some(rest[1..1 + end].to_owned())
+    if let Some(inner) = rest.strip_prefix('"') {
+        let end = inner.find('"')?;
+        Some(inner[..end].to_owned())
+    } else if let Some(inner) = rest.strip_prefix('\'') {
+        let end = inner.find('\'')?;
+        Some(inner[..end].to_owned())
     } else {
         let end = rest
             .find(|c: char| c.is_whitespace() || c == '>' || c == '/')
@@ -713,8 +713,8 @@ pub fn extract_metadata(content: &str) -> DocumentMetadata {
     if metadata.title.is_none() {
         for line in content.lines().take(10) {
             let trimmed = line.trim();
-            if trimmed.starts_with("# ") {
-                metadata.title = Some(trimmed[2..].trim().to_owned());
+            if let Some(title) = trimmed.strip_prefix("# ") {
+                metadata.title = Some(title.trim().to_owned());
                 break;
             }
             // HTML title.

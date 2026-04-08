@@ -363,6 +363,7 @@ fn extract_capitalized_spans(tokens: &[Token]) -> Vec<Vec<String>> {
     spans
 }
 
+#[allow(clippy::ptr_arg)]
 fn flush_span(current: &mut Vec<String>, spans: &mut Vec<Vec<String>>) {
     if current.len() >= 2 {
         spans.push(current.clone());
