@@ -131,10 +131,7 @@ impl TenantAccessPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IsolationViolation {
     /// The workspace_id in the project key does not match the expected scope.
-    WorkspaceMismatch {
-        expected: String,
-        actual: String,
-    },
+    WorkspaceMismatch { expected: String, actual: String },
     /// Cross-tenant access denied.
     TenantAccessDenied {
         source_tenant: String,
@@ -375,12 +372,10 @@ impl WorkspaceQuotaManager {
         };
 
         let mut map = self.usage.write().unwrap();
-        let usage = map
-            .entry(ws.to_owned())
-            .or_insert_with(|| WorkspaceUsage {
-                workspace_id: ws.to_owned(),
-                ..Default::default()
-            });
+        let usage = map.entry(ws.to_owned()).or_insert_with(|| WorkspaceUsage {
+            workspace_id: ws.to_owned(),
+            ..Default::default()
+        });
         Self::maybe_reset_counters(usage);
 
         if policy.max_concurrent_runs > 0 && usage.active_runs >= policy.max_concurrent_runs {
@@ -421,12 +416,10 @@ impl WorkspaceQuotaManager {
         }
 
         let mut map = self.usage.write().unwrap();
-        let usage = map
-            .entry(ws.to_owned())
-            .or_insert_with(|| WorkspaceUsage {
-                workspace_id: ws.to_owned(),
-                ..Default::default()
-            });
+        let usage = map.entry(ws.to_owned()).or_insert_with(|| WorkspaceUsage {
+            workspace_id: ws.to_owned(),
+            ..Default::default()
+        });
         Self::maybe_reset_counters(usage);
 
         let projected = usage.tokens_today.saturating_add(additional_tokens);
@@ -455,10 +448,7 @@ impl WorkspaceQuotaManager {
         }
 
         let map = self.usage.read().unwrap();
-        let storage = map
-            .get(ws)
-            .map(|u| u.storage_mb)
-            .unwrap_or(0);
+        let storage = map.get(ws).map(|u| u.storage_mb).unwrap_or(0);
 
         if storage >= policy.max_storage_mb {
             return Err(QuotaViolation {
@@ -686,16 +676,24 @@ mod tests {
         policy.allow_tenant("t2");
         mgr.set_tenant_access(policy);
 
-        assert!(mgr.check_tenant_access(&tenant("t1"), &tenant("t2")).is_ok());
-        assert!(mgr.check_tenant_access(&tenant("t1"), &tenant("t3")).is_err());
+        assert!(mgr
+            .check_tenant_access(&tenant("t1"), &tenant("t2"))
+            .is_ok());
+        assert!(mgr
+            .check_tenant_access(&tenant("t1"), &tenant("t3"))
+            .is_err());
     }
 
     #[test]
     fn manager_returns_deny_all_for_unknown_tenant() {
         let mgr = WorkspaceQuotaManager::new();
-        assert!(mgr.check_tenant_access(&tenant("unknown"), &tenant("other")).is_err());
+        assert!(mgr
+            .check_tenant_access(&tenant("unknown"), &tenant("other"))
+            .is_err());
         // Same-tenant is always OK even without explicit policy.
-        assert!(mgr.check_tenant_access(&tenant("t1"), &tenant("t1")).is_ok());
+        assert!(mgr
+            .check_tenant_access(&tenant("t1"), &tenant("t1"))
+            .is_ok());
     }
 
     // ── Gap 3: Workspace isolation ───────────────────────────────────────

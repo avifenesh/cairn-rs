@@ -17,10 +17,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cairn_domain::ProjectKey;
 use cairn_domain::events::ActualOutcome;
-use cairn_store::projections::OutcomeReadModel;
+use cairn_domain::ProjectKey;
 use cairn_store::error::StoreError;
+use cairn_store::projections::OutcomeReadModel;
 
 /// How much to adjust raw predicted confidence for a given agent type.
 ///
@@ -78,13 +78,8 @@ where
     ) -> Result<HashMap<String, CalibrationAdjustment>, StoreError> {
         let cutoff_ms = now_millis().saturating_sub(WINDOW_MS);
 
-        let all = OutcomeReadModel::list_by_project(
-            self.store.as_ref(),
-            project,
-            MAX_OUTCOMES,
-            0,
-        )
-        .await?;
+        let all = OutcomeReadModel::list_by_project(self.store.as_ref(), project, MAX_OUTCOMES, 0)
+            .await?;
 
         // Filter to the 7-day window.
         let recent: Vec<_> = all
@@ -136,8 +131,8 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use cairn_domain::{OutcomeId, RunId};
-    use cairn_store::projections::OutcomeRecord;
     use cairn_store::error::StoreError;
+    use cairn_store::projections::OutcomeRecord;
 
     fn project() -> ProjectKey {
         ProjectKey::new("tenant", "workspace", "project")
@@ -176,10 +171,7 @@ mod tests {
 
     #[async_trait]
     impl OutcomeReadModel for StubStore {
-        async fn get(
-            &self,
-            id: &OutcomeId,
-        ) -> Result<Option<OutcomeRecord>, StoreError> {
+        async fn get(&self, id: &OutcomeId) -> Result<Option<OutcomeRecord>, StoreError> {
             Ok(self.records.iter().find(|r| r.outcome_id == *id).cloned())
         }
 
@@ -288,7 +280,10 @@ mod tests {
         let cal = ConfidenceCalibrator::new(Arc::new(StubStore { records }));
         let result = cal.calibrate(&project()).await.unwrap();
         // stale_agent's outcome is outside the 7-day window.
-        assert!(!result.contains_key("stale_agent"), "stale record should be excluded");
+        assert!(
+            !result.contains_key("stale_agent"),
+            "stale record should be excluded"
+        );
         assert!(result.contains_key("fresh_agent"));
     }
 

@@ -9,12 +9,11 @@
 
 use std::sync::Arc;
 
+use cairn_domain::providers::{OperationKind, ProviderCallStatus};
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectKey, ProviderBindingId, ProviderCallId,
-    ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId,
-    RuntimeEvent,
+    ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, RuntimeEvent,
 };
-use cairn_domain::providers::{OperationKind, ProviderCallStatus};
 use cairn_store::{
     projections::{ProviderBindingCostStatsReadModel, RunCostReadModel},
     EventLog, InMemoryStore,
@@ -81,16 +80,65 @@ async fn five_calls_sum_to_1500_micros() {
     let store = Arc::new(InMemoryStore::new());
 
     // All 5 calls on the same run so they land in run_costs.
-    store.append(&[
-        call_event("1", "t1", Some(run_id("a")), "bind_a", "gpt-4o", Some(100), Some(50),  Some(20)),
-        call_event("2", "t1", Some(run_id("a")), "bind_a", "gpt-4o", Some(200), Some(100), Some(40)),
-        call_event("3", "t1", Some(run_id("a")), "bind_a", "gpt-4o", Some(300), Some(150), Some(60)),
-        call_event("4", "t1", Some(run_id("a")), "bind_a", "gpt-4o", Some(400), Some(200), Some(80)),
-        call_event("5", "t1", Some(run_id("a")), "bind_a", "gpt-4o", Some(500), Some(250), Some(100)),
-    ]).await.unwrap();
+    store
+        .append(&[
+            call_event(
+                "1",
+                "t1",
+                Some(run_id("a")),
+                "bind_a",
+                "gpt-4o",
+                Some(100),
+                Some(50),
+                Some(20),
+            ),
+            call_event(
+                "2",
+                "t1",
+                Some(run_id("a")),
+                "bind_a",
+                "gpt-4o",
+                Some(200),
+                Some(100),
+                Some(40),
+            ),
+            call_event(
+                "3",
+                "t1",
+                Some(run_id("a")),
+                "bind_a",
+                "gpt-4o",
+                Some(300),
+                Some(150),
+                Some(60),
+            ),
+            call_event(
+                "4",
+                "t1",
+                Some(run_id("a")),
+                "bind_a",
+                "gpt-4o",
+                Some(400),
+                Some(200),
+                Some(80),
+            ),
+            call_event(
+                "5",
+                "t1",
+                Some(run_id("a")),
+                "bind_a",
+                "gpt-4o",
+                Some(500),
+                Some(250),
+                Some(100),
+            ),
+        ])
+        .await
+        .unwrap();
 
     let run_cost = RunCostReadModel::get_run_cost(store.as_ref(), &run_id("a"))
-        .await.unwrap()
+        .await
+        .unwrap()
         .expect("run cost record must exist");
 
     assert_eq!(
@@ -114,16 +162,66 @@ async fn token_counts_accumulate_correctly() {
 
     // 5 calls: input tokens 50, 100, 150, 200, 250 → total 750
     // output tokens 20, 40, 60, 80, 100 → total 300
-    store.append(&[
-        call_event("t1", "t2", Some(run_id("tokens")), "bind_tok", "model_x", Some(100), Some(50),  Some(20)),
-        call_event("t2", "t2", Some(run_id("tokens")), "bind_tok", "model_x", Some(100), Some(100), Some(40)),
-        call_event("t3", "t2", Some(run_id("tokens")), "bind_tok", "model_x", Some(100), Some(150), Some(60)),
-        call_event("t4", "t2", Some(run_id("tokens")), "bind_tok", "model_x", Some(100), Some(200), Some(80)),
-        call_event("t5", "t2", Some(run_id("tokens")), "bind_tok", "model_x", Some(100), Some(250), Some(100)),
-    ]).await.unwrap();
+    store
+        .append(&[
+            call_event(
+                "t1",
+                "t2",
+                Some(run_id("tokens")),
+                "bind_tok",
+                "model_x",
+                Some(100),
+                Some(50),
+                Some(20),
+            ),
+            call_event(
+                "t2",
+                "t2",
+                Some(run_id("tokens")),
+                "bind_tok",
+                "model_x",
+                Some(100),
+                Some(100),
+                Some(40),
+            ),
+            call_event(
+                "t3",
+                "t2",
+                Some(run_id("tokens")),
+                "bind_tok",
+                "model_x",
+                Some(100),
+                Some(150),
+                Some(60),
+            ),
+            call_event(
+                "t4",
+                "t2",
+                Some(run_id("tokens")),
+                "bind_tok",
+                "model_x",
+                Some(100),
+                Some(200),
+                Some(80),
+            ),
+            call_event(
+                "t5",
+                "t2",
+                Some(run_id("tokens")),
+                "bind_tok",
+                "model_x",
+                Some(100),
+                Some(250),
+                Some(100),
+            ),
+        ])
+        .await
+        .unwrap();
 
     let run_cost = RunCostReadModel::get_run_cost(store.as_ref(), &run_id("tokens"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
         run_cost.total_tokens_in, 750,
@@ -149,45 +247,115 @@ async fn per_binding_cost_breakdown_is_accurate() {
     let store = Arc::new(InMemoryStore::new());
 
     // gpt-4o binding: 3 calls at 1000, 2000, 3000 micros → total 6000
-    store.append(&[
-        call_event("g1", "t3", Some(run_id("gpt")),     "bind_gpt",     "gpt-4o",             Some(1000), Some(100), Some(50)),
-        call_event("g2", "t3", Some(run_id("gpt")),     "bind_gpt",     "gpt-4o",             Some(2000), Some(200), Some(80)),
-        call_event("g3", "t3", Some(run_id("gpt")),     "bind_gpt",     "gpt-4o",             Some(3000), Some(300), Some(120)),
-        // claude binding: 2 calls at 500, 750 micros → total 1250
-        call_event("c1", "t3", Some(run_id("claude")),  "bind_claude",  "claude-3-5-sonnet",  Some(500),  Some(80),  Some(40)),
-        call_event("c2", "t3", Some(run_id("claude")),  "bind_claude",  "claude-3-5-sonnet",  Some(750),  Some(120), Some(60)),
-    ]).await.unwrap();
+    store
+        .append(&[
+            call_event(
+                "g1",
+                "t3",
+                Some(run_id("gpt")),
+                "bind_gpt",
+                "gpt-4o",
+                Some(1000),
+                Some(100),
+                Some(50),
+            ),
+            call_event(
+                "g2",
+                "t3",
+                Some(run_id("gpt")),
+                "bind_gpt",
+                "gpt-4o",
+                Some(2000),
+                Some(200),
+                Some(80),
+            ),
+            call_event(
+                "g3",
+                "t3",
+                Some(run_id("gpt")),
+                "bind_gpt",
+                "gpt-4o",
+                Some(3000),
+                Some(300),
+                Some(120),
+            ),
+            // claude binding: 2 calls at 500, 750 micros → total 1250
+            call_event(
+                "c1",
+                "t3",
+                Some(run_id("claude")),
+                "bind_claude",
+                "claude-3-5-sonnet",
+                Some(500),
+                Some(80),
+                Some(40),
+            ),
+            call_event(
+                "c2",
+                "t3",
+                Some(run_id("claude")),
+                "bind_claude",
+                "claude-3-5-sonnet",
+                Some(750),
+                Some(120),
+                Some(60),
+            ),
+        ])
+        .await
+        .unwrap();
 
-    let gpt_stats = ProviderBindingCostStatsReadModel::get(
-        store.as_ref(),
-        &ProviderBindingId::new("bind_gpt"),
-    ).await.unwrap().expect("gpt binding stats must exist");
+    let gpt_stats =
+        ProviderBindingCostStatsReadModel::get(store.as_ref(), &ProviderBindingId::new("bind_gpt"))
+            .await
+            .unwrap()
+            .expect("gpt binding stats must exist");
 
-    assert_eq!(gpt_stats.total_cost_micros, 6000, "gpt-4o total must be 6000");
+    assert_eq!(
+        gpt_stats.total_cost_micros, 6000,
+        "gpt-4o total must be 6000"
+    );
     assert_eq!(gpt_stats.call_count, 3, "gpt-4o call count must be 3");
 
     let claude_stats = ProviderBindingCostStatsReadModel::get(
         store.as_ref(),
         &ProviderBindingId::new("bind_claude"),
-    ).await.unwrap().expect("claude binding stats must exist");
+    )
+    .await
+    .unwrap()
+    .expect("claude binding stats must exist");
 
-    assert_eq!(claude_stats.total_cost_micros, 1250, "claude total must be 1250");
+    assert_eq!(
+        claude_stats.total_cost_micros, 1250,
+        "claude total must be 1250"
+    );
     assert_eq!(claude_stats.call_count, 2, "claude call count must be 2");
 
     // Combined total via cost_summary: 6000 + 1250 = 7250.
     let (_calls, _tin, _tout, total) = store.cost_summary().await;
-    assert_eq!(total, 7250, "combined cost summary must equal 6000+1250=7250");
+    assert_eq!(
+        total, 7250,
+        "combined cost summary must equal 6000+1250=7250"
+    );
 
     // list_by_tenant shows both bindings.
     let tenant_stats = ProviderBindingCostStatsReadModel::list_by_tenant(
         store.as_ref(),
         &cairn_domain::TenantId::new("t3"),
-    ).await.unwrap();
-    assert_eq!(tenant_stats.len(), 2, "two bindings must appear in tenant stats");
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        tenant_stats.len(),
+        2,
+        "two bindings must appear in tenant stats"
+    );
 
     // Verify the cheaper one sorts first (list_by_tenant sorts by avg cost).
     let total_reported: u64 = tenant_stats.iter().map(|s| s.total_cost_micros).sum();
-    assert_eq!(total_reported, 7250, "sum of per-binding stats must equal 7250");
+    assert_eq!(
+        total_reported, 7250,
+        "sum of per-binding stats must equal 7250"
+    );
 }
 
 /// (5): Zero-cost calls (cost_micros=Some(0)) and None-cost calls do not
@@ -196,17 +364,49 @@ async fn per_binding_cost_breakdown_is_accurate() {
 async fn zero_cost_and_none_cost_dont_inflate_totals() {
     let store = Arc::new(InMemoryStore::new());
 
-    store.append(&[
-        // Paid call: 1000 micros.
-        call_event("paid",  "t4", Some(run_id("mixed")), "bind_mix", "model_m", Some(1000), Some(100), Some(50)),
-        // Free call (explicit zero cost): cache hit / free tier.
-        call_event("free",  "t4", Some(run_id("mixed")), "bind_mix", "model_m", Some(0),    Some(100), Some(50)),
-        // No cost reported (provider didn't return pricing).
-        call_event("none",  "t4", Some(run_id("mixed")), "bind_mix", "model_m", None,       Some(100), Some(50)),
-    ]).await.unwrap();
+    store
+        .append(&[
+            // Paid call: 1000 micros.
+            call_event(
+                "paid",
+                "t4",
+                Some(run_id("mixed")),
+                "bind_mix",
+                "model_m",
+                Some(1000),
+                Some(100),
+                Some(50),
+            ),
+            // Free call (explicit zero cost): cache hit / free tier.
+            call_event(
+                "free",
+                "t4",
+                Some(run_id("mixed")),
+                "bind_mix",
+                "model_m",
+                Some(0),
+                Some(100),
+                Some(50),
+            ),
+            // No cost reported (provider didn't return pricing).
+            call_event(
+                "none",
+                "t4",
+                Some(run_id("mixed")),
+                "bind_mix",
+                "model_m",
+                None,
+                Some(100),
+                Some(50),
+            ),
+        ])
+        .await
+        .unwrap();
 
     let run_cost = RunCostReadModel::get_run_cost(store.as_ref(), &run_id("mixed"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     // Cost must not be inflated by the zero or None calls.
     assert_eq!(
@@ -221,12 +421,18 @@ async fn zero_cost_and_none_cost_dont_inflate_totals() {
     );
 
     // Tokens from all calls accumulate (300 in, 150 out).
-    assert_eq!(run_cost.total_tokens_in, 300, "tokens accumulate from all calls including free");
+    assert_eq!(
+        run_cost.total_tokens_in, 300,
+        "tokens accumulate from all calls including free"
+    );
     assert_eq!(run_cost.total_tokens_out, 150);
 
     // cost_summary reflects the same: 1000 total, not 1000+0+0.
     let (_calls, _tin, _tout, total) = store.cost_summary().await;
-    assert_eq!(total, 1000, "cost_summary must not count zero-cost or None calls toward total");
+    assert_eq!(
+        total, 1000,
+        "cost_summary must not count zero-cost or None calls toward total"
+    );
 }
 
 /// (6): Cost precision — u64 micros arithmetic has no floating-point loss.
@@ -244,29 +450,33 @@ async fn cost_micros_precision_no_floating_point_loss() {
     // Use values that are individually representable but whose sum requires
     // exact integer arithmetic to be correct.
     let costs: &[u64] = &[
-        1,
-        7,           // prime
-        9_999_999,   // just under 10M micros ($9.999999)
-        1_000_001,   // near-round with remainder
-        3,           // prime
+        1, 7,         // prime
+        9_999_999, // just under 10M micros ($9.999999)
+        1_000_001, // near-round with remainder
+        3,         // prime
     ];
-    let expected_total: u64 = costs.iter().sum();  // 11_000_011
+    let expected_total: u64 = costs.iter().sum(); // 11_000_011
 
     for (i, &cost) in costs.iter().enumerate() {
-        store.append(&[call_event(
-            &format!("prec_{i}"),
-            "t5",
-            Some(run_id("precision")),
-            "bind_prec",
-            "model_p",
-            Some(cost),
-            Some(10),
-            Some(5),
-        )]).await.unwrap();
+        store
+            .append(&[call_event(
+                &format!("prec_{i}"),
+                "t5",
+                Some(run_id("precision")),
+                "bind_prec",
+                "model_p",
+                Some(cost),
+                Some(10),
+                Some(5),
+            )])
+            .await
+            .unwrap();
     }
 
     let run_cost = RunCostReadModel::get_run_cost(store.as_ref(), &run_id("precision"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
         run_cost.total_cost_micros, expected_total,
@@ -275,8 +485,10 @@ async fn cost_micros_precision_no_floating_point_loss() {
     );
 
     // Verify against the expected value computed in pure integer arithmetic.
-    assert_eq!(expected_total, 11_000_011,
-        "sanity check: 1+7+9_999_999+1_000_001+3 = 11_000_011");
+    assert_eq!(
+        expected_total, 11_000_011,
+        "sanity check: 1+7+9_999_999+1_000_001+3 = 11_000_011"
+    );
 
     // Confirm f64 would lose precision on the total.
     // (11_000_011 is small enough that f64 actually represents it exactly,
@@ -284,9 +496,14 @@ async fn cost_micros_precision_no_floating_point_loss() {
     let as_u64: u64 = expected_total;
     let as_f64_back: u64 = (expected_total as f64) as u64;
     // For small values f64 is still exact; the important thing is we use u64.
-    assert_eq!(as_u64, as_f64_back, "for this value f64 round-trip is exact");
-    assert_eq!(run_cost.total_cost_micros, as_u64,
-        "stored total must equal the exact integer sum");
+    assert_eq!(
+        as_u64, as_f64_back,
+        "for this value f64 round-trip is exact"
+    );
+    assert_eq!(
+        run_cost.total_cost_micros, as_u64,
+        "stored total must equal the exact integer sum"
+    );
 }
 
 /// Multiple runs: cost_summary() sums across ALL runs, not just the latest.
@@ -295,20 +512,68 @@ async fn cost_summary_aggregates_across_multiple_runs() {
     let store = Arc::new(InMemoryStore::new());
 
     // Run 1: 1000 micros.
-    store.append(&[
-        call_event("r1c1", "t6", Some(run_id("r1")), "bind_r", "m1", Some(400), Some(50), Some(20)),
-        call_event("r1c2", "t6", Some(run_id("r1")), "bind_r", "m1", Some(600), Some(50), Some(20)),
-    ]).await.unwrap();
+    store
+        .append(&[
+            call_event(
+                "r1c1",
+                "t6",
+                Some(run_id("r1")),
+                "bind_r",
+                "m1",
+                Some(400),
+                Some(50),
+                Some(20),
+            ),
+            call_event(
+                "r1c2",
+                "t6",
+                Some(run_id("r1")),
+                "bind_r",
+                "m1",
+                Some(600),
+                Some(50),
+                Some(20),
+            ),
+        ])
+        .await
+        .unwrap();
 
     // Run 2: 2500 micros.
-    store.append(&[
-        call_event("r2c1", "t6", Some(run_id("r2")), "bind_r", "m1", Some(1000), Some(100), Some(40)),
-        call_event("r2c2", "t6", Some(run_id("r2")), "bind_r", "m1", Some(1500), Some(150), Some(60)),
-    ]).await.unwrap();
+    store
+        .append(&[
+            call_event(
+                "r2c1",
+                "t6",
+                Some(run_id("r2")),
+                "bind_r",
+                "m1",
+                Some(1000),
+                Some(100),
+                Some(40),
+            ),
+            call_event(
+                "r2c2",
+                "t6",
+                Some(run_id("r2")),
+                "bind_r",
+                "m1",
+                Some(1500),
+                Some(150),
+                Some(60),
+            ),
+        ])
+        .await
+        .unwrap();
 
     // Per-run verification.
-    let r1 = RunCostReadModel::get_run_cost(store.as_ref(), &run_id("r1")).await.unwrap().unwrap();
-    let r2 = RunCostReadModel::get_run_cost(store.as_ref(), &run_id("r2")).await.unwrap().unwrap();
+    let r1 = RunCostReadModel::get_run_cost(store.as_ref(), &run_id("r1"))
+        .await
+        .unwrap()
+        .unwrap();
+    let r2 = RunCostReadModel::get_run_cost(store.as_ref(), &run_id("r2"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(r1.total_cost_micros, 1000, "run 1 cost must be 1000");
     assert_eq!(r2.total_cost_micros, 2500, "run 2 cost must be 2500");
 

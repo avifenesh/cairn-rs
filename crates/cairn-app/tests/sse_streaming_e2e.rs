@@ -227,7 +227,11 @@ async fn sse_stream_emits_frame_after_session_created() {
         StatusCode::OK,
         "SSE endpoint must remain healthy after events are appended"
     );
-    let ct = sse_after.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let ct = sse_after
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     assert!(ct.contains("text/event-stream"));
 }
 

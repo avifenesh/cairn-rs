@@ -112,17 +112,20 @@ where
             offset,
         )
         .await?;
-        Ok(records.into_iter().map(|rec| SignalSubscription {
-            subscription_id: rec.subscription_id,
-            signal_type: rec.signal_type.clone(),
-            target: rec.target,
-            created_at_ms: rec.created_at_ms,
-            project: rec.project.unwrap_or_else(|| project.clone()),
-            signal_kind: rec.signal_type,
-            target_run_id: rec.target_run_id,
-            target_mailbox_id: rec.target_mailbox_id,
-            filter_expression: rec.filter_expression,
-        }).collect())
+        Ok(records
+            .into_iter()
+            .map(|rec| SignalSubscription {
+                subscription_id: rec.subscription_id,
+                signal_type: rec.signal_type.clone(),
+                target: rec.target,
+                created_at_ms: rec.created_at_ms,
+                project: rec.project.unwrap_or_else(|| project.clone()),
+                signal_kind: rec.signal_type,
+                target_run_id: rec.target_run_id,
+                target_mailbox_id: rec.target_mailbox_id,
+                filter_expression: rec.filter_expression,
+            })
+            .collect())
     }
 
     async fn route_signal(
@@ -150,7 +153,10 @@ where
         let delivered_at_ms = now_ms();
 
         for subscription in subscriptions {
-            let sub_project = subscription.project.clone().unwrap_or_else(|| signal.project.clone());
+            let sub_project = subscription
+                .project
+                .clone()
+                .unwrap_or_else(|| signal.project.clone());
             if sub_project != signal.project
                 || !signal_matches_filter(&signal, subscription.filter_expression.as_deref())
             {
@@ -177,11 +183,11 @@ where
                         from_run_id: None,
                         content: signal.payload.to_string(),
                         deliver_at_ms: 0,
-                                                  sender: None,
-                         recipient: None,
-                         body: None,
-                         sent_at: None,
-                         delivery_status: None,
+                        sender: None,
+                        recipient: None,
+                        body: None,
+                        sent_at: None,
+                        delivery_status: None,
                     },
                 )));
             } else if let Some(run_id) = &subscription.target_run_id {
@@ -201,11 +207,11 @@ where
                         from_run_id: None,
                         content: signal.payload.to_string(),
                         deliver_at_ms: 0,
-                                                  sender: None,
-                         recipient: None,
-                         body: None,
-                         sent_at: None,
-                         delivery_status: None,
+                        sender: None,
+                        recipient: None,
+                        body: None,
+                        sent_at: None,
+                        delivery_status: None,
                     },
                 )));
             }

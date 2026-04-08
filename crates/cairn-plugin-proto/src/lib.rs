@@ -15,10 +15,9 @@ pub use wire::{
     EvalScoreParams, EvalScoreResult, EventEmitParams, HooksPostTurnParams, HooksPostTurnResult,
     HostInfo, InitializeParams, InitializeResult, JsonRpcError, JsonRpcErrorBody,
     JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, LogEmitParams, PluginInfo,
-    PluginNotification,
-    PolicyEvaluateParams, PolicyEvaluateResult, ProgressUpdateParams, RuntimeLinkageWire,
-    ScopeWire, SignalsPollParams, SignalsPollResult, ToolDescriptorWire, ToolsInvokeParams,
-    ToolsInvokeResult, ToolsListResult,
+    PluginNotification, PolicyEvaluateParams, PolicyEvaluateResult, ProgressUpdateParams,
+    RuntimeLinkageWire, ScopeWire, SignalsPollParams, SignalsPollResult, ToolDescriptorWire,
+    ToolsInvokeParams, ToolsInvokeResult, ToolsListResult,
 };
 
 #[cfg(test)]

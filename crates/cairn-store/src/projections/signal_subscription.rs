@@ -54,8 +54,6 @@ pub trait SignalSubscriptionReadModel: Send + Sync {
         _offset: usize,
     ) -> Result<Vec<SignalSubscriptionRecord>, StoreError>;
 
-    async fn upsert_subscription(
-        &self,
-        record: SignalSubscriptionRecord,
-    ) -> Result<(), StoreError>;
+    async fn upsert_subscription(&self, record: SignalSubscriptionRecord)
+        -> Result<(), StoreError>;
 }

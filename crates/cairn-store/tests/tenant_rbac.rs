@@ -11,12 +11,12 @@
 //!         → RunReadModel isolation verified
 //!           → WorkspaceMemberAdded → membership read model verified
 
+use cairn_domain::tenancy::{WorkspaceKey, WorkspaceRole};
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, OperatorId, ProjectId, ProjectKey, RunCreated, RunId,
     RuntimeEvent, SessionCreated, SessionId, TenantCreated, TenantId, WorkspaceCreated,
     WorkspaceId, WorkspaceMemberAdded,
 };
-use cairn_domain::tenancy::{WorkspaceKey, WorkspaceRole};
 use cairn_store::{
     projections::{
         RunReadModel, SessionReadModel, TenantReadModel, WorkspaceMembershipReadModel,
@@ -162,7 +162,10 @@ async fn workspace_list_is_scoped_to_owning_tenant() {
     assert_eq!(wb[0].workspace_id.as_str(), "wb");
 
     // Cross-tenant workspace lookup returns None.
-    let wrong = WorkspaceReadModel::get(&store, &WorkspaceId::new("wb")).await.unwrap().unwrap();
+    let wrong = WorkspaceReadModel::get(&store, &WorkspaceId::new("wb"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(wrong.tenant_id.as_str(), "tb", "wb belongs to tb, not ta");
 }
 
@@ -178,72 +181,86 @@ async fn run_list_is_scoped_to_project() {
     // Create sessions first (runs reference a session).
     store
         .append(&[
-            evt("e1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: proj_a.clone(),
-                session_id: SessionId::new("sess_a"),
-            })),
-            evt("e2", RuntimeEvent::SessionCreated(SessionCreated {
-                project: proj_b.clone(),
-                session_id: SessionId::new("sess_b"),
-            })),
-            evt("e3", RuntimeEvent::RunCreated(RunCreated {
-                project: proj_a.clone(),
-                session_id: SessionId::new("sess_a"),
-                run_id: RunId::new("run_a1"),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            evt("e4", RuntimeEvent::RunCreated(RunCreated {
-                project: proj_a.clone(),
-                session_id: SessionId::new("sess_a"),
-                run_id: RunId::new("run_a2"),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            evt("e5", RuntimeEvent::RunCreated(RunCreated {
-                project: proj_b.clone(),
-                session_id: SessionId::new("sess_b"),
-                run_id: RunId::new("run_b1"),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: proj_a.clone(),
+                    session_id: SessionId::new("sess_a"),
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: proj_b.clone(),
+                    session_id: SessionId::new("sess_b"),
+                }),
+            ),
+            evt(
+                "e3",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: proj_a.clone(),
+                    session_id: SessionId::new("sess_a"),
+                    run_id: RunId::new("run_a1"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e4",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: proj_a.clone(),
+                    session_id: SessionId::new("sess_a"),
+                    run_id: RunId::new("run_a2"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e5",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: proj_b.clone(),
+                    session_id: SessionId::new("sess_b"),
+                    run_id: RunId::new("run_b1"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
 
     // Project A sees only its two runs.
-    let runs_a = RunReadModel::list_by_session(
-        &store,
-        &SessionId::new("sess_a"),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let runs_a = RunReadModel::list_by_session(&store, &SessionId::new("sess_a"), 10, 0)
+        .await
+        .unwrap();
     assert_eq!(runs_a.len(), 2, "project A should have exactly 2 runs");
-    assert!(runs_a.iter().all(|r| r.project == proj_a), "all runs belong to project A");
+    assert!(
+        runs_a.iter().all(|r| r.project == proj_a),
+        "all runs belong to project A"
+    );
 
     // Project B sees only its one run.
-    let runs_b = RunReadModel::list_by_session(
-        &store,
-        &SessionId::new("sess_b"),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let runs_b = RunReadModel::list_by_session(&store, &SessionId::new("sess_b"), 10, 0)
+        .await
+        .unwrap();
     assert_eq!(runs_b.len(), 1, "project B should have exactly 1 run");
     assert_eq!(runs_b[0].run_id.as_str(), "run_b1");
     assert_eq!(runs_b[0].project, proj_b);
 
     // Individual run lookup is correctly attributed.
-    let run_a1 = RunReadModel::get(&store, &RunId::new("run_a1")).await.unwrap().unwrap();
+    let run_a1 = RunReadModel::get(&store, &RunId::new("run_a1"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(run_a1.project.tenant_id.as_str(), "tenant_a");
 
-    let run_b1 = RunReadModel::get(&store, &RunId::new("run_b1")).await.unwrap().unwrap();
+    let run_b1 = RunReadModel::get(&store, &RunId::new("run_b1"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(run_b1.project.tenant_id.as_str(), "tenant_b");
 }
 
@@ -257,36 +274,40 @@ async fn cross_tenant_run_query_returns_empty() {
 
     store
         .append(&[
-            evt("e1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: proj_a.clone(),
-                session_id: SessionId::new("sess_x"),
-            })),
-            evt("e2", RuntimeEvent::RunCreated(RunCreated {
-                project: proj_a.clone(),
-                session_id: SessionId::new("sess_x"),
-                run_id: RunId::new("run_x"),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: proj_a.clone(),
+                    session_id: SessionId::new("sess_x"),
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: proj_a.clone(),
+                    session_id: SessionId::new("sess_x"),
+                    run_id: RunId::new("run_x"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
 
     // Querying with tenant_y's session ID (which never had a session created)
     // returns an empty list — tenant_y cannot see tenant_x's runs.
-    let cross = RunReadModel::list_by_session(
-        &store,
-        &SessionId::new("sess_nonexistent"),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let cross = RunReadModel::list_by_session(&store, &SessionId::new("sess_nonexistent"), 10, 0)
+        .await
+        .unwrap();
     assert!(cross.is_empty(), "cross-tenant run query must return empty");
 
     // Direct run lookup with a known run ID still returns its true owner.
-    let run = RunReadModel::get(&store, &RunId::new("run_x")).await.unwrap().unwrap();
+    let run = RunReadModel::get(&store, &RunId::new("run_x"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(run.project.tenant_id.as_str(), "tenant_x");
     assert_ne!(run.project.tenant_id.as_str(), "tenant_y");
 
@@ -357,24 +378,33 @@ async fn workspace_members_are_scoped_to_workspace() {
 
     store
         .append(&[
-            evt("e1", RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
-                workspace_key: wkey_1.clone(),
-                member_id: OperatorId::new("alice"),
-                role: WorkspaceRole::Owner,
-                added_at_ms: ts,
-            })),
-            evt("e2", RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
-                workspace_key: wkey_1.clone(),
-                member_id: OperatorId::new("bob"),
-                role: WorkspaceRole::Member,
-                added_at_ms: ts + 1,
-            })),
-            evt("e3", RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
-                workspace_key: wkey_2.clone(),
-                member_id: OperatorId::new("carol"),
-                role: WorkspaceRole::Viewer,
-                added_at_ms: ts + 2,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
+                    workspace_key: wkey_1.clone(),
+                    member_id: OperatorId::new("alice"),
+                    role: WorkspaceRole::Owner,
+                    added_at_ms: ts,
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
+                    workspace_key: wkey_1.clone(),
+                    member_id: OperatorId::new("bob"),
+                    role: WorkspaceRole::Member,
+                    added_at_ms: ts + 1,
+                }),
+            ),
+            evt(
+                "e3",
+                RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
+                    workspace_key: wkey_2.clone(),
+                    member_id: OperatorId::new("carol"),
+                    role: WorkspaceRole::Viewer,
+                    added_at_ms: ts + 2,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -411,18 +441,24 @@ async fn re_adding_member_upgrades_role() {
     // Add as Member first, then re-add as Admin (role upgrade).
     store
         .append(&[
-            evt("e1", RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
-                workspace_key: wkey.clone(),
-                member_id: OperatorId::new("dave"),
-                role: WorkspaceRole::Member,
-                added_at_ms: ts,
-            })),
-            evt("e2", RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
-                workspace_key: wkey.clone(),
-                member_id: OperatorId::new("dave"),
-                role: WorkspaceRole::Admin,
-                added_at_ms: ts + 1,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
+                    workspace_key: wkey.clone(),
+                    member_id: OperatorId::new("dave"),
+                    role: WorkspaceRole::Member,
+                    added_at_ms: ts,
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::WorkspaceMemberAdded(WorkspaceMemberAdded {
+                    workspace_key: wkey.clone(),
+                    member_id: OperatorId::new("dave"),
+                    role: WorkspaceRole::Admin,
+                    added_at_ms: ts + 1,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -432,7 +468,15 @@ async fn re_adding_member_upgrades_role() {
         .unwrap();
 
     // Upsert semantics: dave appears exactly once with the updated role.
-    assert_eq!(members.len(), 1, "re-adding a member should upsert, not duplicate");
+    assert_eq!(
+        members.len(),
+        1,
+        "re-adding a member should upsert, not duplicate"
+    );
     assert_eq!(members[0].operator_id, "dave");
-    assert_eq!(members[0].role, WorkspaceRole::Admin, "role must be upgraded to Admin");
+    assert_eq!(
+        members[0].role,
+        WorkspaceRole::Admin,
+        "role must be upgraded to Admin"
+    );
 }

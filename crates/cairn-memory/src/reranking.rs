@@ -56,7 +56,9 @@ pub fn mmr_rerank(results: &[RetrievalResult], limit: usize, lambda: f64) -> Vec
             .max_by(|&a, &b| {
                 let mmr_a = mmr_score(a, &selected, &norm_scores, &sim_matrix, lambda);
                 let mmr_b = mmr_score(b, &selected, &norm_scores, &sim_matrix, lambda);
-                mmr_a.partial_cmp(&mmr_b).unwrap_or(std::cmp::Ordering::Equal)
+                mmr_a
+                    .partial_cmp(&mmr_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .unwrap();
 
@@ -64,10 +66,7 @@ pub fn mmr_rerank(results: &[RetrievalResult], limit: usize, lambda: f64) -> Vec
         remaining.retain(|&i| i != best_idx);
     }
 
-    selected
-        .into_iter()
-        .map(|i| results[i].clone())
-        .collect()
+    selected.into_iter().map(|i| results[i].clone()).collect()
 }
 
 /// MMR score for candidate `i` given already-selected items.
@@ -178,7 +177,12 @@ mod tests {
     use crate::retrieval::ScoringBreakdown;
     use cairn_domain::{ChunkId, KnowledgeDocumentId, ProjectKey, SourceId};
 
-    fn make_result(id: &str, text: &str, score: f64, embedding: Option<Vec<f32>>) -> RetrievalResult {
+    fn make_result(
+        id: &str,
+        text: &str,
+        score: f64,
+        embedding: Option<Vec<f32>>,
+    ) -> RetrievalResult {
         RetrievalResult {
             chunk: ChunkRecord {
                 chunk_id: ChunkId::new(id),

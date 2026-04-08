@@ -93,7 +93,11 @@ fn get_returns_skill_with_correct_fields() {
     assert_eq!(found.required_permissions, vec!["file:read", "http:get"]);
     assert!(found.tags.contains(&"writing".to_owned()));
     assert!(found.tags.contains(&"publishing".to_owned()));
-    assert_eq!(found.status, SkillStatus::Proposed, "new skills start as Proposed");
+    assert_eq!(
+        found.status,
+        SkillStatus::Proposed,
+        "new skills start as Proposed"
+    );
     assert!(!found.enabled, "new skills start disabled");
 }
 
@@ -122,8 +126,11 @@ fn disable_skill_b_shows_disabled_in_get() {
     assert!(!b.enabled, "skill_b must be disabled");
     // Status is NOT reset to Proposed by disable — it remains Active.
     // Re-enabling would keep it Active; only manual status changes affect status.
-    assert_eq!(b.status, SkillStatus::Active,
-        "disable does not roll back status; it only clears enabled flag");
+    assert_eq!(
+        b.status,
+        SkillStatus::Active,
+        "disable does not roll back status; it only clears enabled flag"
+    );
 
     // skill_a and skill_c are unaffected.
     assert!(catalog.get("skill_a").unwrap().enabled);
@@ -139,22 +146,34 @@ fn enable_disable_toggle_is_durable() {
 
     // Initial: disabled + Proposed.
     assert!(!catalog.get("toggle_skill").unwrap().enabled);
-    assert_eq!(catalog.get("toggle_skill").unwrap().status, SkillStatus::Proposed);
+    assert_eq!(
+        catalog.get("toggle_skill").unwrap().status,
+        SkillStatus::Proposed
+    );
 
     // Enable → Active.
     catalog.enable("toggle_skill");
     assert!(catalog.get("toggle_skill").unwrap().enabled);
-    assert_eq!(catalog.get("toggle_skill").unwrap().status, SkillStatus::Active);
+    assert_eq!(
+        catalog.get("toggle_skill").unwrap().status,
+        SkillStatus::Active
+    );
 
     // Disable → not enabled (status stays Active).
     catalog.disable("toggle_skill");
     assert!(!catalog.get("toggle_skill").unwrap().enabled);
-    assert_eq!(catalog.get("toggle_skill").unwrap().status, SkillStatus::Active);
+    assert_eq!(
+        catalog.get("toggle_skill").unwrap().status,
+        SkillStatus::Active
+    );
 
     // Re-enable → still Active.
     catalog.enable("toggle_skill");
     assert!(catalog.get("toggle_skill").unwrap().enabled);
-    assert_eq!(catalog.get("toggle_skill").unwrap().status, SkillStatus::Active);
+    assert_eq!(
+        catalog.get("toggle_skill").unwrap().status,
+        SkillStatus::Active
+    );
 
     // Final enabled() count: only this one.
     assert_eq!(catalog.enabled().len(), 1);
@@ -246,9 +265,18 @@ fn skill_invocation_running_to_failed() {
 
 #[test]
 fn invocation_status_variants_are_all_distinct() {
-    assert_ne!(SkillInvocationStatus::Running, SkillInvocationStatus::Completed);
-    assert_ne!(SkillInvocationStatus::Running, SkillInvocationStatus::Failed);
-    assert_ne!(SkillInvocationStatus::Completed, SkillInvocationStatus::Failed);
+    assert_ne!(
+        SkillInvocationStatus::Running,
+        SkillInvocationStatus::Completed
+    );
+    assert_ne!(
+        SkillInvocationStatus::Running,
+        SkillInvocationStatus::Failed
+    );
+    assert_ne!(
+        SkillInvocationStatus::Completed,
+        SkillInvocationStatus::Failed
+    );
 }
 
 // ── 10. Tag-based filtering — single tag ──────────────────────────────────────
@@ -257,12 +285,16 @@ fn invocation_status_variants_are_all_distinct() {
 fn tag_filter_single_tag_returns_matching_skills() {
     let mut catalog = SkillCatalog::new();
 
-    catalog.register(skill("coder",    &["coding", "review"]));
-    catalog.register(skill("writer",   &["writing", "publishing"]));
-    catalog.register(skill("analyst",  &["data", "coding"]));
+    catalog.register(skill("coder", &["coding", "review"]));
+    catalog.register(skill("writer", &["writing", "publishing"]));
+    catalog.register(skill("analyst", &["data", "coding"]));
 
     let coding_skills = catalog.list(&["coding"]);
-    assert_eq!(coding_skills.len(), 2, "coder and analyst both have 'coding'");
+    assert_eq!(
+        coding_skills.len(),
+        2,
+        "coder and analyst both have 'coding'"
+    );
     let ids: Vec<_> = coding_skills.iter().map(|s| s.skill_id.as_str()).collect();
     assert!(ids.contains(&"coder"));
     assert!(ids.contains(&"analyst"));
@@ -280,9 +312,9 @@ fn tag_filter_multi_tag_requires_all_tags_present() {
     let mut catalog = SkillCatalog::new();
 
     // Only specialist has both "coding" AND "review".
-    catalog.register(skill("specialist",   &["coding", "review", "security"]));
-    catalog.register(skill("generalist",   &["coding", "writing"]));
-    catalog.register(skill("reviewer",     &["review", "writing"]));
+    catalog.register(skill("specialist", &["coding", "review", "security"]));
+    catalog.register(skill("generalist", &["coding", "writing"]));
+    catalog.register(skill("reviewer", &["review", "writing"]));
 
     // AND filter: must have BOTH "coding" AND "review".
     let both = catalog.list(&["coding", "review"]);
@@ -306,10 +338,14 @@ fn tag_filter_empty_slice_returns_all_skills() {
     let mut catalog = SkillCatalog::new();
     catalog.register(skill("s1", &["a"]));
     catalog.register(skill("s2", &["b"]));
-    catalog.register(skill("s3", &[]));   // no tags at all
+    catalog.register(skill("s3", &[])); // no tags at all
 
     let all = catalog.list(&[]);
-    assert_eq!(all.len(), 3, "no filter returns all including tag-less skills");
+    assert_eq!(
+        all.len(),
+        3,
+        "no filter returns all including tag-less skills"
+    );
 }
 
 // ── 13. Tag-based filtering — no match returns empty ─────────────────────────
@@ -339,7 +375,11 @@ fn skill_new_constructor_sets_proposed_and_disabled() {
     assert_eq!(skill.skill_id, "scaffolder");
     assert_eq!(skill.name, "Project Scaffolder");
     assert_eq!(skill.version, "1.0.0");
-    assert_eq!(skill.status, SkillStatus::Proposed, "new() defaults to Proposed");
+    assert_eq!(
+        skill.status,
+        SkillStatus::Proposed,
+        "new() defaults to Proposed"
+    );
     assert!(!skill.enabled, "new() defaults to disabled");
     assert!(skill.tags.is_empty(), "new() has no tags by default");
     assert!(skill.required_permissions.is_empty());
@@ -359,7 +399,7 @@ fn skill_status_variants_are_distinct() {
 #[test]
 fn enable_disable_unknown_skill_returns_false() {
     let mut catalog = SkillCatalog::new();
-    assert!(!catalog.enable("ghost"),  "enable unknown returns false");
+    assert!(!catalog.enable("ghost"), "enable unknown returns false");
     assert!(!catalog.disable("ghost"), "disable unknown returns false");
 }
 
@@ -427,5 +467,9 @@ fn full_skill_marketplace_workflow() {
     // Disable decision-support after use.
     catalog.disable("decision-support");
     assert!(!catalog.get("decision-support").unwrap().enabled);
-    assert_eq!(catalog.enabled().len(), 1, "only code-reviewer remains enabled");
+    assert_eq!(
+        catalog.enabled().len(),
+        1,
+        "only code-reviewer remains enabled"
+    );
 }

@@ -3,14 +3,14 @@
 //! Reads from five sources and produces a ContextBundle:
 //! EventLog, RetrievalService, GraphQueryService, RuntimeConfig, OutcomeReadModel.
 
-use std::sync::Arc;
-use async_trait::async_trait;
-use cairn_domain::{ProjectKey, RunId};
-use cairn_store::EventLog;
-use cairn_store::projections::OutcomeReadModel;
-use cairn_store::error::StoreError;
 use crate::runtime_config::RuntimeConfig;
 use crate::services::orchestrator::{ContextBundle, TaskSummary};
+use async_trait::async_trait;
+use cairn_domain::{ProjectKey, RunId};
+use cairn_store::error::StoreError;
+use cairn_store::projections::OutcomeReadModel;
+use cairn_store::EventLog;
+use std::sync::Arc;
 
 /// Input parameters for a single context-assembly call.
 #[derive(Clone, Debug)]
@@ -61,7 +61,9 @@ impl std::fmt::Display for ContextBuildError {
 impl std::error::Error for ContextBuildError {}
 
 impl From<StoreError> for ContextBuildError {
-    fn from(e: StoreError) -> Self { ContextBuildError::Store(e) }
+    fn from(e: StoreError) -> Self {
+        ContextBuildError::Store(e)
+    }
 }
 
 /// Assembles a ContextBundle for the orchestrator's DECIDE phase.
@@ -102,15 +104,23 @@ where
     O: OutcomeReadModel + 'static,
 {
     pub fn new(event_log: Arc<E>, outcomes: Arc<O>, config: Arc<RuntimeConfig>) -> Self {
-        Self { event_log, outcomes, config, retrieval: None, graph: None }
+        Self {
+            event_log,
+            outcomes,
+            config,
+            retrieval: None,
+            graph: None,
+        }
     }
 
     pub fn with_retrieval(mut self, r: Arc<dyn RetrievalAdapter>) -> Self {
-        self.retrieval = Some(r); self
+        self.retrieval = Some(r);
+        self
     }
 
     pub fn with_graph(mut self, g: Arc<dyn cairn_graph::queries::GraphQueryService>) -> Self {
-        self.graph = Some(g); self
+        self.graph = Some(g);
+        self
     }
 }
 
@@ -124,57 +134,92 @@ where
 
     async fn build(&self, input: &ContextBuilderInput) -> Result<ContextBundle, ContextBuildError> {
         // 1. Recent run events → task_history
-        let run_events = self.event_log
-            .read_by_entity(&cairn_store::EntityRef::Run(input.run_id.clone()), None, input.recent_event_limit)
+        let run_events = self
+            .event_log
+            .read_by_entity(
+                &cairn_store::EntityRef::Run(input.run_id.clone()),
+                None,
+                input.recent_event_limit,
+            )
             .await?;
 
-        let task_history: Vec<TaskSummary> = run_events.iter().filter_map(|e| {
-            if let cairn_domain::RuntimeEvent::TaskStateChanged(ev) = &e.envelope.payload {
-                Some(TaskSummary {
-                    task_id: ev.task_id.as_str().to_owned(),
-                    description: None,
-                    state: format!("{:?}", ev.transition.to).to_lowercase(),
-                    result: None,
-                })
-            } else { None }
-        }).collect();
+        let task_history: Vec<TaskSummary> = run_events
+            .iter()
+            .filter_map(|e| {
+                if let cairn_domain::RuntimeEvent::TaskStateChanged(ev) = &e.envelope.payload {
+                    Some(TaskSummary {
+                        task_id: ev.task_id.as_str().to_owned(),
+                        description: None,
+                        state: format!("{:?}", ev.transition.to).to_lowercase(),
+                        result: None,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         // 2. Memory snippets (via RetrievalAdapter — avoids cairn-memory dep cycle)
         let memory_snippets = if let Some(retrieval) = &self.retrieval {
-            retrieval.query_snippets(&input.project, &input.goal, input.memory_snippet_limit)
-                .await.map_err(ContextBuildError::Memory)?
-        } else { vec![] };
+            retrieval
+                .query_snippets(&input.project, &input.goal, input.memory_snippet_limit)
+                .await
+                .map_err(ContextBuildError::Memory)?
+        } else {
+            vec![]
+        };
 
         // 3. Graph neighbors
         let graph_snippets: Vec<String> = if let Some(graph) = &self.graph {
             use cairn_graph::queries::TraversalDirection;
-            graph.neighbors(input.run_id.as_str(), None, TraversalDirection::Downstream, input.graph_neighbor_limit)
+            graph
+                .neighbors(
+                    input.run_id.as_str(),
+                    None,
+                    TraversalDirection::Downstream,
+                    input.graph_neighbor_limit,
+                )
                 .await
                 .map_err(|e| ContextBuildError::Graph(e.to_string()))?
                 .into_iter()
                 .map(|(_, node)| format!("graph_neighbor: {}", node.node_id))
                 .collect()
-        } else { vec![] };
+        } else {
+            vec![]
+        };
 
         // 4. Outcome history summary
         let outcomes = OutcomeReadModel::list_by_project(
-            self.outcomes.as_ref(), &input.project, input.outcome_history_limit, 0,
-        ).await?;
+            self.outcomes.as_ref(),
+            &input.project,
+            input.outcome_history_limit,
+            0,
+        )
+        .await?;
 
         let outcome_snippet = if !outcomes.is_empty() {
-            let success_rate = outcomes.iter()
+            let success_rate = outcomes
+                .iter()
                 .filter(|o| o.actual_outcome == cairn_domain::events::ActualOutcome::Success)
-                .count() as f64 / outcomes.len() as f64;
-            Some(format!("Recent outcomes ({} samples): {:.0}% success rate",
-                outcomes.len(), success_rate * 100.0))
-        } else { None };
+                .count() as f64
+                / outcomes.len() as f64;
+            Some(format!(
+                "Recent outcomes ({} samples): {:.0}% success rate",
+                outcomes.len(),
+                success_rate * 100.0
+            ))
+        } else {
+            None
+        };
 
         // 5. Agent role from RuntimeConfig
         let agent_role = Some(self.config.default_generate_model().await);
 
         let mut all_snippets = memory_snippets;
         all_snippets.extend(graph_snippets);
-        if let Some(s) = outcome_snippet { all_snippets.push(s); }
+        if let Some(s) = outcome_snippet {
+            all_snippets.push(s);
+        }
 
         Ok(ContextBundle {
             run_id: input.run_id.as_str().to_owned(),
@@ -194,15 +239,21 @@ where
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use cairn_domain::{EventEnvelope, EventId, EventSource, ProjectKey, RunId, RuntimeEvent,
-        TaskId, TaskStateChanged, events::StateTransition, lifecycle::TaskState};
-    use cairn_store::{EventLog, EventPosition, InMemoryStore, StoredEvent, EntityRef};
-    use cairn_store::projections::OutcomeRecord;
+    use cairn_domain::{
+        events::StateTransition, lifecycle::TaskState, EventEnvelope, EventId, EventSource,
+        ProjectKey, RunId, RuntimeEvent, TaskId, TaskStateChanged,
+    };
     use cairn_store::error::StoreError;
+    use cairn_store::projections::OutcomeRecord;
+    use cairn_store::{EntityRef, EventLog, EventPosition, InMemoryStore, StoredEvent};
     use std::sync::Arc;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
-    fn run_id() -> RunId { RunId::new("run_ctx") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
+    fn run_id() -> RunId {
+        RunId::new("run_ctx")
+    }
     fn make_config() -> Arc<RuntimeConfig> {
         Arc::new(RuntimeConfig::new(Arc::new(InMemoryStore::new())))
     }
@@ -210,25 +261,69 @@ mod tests {
         ContextBuilderInput::new(run_id(), project(), "Research cairn-rs")
     }
 
-    struct StubLog { events: Vec<StoredEvent> }
+    struct StubLog {
+        events: Vec<StoredEvent>,
+    }
 
     #[async_trait]
     impl EventLog for StubLog {
-        async fn append(&self, _: &[EventEnvelope<RuntimeEvent>]) -> Result<Vec<EventPosition>, StoreError> { Ok(vec![]) }
-        async fn read_by_entity(&self, _: &EntityRef, _: Option<EventPosition>, _: usize) -> Result<Vec<StoredEvent>, StoreError> { Ok(self.events.clone()) }
-        async fn read_stream(&self, _: Option<EventPosition>, _: usize) -> Result<Vec<StoredEvent>, StoreError> { Ok(self.events.clone()) }
-        async fn head_position(&self) -> Result<Option<EventPosition>, StoreError> { Ok(None) }
-        async fn find_by_causation_id(&self, _: &str) -> Result<Option<EventPosition>, StoreError> { Ok(None) }
+        async fn append(
+            &self,
+            _: &[EventEnvelope<RuntimeEvent>],
+        ) -> Result<Vec<EventPosition>, StoreError> {
+            Ok(vec![])
+        }
+        async fn read_by_entity(
+            &self,
+            _: &EntityRef,
+            _: Option<EventPosition>,
+            _: usize,
+        ) -> Result<Vec<StoredEvent>, StoreError> {
+            Ok(self.events.clone())
+        }
+        async fn read_stream(
+            &self,
+            _: Option<EventPosition>,
+            _: usize,
+        ) -> Result<Vec<StoredEvent>, StoreError> {
+            Ok(self.events.clone())
+        }
+        async fn head_position(&self) -> Result<Option<EventPosition>, StoreError> {
+            Ok(None)
+        }
+        async fn find_by_causation_id(&self, _: &str) -> Result<Option<EventPosition>, StoreError> {
+            Ok(None)
+        }
     }
 
-    struct StubOutcomes { records: Vec<OutcomeRecord> }
+    struct StubOutcomes {
+        records: Vec<OutcomeRecord>,
+    }
 
     #[async_trait]
     impl OutcomeReadModel for StubOutcomes {
-        async fn get(&self, _: &cairn_domain::OutcomeId) -> Result<Option<OutcomeRecord>, StoreError> { Ok(None) }
-        async fn list_by_run(&self, _: &RunId, _: usize) -> Result<Vec<OutcomeRecord>, StoreError> { Ok(vec![]) }
-        async fn list_by_project(&self, _: &ProjectKey, limit: usize, offset: usize) -> Result<Vec<OutcomeRecord>, StoreError> {
-            Ok(self.records.iter().skip(offset).take(limit).cloned().collect())
+        async fn get(
+            &self,
+            _: &cairn_domain::OutcomeId,
+        ) -> Result<Option<OutcomeRecord>, StoreError> {
+            Ok(None)
+        }
+        async fn list_by_run(&self, _: &RunId, _: usize) -> Result<Vec<OutcomeRecord>, StoreError> {
+            Ok(vec![])
+        }
+        async fn list_by_project(
+            &self,
+            _: &ProjectKey,
+            limit: usize,
+            offset: usize,
+        ) -> Result<Vec<OutcomeRecord>, StoreError> {
+            Ok(self
+                .records
+                .iter()
+                .skip(offset)
+                .take(limit)
+                .cloned()
+                .collect())
         }
     }
 
@@ -252,17 +347,25 @@ mod tests {
             position: EventPosition(1),
             stored_at: 1_000,
             envelope: EventEnvelope::for_runtime_event(
-                EventId::new("evt_t1"), EventSource::Runtime,
+                EventId::new("evt_t1"),
+                EventSource::Runtime,
                 RuntimeEvent::TaskStateChanged(TaskStateChanged {
                     project: project(),
                     task_id: TaskId::new("task_abc"),
-                    transition: StateTransition { from: Some(TaskState::Queued), to: TaskState::Completed },
-                    failure_class: None, pause_reason: None, resume_trigger: None,
+                    transition: StateTransition {
+                        from: Some(TaskState::Queued),
+                        to: TaskState::Completed,
+                    },
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
                 }),
             ),
         };
         let builder = DefaultContextBuilder::new(
-            Arc::new(StubLog { events: vec![event] }),
+            Arc::new(StubLog {
+                events: vec![event],
+            }),
             Arc::new(StubOutcomes { records: vec![] }),
             make_config(),
         );
@@ -274,25 +377,33 @@ mod tests {
 
     #[tokio::test]
     async fn outcome_history_becomes_snippet() {
-        use cairn_domain::{OutcomeId, events::ActualOutcome};
-        let records = (0..4).map(|i| OutcomeRecord {
-            outcome_id: OutcomeId::new(format!("oc_{i}")),
-            run_id: RunId::new(format!("r_{i}")),
-            project: project(),
-            agent_type: "test".to_owned(),
-            predicted_confidence: 0.8,
-            actual_outcome: ActualOutcome::Success,
-            recorded_at: 1_000 + i as u64,
-        }).collect();
+        use cairn_domain::{events::ActualOutcome, OutcomeId};
+        let records = (0..4)
+            .map(|i| OutcomeRecord {
+                outcome_id: OutcomeId::new(format!("oc_{i}")),
+                run_id: RunId::new(format!("r_{i}")),
+                project: project(),
+                agent_type: "test".to_owned(),
+                predicted_confidence: 0.8,
+                actual_outcome: ActualOutcome::Success,
+                recorded_at: 1_000 + i as u64,
+            })
+            .collect();
         let builder = DefaultContextBuilder::new(
             Arc::new(StubLog { events: vec![] }),
             Arc::new(StubOutcomes { records }),
             make_config(),
         );
         let bundle = builder.build(&basic_input()).await.unwrap();
-        let has_snippet = bundle.memory_snippets.iter()
+        let has_snippet = bundle
+            .memory_snippets
+            .iter()
             .any(|s| s.contains("100%") && s.contains("4 samples"));
-        assert!(has_snippet, "outcome summary must be a snippet; got: {:?}", bundle.memory_snippets);
+        assert!(
+            has_snippet,
+            "outcome summary must be a snippet; got: {:?}",
+            bundle.memory_snippets
+        );
     }
 
     #[tokio::test]

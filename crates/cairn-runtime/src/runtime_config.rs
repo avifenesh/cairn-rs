@@ -97,36 +97,23 @@ impl RuntimeConfig {
     ///
     /// Set via `CAIRN_BRAIN_MODEL`, the settings API, or the Providers page in the dashboard.
     pub async fn default_brain_model(&self) -> String {
-        self.get_string(
-            KEY_BRAIN_MODEL,
-            "CAIRN_BRAIN_MODEL",
-            "",
-        )
-        .await
+        self.get_string(KEY_BRAIN_MODEL, "CAIRN_BRAIN_MODEL", "")
+            .await
     }
 
     /// Base URL for the brain inference endpoint.
     ///
     /// Key: `brain_url` · Env: `CAIRN_BRAIN_URL` · Default: empty (user must configure)
     pub async fn brain_url(&self) -> String {
-        self.get_string(
-            KEY_BRAIN_URL,
-            "CAIRN_BRAIN_URL",
-            "",
-        )
-        .await
+        self.get_string(KEY_BRAIN_URL, "CAIRN_BRAIN_URL", "").await
     }
 
     /// Base URL for the worker inference endpoint (everyday generation + embeddings).
     ///
     /// Key: `worker_url` · Env: `CAIRN_WORKER_URL` · Default: empty (user must configure)
     pub async fn worker_url(&self) -> String {
-        self.get_string(
-            KEY_WORKER_URL,
-            "CAIRN_WORKER_URL",
-            "",
-        )
-        .await
+        self.get_string(KEY_WORKER_URL, "CAIRN_WORKER_URL", "")
+            .await
     }
 
     /// API key for OpenRouter (https://openrouter.ai).
@@ -136,7 +123,9 @@ impl RuntimeConfig {
     ///
     /// Not hot-reloadable — process restart required to pick up a new key.
     pub fn openrouter_api_key() -> Option<String> {
-        std::env::var("OPENROUTER_API_KEY").ok().filter(|k| !k.is_empty())
+        std::env::var("OPENROUTER_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
     }
 
     /// Default model for SSE token-streaming.

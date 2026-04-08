@@ -21,9 +21,9 @@ use std::time::Instant;
 
 use cairn_domain::providers::{
     GenerationProvider, GenerationResponse, OperationKind, ProviderAdapterError,
-    ProviderBindingRecord, ProviderBindingSettings, ProviderCapability,
-    ProviderModelCapability, RouteAttemptDecision, RouteAttemptRecord,
-    RouteDecisionReason, RouteDecisionRecord, RouteDecisionStatus,
+    ProviderBindingRecord, ProviderBindingSettings, ProviderCapability, ProviderModelCapability,
+    RouteAttemptDecision, RouteAttemptRecord, RouteDecisionReason, RouteDecisionRecord,
+    RouteDecisionStatus,
 };
 use cairn_domain::selectors::SelectorContext;
 use cairn_domain::*;
@@ -180,10 +180,7 @@ impl ProviderRouter {
         let (capable, vetoed) = partition_by_capability(&candidates);
 
         for (index, v) in vetoed.iter().enumerate() {
-            let missing = check_required_capabilities(
-                &v.binding,
-                &v.capabilities,
-            );
+            let missing = check_required_capabilities(&v.binding, &v.capabilities);
             attempts.push(RouteAttemptRecord {
                 route_attempt_id: RouteAttemptId::new(format!("ra_{ts}_{index}")),
                 route_decision_id: decision_id.clone(),
@@ -217,7 +214,10 @@ impl ProviderRouter {
             let attempt_index = (base_index + i) as u16;
             let attempt_id = RouteAttemptId::new(format!("ra_{ts}_{}", base_index + i));
 
-            let provider = match self.providers.get(&candidate.binding.provider_connection_id) {
+            let provider = match self
+                .providers
+                .get(&candidate.binding.provider_connection_id)
+            {
                 Some(p) => p,
                 None => {
                     attempts.push(RouteAttemptRecord {
@@ -245,10 +245,8 @@ impl ProviderRouter {
 
             match result {
                 Ok(response) => {
-                    self.health.record_success(
-                        &candidate.binding.provider_connection_id,
-                        latency_ms,
-                    );
+                    self.health
+                        .record_success(&candidate.binding.provider_connection_id, latency_ms);
 
                     dispatch_log.push(DispatchEntry {
                         binding_id: candidate.binding.provider_binding_id.clone(),
@@ -360,7 +358,10 @@ impl ProviderRouter {
     }
 
     /// Rank capable candidates: healthy first, sorted by cost, then unhealthy.
-    fn rank_candidates<'a>(&self, candidates: Vec<&'a RoutableProvider>) -> Vec<&'a RoutableProvider> {
+    fn rank_candidates<'a>(
+        &self,
+        candidates: Vec<&'a RoutableProvider>,
+    ) -> Vec<&'a RoutableProvider> {
         let (mut healthy, mut unhealthy): (Vec<_>, Vec<_>) = candidates
             .into_iter()
             .partition(|c| self.health.is_healthy(&c.binding.provider_connection_id));
@@ -369,7 +370,9 @@ impl ProviderRouter {
         let sort_by_cost = |a: &&RoutableProvider, b: &&RoutableProvider| {
             let cost_a = composite_cost(a, cost_weight);
             let cost_b = composite_cost(b, cost_weight);
-            cost_a.partial_cmp(&cost_b).unwrap_or(std::cmp::Ordering::Equal)
+            cost_a
+                .partial_cmp(&cost_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
         };
 
         healthy.sort_by(sort_by_cost);
@@ -645,8 +648,7 @@ mod tests {
         router.register(ProviderConnectionId::new("c2"), MockProvider::ok());
 
         let mut binding_needs_tool = test_binding("b1", "c1");
-        binding_needs_tool.settings.required_capabilities =
-            vec![ProviderCapability::ToolUse];
+        binding_needs_tool.settings.required_capabilities = vec![ProviderCapability::ToolUse];
 
         let candidates = vec![
             // c1 requires ToolUse but doesn't have it
@@ -673,7 +675,10 @@ mod tests {
             Some(ProviderBindingId::new("b2"))
         );
         // First attempt should be Vetoed
-        assert!(outcome.attempts.iter().any(|a| a.decision == RouteAttemptDecision::Vetoed));
+        assert!(outcome
+            .attempts
+            .iter()
+            .any(|a| a.decision == RouteAttemptDecision::Vetoed));
     }
 
     #[tokio::test]
@@ -692,11 +697,9 @@ mod tests {
 
         let candidates = vec![
             // Expensive listed first
-            RoutableProvider::new(test_binding("b_exp", "expensive"), vec![])
-                .with_cost(30.0, 60.0),
+            RoutableProvider::new(test_binding("b_exp", "expensive"), vec![]).with_cost(30.0, 60.0),
             // Cheap listed second
-            RoutableProvider::new(test_binding("b_cheap", "cheap"), vec![])
-                .with_cost(0.5, 1.5),
+            RoutableProvider::new(test_binding("b_cheap", "cheap"), vec![]).with_cost(0.5, 1.5),
         ];
 
         let outcome = router

@@ -12,10 +12,9 @@ use std::sync::Arc;
 
 use cairn_domain::providers::OperationKind;
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectKey, ProviderBindingId,
-    ProviderCallCompleted, ProviderCallId, ProviderConnectionId, ProviderModelId,
-    RouteAttemptId, RouteDecisionId, RunId, RunResumeTarget, RuntimeEvent,
-    ResumeTrigger, SessionId, SessionState,
+    EventEnvelope, EventId, EventSource, ProjectKey, ProviderBindingId, ProviderCallCompleted,
+    ProviderCallId, ProviderConnectionId, ProviderModelId, ResumeTrigger, RouteAttemptId,
+    RouteDecisionId, RunId, RunResumeTarget, RuntimeEvent, SessionId, SessionState,
 };
 use cairn_runtime::{RunService, RunServiceImpl, SessionService, SessionServiceImpl};
 use cairn_store::projections::SessionCostReadModel;
@@ -27,9 +26,13 @@ fn project() -> ProjectKey {
 
 /// Advance a run from Pending → Running via resume.
 async fn activate_run(runs: &impl RunService, run_id: &RunId) {
-    runs.resume(run_id, ResumeTrigger::RuntimeSignal, RunResumeTarget::Running)
-        .await
-        .unwrap();
+    runs.resume(
+        run_id,
+        ResumeTrigger::RuntimeSignal,
+        RunResumeTarget::Running,
+    )
+    .await
+    .unwrap();
 }
 
 fn services() -> (
@@ -224,8 +227,14 @@ async fn step5_session_cost_accumulates_from_run_provider_calls() {
         .unwrap()
         .expect("session cost record must exist after provider calls");
 
-    assert_eq!(cost.total_cost_micros, 5_000, "total cost must be 3000 + 2000 = 5000 µUSD");
-    assert_eq!(cost.provider_calls, 2, "two provider calls must be recorded");
+    assert_eq!(
+        cost.total_cost_micros, 5_000,
+        "total cost must be 3000 + 2000 = 5000 µUSD"
+    );
+    assert_eq!(
+        cost.provider_calls, 2,
+        "two provider calls must be recorded"
+    );
     assert_eq!(cost.token_in, 500, "input tokens: 300 + 200 = 500");
     assert_eq!(cost.token_out, 180, "output tokens: 100 + 80 = 180");
 }

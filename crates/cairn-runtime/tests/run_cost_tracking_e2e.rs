@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectKey, RunId, RuntimeEvent, RunCostUpdated,
+    EventEnvelope, EventId, EventSource, ProjectKey, RunCostUpdated, RunId, RuntimeEvent,
     SessionId, TenantId,
 };
 use cairn_runtime::run_cost_alerts::RunCostAlertService;
@@ -74,7 +74,10 @@ async fn cost_accumulates_across_multiple_events() {
     let run_id = RunId::new("run_cost_1");
 
     // ── (1) Create session and run ─────────────────────────────────────────
-    session_svc.create(&project(), session_id.clone()).await.unwrap();
+    session_svc
+        .create(&project(), session_id.clone())
+        .await
+        .unwrap();
     run_svc
         .start(&project(), &session_id, run_id.clone(), None)
         .await
@@ -147,7 +150,10 @@ async fn cost_alert_triggers_when_threshold_exceeded() {
     let run_id = RunId::new("run_alert_e2e");
 
     // ── (1) Create session and run ─────────────────────────────────────────
-    session_svc.create(&project(), session_id.clone()).await.unwrap();
+    session_svc
+        .create(&project(), session_id.clone())
+        .await
+        .unwrap();
     run_svc
         .start(&project(), &session_id, run_id.clone(), None)
         .await
@@ -164,7 +170,10 @@ async fn cost_alert_triggers_when_threshold_exceeded() {
         .await
         .unwrap()
         .expect("alert record must exist after set_alert");
-    assert_eq!(alert_record.threshold_micros, 500, "threshold must be persisted");
+    assert_eq!(
+        alert_record.threshold_micros, 500,
+        "threshold must be persisted"
+    );
     assert_eq!(
         alert_record.triggered_at_ms, 0,
         "alert must not be pre-triggered"
@@ -201,7 +210,10 @@ async fn cost_alert_triggers_when_threshold_exceeded() {
     let trigger = trigger_ev
         .expect("RunCostAlertTriggered must be emitted when total cost exceeds threshold");
 
-    assert_eq!(trigger.run_id, run_id, "event must reference the correct run");
+    assert_eq!(
+        trigger.run_id, run_id,
+        "event must reference the correct run"
+    );
     assert_eq!(
         trigger.threshold_micros, 500,
         "event must carry the configured threshold"
@@ -216,7 +228,8 @@ async fn cost_alert_triggers_when_threshold_exceeded() {
         "triggered_at_ms must be a positive timestamp"
     );
     assert_eq!(
-        trigger.tenant_id, tenant(),
+        trigger.tenant_id,
+        tenant(),
         "event must carry the correct tenant_id"
     );
 
@@ -317,7 +330,10 @@ async fn cost_alert_silent_below_threshold() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(cost.total_cost_micros, 300, "cost must still be tracked even when alert doesn't fire");
+    assert_eq!(
+        cost.total_cost_micros, 300,
+        "cost must still be tracked even when alert doesn't fire"
+    );
 }
 
 // ── check_and_trigger as explicit fallback ─────────────────────────────────────
@@ -350,10 +366,7 @@ async fn explicit_check_and_trigger_fires_alert() {
     );
 
     // list_triggered_by_tenant must include the triggered alert.
-    let triggered = alert_svc
-        .list_triggered_by_tenant(&tenant())
-        .await
-        .unwrap();
+    let triggered = alert_svc.list_triggered_by_tenant(&tenant()).await.unwrap();
     let found = triggered.iter().any(|a| a.run_id == run_id);
     assert!(
         found,

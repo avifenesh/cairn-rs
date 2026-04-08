@@ -188,7 +188,12 @@ pub fn freshness_score(created_at_ms: u64, now_ms: u64, decay_days: f64) -> f64 
 /// recently updated) and 1.0 means maximally stale. Content within
 /// `threshold_days` of its last update receives no penalty. Beyond that,
 /// the penalty grows linearly up to 1.0 at 2x the threshold.
-pub fn staleness_penalty(updated_at_ms: Option<u64>, created_at_ms: u64, now_ms: u64, threshold_days: f64) -> f64 {
+pub fn staleness_penalty(
+    updated_at_ms: Option<u64>,
+    created_at_ms: u64,
+    now_ms: u64,
+    threshold_days: f64,
+) -> f64 {
     if threshold_days <= 0.0 {
         return 0.0;
     }
@@ -303,7 +308,10 @@ mod tests {
         let created_long_ago = now - 365 * day_ms;
 
         let score = freshness_score(created_long_ago, now, 30.0);
-        assert!(score < 0.01, "very old content should score near 0, got {score}");
+        assert!(
+            score < 0.01,
+            "very old content should score near 0, got {score}"
+        );
     }
 
     #[test]

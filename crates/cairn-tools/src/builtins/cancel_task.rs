@@ -18,13 +18,19 @@ pub struct CancelTaskTool {
 }
 
 impl CancelTaskTool {
-    pub fn new(tasks: Arc<dyn TaskService>) -> Self { Self { tasks } }
+    pub fn new(tasks: Arc<dyn TaskService>) -> Self {
+        Self { tasks }
+    }
 }
 
 #[async_trait]
 impl ToolHandler for CancelTaskTool {
-    fn name(&self) -> &str { "cancel_task" }
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn name(&self) -> &str {
+        "cancel_task"
+    }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
     fn description(&self) -> &str {
         "Cancel a task that is queued, leased, or running. \
          This is an irreversible action and requires operator approval. \
@@ -48,15 +54,22 @@ impl ToolHandler for CancelTaskTool {
     }
 
     /// Sensitive — requires approval before execution.
-    fn execution_class(&self) -> ExecutionClass { ExecutionClass::SupervisedProcess }
+    fn execution_class(&self) -> ExecutionClass {
+        ExecutionClass::SupervisedProcess
+    }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
-        let task_id_str = args.get("task_id").and_then(|v| v.as_str())
+        let task_id_str = args
+            .get("task_id")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs {
-                field: "task_id".into(), message: "required string".into(),
+                field: "task_id".into(),
+                message: "required string".into(),
             })?;
 
-        let reason = args.get("reason").and_then(|v| v.as_str())
+        let reason = args
+            .get("reason")
+            .and_then(|v| v.as_str())
             .unwrap_or("cancelled by agent")
             .to_owned();
 
@@ -66,14 +79,15 @@ impl ToolHandler for CancelTaskTool {
                 "state":   format!("{:?}", task.state).to_lowercase(),
                 "reason":  reason,
             }))),
-            Err(cairn_runtime::error::RuntimeError::NotFound { .. }) =>
-                Err(ToolError::Permanent(format!("task not found: {task_id_str}"))),
-            Err(cairn_runtime::error::RuntimeError::InvalidTransition { .. }) =>
+            Err(cairn_runtime::error::RuntimeError::NotFound { .. }) => Err(ToolError::Permanent(
+                format!("task not found: {task_id_str}"),
+            )),
+            Err(cairn_runtime::error::RuntimeError::InvalidTransition { .. }) => {
                 Err(ToolError::Permanent(format!(
                     "task {task_id_str} cannot be cancelled in its current state"
-                ))),
-            Err(e) =>
-                Err(ToolError::Transient(format!("cancel failed: {e}"))),
+                )))
+            }
+            Err(e) => Err(ToolError::Transient(format!("cancel failed: {e}"))),
         }
     }
 }
@@ -81,14 +95,18 @@ impl ToolHandler for CancelTaskTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use cairn_domain::{ProjectKey, TaskId, lifecycle::TaskState};
-    use cairn_runtime::{InMemoryServices, tasks::TaskService, services::TaskServiceImpl};
+    use cairn_domain::{lifecycle::TaskState, ProjectKey, TaskId};
+    use cairn_runtime::{services::TaskServiceImpl, tasks::TaskService, InMemoryServices};
     use cairn_store::InMemoryStore;
+    use std::sync::Arc;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
-    async fn svc() -> Arc<InMemoryServices> { Arc::new(InMemoryServices::new()) }
+    async fn svc() -> Arc<InMemoryServices> {
+        Arc::new(InMemoryServices::new())
+    }
 
     fn task_svc(store: Arc<InMemoryStore>) -> Arc<dyn TaskService> {
         Arc::new(TaskServiceImpl::new(store))
@@ -97,16 +115,30 @@ mod tests {
     #[tokio::test]
     async fn cancels_queued_task() {
         let svc = svc().await;
-        svc.tasks.submit(&project(), TaskId::new("task_ct"), None, None, 0).await.unwrap();
+        svc.tasks
+            .submit(&project(), TaskId::new("task_ct"), None, None, 0)
+            .await
+            .unwrap();
 
         let tool = CancelTaskTool::new(task_svc(svc.store.clone()));
-        let res = tool.execute(&project(), serde_json::json!({
-            "task_id": "task_ct",
-            "reason": "test cancel"
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "task_id": "task_ct",
+                    "reason": "test cancel"
+                }),
+            )
+            .await
+            .unwrap();
         assert_eq!(res.output["state"], "canceled");
 
-        let record = svc.tasks.get(&TaskId::new("task_ct")).await.unwrap().unwrap();
+        let record = svc
+            .tasks
+            .get(&TaskId::new("task_ct"))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(record.state, TaskState::Canceled);
     }
 
@@ -114,7 +146,10 @@ mod tests {
     async fn missing_task_id_is_invalid() {
         let svc = svc().await;
         let tool = CancelTaskTool::new(task_svc(svc.store.clone()));
-        let err = tool.execute(&project(), serde_json::json!({})).await.unwrap_err();
+        let err = tool
+            .execute(&project(), serde_json::json!({}))
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -123,6 +158,9 @@ mod tests {
         let store = Arc::new(InMemoryStore::new());
         let tool = CancelTaskTool::new(Arc::new(TaskServiceImpl::new(store)));
         assert_eq!(tool.tier(), ToolTier::Registered);
-        assert!(matches!(tool.execution_class(), ExecutionClass::SupervisedProcess));
+        assert!(matches!(
+            tool.execution_class(),
+            ExecutionClass::SupervisedProcess
+        ));
     }
 }

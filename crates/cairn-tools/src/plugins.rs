@@ -8,9 +8,15 @@ use crate::permissions::DeclaredPermissions;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginCapability {
-    ToolProvider { tools: Vec<String> },
-    SignalSource { signals: Vec<String> },
-    ChannelProvider { channels: Vec<String> },
+    ToolProvider {
+        tools: Vec<String>,
+    },
+    SignalSource {
+        signals: Vec<String>,
+    },
+    ChannelProvider {
+        channels: Vec<String>,
+    },
     PostTurnHook,
     PolicyHook,
     EvalScorer,
@@ -18,7 +24,9 @@ pub enum PluginCapability {
     ///
     /// When registered, cairn-tools will connect to the server via `McpClient`
     /// and expose its tools under the `mcp.<server_id>.<tool>` namespace.
-    McpServer { endpoint: McpEndpoint },
+    McpServer {
+        endpoint: McpEndpoint,
+    },
 }
 
 /// Concurrency and timeout limits declared in the plugin manifest.

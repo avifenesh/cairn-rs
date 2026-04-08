@@ -20,10 +20,7 @@ use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, RuntimeEvent, SessionCreated,
     SessionId, SessionState, SessionStateChanged, StateTransition, TenantId, WorkspaceId,
 };
-use cairn_store::{
-    projections::SessionReadModel,
-    EventLog, InMemoryStore,
-};
+use cairn_store::{projections::SessionReadModel, EventLog, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -107,7 +104,10 @@ async fn session_created_has_open_state() {
     assert_eq!(record.project, default_project());
     assert_eq!(record.version, 1);
     assert!(record.created_at >= ts);
-    assert_eq!(record.created_at, record.updated_at, "fresh session: created_at == updated_at");
+    assert_eq!(
+        record.created_at, record.updated_at,
+        "fresh session: created_at == updated_at"
+    );
 }
 
 // ── 2. Open → Failed (non-happy terminal path) ───────────────────────────────
@@ -120,7 +120,12 @@ async fn session_transitions_open_to_failed() {
     store
         .append(&[
             session_created("e1", "sess_fail"),
-            session_transition("e2", "sess_fail", Some(SessionState::Open), SessionState::Failed),
+            session_transition(
+                "e2",
+                "sess_fail",
+                Some(SessionState::Open),
+                SessionState::Failed,
+            ),
         ])
         .await
         .unwrap();
@@ -205,7 +210,12 @@ async fn session_multi_hop_open_to_failed_to_archived() {
     store
         .append(&[
             session_created("e1", "sess_multi"),
-            session_transition("e2", "sess_multi", Some(SessionState::Open), SessionState::Failed),
+            session_transition(
+                "e2",
+                "sess_multi",
+                Some(SessionState::Open),
+                SessionState::Failed,
+            ),
         ])
         .await
         .unwrap();
@@ -264,22 +274,45 @@ async fn multiple_sessions_in_project_tracked_independently() {
     store
         .append(&[
             session_transition(
-                "e4", "s_indep_a", Some(SessionState::Open), SessionState::Completed,
+                "e4",
+                "s_indep_a",
+                Some(SessionState::Open),
+                SessionState::Completed,
             ),
             session_transition(
-                "e5", "s_indep_c", Some(SessionState::Open), SessionState::Failed,
+                "e5",
+                "s_indep_c",
+                Some(SessionState::Open),
+                SessionState::Failed,
             ),
         ])
         .await
         .unwrap();
 
-    let a = SessionReadModel::get(&store, &SessionId::new("s_indep_a")).await.unwrap().unwrap();
-    let b = SessionReadModel::get(&store, &SessionId::new("s_indep_b")).await.unwrap().unwrap();
-    let c = SessionReadModel::get(&store, &SessionId::new("s_indep_c")).await.unwrap().unwrap();
+    let a = SessionReadModel::get(&store, &SessionId::new("s_indep_a"))
+        .await
+        .unwrap()
+        .unwrap();
+    let b = SessionReadModel::get(&store, &SessionId::new("s_indep_b"))
+        .await
+        .unwrap()
+        .unwrap();
+    let c = SessionReadModel::get(&store, &SessionId::new("s_indep_c"))
+        .await
+        .unwrap()
+        .unwrap();
 
-    assert_eq!(a.state, SessionState::Completed, "A was transitioned to Completed");
-    assert_eq!(b.state, SessionState::Open,      "B was never transitioned");
-    assert_eq!(c.state, SessionState::Failed,    "C was transitioned to Failed");
+    assert_eq!(
+        a.state,
+        SessionState::Completed,
+        "A was transitioned to Completed"
+    );
+    assert_eq!(b.state, SessionState::Open, "B was never transitioned");
+    assert_eq!(
+        c.state,
+        SessionState::Failed,
+        "C was transitioned to Failed"
+    );
 
     // States don't bleed between sessions.
     assert_ne!(a.state, b.state);
@@ -307,10 +340,16 @@ async fn count_by_state_returns_correct_counts() {
     store
         .append(&[
             session_transition(
-                "e5", "sc_done", Some(SessionState::Open), SessionState::Completed,
+                "e5",
+                "sc_done",
+                Some(SessionState::Open),
+                SessionState::Completed,
             ),
             session_transition(
-                "e6", "sc_fail", Some(SessionState::Open), SessionState::Failed,
+                "e6",
+                "sc_fail",
+                Some(SessionState::Open),
+                SessionState::Failed,
             ),
         ])
         .await
@@ -322,17 +361,26 @@ async fn count_by_state_returns_correct_counts() {
 
     // Derive counts by state.
     let open_count = all.iter().filter(|s| s.state == SessionState::Open).count();
-    let completed_count = all.iter().filter(|s| s.state == SessionState::Completed).count();
-    let failed_count = all.iter().filter(|s| s.state == SessionState::Failed).count();
-    let archived_count = all.iter().filter(|s| s.state == SessionState::Archived).count();
+    let completed_count = all
+        .iter()
+        .filter(|s| s.state == SessionState::Completed)
+        .count();
+    let failed_count = all
+        .iter()
+        .filter(|s| s.state == SessionState::Failed)
+        .count();
+    let archived_count = all
+        .iter()
+        .filter(|s| s.state == SessionState::Archived)
+        .count();
     let terminal_count = all.iter().filter(|s| s.state.is_terminal()).count();
 
-    assert_eq!(open_count, 2,     "2 sessions are Open");
+    assert_eq!(open_count, 2, "2 sessions are Open");
     assert_eq!(completed_count, 1, "1 session is Completed");
-    assert_eq!(failed_count, 1,   "1 session is Failed");
+    assert_eq!(failed_count, 1, "1 session is Failed");
     assert_eq!(archived_count, 0, "no sessions Archived yet");
     assert_eq!(terminal_count, 2, "2 terminal sessions total");
-    assert_eq!(all.len(), 4,      "all 4 sessions tracked");
+    assert_eq!(all.len(), 4, "all 4 sessions tracked");
 }
 
 // ── 9. list_active returns only Open sessions, most-recently-updated first ────
@@ -352,7 +400,10 @@ async fn list_active_returns_open_sessions_only() {
 
     store
         .append(&[session_transition(
-            "e4", "sa_done", Some(SessionState::Open), SessionState::Completed,
+            "e4",
+            "sa_done",
+            Some(SessionState::Open),
+            SessionState::Completed,
         )])
         .await
         .unwrap();
@@ -367,7 +418,10 @@ async fn list_active_returns_open_sessions_only() {
     let ids: Vec<_> = active.iter().map(|s| s.session_id.as_str()).collect();
     assert!(ids.contains(&"sa_open"));
     assert!(ids.contains(&"sa_also_open"));
-    assert!(!ids.contains(&"sa_done"), "Completed session must not appear in list_active");
+    assert!(
+        !ids.contains(&"sa_done"),
+        "Completed session must not appear in list_active"
+    );
 }
 
 // ── 10. list_by_project is sorted by (created_at, session_id) ─────────────────
@@ -408,24 +462,34 @@ async fn list_by_project_scoped_to_project() {
 
     store
         .append(&[
-            evt("e1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: proj_a.clone(),
-                session_id: SessionId::new("sess_proj_a"),
-            })),
-            evt("e2", RuntimeEvent::SessionCreated(SessionCreated {
-                project: proj_b.clone(),
-                session_id: SessionId::new("sess_proj_b"),
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: proj_a.clone(),
+                    session_id: SessionId::new("sess_proj_a"),
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: proj_b.clone(),
+                    session_id: SessionId::new("sess_proj_b"),
+                }),
+            ),
         ])
         .await
         .unwrap();
 
-    let a = SessionReadModel::list_by_project(&store, &proj_a, 10, 0).await.unwrap();
+    let a = SessionReadModel::list_by_project(&store, &proj_a, 10, 0)
+        .await
+        .unwrap();
     assert_eq!(a.len(), 1);
     assert_eq!(a[0].session_id.as_str(), "sess_proj_a");
     assert_eq!(a[0].project, proj_a);
 
-    let b = SessionReadModel::list_by_project(&store, &proj_b, 10, 0).await.unwrap();
+    let b = SessionReadModel::list_by_project(&store, &proj_b, 10, 0)
+        .await
+        .unwrap();
     assert_eq!(b.len(), 1);
     assert_eq!(b[0].session_id.as_str(), "sess_proj_b");
 }
@@ -439,7 +503,10 @@ async fn list_by_project_respects_limit_and_offset() {
     // Create 4 sessions in distinct append calls to get distinct created_at.
     for i in 0u32..4 {
         store
-            .append(&[session_created(&format!("e{i}"), &format!("sess_pg_{i:02}"))])
+            .append(&[session_created(
+                &format!("e{i}"),
+                &format!("sess_pg_{i:02}"),
+            )])
             .await
             .unwrap();
     }

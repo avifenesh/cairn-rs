@@ -36,10 +36,7 @@ pub trait LlmObservabilityService: Send + Sync {
     ///
     /// Returns `LatencyStats { p50_ms: 0, p95_ms: 0, sample_count: 0 }` when
     /// no traces fall in the window.
-    async fn latency_percentiles(
-        &self,
-        window_ms: u64,
-    ) -> Result<LatencyStats, RuntimeError>;
+    async fn latency_percentiles(&self, window_ms: u64) -> Result<LatencyStats, RuntimeError>;
 
     /// Fraction of provider calls that failed within `window_ms` (0.0–1.0).
     ///

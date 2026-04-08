@@ -44,7 +44,9 @@ async fn corpus_management_filter_by_corpus_id() {
                 source_id: SourceId::new(src),
                 source_type: SourceType::PlainText,
                 project: project(),
-                content: format!("Rust memory safety ownership borrow checker {doc_id} corpus content"),
+                content: format!(
+                    "Rust memory safety ownership borrow checker {doc_id} corpus content"
+                ),
                 tags: vec![],
                 corpus_id: Some(corpus_id.clone()),
                 bundle_source_id: None,
@@ -85,12 +87,19 @@ async fn corpus_management_filter_by_corpus_id() {
         .await
         .unwrap();
 
-    let filtered_ids: Vec<String> = filtered.results.iter()
+    let filtered_ids: Vec<String> = filtered
+        .results
+        .iter()
         .map(|r| r.chunk.document_id.to_string())
         .collect();
 
-    assert_eq!(filtered_ids.len(), 2,
-        "corpus filter should return 2 results, got {}: {:?}", filtered_ids.len(), filtered_ids);
+    assert_eq!(
+        filtered_ids.len(),
+        2,
+        "corpus filter should return 2 results, got {}: {:?}",
+        filtered_ids.len(),
+        filtered_ids
+    );
     assert!(filtered_ids.contains(&"doc_corp_a".to_owned()));
     assert!(filtered_ids.contains(&"doc_corp_b".to_owned()));
     assert!(!filtered_ids.contains(&"doc_no_corpus".to_owned()));
@@ -108,8 +117,12 @@ async fn corpus_management_filter_by_corpus_id() {
         .await
         .unwrap();
 
-    assert_eq!(all.results.len(), 3,
-        "unfiltered search must return all 3 docs, got {}", all.results.len());
+    assert_eq!(
+        all.results.len(),
+        3,
+        "unfiltered search must return all 3 docs, got {}",
+        all.results.len()
+    );
 }
 
 /// document_count increments as documents are added to the corpus.
@@ -120,8 +133,15 @@ async fn corpus_management_document_count_tracks_membership() {
     let api = CorpusApiImpl::new(store.clone());
 
     let corpus = api
-        .create_corpus(&project(), &CreateCorpusRequest { name: "count_test".to_owned(), description: None })
-        .await.unwrap();
+        .create_corpus(
+            &project(),
+            &CreateCorpusRequest {
+                name: "count_test".to_owned(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
 
     let fetched = api.get_corpus(&corpus.corpus_id).await.unwrap().unwrap();
     assert_eq!(fetched.document_count, 0);
@@ -139,7 +159,8 @@ async fn corpus_management_document_count_tracks_membership() {
                 bundle_source_id: None,
                 import_id: None,
             })
-            .await.unwrap();
+            .await
+            .unwrap();
 
         let updated = api.get_corpus(&corpus.corpus_id).await.unwrap().unwrap();
         assert_eq!(updated.document_count, (n + 1) as u32);
@@ -155,8 +176,15 @@ async fn corpus_management_api_add_document_post_ingest() {
     let api = CorpusApiImpl::new(store.clone());
 
     let corpus = api
-        .create_corpus(&project(), &CreateCorpusRequest { name: "post_add".to_owned(), description: None })
-        .await.unwrap();
+        .create_corpus(
+            &project(),
+            &CreateCorpusRequest {
+                name: "post_add".to_owned(),
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
 
     pipeline
         .submit(IngestRequest {
@@ -170,7 +198,8 @@ async fn corpus_management_api_add_document_post_ingest() {
             bundle_source_id: None,
             import_id: None,
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     let q = RetrievalQuery {
         project: project(),
@@ -178,19 +207,31 @@ async fn corpus_management_api_add_document_post_ingest() {
         mode: RetrievalMode::LexicalOnly,
         reranker: RerankerStrategy::None,
         limit: 10,
-        metadata_filters: vec![MetadataFilter { key: "corpus_id".to_owned(), value: corpus.corpus_id.clone() }],
+        metadata_filters: vec![MetadataFilter {
+            key: "corpus_id".to_owned(),
+            value: corpus.corpus_id.clone(),
+        }],
         scoring_policy: None,
     };
 
     let before = retrieval.query(q.clone()).await.unwrap();
     assert!(before.results.is_empty(), "doc not in corpus yet");
 
-    api.add_document_to_corpus(&corpus.corpus_id, &AddDocumentToCorpusRequest {
-        document_id: "doc_post_add".to_owned(),
-    }).await.unwrap();
+    api.add_document_to_corpus(
+        &corpus.corpus_id,
+        &AddDocumentToCorpusRequest {
+            document_id: "doc_post_add".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
 
     let after = retrieval.query(q).await.unwrap();
-    assert_eq!(after.results.len(), 1, "doc should appear after being added");
+    assert_eq!(
+        after.results.len(),
+        1,
+        "doc should appear after being added"
+    );
 }
 
 /// list_corpora returns only corpora for the given project.
@@ -202,9 +243,33 @@ async fn corpus_management_list_corpora_scoped_to_project() {
     let proj_a = ProjectKey::new("t", "w", "proj_a");
     let proj_b = ProjectKey::new("t", "w", "proj_b");
 
-    api.create_corpus(&proj_a, &CreateCorpusRequest { name: "corp_a1".to_owned(), description: None }).await.unwrap();
-    api.create_corpus(&proj_a, &CreateCorpusRequest { name: "corp_a2".to_owned(), description: None }).await.unwrap();
-    api.create_corpus(&proj_b, &CreateCorpusRequest { name: "corp_b1".to_owned(), description: None }).await.unwrap();
+    api.create_corpus(
+        &proj_a,
+        &CreateCorpusRequest {
+            name: "corp_a1".to_owned(),
+            description: None,
+        },
+    )
+    .await
+    .unwrap();
+    api.create_corpus(
+        &proj_a,
+        &CreateCorpusRequest {
+            name: "corp_a2".to_owned(),
+            description: None,
+        },
+    )
+    .await
+    .unwrap();
+    api.create_corpus(
+        &proj_b,
+        &CreateCorpusRequest {
+            name: "corp_b1".to_owned(),
+            description: None,
+        },
+    )
+    .await
+    .unwrap();
 
     let a_corpora = api.list_corpora(&proj_a).await.unwrap();
     let b_corpora = api.list_corpora(&proj_b).await.unwrap();

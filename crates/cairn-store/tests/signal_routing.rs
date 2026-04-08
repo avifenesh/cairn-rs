@@ -217,7 +217,10 @@ async fn list_by_signal_type_returns_correct_subscriptions() {
         .await
         .unwrap();
     assert_eq!(push_subs.len(), 2, "two push subscriptions");
-    let ids: Vec<_> = push_subs.iter().map(|s| s.subscription_id.as_str()).collect();
+    let ids: Vec<_> = push_subs
+        .iter()
+        .map(|s| s.subscription_id.as_str())
+        .collect();
     assert!(ids.contains(&"sub_push_1"));
     assert!(ids.contains(&"sub_push_2"));
 
@@ -291,7 +294,10 @@ async fn signal_routed_is_recorded_in_event_log() {
     match &routed_event.envelope.payload {
         RuntimeEvent::SignalRouted(r) => {
             assert_eq!(r.signal_id, signal_id, "routing links correct signal");
-            assert_eq!(r.subscription_id, "sub_timer_1", "routing links correct subscription");
+            assert_eq!(
+                r.subscription_id, "sub_timer_1",
+                "routing links correct subscription"
+            );
             assert_eq!(r.delivered_at_ms, ts + 5);
             assert_eq!(r.project, default_project());
         }
@@ -385,7 +391,10 @@ async fn signal_routed_links_signal_to_subscription() {
     assert!(sub_ids.contains(&"sub_crm_b"));
 
     // Signal read model still has the original signal.
-    let sig_record = SignalReadModel::get(&store, &signal_id).await.unwrap().unwrap();
+    let sig_record = SignalReadModel::get(&store, &signal_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(sig_record.source, "external:crm");
     assert_eq!(sig_record.payload["event_type"], "deal.closed");
 
@@ -510,5 +519,9 @@ async fn subscriptions_are_isolated_by_project() {
     let all_deploy = SignalSubscriptionReadModel::list_by_signal_type(&store, "deploy.completed")
         .await
         .unwrap();
-    assert_eq!(all_deploy.len(), 2, "type lookup is cross-project for routing");
+    assert_eq!(
+        all_deploy.len(),
+        2,
+        "type lookup is cross-project for routing"
+    );
 }

@@ -21,9 +21,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, RwLock};
 
 use cairn_plugin_proto::manifest::PluginManifestWire;
-use cairn_plugin_proto::wire::{
-    self, JsonRpcRequest, JsonRpcResponse, ToolsListResult,
-};
+use cairn_plugin_proto::wire::{self, JsonRpcRequest, JsonRpcResponse, ToolsListResult};
 
 use super::plugin_capability_registry::CapabilityRegistry;
 use super::plugin_health_monitor::PluginHealthMonitor;
@@ -70,8 +68,8 @@ impl PluginHandle {
         self.next_req_id += 1;
 
         let request = JsonRpcRequest::new(&id, method, params);
-        let mut line = serde_json::to_string(&request)
-            .map_err(|e| PluginError::Protocol(e.to_string()))?;
+        let mut line =
+            serde_json::to_string(&request).map_err(|e| PluginError::Protocol(e.to_string()))?;
         line.push('\n');
 
         let stdin = child
@@ -81,9 +79,7 @@ impl PluginHandle {
         stdin
             .write_all(line.as_bytes())
             .map_err(|e| PluginError::Io(e.to_string()))?;
-        stdin
-            .flush()
-            .map_err(|e| PluginError::Io(e.to_string()))?;
+        stdin.flush().map_err(|e| PluginError::Io(e.to_string()))?;
 
         let stdout = child
             .stdout
@@ -108,7 +104,7 @@ impl PluginHandle {
         match self.child.as_mut() {
             None => false,
             Some(child) => match child.try_wait() {
-                Ok(None) => true,  // still running
+                Ok(None) => true,     // still running
                 Ok(Some(_)) => false, // exited
                 Err(_) => false,
             },
@@ -175,10 +171,7 @@ pub struct PluginHost {
 }
 
 impl PluginHost {
-    pub fn new(
-        health: Arc<PluginHealthMonitor>,
-        capabilities: Arc<CapabilityRegistry>,
-    ) -> Self {
+    pub fn new(health: Arc<PluginHealthMonitor>, capabilities: Arc<CapabilityRegistry>) -> Self {
         Self {
             handles: RwLock::new(HashMap::new()),
             health,
@@ -244,9 +237,7 @@ impl PluginHost {
         // Discover tools via tools.list.
         match handle.rpc_call(wire::methods::TOOLS_LIST, serde_json::json!({})) {
             Ok(resp) => {
-                if let Ok(tools_result) =
-                    serde_json::from_value::<ToolsListResult>(resp.result)
-                {
+                if let Ok(tools_result) = serde_json::from_value::<ToolsListResult>(resp.result) {
                     self.capabilities
                         .register_tools(&plugin_id, tools_result.tools);
                 }
@@ -370,9 +361,7 @@ impl PluginHost {
     /// Get the current state of a plugin.
     pub fn plugin_state(&self, plugin_id: &str) -> Option<PluginState> {
         let handles = self.handles.read().unwrap();
-        handles
-            .get(plugin_id)
-            .map(|h| h.lock().unwrap().state)
+        handles.get(plugin_id).map(|h| h.lock().unwrap().state)
     }
 
     /// List all managed plugin IDs.
@@ -426,9 +415,7 @@ impl PluginHost {
         stdin
             .write_all(line.as_bytes())
             .map_err(|e| PluginError::Io(e.to_string()))?;
-        stdin
-            .flush()
-            .map_err(|e| PluginError::Io(e.to_string()))?;
+        stdin.flush().map_err(|e| PluginError::Io(e.to_string()))?;
 
         Ok(())
     }
@@ -454,9 +441,7 @@ impl Default for PluginHost {
 /// - Minimal environment: only `PATH`, `HOME`, and `PLUGIN_ID`
 fn spawn_sandboxed(manifest: &PluginManifestWire) -> Result<Child, PluginError> {
     if manifest.command.is_empty() {
-        return Err(PluginError::SpawnFailed(
-            "manifest command is empty".into(),
-        ));
+        return Err(PluginError::SpawnFailed("manifest command is empty".into()));
     }
 
     let program = &manifest.command[0];
@@ -649,10 +634,7 @@ mod tests {
 
         let crashed = host.detect_crashes();
         assert!(crashed.contains(&"short-lived".to_owned()));
-        assert_eq!(
-            host.plugin_state("short-lived"),
-            Some(PluginState::Crashed)
-        );
+        assert_eq!(host.plugin_state("short-lived"), Some(PluginState::Crashed));
     }
 
     #[test]

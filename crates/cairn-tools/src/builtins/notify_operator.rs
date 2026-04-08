@@ -52,20 +52,24 @@ impl NotificationSink for NoopSink {
 // ── Severity ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Severity { Info, Warning, Critical }
+pub enum Severity {
+    Info,
+    Warning,
+    Critical,
+}
 
 impl Severity {
     fn from_str(s: &str) -> Self {
         match s {
-            "warning"  => Self::Warning,
+            "warning" => Self::Warning,
             "critical" => Self::Critical,
-            _          => Self::Info,
+            _ => Self::Info,
         }
     }
     fn as_str(self) -> &'static str {
         match self {
-            Self::Info     => "info",
-            Self::Warning  => "warning",
+            Self::Info => "info",
+            Self::Warning => "warning",
             Self::Critical => "critical",
         }
     }
@@ -76,33 +80,39 @@ impl Severity {
 /// Core-tier operator notification tool.
 pub struct NotifyOperatorTool {
     mailbox: Option<Arc<dyn MailboxService>>,
-    sink:    Arc<dyn NotificationSink>,
+    sink: Arc<dyn NotificationSink>,
 }
 
 impl NotifyOperatorTool {
     /// Create with both a durable mailbox and a realtime sink.
-    pub fn new(
-        mailbox: Option<Arc<dyn MailboxService>>,
-        sink:    Arc<dyn NotificationSink>,
-    ) -> Self {
+    pub fn new(mailbox: Option<Arc<dyn MailboxService>>, sink: Arc<dyn NotificationSink>) -> Self {
         Self { mailbox, sink }
     }
 
     /// Stub constructor — no mailbox, no-op SSE (for tests / stub registry).
     pub fn stub() -> Self {
-        Self { mailbox: None, sink: Arc::new(NoopSink) }
+        Self {
+            mailbox: None,
+            sink: Arc::new(NoopSink),
+        }
     }
 }
 
 impl Default for NotifyOperatorTool {
-    fn default() -> Self { Self::stub() }
+    fn default() -> Self {
+        Self::stub()
+    }
 }
 
 #[async_trait]
 impl ToolHandler for NotifyOperatorTool {
-    fn name(&self) -> &str { "notify_operator" }
+    fn name(&self) -> &str {
+        "notify_operator"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Core }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Core
+    }
 
     fn description(&self) -> &str {
         "Send a notification to the operator. \
@@ -142,21 +152,19 @@ impl ToolHandler for NotifyOperatorTool {
         let message = args["message"]
             .as_str()
             .ok_or_else(|| ToolError::InvalidArgs {
-                field:   "message".into(),
+                field: "message".into(),
                 message: "required string".into(),
             })?
             .trim();
 
         if message.is_empty() {
             return Err(ToolError::InvalidArgs {
-                field:   "message".into(),
+                field: "message".into(),
                 message: "message must not be empty".into(),
             });
         }
 
-        let severity = Severity::from_str(
-            args["severity"].as_str().unwrap_or("info"),
-        );
+        let severity = Severity::from_str(args["severity"].as_str().unwrap_or("info"));
         let channel = args["channel"].as_str().unwrap_or("operator");
 
         // ── Path 1: Durable mailbox ───────────────────────────────────────────
@@ -174,15 +182,18 @@ impl ToolHandler for NotifyOperatorTool {
                 severity = severity.as_str(),
             );
 
-            match svc.append(
-                project,
-                msg_id.clone(),
-                None, // run_id: let MailboxServiceImpl derive from project context
-                None, // task_id
-                content,
-                None, // from_run_id
-                0,    // deliver_at_ms = immediate
-            ).await {
+            match svc
+                .append(
+                    project,
+                    msg_id.clone(),
+                    None, // run_id: let MailboxServiceImpl derive from project context
+                    None, // task_id
+                    content,
+                    None, // from_run_id
+                    0,    // deliver_at_ms = immediate
+                )
+                .await
+            {
                 Ok(record) => Some(record.message_id.as_str().to_owned()),
                 Err(e) => {
                     // Mailbox failure is non-fatal — still emit SSE and succeed
@@ -213,14 +224,20 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    fn project() -> ProjectKey { ProjectKey::new("t","w","p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     /// Sink that records calls for assertion.
     struct RecordingSink {
         calls: Mutex<Vec<(String, String, String)>>,
     }
     impl RecordingSink {
-        fn new() -> Arc<Self> { Arc::new(Self { calls: Mutex::new(vec![]) }) }
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                calls: Mutex::new(vec![]),
+            })
+        }
         fn recorded(&self) -> Vec<(String, String, String)> {
             self.calls.lock().unwrap().clone()
         }
@@ -228,7 +245,10 @@ mod tests {
     #[async_trait]
     impl NotificationSink for RecordingSink {
         async fn emit(&self, ch: &str, sev: &str, msg: &str) {
-            self.calls.lock().unwrap().push((ch.into(), sev.into(), msg.into()));
+            self.calls
+                .lock()
+                .unwrap()
+                .push((ch.into(), sev.into(), msg.into()));
         }
     }
 
@@ -263,9 +283,15 @@ mod tests {
         let sink = RecordingSink::new();
         let tool = NotifyOperatorTool::new(None, sink.clone());
 
-        let res = tool.execute(&project(), serde_json::json!({
-            "message": "Deploy succeeded",
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "message": "Deploy succeeded",
+                }),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(res.output["delivered"], true);
         assert_eq!(res.output["channel"], "operator");
@@ -283,14 +309,20 @@ mod tests {
         let sink = RecordingSink::new();
         let tool = NotifyOperatorTool::new(None, sink.clone());
 
-        let res = tool.execute(&project(), serde_json::json!({
-            "message":  "Out of memory",
-            "severity": "critical",
-            "channel":  "on-call",
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "message":  "Out of memory",
+                    "severity": "critical",
+                    "channel":  "on-call",
+                }),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(res.output["severity"], "critical");
-        assert_eq!(res.output["channel"],  "on-call");
+        assert_eq!(res.output["channel"], "on-call");
 
         let calls = sink.recorded();
         assert_eq!(calls[0].0, "on-call");
@@ -301,9 +333,15 @@ mod tests {
     async fn default_severity_is_info() {
         let sink = RecordingSink::new();
         let tool = NotifyOperatorTool::new(None, sink.clone());
-        let res = tool.execute(&project(), serde_json::json!({
-            "message": "status update"
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "message": "status update"
+                }),
+            )
+            .await
+            .unwrap();
         assert_eq!(res.output["severity"], "info");
     }
 
@@ -313,7 +351,8 @@ mod tests {
     async fn missing_message_is_invalid_args() {
         let err = NotifyOperatorTool::stub()
             .execute(&project(), serde_json::json!({}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -321,7 +360,8 @@ mod tests {
     async fn empty_message_is_invalid_args() {
         let err = NotifyOperatorTool::stub()
             .execute(&project(), serde_json::json!({"message": "  "}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -331,7 +371,8 @@ mod tests {
     async fn stub_mode_returns_delivered_without_mailbox_id() {
         let res = NotifyOperatorTool::stub()
             .execute(&project(), serde_json::json!({"message": "hello"}))
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(res.output["delivered"], true);
         // No mailbox configured → mailbox_id is null
         assert!(res.output["mailbox_id"].is_null());
@@ -341,10 +382,18 @@ mod tests {
 
     #[test]
     fn severity_round_trips() {
-        for (s, expected) in [("info", Severity::Info), ("warning", Severity::Warning), ("critical", Severity::Critical)] {
+        for (s, expected) in [
+            ("info", Severity::Info),
+            ("warning", Severity::Warning),
+            ("critical", Severity::Critical),
+        ] {
             assert_eq!(Severity::from_str(s), expected);
             assert_eq!(Severity::from_str(s).as_str(), s);
         }
-        assert_eq!(Severity::from_str("unknown"), Severity::Info, "unknown → info");
+        assert_eq!(
+            Severity::from_str("unknown"),
+            Severity::Info,
+            "unknown → info"
+        );
     }
 }

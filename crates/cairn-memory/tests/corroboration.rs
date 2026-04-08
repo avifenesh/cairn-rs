@@ -198,8 +198,14 @@ async fn corroboration_is_symmetric_between_two_sources() {
         .find(|r| r.chunk.chunk_id == ChunkId::new("c2"))
         .unwrap();
 
-    assert!(c1.breakdown.corroboration > 0.0, "c1 should be corroborated");
-    assert!(c2.breakdown.corroboration > 0.0, "c2 should be corroborated");
+    assert!(
+        c1.breakdown.corroboration > 0.0,
+        "c1 should be corroborated"
+    );
+    assert!(
+        c2.breakdown.corroboration > 0.0,
+        "c2 should be corroborated"
+    );
     assert!(
         (c1.breakdown.corroboration - c2.breakdown.corroboration).abs() < 1e-9,
         "corroboration must be symmetric: c1={}, c2={}",
@@ -271,9 +277,24 @@ async fn corroboration_embedding_cosine_similarity() {
 
     store
         .insert_chunks(&[
-            make_chunk("e_a", "src_emb_a", "topic description here alpha", Some(emb_a)),
-            make_chunk("e_b", "src_emb_b", "topic description here beta", Some(emb_b)),
-            make_chunk("e_c", "src_emb_c", "topic description here gamma", Some(emb_c)),
+            make_chunk(
+                "e_a",
+                "src_emb_a",
+                "topic description here alpha",
+                Some(emb_a),
+            ),
+            make_chunk(
+                "e_b",
+                "src_emb_b",
+                "topic description here beta",
+                Some(emb_b),
+            ),
+            make_chunk(
+                "e_c",
+                "src_emb_c",
+                "topic description here gamma",
+                Some(emb_c),
+            ),
         ])
         .await
         .unwrap();

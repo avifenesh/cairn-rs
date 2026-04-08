@@ -205,11 +205,17 @@ async fn hybrid_retrieval_diagnostics_report_mode_and_stages() {
         "Hybrid must report LexicalOnly in diagnostics (in-memory fallback)"
     );
     assert!(
-        response.diagnostics.stages_used.contains(&CandidateStage::Lexical),
+        response
+            .diagnostics
+            .stages_used
+            .contains(&CandidateStage::Lexical),
         "Hybrid must include Lexical stage"
     );
     assert!(
-        response.diagnostics.scoring_dimensions_used.contains(&"lexical_relevance".to_owned()),
+        response
+            .diagnostics
+            .scoring_dimensions_used
+            .contains(&"lexical_relevance".to_owned()),
         "lexical_relevance must be listed as a scoring dimension when non-zero"
     );
 }
@@ -261,7 +267,10 @@ async fn hybrid_retrieval_without_embedding_reports_lexical_mode() {
         RetrievalMode::LexicalOnly,
         "Hybrid without embedding must report LexicalOnly (in-memory fallback)"
     );
-    assert!(!response.results.is_empty(), "should return lexical results");
+    assert!(
+        !response.results.is_empty(),
+        "should return lexical results"
+    );
     // In-memory backend sets semantic_relevance to 0 (no vector search).
     for result in &response.results {
         assert_eq!(

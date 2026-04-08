@@ -167,7 +167,10 @@ async fn import_service_conflict_resolution_strategies_apply_as_requested() {
 
     // Test Skip strategy (default): duplicates are skipped.
     let skip_plan = import_service.plan(&bundle, &target_scope).await.unwrap();
-    assert_eq!(skip_plan.conflict_resolution, ConflictResolutionStrategy::Skip);
+    assert_eq!(
+        skip_plan.conflict_resolution,
+        ConflictResolutionStrategy::Skip
+    );
     let skip_report = import_service.apply(&skip_plan, &bundle).await.unwrap();
     assert_eq!(skip_report.skip_count, 2);
     assert_eq!(skip_report.conflict_count, 0);
@@ -189,7 +192,10 @@ async fn import_validate_rejects_unsupported_schema_version() {
         "bundle with unsupported schema_version must produce validation errors"
     );
     assert!(
-        report.errors.iter().any(|e| e.contains("bundle_schema_version") || e.contains("unsupported")),
+        report
+            .errors
+            .iter()
+            .any(|e| e.contains("bundle_schema_version") || e.contains("unsupported")),
         "error must mention bundle_schema_version, got: {:?}",
         report.errors
     );

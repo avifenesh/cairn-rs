@@ -405,7 +405,11 @@ pub struct ValidationReport {
 
 impl ValidationReport {
     pub fn ok() -> Self {
-        Self { errors: vec![], warnings: vec![], valid: true }
+        Self {
+            errors: vec![],
+            warnings: vec![],
+            valid: true,
+        }
     }
 }
 
@@ -429,8 +433,11 @@ pub trait ImportService: Send + Sync {
     ) -> Result<ImportPlan, Self::Error>;
 
     /// Apply an import plan and materialize product state.
-    async fn apply(&self, plan: &ImportPlan, bundle: &BundleEnvelope)
-        -> Result<ImportReport, Self::Error>;
+    async fn apply(
+        &self,
+        plan: &ImportPlan,
+        bundle: &BundleEnvelope,
+    ) -> Result<ImportReport, Self::Error>;
 }
 
 /// Export service boundary per RFC 013.
@@ -553,7 +560,10 @@ mod tests {
         let mut bundle = make_minimal_bundle("1");
         bundle.bundle_schema_version = "".to_owned();
         let err = validate_bundle_schema_version(&bundle).unwrap_err();
-        assert!(err.contains("bundle_schema_version is required"), "got: {err}");
+        assert!(
+            err.contains("bundle_schema_version is required"),
+            "got: {err}"
+        );
     }
 
     /// RFC 013 §5.1: unsupported schema version must be rejected.
@@ -580,10 +590,21 @@ mod tests {
             created_at: 0,
             created_by: None,
             source_deployment_id: None,
-            source_scope: SourceScope { tenant_id: None, workspace_id: None, project_id: None },
+            source_scope: SourceScope {
+                tenant_id: None,
+                workspace_id: None,
+                project_id: None,
+            },
             artifact_count: 0,
             artifacts: vec![],
-            provenance: BundleProvenance { description: None, source_system: None, export_reason: None, origin: None, production_method: None, source_version: None },
+            provenance: BundleProvenance {
+                description: None,
+                source_system: None,
+                export_reason: None,
+                origin: None,
+                production_method: None,
+                source_version: None,
+            },
         }
     }
 
@@ -611,7 +632,10 @@ mod rfc013_tests {
     /// RFC 013: both bundle types use the same physical envelope format.
     #[test]
     fn rfc013_both_bundle_types_use_same_envelope_shape() {
-        for bundle_type in [BundleType::PromptLibraryBundle, BundleType::CuratedKnowledgePackBundle] {
+        for bundle_type in [
+            BundleType::PromptLibraryBundle,
+            BundleType::CuratedKnowledgePackBundle,
+        ] {
             let bundle = BundleEnvelope {
                 bundle_schema_version: "1".to_owned(),
                 bundle_type,
@@ -620,15 +644,32 @@ mod rfc013_tests {
                 created_at: 1000,
                 created_by: Some("operator".to_owned()),
                 source_deployment_id: None,
-                source_scope: SourceScope { tenant_id: Some("t1".to_owned()), workspace_id: None, project_id: None },
+                source_scope: SourceScope {
+                    tenant_id: Some("t1".to_owned()),
+                    workspace_id: None,
+                    project_id: None,
+                },
                 artifact_count: 0,
                 artifacts: vec![],
-                provenance: BundleProvenance { description: None, source_system: None, export_reason: None, origin: None, production_method: None, source_version: None },
+                provenance: BundleProvenance {
+                    description: None,
+                    source_system: None,
+                    export_reason: None,
+                    origin: None,
+                    production_method: None,
+                    source_version: None,
+                },
             };
-            assert!(validate_bundle_schema_version(&bundle).is_ok(),
-                "RFC 013: {:?} bundle must pass schema validation", bundle_type);
+            assert!(
+                validate_bundle_schema_version(&bundle).is_ok(),
+                "RFC 013: {:?} bundle must pass schema validation",
+                bundle_type
+            );
             let json = serde_json::to_value(&bundle).expect("bundle must serialize");
-            assert!(json.is_object(), "RFC 013: bundle must serialize as JSON object");
+            assert!(
+                json.is_object(),
+                "RFC 013: bundle must serialize as JSON object"
+            );
         }
     }
 
@@ -636,11 +677,41 @@ mod rfc013_tests {
     #[test]
     fn rfc013_import_plan_all_five_outcomes_representable() {
         let entries = vec![
-            ImportPlanEntry { artifact_logical_id: "a1".to_owned(), artifact_kind: ArtifactKind::PromptAsset, outcome: ImportOutcome::Create, reason: "new".to_owned(), existing_id: None },
-            ImportPlanEntry { artifact_logical_id: "a2".to_owned(), artifact_kind: ArtifactKind::PromptAsset, outcome: ImportOutcome::Reuse, reason: "same".to_owned(), existing_id: Some("pa_1".to_owned()) },
-            ImportPlanEntry { artifact_logical_id: "a3".to_owned(), artifact_kind: ArtifactKind::PromptVersion, outcome: ImportOutcome::Update, reason: "changed".to_owned(), existing_id: Some("pv_1".to_owned()) },
-            ImportPlanEntry { artifact_logical_id: "a4".to_owned(), artifact_kind: ArtifactKind::KnowledgePack, outcome: ImportOutcome::Skip, reason: "excluded".to_owned(), existing_id: None },
-            ImportPlanEntry { artifact_logical_id: "a5".to_owned(), artifact_kind: ArtifactKind::KnowledgeDocument, outcome: ImportOutcome::Conflict, reason: "collision".to_owned(), existing_id: None },
+            ImportPlanEntry {
+                artifact_logical_id: "a1".to_owned(),
+                artifact_kind: ArtifactKind::PromptAsset,
+                outcome: ImportOutcome::Create,
+                reason: "new".to_owned(),
+                existing_id: None,
+            },
+            ImportPlanEntry {
+                artifact_logical_id: "a2".to_owned(),
+                artifact_kind: ArtifactKind::PromptAsset,
+                outcome: ImportOutcome::Reuse,
+                reason: "same".to_owned(),
+                existing_id: Some("pa_1".to_owned()),
+            },
+            ImportPlanEntry {
+                artifact_logical_id: "a3".to_owned(),
+                artifact_kind: ArtifactKind::PromptVersion,
+                outcome: ImportOutcome::Update,
+                reason: "changed".to_owned(),
+                existing_id: Some("pv_1".to_owned()),
+            },
+            ImportPlanEntry {
+                artifact_logical_id: "a4".to_owned(),
+                artifact_kind: ArtifactKind::KnowledgePack,
+                outcome: ImportOutcome::Skip,
+                reason: "excluded".to_owned(),
+                existing_id: None,
+            },
+            ImportPlanEntry {
+                artifact_logical_id: "a5".to_owned(),
+                artifact_kind: ArtifactKind::KnowledgeDocument,
+                outcome: ImportOutcome::Conflict,
+                reason: "collision".to_owned(),
+                existing_id: None,
+            },
         ];
         let (c, r, u, s, conf) = ImportPlan::summarize_counts(&entries);
         assert_eq!(c, 1, "RFC 013: Create must be countable");
@@ -660,9 +731,15 @@ mod rfc013_tests {
             reason: "operator excluded from scope".to_owned(),
             existing_id: None,
         };
-        assert!(!skip_entry.reason.is_empty(), "RFC 013: Skip entries must have a reason");
-        assert_ne!(skip_entry.outcome, ImportOutcome::Conflict,
-            "RFC 013: Skip must not substitute for Conflict");
+        assert!(
+            !skip_entry.reason.is_empty(),
+            "RFC 013: Skip entries must have a reason"
+        );
+        assert_ne!(
+            skip_entry.outcome,
+            ImportOutcome::Conflict,
+            "RFC 013: Skip must not substitute for Conflict"
+        );
     }
 
     /// RFC 013: artifact_logical_id is the portable identity key.
@@ -672,7 +749,11 @@ mod rfc013_tests {
             artifact_kind: ArtifactKind::PromptAsset,
             artifact_logical_id: "acme.prompts.agent.system_v2".to_owned(),
             artifact_display_name: "Agent System v2".to_owned(),
-            origin_scope: SourceScope { tenant_id: None, workspace_id: Some("w1".to_owned()), project_id: None },
+            origin_scope: SourceScope {
+                tenant_id: None,
+                workspace_id: Some("w1".to_owned()),
+                project_id: None,
+            },
             origin_artifact_id: Some("pa_abc123".to_owned()),
             content_hash: "sha256:def456".to_owned(),
             source_bundle_id: "bundle_001".to_owned(),
@@ -683,11 +764,14 @@ mod rfc013_tests {
             lineage: None,
             tags: vec![],
         };
-        assert!(!entry.artifact_logical_id.is_empty(),
-            "RFC 013: artifact_logical_id is the portable reconciliation key");
+        assert!(
+            !entry.artifact_logical_id.is_empty(),
+            "RFC 013: artifact_logical_id is the portable reconciliation key"
+        );
         // origin_artifact_id is source-system local.
-        assert!(entry.origin_artifact_id.is_some(),
-            "RFC 013: origin_artifact_id is local, NOT the portable key");
+        assert!(
+            entry.origin_artifact_id.is_some(),
+            "RFC 013: origin_artifact_id is local, NOT the portable key"
+        );
     }
 }
-

@@ -13,15 +13,18 @@
 use std::sync::Arc;
 
 use cairn_domain::{OperatorId, TenantId, WorkspaceId, WorkspaceKey, WorkspaceRole};
-use cairn_runtime::{WorkspaceMembershipService, WorkspaceService};
 use cairn_runtime::services::{WorkspaceMembershipServiceImpl, WorkspaceServiceImpl};
+use cairn_runtime::{WorkspaceMembershipService, WorkspaceService};
 use cairn_store::InMemoryStore;
 
 fn workspace_key() -> WorkspaceKey {
     WorkspaceKey::new("tenant_rbac", "ws_rbac")
 }
 
-async fn setup() -> (WorkspaceServiceImpl<InMemoryStore>, WorkspaceMembershipServiceImpl<InMemoryStore>) {
+async fn setup() -> (
+    WorkspaceServiceImpl<InMemoryStore>,
+    WorkspaceMembershipServiceImpl<InMemoryStore>,
+) {
     let store = Arc::new(InMemoryStore::new());
     let workspaces = WorkspaceServiceImpl::new(store.clone());
     let memberships = WorkspaceMembershipServiceImpl::new(store);
@@ -87,7 +90,11 @@ async fn add_viewer_member_to_workspace() {
     let (_, memberships) = setup().await;
 
     let membership = memberships
-        .add_member(workspace_key(), "op_viewer".to_owned(), WorkspaceRole::Viewer)
+        .add_member(
+            workspace_key(),
+            "op_viewer".to_owned(),
+            WorkspaceRole::Viewer,
+        )
         .await
         .unwrap();
 
@@ -102,7 +109,11 @@ async fn admin_role_satisfies_write_permission() {
     let wk = workspace_key();
 
     memberships
-        .add_member(wk.clone(), "op_admin_write".to_owned(), WorkspaceRole::Admin)
+        .add_member(
+            wk.clone(),
+            "op_admin_write".to_owned(),
+            WorkspaceRole::Admin,
+        )
         .await
         .unwrap();
 
@@ -194,7 +205,11 @@ async fn upgrade_viewer_to_member_grants_write_access() {
         .unwrap()
         .role;
 
-    assert_eq!(after_role, WorkspaceRole::Member, "role must be Member after upgrade");
+    assert_eq!(
+        after_role,
+        WorkspaceRole::Member,
+        "role must be Member after upgrade"
+    );
     assert_can_write(after_role, "op_upgrade");
 }
 
@@ -213,8 +228,16 @@ async fn role_hierarchy_ordering_is_correct() {
     assert!(!WorkspaceRole::Admin.has_at_least(WorkspaceRole::Owner));
 
     // Each role satisfies its own level.
-    for role in [WorkspaceRole::Viewer, WorkspaceRole::Member, WorkspaceRole::Admin, WorkspaceRole::Owner] {
-        assert!(role.has_at_least(role), "{role:?} must satisfy its own level");
+    for role in [
+        WorkspaceRole::Viewer,
+        WorkspaceRole::Member,
+        WorkspaceRole::Admin,
+        WorkspaceRole::Owner,
+    ] {
+        assert!(
+            role.has_at_least(role),
+            "{role:?} must satisfy its own level"
+        );
     }
 }
 
@@ -249,10 +272,22 @@ async fn list_members_reflects_correct_roles_for_each_operator() {
     let (_, memberships) = setup().await;
     let wk = workspace_key();
 
-    memberships.add_member(wk.clone(), "alice".to_owned(), WorkspaceRole::Owner).await.unwrap();
-    memberships.add_member(wk.clone(), "bob".to_owned(), WorkspaceRole::Admin).await.unwrap();
-    memberships.add_member(wk.clone(), "carol".to_owned(), WorkspaceRole::Member).await.unwrap();
-    memberships.add_member(wk.clone(), "dave".to_owned(), WorkspaceRole::Viewer).await.unwrap();
+    memberships
+        .add_member(wk.clone(), "alice".to_owned(), WorkspaceRole::Owner)
+        .await
+        .unwrap();
+    memberships
+        .add_member(wk.clone(), "bob".to_owned(), WorkspaceRole::Admin)
+        .await
+        .unwrap();
+    memberships
+        .add_member(wk.clone(), "carol".to_owned(), WorkspaceRole::Member)
+        .await
+        .unwrap();
+    memberships
+        .add_member(wk.clone(), "dave".to_owned(), WorkspaceRole::Viewer)
+        .await
+        .unwrap();
 
     let members = memberships.list_members(&wk).await.unwrap();
     assert_eq!(members.len(), 4, "all 4 members must be listed");
@@ -261,10 +296,10 @@ async fn list_members_reflects_correct_roles_for_each_operator() {
         let op = m.operator_id.as_str();
         match op {
             "alice" => assert_eq!(m.role, WorkspaceRole::Owner),
-            "bob"   => assert_eq!(m.role, WorkspaceRole::Admin),
+            "bob" => assert_eq!(m.role, WorkspaceRole::Admin),
             "carol" => assert_eq!(m.role, WorkspaceRole::Member),
-            "dave"  => assert_eq!(m.role, WorkspaceRole::Viewer),
-            other   => panic!("unexpected operator: {other}"),
+            "dave" => assert_eq!(m.role, WorkspaceRole::Viewer),
+            other => panic!("unexpected operator: {other}"),
         }
     }
 
@@ -273,7 +308,11 @@ async fn list_members_reflects_correct_roles_for_each_operator() {
         .iter()
         .filter(|m| m.role.has_at_least(WorkspaceRole::Member))
         .collect();
-    assert_eq!(write_capable.len(), 3, "Owner + Admin + Member can write; Viewer cannot");
+    assert_eq!(
+        write_capable.len(),
+        3,
+        "Owner + Admin + Member can write; Viewer cannot"
+    );
 
     let read_only: Vec<_> = members
         .iter()
@@ -296,7 +335,12 @@ async fn unknown_operator_is_not_in_member_list() {
         .unwrap();
 
     let members = memberships.list_members(&wk).await.unwrap();
-    let unknown = members.iter().find(|m| m.operator_id == OperatorId::new("unknown_op"));
+    let unknown = members
+        .iter()
+        .find(|m| m.operator_id == OperatorId::new("unknown_op"));
 
-    assert!(unknown.is_none(), "un-enrolled operator must not appear in member list");
+    assert!(
+        unknown.is_none(),
+        "un-enrolled operator must not appear in member list"
+    );
 }

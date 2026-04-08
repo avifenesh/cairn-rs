@@ -18,10 +18,7 @@ pub trait ProjectService: Send + Sync {
     ) -> Result<ProjectRecord, RuntimeError>;
 
     /// Get a project by its composite key.
-    async fn get(
-        &self,
-        project: &ProjectKey,
-    ) -> Result<Option<ProjectRecord>, RuntimeError>;
+    async fn get(&self, project: &ProjectKey) -> Result<Option<ProjectRecord>, RuntimeError>;
 
     /// List projects for a workspace with pagination.
     async fn list_by_workspace(

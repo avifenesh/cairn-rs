@@ -15,8 +15,8 @@ use cairn_domain::tool_invocation::{
     ToolInvocationOutcomeKind, ToolInvocationState, ToolInvocationTarget,
 };
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectKey, RunId, RuntimeEvent, SessionId,
-    TaskId, ToolInvocationId, ToolInvocationProgressUpdated,
+    EventEnvelope, EventId, EventSource, ProjectKey, RunId, RuntimeEvent, SessionId, TaskId,
+    ToolInvocationId, ToolInvocationProgressUpdated,
 };
 use cairn_runtime::services::{ToolInvocationService, ToolInvocationServiceImpl};
 use cairn_store::projections::ToolInvocationReadModel;
@@ -82,7 +82,10 @@ async fn tool_invocation_start_progress_complete() {
         record.finished_at_ms.is_none(),
         "finished_at_ms must be None until completion"
     );
-    assert!(record.outcome.is_none(), "outcome must be None until terminal");
+    assert!(
+        record.outcome.is_none(),
+        "outcome must be None until terminal"
+    );
 
     // Verify target contains the tool_name.
     match &record.target {
@@ -253,7 +256,10 @@ async fn tool_invocation_cancel_records_canceled_state() {
 
     // Plugin target fields must be preserved.
     match &canceled.target {
-        ToolInvocationTarget::Plugin { plugin_id, tool_name } => {
+        ToolInvocationTarget::Plugin {
+            plugin_id,
+            tool_name,
+        } => {
             assert_eq!(plugin_id, "com.example.code_exec");
             assert_eq!(tool_name, "code_exec.run");
         }
@@ -278,7 +284,9 @@ async fn tool_invocation_permanent_failure_records_error() {
         None,
         Some(RunId::new("run_fail_1")),
         None,
-        ToolInvocationTarget::Builtin { tool_name: "http.get".to_owned() },
+        ToolInvocationTarget::Builtin {
+            tool_name: "http.get".to_owned(),
+        },
         ExecutionClass::SupervisedProcess,
     )
     .await
@@ -301,7 +309,10 @@ async fn tool_invocation_permanent_failure_records_error() {
         .unwrap();
 
     assert_eq!(failed.state, ToolInvocationState::Failed);
-    assert_eq!(failed.outcome, Some(ToolInvocationOutcomeKind::PermanentFailure));
+    assert_eq!(
+        failed.outcome,
+        Some(ToolInvocationOutcomeKind::PermanentFailure)
+    );
     assert_eq!(
         failed.error_message.as_deref(),
         Some("connection refused: target host unreachable")
@@ -328,7 +339,9 @@ async fn list_by_run_returns_all_invocations() {
             None,
             Some(run_id.clone()),
             None,
-            ToolInvocationTarget::Builtin { tool_name: format!("tool_{i}") },
+            ToolInvocationTarget::Builtin {
+                tool_name: format!("tool_{i}"),
+            },
             ExecutionClass::SupervisedProcess,
         )
         .await
@@ -342,7 +355,9 @@ async fn list_by_run_returns_all_invocations() {
         None,
         Some(other_run.clone()),
         None,
-        ToolInvocationTarget::Builtin { tool_name: "other.tool".to_owned() },
+        ToolInvocationTarget::Builtin {
+            tool_name: "other.tool".to_owned(),
+        },
         ExecutionClass::SupervisedProcess,
     )
     .await
@@ -360,7 +375,11 @@ async fn list_by_run_returns_all_invocations() {
     let other_invocations = ToolInvocationReadModel::list_by_run(store.as_ref(), &other_run, 10, 0)
         .await
         .unwrap();
-    assert_eq!(other_invocations.len(), 1, "other run must see only its 1 invocation");
+    assert_eq!(
+        other_invocations.len(),
+        1,
+        "other run must see only its 1 invocation"
+    );
 }
 
 // ── Multiple terminal outcomes all set finished_at_ms ─────────────────────────
@@ -372,27 +391,50 @@ async fn all_terminal_outcomes_set_finished_at_ms() {
 
     let run_id = RunId::new("run_terminal");
     let cases = [
-        ("inv_term_success",  ToolInvocationOutcomeKind::Success,          None),
-        ("inv_term_canceled", ToolInvocationOutcomeKind::Canceled,         Some("canceled")),
-        ("inv_term_timeout",  ToolInvocationOutcomeKind::Timeout,          Some("timed out")),
-        ("inv_term_perm",     ToolInvocationOutcomeKind::PermanentFailure, Some("perm fail")),
+        ("inv_term_success", ToolInvocationOutcomeKind::Success, None),
+        (
+            "inv_term_canceled",
+            ToolInvocationOutcomeKind::Canceled,
+            Some("canceled"),
+        ),
+        (
+            "inv_term_timeout",
+            ToolInvocationOutcomeKind::Timeout,
+            Some("timed out"),
+        ),
+        (
+            "inv_term_perm",
+            ToolInvocationOutcomeKind::PermanentFailure,
+            Some("perm fail"),
+        ),
     ];
 
     for (id, outcome, err_msg) in &cases {
         let inv = invid(id);
         svc.record_start(
-            &project(), inv.clone(), None, Some(run_id.clone()), None,
-            ToolInvocationTarget::Builtin { tool_name: "t".to_owned() },
+            &project(),
+            inv.clone(),
+            None,
+            Some(run_id.clone()),
+            None,
+            ToolInvocationTarget::Builtin {
+                tool_name: "t".to_owned(),
+            },
             ExecutionClass::SupervisedProcess,
         )
         .await
         .unwrap();
 
         if *outcome == ToolInvocationOutcomeKind::Success {
-            svc.record_completed(&project(), inv.clone(), None, "t".to_owned()).await.unwrap();
+            svc.record_completed(&project(), inv.clone(), None, "t".to_owned())
+                .await
+                .unwrap();
         } else {
             svc.record_failed(
-                &project(), inv.clone(), None, "t".to_owned(),
+                &project(),
+                inv.clone(),
+                None,
+                "t".to_owned(),
                 *outcome,
                 err_msg.map(|s| s.to_owned()),
             )
@@ -400,10 +442,14 @@ async fn all_terminal_outcomes_set_finished_at_ms() {
             .unwrap();
         }
 
-        let rec = ToolInvocationReadModel::get(store.as_ref(), &inv).await.unwrap().unwrap();
+        let rec = ToolInvocationReadModel::get(store.as_ref(), &inv)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(
             rec.state.is_terminal(),
-            "outcome {outcome:?} must produce a terminal state; got: {:?}", rec.state
+            "outcome {outcome:?} must produce a terminal state; got: {:?}",
+            rec.state
         );
         assert!(
             rec.finished_at_ms.is_some(),

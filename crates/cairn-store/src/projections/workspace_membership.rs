@@ -40,10 +40,7 @@ pub trait WorkspaceMembershipReadModel: Send + Sync {
         operator_id: &str,
     ) -> Result<Option<WorkspaceMemberRecord>, StoreError>;
 
-    async fn add_workspace_member(
-        &self,
-        record: WorkspaceMemberRecord,
-    ) -> Result<(), StoreError>;
+    async fn add_workspace_member(&self, record: WorkspaceMemberRecord) -> Result<(), StoreError>;
 
     async fn remove_workspace_member(
         &self,

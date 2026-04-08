@@ -298,8 +298,17 @@ mod tests {
 
     #[test]
     fn skill_invocation_status_variants_are_distinct() {
-        assert_ne!(SkillInvocationStatus::Running, SkillInvocationStatus::Completed);
-        assert_ne!(SkillInvocationStatus::Completed, SkillInvocationStatus::Failed);
-        assert_ne!(SkillInvocationStatus::Running, SkillInvocationStatus::Failed);
+        assert_ne!(
+            SkillInvocationStatus::Running,
+            SkillInvocationStatus::Completed
+        );
+        assert_ne!(
+            SkillInvocationStatus::Completed,
+            SkillInvocationStatus::Failed
+        );
+        assert_ne!(
+            SkillInvocationStatus::Running,
+            SkillInvocationStatus::Failed
+        );
     }
 }

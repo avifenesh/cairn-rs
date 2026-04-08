@@ -174,8 +174,8 @@ impl FileConfigStore {
         let path = path.into();
         let cache = if path.exists() {
             let src = std::fs::read_to_string(&path)?;
-            let tf: TomlConfigFile = toml::from_str(&src)
-                .map_err(|e| ConfigStoreError::Parse(e.to_string()))?;
+            let tf: TomlConfigFile =
+                toml::from_str(&src).map_err(|e| ConfigStoreError::Parse(e.to_string()))?;
             tf.config
         } else {
             HashMap::new()
@@ -204,7 +204,9 @@ impl FileConfigStore {
     }
 
     fn flush(&self, cache: &HashMap<String, String>) -> Result<(), ConfigStoreError> {
-        let tf = TomlConfigFile { config: cache.clone() };
+        let tf = TomlConfigFile {
+            config: cache.clone(),
+        };
         let content = toml::to_string_pretty(&tf)
             .map_err(|e: toml::ser::Error| ConfigStoreError::Parse(e.to_string()))?;
         // Write atomically via a temp file so partial writes don't corrupt config.
@@ -264,7 +266,9 @@ mod tests {
     #[test]
     fn in_memory_set_and_get() {
         let store = InMemoryConfigStore::new();
-        store.set("agent.model", "claude-sonnet-4-6".to_owned()).unwrap();
+        store
+            .set("agent.model", "claude-sonnet-4-6".to_owned())
+            .unwrap();
         assert_eq!(store.get("agent.model").unwrap(), "claude-sonnet-4-6");
     }
 
@@ -348,7 +352,9 @@ mod tests {
     fn file_store_set_and_get() {
         let path = tmp_config_path();
         let store = FileConfigStore::open(&path).unwrap();
-        store.set("agent.model", "claude-sonnet-4-6".to_owned()).unwrap();
+        store
+            .set("agent.model", "claude-sonnet-4-6".to_owned())
+            .unwrap();
         assert_eq!(store.get("agent.model").unwrap(), "claude-sonnet-4-6");
         let _ = std::fs::remove_file(&path);
     }

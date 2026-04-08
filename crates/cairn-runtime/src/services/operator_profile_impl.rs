@@ -74,7 +74,7 @@ where
         ));
         self.store.append(&[event]).await?;
 
-        OperatorProfileReadModel::get(self.store.as_ref(),&profile_id)
+        OperatorProfileReadModel::get(self.store.as_ref(), &profile_id)
             .await?
             .map(record_to_profile)
             .ok_or_else(|| {
@@ -83,7 +83,11 @@ where
     }
 
     async fn get(&self, profile_id: &OperatorId) -> Result<Option<OperatorProfile>, RuntimeError> {
-        Ok(OperatorProfileReadModel::get(self.store.as_ref(),profile_id).await?.map(record_to_profile))
+        Ok(
+            OperatorProfileReadModel::get(self.store.as_ref(), profile_id)
+                .await?
+                .map(record_to_profile),
+        )
     }
 
     async fn list(
@@ -93,7 +97,7 @@ where
         offset: usize,
     ) -> Result<Vec<OperatorProfile>, RuntimeError> {
         Ok(
-            OperatorProfileReadModel::list_by_tenant(self.store.as_ref(),tenant_id, limit, offset)
+            OperatorProfileReadModel::list_by_tenant(self.store.as_ref(), tenant_id, limit, offset)
                 .await?
                 .into_iter()
                 .map(record_to_profile)
@@ -107,7 +111,7 @@ where
         display_name: String,
         email: String,
     ) -> Result<OperatorProfile, RuntimeError> {
-        let existing = OperatorProfileReadModel::get(self.store.as_ref(),profile_id)
+        let existing = OperatorProfileReadModel::get(self.store.as_ref(), profile_id)
             .await?
             .ok_or_else(|| RuntimeError::NotFound {
                 entity: "operator_profile",
@@ -124,7 +128,7 @@ where
         ));
         self.store.append(&[event]).await?;
 
-        OperatorProfileReadModel::get(self.store.as_ref(),profile_id)
+        OperatorProfileReadModel::get(self.store.as_ref(), profile_id)
             .await?
             .map(record_to_profile)
             .ok_or_else(|| {
@@ -137,11 +141,10 @@ where
         profile_id: &OperatorId,
         preferences: serde_json::Value,
     ) -> Result<OperatorProfile, RuntimeError> {
-        validate_operator_preferences(&preferences).map_err(|reason| {
-            RuntimeError::Validation { reason }
-        })?;
+        validate_operator_preferences(&preferences)
+            .map_err(|reason| RuntimeError::Validation { reason })?;
 
-        let existing = OperatorProfileReadModel::get(self.store.as_ref(),profile_id)
+        let existing = OperatorProfileReadModel::get(self.store.as_ref(), profile_id)
             .await?
             .ok_or_else(|| RuntimeError::NotFound {
                 entity: "operator_profile",
@@ -158,9 +161,11 @@ where
         ));
         self.store.append(&[event]).await?;
 
-        let record = OperatorProfileReadModel::get(self.store.as_ref(),profile_id)
+        let record = OperatorProfileReadModel::get(self.store.as_ref(), profile_id)
             .await?
-            .ok_or_else(|| RuntimeError::Internal("profile not found after set_preferences".into()))?;
+            .ok_or_else(|| {
+                RuntimeError::Internal("profile not found after set_preferences".into())
+            })?;
         let mut updated = record_to_profile(record);
         updated.preferences = preferences;
         Ok(updated)

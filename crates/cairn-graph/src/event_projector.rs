@@ -49,13 +49,19 @@ impl<P: GraphProjection> EventProjector<P> {
 
         match &event.envelope.payload {
             RuntimeEvent::SessionCreated(e) => {
-                self.add_node(e.session_id.as_str(), NodeKind::Session, Some(&e.project), ts)
-                    .await?;
+                self.add_node(
+                    e.session_id.as_str(),
+                    NodeKind::Session,
+                    Some(&e.project),
+                    ts,
+                )
+                .await?;
                 nodes += 1;
             }
 
             RuntimeEvent::RunCreated(e) => {
-                self.add_node(e.run_id.as_str(), NodeKind::Run, Some(&e.project), ts).await?;
+                self.add_node(e.run_id.as_str(), NodeKind::Run, Some(&e.project), ts)
+                    .await?;
                 nodes += 1;
 
                 // Run -> Session
@@ -100,8 +106,13 @@ impl<P: GraphProjection> EventProjector<P> {
             }
 
             RuntimeEvent::ApprovalRequested(e) => {
-                self.add_node(e.approval_id.as_str(), NodeKind::Approval, Some(&e.project), ts)
-                    .await?;
+                self.add_node(
+                    e.approval_id.as_str(),
+                    NodeKind::Approval,
+                    Some(&e.project),
+                    ts,
+                )
+                .await?;
                 nodes += 1;
 
                 if let Some(run_id) = &e.run_id {
@@ -151,8 +162,13 @@ impl<P: GraphProjection> EventProjector<P> {
             }
 
             RuntimeEvent::CheckpointRecorded(e) => {
-                self.add_node(e.checkpoint_id.as_str(), NodeKind::Checkpoint, Some(&e.project), ts)
-                    .await?;
+                self.add_node(
+                    e.checkpoint_id.as_str(),
+                    NodeKind::Checkpoint,
+                    Some(&e.project),
+                    ts,
+                )
+                .await?;
                 nodes += 1;
 
                 self.add_edge(
@@ -177,8 +193,13 @@ impl<P: GraphProjection> EventProjector<P> {
             }
 
             RuntimeEvent::MailboxMessageAppended(e) => {
-                self.add_node(e.message_id.as_str(), NodeKind::MailboxMessage, Some(&e.project), ts)
-                    .await?;
+                self.add_node(
+                    e.message_id.as_str(),
+                    NodeKind::MailboxMessage,
+                    Some(&e.project),
+                    ts,
+                )
+                .await?;
                 nodes += 1;
 
                 if let Some(run_id) = &e.run_id {
@@ -199,8 +220,13 @@ impl<P: GraphProjection> EventProjector<P> {
             }
 
             RuntimeEvent::ToolInvocationStarted(e) => {
-                self.add_node(e.invocation_id.as_str(), NodeKind::ToolInvocation, Some(&e.project), ts)
-                    .await?;
+                self.add_node(
+                    e.invocation_id.as_str(),
+                    NodeKind::ToolInvocation,
+                    Some(&e.project),
+                    ts,
+                )
+                .await?;
                 nodes += 1;
 
                 if let Some(run_id) = &e.run_id {
@@ -227,10 +253,20 @@ impl<P: GraphProjection> EventProjector<P> {
 
             RuntimeEvent::SubagentSpawned(e) => {
                 // Create child session and task nodes if they don't exist.
-                self.add_node(e.child_session_id.as_str(), NodeKind::Session, Some(&e.project), ts)
-                    .await?;
-                self.add_node(e.child_task_id.as_str(), NodeKind::Task, Some(&e.project), ts)
-                    .await?;
+                self.add_node(
+                    e.child_session_id.as_str(),
+                    NodeKind::Session,
+                    Some(&e.project),
+                    ts,
+                )
+                .await?;
+                self.add_node(
+                    e.child_task_id.as_str(),
+                    NodeKind::Task,
+                    Some(&e.project),
+                    ts,
+                )
+                .await?;
                 nodes += 2;
 
                 // Parent run spawned child task.
@@ -254,7 +290,8 @@ impl<P: GraphProjection> EventProjector<P> {
                 edges += 1;
 
                 if let Some(child_run) = &e.child_run_id {
-                    self.add_node(child_run.as_str(), NodeKind::Run, Some(&e.project), ts).await?;
+                    self.add_node(child_run.as_str(), NodeKind::Run, Some(&e.project), ts)
+                        .await?;
                     nodes += 1;
                     self.add_edge(
                         e.child_session_id.as_str(),
@@ -381,8 +418,13 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::ToolInvocationProgressUpdated(_) => {}
 
             RuntimeEvent::EvalRunStarted(e) => {
-                self.add_node(e.eval_run_id.as_str(), NodeKind::EvalRun, Some(&e.project), ts)
-                    .await?;
+                self.add_node(
+                    e.eval_run_id.as_str(),
+                    NodeKind::EvalRun,
+                    Some(&e.project),
+                    ts,
+                )
+                .await?;
                 nodes += 1;
             }
 
@@ -399,7 +441,6 @@ impl<P: GraphProjection> EventProjector<P> {
                     edges += 1;
                 }
             }
-
         }
 
         Ok((nodes, edges))

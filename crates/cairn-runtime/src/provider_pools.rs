@@ -27,7 +27,8 @@ pub trait ProviderConnectionPoolService: Send + Sync {
         connection_id: &ProviderConnectionId,
     ) -> Result<ProviderConnectionPool, RuntimeError>;
 
-    async fn get_pool(&self, pool_id: &str) -> Result<Option<ProviderConnectionPool>, RuntimeError>;
+    async fn get_pool(&self, pool_id: &str)
+        -> Result<Option<ProviderConnectionPool>, RuntimeError>;
 
     async fn list_pools(
         &self,

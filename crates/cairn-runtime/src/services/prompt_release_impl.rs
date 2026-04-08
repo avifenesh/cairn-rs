@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{ApprovalReadModel, ApprovalRecord, PromptReleaseReadModel, PromptReleaseRecord};
+use cairn_store::projections::{
+    ApprovalReadModel, ApprovalRecord, PromptReleaseReadModel, PromptReleaseRecord,
+};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -101,7 +103,9 @@ where
 
         PromptReleaseReadModel::get(self.store.as_ref(), release_id)
             .await?
-            .ok_or_else(|| RuntimeError::Internal("prompt_release not found after transition".into()))
+            .ok_or_else(|| {
+                RuntimeError::Internal("prompt_release not found after transition".into())
+            })
     }
 
     async fn activate(
@@ -126,13 +130,15 @@ where
         }
 
         // RFC 006: if an approval policy is attached, check approval status.
-        let policy_id = self.policy_attachments
+        let policy_id = self
+            .policy_attachments
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(release_id.as_str())
             .cloned();
         if let Some(_pid) = policy_id {
-            let approval_id = self.approval_links
+            let approval_id = self
+                .approval_links
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .get(release_id.as_str())
@@ -154,12 +160,15 @@ where
                         Some(cairn_domain::ApprovalDecision::Approved) => {}
                         Some(cairn_domain::ApprovalDecision::Rejected) => {
                             return Err(RuntimeError::PolicyDenied {
-                                reason: "approval was rejected; create a new release to retry".to_owned(),
+                                reason: "approval was rejected; create a new release to retry"
+                                    .to_owned(),
                             });
                         }
                         None => {
                             return Err(RuntimeError::PolicyDenied {
-                                reason: "approval is pending; wait for resolution before activating".to_owned(),
+                                reason:
+                                    "approval is pending; wait for resolution before activating"
+                                        .to_owned(),
                             });
                         }
                     }

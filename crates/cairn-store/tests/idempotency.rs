@@ -14,11 +14,11 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    CommandId, EventEnvelope, EventId, EventSource, ProjectKey, RunCreated,
-    RunId, RuntimeEvent, SessionCreated, SessionId,
+    CommandId, EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
+    SessionCreated, SessionId,
 };
-use cairn_store::{EventLog, InMemoryStore};
 use cairn_store::event_log::EventPosition;
+use cairn_store::{EventLog, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -98,12 +98,9 @@ async fn causation_id_lookup_returns_correct_position() {
     let store = Arc::new(InMemoryStore::new());
 
     // Append an event tagged with causation_id='cmd_1'.
-    let positions = EventLog::append(
-        store.as_ref(),
-        &[session_event("evt_1", Some("cmd_1"))],
-    )
-    .await
-    .unwrap();
+    let positions = EventLog::append(store.as_ref(), &[session_event("evt_1", Some("cmd_1"))])
+        .await
+        .unwrap();
 
     let appended_pos = positions[0];
 
@@ -130,12 +127,8 @@ async fn same_causation_id_is_rejected_idempotently() {
     let store = Arc::new(InMemoryStore::new());
 
     // First application of cmd_1.
-    let (pos1, dup1) = idempotent_append(
-        &store,
-        session_event("evt_first", Some("cmd_1")),
-        "cmd_1",
-    )
-    .await;
+    let (pos1, dup1) =
+        idempotent_append(&store, session_event("evt_first", Some("cmd_1")), "cmd_1").await;
     assert!(!dup1, "first application must not be a duplicate");
 
     // Second application of cmd_1 (re-delivery simulation).
@@ -145,7 +138,10 @@ async fn same_causation_id_is_rejected_idempotently() {
         "cmd_1",
     )
     .await;
-    assert!(dup2, "second application with same causation_id must be rejected as duplicate");
+    assert!(
+        dup2,
+        "second application with same causation_id must be rejected as duplicate"
+    );
     assert_eq!(
         pos1, pos2,
         "idempotent rejection must return the original event position, not a new one"
@@ -168,12 +164,8 @@ async fn different_causation_id_appends_new_event() {
     let store = Arc::new(InMemoryStore::new());
 
     // Apply cmd_1.
-    let (pos1, _) = idempotent_append(
-        &store,
-        session_event("evt_cmd1", Some("cmd_1")),
-        "cmd_1",
-    )
-    .await;
+    let (pos1, _) =
+        idempotent_append(&store, session_event("evt_cmd1", Some("cmd_1")), "cmd_1").await;
 
     // Apply cmd_2 (different causation_id).
     let (pos2, dup2) = idempotent_append(
@@ -184,7 +176,10 @@ async fn different_causation_id_appends_new_event() {
     .await;
 
     assert!(!dup2, "cmd_2 must not be treated as a duplicate of cmd_1");
-    assert_ne!(pos1, pos2, "cmd_2 must produce a distinct position from cmd_1");
+    assert_ne!(
+        pos1, pos2,
+        "cmd_2 must produce a distinct position from cmd_1"
+    );
     assert!(
         pos2 > pos1,
         "second event must have a higher position than the first"
@@ -198,8 +193,16 @@ async fn different_causation_id_appends_new_event() {
         .await
         .unwrap();
 
-    assert_eq!(found1.unwrap(), pos1, "cmd_1 must resolve to its original position");
-    assert_eq!(found2.unwrap(), pos2, "cmd_2 must resolve to its own position");
+    assert_eq!(
+        found1.unwrap(),
+        pos1,
+        "cmd_1 must resolve to its original position"
+    );
+    assert_eq!(
+        found2.unwrap(),
+        pos2,
+        "cmd_2 must resolve to its own position"
+    );
 
     let events = EventLog::read_stream(store.as_ref(), None, 100)
         .await
@@ -258,9 +261,9 @@ async fn tagged_and_untagged_events_coexist() {
     let positions = EventLog::append(
         store.as_ref(),
         &[
-            session_event("evt_1", None),                   // no causation_id
+            session_event("evt_1", None),                    // no causation_id
             run_event("evt_2", "run_a", Some("cmd_tagged")), // tagged
-            run_event("evt_3", "run_b", None),              // no causation_id
+            run_event("evt_3", "run_b", None),               // no causation_id
         ],
     )
     .await
@@ -340,7 +343,7 @@ async fn find_by_causation_id_returns_first_match() {
     let positions = EventLog::append(
         store.as_ref(),
         &[
-            session_event("evt_first",  Some("cmd_dup")),
+            session_event("evt_first", Some("cmd_dup")),
             run_event("evt_second", "run_dup", Some("cmd_dup")),
         ],
     )

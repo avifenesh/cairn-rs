@@ -49,10 +49,14 @@ async fn ollama_embedding_default_local_uses_localhost() {
 fn ollama_from_env_behaviour() {
     // Ensure unset → None for both providers.
     std::env::remove_var("OLLAMA_HOST");
-    assert!(OllamaProvider::from_env().is_none(),
-        "OllamaProvider::from_env must be None when OLLAMA_HOST unset");
-    assert!(OllamaEmbeddingProvider::from_env().is_none(),
-        "OllamaEmbeddingProvider::from_env must be None when OLLAMA_HOST unset");
+    assert!(
+        OllamaProvider::from_env().is_none(),
+        "OllamaProvider::from_env must be None when OLLAMA_HOST unset"
+    );
+    assert!(
+        OllamaEmbeddingProvider::from_env().is_none(),
+        "OllamaEmbeddingProvider::from_env must be None when OLLAMA_HOST unset"
+    );
 
     // Set and read back.
     std::env::set_var("OLLAMA_HOST", "http://remote-ollama:11434");
@@ -64,9 +68,17 @@ fn ollama_from_env_behaviour() {
     // Trailing slash stripped.
     std::env::set_var("OLLAMA_HOST", "http://localhost:11434/");
     let p2 = OllamaProvider::from_env().unwrap();
-    assert_eq!(p2.host(), "http://localhost:11434", "trailing slash must be stripped");
+    assert_eq!(
+        p2.host(),
+        "http://localhost:11434",
+        "trailing slash must be stripped"
+    );
     let e2 = OllamaEmbeddingProvider::from_env().unwrap();
-    assert_eq!(e2.host(), "http://localhost:11434", "trailing slash must be stripped");
+    assert_eq!(
+        e2.host(),
+        "http://localhost:11434",
+        "trailing slash must be stripped"
+    );
 
     // Clean up.
     std::env::remove_var("OLLAMA_HOST");
@@ -87,7 +99,10 @@ async fn ollama_health_check_fails_when_no_server() {
     );
     // Must be a transport failure, not a logic error.
     assert!(
-        matches!(result.unwrap_err(), ProviderAdapterError::TransportFailure(_)),
+        matches!(
+            result.unwrap_err(),
+            ProviderAdapterError::TransportFailure(_)
+        ),
         "error must be TransportFailure when connection is refused"
     );
 }
@@ -106,13 +121,18 @@ async fn ollama_is_healthy_returns_false_when_no_server() {
 #[tokio::test]
 async fn ollama_embedding_fails_when_no_server() {
     let p = OllamaEmbeddingProvider::new("http://127.0.0.1:19434");
-    let result = p.embed("nomic-embed-text", vec!["hello world".to_owned()]).await;
+    let result = p
+        .embed("nomic-embed-text", vec!["hello world".to_owned()])
+        .await;
     assert!(
         result.is_err(),
         "embed must fail when no Ollama daemon is running"
     );
     assert!(
-        matches!(result.unwrap_err(), ProviderAdapterError::TransportFailure(_)),
+        matches!(
+            result.unwrap_err(),
+            ProviderAdapterError::TransportFailure(_)
+        ),
         "error must be TransportFailure when connection is refused"
     );
 }
@@ -124,7 +144,10 @@ async fn ollama_embedding_empty_texts_returns_immediately() {
     // Even with an invalid host, empty input must not reach the network.
     let p = OllamaEmbeddingProvider::new("http://127.0.0.1:19434");
     let result = p.embed("nomic-embed-text", vec![]).await;
-    assert!(result.is_ok(), "empty input must succeed without network call");
+    assert!(
+        result.is_ok(),
+        "empty input must succeed without network call"
+    );
     let resp = result.unwrap();
     assert!(resp.embeddings.is_empty());
     assert_eq!(resp.token_count, 0);

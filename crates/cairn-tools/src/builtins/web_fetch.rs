@@ -40,9 +40,13 @@ impl Default for WebFetchTool {
 
 #[async_trait]
 impl ToolHandler for WebFetchTool {
-    fn name(&self) -> &str { "web_fetch" }
+    fn name(&self) -> &str {
+        "web_fetch"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
 
     fn description(&self) -> &str {
         "Fetch a URL via HTTP GET and return the response body (capped at 32 KB)."
@@ -70,7 +74,8 @@ impl ToolHandler for WebFetchTool {
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
         // ── Validate URL ──────────────────────────────────────────────────────
-        let url = args.get("url")
+        let url = args
+            .get("url")
             .and_then(|u| u.as_str())
             .ok_or_else(|| ToolError::InvalidArgs {
                 field: "url".into(),
@@ -78,7 +83,8 @@ impl ToolHandler for WebFetchTool {
             })?
             .to_owned();
 
-        let parsed = url.parse::<reqwest::Url>()
+        let parsed = url
+            .parse::<reqwest::Url>()
             .map_err(|e| ToolError::InvalidArgs {
                 field: "url".into(),
                 message: format!("invalid URL: {e}"),
@@ -95,10 +101,14 @@ impl ToolHandler for WebFetchTool {
         }
 
         // ── Build request ─────────────────────────────────────────────────────
-        let timeout_ms = args.get("timeout_ms").and_then(|t| t.as_u64())
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|t| t.as_u64())
             .unwrap_or(DEFAULT_TIMEOUT_MS);
 
-        let mut req = self.client.get(url.as_str())
+        let mut req = self
+            .client
+            .get(url.as_str())
             .timeout(std::time::Duration::from_millis(timeout_ms));
 
         if let Some(headers) = args.get("headers").and_then(|h| h.as_object()) {
@@ -111,24 +121,28 @@ impl ToolHandler for WebFetchTool {
 
         // ── Send ──────────────────────────────────────────────────────────────
         let response = req.send().await.map_err(|e| {
-            if e.is_timeout() { ToolError::TimedOut }
-            else { ToolError::Transient(e.to_string()) }
+            if e.is_timeout() {
+                ToolError::TimedOut
+            } else {
+                ToolError::Transient(e.to_string())
+            }
         })?;
 
         let status = response.status().as_u16();
-        let content_type = response.headers()
+        let content_type = response
+            .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_owned();
 
-        let bytes = response.bytes().await
+        let bytes = response
+            .bytes()
+            .await
             .map_err(|e| ToolError::Transient(format!("read body: {e}")))?;
 
         let truncated = bytes.len() > MAX_BODY_BYTES;
-        let body = String::from_utf8_lossy(
-            &bytes[..bytes.len().min(MAX_BODY_BYTES)]
-        ).into_owned();
+        let body = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_BODY_BYTES)]).into_owned();
 
         let output = serde_json::json!({
             "status":       status,
@@ -137,7 +151,11 @@ impl ToolHandler for WebFetchTool {
             "truncated":    truncated,
         });
 
-        Ok(if truncated { ToolResult::truncated(output) } else { ToolResult::ok(output) })
+        Ok(if truncated {
+            ToolResult::truncated(output)
+        } else {
+            ToolResult::ok(output)
+        })
     }
 }
 
@@ -145,7 +163,9 @@ impl ToolHandler for WebFetchTool {
 mod tests {
     use super::*;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     #[test]
     fn name_tier_class() {
@@ -158,7 +178,9 @@ mod tests {
     #[test]
     fn schema_requires_url() {
         let req = WebFetchTool::default().parameters_schema()["required"]
-            .as_array().unwrap().clone();
+            .as_array()
+            .unwrap()
+            .clone();
         assert!(req.iter().any(|v| v.as_str() == Some("url")));
     }
 
@@ -166,7 +188,8 @@ mod tests {
     async fn missing_url_is_invalid_args() {
         let err = WebFetchTool::default()
             .execute(&project(), serde_json::json!({}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -174,7 +197,8 @@ mod tests {
     async fn bad_scheme_is_invalid_args() {
         let err = WebFetchTool::default()
             .execute(&project(), serde_json::json!({"url": "ftp://example.com"}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -182,7 +206,8 @@ mod tests {
     async fn invalid_url_is_invalid_args() {
         let err = WebFetchTool::default()
             .execute(&project(), serde_json::json!({"url": "not-a-url"}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 }

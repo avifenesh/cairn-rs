@@ -51,7 +51,10 @@ pub struct BulkSourceActionResponse {
 impl BulkSourceActionResponse {
     /// Convenience: an empty response (no successes, no failures).
     pub fn empty() -> Self {
-        Self { succeeded: vec![], failed: vec![] }
+        Self {
+            succeeded: vec![],
+            failed: vec![],
+        }
     }
 }
 

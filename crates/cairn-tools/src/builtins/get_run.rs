@@ -15,13 +15,19 @@ pub struct GetRunTool {
 }
 
 impl GetRunTool {
-    pub fn new(store: Arc<dyn RunReadModel>) -> Self { Self { store } }
+    pub fn new(store: Arc<dyn RunReadModel>) -> Self {
+        Self { store }
+    }
 }
 
 #[async_trait]
 impl ToolHandler for GetRunTool {
-    fn name(&self) -> &str { "get_run" }
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn name(&self) -> &str {
+        "get_run"
+    }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
     fn description(&self) -> &str {
         "Inspect a specific run by its ID. \
          Returns the run state, session linkage, and timestamps."
@@ -35,13 +41,18 @@ impl ToolHandler for GetRunTool {
             }
         })
     }
-    fn execution_class(&self) -> ExecutionClass { ExecutionClass::SandboxedProcess }
+    fn execution_class(&self) -> ExecutionClass {
+        ExecutionClass::SandboxedProcess
+    }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
-        let run_id = args.get("run_id").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidArgs {
-                field: "run_id".into(), message: "required string".into(),
-            })?;
+        let run_id =
+            args.get("run_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidArgs {
+                    field: "run_id".into(),
+                    message: "required string".into(),
+                })?;
 
         match RunReadModel::get(self.store.as_ref(), &RunId::new(run_id)).await {
             Ok(Some(run)) => Ok(ToolResult::ok(serde_json::json!({
@@ -58,7 +69,7 @@ impl ToolHandler for GetRunTool {
                 },
             }))),
             Ok(None) => Err(ToolError::Permanent(format!("run not found: {run_id}"))),
-            Err(e)   => Err(ToolError::Transient(format!("store error: {e}"))),
+            Err(e) => Err(ToolError::Transient(format!("store error: {e}"))),
         }
     }
 }
@@ -66,22 +77,40 @@ impl ToolHandler for GetRunTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use cairn_domain::{ProjectKey, RunId, SessionId};
     use cairn_runtime::{InMemoryServices, RunService, SessionService};
+    use std::sync::Arc;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
-    async fn svc() -> Arc<InMemoryServices> { Arc::new(InMemoryServices::new()) }
+    async fn svc() -> Arc<InMemoryServices> {
+        Arc::new(InMemoryServices::new())
+    }
 
     #[tokio::test]
     async fn returns_run_state() {
         let svc = svc().await;
-        svc.sessions.create(&project(), SessionId::new("sess_gr")).await.unwrap();
-        svc.runs.start(&project(), &SessionId::new("sess_gr"), RunId::new("run_gr"), None).await.unwrap();
+        svc.sessions
+            .create(&project(), SessionId::new("sess_gr"))
+            .await
+            .unwrap();
+        svc.runs
+            .start(
+                &project(),
+                &SessionId::new("sess_gr"),
+                RunId::new("run_gr"),
+                None,
+            )
+            .await
+            .unwrap();
 
         let tool = GetRunTool::new(svc.store.clone());
-        let res = tool.execute(&project(), serde_json::json!({ "run_id": "run_gr" })).await.unwrap();
+        let res = tool
+            .execute(&project(), serde_json::json!({ "run_id": "run_gr" }))
+            .await
+            .unwrap();
         assert_eq!(res.output["run_id"], "run_gr");
         assert_eq!(res.output["state"], "pending");
         assert_eq!(res.output["is_terminal"], false);
@@ -91,10 +120,18 @@ mod tests {
     async fn not_found_is_permanent_error() {
         let svc = svc().await;
         let tool = GetRunTool::new(svc.store.clone());
-        let err = tool.execute(&project(), serde_json::json!({ "run_id": "nope" })).await.unwrap_err();
+        let err = tool
+            .execute(&project(), serde_json::json!({ "run_id": "nope" }))
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::Permanent(_)));
     }
 
     #[test]
-    fn tier_is_registered() { assert_eq!(GetRunTool::new(Arc::new(cairn_store::InMemoryStore::new())).tier(), ToolTier::Registered); }
+    fn tier_is_registered() {
+        assert_eq!(
+            GetRunTool::new(Arc::new(cairn_store::InMemoryStore::new())).tier(),
+            ToolTier::Registered
+        );
+    }
 }

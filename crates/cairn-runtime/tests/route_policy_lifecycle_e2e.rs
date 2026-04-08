@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use cairn_domain::providers::{RoutePolicy, RoutePolicyRule};
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, RuntimeEvent, RoutePolicyCreated, TenantId,
+    EventEnvelope, EventId, EventSource, RoutePolicyCreated, RuntimeEvent, TenantId,
 };
 use cairn_runtime::error::RuntimeError;
 use cairn_runtime::route_policies::RoutePolicyService;
@@ -95,7 +95,10 @@ async fn create_route_policy_with_rules_and_verify() {
     let r2 = &policy.rules[1];
     assert_eq!(r1.priority, 10, "rule priorities must be preserved");
     assert_eq!(r2.priority, 20);
-    assert!(r1.description.is_some(), "rule descriptions must be preserved");
+    assert!(
+        r1.description.is_some(),
+        "rule descriptions must be preserved"
+    );
 
     // get() must return the identical record.
     let fetched = svc
@@ -185,17 +188,30 @@ async fn list_policies_excludes_disabled() {
 
     // Create three policies — sleep between each to ensure unique ms timestamps
     // (policy_id is generated as "route_policy_{now_ms()}").
-    let p1 = svc.create(tenant(), "policy-alpha".to_owned(), vec![]).await.unwrap();
+    let p1 = svc
+        .create(tenant(), "policy-alpha".to_owned(), vec![])
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(2)).await;
-    let p2 = svc.create(tenant(), "policy-beta".to_owned(), vec![]).await.unwrap();
+    let p2 = svc
+        .create(tenant(), "policy-beta".to_owned(), vec![])
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(2)).await;
-    let p3 = svc.create(tenant(), "policy-gamma".to_owned(), vec![]).await.unwrap();
+    let p3 = svc
+        .create(tenant(), "policy-gamma".to_owned(), vec![])
+        .await
+        .unwrap();
 
     // ── (5) List: all three are enabled → list returns 3 ─────────────────
     let all = RoutePolicyReadModel::list_by_tenant(store.as_ref(), &tenant(), 10, 0)
         .await
         .unwrap();
-    assert_eq!(all.len(), 3, "all three enabled policies must appear in the list");
+    assert_eq!(
+        all.len(),
+        3,
+        "all three enabled policies must appear in the list"
+    );
 
     // Disable p2 by overwriting with enabled=false.
     store
@@ -261,20 +277,31 @@ async fn tenant_isolation_in_list() {
 
     // Two policies for the main tenant, one for the other.
     // Sleep between creates to ensure unique ms-based policy IDs.
-    svc.create(tenant(), "main-policy-1".to_owned(), vec![]).await.unwrap();
+    svc.create(tenant(), "main-policy-1".to_owned(), vec![])
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(2)).await;
-    svc.create(tenant(), "main-policy-2".to_owned(), vec![]).await.unwrap();
+    svc.create(tenant(), "main-policy-2".to_owned(), vec![])
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(2)).await;
     other_svc
-        .create(TenantId::new("t_other_rfc009"), "other-policy".to_owned(), vec![])
+        .create(
+            TenantId::new("t_other_rfc009"),
+            "other-policy".to_owned(),
+            vec![],
+        )
         .await
         .unwrap();
 
-    let main_list =
-        RoutePolicyReadModel::list_by_tenant(store.as_ref(), &tenant(), 10, 0)
-            .await
-            .unwrap();
-    assert_eq!(main_list.len(), 2, "main tenant must see only its 2 policies");
+    let main_list = RoutePolicyReadModel::list_by_tenant(store.as_ref(), &tenant(), 10, 0)
+        .await
+        .unwrap();
+    assert_eq!(
+        main_list.len(),
+        2,
+        "main tenant must see only its 2 policies"
+    );
 
     let other_list = RoutePolicyReadModel::list_by_tenant(
         store.as_ref(),
@@ -284,7 +311,11 @@ async fn tenant_isolation_in_list() {
     )
     .await
     .unwrap();
-    assert_eq!(other_list.len(), 1, "other tenant must see only its 1 policy");
+    assert_eq!(
+        other_list.len(),
+        1,
+        "other tenant must see only its 1 policy"
+    );
 }
 
 // ── get() on unknown ID returns None ──────────────────────────────────────────
@@ -294,7 +325,10 @@ async fn get_unknown_policy_returns_none() {
     let (_store, svc) = setup().await;
 
     let result = svc.get("no_such_policy").await.unwrap();
-    assert!(result.is_none(), "get() on unknown policy_id must return None");
+    assert!(
+        result.is_none(),
+        "get() on unknown policy_id must return None"
+    );
 }
 
 // ── Creating for a non-existent tenant returns NotFound ───────────────────────
@@ -310,7 +344,13 @@ async fn create_for_missing_tenant_returns_not_found() {
         .unwrap_err();
 
     assert!(
-        matches!(err, RuntimeError::NotFound { entity: "tenant", .. }),
+        matches!(
+            err,
+            RuntimeError::NotFound {
+                entity: "tenant",
+                ..
+            }
+        ),
         "creating a policy for a non-existent tenant must return NotFound; got: {err:?}"
     );
 }
@@ -364,5 +404,9 @@ async fn rule_priorities_preserved_on_create() {
 
     let fetched = svc.get(&policy.policy_id).await.unwrap().unwrap();
     let priorities: Vec<u32> = fetched.rules.iter().map(|r| r.priority).collect();
-    assert_eq!(priorities, vec![1, 50, 100], "rule priorities must be preserved exactly");
+    assert_eq!(
+        priorities,
+        vec![1, 50, 100],
+        "rule priorities must be preserved exactly"
+    );
 }

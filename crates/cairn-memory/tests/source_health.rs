@@ -21,16 +21,8 @@ async fn source_health_good_vs_bad_feedback() {
     let diagnostics = Arc::new(InMemoryDiagnostics::new());
 
     // Register src_a and src_b via ingest.
-    diagnostics.record_ingest(
-        &SourceId::new("src_a"),
-        &project(),
-        3,
-    );
-    diagnostics.record_ingest(
-        &SourceId::new("src_b"),
-        &project(),
-        3,
-    );
+    diagnostics.record_ingest(&SourceId::new("src_a"), &project(), 3);
+    diagnostics.record_ingest(&SourceId::new("src_b"), &project(), 3);
 
     // Good feedback for src_a (high relevance).
     for _ in 0..10 {
@@ -66,11 +58,7 @@ async fn source_health_good_vs_bad_feedback() {
 async fn source_health_new_source_has_quality_record() {
     let diagnostics = Arc::new(InMemoryDiagnostics::new());
 
-    diagnostics.record_ingest(
-        &SourceId::new("src_fresh"),
-        &project(),
-        5,
-    );
+    diagnostics.record_ingest(&SourceId::new("src_fresh"), &project(), 5);
 
     let quality = diagnostics
         .source_quality(&SourceId::new("src_fresh"))
@@ -88,11 +76,7 @@ async fn source_health_chunk_count_accumulates() {
     let diagnostics = Arc::new(InMemoryDiagnostics::new());
 
     // 2 chunks first ingest.
-    diagnostics.record_ingest(
-        &SourceId::new("src_size"),
-        &project(),
-        2,
-    );
+    diagnostics.record_ingest(&SourceId::new("src_size"), &project(), 2);
 
     let record = diagnostics
         .source_quality(&SourceId::new("src_size"))
@@ -102,17 +86,16 @@ async fn source_health_chunk_count_accumulates() {
     assert_eq!(record.total_chunks, 2);
 
     // Add more chunks: cumulative total = 2 + 4 = 6.
-    diagnostics.record_ingest(
-        &SourceId::new("src_size"),
-        &project(),
-        4,
-    );
+    diagnostics.record_ingest(&SourceId::new("src_size"), &project(), 4);
     let record2 = diagnostics
         .source_quality(&SourceId::new("src_size"))
         .await
         .unwrap()
         .expect("should have record");
-    assert_eq!(record2.total_chunks, 6, "total_chunks should accumulate: 2 + 4 = 6");
+    assert_eq!(
+        record2.total_chunks, 6,
+        "total_chunks should accumulate: 2 + 4 = 6"
+    );
 }
 
 /// total_retrievals increments on each record_retrieval_hit call.
@@ -120,11 +103,7 @@ async fn source_health_chunk_count_accumulates() {
 async fn source_health_retrieval_count_increments_on_hit() {
     let diagnostics = Arc::new(InMemoryDiagnostics::new());
 
-    diagnostics.record_ingest(
-        &SourceId::new("src_cnt"),
-        &project(),
-        1,
-    );
+    diagnostics.record_ingest(&SourceId::new("src_cnt"), &project(), 1);
 
     for i in 1u64..=5 {
         diagnostics.record_retrieval_hit(&SourceId::new("src_cnt"), 0.7);

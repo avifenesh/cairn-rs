@@ -2,8 +2,8 @@ use crate::errors::RuntimeEntityRef;
 use crate::ids::{
     ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, OperatorId,
     OutcomeId, PromptAssetId, PromptReleaseId, PromptVersionId, ProviderBindingId, ProviderCallId,
-    ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId,
-    ScheduledTaskId, SessionId, SignalId, TaskId, TenantId, ToolInvocationId, WorkspaceId,
+    ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, ScheduledTaskId,
+    SessionId, SignalId, TaskId, TenantId, ToolInvocationId, WorkspaceId,
 };
 use crate::lifecycle::{
     CheckpointDisposition, FailureClass, PauseReason, ResumeTrigger, RunState, SessionState,
@@ -328,12 +328,15 @@ impl RuntimeEvent {
             | RuntimeEvent::ScheduledTaskCreated(_) => {
                 // These events are tenant-scoped rather than project-scoped.
                 // Return a static placeholder key.
-                static SYSTEM_KEY: std::sync::OnceLock<crate::tenancy::ProjectKey> = std::sync::OnceLock::new();
-                SYSTEM_KEY.get_or_init(|| crate::tenancy::ProjectKey::new(
-                    crate::ids::TenantId::new("_system"),
-                    crate::ids::WorkspaceId::new("_system"),
-                    "_system".to_owned(),
-                ))
+                static SYSTEM_KEY: std::sync::OnceLock<crate::tenancy::ProjectKey> =
+                    std::sync::OnceLock::new();
+                SYSTEM_KEY.get_or_init(|| {
+                    crate::tenancy::ProjectKey::new(
+                        crate::ids::TenantId::new("_system"),
+                        crate::ids::WorkspaceId::new("_system"),
+                        "_system".to_owned(),
+                    )
+                })
             }
         }
     }
@@ -455,7 +458,9 @@ impl RuntimeEvent {
                     prompt_release_id: event.prompt_release_id.clone(),
                 })
             }
-            RuntimeEvent::PromptRolloutStarted(event) => Some(RuntimeEntityRef::PromptRelease { prompt_release_id: event.prompt_release_id.clone() }),
+            RuntimeEvent::PromptRolloutStarted(event) => Some(RuntimeEntityRef::PromptRelease {
+                prompt_release_id: event.prompt_release_id.clone(),
+            }),
             RuntimeEvent::TenantCreated(_) => None,
             RuntimeEvent::WorkspaceCreated(_) => None,
             RuntimeEvent::ProjectCreated(_) => None,
@@ -1152,7 +1157,6 @@ pub struct SpendAlertTriggered {
     pub triggered_at_ms: u64,
 }
 
-
 // ── New event structs for extended service coverage ─────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1671,7 +1675,9 @@ pub struct RoutePolicyCreated {
     pub enabled: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutePolicyUpdated {
@@ -1934,8 +1940,12 @@ mod tests {
             Some(crate::errors::RuntimeEntityRef::Approval { .. })
         ));
         assert_eq!(
-            EventEnvelope::for_runtime_event(EventId::new("evt_task_9"), EventSource::Runtime, task_event)
-                .project(),
+            EventEnvelope::for_runtime_event(
+                EventId::new("evt_task_9"),
+                EventSource::Runtime,
+                task_event
+            )
+            .project(),
             &project
         );
         assert_eq!(

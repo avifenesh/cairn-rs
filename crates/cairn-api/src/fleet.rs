@@ -147,9 +147,9 @@ mod tests {
             session("s3", 1000),
         ];
         let mut runs = HashMap::new();
-        runs.insert("s1".to_owned(), run("s1", RunState::Running));       // busy
+        runs.insert("s1".to_owned(), run("s1", RunState::Running)); // busy
         runs.insert("s2".to_owned(), run("s2", RunState::WaitingApproval)); // idle
-        // s3: no run → offline
+                                                                            // s3: no run → offline
 
         let view = build_fleet_view(sessions, &runs, FLEET_SESSION_LIMIT);
 
@@ -162,7 +162,9 @@ mod tests {
     #[test]
     fn fleet_view_truncates_at_limit() {
         // Create limit+1 sessions.
-        let sessions: Vec<SessionRecord> = (0..=5).map(|i| session(&format!("s{i}"), i as u64)).collect();
+        let sessions: Vec<SessionRecord> = (0..=5)
+            .map(|i| session(&format!("s{i}"), i as u64))
+            .collect();
         let runs = HashMap::new();
 
         let view = build_fleet_view(sessions, &runs, 5);
@@ -172,7 +174,9 @@ mod tests {
 
     #[test]
     fn fleet_view_no_truncation_within_limit() {
-        let sessions: Vec<SessionRecord> = (0..3).map(|i| session(&format!("s{i}"), i as u64)).collect();
+        let sessions: Vec<SessionRecord> = (0..3)
+            .map(|i| session(&format!("s{i}"), i as u64))
+            .collect();
         let view = build_fleet_view(sessions, &HashMap::new(), FLEET_SESSION_LIMIT);
         assert_eq!(view.agents.len(), 3);
         assert!(!view.truncated);
@@ -180,11 +184,26 @@ mod tests {
 
     #[test]
     fn agent_status_from_run_states() {
-        assert_eq!(AgentStatus::from_run_state(Some(RunState::Running)), AgentStatus::Busy);
-        assert_eq!(AgentStatus::from_run_state(Some(RunState::WaitingApproval)), AgentStatus::Idle);
-        assert_eq!(AgentStatus::from_run_state(Some(RunState::Paused)), AgentStatus::Idle);
-        assert_eq!(AgentStatus::from_run_state(Some(RunState::Completed)), AgentStatus::Offline);
-        assert_eq!(AgentStatus::from_run_state(Some(RunState::Failed)), AgentStatus::Offline);
+        assert_eq!(
+            AgentStatus::from_run_state(Some(RunState::Running)),
+            AgentStatus::Busy
+        );
+        assert_eq!(
+            AgentStatus::from_run_state(Some(RunState::WaitingApproval)),
+            AgentStatus::Idle
+        );
+        assert_eq!(
+            AgentStatus::from_run_state(Some(RunState::Paused)),
+            AgentStatus::Idle
+        );
+        assert_eq!(
+            AgentStatus::from_run_state(Some(RunState::Completed)),
+            AgentStatus::Offline
+        );
+        assert_eq!(
+            AgentStatus::from_run_state(Some(RunState::Failed)),
+            AgentStatus::Offline
+        );
         assert_eq!(AgentStatus::from_run_state(None), AgentStatus::Offline);
     }
 
@@ -210,7 +229,11 @@ mod tests {
                 last_active_ms: 9000,
                 current_task: Some("Draft PR".to_owned()),
             }],
-            summary: FleetSummary { busy: 1, idle: 0, offline: 0 },
+            summary: FleetSummary {
+                busy: 1,
+                idle: 0,
+                offline: 0,
+            },
             truncated: false,
         };
         let json = serde_json::to_value(&view).unwrap();

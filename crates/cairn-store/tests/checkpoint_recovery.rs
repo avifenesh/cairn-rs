@@ -11,14 +11,11 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    CheckpointDisposition, CheckpointId, CheckpointRecorded, EventEnvelope, EventId,
-    EventSource, ProjectKey, RecoveryAttempted, RecoveryCompleted, RunCreated, RunId,
-    RuntimeEvent, SessionCreated, SessionId, TaskCreated, TaskId,
+    CheckpointDisposition, CheckpointId, CheckpointRecorded, EventEnvelope, EventId, EventSource,
+    ProjectKey, RecoveryAttempted, RecoveryCompleted, RunCreated, RunId, RuntimeEvent,
+    SessionCreated, SessionId, TaskCreated, TaskId,
 };
-use cairn_store::{
-    projections::CheckpointReadModel,
-    EventLog, InMemoryStore,
-};
+use cairn_store::{projections::CheckpointReadModel, EventLog, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,14 +32,13 @@ fn session_id() -> SessionId {
 }
 
 fn ev<P: Into<RuntimeEvent>>(id: &str, payload: P) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(
-        EventId::new(id),
-        EventSource::Runtime,
-        payload.into(),
-    )
+    EventEnvelope::for_runtime_event(EventId::new(id), EventSource::Runtime, payload.into())
 }
 
-fn checkpoint_event(cp_id: &str, disposition: CheckpointDisposition) -> EventEnvelope<RuntimeEvent> {
+fn checkpoint_event(
+    cp_id: &str,
+    disposition: CheckpointDisposition,
+) -> EventEnvelope<RuntimeEvent> {
     ev(
         &format!("evt_{cp_id}"),
         RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
@@ -66,32 +62,44 @@ async fn checkpoint_recorded_and_readable() {
     // Step 1: create session, run, and two tasks.
     store
         .append(&[
-            ev("evt_sess", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: session_id(),
-            })),
-            ev("evt_run", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: session_id(),
-                run_id: run_id(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            ev("evt_task1", RuntimeEvent::TaskCreated(TaskCreated {
-                project: project(),
-                task_id: TaskId::new("task_1"),
-                parent_run_id: Some(run_id()),
-                parent_task_id: None,
-                prompt_release_id: None,
-            })),
-            ev("evt_task2", RuntimeEvent::TaskCreated(TaskCreated {
-                project: project(),
-                task_id: TaskId::new("task_2"),
-                parent_run_id: Some(run_id()),
-                parent_task_id: Some(TaskId::new("task_1")),
-                prompt_release_id: None,
-            })),
+            ev(
+                "evt_sess",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: session_id(),
+                }),
+            ),
+            ev(
+                "evt_run",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: session_id(),
+                    run_id: run_id(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            ev(
+                "evt_task1",
+                RuntimeEvent::TaskCreated(TaskCreated {
+                    project: project(),
+                    task_id: TaskId::new("task_1"),
+                    parent_run_id: Some(run_id()),
+                    parent_task_id: None,
+                    prompt_release_id: None,
+                }),
+            ),
+            ev(
+                "evt_task2",
+                RuntimeEvent::TaskCreated(TaskCreated {
+                    project: project(),
+                    task_id: TaskId::new("task_2"),
+                    parent_run_id: Some(run_id()),
+                    parent_task_id: Some(TaskId::new("task_1")),
+                    prompt_release_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -129,18 +137,24 @@ async fn second_checkpoint_supersedes_first() {
 
     store
         .append(&[
-            ev("evt_sess", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: session_id(),
-            })),
-            ev("evt_run", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: session_id(),
-                run_id: run_id(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
+            ev(
+                "evt_sess",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: session_id(),
+                }),
+            ),
+            ev(
+                "evt_run",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: session_id(),
+                    run_id: run_id(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -184,25 +198,34 @@ async fn recovery_events_land_in_log_in_order() {
     // Baseline events.
     store
         .append(&[
-            ev("evt_sess", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: session_id(),
-            })),
-            ev("evt_run", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: session_id(),
-                run_id: run_id(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
+            ev(
+                "evt_sess",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: session_id(),
+                }),
+            ),
+            ev(
+                "evt_run",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: session_id(),
+                    run_id: run_id(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
 
     // Record a checkpoint to recover from.
     store
-        .append(&[checkpoint_event("cp_recovery", CheckpointDisposition::Latest)])
+        .append(&[checkpoint_event(
+            "cp_recovery",
+            CheckpointDisposition::Latest,
+        )])
         .await
         .unwrap();
 
@@ -249,7 +272,11 @@ async fn recovery_events_land_in_log_in_order() {
         })
         .collect();
 
-    assert_eq!(positions.len(), 2, "both recovery events must be in the log");
+    assert_eq!(
+        positions.len(),
+        2,
+        "both recovery events must be in the log"
+    );
     assert_eq!(positions[0].0, "attempted");
     assert_eq!(positions[1].0, "completed");
     assert!(
@@ -258,10 +285,13 @@ async fn recovery_events_land_in_log_in_order() {
     );
 
     // RecoveryCompleted must report recovered=true.
-    let completed_event = events.iter().find(|e| {
-        matches!(&e.envelope.payload, RuntimeEvent::RecoveryCompleted(r) if r.recovered)
-    });
-    assert!(completed_event.is_some(), "RecoveryCompleted with recovered=true must be present");
+    let completed_event = events
+        .iter()
+        .find(|e| matches!(&e.envelope.payload, RuntimeEvent::RecoveryCompleted(r) if r.recovered));
+    assert!(
+        completed_event.is_some(),
+        "RecoveryCompleted with recovered=true must be present"
+    );
 }
 
 /// (6) read_stream with an `after` position returns only events that occurred
@@ -273,32 +303,44 @@ async fn read_after_checkpoint_position_returns_only_post_checkpoint_events() {
     // Pre-checkpoint events.
     store
         .append(&[
-            ev("evt_sess", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: session_id(),
-            })),
-            ev("evt_run", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: session_id(),
-                run_id: run_id(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            ev("evt_task1", RuntimeEvent::TaskCreated(TaskCreated {
-                project: project(),
-                task_id: TaskId::new("pre_task_1"),
-                parent_run_id: Some(run_id()),
-                parent_task_id: None,
-                prompt_release_id: None,
-            })),
+            ev(
+                "evt_sess",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: session_id(),
+                }),
+            ),
+            ev(
+                "evt_run",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: session_id(),
+                    run_id: run_id(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            ev(
+                "evt_task1",
+                RuntimeEvent::TaskCreated(TaskCreated {
+                    project: project(),
+                    task_id: TaskId::new("pre_task_1"),
+                    parent_run_id: Some(run_id()),
+                    parent_task_id: None,
+                    prompt_release_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
 
     // Record checkpoint — capture the position after all pre-checkpoint events.
     store
-        .append(&[checkpoint_event("cp_boundary", CheckpointDisposition::Latest)])
+        .append(&[checkpoint_event(
+            "cp_boundary",
+            CheckpointDisposition::Latest,
+        )])
         .await
         .unwrap();
 
@@ -311,20 +353,26 @@ async fn read_after_checkpoint_position_returns_only_post_checkpoint_events() {
     // Post-checkpoint events.
     store
         .append(&[
-            ev("evt_task2", RuntimeEvent::TaskCreated(TaskCreated {
-                project: project(),
-                task_id: TaskId::new("post_task_2"),
-                parent_run_id: Some(run_id()),
-                parent_task_id: None,
-                prompt_release_id: None,
-            })),
-            ev("evt_task3", RuntimeEvent::TaskCreated(TaskCreated {
-                project: project(),
-                task_id: TaskId::new("post_task_3"),
-                parent_run_id: Some(run_id()),
-                parent_task_id: Some(TaskId::new("post_task_2")),
-                prompt_release_id: None,
-            })),
+            ev(
+                "evt_task2",
+                RuntimeEvent::TaskCreated(TaskCreated {
+                    project: project(),
+                    task_id: TaskId::new("post_task_2"),
+                    parent_run_id: Some(run_id()),
+                    parent_task_id: None,
+                    prompt_release_id: None,
+                }),
+            ),
+            ev(
+                "evt_task3",
+                RuntimeEvent::TaskCreated(TaskCreated {
+                    project: project(),
+                    task_id: TaskId::new("post_task_3"),
+                    parent_run_id: Some(run_id()),
+                    parent_task_id: Some(TaskId::new("post_task_2")),
+                    prompt_release_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -341,7 +389,10 @@ async fn read_after_checkpoint_position_returns_only_post_checkpoint_events() {
         "read_stream after checkpoint position must return only post-checkpoint events; \
          got {} event(s): {:?}",
         post_events.len(),
-        post_events.iter().map(|e| &e.envelope.event_id).collect::<Vec<_>>()
+        post_events
+            .iter()
+            .map(|e| &e.envelope.event_id)
+            .collect::<Vec<_>>()
     );
 
     // All returned events must be strictly after the checkpoint position.
@@ -359,8 +410,14 @@ async fn read_after_checkpoint_position_returns_only_post_checkpoint_events() {
         .iter()
         .map(|e| e.envelope.event_id.as_str())
         .collect();
-    assert!(event_ids.contains(&"evt_task2"), "post-checkpoint stream must include evt_task2");
-    assert!(event_ids.contains(&"evt_task3"), "post-checkpoint stream must include evt_task3");
+    assert!(
+        event_ids.contains(&"evt_task2"),
+        "post-checkpoint stream must include evt_task2"
+    );
+    assert!(
+        event_ids.contains(&"evt_task3"),
+        "post-checkpoint stream must include evt_task3"
+    );
 }
 
 /// list_by_run returns all checkpoints for the run, ordered by creation time.
@@ -370,18 +427,24 @@ async fn list_by_run_returns_all_checkpoints_in_order() {
 
     store
         .append(&[
-            ev("evt_sess", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: session_id(),
-            })),
-            ev("evt_run", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: session_id(),
-                run_id: run_id(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
+            ev(
+                "evt_sess",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: session_id(),
+                }),
+            ),
+            ev(
+                "evt_run",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: session_id(),
+                    run_id: run_id(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
             checkpoint_event("cp_x1", CheckpointDisposition::Latest),
             checkpoint_event("cp_x2", CheckpointDisposition::Latest),
             checkpoint_event("cp_x3", CheckpointDisposition::Latest),
@@ -400,5 +463,8 @@ async fn list_by_run_returns_all_checkpoints_in_order() {
         .iter()
         .filter(|c| c.disposition == CheckpointDisposition::Latest)
         .count();
-    assert_eq!(latest_count, 1, "exactly one checkpoint should have Latest disposition");
+    assert_eq!(
+        latest_count, 1,
+        "exactly one checkpoint should have Latest disposition"
+    );
 }

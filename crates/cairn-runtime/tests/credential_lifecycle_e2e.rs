@@ -59,7 +59,10 @@ async fn store_credential_encrypts_value_and_tags_key_version() {
         .unwrap();
 
     // ── Basic identity fields ────────────────────────────────────────────
-    assert!(!stored.id.as_str().is_empty(), "credential must have a non-empty ID");
+    assert!(
+        !stored.id.as_str().is_empty(),
+        "credential must have a non-empty ID"
+    );
     assert_eq!(stored.tenant_id, tenant_id());
     assert_eq!(stored.provider_id, "openai");
 
@@ -85,7 +88,10 @@ async fn store_credential_encrypts_value_and_tags_key_version() {
         Some("v1"),
         "RFC 011: key_version must be set to 'v1' on store"
     );
-    assert!(stored.encrypted_at_ms.is_some(), "encrypted_at_ms must be recorded");
+    assert!(
+        stored.encrypted_at_ms.is_some(),
+        "encrypted_at_ms must be recorded"
+    );
 
     // ── State ───────────────────────────────────────────────────────────
     assert!(stored.active, "freshly stored credential must be active");
@@ -101,7 +107,10 @@ async fn store_credential_encrypts_value_and_tags_key_version() {
         .unwrap()
         .expect("credential must be retrievable by ID");
 
-    assert_eq!(fetched, stored, "get() must return the same record as store()");
+    assert_eq!(
+        fetched, stored,
+        "get() must return the same record as store()"
+    );
     assert_eq!(fetched.encrypted_value, stored.encrypted_value);
     assert_eq!(fetched.key_id, stored.key_id);
     assert_eq!(fetched.key_version, stored.key_version);
@@ -129,7 +138,10 @@ async fn revoke_credential_stamps_revoked_at_ms_and_clears_active() {
         .unwrap();
 
     let credential_id = stored.id.clone();
-    assert!(stored.active, "pre-condition: credential must be active before revocation");
+    assert!(
+        stored.active,
+        "pre-condition: credential must be active before revocation"
+    );
     let stored_at = stored.encrypted_at_ms.unwrap();
 
     // ── Test 3: revoke ───────────────────────────────────────────────────
@@ -238,7 +250,13 @@ async fn store_for_nonexistent_tenant_returns_not_found() {
         .unwrap_err();
 
     assert!(
-        matches!(err, RuntimeError::NotFound { entity: "tenant", .. }),
+        matches!(
+            err,
+            RuntimeError::NotFound {
+                entity: "tenant",
+                ..
+            }
+        ),
         "RFC 011: storing for a non-existent tenant must return NotFound; got: {err:?}"
     );
 }
@@ -257,7 +275,13 @@ async fn revoke_nonexistent_credential_returns_not_found() {
         .unwrap_err();
 
     assert!(
-        matches!(err, RuntimeError::NotFound { entity: "credential", .. }),
+        matches!(
+            err,
+            RuntimeError::NotFound {
+                entity: "credential",
+                ..
+            }
+        ),
         "revoking a non-existent credential must return NotFound; got: {err:?}"
     );
 }
@@ -341,17 +365,32 @@ async fn key_rotation_reencrypts_credentials_and_records_rotation() {
 
     // Two credentials under "key_old", one under "key_other" (must not rotate).
     let c1 = cred_svc
-        .store(tenant_id(), "openai".to_owned(), "token-a".to_owned(), Some("key_old".to_owned()))
+        .store(
+            tenant_id(),
+            "openai".to_owned(),
+            "token-a".to_owned(),
+            Some("key_old".to_owned()),
+        )
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(1)).await;
     let c2 = cred_svc
-        .store(tenant_id(), "slack".to_owned(), "token-b".to_owned(), Some("key_old".to_owned()))
+        .store(
+            tenant_id(),
+            "slack".to_owned(),
+            "token-b".to_owned(),
+            Some("key_old".to_owned()),
+        )
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(1)).await;
     cred_svc
-        .store(tenant_id(), "github".to_owned(), "token-c".to_owned(), Some("key_other".to_owned()))
+        .store(
+            tenant_id(),
+            "github".to_owned(),
+            "token-c".to_owned(),
+            Some("key_other".to_owned()),
+        )
         .await
         .unwrap();
 
@@ -367,7 +406,10 @@ async fn key_rotation_reencrypts_credentials_and_records_rotation() {
     );
     assert_eq!(rotation.old_key_id, "key_old");
     assert_eq!(rotation.new_key_id, "key_new");
-    assert!(rotation.completed_at_ms.is_some(), "rotation must have a completion timestamp");
+    assert!(
+        rotation.completed_at_ms.is_some(),
+        "rotation must have a completion timestamp"
+    );
 
     // Rotated credentials must now use key_new.
     for id in [&c1.id, &c2.id] {
@@ -380,11 +422,21 @@ async fn key_rotation_reencrypts_credentials_and_records_rotation() {
         // The encrypted_value must have changed (different key → different ciphertext).
         // (We can't decrypt here without the internal helper, but we can verify the
         // ciphertext byte length is plausible for AES-256-GCM output.)
-        assert!(after.encrypted_value.len() > 16, "rotated ciphertext must be non-trivial");
+        assert!(
+            after.encrypted_value.len() > 16,
+            "rotated ciphertext must be non-trivial"
+        );
     }
 
     // The "key_other" credential must be untouched.
     let all = cred_svc.list(&tenant_id(), 10, 0).await.unwrap();
-    let key_other_creds: Vec<_> = all.iter().filter(|c| c.key_id.as_deref() == Some("key_other")).collect();
-    assert_eq!(key_other_creds.len(), 1, "credential under key_other must not be rotated");
+    let key_other_creds: Vec<_> = all
+        .iter()
+        .filter(|c| c.key_id.as_deref() == Some("key_other"))
+        .collect();
+    assert_eq!(
+        key_other_creds.len(),
+        1,
+        "credential under key_other must not be rotated"
+    );
 }

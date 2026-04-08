@@ -52,11 +52,7 @@ where
             .as_millis() as u64;
 
         // Use a synthetic ProjectKey scoped to the tenant/workspace.
-        let project = ProjectKey::new(
-            tenant_id.clone(),
-            workspace_id.clone(),
-            "__system__",
-        );
+        let project = ProjectKey::new(tenant_id.clone(), workspace_id.clone(), "__system__");
 
         let event = make_envelope(RuntimeEvent::WorkspaceCreated(WorkspaceCreated {
             project,

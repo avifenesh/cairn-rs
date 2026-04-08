@@ -1,11 +1,11 @@
 //! RFC 008: cross-workspace resource sharing service implementation.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::resource_sharing::SharedResource;
-use cairn_domain::{ResourceShared, ResourceShareRevoked, RuntimeEvent, TenantId, WorkspaceId};
+use cairn_domain::{ResourceShareRevoked, ResourceShared, RuntimeEvent, TenantId, WorkspaceId};
 use cairn_store::projections::ResourceSharingReadModel;
 use cairn_store::EventLog;
 
@@ -97,14 +97,12 @@ where
         tenant_id: &TenantId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<SharedResource>, RuntimeError> {
-        Ok(
-            ResourceSharingReadModel::list_shares_for_workspace(
-                self.store.as_ref(),
-                tenant_id,
-                workspace_id,
-            )
-            .await?,
+        Ok(ResourceSharingReadModel::list_shares_for_workspace(
+            self.store.as_ref(),
+            tenant_id,
+            workspace_id,
         )
+        .await?)
     }
 
     async fn get_share(&self, share_id: &str) -> Result<Option<SharedResource>, RuntimeError> {
@@ -128,8 +126,8 @@ mod tests {
     };
     use crate::tenants::TenantService;
     use crate::workspaces::WorkspaceService;
-    use cairn_domain::{PromptAssetId, PromptVersionId};
     use cairn_domain::tenancy::ProjectKey;
+    use cairn_domain::{PromptAssetId, PromptVersionId};
 
     async fn setup_tenant_and_workspaces(
         store: &Arc<InMemoryStore>,

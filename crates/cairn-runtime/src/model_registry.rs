@@ -65,11 +65,21 @@ struct TomlEntry {
     output_modalities: Vec<String>,
 }
 
-fn default_true() -> bool { true }
-fn default_max_tokens() -> u32 { 4096 }
-fn default_min_cacheable_tokens() -> u32 { 1024 }
-fn default_cache_type() -> String { "automatic".to_owned() }
-fn default_text_modality() -> Vec<String> { vec!["text".to_owned()] }
+fn default_true() -> bool {
+    true
+}
+fn default_max_tokens() -> u32 {
+    4096
+}
+fn default_min_cacheable_tokens() -> u32 {
+    1024
+}
+fn default_cache_type() -> String {
+    "automatic".to_owned()
+}
+fn default_text_modality() -> Vec<String> {
+    vec!["text".to_owned()]
+}
 
 impl From<TomlEntry> for ModelEntry {
     fn from(t: TomlEntry) -> Self {
@@ -126,7 +136,9 @@ impl ModelRegistry {
     /// Create an empty registry (useful in tests).
     pub fn empty() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(Inner { models: HashMap::new() })),
+            inner: Arc::new(RwLock::new(Inner {
+                models: HashMap::new(),
+            })),
         }
     }
 
@@ -174,13 +186,23 @@ impl ModelRegistry {
     /// Return all models matching the given tier, regardless of `enabled`.
     pub fn list_by_tier(&self, tier: ModelTier) -> Vec<ModelEntry> {
         let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
-        inner.models.values().filter(|e| e.tier == tier).cloned().collect()
+        inner
+            .models
+            .values()
+            .filter(|e| e.tier == tier)
+            .cloned()
+            .collect()
     }
 
     /// Return all models for a given provider id.
     pub fn list_by_provider(&self, provider_id: &str) -> Vec<ModelEntry> {
         let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());
-        inner.models.values().filter(|e| e.provider == provider_id).cloned().collect()
+        inner
+            .models
+            .values()
+            .filter(|e| e.provider == provider_id)
+            .cloned()
+            .collect()
     }
 
     /// Return all entries (snapshot).
@@ -191,7 +213,11 @@ impl ModelRegistry {
 
     /// Number of entries in the registry.
     pub fn len(&self) -> usize {
-        self.inner.read().unwrap_or_else(|e| e.into_inner()).models.len()
+        self.inner
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .models
+            .len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -219,7 +245,9 @@ mod tests {
     #[test]
     fn model_registry_bundled_contains_gpt4o() {
         let reg = ModelRegistry::with_bundled().unwrap();
-        let e = reg.get("gpt-4o").expect("gpt-4o must be in bundled catalog");
+        let e = reg
+            .get("gpt-4o")
+            .expect("gpt-4o must be in bundled catalog");
         assert_eq!(e.provider, "openai");
         assert_eq!(e.tier, ModelTier::Brain);
         assert_eq!(e.cost_type, ProviderCostType::Metered);
@@ -229,7 +257,9 @@ mod tests {
     #[test]
     fn model_registry_bundled_contains_claude_sonnet() {
         let reg = ModelRegistry::with_bundled().unwrap();
-        let e = reg.get("claude-sonnet-4-6").expect("claude-sonnet-4-6 must be in catalog");
+        let e = reg
+            .get("claude-sonnet-4-6")
+            .expect("claude-sonnet-4-6 must be in catalog");
         assert_eq!(e.provider, "anthropic");
         assert_eq!(e.tier, ModelTier::Mid);
         assert!(e.input_modalities.contains(&"image".to_owned()));
@@ -238,7 +268,9 @@ mod tests {
     #[test]
     fn model_registry_bundled_contains_haiku() {
         let reg = ModelRegistry::with_bundled().unwrap();
-        let e = reg.get("claude-haiku-4-5").expect("claude-haiku-4-5 must be in catalog");
+        let e = reg
+            .get("claude-haiku-4-5")
+            .expect("claude-haiku-4-5 must be in catalog");
         assert_eq!(e.tier, ModelTier::Light);
     }
 
@@ -258,7 +290,11 @@ mod tests {
         let brain = reg.list_by_tier(ModelTier::Brain);
         assert!(!brain.is_empty(), "must have at least one Brain-tier model");
         for e in &brain {
-            assert_eq!(e.tier, ModelTier::Brain, "all returned entries must be Brain tier");
+            assert_eq!(
+                e.tier,
+                ModelTier::Brain,
+                "all returned entries must be Brain tier"
+            );
         }
     }
 
@@ -305,7 +341,9 @@ enabled = true
 
         let reg = ModelRegistry::empty();
         reg.load_from_toml(&path).expect("load must succeed");
-        let e = reg.get("my-custom-model").expect("custom model must be loaded");
+        let e = reg
+            .get("my-custom-model")
+            .expect("custom model must be loaded");
         assert_eq!(e.provider, "custom");
         assert_eq!(e.context_len, 8000);
 
@@ -324,10 +362,16 @@ enabled = true
         let reg = ModelRegistry::with_bundled().unwrap();
         for e in reg.all() {
             if e.cost_type == ProviderCostType::Free {
-                assert_eq!(e.cost_per_1m_input, 0.0,
-                    "free model {} must have zero cost_in", e.id);
-                assert_eq!(e.cost_per_1m_output, 0.0,
-                    "free model {} must have zero cost_out", e.id);
+                assert_eq!(
+                    e.cost_per_1m_input, 0.0,
+                    "free model {} must have zero cost_in",
+                    e.id
+                );
+                assert_eq!(
+                    e.cost_per_1m_output, 0.0,
+                    "free model {} must have zero cost_out",
+                    e.id
+                );
             }
         }
     }
@@ -357,8 +401,10 @@ enabled = true
 
         reg.load_from_toml(&path).unwrap();
         let updated = reg.get("gpt-4o").unwrap();
-        assert_eq!(updated.cost_per_1m_input, 999.0,
-            "user override must win over bundled entry");
+        assert_eq!(
+            updated.cost_per_1m_input, 999.0,
+            "user override must win over bundled entry"
+        );
         assert_ne!(updated.cost_per_1m_input, original_cost);
 
         let _ = std::fs::remove_file(&path);

@@ -17,14 +17,14 @@
 use std::collections::HashSet;
 
 use cairn_domain::{
-    ApprovalId, ApprovalRequirement, CheckpointDisposition, CheckpointId, EventEnvelope,
-    EventId, EventSource, MailboxMessageId, OperatorId, ProjectId, ProjectKey, RunId,
-    RuntimeEvent, SessionId, TaskId, TenantId, WorkspaceId,
     events::{
-        ApprovalRequested, CheckpointRecorded, MailboxMessageAppended, RunCreated,
-        SessionCreated, TaskCreated,
+        ApprovalRequested, CheckpointRecorded, MailboxMessageAppended, RunCreated, SessionCreated,
+        TaskCreated,
     },
     tenancy::OwnershipKey,
+    ApprovalId, ApprovalRequirement, CheckpointDisposition, CheckpointId, EventEnvelope, EventId,
+    EventSource, MailboxMessageId, OperatorId, ProjectId, ProjectKey, RunId, RuntimeEvent,
+    SessionId, TaskId, TenantId, WorkspaceId,
 };
 use cairn_store::{EventLog, EventPosition, InMemoryStore};
 
@@ -53,10 +53,14 @@ fn session_event(
     project: &ProjectKey,
     session: &str,
 ) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(id, source, RuntimeEvent::SessionCreated(SessionCreated {
-        project: project.clone(),
-        session_id: SessionId::new(session),
-    }))
+    EventEnvelope::for_runtime_event(
+        id,
+        source,
+        RuntimeEvent::SessionCreated(SessionCreated {
+            project: project.clone(),
+            session_id: SessionId::new(session),
+        }),
+    )
 }
 
 /// Build a `RunCreated` envelope for the given project.
@@ -67,18 +71,27 @@ fn run_event(
     session: &str,
     run: &str,
 ) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(id, source, RuntimeEvent::RunCreated(RunCreated {
-        project: project.clone(),
-        session_id: SessionId::new(session),
-        run_id: RunId::new(run),
-        parent_run_id: None,
-        prompt_release_id: None,
-        agent_role_id: None,
-    }))
+    EventEnvelope::for_runtime_event(
+        id,
+        source,
+        RuntimeEvent::RunCreated(RunCreated {
+            project: project.clone(),
+            session_id: SessionId::new(session),
+            run_id: RunId::new(run),
+            parent_run_id: None,
+            prompt_release_id: None,
+            agent_role_id: None,
+        }),
+    )
 }
 
 /// Build a `TaskCreated` envelope.
-fn task_event(id: &str, project: &ProjectKey, run: &str, task: &str) -> EventEnvelope<RuntimeEvent> {
+fn task_event(
+    id: &str,
+    project: &ProjectKey,
+    run: &str,
+    task: &str,
+) -> EventEnvelope<RuntimeEvent> {
     EventEnvelope::for_runtime_event(
         id,
         EventSource::Runtime,
@@ -108,7 +121,12 @@ fn approval_event(id: &str, project: &ProjectKey, approval: &str) -> EventEnvelo
 }
 
 /// Build a `CheckpointRecorded` envelope.
-fn checkpoint_event(id: &str, project: &ProjectKey, run: &str, ckpt: &str) -> EventEnvelope<RuntimeEvent> {
+fn checkpoint_event(
+    id: &str,
+    project: &ProjectKey,
+    run: &str,
+    ckpt: &str,
+) -> EventEnvelope<RuntimeEvent> {
     EventEnvelope::for_runtime_event(
         id,
         EventSource::System,
@@ -136,11 +154,11 @@ fn mailbox_event(id: &str, project: &ProjectKey, msg: &str) -> EventEnvelope<Run
             from_run_id: None,
             from_task_id: None,
             deliver_at_ms: 0,
-                          sender: None,
-             recipient: None,
-             body: None,
-             sent_at: None,
-             delivery_status: None,
+            sender: None,
+            recipient: None,
+            body: None,
+            sent_at: None,
+            delivery_status: None,
         }),
     )
 }
@@ -153,12 +171,12 @@ async fn append_ten_mixed_entity_events_all_stored() {
     let pa = project_a();
 
     let batch: Vec<EventEnvelope<RuntimeEvent>> = vec![
-        session_event("evt_01", EventSource::Runtime,   &pa, "sess_01"),
+        session_event("evt_01", EventSource::Runtime, &pa, "sess_01"),
         session_event("evt_02", EventSource::Scheduler, &pa, "sess_02"),
-        run_event(    "evt_03", EventSource::Runtime,   &pa, "sess_01", "run_01"),
-        run_event(    "evt_04", EventSource::Runtime,   &pa, "sess_02", "run_02"),
-        task_event(   "evt_05", &pa, "run_01", "task_01"),
-        task_event(   "evt_06", &pa, "run_01", "task_02"),
+        run_event("evt_03", EventSource::Runtime, &pa, "sess_01", "run_01"),
+        run_event("evt_04", EventSource::Runtime, &pa, "sess_02", "run_02"),
+        task_event("evt_05", &pa, "run_01", "task_01"),
+        task_event("evt_06", &pa, "run_01", "task_02"),
         approval_event("evt_07", &pa, "approval_01"),
         checkpoint_event("evt_08", &pa, "run_01", "ckpt_01"),
         mailbox_event("evt_09", &pa, "msg_01"),
@@ -193,7 +211,10 @@ async fn stored_event_fields_populated() {
     assert!(stored.position.0 >= 1, "position must be ≥ 1");
 
     // stored_at is populated.
-    assert!(stored.stored_at > 0, "stored_at must be a non-zero timestamp");
+    assert!(
+        stored.stored_at > 0,
+        "stored_at must be a non-zero timestamp"
+    );
 
     // Envelope round-trips intact.
     assert_eq!(stored.envelope.event_id, envelope.event_id);
@@ -210,7 +231,14 @@ async fn event_ids_are_unique_across_ten_events() {
     let pa = project_a();
 
     let batch: Vec<EventEnvelope<RuntimeEvent>> = (0..10)
-        .map(|i| session_event(&format!("uniq_evt_{i:02}"), EventSource::Runtime, &pa, &format!("sess_uniq_{i}")))
+        .map(|i| {
+            session_event(
+                &format!("uniq_evt_{i:02}"),
+                EventSource::Runtime,
+                &pa,
+                &format!("sess_uniq_{i}"),
+            )
+        })
         .collect();
 
     store.append(&batch).await.unwrap();
@@ -230,13 +258,25 @@ async fn event_positions_are_strictly_increasing() {
     let pa = project_a();
 
     let batch: Vec<_> = (0..5)
-        .map(|i| session_event(&format!("pos_evt_{i}"), EventSource::Runtime, &pa, &format!("sess_{i}")))
+        .map(|i| {
+            session_event(
+                &format!("pos_evt_{i}"),
+                EventSource::Runtime,
+                &pa,
+                &format!("sess_{i}"),
+            )
+        })
         .collect();
 
     let positions = store.append(&batch).await.unwrap();
 
     for w in positions.windows(2) {
-        assert!(w[0] < w[1], "positions must be strictly increasing: {:?} < {:?}", w[0], w[1]);
+        assert!(
+            w[0] < w[1],
+            "positions must be strictly increasing: {:?} < {:?}",
+            w[0],
+            w[1]
+        );
     }
 }
 
@@ -262,12 +302,14 @@ async fn all_event_source_variants_survive_round_trip() {
     let batch: Vec<EventEnvelope<RuntimeEvent>> = sources
         .iter()
         .enumerate()
-        .map(|(i, src)| session_event(
-            &format!("src_evt_{i}"),
-            src.clone(),
-            &pa,
-            &format!("sess_src_{i}"),
-        ))
+        .map(|(i, src)| {
+            session_event(
+                &format!("src_evt_{i}"),
+                src.clone(),
+                &pa,
+                &format!("sess_src_{i}"),
+            )
+        })
         .collect();
 
     store.append(&batch).await.unwrap();
@@ -311,7 +353,9 @@ async fn external_worker_source_preserves_worker_name() {
     let store = InMemoryStore::new();
     let pa = project_a();
 
-    let source = EventSource::ExternalWorker { worker: "gpu-node-7".to_owned() };
+    let source = EventSource::ExternalWorker {
+        worker: "gpu-node-7".to_owned(),
+    };
     let envelope = session_event("evt_worker_src", source, &pa, "sess_worker_src");
     store.append(&[envelope]).await.unwrap();
 
@@ -342,12 +386,14 @@ async fn ownership_key_project_scoping_is_preserved() {
     assert_eq!(all.len(), 3);
 
     // Verify OwnershipKey.Project fields match what was submitted.
-    let a_events: Vec<_> = all.iter().filter(|e| {
-        matches!(&e.envelope.ownership, OwnershipKey::Project(pk) if pk == &pa)
-    }).collect();
-    let b_events: Vec<_> = all.iter().filter(|e| {
-        matches!(&e.envelope.ownership, OwnershipKey::Project(pk) if pk == &pb)
-    }).collect();
+    let a_events: Vec<_> = all
+        .iter()
+        .filter(|e| matches!(&e.envelope.ownership, OwnershipKey::Project(pk) if pk == &pa))
+        .collect();
+    let b_events: Vec<_> = all
+        .iter()
+        .filter(|e| matches!(&e.envelope.ownership, OwnershipKey::Project(pk) if pk == &pb))
+        .collect();
 
     assert_eq!(a_events.len(), 2, "project_a should have 2 events");
     assert_eq!(b_events.len(), 1, "project_b should have 1 event");
@@ -360,8 +406,20 @@ async fn ownership_key_tenant_id_is_preserved() {
     let pb = project_b();
 
     let batch = vec![
-        run_event("evt_tenant_a", EventSource::Runtime, &pa, "sess_ta", "run_ta"),
-        run_event("evt_tenant_b", EventSource::Runtime, &pb, "sess_tb", "run_tb"),
+        run_event(
+            "evt_tenant_a",
+            EventSource::Runtime,
+            &pa,
+            "sess_ta",
+            "run_ta",
+        ),
+        run_event(
+            "evt_tenant_b",
+            EventSource::Runtime,
+            &pb,
+            "sess_tb",
+            "run_tb",
+        ),
     ];
     store.append(&batch).await.unwrap();
 
@@ -426,10 +484,15 @@ async fn correlation_id_chain_survives_round_trip() {
     let events: Vec<EventEnvelope<RuntimeEvent>> = vec![
         session_event("evt_corr_1", EventSource::Runtime, &pa, "sess_corr")
             .with_correlation_id(correlation),
-        run_event("evt_corr_2", EventSource::Runtime, &pa, "sess_corr", "run_corr")
-            .with_correlation_id(correlation),
-        task_event("evt_corr_3", &pa, "run_corr", "task_corr")
-            .with_correlation_id(correlation),
+        run_event(
+            "evt_corr_2",
+            EventSource::Runtime,
+            &pa,
+            "sess_corr",
+            "run_corr",
+        )
+        .with_correlation_id(correlation),
+        task_event("evt_corr_3", &pa, "run_corr", "task_corr").with_correlation_id(correlation),
         checkpoint_event("evt_corr_4", &pa, "run_corr", "ckpt_corr")
             .with_correlation_id(correlation),
     ];
@@ -476,10 +539,22 @@ async fn multiple_correlation_chains_coexist_independently() {
             .with_correlation_id(chain_x),
         session_event("evt_cy_1", EventSource::Runtime, &pa, "sess_cy_1")
             .with_correlation_id(chain_y),
-        run_event("evt_cx_2", EventSource::Runtime, &pa, "sess_cx_1", "run_cx_1")
-            .with_correlation_id(chain_x),
-        run_event("evt_cy_2", EventSource::Runtime, &pa, "sess_cy_1", "run_cy_1")
-            .with_correlation_id(chain_y),
+        run_event(
+            "evt_cx_2",
+            EventSource::Runtime,
+            &pa,
+            "sess_cx_1",
+            "run_cx_1",
+        )
+        .with_correlation_id(chain_x),
+        run_event(
+            "evt_cy_2",
+            EventSource::Runtime,
+            &pa,
+            "sess_cy_1",
+            "run_cy_1",
+        )
+        .with_correlation_id(chain_y),
         // One uncorrelated event.
         session_event("evt_nc", EventSource::System, &pa, "sess_nc"),
     ];
@@ -487,13 +562,16 @@ async fn multiple_correlation_chains_coexist_independently() {
     store.append(&batch).await.unwrap();
 
     let all = store.read_stream(None, 100).await.unwrap();
-    let cx_chain: Vec<_> = all.iter()
+    let cx_chain: Vec<_> = all
+        .iter()
         .filter(|e| e.envelope.correlation_id.as_deref() == Some(chain_x))
         .collect();
-    let cy_chain: Vec<_> = all.iter()
+    let cy_chain: Vec<_> = all
+        .iter()
         .filter(|e| e.envelope.correlation_id.as_deref() == Some(chain_y))
         .collect();
-    let no_corr: Vec<_> = all.iter()
+    let no_corr: Vec<_> = all
+        .iter()
         .filter(|e| e.envelope.correlation_id.is_none())
         .collect();
 
@@ -527,17 +605,31 @@ async fn find_by_causation_id_returns_correct_position() {
     let causation = "cmd_find_me";
 
     // Append one event without causation, then one with.
-    store.append(&[session_event("evt_no_caus", EventSource::Runtime, &pa, "sess_nc")]).await.unwrap();
+    store
+        .append(&[session_event(
+            "evt_no_caus",
+            EventSource::Runtime,
+            &pa,
+            "sess_nc",
+        )])
+        .await
+        .unwrap();
     let positions = store
-        .append(&[session_event("evt_with_caus", EventSource::Runtime, &pa, "sess_wc")
-            .with_causation_id(causation)])
+        .append(&[
+            session_event("evt_with_caus", EventSource::Runtime, &pa, "sess_wc")
+                .with_causation_id(causation),
+        ])
         .await
         .unwrap();
 
     let expected_pos = positions[0];
     let found = store.find_by_causation_id(causation).await.unwrap();
 
-    assert_eq!(found, Some(expected_pos), "find_by_causation_id must return the assigned position");
+    assert_eq!(
+        found,
+        Some(expected_pos),
+        "find_by_causation_id must return the assigned position"
+    );
 }
 
 #[tokio::test]
@@ -545,7 +637,15 @@ async fn find_by_causation_id_returns_none_when_absent() {
     let store = InMemoryStore::new();
     let pa = project_a();
 
-    store.append(&[session_event("evt_absent", EventSource::Runtime, &pa, "sess_absent")]).await.unwrap();
+    store
+        .append(&[session_event(
+            "evt_absent",
+            EventSource::Runtime,
+            &pa,
+            "sess_absent",
+        )])
+        .await
+        .unwrap();
 
     let result = store.find_by_causation_id("cmd_ghost").await.unwrap();
     assert_eq!(result, None);
@@ -565,14 +665,25 @@ async fn head_position_matches_last_appended_event() {
     );
 
     let batch: Vec<_> = (0..5u32)
-        .map(|i| session_event(&format!("evt_head_{i}"), EventSource::Runtime, &pa, &format!("sess_h_{i}")))
+        .map(|i| {
+            session_event(
+                &format!("evt_head_{i}"),
+                EventSource::Runtime,
+                &pa,
+                &format!("sess_h_{i}"),
+            )
+        })
         .collect();
 
     let positions = store.append(&batch).await.unwrap();
     let last_pos = *positions.last().unwrap();
 
     let head = store.head_position().await.unwrap();
-    assert_eq!(head, Some(last_pos), "head_position must equal last assigned position");
+    assert_eq!(
+        head,
+        Some(last_pos),
+        "head_position must equal last assigned position"
+    );
 }
 
 // ── 9. Payload identity through round-trip ───────────────────────────────────
@@ -583,16 +694,35 @@ async fn all_mixed_entity_payloads_round_trip_without_mutation() {
     let pa = project_a();
 
     let original: Vec<EventEnvelope<RuntimeEvent>> = vec![
-        session_event(   "evt_rt_01", EventSource::Runtime,   &pa, "sess_rt_1"),
-        run_event(       "evt_rt_02", EventSource::Scheduler, &pa, "sess_rt_1", "run_rt_1"),
-        task_event(      "evt_rt_03",                         &pa, "run_rt_1", "task_rt_1"),
-        approval_event(  "evt_rt_04",                         &pa, "appr_rt_1"),
-        checkpoint_event("evt_rt_05",                         &pa, "run_rt_1", "ckpt_rt_1"),
-        mailbox_event(   "evt_rt_06",                         &pa, "msg_rt_1"),
-        session_event(   "evt_rt_07", EventSource::System,    &pa, "sess_rt_2"),
-        run_event(       "evt_rt_08", EventSource::Runtime,   &pa, "sess_rt_2", "run_rt_2"),
-        task_event(      "evt_rt_09",                         &pa, "run_rt_2", "task_rt_2"),
-        session_event(   "evt_rt_10", EventSource::ExternalWorker { worker: "w1".to_owned() }, &pa, "sess_rt_3"),
+        session_event("evt_rt_01", EventSource::Runtime, &pa, "sess_rt_1"),
+        run_event(
+            "evt_rt_02",
+            EventSource::Scheduler,
+            &pa,
+            "sess_rt_1",
+            "run_rt_1",
+        ),
+        task_event("evt_rt_03", &pa, "run_rt_1", "task_rt_1"),
+        approval_event("evt_rt_04", &pa, "appr_rt_1"),
+        checkpoint_event("evt_rt_05", &pa, "run_rt_1", "ckpt_rt_1"),
+        mailbox_event("evt_rt_06", &pa, "msg_rt_1"),
+        session_event("evt_rt_07", EventSource::System, &pa, "sess_rt_2"),
+        run_event(
+            "evt_rt_08",
+            EventSource::Runtime,
+            &pa,
+            "sess_rt_2",
+            "run_rt_2",
+        ),
+        task_event("evt_rt_09", &pa, "run_rt_2", "task_rt_2"),
+        session_event(
+            "evt_rt_10",
+            EventSource::ExternalWorker {
+                worker: "w1".to_owned(),
+            },
+            &pa,
+            "sess_rt_3",
+        ),
     ];
 
     store.append(&original).await.unwrap();
@@ -601,9 +731,15 @@ async fn all_mixed_entity_payloads_round_trip_without_mutation() {
     assert_eq!(stored.len(), original.len());
 
     for (orig, stored_ev) in original.iter().zip(stored.iter()) {
-        assert_eq!(stored_ev.envelope.event_id, orig.event_id,    "event_id mismatch");
-        assert_eq!(stored_ev.envelope.source,   orig.source,      "source mismatch");
-        assert_eq!(stored_ev.envelope.ownership, orig.ownership,  "ownership mismatch");
-        assert_eq!(stored_ev.envelope.payload,  orig.payload,     "payload mismatch");
+        assert_eq!(
+            stored_ev.envelope.event_id, orig.event_id,
+            "event_id mismatch"
+        );
+        assert_eq!(stored_ev.envelope.source, orig.source, "source mismatch");
+        assert_eq!(
+            stored_ev.envelope.ownership, orig.ownership,
+            "ownership mismatch"
+        );
+        assert_eq!(stored_ev.envelope.payload, orig.payload, "payload mismatch");
     }
 }

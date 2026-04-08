@@ -94,13 +94,14 @@ fn task_update_current_state_helper_uses_store_record() {
     use cairn_domain::TaskId;
     use cairn_store::projections::TaskRecord;
 
-    let event = cairn_domain::events::RuntimeEvent::TaskCreated(cairn_domain::events::TaskCreated {
-        project: ProjectKey::new("t", "w", "p"),
-        task_id: TaskId::new("task_001"),
-        parent_run_id: None,
-        parent_task_id: None,
-        prompt_release_id: None,
-    });
+    let event =
+        cairn_domain::events::RuntimeEvent::TaskCreated(cairn_domain::events::TaskCreated {
+            project: ProjectKey::new("t", "w", "p"),
+            task_id: TaskId::new("task_001"),
+            parent_run_id: None,
+            parent_task_id: None,
+            prompt_release_id: None,
+        });
     let record = TaskRecord {
         task_id: TaskId::new("task_001"),
         project: ProjectKey::new("t", "w", "p"),
@@ -121,17 +122,17 @@ fn task_update_current_state_helper_uses_store_record() {
         updated_at: 1500,
     };
 
-    let payload = cairn_api::sse_payloads::shape_event_payload_with_records(
-        &event,
-        Some(&record),
-        None,
-    )
-    .unwrap();
+    let payload =
+        cairn_api::sse_payloads::shape_event_payload_with_records(&event, Some(&record), None)
+            .unwrap();
 
     assert_eq!(payload["task"]["id"], "task_001");
     assert_eq!(payload["task"]["status"], "running");
     assert_eq!(payload["task"]["title"], "Draft weekly digest");
-    assert_eq!(payload["task"]["description"], "Collect updates and prepare digest.");
+    assert_eq!(
+        payload["task"]["description"],
+        "Collect updates and prepare digest."
+    );
     assert_eq!(payload["task"]["createdAt"], "1000");
     assert_eq!(payload["task"]["updatedAt"], "1500");
 }
@@ -217,17 +218,17 @@ fn approval_required_current_state_helper_uses_store_record() {
         updated_at: 2000,
     };
 
-    let payload = cairn_api::sse_payloads::shape_event_payload_with_records(
-        &event,
-        None,
-        Some(&record),
-    )
-    .unwrap();
+    let payload =
+        cairn_api::sse_payloads::shape_event_payload_with_records(&event, None, Some(&record))
+            .unwrap();
 
     assert_eq!(payload["approval"]["id"], "approval_001");
     assert_eq!(payload["approval"]["status"], "pending");
     assert_eq!(payload["approval"]["title"], "Approve GitHub write action");
-    assert_eq!(payload["approval"]["description"], "Agent wants to create a PR.");
+    assert_eq!(
+        payload["approval"]["description"],
+        "Agent wants to create a PR."
+    );
     assert_eq!(payload["approval"]["createdAt"], "2000");
 }
 

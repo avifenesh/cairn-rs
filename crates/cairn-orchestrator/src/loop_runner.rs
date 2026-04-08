@@ -97,10 +97,10 @@ impl CheckpointHook for NoOpCheckpointHook {
 /// - `max_iterations` guards against infinite loops.
 /// - `timeout_ms` provides a wall-clock deadline for the whole run.
 pub struct OrchestratorLoop<G, D, E> {
-    gather:  G,
-    decide:  D,
+    gather: G,
+    decide: D,
     execute: E,
-    config:  LoopConfig,
+    config: LoopConfig,
     checkpoint_hook: Arc<dyn CheckpointHook>,
     emitter: Arc<dyn OrchestratorEventEmitter>,
 }
@@ -154,9 +154,11 @@ where
         let result = self.run_inner(&mut ctx).await;
         // Emit on_finished for every terminal outcome (Ok or infrastructure Err).
         match &result {
-            Ok(t)  => self.emitter.on_finished(&ctx, t).await,
+            Ok(t) => self.emitter.on_finished(&ctx, t).await,
             Err(_) => {
-                let term = LoopTermination::Failed { reason: "infrastructure error".to_owned() };
+                let term = LoopTermination::Failed {
+                    reason: "infrastructure error".to_owned(),
+                };
                 self.emitter.on_finished(&ctx, &term).await;
             }
         }
@@ -167,8 +169,7 @@ where
         &self,
         ctx: &mut OrchestrationContext,
     ) -> Result<LoopTermination, OrchestratorError> {
-        let deadline_ms = ctx.run_started_at_ms
-            .saturating_add(self.config.timeout_ms);
+        let deadline_ms = ctx.run_started_at_ms.saturating_add(self.config.timeout_ms);
 
         // Local step history — carried across iterations within this invocation.
         // On resume from a checkpoint the gather phase rebuilds history from the
@@ -225,7 +226,9 @@ where
                 e
             })?;
 
-            let first_action = decide_output.proposals.first()
+            let first_action = decide_output
+                .proposals
+                .first()
                 .map(|p| format!("{:?}", p.action_type))
                 .unwrap_or_else(|| "none".to_owned());
 
@@ -282,10 +285,14 @@ where
                 e
             })?;
 
-            let succeeded_count = execute_outcome.results.iter()
+            let succeeded_count = execute_outcome
+                .results
+                .iter()
                 .filter(|r| r.status == ActionStatus::Succeeded)
                 .count();
-            let failed_count = execute_outcome.results.iter()
+            let failed_count = execute_outcome
+                .results
+                .iter()
                 .filter(|r| matches!(r.status, ActionStatus::Failed { .. }))
                 .count();
 
@@ -300,26 +307,28 @@ where
 
             // Emit per-action tool_called / tool_result events.
             for result in &execute_outcome.results {
-                let tool_name = result.proposal.tool_name
+                let tool_name = result
+                    .proposal
+                    .tool_name
                     .as_deref()
                     .unwrap_or_else(|| result.proposal.description.as_str());
-                self.emitter.on_tool_called(
-                    &ctx,
-                    tool_name,
-                    result.proposal.tool_args.as_ref(),
-                ).await;
+                self.emitter
+                    .on_tool_called(&ctx, tool_name, result.proposal.tool_args.as_ref())
+                    .await;
                 let (succeeded, error) = match &result.status {
                     ActionStatus::Succeeded => (true, None),
                     ActionStatus::Failed { reason } => (false, Some(reason.as_str())),
                     _ => (true, None),
                 };
-                self.emitter.on_tool_result(
-                    &ctx,
-                    tool_name,
-                    succeeded,
-                    result.tool_output.as_ref(),
-                    error,
-                ).await;
+                self.emitter
+                    .on_tool_result(
+                        &ctx,
+                        tool_name,
+                        succeeded,
+                        result.tool_output.as_ref(),
+                        error,
+                    )
+                    .await;
             }
 
             // ── (6) CHECKPOINT ────────────────────────────────────────────────
@@ -331,7 +340,8 @@ where
             let step_summary = build_step_summary(&ctx, &decide_output, &execute_outcome);
             step_history.push(step_summary);
 
-            if let Err(e) = self.checkpoint_hook
+            if let Err(e) = self
+                .checkpoint_hook
                 .save(&ctx, &gather_output, &decide_output, &execute_outcome)
                 .await
             {
@@ -351,12 +361,16 @@ where
                 );
             }
 
-            self.emitter.on_step_completed(&ctx, &decide_output, &execute_outcome).await;
+            self.emitter
+                .on_step_completed(&ctx, &decide_output, &execute_outcome)
+                .await;
 
             // ── (7) Loop signal ───────────────────────────────────────────────
             match execute_outcome.loop_signal {
                 LoopSignal::Done => {
-                    let summary = decide_output.proposals.iter()
+                    let summary = decide_output
+                        .proposals
+                        .iter()
                         .find(|p| p.action_type == cairn_domain::ActionType::CompleteRun)
                         .map(|p| p.description.clone())
                         .unwrap_or_else(|| "run completed".to_owned());
@@ -471,11 +485,20 @@ fn build_step_summary(
     decide: &DecideOutput,
     execute: &ExecuteOutcome,
 ) -> StepSummary {
-    let action_kind = decide.proposals.first()
-        .map(|p| serde_json::to_value(&p.action_type).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_else(|| "unknown".to_owned()))
+    let action_kind = decide
+        .proposals
+        .first()
+        .map(|p| {
+            serde_json::to_value(&p.action_type)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "unknown".to_owned())
+        })
         .unwrap_or_else(|| "no_op".to_owned());
 
-    let summary = decide.proposals.first()
+    let summary = decide
+        .proposals
+        .first()
         .map(|p| p.description.clone())
         .unwrap_or_else(|| format!("iteration {} complete", ctx.iteration));
 
@@ -501,22 +524,25 @@ fn now_millis() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::{
+        ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput, LoopConfig,
+        LoopSignal, OrchestrationContext,
+    };
+    use crate::error::OrchestratorError;
     use async_trait::async_trait;
     use cairn_domain::{
         ActionProposal, ActionType, ApprovalId, ProjectKey, RunId, SessionId, TaskId,
     };
-    use crate::context::{
-        ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput,
-        LoopConfig, LoopSignal, OrchestrationContext,
-    };
-    use crate::error::OrchestratorError;
 
     // ── Minimal stubs ─────────────────────────────────────────────────────────
 
     struct FixedGather;
     #[async_trait]
     impl GatherPhase for FixedGather {
-        async fn gather(&self, _ctx: &OrchestrationContext) -> Result<GatherOutput, OrchestratorError> {
+        async fn gather(
+            &self,
+            _ctx: &OrchestrationContext,
+        ) -> Result<GatherOutput, OrchestratorError> {
             Ok(GatherOutput::default())
         }
     }
@@ -531,13 +557,20 @@ mod tests {
 
     impl ScriptedDecide {
         fn always(output: DecideOutput) -> Self {
-            Self { outputs: vec![output], call_count: std::sync::Mutex::new(0) }
+            Self {
+                outputs: vec![output],
+                call_count: std::sync::Mutex::new(0),
+            }
         }
     }
 
     #[async_trait]
     impl DecidePhase for ScriptedDecide {
-        async fn decide(&self, _ctx: &OrchestrationContext, _: &GatherOutput) -> Result<DecideOutput, OrchestratorError> {
+        async fn decide(
+            &self,
+            _ctx: &OrchestrationContext,
+            _: &GatherOutput,
+        ) -> Result<DecideOutput, OrchestratorError> {
             let mut n = self.call_count.lock().unwrap();
             let idx = (*n).min(self.outputs.len() - 1);
             *n += 1;
@@ -551,13 +584,21 @@ mod tests {
 
     #[async_trait]
     impl ExecutePhase for ScriptedExecute {
-        async fn execute(&self, _ctx: &OrchestrationContext, decide: &DecideOutput) -> Result<ExecuteOutcome, OrchestratorError> {
-            let results = decide.proposals.iter().map(|p| ActionResult {
-                proposal: p.clone(),
-                status: ActionStatus::Succeeded,
-                tool_output: None,
-                invocation_id: None,
-            }).collect();
+        async fn execute(
+            &self,
+            _ctx: &OrchestrationContext,
+            decide: &DecideOutput,
+        ) -> Result<ExecuteOutcome, OrchestratorError> {
+            let results = decide
+                .proposals
+                .iter()
+                .map(|p| ActionResult {
+                    proposal: p.clone(),
+                    status: ActionStatus::Succeeded,
+                    tool_output: None,
+                    invocation_id: None,
+                })
+                .collect();
             Ok(ExecuteOutcome {
                 results,
                 loop_signal: self.signal.clone(),
@@ -569,13 +610,13 @@ mod tests {
 
     fn ctx() -> OrchestrationContext {
         OrchestrationContext {
-            project:          ProjectKey::new("t", "w", "p"),
-            session_id:       SessionId::new("sess"),
-            run_id:           RunId::new("run"),
-            task_id:          None,
-            iteration:        0,
-            goal:             "test goal".to_owned(),
-            agent_type:       "test_agent".to_owned(),
+            project: ProjectKey::new("t", "w", "p"),
+            session_id: SessionId::new("sess"),
+            run_id: RunId::new("run"),
+            task_id: None,
+            iteration: 0,
+            goal: "test goal".to_owned(),
+            agent_type: "test_agent".to_owned(),
             run_started_at_ms: now_millis(),
             discovered_tool_names: vec![],
         }
@@ -583,11 +624,11 @@ mod tests {
 
     fn complete_run_proposal() -> ActionProposal {
         ActionProposal {
-            action_type:      ActionType::CompleteRun,
-            description:      "all done".to_owned(),
-            confidence:       0.95,
-            tool_name:        None,
-            tool_args:        None,
+            action_type: ActionType::CompleteRun,
+            description: "all done".to_owned(),
+            confidence: 0.95,
+            tool_name: None,
+            tool_args: None,
             requires_approval: false,
         }
     }
@@ -609,11 +650,11 @@ mod tests {
         DecideOutput {
             raw_response: format!(r#"[{{"action_type":"invoke_tool","tool_name":"{tool}"}}]"#),
             proposals: vec![ActionProposal {
-                action_type:      ActionType::InvokeTool,
-                description:      format!("call {tool}"),
-                confidence:       0.8,
-                tool_name:        Some(tool.to_owned()),
-                tool_args:        Some(serde_json::json!({})),
+                action_type: ActionType::InvokeTool,
+                description: format!("call {tool}"),
+                confidence: 0.8,
+                tool_name: Some(tool.to_owned()),
+                tool_args: Some(serde_json::json!({})),
                 requires_approval: false,
             }],
             calibrated_confidence: 0.8,
@@ -632,9 +673,18 @@ mod tests {
         let mut past_ctx = ctx();
         past_ctx.run_started_at_ms = 0; // started at epoch = already timed out
 
-        let config = LoopConfig { timeout_ms: 1, ..Default::default() };
-        let lp = OrchestratorLoop::new(FixedGather, ScriptedDecide::always(decide_done()),
-            ScriptedExecute { signal: LoopSignal::Done }, config);
+        let config = LoopConfig {
+            timeout_ms: 1,
+            ..Default::default()
+        };
+        let lp = OrchestratorLoop::new(
+            FixedGather,
+            ScriptedDecide::always(decide_done()),
+            ScriptedExecute {
+                signal: LoopSignal::Done,
+            },
+            config,
+        );
 
         let result = lp.run(past_ctx).await.unwrap();
         assert!(matches!(result, LoopTermination::TimedOut));
@@ -645,31 +695,51 @@ mod tests {
     #[tokio::test]
     async fn two_iterations_then_done() {
         // First two calls return Continue; third returns Done.
-        let config = LoopConfig { max_iterations: 10, ..Default::default() };
+        let config = LoopConfig {
+            max_iterations: 10,
+            ..Default::default()
+        };
 
         struct CountingExecute {
             calls: std::sync::Mutex<u32>,
         }
         #[async_trait]
         impl ExecutePhase for CountingExecute {
-            async fn execute(&self, _ctx: &OrchestrationContext, decide: &DecideOutput) -> Result<ExecuteOutcome, OrchestratorError> {
+            async fn execute(
+                &self,
+                _ctx: &OrchestrationContext,
+                decide: &DecideOutput,
+            ) -> Result<ExecuteOutcome, OrchestratorError> {
                 let mut n = self.calls.lock().unwrap();
                 *n += 1;
-                let signal = if *n < 3 { LoopSignal::Continue } else { LoopSignal::Done };
-                let results = decide.proposals.iter().map(|p| ActionResult {
-                    proposal: p.clone(),
-                    status: ActionStatus::Succeeded,
-                    tool_output: None,
-                    invocation_id: None,
-                }).collect();
-                Ok(ExecuteOutcome { results, loop_signal: signal })
+                let signal = if *n < 3 {
+                    LoopSignal::Continue
+                } else {
+                    LoopSignal::Done
+                };
+                let results = decide
+                    .proposals
+                    .iter()
+                    .map(|p| ActionResult {
+                        proposal: p.clone(),
+                        status: ActionStatus::Succeeded,
+                        tool_output: None,
+                        invocation_id: None,
+                    })
+                    .collect();
+                Ok(ExecuteOutcome {
+                    results,
+                    loop_signal: signal,
+                })
             }
         }
 
         let lp = OrchestratorLoop::new(
             FixedGather,
             ScriptedDecide::always(decide_done()),
-            CountingExecute { calls: std::sync::Mutex::new(0) },
+            CountingExecute {
+                calls: std::sync::Mutex::new(0),
+            },
             config,
         );
         let result = lp.run(ctx()).await.unwrap();
@@ -683,11 +753,16 @@ mod tests {
 
     #[tokio::test]
     async fn max_iterations_returns_max_iterations_reached() {
-        let config = LoopConfig { max_iterations: 3, ..Default::default() };
+        let config = LoopConfig {
+            max_iterations: 3,
+            ..Default::default()
+        };
         let lp = OrchestratorLoop::new(
             FixedGather,
             ScriptedDecide::always(decide_tool("web_search")),
-            ScriptedExecute { signal: LoopSignal::Continue },
+            ScriptedExecute {
+                signal: LoopSignal::Continue,
+            },
             config,
         );
         let result = lp.run(ctx()).await.unwrap();
@@ -701,7 +776,11 @@ mod tests {
         let lp = OrchestratorLoop::new(
             FixedGather,
             ScriptedDecide::always(decide_tool("broken_tool")),
-            ScriptedExecute { signal: LoopSignal::Failed { reason: "tool error".to_owned() } },
+            ScriptedExecute {
+                signal: LoopSignal::Failed {
+                    reason: "tool error".to_owned(),
+                },
+            },
             LoopConfig::default(),
         );
         let result = lp.run(ctx()).await.unwrap();
@@ -718,16 +797,28 @@ mod tests {
         struct ApprovalExecute(ApprovalId);
         #[async_trait]
         impl ExecutePhase for ApprovalExecute {
-            async fn execute(&self, _ctx: &OrchestrationContext, decide: &DecideOutput) -> Result<ExecuteOutcome, OrchestratorError> {
-                let results = decide.proposals.iter().map(|p| ActionResult {
-                    proposal: p.clone(),
-                    status: ActionStatus::AwaitingApproval { approval_id: self.0.clone() },
-                    tool_output: None,
-                    invocation_id: None,
-                }).collect();
+            async fn execute(
+                &self,
+                _ctx: &OrchestrationContext,
+                decide: &DecideOutput,
+            ) -> Result<ExecuteOutcome, OrchestratorError> {
+                let results = decide
+                    .proposals
+                    .iter()
+                    .map(|p| ActionResult {
+                        proposal: p.clone(),
+                        status: ActionStatus::AwaitingApproval {
+                            approval_id: self.0.clone(),
+                        },
+                        tool_output: None,
+                        invocation_id: None,
+                    })
+                    .collect();
                 Ok(ExecuteOutcome {
                     results,
-                    loop_signal: LoopSignal::WaitApproval { approval_id: self.0.clone() },
+                    loop_signal: LoopSignal::WaitApproval {
+                        approval_id: self.0.clone(),
+                    },
                 })
             }
         }
@@ -772,7 +863,9 @@ mod tests {
             FixedGather,
             ScriptedDecide::always(decide_tool("spawn")),
             ScriptedExecute {
-                signal: LoopSignal::WaitSubagent { child_task_id: child_id.clone() },
+                signal: LoopSignal::WaitSubagent {
+                    child_task_id: child_id.clone(),
+                },
             },
             LoopConfig::default(),
         );
@@ -791,7 +884,13 @@ mod tests {
         struct CountingHook(Arc<AtomicU32>);
         #[async_trait::async_trait]
         impl CheckpointHook for CountingHook {
-            async fn save(&self, _: &OrchestrationContext, _: &GatherOutput, _: &DecideOutput, _: &ExecuteOutcome) -> Result<(), OrchestratorError> {
+            async fn save(
+                &self,
+                _: &OrchestrationContext,
+                _: &GatherOutput,
+                _: &DecideOutput,
+                _: &ExecuteOutcome,
+            ) -> Result<(), OrchestratorError> {
                 self.0.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             }
@@ -803,15 +902,32 @@ mod tests {
         struct TwoThenDone(std::sync::Mutex<u32>);
         #[async_trait]
         impl ExecutePhase for TwoThenDone {
-            async fn execute(&self, _: &OrchestrationContext, decide: &DecideOutput) -> Result<ExecuteOutcome, OrchestratorError> {
+            async fn execute(
+                &self,
+                _: &OrchestrationContext,
+                decide: &DecideOutput,
+            ) -> Result<ExecuteOutcome, OrchestratorError> {
                 let mut n = self.0.lock().unwrap();
                 *n += 1;
-                let signal = if *n < 3 { LoopSignal::Continue } else { LoopSignal::Done };
-                let results = decide.proposals.iter().map(|p| ActionResult {
-                    proposal: p.clone(), status: ActionStatus::Succeeded,
-                    tool_output: None, invocation_id: None,
-                }).collect();
-                Ok(ExecuteOutcome { results, loop_signal: signal })
+                let signal = if *n < 3 {
+                    LoopSignal::Continue
+                } else {
+                    LoopSignal::Done
+                };
+                let results = decide
+                    .proposals
+                    .iter()
+                    .map(|p| ActionResult {
+                        proposal: p.clone(),
+                        status: ActionStatus::Succeeded,
+                        tool_output: None,
+                        invocation_id: None,
+                    })
+                    .collect();
+                Ok(ExecuteOutcome {
+                    results,
+                    loop_signal: signal,
+                })
             }
         }
 
@@ -827,7 +943,8 @@ mod tests {
         assert!(matches!(result, LoopTermination::Completed { .. }));
         // Checkpoint hook must be called once per completed iteration (3 total).
         assert_eq!(
-            call_count.load(Ordering::SeqCst), 3,
+            call_count.load(Ordering::SeqCst),
+            3,
             "checkpoint hook must be called after each of the 3 iterations"
         );
     }
@@ -864,15 +981,15 @@ mod tests {
         let outcome = ExecuteOutcome {
             results: vec![ActionResult {
                 proposal: ActionProposal {
-                    action_type:       ActionType::InvokeTool,
-                    description:       "search for tools".to_owned(),
-                    confidence:        0.8,
-                    tool_name:         Some("tool_search".to_owned()),
-                    tool_args:         None,
+                    action_type: ActionType::InvokeTool,
+                    description: "search for tools".to_owned(),
+                    confidence: 0.8,
+                    tool_name: Some("tool_search".to_owned()),
+                    tool_args: None,
                     requires_approval: false,
                 },
-                status:       ActionStatus::Succeeded,
-                tool_output:  Some(serde_json::json!({
+                status: ActionStatus::Succeeded,
+                tool_output: Some(serde_json::json!({
                     "matches": [
                         { "name": "shell_exec",   "description": "run shell commands" },
                         { "name": "graph_query",  "description": "query the graph" },
@@ -912,7 +1029,10 @@ mod tests {
         };
 
         let discovered = extract_tool_search_discoveries(&outcome);
-        assert!(discovered.is_empty(), "non-tool_search results must not produce discoveries");
+        assert!(
+            discovered.is_empty(),
+            "non-tool_search results must not produce discoveries"
+        );
     }
 
     #[test]
@@ -947,28 +1067,43 @@ mod tests {
         // Capture the ctx seen at each decide() call
         struct CapturingDecide {
             captured: std::sync::Arc<Mutex<Vec<Vec<String>>>>,
-            call_n:   Mutex<u32>,
+            call_n: Mutex<u32>,
         }
         #[async_trait]
         impl DecidePhase for CapturingDecide {
             async fn decide(
-                &self, ctx: &OrchestrationContext, _: &GatherOutput
+                &self,
+                ctx: &OrchestrationContext,
+                _: &GatherOutput,
             ) -> Result<DecideOutput, OrchestratorError> {
-                self.captured.lock().unwrap()
+                self.captured
+                    .lock()
+                    .unwrap()
                     .push(ctx.discovered_tool_names.clone());
-                let n = { let mut g = self.call_n.lock().unwrap(); *g += 1; *g };
+                let n = {
+                    let mut g = self.call_n.lock().unwrap();
+                    *g += 1;
+                    *g
+                };
                 // First call: invoke tool_search; second call: done
                 let (action, tool_name, tool_args) = if n == 1 {
-                    (ActionType::InvokeTool, Some("tool_search".to_owned()),
-                     Some(serde_json::json!({"query":"shell"})))
+                    (
+                        ActionType::InvokeTool,
+                        Some("tool_search".to_owned()),
+                        Some(serde_json::json!({"query":"shell"})),
+                    )
                 } else {
                     (ActionType::CompleteRun, None, None)
                 };
                 Ok(DecideOutput {
                     raw_response: String::new(),
                     proposals: vec![ActionProposal {
-                        action_type: action, description: "step".to_owned(),
-                        confidence: 0.9, tool_name, tool_args, requires_approval: false,
+                        action_type: action,
+                        description: "step".to_owned(),
+                        confidence: 0.9,
+                        tool_name,
+                        tool_args,
+                        requires_approval: false,
                     }],
                     calibrated_confidence: 0.9,
                     requires_approval: false,
@@ -981,26 +1116,46 @@ mod tests {
         }
 
         // Execute returns tool_search results on first call, Done on second
-        struct DiscoveryExecute { calls: Mutex<u32> }
+        struct DiscoveryExecute {
+            calls: Mutex<u32>,
+        }
         #[async_trait]
         impl ExecutePhase for DiscoveryExecute {
             async fn execute(
-                &self, _: &OrchestrationContext, decide: &DecideOutput,
+                &self,
+                _: &OrchestrationContext,
+                decide: &DecideOutput,
             ) -> Result<ExecuteOutcome, OrchestratorError> {
-                let n = { let mut g = self.calls.lock().unwrap(); *g += 1; *g };
+                let n = {
+                    let mut g = self.calls.lock().unwrap();
+                    *g += 1;
+                    *g
+                };
                 let (signal, tool_output) = if n == 1 {
-                    (LoopSignal::Continue, Some(serde_json::json!({
-                        "matches": [{"name":"shell_exec","description":"run shell"}],
-                        "total": 1,
-                    })))
+                    (
+                        LoopSignal::Continue,
+                        Some(serde_json::json!({
+                            "matches": [{"name":"shell_exec","description":"run shell"}],
+                            "total": 1,
+                        })),
+                    )
                 } else {
                     (LoopSignal::Done, None)
                 };
-                let results = decide.proposals.iter().map(|p| ActionResult {
-                    proposal: p.clone(), status: ActionStatus::Succeeded,
-                    tool_output: tool_output.clone(), invocation_id: None,
-                }).collect();
-                Ok(ExecuteOutcome { results, loop_signal: signal })
+                let results = decide
+                    .proposals
+                    .iter()
+                    .map(|p| ActionResult {
+                        proposal: p.clone(),
+                        status: ActionStatus::Succeeded,
+                        tool_output: tool_output.clone(),
+                        invocation_id: None,
+                    })
+                    .collect();
+                Ok(ExecuteOutcome {
+                    results,
+                    loop_signal: signal,
+                })
             }
         }
 
@@ -1008,13 +1163,19 @@ mod tests {
             std::sync::Arc::new(Mutex::new(vec![]));
         let capturing = CapturingDecide {
             captured: shared_captured.clone(),
-            call_n:   Mutex::new(0),
+            call_n: Mutex::new(0),
         };
 
         let lp = OrchestratorLoop::new(
-            FixedGather, capturing,
-            DiscoveryExecute { calls: Mutex::new(0) },
-            LoopConfig { max_iterations: 5, ..Default::default() },
+            FixedGather,
+            capturing,
+            DiscoveryExecute {
+                calls: Mutex::new(0),
+            },
+            LoopConfig {
+                max_iterations: 5,
+                ..Default::default()
+            },
         );
 
         let result = lp.run(ctx()).await.unwrap();
@@ -1022,10 +1183,14 @@ mod tests {
 
         let snapshots = shared_captured.lock().unwrap();
         // First decide: no discovered tools yet
-        assert!(snapshots[0].is_empty(),
-            "iteration 0 must have no discovered tools yet");
+        assert!(
+            snapshots[0].is_empty(),
+            "iteration 0 must have no discovered tools yet"
+        );
         // Second decide: shell_exec must be in discovered_tool_names
-        assert!(snapshots[1].contains(&"shell_exec".to_owned()),
-            "iteration 1 must see shell_exec from prior tool_search result");
+        assert!(
+            snapshots[1].contains(&"shell_exec".to_owned()),
+            "iteration 1 must see shell_exec from prior tool_search result"
+        );
     }
 }

@@ -94,13 +94,14 @@ where
             });
         }
 
-        let event =
-            make_envelope(RuntimeEvent::ProviderPoolConnectionAdded(ProviderPoolConnectionAdded {
+        let event = make_envelope(RuntimeEvent::ProviderPoolConnectionAdded(
+            ProviderPoolConnectionAdded {
                 pool_id: pool_id.to_owned(),
                 tenant_id: pool.tenant_id.clone(),
                 connection_id: connection_id.clone(),
                 added_at_ms: now_ms(),
-            }));
+            },
+        ));
         self.store.append(&[event]).await?;
 
         ProviderPoolReadModel::get_pool(self.store.as_ref(), pool_id)
@@ -142,7 +143,10 @@ where
             .ok_or_else(|| RuntimeError::Internal("pool not found after remove".into()))
     }
 
-    async fn get_pool(&self, pool_id: &str) -> Result<Option<ProviderConnectionPool>, RuntimeError> {
+    async fn get_pool(
+        &self,
+        pool_id: &str,
+    ) -> Result<Option<ProviderConnectionPool>, RuntimeError> {
         Ok(ProviderPoolReadModel::get_pool(self.store.as_ref(), pool_id).await?)
     }
 
@@ -200,7 +204,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(pool.active_connections, 1);
-        assert!(pool.connection_ids.contains(&ProviderConnectionId::new("conn_a")));
+        assert!(pool
+            .connection_ids
+            .contains(&ProviderConnectionId::new("conn_a")));
 
         // Add second connection.
         let pool = svc
@@ -208,7 +214,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(pool.active_connections, 2);
-        assert!(pool.connection_ids.contains(&ProviderConnectionId::new("conn_b")));
+        assert!(pool
+            .connection_ids
+            .contains(&ProviderConnectionId::new("conn_b")));
 
         // get_available returns first connection.
         let available = svc.get_available("pool_2").await.unwrap();

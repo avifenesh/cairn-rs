@@ -28,7 +28,10 @@ pub enum WorktreeStatus {
 impl WorktreeStatus {
     /// Returns true if the worktree requires operator attention before merge.
     pub fn needs_attention(&self) -> bool {
-        matches!(self, WorktreeStatus::Diverged { .. } | WorktreeStatus::Conflicted { .. })
+        matches!(
+            self,
+            WorktreeStatus::Diverged { .. } | WorktreeStatus::Conflicted { .. }
+        )
     }
 }
 
@@ -206,7 +209,11 @@ impl WorktreeService for WorktreeServiceImpl {
         worktree_id: &str,
         status: WorktreeStatus,
     ) -> Result<(), crate::error::RuntimeError> {
-        let updated = self.registry.lock().unwrap().update_status(worktree_id, status);
+        let updated = self
+            .registry
+            .lock()
+            .unwrap()
+            .update_status(worktree_id, status);
         if updated {
             Ok(())
         } else {
@@ -295,7 +302,12 @@ mod tests {
     fn list_diverged_returns_only_diverged() {
         let mut reg = WorktreeRegistry::new();
         reg.register(make_record("wt_clean", "t", WorktreeStatus::Clean, 1000));
-        reg.register(make_record("wt_dirty", "t", WorktreeStatus::Dirty { modified_files: 1 }, 2000));
+        reg.register(make_record(
+            "wt_dirty",
+            "t",
+            WorktreeStatus::Dirty { modified_files: 1 },
+            2000,
+        ));
         reg.register(make_record(
             "wt_div",
             "t",
@@ -305,12 +317,18 @@ mod tests {
         reg.register(make_record(
             "wt_conf",
             "t",
-            WorktreeStatus::Conflicted { conflicted_files: 1 },
+            WorktreeStatus::Conflicted {
+                conflicted_files: 1,
+            },
             4000,
         ));
 
         let diverged = reg.list_diverged();
-        assert_eq!(diverged.len(), 2, "only Diverged and Conflicted need attention");
+        assert_eq!(
+            diverged.len(),
+            2,
+            "only Diverged and Conflicted need attention"
+        );
         let ids: Vec<&str> = diverged.iter().map(|r| r.worktree_id.as_str()).collect();
         assert!(ids.contains(&"wt_div"));
         assert!(ids.contains(&"wt_conf"));
@@ -320,7 +338,12 @@ mod tests {
     fn list_by_task_filters_correctly() {
         let mut reg = WorktreeRegistry::new();
         reg.register(make_record("wt_a1", "task_a", WorktreeStatus::Clean, 1000));
-        reg.register(make_record("wt_a2", "task_a", WorktreeStatus::Dirty { modified_files: 2 }, 2000));
+        reg.register(make_record(
+            "wt_a2",
+            "task_a",
+            WorktreeStatus::Dirty { modified_files: 2 },
+            2000,
+        ));
         reg.register(make_record("wt_b1", "task_b", WorktreeStatus::Clean, 3000));
 
         let task_a = reg.list_by_task("task_a");
@@ -344,7 +367,10 @@ mod tests {
         assert!(removed.is_some());
         assert_eq!(removed.unwrap().worktree_id, "wt_rem");
         assert!(reg.is_empty());
-        assert!(reg.remove("wt_rem").is_none(), "second remove must return None");
+        assert!(
+            reg.remove("wt_rem").is_none(),
+            "second remove must return None"
+        );
     }
 
     #[test]
@@ -352,9 +378,26 @@ mod tests {
         let mut reg = WorktreeRegistry::new();
         reg.register(make_record("w1", "t", WorktreeStatus::Clean, 1));
         reg.register(make_record("w2", "t", WorktreeStatus::Clean, 2));
-        reg.register(make_record("w3", "t", WorktreeStatus::Dirty { modified_files: 5 }, 3));
-        reg.register(make_record("w4", "t", WorktreeStatus::Diverged { commits_ahead: 1 }, 4));
-        reg.register(make_record("w5", "t", WorktreeStatus::Conflicted { conflicted_files: 2 }, 5));
+        reg.register(make_record(
+            "w3",
+            "t",
+            WorktreeStatus::Dirty { modified_files: 5 },
+            3,
+        ));
+        reg.register(make_record(
+            "w4",
+            "t",
+            WorktreeStatus::Diverged { commits_ahead: 1 },
+            4,
+        ));
+        reg.register(make_record(
+            "w5",
+            "t",
+            WorktreeStatus::Conflicted {
+                conflicted_files: 2,
+            },
+            5,
+        ));
 
         let s = reg.divergence_summary();
         assert_eq!(s.total, 5);
@@ -367,7 +410,10 @@ mod tests {
     #[test]
     fn dirty_status_carries_modified_file_count() {
         let status = WorktreeStatus::Dirty { modified_files: 7 };
-        assert!(!status.needs_attention(), "Dirty does not require merge approval");
+        assert!(
+            !status.needs_attention(),
+            "Dirty does not require merge approval"
+        );
         if let WorktreeStatus::Dirty { modified_files } = status {
             assert_eq!(modified_files, 7);
         } else {
@@ -377,8 +423,13 @@ mod tests {
 
     #[test]
     fn conflicted_status_carries_conflicted_file_count() {
-        let status = WorktreeStatus::Conflicted { conflicted_files: 3 };
-        assert!(status.needs_attention(), "Conflicted must require attention");
+        let status = WorktreeStatus::Conflicted {
+            conflicted_files: 3,
+        };
+        assert!(
+            status.needs_attention(),
+            "Conflicted must require attention"
+        );
         if let WorktreeStatus::Conflicted { conflicted_files } = status {
             assert_eq!(conflicted_files, 3);
         } else {

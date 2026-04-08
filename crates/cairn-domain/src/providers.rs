@@ -651,7 +651,6 @@ impl LlmBudget {
     }
 }
 
-
 /// Health status reported by the connection health checker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -662,7 +661,6 @@ pub enum ProviderHealthStatus {
     Unknown,
     Unreachable,
 }
-
 
 /// A single rule within a route policy.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -847,8 +845,8 @@ mod tests {
 mod rfc009_tests {
     use super::*;
     use crate::ids::{
-        ProviderBindingId, ProviderCallId, ProviderConnectionId, ProviderModelId,
-        RouteAttemptId, RouteDecisionId,
+        ProviderBindingId, ProviderCallId, ProviderConnectionId, ProviderModelId, RouteAttemptId,
+        RouteDecisionId,
     };
 
     /// RFC 009: skipped/vetoed route attempts must NOT create provider call records.
@@ -872,11 +870,17 @@ mod rfc009_tests {
 
         // RFC 009: vetoed attempts should not have an associated provider call.
         // Verify the decision type matches and no call was dispatched.
-        assert_eq!(attempt.decision, RouteAttemptDecision::Vetoed,
-            "RFC 009: vetoed attempt must be explicitly marked Vetoed");
+        assert_eq!(
+            attempt.decision,
+            RouteAttemptDecision::Vetoed,
+            "RFC 009: vetoed attempt must be explicitly marked Vetoed"
+        );
         // Veto reason must be explicit, not Other
-        assert_ne!(attempt.decision_reason, RouteDecisionReason::Other,
-            "RFC 009: every veto must have a concrete decision_reason");
+        assert_ne!(
+            attempt.decision_reason,
+            RouteDecisionReason::Other,
+            "RFC 009: every veto must have a concrete decision_reason"
+        );
     }
 
     /// RFC 009: a selected route decision must have selected_provider_binding_id set.
@@ -895,10 +899,14 @@ mod rfc009_tests {
             final_status: RouteDecisionStatus::Selected,
         };
 
-        assert!(decision.selected_provider_binding_id.is_some(),
-            "RFC 009: Selected route decision must have selected_provider_binding_id");
-        assert!(decision.selected_route_attempt_id.is_some(),
-            "RFC 009: Selected route decision must have selected_route_attempt_id");
+        assert!(
+            decision.selected_provider_binding_id.is_some(),
+            "RFC 009: Selected route decision must have selected_provider_binding_id"
+        );
+        assert!(
+            decision.selected_route_attempt_id.is_some(),
+            "RFC 009: Selected route decision must have selected_route_attempt_id"
+        );
     }
 
     /// RFC 009: no_viable_route decision must have no selected binding.
@@ -917,8 +925,10 @@ mod rfc009_tests {
             final_status: RouteDecisionStatus::NoViableRoute,
         };
 
-        assert!(decision.selected_provider_binding_id.is_none(),
-            "RFC 009: NoViableRoute decision must have no selected binding");
+        assert!(
+            decision.selected_provider_binding_id.is_none(),
+            "RFC 009: NoViableRoute decision must have no selected binding"
+        );
     }
 
     /// RFC 009: every provider call must belong to exactly one route decision.
@@ -951,7 +961,10 @@ mod rfc009_tests {
         // RFC 009: every provider call must link to exactly one route_decision and attempt.
         assert_eq!(call.route_decision_id.as_str(), "rd_1");
         assert_eq!(call.route_attempt_id.as_str(), "ra_1");
-        assert_eq!(call.fallback_position, 0, "first attempt has fallback_position=0");
+        assert_eq!(
+            call.fallback_position, 0,
+            "first attempt has fallback_position=0"
+        );
     }
 
     /// RFC 009: veto reasons must cover all product-defined rejection scenarios.
@@ -1013,7 +1026,8 @@ mod rfc009_tests {
                 cache_write_per_1m: 0.0,
             };
             assert_eq!(
-                rates.estimate_micros(1_000_000, 500_000), 0,
+                rates.estimate_micros(1_000_000, 500_000),
+                0,
                 "{cost_type:?} must always return 0 cost regardless of token count"
             );
         }
@@ -1038,7 +1052,10 @@ mod rfc009_tests {
     fn llm_budget_cannot_afford_over_monthly_limit() {
         let mut budget = LlmBudget::new(0, 5_000_000); // no daily, $5 monthly
         budget.record(4_500_000);
-        assert!(!budget.can_afford(600_000), "4.5M + 600k > 5M monthly limit");
+        assert!(
+            !budget.can_afford(600_000),
+            "4.5M + 600k > 5M monthly limit"
+        );
     }
 
     #[test]
@@ -1067,9 +1084,7 @@ mod rfc009_tests {
 
     #[test]
     fn provider_call_record_carries_cost_type() {
-        use crate::ids::{
-            ProviderCallId, ProviderConnectionId, RouteAttemptId, RouteDecisionId,
-        };
+        use crate::ids::{ProviderCallId, ProviderConnectionId, RouteAttemptId, RouteDecisionId};
         let record = ProviderCallRecord {
             provider_call_id: ProviderCallId::new("pc1"),
             route_decision_id: RouteDecisionId::new("rd1"),
@@ -1254,4 +1269,3 @@ pub struct ProviderCredentialLink {
     pub credential_id: String,
     pub linked_at: u64,
 }
-

@@ -374,11 +374,9 @@ impl PluginNotification {
             notifications::LOG_EMIT => serde_json::from_value(notification.params.clone())
                 .ok()
                 .map(PluginNotification::LogEmit),
-            notifications::PROGRESS_UPDATE => {
-                serde_json::from_value(notification.params.clone())
-                    .ok()
-                    .map(PluginNotification::ProgressUpdate)
-            }
+            notifications::PROGRESS_UPDATE => serde_json::from_value(notification.params.clone())
+                .ok()
+                .map(PluginNotification::ProgressUpdate),
             notifications::EVENT_EMIT => serde_json::from_value(notification.params.clone())
                 .ok()
                 .map(PluginNotification::EventEmit),

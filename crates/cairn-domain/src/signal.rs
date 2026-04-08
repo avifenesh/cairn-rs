@@ -12,7 +12,6 @@ pub struct SignalRecord {
     pub timestamp_ms: u64,
 }
 
-
 /// A subscription to a signal type for routing notifications.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SignalSubscription {

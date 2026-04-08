@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use cairn_domain::{RunId, TenantId, sla::{SlaConfig, SlaBreach}};
+use cairn_domain::{
+    sla::{SlaBreach, SlaConfig},
+    RunId, TenantId,
+};
 
 use crate::error::StoreError;
 

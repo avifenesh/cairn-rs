@@ -45,7 +45,10 @@ async fn explain_result_is_populated_for_known_query() {
 
     let retrieval = InMemoryRetrieval::new(store.clone());
     let all_chunks = store.all_chunks();
-    assert!(!all_chunks.is_empty(), "must have ingested at least one chunk");
+    assert!(
+        !all_chunks.is_empty(),
+        "must have ingested at least one chunk"
+    );
 
     let chunk_id = all_chunks[0].chunk_id.as_str().to_owned();
 
@@ -71,10 +74,7 @@ async fn explain_result_is_populated_for_known_query() {
         "quality_score must be in [0, 1]"
     );
 
-    assert!(
-        !explanation.summary.is_empty(),
-        "summary must be non-empty"
-    );
+    assert!(!explanation.summary.is_empty(), "summary must be non-empty");
 }
 
 /// RFC 003: explain_result returns None for a chunk that does not exist.
@@ -85,7 +85,10 @@ fn explain_result_returns_none_for_unknown_chunk() {
     let project = ProjectKey::new("t", "w", "p");
 
     let result = retrieval.explain_result("nonexistent_chunk", "any query", &project);
-    assert!(result.is_none(), "explain_result must return None for unknown chunk_id");
+    assert!(
+        result.is_none(),
+        "explain_result must return None for unknown chunk_id"
+    );
 }
 
 /// RFC 003: explain_result returns None for a chunk in a different project.
@@ -98,7 +101,12 @@ async fn explain_result_returns_none_for_different_project() {
     let project_b = ProjectKey::new("t", "w", "p_b");
 
     pipeline
-        .submit(make_request("doc_proj_a", "src_a", "Content in project A.", project_a.clone()))
+        .submit(make_request(
+            "doc_proj_a",
+            "src_a",
+            "Content in project A.",
+            project_a.clone(),
+        ))
         .await
         .unwrap();
 
@@ -107,8 +115,14 @@ async fn explain_result_returns_none_for_different_project() {
     let chunk_id = chunks[0].chunk_id.as_str().to_owned();
 
     let result = retrieval.explain_result(&chunk_id, "content", &project_b);
-    assert!(result.is_none(), "explain_result must return None for chunk in different project");
+    assert!(
+        result.is_none(),
+        "explain_result must return None for chunk in different project"
+    );
 
     let result_a = retrieval.explain_result(&chunk_id, "content", &project_a);
-    assert!(result_a.is_some(), "explain_result must return Some for chunk in correct project");
+    assert!(
+        result_a.is_some(),
+        "explain_result must return Some for chunk in correct project"
+    );
 }

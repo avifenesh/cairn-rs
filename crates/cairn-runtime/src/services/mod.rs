@@ -4,59 +4,59 @@
 //! emits events through the EventLog, and returns the updated projection.
 
 pub mod approval_impl;
-pub mod confidence_calibrator;
 pub mod approval_policy_impl;
-pub mod orchestrator;
+pub mod audit_impl;
+pub mod budget_impl;
+pub mod channel_impl;
 pub mod checkpoint_impl;
+pub mod confidence_calibrator;
+pub mod credential_impl;
+pub mod defaults_impl;
 pub mod eval_run_impl;
 pub mod event_helpers;
 pub mod external_worker_impl;
+pub mod guardrail_impl;
 pub mod ingest_job_impl;
+pub mod license_impl;
 pub mod mailbox_impl;
+pub mod notification_impl;
 pub mod observability_impl;
+pub mod operator_profile_impl;
+pub mod orchestrator;
 pub mod project_impl;
 pub mod prompt_asset_impl;
 pub mod prompt_release_impl;
 pub mod prompt_version_impl;
-pub mod recovery_impl;
-pub mod route_resolver_impl;
-pub mod research_impl;
-pub mod run_impl;
-pub mod skill_catalog_impl;
-pub mod spend_alert_impl;
-pub mod session_impl;
-pub mod signal_impl;
-pub mod task_impl;
-pub mod tenant_impl;
-pub mod tool_invocation_impl;
-pub mod voice_impl;
-pub mod workspace_impl;
-pub mod audit_impl;
-pub mod budget_impl;
-pub mod channel_impl;
-pub mod credential_impl;
-pub mod defaults_impl;
-pub mod guardrail_impl;
-pub mod license_impl;
-pub mod notification_impl;
-pub mod operator_profile_impl;
 pub mod provider_binding_impl;
 pub mod provider_connection_impl;
 pub mod provider_health_impl;
 pub mod provider_model_impl;
 pub mod provider_pool_impl;
 pub mod quota_impl;
+pub mod recovery_impl;
+pub mod research_impl;
 pub mod retention_impl;
 pub mod route_policy_impl;
+pub mod route_resolver_impl;
 pub mod run_cost_alert_impl;
+pub mod run_impl;
 pub mod run_sla_impl;
+pub mod session_impl;
+pub mod signal_impl;
 pub mod signal_router_impl;
+pub mod skill_catalog_impl;
+pub mod spend_alert_impl;
+pub mod task_impl;
+pub mod tenant_impl;
+pub mod tool_invocation_impl;
+pub mod voice_impl;
+pub mod workspace_impl;
 pub mod workspace_membership_impl;
 
 pub use approval_impl::ApprovalServiceImpl;
-pub use confidence_calibrator::{CalibrationAdjustment, ConfidenceCalibrator};
 pub use approval_policy_impl::ApprovalPolicyServiceImpl;
 pub use checkpoint_impl::CheckpointServiceImpl;
+pub use confidence_calibrator::{CalibrationAdjustment, ConfidenceCalibrator};
 pub use eval_run_impl::EvalRunServiceImpl;
 pub use external_worker_impl::{parse_outcome, ExternalWorkerService, ExternalWorkerServiceImpl};
 pub use ingest_job_impl::IngestJobServiceImpl;
@@ -69,20 +69,16 @@ pub use prompt_version_impl::PromptVersionServiceImpl;
 pub use recovery_impl::RecoveryServiceImpl;
 pub use route_resolver_impl::SimpleRouteResolver;
 pub use run_impl::RunServiceImpl;
-pub use skill_catalog_impl::SkillCatalogServiceImpl;
-pub use spend_alert_impl::SpendAlertServiceImpl;
 pub use session_impl::SessionServiceImpl;
 pub use signal_impl::SignalServiceImpl;
+pub use skill_catalog_impl::SkillCatalogServiceImpl;
+pub use spend_alert_impl::SpendAlertServiceImpl;
 pub use task_impl::TaskServiceImpl;
 pub use tenant_impl::TenantServiceImpl;
 pub use tool_invocation_impl::{ToolInvocationService, ToolInvocationServiceImpl};
 pub use voice_impl::InMemoryVoiceService;
 pub use workspace_impl::WorkspaceServiceImpl;
 
-pub use research_impl::{InMemoryDigestService, InMemoryResearchService};
-pub use provider_model_impl::ProviderModelServiceImpl;
-pub use workspace_membership_impl::WorkspaceMembershipServiceImpl;
-pub use signal_router_impl::SignalRouterServiceImpl;
 pub use audit_impl::AuditServiceImpl;
 pub use budget_impl::BudgetServiceImpl;
 pub use channel_impl::ChannelServiceImpl;
@@ -95,12 +91,16 @@ pub use operator_profile_impl::OperatorProfileServiceImpl;
 pub use provider_binding_impl::ProviderBindingServiceImpl;
 pub use provider_connection_impl::ProviderConnectionServiceImpl;
 pub use provider_health_impl::ProviderHealthServiceImpl;
+pub use provider_model_impl::ProviderModelServiceImpl;
 pub use provider_pool_impl::ProviderConnectionPoolServiceImpl;
 pub use quota_impl::QuotaServiceImpl;
+pub use research_impl::{InMemoryDigestService, InMemoryResearchService};
 pub use retention_impl::RetentionServiceImpl;
 pub use route_policy_impl::RoutePolicyServiceImpl;
 pub use run_cost_alert_impl::RunCostAlertServiceImpl;
 pub use run_sla_impl::RunSlaServiceImpl;
+pub use signal_router_impl::SignalRouterServiceImpl;
+pub use workspace_membership_impl::WorkspaceMembershipServiceImpl;
 
 pub mod resource_sharing_impl;
 pub use resource_sharing_impl::ResourceSharingServiceImpl;
@@ -136,8 +136,8 @@ pub use provider_router::{
 
 pub mod prompt_release_pipeline;
 pub use prompt_release_pipeline::{
-    DiffKind, DiffLine, PromptReleasePipeline, RolloutState, RolloutStatus,
-    RoutingDecision, VersionDiff,
+    DiffKind, DiffLine, PromptReleasePipeline, RolloutState, RolloutStatus, RoutingDecision,
+    VersionDiff,
 };
 
 pub mod workspace_quota;

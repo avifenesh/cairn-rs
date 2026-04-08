@@ -7,19 +7,24 @@ use axum::{
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
-use cairn_domain::OperatorId;
 use cairn_domain::tenancy::TenantKey;
+use cairn_domain::OperatorId;
 use tower::ServiceExt;
 
 const TOKEN: &str = "refresh-test-token";
 const TENANT: &str = "t_refresh";
 
 async fn make_app() -> axum::Router {
-    let (app, _, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
-            .await
-            .unwrap();
-    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new(TENANT) });
+    let (app, _, tokens) = AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
+        .await
+        .unwrap();
+    tokens.register(
+        TOKEN.to_string(),
+        AuthPrincipal::Operator {
+            operator_id: OperatorId::new("test_op"),
+            tenant: TenantKey::new(TENANT),
+        },
+    );
     app
 }
 
@@ -50,13 +55,14 @@ async fn source_refresh_schedule_created_and_processed() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), StatusCode::OK, "create schedule must succeed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "create schedule must succeed"
+    );
     let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     let schedule: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        schedule["source_id"].as_str().unwrap(),
-        "src_refresh_a"
-    );
+    assert_eq!(schedule["source_id"].as_str().unwrap(), "src_refresh_a");
     assert_eq!(schedule["interval_ms"].as_u64().unwrap(), 10);
     assert!(
         schedule["last_refresh_ms"].is_null(),
@@ -80,7 +86,11 @@ async fn source_refresh_schedule_created_and_processed() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), StatusCode::OK, "process-refresh must succeed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "process-refresh must succeed"
+    );
     let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(
@@ -130,8 +140,7 @@ async fn source_refresh_due_count_decreases_after_processing() {
                     .header("authorization", format!("Bearer {TOKEN}"))
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        serde_json::json!({ "interval_ms": 1, "refresh_url": null })
-                            .to_string(),
+                        serde_json::json!({ "interval_ms": 1, "refresh_url": null }).to_string(),
                     ))
                     .unwrap(),
             )
@@ -158,7 +167,10 @@ async fn source_refresh_due_count_decreases_after_processing() {
     let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     let first_result: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let first_count = first_result["processed_count"].as_u64().unwrap();
-    assert!(first_count >= 2, "both schedules must be processed first time");
+    assert!(
+        first_count >= 2,
+        "both schedules must be processed first time"
+    );
 
     // Second process-refresh — interval=1ms is tiny, but we call immediately,
     // so fewer (or zero) should be due RIGHT NOW.

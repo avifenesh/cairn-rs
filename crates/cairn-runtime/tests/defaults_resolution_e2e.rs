@@ -39,7 +39,12 @@ async fn scope_chain_system_tenant_project_with_fallback() {
 
     // ── (1) Set a system-level default ────────────────────────────────────
     let system_setting = svc
-        .set(Scope::System, "system".to_owned(), key.to_owned(), serde_json::json!(1024))
+        .set(
+            Scope::System,
+            "system".to_owned(),
+            key.to_owned(),
+            serde_json::json!(1024),
+        )
         .await
         .unwrap();
 
@@ -49,7 +54,11 @@ async fn scope_chain_system_tenant_project_with_fallback() {
 
     // System default alone → resolve returns 1024.
     let v = svc.resolve(&project(), key).await.unwrap();
-    assert_eq!(v, Some(serde_json::json!(1024)), "system default must be the fallback");
+    assert_eq!(
+        v,
+        Some(serde_json::json!(1024)),
+        "system default must be the fallback"
+    );
 
     // ── (2) Set a tenant-level override ───────────────────────────────────
     svc.set(
@@ -111,9 +120,14 @@ async fn system_default_is_ultimate_fallback() {
     let key = "retry_limit";
 
     // Only a system default exists — every project should see it.
-    svc.set(Scope::System, "system".to_owned(), key.to_owned(), serde_json::json!(3))
-        .await
-        .unwrap();
+    svc.set(
+        Scope::System,
+        "system".to_owned(),
+        key.to_owned(),
+        serde_json::json!(3),
+    )
+    .await
+    .unwrap();
 
     // Different projects in different tenants all see the system default.
     for proj in [
@@ -139,27 +153,68 @@ async fn workspace_override_wins_over_tenant_loses_to_project() {
     let svc = DefaultsServiceImpl::new(store);
     let key = "log_level";
 
-    svc.set(Scope::Tenant,    "t_d".to_owned(), key.to_owned(), serde_json::json!("warn")).await.unwrap();
-    svc.set(Scope::Workspace, "w_d".to_owned(), key.to_owned(), serde_json::json!("info")).await.unwrap();
+    svc.set(
+        Scope::Tenant,
+        "t_d".to_owned(),
+        key.to_owned(),
+        serde_json::json!("warn"),
+    )
+    .await
+    .unwrap();
+    svc.set(
+        Scope::Workspace,
+        "w_d".to_owned(),
+        key.to_owned(),
+        serde_json::json!("info"),
+    )
+    .await
+    .unwrap();
 
     // With only tenant + workspace, workspace wins.
     let v = svc.resolve(&project(), key).await.unwrap();
-    assert_eq!(v, Some(serde_json::json!("info")), "workspace must win over tenant");
+    assert_eq!(
+        v,
+        Some(serde_json::json!("info")),
+        "workspace must win over tenant"
+    );
 
     // Add project override — project must now win.
-    svc.set(Scope::Project, "p_d".to_owned(), key.to_owned(), serde_json::json!("debug")).await.unwrap();
+    svc.set(
+        Scope::Project,
+        "p_d".to_owned(),
+        key.to_owned(),
+        serde_json::json!("debug"),
+    )
+    .await
+    .unwrap();
     let v = svc.resolve(&project(), key).await.unwrap();
-    assert_eq!(v, Some(serde_json::json!("debug")), "project must win over workspace");
+    assert_eq!(
+        v,
+        Some(serde_json::json!("debug")),
+        "project must win over workspace"
+    );
 
     // Clear project → workspace re-emerges.
-    svc.clear(Scope::Project, "p_d".to_owned(), key.to_owned()).await.unwrap();
+    svc.clear(Scope::Project, "p_d".to_owned(), key.to_owned())
+        .await
+        .unwrap();
     let v = svc.resolve(&project(), key).await.unwrap();
-    assert_eq!(v, Some(serde_json::json!("info")), "after clearing project, workspace must re-emerge");
+    assert_eq!(
+        v,
+        Some(serde_json::json!("info")),
+        "after clearing project, workspace must re-emerge"
+    );
 
     // Clear workspace → tenant re-emerges.
-    svc.clear(Scope::Workspace, "w_d".to_owned(), key.to_owned()).await.unwrap();
+    svc.clear(Scope::Workspace, "w_d".to_owned(), key.to_owned())
+        .await
+        .unwrap();
     let v = svc.resolve(&project(), key).await.unwrap();
-    assert_eq!(v, Some(serde_json::json!("warn")), "after clearing workspace, tenant must re-emerge");
+    assert_eq!(
+        v,
+        Some(serde_json::json!("warn")),
+        "after clearing workspace, tenant must re-emerge"
+    );
 }
 
 // ── Missing key returns None ──────────────────────────────────────────────────
@@ -176,9 +231,14 @@ async fn missing_key_returns_none() {
     assert!(v.is_none(), "unset key must resolve to None");
 
     // Set a different key — still None for the queried key.
-    svc.set(Scope::System, "system".to_owned(), "other_key".to_owned(), serde_json::json!(1))
-        .await
-        .unwrap();
+    svc.set(
+        Scope::System,
+        "system".to_owned(),
+        "other_key".to_owned(),
+        serde_json::json!(1),
+    )
+    .await
+    .unwrap();
     let v = svc.resolve(&project(), "nonexistent_key").await.unwrap();
     assert!(v.is_none(), "only matching key names must be returned");
 }
@@ -193,22 +253,62 @@ async fn multiple_keys_resolved_independently() {
     let svc = DefaultsServiceImpl::new(store);
 
     // Key A: set at system + overridden at project.
-    svc.set(Scope::System,  "system".to_owned(), "key_a".to_owned(), serde_json::json!("sys_a")).await.unwrap();
-    svc.set(Scope::Project, "p_d".to_owned(),    "key_a".to_owned(), serde_json::json!("proj_a")).await.unwrap();
+    svc.set(
+        Scope::System,
+        "system".to_owned(),
+        "key_a".to_owned(),
+        serde_json::json!("sys_a"),
+    )
+    .await
+    .unwrap();
+    svc.set(
+        Scope::Project,
+        "p_d".to_owned(),
+        "key_a".to_owned(),
+        serde_json::json!("proj_a"),
+    )
+    .await
+    .unwrap();
 
     // Key B: set only at tenant.
-    svc.set(Scope::Tenant, "t_d".to_owned(), "key_b".to_owned(), serde_json::json!("tenant_b")).await.unwrap();
+    svc.set(
+        Scope::Tenant,
+        "t_d".to_owned(),
+        "key_b".to_owned(),
+        serde_json::json!("tenant_b"),
+    )
+    .await
+    .unwrap();
 
     // Key C: set only at system.
-    svc.set(Scope::System, "system".to_owned(), "key_c".to_owned(), serde_json::json!("sys_c")).await.unwrap();
+    svc.set(
+        Scope::System,
+        "system".to_owned(),
+        "key_c".to_owned(),
+        serde_json::json!("sys_c"),
+    )
+    .await
+    .unwrap();
 
     let a = svc.resolve(&project(), "key_a").await.unwrap();
     let b = svc.resolve(&project(), "key_b").await.unwrap();
     let c = svc.resolve(&project(), "key_c").await.unwrap();
 
-    assert_eq!(a, Some(serde_json::json!("proj_a")), "key_a: project must win over system");
-    assert_eq!(b, Some(serde_json::json!("tenant_b")), "key_b: tenant value must be returned");
-    assert_eq!(c, Some(serde_json::json!("sys_c")), "key_c: system fallback must be returned");
+    assert_eq!(
+        a,
+        Some(serde_json::json!("proj_a")),
+        "key_a: project must win over system"
+    );
+    assert_eq!(
+        b,
+        Some(serde_json::json!("tenant_b")),
+        "key_b: tenant value must be returned"
+    );
+    assert_eq!(
+        c,
+        Some(serde_json::json!("sys_c")),
+        "key_c: system fallback must be returned"
+    );
 }
 
 // ── Clearing system default removes ultimate fallback ─────────────────────────
@@ -221,9 +321,14 @@ async fn clearing_system_default_leaves_no_fallback() {
     let svc = DefaultsServiceImpl::new(store);
     let key = "ephemeral_flag";
 
-    svc.set(Scope::System, "system".to_owned(), key.to_owned(), serde_json::json!(true))
-        .await
-        .unwrap();
+    svc.set(
+        Scope::System,
+        "system".to_owned(),
+        key.to_owned(),
+        serde_json::json!(true),
+    )
+    .await
+    .unwrap();
 
     let before = svc.resolve(&project(), key).await.unwrap();
     assert_eq!(before, Some(serde_json::json!(true)));
@@ -273,11 +378,11 @@ async fn various_value_types_preserved() {
     let svc = DefaultsServiceImpl::new(store);
 
     let cases = [
-        ("str_key",  serde_json::json!("hello")),
-        ("int_key",  serde_json::json!(42)),
+        ("str_key", serde_json::json!("hello")),
+        ("int_key", serde_json::json!(42)),
         ("bool_key", serde_json::json!(false)),
-        ("obj_key",  serde_json::json!({"nested": true, "count": 3})),
-        ("arr_key",  serde_json::json!([1, 2, 3])),
+        ("obj_key", serde_json::json!({"nested": true, "count": 3})),
+        ("arr_key", serde_json::json!([1, 2, 3])),
     ];
 
     for (key, value) in &cases {

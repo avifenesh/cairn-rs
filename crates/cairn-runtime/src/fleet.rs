@@ -93,13 +93,9 @@ where
         tenant_id: &TenantId,
         limit: usize,
     ) -> Result<FleetReport, RuntimeError> {
-        let records: Vec<ExternalWorkerRecord> = ExternalWorkerReadModel::list_by_tenant(
-            self.store.as_ref(),
-            tenant_id,
-            limit,
-            0,
-        )
-        .await?;
+        let records: Vec<ExternalWorkerRecord> =
+            ExternalWorkerReadModel::list_by_tenant(self.store.as_ref(), tenant_id, limit, 0)
+                .await?;
 
         let now = now_millis();
         let mut workers = Vec::with_capacity(records.len());
@@ -115,7 +111,11 @@ where
             // Count active tasks leased to this worker.
             // We use the current_task_id stored in the record. A running lease
             // means the task is either in "leased" or "running" state.
-            let active_task_count = if rec.current_task_id.is_some() { 1u32 } else { 0u32 };
+            let active_task_count = if rec.current_task_id.is_some() {
+                1u32
+            } else {
+                0u32
+            };
             rec.health.active_task_count = active_task_count;
 
             if rec.status == "active" {
@@ -135,7 +135,12 @@ where
         }
 
         let total = workers.len() as u32;
-        Ok(FleetReport { workers, total, active: active_count, healthy: healthy_count })
+        Ok(FleetReport {
+            workers,
+            total,
+            active: active_count,
+            healthy: healthy_count,
+        })
     }
 }
 
@@ -144,10 +149,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use cairn_domain::*;
     use cairn_store::EventLog;
     use cairn_store::InMemoryStore;
+    use std::sync::Arc;
 
     fn ev(payload: RuntimeEvent) -> EventEnvelope<RuntimeEvent> {
         use cairn_domain::{EventId, OwnershipKey};
@@ -172,13 +177,15 @@ mod tests {
         tenant_id: &str,
         display_name: &str,
     ) {
-        let event = ev(RuntimeEvent::ExternalWorkerRegistered(ExternalWorkerRegistered {
-            sentinel_project: sentinel(tenant_id),
-            worker_id: WorkerId::new(worker_id),
-            tenant_id: TenantId::new(tenant_id),
-            display_name: display_name.to_owned(),
-            registered_at: 1_000,
-        }));
+        let event = ev(RuntimeEvent::ExternalWorkerRegistered(
+            ExternalWorkerRegistered {
+                sentinel_project: sentinel(tenant_id),
+                worker_id: WorkerId::new(worker_id),
+                tenant_id: TenantId::new(tenant_id),
+                display_name: display_name.to_owned(),
+                registered_at: 1_000,
+            },
+        ));
         store.append(&[event]).await.unwrap();
     }
 
@@ -189,27 +196,35 @@ mod tests {
         worker_id: &str,
     ) {
         // Create the task.
-        store.append(&[ev(RuntimeEvent::TaskCreated(TaskCreated {
-            project: project.clone(),
-            task_id: TaskId::new(task_id),
-            parent_run_id: None,
-            parent_task_id: None,
-            prompt_release_id: None,
-        }))]).await.unwrap();
+        store
+            .append(&[ev(RuntimeEvent::TaskCreated(TaskCreated {
+                project: project.clone(),
+                task_id: TaskId::new(task_id),
+                parent_run_id: None,
+                parent_task_id: None,
+                prompt_release_id: None,
+            }))])
+            .await
+            .unwrap();
 
         // Heartbeat report sets current_task_id on the worker.
-        store.append(&[ev(RuntimeEvent::ExternalWorkerReported(ExternalWorkerReported {
-            report: cairn_domain::workers::ExternalWorkerReport {
-                project: project.clone(),
-                worker_id: WorkerId::new(worker_id),
-                run_id: None,
-                task_id: TaskId::new(task_id),
-                lease_token: 1,
-                reported_at_ms: 5_000,
-                progress: None,
-                outcome: None,
-            },
-        }))]).await.unwrap();
+        store
+            .append(&[ev(RuntimeEvent::ExternalWorkerReported(
+                ExternalWorkerReported {
+                    report: cairn_domain::workers::ExternalWorkerReport {
+                        project: project.clone(),
+                        worker_id: WorkerId::new(worker_id),
+                        run_id: None,
+                        task_id: TaskId::new(task_id),
+                        lease_token: 1,
+                        reported_at_ms: 5_000,
+                        progress: None,
+                        outcome: None,
+                    },
+                },
+            ))])
+            .await
+            .unwrap();
     }
 
     /// Register 2 workers, assign task to one, verify fleet report.
@@ -227,16 +242,21 @@ mod tests {
         create_and_claim_task(&store, &project, "task-001", "worker-alpha").await;
 
         // Build fleet report.
-        let svc = FleetServiceImpl::new(store.clone())
-            .with_heartbeat_ttl_ms(60_000);
+        let svc = FleetServiceImpl::new(store.clone()).with_heartbeat_ttl_ms(60_000);
         let report = svc.fleet_report(&tenant_id, 100).await.unwrap();
 
         // Both workers appear.
         assert_eq!(report.total, 2, "total must be 2");
 
-        let alpha = report.workers.iter().find(|w| w.worker_id == "worker-alpha")
+        let alpha = report
+            .workers
+            .iter()
+            .find(|w| w.worker_id == "worker-alpha")
             .expect("worker-alpha must appear");
-        let beta = report.workers.iter().find(|w| w.worker_id == "worker-beta")
+        let beta = report
+            .workers
+            .iter()
+            .find(|w| w.worker_id == "worker-beta")
             .expect("worker-beta must appear");
 
         // Alpha has the task.
@@ -255,14 +275,20 @@ mod tests {
             beta.health.active_task_count, 0,
             "worker-beta must have active_task_count=0"
         );
-        assert!(beta.current_task_id.is_none(), "worker-beta must have no current_task");
+        assert!(
+            beta.current_task_id.is_none(),
+            "worker-beta must have no current_task"
+        );
     }
 
     #[tokio::test]
     async fn fleet_report_empty_tenant() {
         let store = Arc::new(InMemoryStore::new());
         let svc = FleetServiceImpl::new(store);
-        let report = svc.fleet_report(&TenantId::new("nobody"), 100).await.unwrap();
+        let report = svc
+            .fleet_report(&TenantId::new("nobody"), 100)
+            .await
+            .unwrap();
         assert_eq!(report.total, 0);
         assert_eq!(report.active, 0);
         assert_eq!(report.healthy, 0);
@@ -277,13 +303,18 @@ mod tests {
         register_worker(&store, "w2", "t2", "Worker 2").await;
 
         // Suspend w2.
-        store.append(&[ev(RuntimeEvent::ExternalWorkerSuspended(ExternalWorkerSuspended {
-            sentinel_project: sentinel("t2"),
-            worker_id: WorkerId::new("w2"),
-            tenant_id: tenant_id.clone(),
-            suspended_at: 2_000,
-            reason: Some("operator".to_owned()),
-        }))]).await.unwrap();
+        store
+            .append(&[ev(RuntimeEvent::ExternalWorkerSuspended(
+                ExternalWorkerSuspended {
+                    sentinel_project: sentinel("t2"),
+                    worker_id: WorkerId::new("w2"),
+                    tenant_id: tenant_id.clone(),
+                    suspended_at: 2_000,
+                    reason: Some("operator".to_owned()),
+                },
+            ))])
+            .await
+            .unwrap();
 
         let svc = FleetServiceImpl::new(store);
         let report = svc.fleet_report(&tenant_id, 100).await.unwrap();

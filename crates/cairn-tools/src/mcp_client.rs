@@ -196,7 +196,9 @@ impl StdioMcpTransport {
             }
         }
 
-        let mut child = cmd.spawn().map_err(|e| McpError::Transport(e.to_string()))?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| McpError::Transport(e.to_string()))?;
         let stdout = child
             .stdout
             .take()
@@ -232,8 +234,7 @@ impl StdioMcpTransport {
     }
 
     fn send_notification(&mut self, notif: &McpNotification) -> Result<(), McpError> {
-        let json =
-            serde_json::to_string(notif).map_err(|e| McpError::Transport(e.to_string()))?;
+        let json = serde_json::to_string(notif).map_err(|e| McpError::Transport(e.to_string()))?;
         self.send_raw(&json)
     }
 
@@ -295,7 +296,10 @@ impl McpClient {
     /// For `Stdio` endpoints, spawns the child process and completes
     /// `initialize` → `notifications/initialized`. For `Http` endpoints,
     /// returns `McpError::HttpNotImplemented` (async runtime required).
-    pub fn connect(server_name: impl Into<String>, endpoint: McpEndpoint) -> Result<Self, McpError> {
+    pub fn connect(
+        server_name: impl Into<String>,
+        endpoint: McpEndpoint,
+    ) -> Result<Self, McpError> {
         let name = server_name.into();
 
         match endpoint {
@@ -367,9 +371,8 @@ impl McpClient {
         });
 
         let result = self.send_rpc("initialize", Some(params))?;
-        let init: InitializeResult = serde_json::from_value(result).map_err(|e| {
-            McpError::Transport(format!("invalid initialize response: {e}"))
-        })?;
+        let init: InitializeResult = serde_json::from_value(result)
+            .map_err(|e| McpError::Transport(format!("invalid initialize response: {e}")))?;
 
         // MCP protocol versions are date-stamped. We accept any version and
         // warn on mismatch (non-fatal) rather than hard-failing, because
@@ -405,9 +408,8 @@ impl McpClient {
     /// Perform a fresh `tools/list` round-trip and update the cache.
     pub fn refresh_tools(&mut self) -> Result<Vec<McpTool>, McpError> {
         let result = self.send_rpc("tools/list", None)?;
-        let list: ListToolsResult = serde_json::from_value(result).map_err(|e| {
-            McpError::Transport(format!("invalid tools/list response: {e}"))
-        })?;
+        let list: ListToolsResult = serde_json::from_value(result)
+            .map_err(|e| McpError::Transport(format!("invalid tools/list response: {e}")))?;
 
         let server_name = self.server_name.clone();
         let tools: Vec<McpTool> = list
@@ -416,9 +418,9 @@ impl McpClient {
             .map(|def| McpTool {
                 name: format!("mcp.{}.{}", server_name, def.name),
                 description: format!("[MCP:{}] {}", server_name, def.description),
-                input_schema: def.input_schema.unwrap_or_else(|| {
-                    serde_json::json!({"type": "object", "properties": {}})
-                }),
+                input_schema: def
+                    .input_schema
+                    .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}})),
             })
             .collect();
 
@@ -433,10 +435,7 @@ impl McpClient {
     pub fn call_tool(&mut self, name: &str, args: Value) -> Result<Value, McpError> {
         // Accept both `mcp.<server>.<tool>` (namespaced) and `<tool>` (bare).
         let prefix = format!("mcp.{}.", self.server_name);
-        let tool_name = name
-            .strip_prefix(&prefix)
-            .unwrap_or(name)
-            .to_owned();
+        let tool_name = name.strip_prefix(&prefix).unwrap_or(name).to_owned();
 
         let params = serde_json::json!({
             "name": tool_name,
@@ -444,9 +443,8 @@ impl McpClient {
         });
 
         let result = self.send_rpc("tools/call", Some(params))?;
-        let call_result: CallToolResult = serde_json::from_value(result).map_err(|e| {
-            McpError::Transport(format!("invalid tools/call response: {e}"))
-        })?;
+        let call_result: CallToolResult = serde_json::from_value(result)
+            .map_err(|e| McpError::Transport(format!("invalid tools/call response: {e}")))?;
 
         if call_result.is_error {
             let error_text: String = call_result
@@ -533,7 +531,10 @@ mod tests {
     fn mcp_endpoint_stdio_round_trips() {
         let endpoint = McpEndpoint::Stdio {
             command: "npx".to_owned(),
-            args: vec!["-y".to_owned(), "@modelcontextprotocol/server-filesystem".to_owned()],
+            args: vec![
+                "-y".to_owned(),
+                "@modelcontextprotocol/server-filesystem".to_owned(),
+            ],
             env: vec!["MY_VAR=value".to_owned()],
         };
         let json = serde_json::to_string(&endpoint).unwrap();

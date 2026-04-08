@@ -13,8 +13,5 @@ pub trait RetentionPolicyReadModel: Send + Sync {
 
 #[async_trait]
 pub trait RetentionMaintenance: Send + Sync {
-    async fn apply_retention(
-        &self,
-        tenant_id: &TenantId,
-    ) -> Result<RetentionResult, StoreError>;
+    async fn apply_retention(&self, tenant_id: &TenantId) -> Result<RetentionResult, StoreError>;
 }

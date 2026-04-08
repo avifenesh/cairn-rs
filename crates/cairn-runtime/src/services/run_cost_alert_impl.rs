@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::providers::RunCostAlert;
-use cairn_domain::{
-    RunCostAlertSet, RunCostAlertTriggered, RuntimeEvent, RunId, TenantId,
-};
+use cairn_domain::{RunCostAlertSet, RunCostAlertTriggered, RunId, RuntimeEvent, TenantId};
 use cairn_store::projections::{RunCostAlertReadModel, RunCostReadModel};
 use cairn_store::EventLog;
 
@@ -71,15 +69,13 @@ where
         let total = cost.map(|c| c.total_cost_micros).unwrap_or(0);
 
         if total >= alert_record.threshold_micros {
-            let event = make_envelope(RuntimeEvent::RunCostAlertTriggered(
-                RunCostAlertTriggered {
-                    run_id: run_id.clone(),
-                    tenant_id: alert_record.tenant_id.clone(),
-                    threshold_micros: alert_record.threshold_micros,
-                    actual_cost_micros: total,
-                    triggered_at_ms: now_millis(),
-                },
-            ));
+            let event = make_envelope(RuntimeEvent::RunCostAlertTriggered(RunCostAlertTriggered {
+                run_id: run_id.clone(),
+                tenant_id: alert_record.tenant_id.clone(),
+                threshold_micros: alert_record.threshold_micros,
+                actual_cost_micros: total,
+                triggered_at_ms: now_millis(),
+            }));
             self.store.append(&[event]).await?;
             return Ok(true);
         }
@@ -94,19 +90,14 @@ where
         &self,
         tenant_id: &TenantId,
     ) -> Result<Vec<RunCostAlert>, RuntimeError> {
-        Ok(
-            RunCostAlertReadModel::list_triggered_by_tenant(self.store.as_ref(), tenant_id)
-                .await?,
-        )
+        Ok(RunCostAlertReadModel::list_triggered_by_tenant(self.store.as_ref(), tenant_id).await?)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cairn_domain::{
-        EventEnvelope, EventId, EventSource, RunCostUpdated, SessionId, TenantId,
-    };
+    use cairn_domain::{EventEnvelope, EventId, EventSource, RunCostUpdated, SessionId, TenantId};
     use cairn_store::InMemoryStore;
 
     #[tokio::test]
@@ -199,9 +190,9 @@ mod tests {
             .unwrap();
 
         let events = store.read_stream(None, 100).await.unwrap();
-        let triggered = events.iter().any(|e| {
-            matches!(&e.envelope.payload, RuntimeEvent::RunCostAlertTriggered(_))
-        });
+        let triggered = events
+            .iter()
+            .any(|e| matches!(&e.envelope.payload, RuntimeEvent::RunCostAlertTriggered(_)));
         assert!(!triggered, "alert should NOT fire when cost < threshold");
     }
 
@@ -223,7 +214,7 @@ mod tests {
                     EventId::new(format!("evt_cost_once_{i}")),
                     EventSource::Runtime,
                     RuntimeEvent::RunCostUpdated(RunCostUpdated {
-                    project: cairn_domain::tenancy::ProjectKey::new("_", "_", "_"),
+                        project: cairn_domain::tenancy::ProjectKey::new("_", "_", "_"),
                         run_id: run_id.clone(),
                         session_id: Some(SessionId::new("sess_once")),
                         tenant_id: Some(tenant_id.clone()),

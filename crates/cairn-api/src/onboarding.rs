@@ -4,9 +4,9 @@
 //! and a canonical bootstrap path from install to first value.
 
 use cairn_domain::onboarding::{
-    BootstrapProvenance, ImportOutcome, MaterializedAsset,
-    OnboardingFlowState, OnboardingProgress as DomainOnboardingProgress, OnboardingStep,
-    StarterTemplate, StarterTemplateCategory,
+    BootstrapProvenance, ImportOutcome, MaterializedAsset, OnboardingFlowState,
+    OnboardingProgress as DomainOnboardingProgress, OnboardingStep, StarterTemplate,
+    StarterTemplateCategory,
 };
 use cairn_domain::{ProjectId, TenantId, WorkspaceId};
 
@@ -50,10 +50,7 @@ impl StarterTemplateRegistry {
                     name: "Multi-Step Operator Workflow".to_owned(),
                     description: "Orchestration with tools, stages, and control-plane visibility"
                         .to_owned(),
-                    prompt_assets: vec![
-                        "planner.system".to_owned(),
-                        "executor.system".to_owned(),
-                    ],
+                    prompt_assets: vec!["planner.system".to_owned(), "executor.system".to_owned()],
                     policy_presets: vec!["tool-permission-default".to_owned()],
                     skill_packs: vec![],
                 },
@@ -69,10 +66,7 @@ impl StarterTemplateRegistry {
         self.templates.iter().find(|t| t.id == template_id)
     }
 
-    pub fn get_by_category(
-        &self,
-        category: StarterTemplateCategory,
-    ) -> Option<&StarterTemplate> {
+    pub fn get_by_category(&self, category: StarterTemplateCategory) -> Option<&StarterTemplate> {
         self.templates.iter().find(|t| t.category == category)
     }
 }
@@ -97,12 +91,17 @@ pub fn materialize_template(
             source_template_ref: format!("{}:{}", template.id, name),
             diverged: false,
         })
-        .chain(template.policy_presets.iter().map(|name| MaterializedAsset {
-            asset_type: "policy_preset".to_owned(),
-            asset_id: format!("{}_{}", project_id.as_str(), name),
-            source_template_ref: format!("{}:{}", template.id, name),
-            diverged: false,
-        }))
+        .chain(
+            template
+                .policy_presets
+                .iter()
+                .map(|name| MaterializedAsset {
+                    asset_type: "policy_preset".to_owned(),
+                    asset_id: format!("{}_{}", project_id.as_str(), name),
+                    source_template_ref: format!("{}:{}", template.id, name),
+                    diverged: false,
+                }),
+        )
         .collect();
 
     BootstrapProvenance {
@@ -139,8 +138,12 @@ pub struct OnboardingProgress {
 /// Required steps are: create_project, configure_provider, create_operator, first_run.
 /// All other steps are recommended but optional.
 pub fn compute_progress(checklist: &DomainOnboardingProgress) -> Vec<OnboardingProgress> {
-    const REQUIRED_STEP_IDS: &[&str] =
-        &["create_project", "configure_provider", "create_operator", "first_run"];
+    const REQUIRED_STEP_IDS: &[&str] = &[
+        "create_project",
+        "configure_provider",
+        "create_operator",
+        "first_run",
+    ];
 
     checklist
         .steps
@@ -149,7 +152,11 @@ pub fn compute_progress(checklist: &DomainOnboardingProgress) -> Vec<OnboardingP
             step_id: step.step_id.clone(),
             label: step.name.clone(),
             completed: step.completed,
-            completed_at: if step.completed { checklist.completed_at } else { None },
+            completed_at: if step.completed {
+                checklist.completed_at
+            } else {
+                None
+            },
             required: REQUIRED_STEP_IDS.contains(&step.step_id.as_str()),
         })
         .collect()
@@ -383,10 +390,7 @@ mod tests {
         );
         // 2 prompt assets + 1 policy preset = 3 materialized assets
         assert_eq!(provenance.materialized_assets.len(), 3);
-        assert!(provenance
-            .materialized_assets
-            .iter()
-            .all(|a| !a.diverged));
+        assert!(provenance.materialized_assets.iter().all(|a| !a.diverged));
     }
 
     #[test]
@@ -442,17 +446,17 @@ mod tests {
             "inspect_results",
         ];
 
-        let checklist = create_onboarding_checklist(
-            &ProjectId::new("p1"),
-            Some("knowledge-assistant"),
-        );
+        let checklist =
+            create_onboarding_checklist(&ProjectId::new("p1"), Some("knowledge-assistant"));
         let step_ids: Vec<&str> = checklist.steps.iter().map(|s| s.step_id.as_str()).collect();
 
         // Every required step must be present.
         for required in REQUIRED_STEPS {
             assert!(
                 step_ids.contains(required),
-                "RFC 012 requires step '{}'; present: {:?}", required, step_ids
+                "RFC 012 requires step '{}'; present: {:?}",
+                required,
+                step_ids
             );
         }
 
@@ -484,14 +488,22 @@ mod rfc012_tests {
     fn rfc012_mandatory_three_starter_templates_present() {
         let registry = StarterTemplateRegistry::v1_defaults();
         let templates = registry.list();
-        assert!(templates.len() >= 3,
-            "RFC 012: v1 must ship at least 3 starter templates");
+        assert!(
+            templates.len() >= 3,
+            "RFC 012: v1 must ship at least 3 starter templates"
+        );
 
-        let has_ka = templates.iter().any(|t| t.category == StarterTemplateCategory::KnowledgeAssistant);
-        let has_agw = templates.iter().any(|t| t.category == StarterTemplateCategory::ApprovalGatedWorker);
-        let has_msw = templates.iter().any(|t| t.category == StarterTemplateCategory::MultiStepWorkflow);
+        let has_ka = templates
+            .iter()
+            .any(|t| t.category == StarterTemplateCategory::KnowledgeAssistant);
+        let has_agw = templates
+            .iter()
+            .any(|t| t.category == StarterTemplateCategory::ApprovalGatedWorker);
+        let has_msw = templates
+            .iter()
+            .any(|t| t.category == StarterTemplateCategory::MultiStepWorkflow);
 
-        assert!(has_ka,  "RFC 012: KnowledgeAssistant template required");
+        assert!(has_ka, "RFC 012: KnowledgeAssistant template required");
         assert!(has_agw, "RFC 012: ApprovalGatedWorker template required");
         assert!(has_msw, "RFC 012: MultiStepWorkflow template required");
     }
@@ -509,12 +521,18 @@ mod rfc012_tests {
             12345,
         );
 
-        assert_eq!(provenance.template_id, "knowledge-assistant",
-            "RFC 012: provenance must record which template was selected");
-        assert!(provenance.materialized_at == 12345,
-            "RFC 012: provenance must record when materialization happened");
-        assert!(!provenance.materialized_assets.is_empty(),
-            "RFC 012: provenance must record which assets were materialized");
+        assert_eq!(
+            provenance.template_id, "knowledge-assistant",
+            "RFC 012: provenance must record which template was selected"
+        );
+        assert!(
+            provenance.materialized_at == 12345,
+            "RFC 012: provenance must record when materialization happened"
+        );
+        assert!(
+            !provenance.materialized_assets.is_empty(),
+            "RFC 012: provenance must record which assets were materialized"
+        );
     }
 
     /// RFC 012: bootstrap must be idempotent — repeated import of same content = Reused.
@@ -546,10 +564,16 @@ mod rfc012_tests {
         existing.insert("agent.prompt".to_owned(), "original_hash".to_owned());
 
         let outcome = reconcile_prompt_import(&existing, "agent.prompt", "new_hash");
-        assert_eq!(outcome, ImportOutcome::Conflicted,
-            "RFC 012: changed content must produce Conflicted, not silent overwrite");
-        assert_ne!(outcome, ImportOutcome::Reused,
-            "RFC 012: must not silently reuse when content changed");
+        assert_eq!(
+            outcome,
+            ImportOutcome::Conflicted,
+            "RFC 012: changed content must produce Conflicted, not silent overwrite"
+        );
+        assert_ne!(
+            outcome,
+            ImportOutcome::Reused,
+            "RFC 012: must not silently reuse when content changed"
+        );
     }
 
     /// RFC 012: compute_progress produces one entry per checklist step with correct required flag.
@@ -560,18 +584,28 @@ mod rfc012_tests {
 
         assert_eq!(progress.len(), checklist.steps.len());
 
-        let required_ids = ["create_project", "configure_provider", "create_operator", "first_run"];
+        let required_ids = [
+            "create_project",
+            "configure_provider",
+            "create_operator",
+            "first_run",
+        ];
         for p in &progress {
             let expected_required = required_ids.contains(&p.step_id.as_str());
             assert_eq!(
                 p.required, expected_required,
-                "step '{}' required flag mismatch", p.step_id
+                "step '{}' required flag mismatch",
+                p.step_id
             );
             // Fresh checklist: nothing completed yet.
             assert!(!p.completed);
             assert!(p.completed_at.is_none());
             // Label must be non-empty.
-            assert!(!p.label.is_empty(), "step '{}' must have a label", p.step_id);
+            assert!(
+                !p.label.is_empty(),
+                "step '{}' must have a label",
+                p.step_id
+            );
         }
     }
 
@@ -582,8 +616,16 @@ mod rfc012_tests {
     fn rfc012_batch_import_creates_new_assets() {
         let existing = HashMap::new();
         let items = vec![
-            PromptImportItem { name: "a.prompt".into(), content_hash: "h1".into(), import_id: None },
-            PromptImportItem { name: "b.prompt".into(), content_hash: "h2".into(), import_id: None },
+            PromptImportItem {
+                name: "a.prompt".into(),
+                content_hash: "h1".into(),
+                import_id: None,
+            },
+            PromptImportItem {
+                name: "b.prompt".into(),
+                content_hash: "h2".into(),
+                import_id: None,
+            },
         ];
         let report = reconcile_prompt_imports(&existing, &items);
         assert_eq!(report.created_count, 2, "two new items must be created");
@@ -599,8 +641,16 @@ mod rfc012_tests {
         existing.insert("a.prompt".to_owned(), "h1".to_owned());
         existing.insert("b.prompt".to_owned(), "h2".to_owned());
         let items = vec![
-            PromptImportItem { name: "a.prompt".into(), content_hash: "h1".into(), import_id: None },
-            PromptImportItem { name: "b.prompt".into(), content_hash: "h2".into(), import_id: None },
+            PromptImportItem {
+                name: "a.prompt".into(),
+                content_hash: "h1".into(),
+                import_id: None,
+            },
+            PromptImportItem {
+                name: "b.prompt".into(),
+                content_hash: "h2".into(),
+                import_id: None,
+            },
         ];
         let report = reconcile_prompt_imports(&existing, &items);
         assert!(report.is_noop(), "identical re-import must be a no-op");
@@ -612,13 +662,11 @@ mod rfc012_tests {
     fn rfc012_batch_import_changed_content_creates_new_version() {
         let mut existing = HashMap::new();
         existing.insert("agent.prompt".to_owned(), "original_hash".to_owned());
-        let items = vec![
-            PromptImportItem {
-                name: "agent.prompt".into(),
-                content_hash: "new_hash".into(),
-                import_id: None,
-            },
-        ];
+        let items = vec![PromptImportItem {
+            name: "agent.prompt".into(),
+            content_hash: "new_hash".into(),
+            import_id: None,
+        }];
         let report = reconcile_prompt_imports(&existing, &items);
         assert_eq!(report.updated_count, 1,
             "RFC 012: changed content must produce updated_count (new version), not silent overwrite");
@@ -635,13 +683,15 @@ mod rfc012_tests {
 
         // Same import_id, same hash → skipped (idempotent).
         let same = vec![PromptImportItem {
-            name: "system.prompt".into(),       // name could differ
+            name: "system.prompt".into(), // name could differ
             content_hash: "hash_v1".into(),
             import_id: Some("imp_system_001".into()),
         }];
         let report = reconcile_prompt_imports(&existing, &same);
-        assert_eq!(report.skipped_count, 1,
-            "RFC 012: import_id lookup must be idempotent when hash matches");
+        assert_eq!(
+            report.skipped_count, 1,
+            "RFC 012: import_id lookup must be idempotent when hash matches"
+        );
 
         // Same import_id, changed hash → new version.
         let updated = vec![PromptImportItem {
@@ -650,8 +700,10 @@ mod rfc012_tests {
             import_id: Some("imp_system_001".into()),
         }];
         let report = reconcile_prompt_imports(&existing, &updated);
-        assert_eq!(report.updated_count, 1,
-            "RFC 012: import_id lookup must produce updated_count when hash changes");
+        assert_eq!(
+            report.updated_count, 1,
+            "RFC 012: import_id lookup must produce updated_count when hash changes"
+        );
     }
 
     /// RFC 012: import_id absent falls back to name-based lookup.
@@ -663,11 +715,13 @@ mod rfc012_tests {
         let items = vec![PromptImportItem {
             name: "worker.prompt".into(),
             content_hash: "hash_w".into(),
-            import_id: None,     // no import_id → uses name
+            import_id: None, // no import_id → uses name
         }];
         let report = reconcile_prompt_imports(&existing, &items);
-        assert_eq!(report.skipped_count, 1,
-            "RFC 012: fallback to name-based lookup must match existing entry");
+        assert_eq!(
+            report.skipped_count, 1,
+            "RFC 012: fallback to name-based lookup must match existing entry"
+        );
     }
 
     /// RFC 012: mixed batch — some new, some reused, some updated, some with import_id.
@@ -679,16 +733,31 @@ mod rfc012_tests {
 
         let items = vec![
             // new asset (no prior record)
-            PromptImportItem { name: "brand_new.prompt".into(), content_hash: "h_new".into(), import_id: None },
+            PromptImportItem {
+                name: "brand_new.prompt".into(),
+                content_hash: "h_new".into(),
+                import_id: None,
+            },
             // reused (name key, same hash)
-            PromptImportItem { name: "existing_name.prompt".into(), content_hash: "hash_same".into(), import_id: None },
+            PromptImportItem {
+                name: "existing_name.prompt".into(),
+                content_hash: "hash_same".into(),
+                import_id: None,
+            },
             // updated (import_id key, changed hash)
-            PromptImportItem { name: "renamed.prompt".into(), content_hash: "hash_new".into(), import_id: Some("imp_aaa".into()) },
+            PromptImportItem {
+                name: "renamed.prompt".into(),
+                content_hash: "hash_new".into(),
+                import_id: Some("imp_aaa".into()),
+            },
         ];
         let report = reconcile_prompt_imports(&existing, &items);
         assert_eq!(report.created_count, 1, "one new asset");
         assert_eq!(report.skipped_count, 1, "one reused asset");
-        assert_eq!(report.updated_count, 1, "one versioned update via import_id");
+        assert_eq!(
+            report.updated_count, 1,
+            "one versioned update via import_id"
+        );
         assert_eq!(report.total(), 3);
         assert!(!report.is_noop());
     }
@@ -707,9 +776,11 @@ mod rfc012_tests {
         );
         // RFC 012: newly materialized assets must not show as diverged from shipped defaults.
         for asset in &provenance.materialized_assets {
-            assert!(!asset.diverged,
+            assert!(
+                !asset.diverged,
                 "RFC 012: freshly materialized asset '{}' must not be marked diverged",
-                asset.asset_id);
+                asset.asset_id
+            );
         }
     }
 }

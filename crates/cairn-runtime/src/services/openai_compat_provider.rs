@@ -15,11 +15,11 @@
 //! cargo run -p cairn-app
 //! ```
 
-use serde::{Deserialize, Serialize};
 use cairn_domain::providers::{
     EmbeddingProvider, EmbeddingResponse, GenerationProvider, GenerationResponse,
     ProviderAdapterError, ProviderBindingSettings,
 };
+use serde::{Deserialize, Serialize};
 
 // ── Request / response shapes ────────────────────────────────────────────────
 
@@ -406,10 +406,7 @@ mod tests {
             "Cairn-Inference-2026!",
         );
         let resp = provider
-            .embed(
-                "qwen3-embedding:8b",
-                vec!["Rust memory safety".to_owned()],
-            )
+            .embed("qwen3-embedding:8b", vec!["Rust memory safety".to_owned()])
             .await
             .unwrap();
 
@@ -419,5 +416,4 @@ mod tests {
             "embedding vector must not be empty"
         );
     }
-
 }

@@ -46,9 +46,13 @@ impl GraphQueryTool {
 
 #[async_trait]
 impl ToolHandler for GraphQueryTool {
-    fn name(&self) -> &str { "graph_query" }
+    fn name(&self) -> &str {
+        "graph_query"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
 
     fn description(&self) -> &str {
         "Traverse the knowledge/execution graph from a node. Returns related nodes and edges."
@@ -88,7 +92,8 @@ impl ToolHandler for GraphQueryTool {
     }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
-        let node_id = args.get("node_id")
+        let node_id = args
+            .get("node_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs {
                 field: "node_id".into(),
@@ -103,16 +108,23 @@ impl ToolHandler for GraphQueryTool {
             });
         }
 
-        let direction = match args.get("direction").and_then(|v| v.as_str()).unwrap_or("downstream") {
-            "upstream"   => TraversalDirection::Upstream,
+        let direction = match args
+            .get("direction")
+            .and_then(|v| v.as_str())
+            .unwrap_or("downstream")
+        {
+            "upstream" => TraversalDirection::Upstream,
             "downstream" => TraversalDirection::Downstream,
-            other => return Err(ToolError::InvalidArgs {
-                field: "direction".into(),
-                message: format!("must be 'upstream' or 'downstream', got '{other}'"),
-            }),
+            other => {
+                return Err(ToolError::InvalidArgs {
+                    field: "direction".into(),
+                    message: format!("must be 'upstream' or 'downstream', got '{other}'"),
+                })
+            }
         };
 
-        let max_hops = args.get("max_hops")
+        let max_hops = args
+            .get("max_hops")
             .and_then(|v| v.as_u64())
             .unwrap_or(2)
             .min(10) as u32; // cap at 10 to prevent runaway traversals
@@ -126,26 +138,39 @@ impl ToolHandler for GraphQueryTool {
             direction,
         };
 
-        let subgraph = self.graph.query(query).await
+        let subgraph = self
+            .graph
+            .query(query)
+            .await
             .map_err(|e| ToolError::Transient(e.to_string()))?;
 
-        let nodes: Vec<Value> = subgraph.nodes.iter().map(|n| serde_json::json!({
-            "node_id":    n.node_id,
-            "kind":       format!("{:?}", n.kind).to_lowercase(),
-            "created_at": n.created_at,
-        })).collect();
+        let nodes: Vec<Value> = subgraph
+            .nodes
+            .iter()
+            .map(|n| {
+                serde_json::json!({
+                    "node_id":    n.node_id,
+                    "kind":       format!("{:?}", n.kind).to_lowercase(),
+                    "created_at": n.created_at,
+                })
+            })
+            .collect();
 
-        let edges: Vec<Value> = subgraph.edges.iter().map(|e| {
-            let mut obj = serde_json::json!({
-                "source": e.source_node_id,
-                "target": e.target_node_id,
-                "kind":   format!("{:?}", e.kind).to_lowercase(),
-            });
-            if let Some(c) = e.confidence {
-                obj["confidence"] = serde_json::json!(c);
-            }
-            obj
-        }).collect();
+        let edges: Vec<Value> = subgraph
+            .edges
+            .iter()
+            .map(|e| {
+                let mut obj = serde_json::json!({
+                    "source": e.source_node_id,
+                    "target": e.target_node_id,
+                    "kind":   format!("{:?}", e.kind).to_lowercase(),
+                });
+                if let Some(c) = e.confidence {
+                    obj["confidence"] = serde_json::json!(c);
+                }
+                obj
+            })
+            .collect();
 
         let node_count = nodes.len();
         let edge_count = edges.len();
@@ -164,14 +189,16 @@ impl ToolHandler for GraphQueryTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use async_trait::async_trait;
     use cairn_graph::{
         projections::{EdgeKind, GraphEdge, GraphNode, NodeKind},
         queries::{GraphQuery, GraphQueryError, GraphQueryService, Subgraph, TraversalDirection},
     };
+    use std::sync::Arc;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     // ── Minimal stub ──────────────────────────────────────────────────────────
 
@@ -183,16 +210,45 @@ mod tests {
     #[async_trait]
     impl GraphQueryService for StubGraph {
         async fn query(&self, _q: GraphQuery) -> Result<Subgraph, GraphQueryError> {
-            Ok(Subgraph { nodes: self.nodes.clone(), edges: self.edges.clone() })
+            Ok(Subgraph {
+                nodes: self.nodes.clone(),
+                edges: self.edges.clone(),
+            })
         }
-        async fn neighbors(&self, _: &str, _: Option<EdgeKind>, _: TraversalDirection, _: usize)
-            -> Result<Vec<(GraphEdge, GraphNode)>, GraphQueryError> { Ok(vec![]) }
-        async fn find_edges_by_source(&self, _: &str, _: Option<EdgeKind>, _: usize)
-            -> Result<Vec<GraphEdge>, GraphQueryError> { Ok(vec![]) }
-        async fn find_edges_by_target(&self, _: &str, _: Option<EdgeKind>, _: usize)
-            -> Result<Vec<GraphEdge>, GraphQueryError> { Ok(vec![]) }
-        async fn shortest_path(&self, _: &str, _: &str, _: Option<EdgeKind>, _: u32)
-            -> Result<Option<Subgraph>, GraphQueryError> { Ok(None) }
+        async fn neighbors(
+            &self,
+            _: &str,
+            _: Option<EdgeKind>,
+            _: TraversalDirection,
+            _: usize,
+        ) -> Result<Vec<(GraphEdge, GraphNode)>, GraphQueryError> {
+            Ok(vec![])
+        }
+        async fn find_edges_by_source(
+            &self,
+            _: &str,
+            _: Option<EdgeKind>,
+            _: usize,
+        ) -> Result<Vec<GraphEdge>, GraphQueryError> {
+            Ok(vec![])
+        }
+        async fn find_edges_by_target(
+            &self,
+            _: &str,
+            _: Option<EdgeKind>,
+            _: usize,
+        ) -> Result<Vec<GraphEdge>, GraphQueryError> {
+            Ok(vec![])
+        }
+        async fn shortest_path(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<EdgeKind>,
+            _: u32,
+        ) -> Result<Option<Subgraph>, GraphQueryError> {
+            Ok(None)
+        }
     }
 
     fn make_tool(nodes: Vec<GraphNode>, edges: Vec<GraphEdge>) -> GraphQueryTool {
@@ -201,9 +257,9 @@ mod tests {
 
     fn node(id: &str) -> GraphNode {
         GraphNode {
-            node_id:    id.to_owned(),
-            kind:       NodeKind::Run,
-            project:    None,
+            node_id: id.to_owned(),
+            kind: NodeKind::Run,
+            project: None,
             created_at: 0,
         }
     }
@@ -212,9 +268,9 @@ mod tests {
         GraphEdge {
             source_node_id: src.to_owned(),
             target_node_id: tgt.to_owned(),
-            kind:           EdgeKind::Spawned,
-            created_at:     0,
-            confidence:     None,
+            kind: EdgeKind::Spawned,
+            created_at: 0,
+            confidence: None,
         }
     }
 
@@ -231,7 +287,9 @@ mod tests {
     #[test]
     fn schema_requires_node_id() {
         let req = make_tool(vec![], vec![]).parameters_schema()["required"]
-            .as_array().unwrap().clone();
+            .as_array()
+            .unwrap()
+            .clone();
         assert!(req.iter().any(|v| v.as_str() == Some("node_id")));
     }
 
@@ -241,7 +299,8 @@ mod tests {
     async fn missing_node_id_is_invalid() {
         let err = make_tool(vec![], vec![])
             .execute(&project(), serde_json::json!({}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -249,15 +308,20 @@ mod tests {
     async fn empty_node_id_is_invalid() {
         let err = make_tool(vec![], vec![])
             .execute(&project(), serde_json::json!({"node_id": "  "}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
     #[tokio::test]
     async fn bad_direction_is_invalid() {
         let err = make_tool(vec![], vec![])
-            .execute(&project(), serde_json::json!({"node_id": "n1", "direction": "sideways"}))
-            .await.unwrap_err();
+            .execute(
+                &project(),
+                serde_json::json!({"node_id": "n1", "direction": "sideways"}),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { field, .. } if field == "direction"));
     }
 
@@ -269,8 +333,10 @@ mod tests {
             vec![node("run_1"), node("run_2")],
             vec![edge("run_1", "run_2")],
         );
-        let result = t.execute(&project(), serde_json::json!({"node_id": "run_1"}))
-            .await.unwrap();
+        let result = t
+            .execute(&project(), serde_json::json!({"node_id": "run_1"}))
+            .await
+            .unwrap();
 
         assert_eq!(result.output["node_count"], 2);
         assert_eq!(result.output["edge_count"], 1);
@@ -287,8 +353,12 @@ mod tests {
     #[tokio::test]
     async fn empty_graph_returns_zeros() {
         let result = make_tool(vec![], vec![])
-            .execute(&project(), serde_json::json!({"node_id": "run_x", "max_hops": 5}))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({"node_id": "run_x", "max_hops": 5}),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["node_count"], 0);
         assert_eq!(result.output["edge_count"], 0);
     }
@@ -299,7 +369,8 @@ mod tests {
         e.confidence = Some(0.75);
         let result = make_tool(vec![node("a"), node("b")], vec![e])
             .execute(&project(), serde_json::json!({"node_id": "a"}))
-            .await.unwrap();
+            .await
+            .unwrap();
         let edges = result.output["edges"].as_array().unwrap();
         assert!((edges[0]["confidence"].as_f64().unwrap() - 0.75).abs() < 1e-9);
     }
@@ -307,8 +378,12 @@ mod tests {
     #[tokio::test]
     async fn upstream_direction_accepted() {
         let result = make_tool(vec![], vec![])
-            .execute(&project(), serde_json::json!({"node_id": "run_1", "direction": "upstream"}))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({"node_id": "run_1", "direction": "upstream"}),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["node_count"], 0); // stub returns empty either way
     }
 }

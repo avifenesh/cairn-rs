@@ -15,7 +15,10 @@ use crate::transport::{PluginProcess, SpawnConfig, TransportError};
 #[derive(Debug)]
 pub enum PluginHostError {
     NotFound(String),
-    InvalidState { plugin_id: String, state: PluginState },
+    InvalidState {
+        plugin_id: String,
+        state: PluginState,
+    },
     Transport(TransportError),
     HandshakeFailed(String),
     HealthCheckFailed(String),
@@ -105,9 +108,10 @@ impl StdioPluginHost {
         let req_id = managed.next_request_id();
         let request = build_initialize_request(&req_id);
 
-        let process = managed.process.as_mut().ok_or_else(|| {
-            PluginHostError::HandshakeFailed("no process available".to_owned())
-        })?;
+        let process = managed
+            .process
+            .as_mut()
+            .ok_or_else(|| PluginHostError::HandshakeFailed("no process available".to_owned()))?;
 
         process.send(&request)?;
         let response = process.recv()?;
@@ -179,9 +183,10 @@ impl StdioPluginHost {
         let req_id = managed.next_request_id();
         let request = JsonRpcRequest::new(&req_id, methods::HEALTH_CHECK, serde_json::json!({}));
 
-        let process = managed.process.as_mut().ok_or_else(|| {
-            PluginHostError::HealthCheckFailed("no process available".to_owned())
-        })?;
+        let process = managed
+            .process
+            .as_mut()
+            .ok_or_else(|| PluginHostError::HealthCheckFailed("no process available".to_owned()))?;
 
         process.send(&request)?;
         let response = process.recv()?;
@@ -207,9 +212,9 @@ impl StdioPluginHost {
             });
         }
 
-        let process = managed.process.as_mut().ok_or(
-            PluginHostError::Transport(TransportError::ProcessExited(None))
-        )?;
+        let process = managed.process.as_mut().ok_or(PluginHostError::Transport(
+            TransportError::ProcessExited(None),
+        ))?;
 
         process.send(request)?;
         process.recv().map_err(PluginHostError::Transport)
@@ -240,10 +245,8 @@ impl StdioPluginHost {
                 })
                 .collect::<Vec<_>>();
 
-            let result = serde_json::to_value(
-                cairn_plugin_proto::wire::ToolsListResult { tools },
-            )
-            .unwrap_or(serde_json::Value::Null);
+            let result = serde_json::to_value(cairn_plugin_proto::wire::ToolsListResult { tools })
+                .unwrap_or(serde_json::Value::Null);
 
             return Ok(JsonRpcResponse::new(request.id.clone(), result));
         }
@@ -332,7 +335,6 @@ impl PluginHost for StdioPluginHost {
         let request = build_shutdown_request(&req_id);
 
         if let Some(process) = managed.process.as_mut() {
-
             // Best-effort: send shutdown, then kill if needed.
             let _ = process.send(&request);
             if process.is_alive() {
@@ -384,7 +386,9 @@ impl StdioPluginHost {
             .plugins
             .get(plugin_id)
             .map(|p| format!("{:?}", p.state))
-            .ok_or_else(|| PluginHostError::HandshakeFailed(format!("plugin not found: {plugin_id}")))?;
+            .ok_or_else(|| {
+                PluginHostError::HandshakeFailed(format!("plugin not found: {plugin_id}"))
+            })?;
         Ok(crate::PluginLifecycleSnapshot {
             plugin_id: plugin_id.to_owned(),
             state,
@@ -431,7 +435,9 @@ impl StdioPluginHost {
             .plugins
             .get(plugin_id)
             .map(|p| &p.manifest)
-            .ok_or_else(|| PluginHostError::HandshakeFailed(format!("plugin not found: {plugin_id}")))?;
+            .ok_or_else(|| {
+                PluginHostError::HandshakeFailed(format!("plugin not found: {plugin_id}"))
+            })?;
         Ok(manifest
             .capabilities
             .iter()
@@ -474,10 +480,7 @@ mod tests {
         let mut host = StdioPluginHost::new();
         host.register(test_manifest("com.test.plugin")).unwrap();
 
-        assert_eq!(
-            host.state("com.test.plugin"),
-            Some(PluginState::Discovered)
-        );
+        assert_eq!(host.state("com.test.plugin"), Some(PluginState::Discovered));
     }
 
     #[test]

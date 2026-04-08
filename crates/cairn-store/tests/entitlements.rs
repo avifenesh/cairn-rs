@@ -14,8 +14,8 @@ use cairn_domain::{
         DefaultFeatureGate, Entitlement, EntitlementSet, FeatureGate, FeatureGateResult,
         ProductTier,
     },
-    EntitlementOverrideSet, EventEnvelope, EventId, EventSource, LicenseActivated,
-    RuntimeEvent, TenantId,
+    EntitlementOverrideSet, EventEnvelope, EventId, EventSource, LicenseActivated, RuntimeEvent,
+    TenantId,
 };
 use cairn_store::{projections::LicenseReadModel, EventLog, InMemoryStore};
 
@@ -26,11 +26,7 @@ fn tenant_id() -> TenantId {
 }
 
 fn ev<P: Into<RuntimeEvent>>(id: &str, payload: P) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(
-        EventId::new(id),
-        EventSource::System,
-        payload.into(),
-    )
+    EventEnvelope::for_runtime_event(EventId::new(id), EventSource::System, payload.into())
 }
 
 fn license_activated_event(tier: ProductTier) -> EventEnvelope<RuntimeEvent> {
@@ -95,7 +91,10 @@ async fn no_license_when_none_activated() {
     let license = LicenseReadModel::get_active(store.as_ref(), &tenant_id())
         .await
         .unwrap();
-    assert!(license.is_none(), "no license should exist before LicenseActivated is appended");
+    assert!(
+        license.is_none(),
+        "no license should exist before LicenseActivated is appended"
+    );
 }
 
 /// (3) Append EntitlementOverrideSet; (4) verify override is active in read-model.
@@ -120,7 +119,10 @@ async fn entitlement_override_is_stored_and_queryable() {
     assert_eq!(override_rec.tenant_id, tenant_id());
     assert_eq!(override_rec.feature, "advanced_audit_export");
     assert!(override_rec.granted, "override must be marked granted=true");
-    assert!(override_rec.reason.is_some(), "override reason must be preserved");
+    assert!(
+        override_rec.reason.is_some(),
+        "override reason must be preserved"
+    );
 }
 
 /// Multiple overrides for the same tenant are all listed.
@@ -232,7 +234,11 @@ async fn entitlement_gated_feature_denied_without_entitlement() {
     // No entitlements — all gated features must be Denied.
     let bare_entitlements = EntitlementSet::new(tenant_id(), ProductTier::TeamSelfHosted);
 
-    for feature in &["advanced_audit_export", "compliance_policy_packs", "approval_hardening"] {
+    for feature in &[
+        "advanced_audit_export",
+        "compliance_policy_packs",
+        "approval_hardening",
+    ] {
         let result = gate.check(&bare_entitlements, feature);
         assert!(
             matches!(result, FeatureGateResult::Denied { .. }),
@@ -305,18 +311,33 @@ async fn full_pipeline_license_to_gate_decision() {
     let entitlements = EntitlementSet {
         tenant_id: license.tenant_id.clone(),
         tier: license.tier,
-        active: vec![Entitlement::GovernanceCompliance, Entitlement::AdvancedAdmin],
+        active: vec![
+            Entitlement::GovernanceCompliance,
+            Entitlement::AdvancedAdmin,
+        ],
     };
 
     let gate = DefaultFeatureGate::v1_defaults();
 
     // GA features: always allowed.
-    assert_eq!(gate.check(&entitlements, "runtime_core"), FeatureGateResult::Allowed);
-    assert_eq!(gate.check(&entitlements, "retrieval_core"), FeatureGateResult::Allowed);
+    assert_eq!(
+        gate.check(&entitlements, "runtime_core"),
+        FeatureGateResult::Allowed
+    );
+    assert_eq!(
+        gate.check(&entitlements, "retrieval_core"),
+        FeatureGateResult::Allowed
+    );
 
     // Entitlement-gated features: allowed because entitlements are active.
-    assert_eq!(gate.check(&entitlements, "advanced_audit_export"), FeatureGateResult::Allowed);
-    assert_eq!(gate.check(&entitlements, "advanced_admin"), FeatureGateResult::Allowed);
+    assert_eq!(
+        gate.check(&entitlements, "advanced_audit_export"),
+        FeatureGateResult::Allowed
+    );
+    assert_eq!(
+        gate.check(&entitlements, "advanced_admin"),
+        FeatureGateResult::Allowed
+    );
 
     // Unknown feature: denied (fail-closed).
     assert!(matches!(

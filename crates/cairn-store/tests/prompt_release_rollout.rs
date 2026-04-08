@@ -13,13 +13,13 @@
 //! - `list_by_project` filtered to `"active"` state returns only live releases.
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, PromptAssetId,
-    PromptReleaseId, PromptVersionId, RuntimeEvent, TenantId, WorkspaceId,
     events::{
-        PromptAssetCreated, PromptReleaseCreated, PromptReleaseTransitioned,
-        PromptRolloutStarted, PromptVersionCreated,
+        PromptAssetCreated, PromptReleaseCreated, PromptReleaseTransitioned, PromptRolloutStarted,
+        PromptVersionCreated,
     },
     tenancy::OwnershipKey,
+    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, PromptAssetId, PromptReleaseId,
+    PromptVersionId, RuntimeEvent, TenantId, WorkspaceId,
 };
 use cairn_store::{
     projections::{PromptAssetReadModel, PromptReleaseReadModel, PromptVersionReadModel},
@@ -158,14 +158,36 @@ async fn setup_active_release(
     store: &InMemoryStore,
     prefix: &str,
 ) -> (PromptAssetId, PromptVersionId, PromptReleaseId) {
-    let asset_id   = PromptAssetId::new(format!("{prefix}_asset"));
+    let asset_id = PromptAssetId::new(format!("{prefix}_asset"));
     let version_id = PromptVersionId::new(format!("{prefix}_version"));
     let release_id = PromptReleaseId::new(format!("{prefix}_release"));
 
     append_asset(store, &format!("{prefix}_e1"), asset_id.as_str()).await;
-    append_version(store, &format!("{prefix}_e2"), version_id.as_str(), asset_id.as_str(), "hash_abc").await;
-    append_release(store, &format!("{prefix}_e3"), release_id.as_str(), asset_id.as_str(), version_id.as_str()).await;
-    transition_release(store, &format!("{prefix}_e4"), release_id.as_str(), "draft", "active", 2_000).await;
+    append_version(
+        store,
+        &format!("{prefix}_e2"),
+        version_id.as_str(),
+        asset_id.as_str(),
+        "hash_abc",
+    )
+    .await;
+    append_release(
+        store,
+        &format!("{prefix}_e3"),
+        release_id.as_str(),
+        asset_id.as_str(),
+        version_id.as_str(),
+    )
+    .await;
+    transition_release(
+        store,
+        &format!("{prefix}_e4"),
+        release_id.as_str(),
+        "draft",
+        "active",
+        2_000,
+    )
+    .await;
 
     (asset_id, version_id, release_id)
 }
@@ -180,10 +202,15 @@ async fn release_created_starts_in_draft_state() {
     append_release(&store, "e3", "rel_1", "asset_1", "ver_1").await;
 
     let rel = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_1"))
-        .await.unwrap().expect("release must exist after PromptReleaseCreated");
+        .await
+        .unwrap()
+        .expect("release must exist after PromptReleaseCreated");
 
     assert_eq!(rel.state, "draft", "newly created release must be in draft");
-    assert!(rel.rollout_percent.is_none(), "rollout_percent must be None until rollout starts");
+    assert!(
+        rel.rollout_percent.is_none(),
+        "rollout_percent must be None until rollout starts"
+    );
 }
 
 #[tokio::test]
@@ -193,11 +220,15 @@ async fn asset_and_version_are_stored_by_their_events() {
     append_version(&store, "e2", "ver_av", "asset_av", "hash_av").await;
 
     let asset = PromptAssetReadModel::get(&store, &PromptAssetId::new("asset_av"))
-        .await.unwrap().expect("asset must be stored");
+        .await
+        .unwrap()
+        .expect("asset must be stored");
     assert_eq!(asset.prompt_asset_id.as_str(), "asset_av");
 
     let ver = PromptVersionReadModel::get(&store, &PromptVersionId::new("ver_av"))
-        .await.unwrap().expect("version must be stored");
+        .await
+        .unwrap()
+        .expect("version must be stored");
     assert_eq!(ver.content_hash, "hash_av");
 }
 
@@ -207,7 +238,9 @@ async fn release_links_correct_asset_and_version() {
     let (asset_id, version_id, release_id) = setup_active_release(&store, "link").await;
 
     let rel = PromptReleaseReadModel::get(&store, &release_id)
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(rel.prompt_asset_id, asset_id);
     assert_eq!(rel.prompt_version_id, version_id);
@@ -226,7 +259,9 @@ async fn transition_to_active_updates_state() {
     transition_release(&store, "e4", "rel_t", "draft", "active", 3_000).await;
 
     let rel = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_t"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(rel.state, "active");
     assert_eq!(rel.updated_at, 3_000);
 }
@@ -241,10 +276,15 @@ async fn rollout_25_sets_rollout_percent_and_activates() {
     start_rollout(&store, "r25_e5", release_id.as_str(), 25, 5_000).await;
 
     let rel = PromptReleaseReadModel::get(&store, &release_id)
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(rel.rollout_percent, Some(25), "rollout_percent must be 25");
-    assert_eq!(rel.state, "active", "state must remain active after rollout start");
+    assert_eq!(
+        rel.state, "active",
+        "state must remain active after rollout start"
+    );
     assert_eq!(rel.updated_at, 5_000);
 }
 
@@ -254,10 +294,23 @@ async fn rollout_percent_increases_with_successive_rollout_events() {
     let (_, _, release_id) = setup_active_release(&store, "incr").await;
 
     for (pct, at) in [(10u8, 1_000u64), (50, 2_000), (75, 3_000), (100, 4_000)] {
-        start_rollout(&store, &format!("incr_e_{pct}"), release_id.as_str(), pct, at).await;
+        start_rollout(
+            &store,
+            &format!("incr_e_{pct}"),
+            release_id.as_str(),
+            pct,
+            at,
+        )
+        .await;
         let rel = PromptReleaseReadModel::get(&store, &release_id)
-            .await.unwrap().unwrap();
-        assert_eq!(rel.rollout_percent, Some(pct), "rollout_percent should be {pct}");
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rel.rollout_percent,
+            Some(pct),
+            "rollout_percent should be {pct}"
+        );
     }
 }
 
@@ -271,9 +324,15 @@ async fn rollout_100_means_full_deployment() {
     start_rollout(&store, "full_e5", release_id.as_str(), 100, 9_000).await;
 
     let rel = PromptReleaseReadModel::get(&store, &release_id)
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
-    assert_eq!(rel.rollout_percent, Some(100), "100% rollout = full deployment");
+    assert_eq!(
+        rel.rollout_percent,
+        Some(100),
+        "100% rollout = full deployment"
+    );
     assert_eq!(rel.state, "active");
 }
 
@@ -286,7 +345,9 @@ async fn rollout_0_percent_is_stored_but_release_stays_active() {
     start_rollout(&store, "zero_e5", release_id.as_str(), 0, 1_000).await;
 
     let rel = PromptReleaseReadModel::get(&store, &release_id)
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(rel.rollout_percent, Some(0));
     assert_eq!(rel.state, "active");
@@ -306,19 +367,25 @@ async fn rollout_on_draft_release_activates_it() {
 
     // Release is still "draft" — no transition event.
     let before = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_d"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(before.state, "draft");
 
     start_rollout(&store, "e4", "rel_d", 25, 2_000).await;
 
     let after = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_d"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     // The rollout forces it to "active" — document that this is the current
     // projection behaviour. The service layer (not the store) would enforce
     // the state guard.
-    assert_eq!(after.state, "active",
-        "PromptRolloutStarted forces state=active even on a draft release");
+    assert_eq!(
+        after.state, "active",
+        "PromptRolloutStarted forces state=active even on a draft release"
+    );
     assert_eq!(after.rollout_percent, Some(25));
 }
 
@@ -328,8 +395,12 @@ async fn rollout_on_unknown_release_is_a_no_op() {
     start_rollout(&store, "e1", "ghost_release", 50, 1_000).await;
 
     let result = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("ghost_release"))
-        .await.unwrap();
-    assert!(result.is_none(), "rollout on unknown release must not create a record");
+        .await
+        .unwrap();
+    assert!(
+        result.is_none(),
+        "rollout on unknown release must not create a record"
+    );
 }
 
 #[tokio::test]
@@ -338,16 +409,28 @@ async fn rollout_on_retired_release_updates_it() {
     // but returns the updated state. Service layer owns the guard.
     let store = InMemoryStore::new();
     let (_, _, release_id) = setup_active_release(&store, "retired").await;
-    transition_release(&store, "retired_e5", release_id.as_str(), "active", "retired", 3_000).await;
+    transition_release(
+        &store,
+        "retired_e5",
+        release_id.as_str(),
+        "active",
+        "retired",
+        3_000,
+    )
+    .await;
 
     let before = PromptReleaseReadModel::get(&store, &release_id)
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(before.state, "retired");
 
     start_rollout(&store, "retired_e6", release_id.as_str(), 10, 4_000).await;
 
     let after = PromptReleaseReadModel::get(&store, &release_id)
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     // Documents projection behaviour — state snaps to "active" again.
     assert_eq!(after.rollout_percent, Some(10));
 }
@@ -374,16 +457,27 @@ async fn list_by_project_returns_only_active_releases_when_filtered() {
     append_release(&store, "r3_e3", "rel_r3", "asset_r3", "ver_r3").await;
 
     let all = PromptReleaseReadModel::list_by_project(&store, &project(), 100, 0)
-        .await.unwrap();
-    assert_eq!(all.len(), 3, "all 3 releases must appear in list_by_project");
+        .await
+        .unwrap();
+    assert_eq!(
+        all.len(),
+        3,
+        "all 3 releases must appear in list_by_project"
+    );
 
     let active: Vec<_> = all.iter().filter(|r| r.state == "active").collect();
     assert_eq!(active.len(), 2, "exactly 2 active releases");
 
-    let active_ids: Vec<&str> = active.iter().map(|r| r.prompt_release_id.as_str()).collect();
+    let active_ids: Vec<&str> = active
+        .iter()
+        .map(|r| r.prompt_release_id.as_str())
+        .collect();
     assert!(active_ids.contains(&rel_via_transition.as_str()));
     assert!(active_ids.contains(&"rel_r2"));
-    assert!(!active_ids.contains(&"rel_r3"), "draft release must not be in active list");
+    assert!(
+        !active_ids.contains(&"rel_r3"),
+        "draft release must not be in active list"
+    );
 }
 
 #[tokio::test]
@@ -394,7 +488,8 @@ async fn draft_only_project_has_no_active_releases() {
     append_release(&store, "e3", "rel_draft", "asset_draft", "ver_draft").await;
 
     let all = PromptReleaseReadModel::list_by_project(&store, &project(), 100, 0)
-        .await.unwrap();
+        .await
+        .unwrap();
     let active: Vec<_> = all.iter().filter(|r| r.state == "active").collect();
     assert!(active.is_empty());
 }
@@ -405,12 +500,24 @@ async fn retired_releases_are_excluded_from_active_filter() {
     let (_, _, release_id) = setup_active_release(&store, "retire").await;
 
     // Retire the release.
-    transition_release(&store, "retire_e5", release_id.as_str(), "active", "retired", 5_000).await;
+    transition_release(
+        &store,
+        "retire_e5",
+        release_id.as_str(),
+        "active",
+        "retired",
+        5_000,
+    )
+    .await;
 
     let all = PromptReleaseReadModel::list_by_project(&store, &project(), 100, 0)
-        .await.unwrap();
+        .await
+        .unwrap();
     let active: Vec<_> = all.iter().filter(|r| r.state == "active").collect();
-    assert!(active.is_empty(), "retired release must not appear in active list");
+    assert!(
+        active.is_empty(),
+        "retired release must not appear in active list"
+    );
 }
 
 // ── 7. Event log completeness ─────────────────────────────────────────────────
@@ -425,14 +532,23 @@ async fn all_lifecycle_events_are_written_to_log() {
     // asset + version + release + transition + rollout = 5 events
     assert_eq!(all.len(), 5);
 
-    let types: Vec<bool> = all.iter().map(|e| matches!(&e.envelope.payload,
-        RuntimeEvent::PromptAssetCreated(_)   |
-        RuntimeEvent::PromptVersionCreated(_) |
-        RuntimeEvent::PromptReleaseCreated(_) |
-        RuntimeEvent::PromptReleaseTransitioned(_) |
-        RuntimeEvent::PromptRolloutStarted(_)
-    )).collect();
-    assert!(types.iter().all(|&t| t), "all 5 events must be of expected types");
+    let types: Vec<bool> = all
+        .iter()
+        .map(|e| {
+            matches!(
+                &e.envelope.payload,
+                RuntimeEvent::PromptAssetCreated(_)
+                    | RuntimeEvent::PromptVersionCreated(_)
+                    | RuntimeEvent::PromptReleaseCreated(_)
+                    | RuntimeEvent::PromptReleaseTransitioned(_)
+                    | RuntimeEvent::PromptRolloutStarted(_)
+            )
+        })
+        .collect();
+    assert!(
+        types.iter().all(|&t| t),
+        "all 5 events must be of expected types"
+    );
 }
 
 #[tokio::test]
@@ -444,7 +560,13 @@ async fn rollout_percent_persists_after_second_rollout_event() {
     start_rollout(&store, "persist_e6", release_id.as_str(), 75, 2_000).await;
 
     let rel = PromptReleaseReadModel::get(&store, &release_id)
-        .await.unwrap().unwrap();
-    assert_eq!(rel.rollout_percent, Some(75), "second rollout event must override first");
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        rel.rollout_percent,
+        Some(75),
+        "second rollout event must override first"
+    );
     assert_eq!(rel.updated_at, 2_000);
 }

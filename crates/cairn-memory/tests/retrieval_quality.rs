@@ -14,7 +14,9 @@ use cairn_memory::diagnostics::DiagnosticsService;
 use cairn_memory::diagnostics_impl::InMemoryDiagnostics;
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::{ChunkRecord, IngestRequest, IngestService, SourceType};
-use cairn_memory::pipeline::{compute_content_hash, DocumentStore, IngestPipeline, ParagraphChunker};
+use cairn_memory::pipeline::{
+    compute_content_hash, DocumentStore, IngestPipeline, ParagraphChunker,
+};
 use cairn_memory::retrieval::{
     freshness_score, RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService,
     ScoringPolicy, ScoringWeights,
@@ -38,7 +40,13 @@ fn doc(n: &str) -> KnowledgeDocumentId {
     KnowledgeDocumentId::new(format!("doc_{n}"))
 }
 
-fn ingest(project: ProjectKey, id: &str, source_id: &str, source_type: SourceType, content: &str) -> IngestRequest {
+fn ingest(
+    project: ProjectKey,
+    id: &str,
+    source_id: &str,
+    source_type: SourceType,
+    content: &str,
+) -> IngestRequest {
     IngestRequest {
         document_id: doc(id),
         source_id: source(source_id),
@@ -102,16 +110,34 @@ async fn three_source_types_all_produce_chunks() {
         .unwrap();
 
     let all_chunks = store.all_chunks();
-    assert!(!all_chunks.is_empty(), "chunks must be produced for all three source types");
+    assert!(
+        !all_chunks.is_empty(),
+        "chunks must be produced for all three source types"
+    );
 
     // Each document type must have at least one chunk.
-    let plain_chunks: Vec<_> = all_chunks.iter().filter(|c| c.document_id == doc("plain")).collect();
-    let md_chunks: Vec<_>    = all_chunks.iter().filter(|c| c.document_id == doc("markdown")).collect();
-    let html_chunks: Vec<_>  = all_chunks.iter().filter(|c| c.document_id == doc("html")).collect();
+    let plain_chunks: Vec<_> = all_chunks
+        .iter()
+        .filter(|c| c.document_id == doc("plain"))
+        .collect();
+    let md_chunks: Vec<_> = all_chunks
+        .iter()
+        .filter(|c| c.document_id == doc("markdown"))
+        .collect();
+    let html_chunks: Vec<_> = all_chunks
+        .iter()
+        .filter(|c| c.document_id == doc("html"))
+        .collect();
 
-    assert!(!plain_chunks.is_empty(), "PlainText document must produce chunks");
-    assert!(!md_chunks.is_empty(),    "Markdown document must produce chunks");
-    assert!(!html_chunks.is_empty(),  "Html document must produce chunks");
+    assert!(
+        !plain_chunks.is_empty(),
+        "PlainText document must produce chunks"
+    );
+    assert!(
+        !md_chunks.is_empty(),
+        "Markdown document must produce chunks"
+    );
+    assert!(!html_chunks.is_empty(), "Html document must produce chunks");
 
     // Each chunk must carry its source type and project key.
     for chunk in &plain_chunks {
@@ -143,7 +169,7 @@ async fn source_quality_tracks_each_source_independently() {
     let diag = InMemoryDiagnostics::new();
 
     // Record ingests from two sources.
-    diag.record_ingest(&source("plain"),    &project(), 4);
+    diag.record_ingest(&source("plain"), &project(), 4);
     diag.record_ingest(&source("markdown"), &project(), 6);
 
     // Record retrieval hits only for the plain source.
@@ -152,33 +178,58 @@ async fn source_quality_tracks_each_source_independently() {
     diag.record_retrieval_hit(&source("plain"), 0.72);
 
     // --- Plain source ---
-    let plain_q = diag.source_quality(&source("plain")).await.unwrap().unwrap();
+    let plain_q = diag
+        .source_quality(&source("plain"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(plain_q.total_chunks, 4);
-    assert_eq!(plain_q.total_retrievals, 3, "plain source must record 3 retrieval hits");
+    assert_eq!(
+        plain_q.total_retrievals, 3,
+        "plain source must record 3 retrieval hits"
+    );
     let expected_avg = (0.95 + 0.88 + 0.72) / 3.0;
     assert!(
         (plain_q.avg_relevance_score - expected_avg).abs() < 0.001,
         "plain source avg relevance must be {:.3}, got {:.3}",
-        expected_avg, plain_q.avg_relevance_score
+        expected_avg,
+        plain_q.avg_relevance_score
     );
 
     // --- Markdown source ---
-    let md_q = diag.source_quality(&source("markdown")).await.unwrap().unwrap();
+    let md_q = diag
+        .source_quality(&source("markdown"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(md_q.total_chunks, 6);
-    assert_eq!(md_q.total_retrievals, 0, "markdown source has no retrieval hits yet");
+    assert_eq!(
+        md_q.total_retrievals, 0,
+        "markdown source has no retrieval hits yet"
+    );
 
     // --- HTML source (never recorded) ---
     let html_q = diag.source_quality(&source("html")).await.unwrap();
-    assert!(html_q.is_none(), "unrecorded source must return None from source_quality");
+    assert!(
+        html_q.is_none(),
+        "unrecorded source must return None from source_quality"
+    );
 
     // Index status aggregates across all recorded sources for the project.
     let idx = diag.index_status(&project()).await.unwrap();
-    assert_eq!(idx.total_documents, 2, "index must count 2 distinct document sources");
+    assert_eq!(
+        idx.total_documents, 2,
+        "index must count 2 distinct document sources"
+    );
     assert_eq!(idx.total_chunks, 10, "index must sum chunks: 4 + 6 = 10");
 
     // list_source_quality returns both sources.
     let all_quality = diag.list_source_quality(&project(), 10).await.unwrap();
-    assert_eq!(all_quality.len(), 2, "both sources must appear in list_source_quality");
+    assert_eq!(
+        all_quality.len(),
+        2,
+        "both sources must appear in list_source_quality"
+    );
 }
 
 // ── (4): Retrieval ranking by relevance ────────────────────────────────────────
@@ -261,13 +312,17 @@ async fn retrieval_ranking_by_relevance() {
         assert!(
             window[0] >= window[1],
             "results must be sorted in descending score order: {} >= {}",
-            window[0], window[1]
+            window[0],
+            window[1]
         );
     }
 
     // Diagnostics must report lexical_relevance as a used dimension.
     assert!(
-        response.diagnostics.scoring_dimensions_used.contains(&"lexical_relevance".to_owned()),
+        response
+            .diagnostics
+            .scoring_dimensions_used
+            .contains(&"lexical_relevance".to_owned()),
         "lexical_relevance must be listed as a used scoring dimension"
     );
 }
@@ -321,13 +376,22 @@ async fn retrieval_is_project_scoped() {
         .await
         .unwrap();
 
-    assert!(!proj_a_results.results.is_empty(), "project must find its own document");
     assert!(
-        proj_a_results.results.iter().all(|r| r.chunk.project == project()),
+        !proj_a_results.results.is_empty(),
+        "project must find its own document"
+    );
+    assert!(
+        proj_a_results
+            .results
+            .iter()
+            .all(|r| r.chunk.project == project()),
         "all results must be scoped to project"
     );
     assert!(
-        !proj_a_results.results.iter().any(|r| r.chunk.document_id == doc("proj_b_doc")),
+        !proj_a_results
+            .results
+            .iter()
+            .any(|r| r.chunk.document_id == doc("proj_b_doc")),
         "project query must not return documents from other_project"
     );
 
@@ -346,11 +410,17 @@ async fn retrieval_is_project_scoped() {
         .unwrap();
 
     assert!(
-        proj_b_results.results.iter().all(|r| r.chunk.project == other_project()),
+        proj_b_results
+            .results
+            .iter()
+            .all(|r| r.chunk.project == other_project()),
         "other_project results must only include other_project documents"
     );
     assert!(
-        !proj_b_results.results.iter().any(|r| r.chunk.document_id == doc("proj_a_doc")),
+        !proj_b_results
+            .results
+            .iter()
+            .any(|r| r.chunk.document_id == doc("proj_a_doc")),
         "other_project query must not return documents from project"
     );
 }
@@ -483,25 +553,37 @@ async fn stale_chunks_score_lower_on_freshness() {
         .await
         .unwrap();
 
-    assert_eq!(response.results.len(), 2, "both chunks must be returned for the query");
+    assert_eq!(
+        response.results.len(),
+        2,
+        "both chunks must be returned for the query"
+    );
 
     // Find the fresh and stale results by document ID.
-    let fresh_result = response.results.iter().find(|r| r.chunk.document_id == doc("fresh_doc"))
+    let fresh_result = response
+        .results
+        .iter()
+        .find(|r| r.chunk.document_id == doc("fresh_doc"))
         .expect("fresh document must appear in results");
-    let stale_result = response.results.iter().find(|r| r.chunk.document_id == doc("stale_doc"))
+    let stale_result = response
+        .results
+        .iter()
+        .find(|r| r.chunk.document_id == doc("stale_doc"))
         .expect("stale document must appear in results");
 
     // Fresh chunk must score significantly higher.
     assert!(
         fresh_result.breakdown.freshness > stale_result.breakdown.freshness,
         "fresh chunk freshness ({:.4}) must exceed stale chunk freshness ({:.4})",
-        fresh_result.breakdown.freshness, stale_result.breakdown.freshness
+        fresh_result.breakdown.freshness,
+        stale_result.breakdown.freshness
     );
     assert!(
         fresh_result.score > stale_result.score,
         "fresh chunk final score ({:.4}) must exceed stale chunk score ({:.4}) \
          under freshness-heavy policy",
-        fresh_result.score, stale_result.score
+        fresh_result.score,
+        stale_result.score
     );
 
     // Fresh result must appear first (sorted by descending score).

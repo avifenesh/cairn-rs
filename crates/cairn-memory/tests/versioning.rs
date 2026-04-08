@@ -207,7 +207,10 @@ async fn versioning_list_versions_empty_for_unknown_doc() {
     let versions: Vec<cairn_memory::ingest::DocumentVersion> =
         store.list_versions(&doc_id, 100).await.unwrap();
 
-    assert!(versions.is_empty(), "unknown document should have no versions");
+    assert!(
+        versions.is_empty(),
+        "unknown document should have no versions"
+    );
 }
 
 /// Version read model: after a single ingest, list_versions returns exactly one entry.
@@ -238,5 +241,8 @@ async fn versioning_list_versions_after_single_ingest() {
 
     // The in-memory stub currently returns an empty vec; this asserts the call succeeds.
     // Once the version tracking is fully implemented, this should return 1 version.
-    assert!(versions.len() <= 1, "expected at most 1 version after single ingest");
+    assert!(
+        versions.len() <= 1,
+        "expected at most 1 version after single ingest"
+    );
 }

@@ -133,8 +133,16 @@ mod tests {
             experiment_id: "e1".to_owned(),
             tenant_id: TenantId::new("t1"),
             arms: vec![
-                { let mut a = BanditArm::new("a", release("pr_1")); a.pulls = 5; a },
-                { let mut a = BanditArm::new("b", release("pr_2")); a.pulls = 3; a },
+                {
+                    let mut a = BanditArm::new("a", release("pr_1"));
+                    a.pulls = 5;
+                    a
+                },
+                {
+                    let mut a = BanditArm::new("b", release("pr_2"));
+                    a.pulls = 3;
+                    a
+                },
             ],
             strategy: BanditStrategy::EpsilonGreedy { epsilon: 0.1 },
             epsilon: 0.1,

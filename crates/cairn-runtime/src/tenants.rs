@@ -11,19 +11,12 @@ use crate::error::RuntimeError;
 #[async_trait]
 pub trait TenantService: Send + Sync {
     /// Create a new tenant.
-    async fn create(
-        &self,
-        tenant_id: TenantId,
-        name: String,
-    ) -> Result<TenantRecord, RuntimeError>;
+    async fn create(&self, tenant_id: TenantId, name: String)
+        -> Result<TenantRecord, RuntimeError>;
 
     /// Get a tenant by ID.
     async fn get(&self, tenant_id: &TenantId) -> Result<Option<TenantRecord>, RuntimeError>;
 
     /// List tenants with pagination.
-    async fn list(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<Vec<TenantRecord>, RuntimeError>;
+    async fn list(&self, limit: usize, offset: usize) -> Result<Vec<TenantRecord>, RuntimeError>;
 }

@@ -31,7 +31,10 @@ fn empty_registry_has_no_roles() {
     let reg = AgentRoleRegistry::empty();
     assert_eq!(reg.len(), 0);
     assert!(reg.is_empty());
-    assert!(reg.default_role().is_none(), "empty registry has no default role");
+    assert!(
+        reg.default_role().is_none(),
+        "empty registry has no default role"
+    );
 }
 
 // ── 2. list_all returns all 4, sorted by role_id ─────────────────────────────
@@ -45,7 +48,10 @@ fn list_all_returns_four_sorted_by_role_id() {
 
     // Verify sorted order (executor < orchestrator < researcher < reviewer).
     for window in all.windows(2) {
-        assert!(window[0].role_id <= window[1].role_id, "list_all must be sorted");
+        assert!(
+            window[0].role_id <= window[1].role_id,
+            "list_all must be sorted"
+        );
     }
 
     let ids: Vec<_> = all.iter().map(|r| r.role_id.as_str()).collect();
@@ -65,7 +71,10 @@ fn get_orchestrator_returns_correct_role() {
     assert_eq!(role.role_id, "orchestrator");
     assert_eq!(role.display_name, "Orchestrator");
     assert_eq!(role.tier, AgentRoleTier::Orchestrator);
-    assert!(role.system_prompt.is_some(), "orchestrator has a system prompt");
+    assert!(
+        role.system_prompt.is_some(),
+        "orchestrator has a system prompt"
+    );
     assert!(
         role.max_context_tokens.unwrap_or(0) >= 100_000,
         "orchestrator gets extended context (>= 100k tokens)"
@@ -86,7 +95,9 @@ fn get_researcher_returns_correct_role() {
     );
     // Researcher must have retrieval tools.
     assert!(
-        role.allowed_tools.iter().any(|t| t.contains("retrieve") || t.contains("search")),
+        role.allowed_tools
+            .iter()
+            .any(|t| t.contains("retrieve") || t.contains("search")),
         "researcher must include retrieval/search tools"
     );
 }
@@ -101,7 +112,10 @@ fn get_executor_returns_correct_role() {
     assert!(role.system_prompt.is_some());
     // Executor can write.
     assert!(
-        role.allowed_tools.iter().any(|t| t.contains("write") || t.contains("Write") || t.contains("run") || t.contains("Run")),
+        role.allowed_tools.iter().any(|t| t.contains("write")
+            || t.contains("Write")
+            || t.contains("run")
+            || t.contains("Run")),
         "executor must include write/run tools"
     );
 }
@@ -116,7 +130,10 @@ fn get_reviewer_returns_correct_role() {
     assert!(role.system_prompt.is_some());
     // Reviewer is read-only — must NOT have write tools.
     assert!(
-        !role.allowed_tools.iter().any(|t| t.to_lowercase().contains("write")),
+        !role
+            .allowed_tools
+            .iter()
+            .any(|t| t.to_lowercase().contains("write")),
         "reviewer must not include write tools: {:?}",
         role.allowed_tools
     );
@@ -155,13 +172,19 @@ fn register_custom_role_grows_registry_to_five() {
 fn registered_custom_role_is_retrievable() {
     let reg = AgentRoleRegistry::with_defaults();
 
-    let custom = AgentRole::new("decision-maker", "Decision Maker", AgentRoleTier::Orchestrator)
-        .with_system_prompt("Evaluate options and decide.")
-        .with_max_context_tokens(50_000);
+    let custom = AgentRole::new(
+        "decision-maker",
+        "Decision Maker",
+        AgentRoleTier::Orchestrator,
+    )
+    .with_system_prompt("Evaluate options and decide.")
+    .with_max_context_tokens(50_000);
 
     reg.register(custom);
 
-    let found = reg.get("decision-maker").expect("custom role must be retrievable");
+    let found = reg
+        .get("decision-maker")
+        .expect("custom role must be retrievable");
     assert_eq!(found.display_name, "Decision Maker");
     assert_eq!(found.tier, AgentRoleTier::Orchestrator);
     assert_eq!(found.max_context_tokens, Some(50_000));
@@ -175,9 +198,15 @@ fn tier_orchestrator_has_exactly_one_default_role() {
     let reg = AgentRoleRegistry::with_defaults();
     let orch_tier = reg.list_by_tier(AgentRoleTier::Orchestrator);
 
-    assert_eq!(orch_tier.len(), 1, "exactly one Orchestrator-tier role by default");
+    assert_eq!(
+        orch_tier.len(),
+        1,
+        "exactly one Orchestrator-tier role by default"
+    );
     assert_eq!(orch_tier[0].role_id, "orchestrator");
-    assert!(orch_tier.iter().all(|r| r.tier == AgentRoleTier::Orchestrator));
+    assert!(orch_tier
+        .iter()
+        .all(|r| r.tier == AgentRoleTier::Orchestrator));
 }
 
 #[test]
@@ -185,7 +214,11 @@ fn tier_research_has_exactly_one_default_role() {
     let reg = AgentRoleRegistry::with_defaults();
     let research = reg.list_by_tier(AgentRoleTier::Research);
 
-    assert_eq!(research.len(), 1, "exactly one Research-tier role by default");
+    assert_eq!(
+        research.len(),
+        1,
+        "exactly one Research-tier role by default"
+    );
     assert_eq!(research[0].role_id, "researcher");
     assert!(research.iter().all(|r| r.tier == AgentRoleTier::Research));
 }
@@ -195,7 +228,11 @@ fn tier_standard_has_two_default_roles() {
     let reg = AgentRoleRegistry::with_defaults();
     let standard = reg.list_by_tier(AgentRoleTier::Standard);
 
-    assert_eq!(standard.len(), 2, "executor and reviewer are both Standard tier");
+    assert_eq!(
+        standard.len(),
+        2,
+        "executor and reviewer are both Standard tier"
+    );
     let ids: Vec<_> = standard.iter().map(|r| r.role_id.as_str()).collect();
     assert!(ids.contains(&"executor"));
     assert!(ids.contains(&"reviewer"));
@@ -207,7 +244,10 @@ fn tier_list_is_sorted_by_role_id() {
     let reg = AgentRoleRegistry::with_defaults();
     let standard = reg.list_by_tier(AgentRoleTier::Standard);
     for window in standard.windows(2) {
-        assert!(window[0].role_id <= window[1].role_id, "list_by_tier must be sorted");
+        assert!(
+            window[0].role_id <= window[1].role_id,
+            "list_by_tier must be sorted"
+        );
     }
 }
 
@@ -233,29 +273,41 @@ fn role_tier_variants_are_distinct() {
 #[test]
 fn default_role_returns_orchestrator() {
     let reg = AgentRoleRegistry::with_defaults();
-    let default = reg.default_role().expect("default_role must return Some for a populated registry");
+    let default = reg
+        .default_role()
+        .expect("default_role must return Some for a populated registry");
 
-    assert_eq!(default.role_id, "orchestrator",
-        "orchestrator is the canonical default role");
+    assert_eq!(
+        default.role_id, "orchestrator",
+        "orchestrator is the canonical default role"
+    );
     assert_eq!(default.tier, AgentRoleTier::Orchestrator);
 }
 
 #[test]
 fn default_role_none_on_empty_registry() {
     let reg = AgentRoleRegistry::empty();
-    assert!(reg.default_role().is_none(),
-        "empty registry has no default role");
+    assert!(
+        reg.default_role().is_none(),
+        "empty registry has no default role"
+    );
 }
 
 #[test]
 fn default_role_available_after_custom_registration() {
     // Registering other roles must not displace the default.
     let reg = AgentRoleRegistry::with_defaults();
-    reg.register(AgentRole::new("extra", "Extra Role", AgentRoleTier::Standard));
+    reg.register(AgentRole::new(
+        "extra",
+        "Extra Role",
+        AgentRoleTier::Standard,
+    ));
 
     let default = reg.default_role().unwrap();
-    assert_eq!(default.role_id, "orchestrator",
-        "default_role still returns orchestrator after additional registrations");
+    assert_eq!(
+        default.role_id, "orchestrator",
+        "default_role still returns orchestrator after additional registrations"
+    );
 }
 
 // ── 8. Override: re-registering same role_id replaces the entry ───────────────
@@ -266,8 +318,12 @@ fn register_same_id_replaces_without_duplicate() {
     assert_eq!(reg.len(), 4);
 
     // Override orchestrator with a restricted version.
-    let restricted_orch = AgentRole::new("orchestrator", "Restricted Orchestrator", AgentRoleTier::Orchestrator)
-        .with_max_context_tokens(32_000);
+    let restricted_orch = AgentRole::new(
+        "orchestrator",
+        "Restricted Orchestrator",
+        AgentRoleTier::Orchestrator,
+    )
+    .with_max_context_tokens(32_000);
     reg.register(restricted_orch);
 
     assert_eq!(reg.len(), 4, "override must not duplicate the entry");
@@ -284,8 +340,16 @@ fn cloned_registry_shares_underlying_state() {
     let clone = reg.clone();
 
     // Register via clone — must be visible in original.
-    clone.register(AgentRole::new("shared-role", "Shared", AgentRoleTier::Standard));
+    clone.register(AgentRole::new(
+        "shared-role",
+        "Shared",
+        AgentRoleTier::Standard,
+    ));
 
-    assert_eq!(reg.len(), 5, "clone shares Arc — registration is visible in original");
+    assert_eq!(
+        reg.len(),
+        5,
+        "clone shares Arc — registration is visible in original"
+    );
     assert!(reg.get("shared-role").is_some());
 }

@@ -30,7 +30,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::{ProjectKey, RunId, TaskId, policy::ExecutionClass};
+use cairn_domain::{policy::ExecutionClass, ProjectKey, RunId, TaskId};
 use cairn_runtime::tasks::TaskService;
 use serde_json::Value;
 
@@ -49,9 +49,13 @@ impl CreateTaskTool {
 
 #[async_trait]
 impl ToolHandler for CreateTaskTool {
-    fn name(&self) -> &str { "create_task" }
+    fn name(&self) -> &str {
+        "create_task"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
 
     fn description(&self) -> &str {
         "Spawn a sub-task under the current run. Use blocking=true to wait for completion."
@@ -90,30 +94,39 @@ impl ToolHandler for CreateTaskTool {
 
     async fn execute(&self, project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
         // ── Validate ──────────────────────────────────────────────────────────
-        let run_id_str = args.get("run_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidArgs {
-                field: "run_id".into(), message: "required".into(),
-            })?;
+        let run_id_str =
+            args.get("run_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidArgs {
+                    field: "run_id".into(),
+                    message: "required".into(),
+                })?;
         if run_id_str.trim().is_empty() {
             return Err(ToolError::InvalidArgs {
-                field: "run_id".into(), message: "must not be empty".into(),
+                field: "run_id".into(),
+                message: "must not be empty".into(),
             });
         }
 
-        let description = args.get("description")
+        let description = args
+            .get("description")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs {
-                field: "description".into(), message: "required".into(),
+                field: "description".into(),
+                message: "required".into(),
             })?
             .to_owned();
         if description.trim().is_empty() {
             return Err(ToolError::InvalidArgs {
-                field: "description".into(), message: "must not be empty".into(),
+                field: "description".into(),
+                message: "must not be empty".into(),
             });
         }
 
-        let blocking = args.get("blocking").and_then(|v| v.as_bool()).unwrap_or(false);
+        let blocking = args
+            .get("blocking")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         // ── Generate a unique task ID ─────────────────────────────────────────
         let now_ms = now_millis();
@@ -121,7 +134,8 @@ impl ToolHandler for CreateTaskTool {
         let parent_run_id = RunId::new(run_id_str);
 
         // ── Submit via TaskService ────────────────────────────────────────────
-        let record = self.task_service
+        let record = self
+            .task_service
             .submit(project, task_id.clone(), Some(parent_run_id), None, 0)
             .await
             .map_err(|e| ToolError::Transient(e.to_string()))?;
@@ -148,11 +162,13 @@ fn now_millis() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use cairn_store::InMemoryStore;
     use cairn_runtime::services::TaskServiceImpl;
+    use cairn_store::InMemoryStore;
+    use std::sync::Arc;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     fn make_tool() -> CreateTaskTool {
         let store = Arc::new(InMemoryStore::new());
@@ -172,7 +188,9 @@ mod tests {
     #[test]
     fn schema_requires_run_id_and_description() {
         let req = make_tool().parameters_schema()["required"]
-            .as_array().unwrap().clone();
+            .as_array()
+            .unwrap()
+            .clone();
         assert!(req.iter().any(|v| v.as_str() == Some("run_id")));
         assert!(req.iter().any(|v| v.as_str() == Some("description")));
     }
@@ -183,7 +201,8 @@ mod tests {
     async fn missing_run_id_is_invalid() {
         let err = make_tool()
             .execute(&project(), serde_json::json!({"description": "do a thing"}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { field, .. } if field == "run_id"));
     }
 
@@ -191,15 +210,20 @@ mod tests {
     async fn missing_description_is_invalid() {
         let err = make_tool()
             .execute(&project(), serde_json::json!({"run_id": "r1"}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { field, .. } if field == "description"));
     }
 
     #[tokio::test]
     async fn empty_description_is_invalid() {
         let err = make_tool()
-            .execute(&project(), serde_json::json!({"run_id": "r1", "description": "  "}))
-            .await.unwrap_err();
+            .execute(
+                &project(),
+                serde_json::json!({"run_id": "r1", "description": "  "}),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { field, .. } if field == "description"));
     }
 
@@ -208,38 +232,59 @@ mod tests {
     #[tokio::test]
     async fn creates_task_successfully() {
         let result = make_tool()
-            .execute(&project(), serde_json::json!({
-                "run_id": "run_parent", "description": "Research cairn-rs architecture"
-            }))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "run_id": "run_parent", "description": "Research cairn-rs architecture"
+                }),
+            )
+            .await
+            .unwrap();
 
         let task_id = result.output["task_id"].as_str().unwrap();
         assert!(!task_id.is_empty(), "task_id must be populated");
         assert_eq!(result.output["run_id"], "run_parent");
         assert_eq!(result.output["state"], "queued", "new task must be queued");
         assert_eq!(result.output["blocking"], false, "default is non-blocking");
-        assert_eq!(result.output["description"], "Research cairn-rs architecture");
+        assert_eq!(
+            result.output["description"],
+            "Research cairn-rs architecture"
+        );
     }
 
     #[tokio::test]
     async fn blocking_flag_is_preserved() {
         let result = make_tool()
-            .execute(&project(), serde_json::json!({
-                "run_id": "run_1", "description": "delegate subtask", "blocking": true
-            }))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "run_id": "run_1", "description": "delegate subtask", "blocking": true
+                }),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["blocking"], true);
     }
 
     #[tokio::test]
     async fn two_tasks_get_distinct_ids() {
         let tool = make_tool();
-        let r1 = tool.execute(&project(), serde_json::json!({"run_id":"r","description":"a"}))
-            .await.unwrap();
+        let r1 = tool
+            .execute(
+                &project(),
+                serde_json::json!({"run_id":"r","description":"a"}),
+            )
+            .await
+            .unwrap();
         // small delay to ensure distinct timestamps
         tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
-        let r2 = tool.execute(&project(), serde_json::json!({"run_id":"r","description":"b"}))
-            .await.unwrap();
+        let r2 = tool
+            .execute(
+                &project(),
+                serde_json::json!({"run_id":"r","description":"b"}),
+            )
+            .await
+            .unwrap();
         assert_ne!(
             r1.output["task_id"].as_str().unwrap(),
             r2.output["task_id"].as_str().unwrap(),

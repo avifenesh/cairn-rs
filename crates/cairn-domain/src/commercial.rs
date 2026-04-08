@@ -242,10 +242,7 @@ mod tests {
     fn feature_gate_allows_ga_features() {
         let gate = DefaultFeatureGate::v1_defaults();
         let set = EntitlementSet::new(TenantId::new("t1"), ProductTier::TeamSelfHosted);
-        assert_eq!(
-            gate.check(&set, "runtime_core"),
-            FeatureGateResult::Allowed
-        );
+        assert_eq!(gate.check(&set, "runtime_core"), FeatureGateResult::Allowed);
     }
 
     #[test]
@@ -278,7 +275,8 @@ mod tests {
         let result = gate.check(&set, "nonexistent_feature");
         assert!(
             matches!(result, FeatureGateResult::Denied { .. }),
-            "RFC 014: unknown feature must return Denied; got {:?}", result
+            "RFC 014: unknown feature must return Denied; got {:?}",
+            result
         );
     }
 
@@ -319,14 +317,20 @@ mod tests {
         let result = gate.check(&set, "advanced_admin");
         assert!(
             matches!(result, FeatureGateResult::Denied { .. }),
-            "absent entitlement must refuse with Denied, got {:?}", result
+            "absent entitlement must refuse with Denied, got {:?}",
+            result
         );
 
         // Denial must not corrupt the EntitlementSet — count unchanged, existing entitlement still valid.
-        assert_eq!(set.active.len(), initial_active_count,
-            "gate check must not mutate the EntitlementSet");
-        assert!(set.has(Entitlement::GovernanceCompliance),
-            "pre-existing entitlement must survive a denial of a different feature");
+        assert_eq!(
+            set.active.len(),
+            initial_active_count,
+            "gate check must not mutate the EntitlementSet"
+        );
+        assert!(
+            set.has(Entitlement::GovernanceCompliance),
+            "pre-existing entitlement must survive a denial of a different feature"
+        );
 
         // The feature backed by the held entitlement must still be accessible.
         assert_eq!(
@@ -351,15 +355,24 @@ mod rfc014_tests {
             .with_entitlement(Entitlement::AdvancedAdmin);
 
         // RFC 014: entitlements must be inspectable — list them explicitly.
-        assert!(set.has(Entitlement::GovernanceCompliance),
-            "RFC 014: entitlements must be individually inspectable");
-        assert!(set.has(Entitlement::AdvancedAdmin),
-            "RFC 014: all active entitlements must be visible");
-        assert!(!set.has(Entitlement::ManagedServiceRights),
-            "RFC 014: absent entitlements must not appear present");
+        assert!(
+            set.has(Entitlement::GovernanceCompliance),
+            "RFC 014: entitlements must be individually inspectable"
+        );
+        assert!(
+            set.has(Entitlement::AdvancedAdmin),
+            "RFC 014: all active entitlements must be visible"
+        );
+        assert!(
+            !set.has(Entitlement::ManagedServiceRights),
+            "RFC 014: absent entitlements must not appear present"
+        );
         // The active list must be enumerable.
-        assert_eq!(set.active.len(), 2,
-            "RFC 014: active entitlement count must be accurate");
+        assert_eq!(
+            set.active.len(),
+            2,
+            "RFC 014: active entitlement count must be accurate"
+        );
     }
 
     /// RFC 014: one codebase, one binary — product tier does not fork behavior.
@@ -389,19 +402,24 @@ mod rfc014_tests {
         // Must be Denied, not panicking or corrupting state.
         assert!(
             matches!(result, FeatureGateResult::Denied { .. }),
-            "RFC 014: community tier must be denied advanced features, got {:?}", result
+            "RFC 014: community tier must be denied advanced features, got {:?}",
+            result
         );
         // State must not be mutated.
-        assert!(set.active.is_empty(),
-            "RFC 014: gate check must not add entitlements to deny result");
+        assert!(
+            set.active.is_empty(),
+            "RFC 014: gate check must not add entitlements to deny result"
+        );
     }
 
     /// RFC 014: enterprise tier includes advanced capabilities.
     #[test]
     fn rfc014_enterprise_tier_includes_advanced_capabilities() {
         let set = EntitlementSet::new(TenantId::new("t1"), ProductTier::EnterpriseSelfHosted);
-        assert!(set.is_enterprise(),
-            "RFC 014: EnterpriseSelfHosted must be recognized as enterprise tier");
+        assert!(
+            set.is_enterprise(),
+            "RFC 014: EnterpriseSelfHosted must be recognized as enterprise tier"
+        );
     }
 
     /// RFC 014: feature gate result types are distinct and exhaustive.
@@ -409,11 +427,15 @@ mod rfc014_tests {
     fn rfc014_feature_gate_result_types_are_distinct() {
         assert_ne!(
             FeatureGateResult::Allowed,
-            FeatureGateResult::Denied { reason: "test".to_owned() },
+            FeatureGateResult::Denied {
+                reason: "test".to_owned()
+            },
         );
         assert_ne!(
             FeatureGateResult::Allowed,
-            FeatureGateResult::Degraded { reason: "test".to_owned() },
+            FeatureGateResult::Degraded {
+                reason: "test".to_owned()
+            },
         );
     }
 }

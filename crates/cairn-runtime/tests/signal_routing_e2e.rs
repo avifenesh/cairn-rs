@@ -12,14 +12,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cairn_domain::{
-    MailboxMessageId, ProjectKey, RunId, RuntimeEvent, SessionId, SignalId,
-};
-use cairn_runtime::{
-    RunService, RunServiceImpl, SessionService, SessionServiceImpl,
-    SignalRouterService, SignalService,
-};
+use cairn_domain::{MailboxMessageId, ProjectKey, RunId, RuntimeEvent, SessionId, SignalId};
 use cairn_runtime::services::{SignalRouterServiceImpl, SignalServiceImpl};
+use cairn_runtime::{
+    RunService, RunServiceImpl, SessionService, SessionServiceImpl, SignalRouterService,
+    SignalService,
+};
 use cairn_store::projections::MailboxReadModel;
 use cairn_store::{EventLog, InMemoryStore};
 
@@ -129,7 +127,10 @@ async fn ingest_and_route_creates_mailbox_message() {
         .await
         .unwrap();
 
-    assert_eq!(result.routed_count, 1, "one subscription should receive the signal");
+    assert_eq!(
+        result.routed_count, 1,
+        "one subscription should receive the signal"
+    );
     assert_eq!(
         result.mailbox_message_ids,
         vec![MailboxMessageId::new("mbox_route_1")]
@@ -138,7 +139,10 @@ async fn ingest_and_route_creates_mailbox_message() {
     let msg = MailboxReadModel::get(store.as_ref(), &MailboxMessageId::new("mbox_route_1"))
         .await
         .unwrap();
-    assert!(msg.is_some(), "mailbox message must be created after routing");
+    assert!(
+        msg.is_some(),
+        "mailbox message must be created after routing"
+    );
 
     // SignalRouted event must be in the store.
     let events = store.read_stream(None, 30).await.unwrap();
@@ -226,13 +230,13 @@ async fn filter_expression_passes_matching_signal() {
         .unwrap();
 
     assert_eq!(result.routed_count, 1, "matching signal must be routed");
-    let msg = MailboxReadModel::get(
-        store.as_ref(),
-        &MailboxMessageId::new("mbox_filter_ok"),
-    )
-    .await
-    .unwrap();
-    assert!(msg.is_some(), "mailbox message must be created for matching signal");
+    let msg = MailboxReadModel::get(store.as_ref(), &MailboxMessageId::new("mbox_filter_ok"))
+        .await
+        .unwrap();
+    assert!(
+        msg.is_some(),
+        "mailbox message must be created for matching signal"
+    );
 }
 
 // ── (5) Multi-subscription fan-out ───────────────────────────────────────
@@ -284,7 +288,10 @@ async fn signal_fans_out_to_multiple_subscriptions() {
         .await
         .unwrap();
 
-    assert_eq!(result.routed_count, 2, "signal must fan out to both subscribers");
+    assert_eq!(
+        result.routed_count, 2,
+        "signal must fan out to both subscribers"
+    );
     assert_eq!(result.mailbox_message_ids.len(), 2);
 }
 

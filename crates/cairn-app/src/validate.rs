@@ -26,7 +26,9 @@ pub fn require(field: &str, value: &Option<String>) -> Result<(), String> {
 pub fn max_len(field: &str, value: &Option<String>, max: usize) -> Result<(), String> {
     if let Some(v) = value {
         if v.len() > max {
-            return Err(format!("{field} exceeds maximum length of {max} characters"));
+            return Err(format!(
+                "{field} exceeds maximum length of {max} characters"
+            ));
         }
     }
     Ok(())
@@ -35,7 +37,9 @@ pub fn max_len(field: &str, value: &Option<String>, max: usize) -> Result<(), St
 /// Validate that a non-optional string does not exceed `max` bytes.
 pub fn max_len_str(field: &str, value: &str, max: usize) -> Result<(), String> {
     if value.len() > max {
-        Err(format!("{field} exceeds maximum length of {max} characters"))
+        Err(format!(
+            "{field} exceeds maximum length of {max} characters"
+        ))
     } else {
         Ok(())
     }
@@ -48,7 +52,9 @@ pub fn valid_id(field: &str, value: &Option<String>) -> Result<(), String> {
         return Ok(()); // optional IDs are allowed to be absent
     }
     if v.len() > MAX_ID_LEN {
-        return Err(format!("{field} exceeds maximum length of {MAX_ID_LEN} characters"));
+        return Err(format!(
+            "{field} exceeds maximum length of {MAX_ID_LEN} characters"
+        ));
     }
     if v.chars().any(|c| c.is_control()) {
         return Err(format!("{field} must not contain control characters"));
@@ -62,7 +68,9 @@ pub fn require_id(field: &str, value: &str) -> Result<(), String> {
         return Err(format!("{field} is required"));
     }
     if value.len() > MAX_ID_LEN {
-        return Err(format!("{field} exceeds maximum length of {MAX_ID_LEN} characters"));
+        return Err(format!(
+            "{field} exceeds maximum length of {MAX_ID_LEN} characters"
+        ));
     }
     if value.chars().any(|c| c.is_control()) {
         return Err(format!("{field} must not contain control characters"));

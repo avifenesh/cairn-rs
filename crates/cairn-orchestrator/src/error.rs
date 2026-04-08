@@ -34,20 +34,23 @@ pub enum OrchestratorError {
 impl std::fmt::Display for OrchestratorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            OrchestratorError::Gather(msg)   => write!(f, "gather error: {msg}"),
-            OrchestratorError::Decide(msg)   => write!(f, "decide error: {msg}"),
-            OrchestratorError::Execute(msg)  => write!(f, "execute error: {msg}"),
-            OrchestratorError::Runtime(e)    => write!(f, "runtime error: {e}"),
-            OrchestratorError::Store(e)      => write!(f, "store error: {e}"),
-            OrchestratorError::MaxIterations { limit } =>
-                write!(f, "max iterations reached: {limit}"),
-            OrchestratorError::Timeout       => write!(f, "orchestration timed out"),
-            OrchestratorError::ApprovalDenied { approval_id } =>
-                write!(f, "approval denied: {approval_id}"),
-            OrchestratorError::DependencyFailed { child_task_id } =>
-                write!(f, "dependency failed: child task {child_task_id}"),
-            OrchestratorError::Memory(msg)   => write!(f, "memory error: {msg}"),
-            OrchestratorError::Graph(msg)    => write!(f, "graph error: {msg}"),
+            OrchestratorError::Gather(msg) => write!(f, "gather error: {msg}"),
+            OrchestratorError::Decide(msg) => write!(f, "decide error: {msg}"),
+            OrchestratorError::Execute(msg) => write!(f, "execute error: {msg}"),
+            OrchestratorError::Runtime(e) => write!(f, "runtime error: {e}"),
+            OrchestratorError::Store(e) => write!(f, "store error: {e}"),
+            OrchestratorError::MaxIterations { limit } => {
+                write!(f, "max iterations reached: {limit}")
+            }
+            OrchestratorError::Timeout => write!(f, "orchestration timed out"),
+            OrchestratorError::ApprovalDenied { approval_id } => {
+                write!(f, "approval denied: {approval_id}")
+            }
+            OrchestratorError::DependencyFailed { child_task_id } => {
+                write!(f, "dependency failed: child task {child_task_id}")
+            }
+            OrchestratorError::Memory(msg) => write!(f, "memory error: {msg}"),
+            OrchestratorError::Graph(msg) => write!(f, "graph error: {msg}"),
         }
     }
 }

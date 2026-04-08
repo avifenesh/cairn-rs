@@ -6,8 +6,8 @@ use axum::{
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
-use cairn_domain::OperatorId;
 use cairn_domain::tenancy::TenantKey;
+use cairn_domain::OperatorId;
 use tower::ServiceExt;
 
 const TOKEN: &str = "full-workspace-token";
@@ -101,11 +101,16 @@ async fn app_with_token() -> axum::Router {
         mode: cairn_api::bootstrap::DeploymentMode::SelfHostedTeam,
         ..BootstrapConfig::default()
     };
-    let (app, _runtime, tokens) =
-        AppBootstrap::router_with_runtime_and_tokens(config)
-            .await
-            .unwrap();
-    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
+    let (app, _runtime, tokens) = AppBootstrap::router_with_runtime_and_tokens(config)
+        .await
+        .unwrap();
+    tokens.register(
+        TOKEN.to_string(),
+        AuthPrincipal::Operator {
+            operator_id: OperatorId::new("test_op"),
+            tenant: TenantKey::new("default_tenant"),
+        },
+    );
     app
 }
 

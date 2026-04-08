@@ -12,14 +12,14 @@
 //!     → ApprovalResolved(Rejected)   → rejection path
 //!   ApprovalPolicyCreated → queryable by policy ID and tenant
 
+use cairn_domain::policy::{ApprovalDecision, ApprovalRequirement};
+use cairn_domain::tenancy::WorkspaceRole;
+use cairn_domain::tool_invocation::ToolInvocationTarget;
 use cairn_domain::{
-    ApprovalId, ApprovalPolicyCreated, ApprovalRequested, ApprovalResolved, EventEnvelope,
-    EventId, EventSource, ExecutionClass, ProjectId, ProjectKey, RunCreated, RunId, RuntimeEvent,
+    ApprovalId, ApprovalPolicyCreated, ApprovalRequested, ApprovalResolved, EventEnvelope, EventId,
+    EventSource, ExecutionClass, ProjectId, ProjectKey, RunCreated, RunId, RuntimeEvent,
     SessionCreated, SessionId, TenantId, ToolInvocationId, ToolInvocationStarted, WorkspaceId,
 };
-use cairn_domain::policy::{ApprovalDecision, ApprovalRequirement};
-use cairn_domain::tool_invocation::ToolInvocationTarget;
-use cairn_domain::tenancy::WorkspaceRole;
 use cairn_store::{
     projections::{ApprovalPolicyReadModel, ApprovalReadModel, ToolInvocationReadModel},
     EventLog, InMemoryStore,
@@ -57,32 +57,41 @@ async fn tool_invocation_is_recorded_before_approval() {
 
     store
         .append(&[
-            evt("e1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: SessionId::new("sess_1"),
-            })),
-            evt("e2", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_1"),
-                run_id: run_id.clone(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            evt("e3", RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
-                project: project(),
-                invocation_id: invocation_id.clone(),
-                session_id: Some(SessionId::new("sess_1")),
-                run_id: Some(run_id.clone()),
-                task_id: None,
-                target: ToolInvocationTarget::Builtin {
-                    tool_name: "write_file".to_owned(),
-                },
-                execution_class: ExecutionClass::SupervisedProcess,
-                prompt_release_id: None,
-                requested_at_ms: ts,
-                started_at_ms: ts,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_1"),
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_1"),
+                    run_id: run_id.clone(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e3",
+                RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
+                    project: project(),
+                    invocation_id: invocation_id.clone(),
+                    session_id: Some(SessionId::new("sess_1")),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    target: ToolInvocationTarget::Builtin {
+                        tool_name: "write_file".to_owned(),
+                    },
+                    execution_class: ExecutionClass::SupervisedProcess,
+                    prompt_release_id: None,
+                    requested_at_ms: ts,
+                    started_at_ms: ts,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -94,7 +103,9 @@ async fn tool_invocation_is_recorded_before_approval() {
 
     assert_eq!(inv.invocation_id, invocation_id);
     assert_eq!(inv.run_id, Some(run_id));
-    assert!(matches!(inv.target, ToolInvocationTarget::Builtin { ref tool_name } if tool_name == "write_file"));
+    assert!(
+        matches!(inv.target, ToolInvocationTarget::Builtin { ref tool_name } if tool_name == "write_file")
+    );
 }
 
 // ── 2. ApprovalRequested creates pending record ───────────────────────────────
@@ -108,25 +119,34 @@ async fn approval_requested_creates_pending_record() {
 
     store
         .append(&[
-            evt("e1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: SessionId::new("sess_2"),
-            })),
-            evt("e2", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_2"),
-                run_id: run_id.clone(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            evt("e3", RuntimeEvent::ApprovalRequested(ApprovalRequested {
-                project: project(),
-                approval_id: approval_id.clone(),
-                run_id: Some(run_id.clone()),
-                task_id: None,
-                requirement: ApprovalRequirement::Required,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_2"),
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_2"),
+                    run_id: run_id.clone(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e3",
+                RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                    project: project(),
+                    approval_id: approval_id.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    requirement: ApprovalRequirement::Required,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -139,7 +159,10 @@ async fn approval_requested_creates_pending_record() {
     assert_eq!(record.approval_id, approval_id);
     assert_eq!(record.run_id, Some(run_id));
     assert_eq!(record.requirement, ApprovalRequirement::Required);
-    assert!(record.decision.is_none(), "pending approval has no decision yet");
+    assert!(
+        record.decision.is_none(),
+        "pending approval has no decision yet"
+    );
     assert_eq!(record.version, 1, "initial version is 1");
 
     // Appears in the pending inbox.
@@ -161,40 +184,55 @@ async fn approval_resolved_approved_updates_decision() {
 
     store
         .append(&[
-            evt("e1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: SessionId::new("sess_3"),
-            })),
-            evt("e2", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_3"),
-                run_id: run_id.clone(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            evt("e3", RuntimeEvent::ApprovalRequested(ApprovalRequested {
-                project: project(),
-                approval_id: approval_id.clone(),
-                run_id: Some(run_id.clone()),
-                task_id: None,
-                requirement: ApprovalRequirement::Required,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_3"),
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_3"),
+                    run_id: run_id.clone(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e3",
+                RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                    project: project(),
+                    approval_id: approval_id.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    requirement: ApprovalRequirement::Required,
+                }),
+            ),
         ])
         .await
         .unwrap();
 
     // Verify pending before resolution.
-    let before = ApprovalReadModel::get(&store, &approval_id).await.unwrap().unwrap();
+    let before = ApprovalReadModel::get(&store, &approval_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(before.decision.is_none());
 
     // Operator approves.
     store
-        .append(&[evt("e4", RuntimeEvent::ApprovalResolved(ApprovalResolved {
-            project: project(),
-            approval_id: approval_id.clone(),
-            decision: ApprovalDecision::Approved,
-        }))])
+        .append(&[evt(
+            "e4",
+            RuntimeEvent::ApprovalResolved(ApprovalResolved {
+                project: project(),
+                approval_id: approval_id.clone(),
+                decision: ApprovalDecision::Approved,
+            }),
+        )])
         .await
         .unwrap();
 
@@ -205,13 +243,19 @@ async fn approval_resolved_approved_updates_decision() {
 
     assert_eq!(after.decision, Some(ApprovalDecision::Approved));
     assert_eq!(after.version, 2, "version bumped after resolution");
-    assert!(after.updated_at >= before.updated_at, "updated_at must advance");
+    assert!(
+        after.updated_at >= before.updated_at,
+        "updated_at must advance"
+    );
 
     // Resolved approval no longer in pending inbox.
     let pending = ApprovalReadModel::list_pending(&store, &project(), 10, 0)
         .await
         .unwrap();
-    assert!(pending.is_empty(), "resolved approval must not appear in pending list");
+    assert!(
+        pending.is_empty(),
+        "resolved approval must not appear in pending list"
+    );
 }
 
 // ── 4. Rejection path ─────────────────────────────────────────────────────────
@@ -224,30 +268,42 @@ async fn approval_resolved_rejected_records_rejection() {
 
     store
         .append(&[
-            evt("e1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: SessionId::new("sess_4"),
-            })),
-            evt("e2", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_4"),
-                run_id: run_id.clone(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            evt("e3", RuntimeEvent::ApprovalRequested(ApprovalRequested {
-                project: project(),
-                approval_id: approval_id.clone(),
-                run_id: Some(run_id.clone()),
-                task_id: None,
-                requirement: ApprovalRequirement::Required,
-            })),
-            evt("e4", RuntimeEvent::ApprovalResolved(ApprovalResolved {
-                project: project(),
-                approval_id: approval_id.clone(),
-                decision: ApprovalDecision::Rejected,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_4"),
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_4"),
+                    run_id: run_id.clone(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e3",
+                RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                    project: project(),
+                    approval_id: approval_id.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    requirement: ApprovalRequirement::Required,
+                }),
+            ),
+            evt(
+                "e4",
+                RuntimeEvent::ApprovalResolved(ApprovalResolved {
+                    project: project(),
+                    approval_id: approval_id.clone(),
+                    decision: ApprovalDecision::Rejected,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -279,40 +335,55 @@ async fn multiple_approvals_pending_list_shows_unresolved_only() {
 
     store
         .append(&[
-            evt("e1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: SessionId::new("sess_5"),
-            })),
-            evt("e2", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_5"),
-                run_id: run_id.clone(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_5"),
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_5"),
+                    run_id: run_id.clone(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
             // Three approvals requested.
-            evt("e3", RuntimeEvent::ApprovalRequested(ApprovalRequested {
-                project: project(),
-                approval_id: ap1.clone(),
-                run_id: Some(run_id.clone()),
-                task_id: None,
-                requirement: ApprovalRequirement::Required,
-            })),
-            evt("e4", RuntimeEvent::ApprovalRequested(ApprovalRequested {
-                project: project(),
-                approval_id: ap2.clone(),
-                run_id: Some(run_id.clone()),
-                task_id: None,
-                requirement: ApprovalRequirement::Required,
-            })),
-            evt("e5", RuntimeEvent::ApprovalRequested(ApprovalRequested {
-                project: project(),
-                approval_id: ap3.clone(),
-                run_id: Some(run_id.clone()),
-                task_id: None,
-                requirement: ApprovalRequirement::Required,
-            })),
+            evt(
+                "e3",
+                RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                    project: project(),
+                    approval_id: ap1.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    requirement: ApprovalRequirement::Required,
+                }),
+            ),
+            evt(
+                "e4",
+                RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                    project: project(),
+                    approval_id: ap2.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    requirement: ApprovalRequirement::Required,
+                }),
+            ),
+            evt(
+                "e5",
+                RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                    project: project(),
+                    approval_id: ap3.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    requirement: ApprovalRequirement::Required,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -325,16 +396,22 @@ async fn multiple_approvals_pending_list_shows_unresolved_only() {
     // Resolve the first two.
     store
         .append(&[
-            evt("e6", RuntimeEvent::ApprovalResolved(ApprovalResolved {
-                project: project(),
-                approval_id: ap1.clone(),
-                decision: ApprovalDecision::Approved,
-            })),
-            evt("e7", RuntimeEvent::ApprovalResolved(ApprovalResolved {
-                project: project(),
-                approval_id: ap2.clone(),
-                decision: ApprovalDecision::Rejected,
-            })),
+            evt(
+                "e6",
+                RuntimeEvent::ApprovalResolved(ApprovalResolved {
+                    project: project(),
+                    approval_id: ap1.clone(),
+                    decision: ApprovalDecision::Approved,
+                }),
+            ),
+            evt(
+                "e7",
+                RuntimeEvent::ApprovalResolved(ApprovalResolved {
+                    project: project(),
+                    approval_id: ap2.clone(),
+                    decision: ApprovalDecision::Rejected,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -342,7 +419,11 @@ async fn multiple_approvals_pending_list_shows_unresolved_only() {
     let pending_after = ApprovalReadModel::list_pending(&store, &project(), 10, 0)
         .await
         .unwrap();
-    assert_eq!(pending_after.len(), 1, "only the third approval remains pending");
+    assert_eq!(
+        pending_after.len(),
+        1,
+        "only the third approval remains pending"
+    );
     assert_eq!(pending_after[0].approval_id, ap3);
 
     // Decisions are correct.
@@ -389,26 +470,18 @@ async fn approval_policy_created_is_queryable() {
     assert_eq!(policy.auto_reject_after_ms, Some(86_400_000));
 
     // List by tenant returns it.
-    let by_tenant = ApprovalPolicyReadModel::list_by_tenant(
-        &store,
-        &TenantId::new("t_approval"),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let by_tenant =
+        ApprovalPolicyReadModel::list_by_tenant(&store, &TenantId::new("t_approval"), 10, 0)
+            .await
+            .unwrap();
     assert_eq!(by_tenant.len(), 1);
     assert_eq!(by_tenant[0].policy_id, "policy_strict_001");
 
     // Another tenant returns nothing.
-    let other = ApprovalPolicyReadModel::list_by_tenant(
-        &store,
-        &TenantId::new("other_tenant"),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let other =
+        ApprovalPolicyReadModel::list_by_tenant(&store, &TenantId::new("other_tenant"), 10, 0)
+            .await
+            .unwrap();
     assert!(other.is_empty(), "policy is tenant-scoped");
 }
 
@@ -425,50 +498,62 @@ async fn full_approval_workflow_tool_to_resolution() {
     // Step 1: session + run.
     store
         .append(&[
-            evt("e1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: SessionId::new("sess_7"),
-            })),
-            evt("e2", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_7"),
-                run_id: run_id.clone(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_7"),
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_7"),
+                    run_id: run_id.clone(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
 
     // Step 2: tool invocation starts, requiring approval.
     store
-        .append(&[evt("e3", RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
-            project: project(),
-            invocation_id: invocation_id.clone(),
-            session_id: Some(SessionId::new("sess_7")),
-            run_id: Some(run_id.clone()),
-            task_id: None,
-            target: ToolInvocationTarget::Builtin {
-                tool_name: "deploy_code".to_owned(),
-            },
-            execution_class: ExecutionClass::SupervisedProcess,
-            prompt_release_id: None,
-            requested_at_ms: ts,
-            started_at_ms: ts,
-        }))])
+        .append(&[evt(
+            "e3",
+            RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
+                project: project(),
+                invocation_id: invocation_id.clone(),
+                session_id: Some(SessionId::new("sess_7")),
+                run_id: Some(run_id.clone()),
+                task_id: None,
+                target: ToolInvocationTarget::Builtin {
+                    tool_name: "deploy_code".to_owned(),
+                },
+                execution_class: ExecutionClass::SupervisedProcess,
+                prompt_release_id: None,
+                requested_at_ms: ts,
+                started_at_ms: ts,
+            }),
+        )])
         .await
         .unwrap();
 
     // Step 3: approval gate — run is paused waiting for human.
     store
-        .append(&[evt("e4", RuntimeEvent::ApprovalRequested(ApprovalRequested {
-            project: project(),
-            approval_id: approval_id.clone(),
-            run_id: Some(run_id.clone()),
-            task_id: None,
-            requirement: ApprovalRequirement::Required,
-        }))])
+        .append(&[evt(
+            "e4",
+            RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                project: project(),
+                approval_id: approval_id.clone(),
+                run_id: Some(run_id.clone()),
+                task_id: None,
+                requirement: ApprovalRequirement::Required,
+            }),
+        )])
         .await
         .unwrap();
 
@@ -488,11 +573,14 @@ async fn full_approval_workflow_tool_to_resolution() {
 
     // Step 4: operator approves → gate lifts.
     store
-        .append(&[evt("e5", RuntimeEvent::ApprovalResolved(ApprovalResolved {
-            project: project(),
-            approval_id: approval_id.clone(),
-            decision: ApprovalDecision::Approved,
-        }))])
+        .append(&[evt(
+            "e5",
+            RuntimeEvent::ApprovalResolved(ApprovalResolved {
+                project: project(),
+                approval_id: approval_id.clone(),
+                decision: ApprovalDecision::Approved,
+            }),
+        )])
         .await
         .unwrap();
 
@@ -500,7 +588,10 @@ async fn full_approval_workflow_tool_to_resolution() {
     let pending_after = ApprovalReadModel::list_pending(&store, &project(), 10, 0)
         .await
         .unwrap();
-    assert!(pending_after.is_empty(), "no pending approvals after resolution");
+    assert!(
+        pending_after.is_empty(),
+        "no pending approvals after resolution"
+    );
 
     // Final record shows approved.
     let final_record = ApprovalReadModel::get(&store, &approval_id)

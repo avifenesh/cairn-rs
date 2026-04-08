@@ -16,10 +16,10 @@ pub mod services;
 
 pub use matrices::{
     DimensionScore, EvalMetrics, GuardrailMatrix, GuardrailPolicyRow, MatrixCategory,
-    MemorySourceQualityMatrix, MemorySourceQualityRow, MetricDelta, ModelEvalCell,
-    ModelEvalMatrix, PermissionMatrix, PermissionRow, PromptComparisonMatrix,
-    PromptComparisonRow, ProviderRoutingMatrix, ProviderRoutingRow, RubricDimensionDef,
-    RubricScoringResult, RunComparison, SkillHealthMatrix, SkillHealthRow,
+    MemorySourceQualityMatrix, MemorySourceQualityRow, MetricDelta, ModelEvalCell, ModelEvalMatrix,
+    PermissionMatrix, PermissionRow, PromptComparisonMatrix, PromptComparisonRow,
+    ProviderRoutingMatrix, ProviderRoutingRow, RubricDimensionDef, RubricScoringResult,
+    RunComparison, SkillHealthMatrix, SkillHealthRow,
 };
 pub use prompts::{
     PromptAsset, PromptAssetStatus, PromptFormat, PromptKind, PromptRelease, PromptReleaseState,
@@ -29,12 +29,12 @@ pub use scorecards::{
     DatasetSource, EvalRun, EvalRunStatus, EvalSubjectKind, Scorecard, ScorecardEntry,
 };
 pub use selectors::{ResolutionContext, RolloutTarget, SelectorKind, SelectorValue};
+pub use services::eval_service::{MemoryDiagnosticsSource, SourceQualitySnapshot};
 pub use services::{
-    EvalBaselineServiceImpl, EvalDatasetServiceImpl, EvalRunService, EvalRubricServiceImpl,
+    EvalBaselineServiceImpl, EvalDatasetServiceImpl, EvalRubricServiceImpl, EvalRunService,
     GraphIntegration, ModelComparisonServiceImpl, PluginDimensionScore, PluginRubricScorer,
     PromptReleaseService, SelectorResolver,
 };
-pub use services::eval_service::{MemoryDiagnosticsSource, SourceQualitySnapshot};
 // Re-export RubricDimension from domain for cairn-app convenience.
 pub use cairn_domain::RubricDimension;
 

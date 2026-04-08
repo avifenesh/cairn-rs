@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
 use cairn_plugin_proto::capabilities::CapabilityFamily;
-use cairn_plugin_proto::wire::ToolDescriptorWire;
 use cairn_plugin_proto::manifest::CapabilityWire;
+use cairn_plugin_proto::wire::ToolDescriptorWire;
 
 /// Discovered capabilities for one plugin.
 #[derive(Clone, Debug)]
@@ -289,7 +289,10 @@ mod tests {
         reg.register_from_manifest("integrations", &[cap, chan]);
 
         let caps = reg.get("integrations").unwrap();
-        assert_eq!(caps.signal_sources, vec!["github.webhook", "pagerduty.alert"]);
+        assert_eq!(
+            caps.signal_sources,
+            vec!["github.webhook", "pagerduty.alert"]
+        );
         assert_eq!(caps.channels, vec!["slack"]);
         assert!(caps.families.contains(&CapabilityFamily::SignalSource));
         assert!(caps.families.contains(&CapabilityFamily::ChannelProvider));

@@ -10,15 +10,11 @@
 
 use std::sync::Arc;
 
-use cairn_domain::{
-    OperatorId, ProjectId, TenantId, WorkspaceId, WorkspaceKey, WorkspaceRole,
-};
-use cairn_runtime::{
-    ProjectService, TenantService, WorkspaceMembershipService, WorkspaceService,
-};
+use cairn_domain::{OperatorId, ProjectId, TenantId, WorkspaceId, WorkspaceKey, WorkspaceRole};
 use cairn_runtime::services::{
     ProjectServiceImpl, TenantServiceImpl, WorkspaceMembershipServiceImpl, WorkspaceServiceImpl,
 };
+use cairn_runtime::{ProjectService, TenantService, WorkspaceMembershipService, WorkspaceService};
 use cairn_store::InMemoryStore;
 
 fn services() -> (
@@ -76,7 +72,10 @@ async fn duplicate_tenant_create_returns_conflict() {
         .create(TenantId::new("tenant_dup"), "Duplicate Again".to_owned())
         .await;
 
-    assert!(result.is_err(), "creating a tenant with the same ID must fail");
+    assert!(
+        result.is_err(),
+        "creating a tenant with the same ID must fail"
+    );
 }
 
 // ── (2) Create workspace within tenant ───────────────────────────────────
@@ -174,7 +173,11 @@ async fn add_member_to_workspace_with_role() {
     let ws_key = WorkspaceKey::new("tenant_mem", "ws_mem");
 
     let membership = memberships
-        .add_member(ws_key.clone(), "operator_alice".to_owned(), WorkspaceRole::Admin)
+        .add_member(
+            ws_key.clone(),
+            "operator_alice".to_owned(),
+            WorkspaceRole::Admin,
+        )
         .await
         .unwrap();
 
@@ -219,13 +222,22 @@ async fn list_members_returns_all_added_members() {
 
     assert_eq!(members.len(), 3, "all 3 members must be listed");
 
-    let alice = members.iter().find(|m| m.operator_id == OperatorId::new("op_alice")).unwrap();
+    let alice = members
+        .iter()
+        .find(|m| m.operator_id == OperatorId::new("op_alice"))
+        .unwrap();
     assert_eq!(alice.role, WorkspaceRole::Owner);
 
-    let bob = members.iter().find(|m| m.operator_id == OperatorId::new("op_bob")).unwrap();
+    let bob = members
+        .iter()
+        .find(|m| m.operator_id == OperatorId::new("op_bob"))
+        .unwrap();
     assert_eq!(bob.role, WorkspaceRole::Member);
 
-    let carol = members.iter().find(|m| m.operator_id == OperatorId::new("op_carol")).unwrap();
+    let carol = members
+        .iter()
+        .find(|m| m.operator_id == OperatorId::new("op_carol"))
+        .unwrap();
     assert_eq!(carol.role, WorkspaceRole::Viewer);
 }
 
@@ -278,17 +290,29 @@ async fn full_hierarchy_tenant_workspace_project() {
 
     // Tenant A gets two workspaces.
     workspaces
-        .create(TenantId::new("tenant_hier_a"), WorkspaceId::new("ws_a1"), "A-WS1".to_owned())
+        .create(
+            TenantId::new("tenant_hier_a"),
+            WorkspaceId::new("ws_a1"),
+            "A-WS1".to_owned(),
+        )
         .await
         .unwrap();
     workspaces
-        .create(TenantId::new("tenant_hier_a"), WorkspaceId::new("ws_a2"), "A-WS2".to_owned())
+        .create(
+            TenantId::new("tenant_hier_a"),
+            WorkspaceId::new("ws_a2"),
+            "A-WS2".to_owned(),
+        )
         .await
         .unwrap();
 
     // Tenant B gets one workspace.
     workspaces
-        .create(TenantId::new("tenant_hier_b"), WorkspaceId::new("ws_b1"), "B-WS1".to_owned())
+        .create(
+            TenantId::new("tenant_hier_b"),
+            WorkspaceId::new("ws_b1"),
+            "B-WS1".to_owned(),
+        )
         .await
         .unwrap();
 
@@ -320,32 +344,59 @@ async fn full_hierarchy_tenant_workspace_project() {
         .list_by_tenant(&TenantId::new("tenant_hier_a"), 10, 0)
         .await
         .unwrap();
-    assert_eq!(a_workspaces.len(), 2, "tenant A must have exactly 2 workspaces");
-    assert!(a_workspaces.iter().all(|w| w.tenant_id == TenantId::new("tenant_hier_a")));
+    assert_eq!(
+        a_workspaces.len(),
+        2,
+        "tenant A must have exactly 2 workspaces"
+    );
+    assert!(a_workspaces
+        .iter()
+        .all(|w| w.tenant_id == TenantId::new("tenant_hier_a")));
 
     // Tenant B: list workspaces — must return exactly 1.
     let b_workspaces = workspaces
         .list_by_tenant(&TenantId::new("tenant_hier_b"), 10, 0)
         .await
         .unwrap();
-    assert_eq!(b_workspaces.len(), 1, "tenant B must have exactly 1 workspace");
+    assert_eq!(
+        b_workspaces.len(),
+        1,
+        "tenant B must have exactly 1 workspace"
+    );
 
     // Workspace A1: list projects — must return exactly 1.
     let a1_projects = projects
-        .list_by_workspace(&TenantId::new("tenant_hier_a"), &WorkspaceId::new("ws_a1"), 10, 0)
+        .list_by_workspace(
+            &TenantId::new("tenant_hier_a"),
+            &WorkspaceId::new("ws_a1"),
+            10,
+            0,
+        )
         .await
         .unwrap();
-    assert_eq!(a1_projects.len(), 1, "workspace A1 must have exactly 1 project");
+    assert_eq!(
+        a1_projects.len(),
+        1,
+        "workspace A1 must have exactly 1 project"
+    );
     assert_eq!(a1_projects[0].project_id, ProjectId::new("proj_a1"));
 
     // Cross-tenant isolation: workspace B1 project must NOT appear under tenant A.
     let a2_projects = projects
-        .list_by_workspace(&TenantId::new("tenant_hier_a"), &WorkspaceId::new("ws_a2"), 10, 0)
+        .list_by_workspace(
+            &TenantId::new("tenant_hier_a"),
+            &WorkspaceId::new("ws_a2"),
+            10,
+            0,
+        )
         .await
         .unwrap();
     assert_eq!(a2_projects.len(), 1);
-    assert_eq!(a2_projects[0].project_id, ProjectId::new("proj_a2"),
-        "tenant A workspace 2 must only contain its own project");
+    assert_eq!(
+        a2_projects[0].project_id,
+        ProjectId::new("proj_a2"),
+        "tenant A workspace 2 must only contain its own project"
+    );
 }
 
 // ── Membership removal ────────────────────────────────────────────────────
@@ -370,7 +421,11 @@ async fn remove_member_from_workspace() {
     let ws_key = WorkspaceKey::new("tenant_rm", "ws_rm");
 
     memberships
-        .add_member(ws_key.clone(), "op_remove_me".to_owned(), WorkspaceRole::Member)
+        .add_member(
+            ws_key.clone(),
+            "op_remove_me".to_owned(),
+            WorkspaceRole::Member,
+        )
         .await
         .unwrap();
 

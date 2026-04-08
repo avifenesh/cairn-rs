@@ -1,6 +1,6 @@
 use async_trait::async_trait;
+use cairn_domain::org::{ProjectRecord, TenantRecord, WorkspaceRecord};
 use cairn_domain::{ProjectKey, TenantId, WorkspaceId};
-use cairn_domain::org::{TenantRecord, WorkspaceRecord, ProjectRecord};
 
 use crate::error::StoreError;
 

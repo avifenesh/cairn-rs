@@ -9,16 +9,15 @@
 
 use std::sync::Arc;
 
-use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectKey, ProviderCallCompleted,
-    ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId,
-    RuntimeEvent, SessionId, TenantId,
-    SessionCostUpdated,
-};
 use cairn_domain::ids::{ProviderBindingId, ProviderCallId};
 use cairn_domain::providers::{OperationKind, ProviderBudgetPeriod, ProviderCallStatus};
+use cairn_domain::{
+    EventEnvelope, EventId, EventSource, ProjectKey, ProviderCallCompleted, ProviderConnectionId,
+    ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, RuntimeEvent, SessionCostUpdated,
+    SessionId, TenantId,
+};
 use cairn_store::{
-    projections::{RunCostReadModel, SessionCostReadModel, ProviderBudgetReadModel},
+    projections::{ProviderBudgetReadModel, RunCostReadModel, SessionCostReadModel},
     EventLog, InMemoryStore,
 };
 
@@ -167,7 +166,7 @@ async fn session_cost_accumulates_across_calls() {
         .append(&[
             call_completed(1, None, Some(session_id(1)), 3_000, 150, 60),
             call_completed(2, None, Some(session_id(1)), 4_500, 300, 120),
-            call_completed(3, None, Some(session_id(1)), 500,  50,  10),
+            call_completed(3, None, Some(session_id(1)), 500, 50, 10),
         ])
         .await
         .unwrap();
@@ -355,6 +354,9 @@ async fn zero_cost_call_increments_count_without_inflating_totals() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(rec.total_cost_micros, 500, "cost should not include zero-cost call");
+    assert_eq!(
+        rec.total_cost_micros, 500,
+        "cost should not include zero-cost call"
+    );
     assert_eq!(rec.provider_calls, 2, "call count includes zero-cost call");
 }

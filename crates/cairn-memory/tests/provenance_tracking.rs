@@ -43,9 +43,13 @@ async fn ingest_with_bundle_source_id_succeeds() {
 
     // Document must be registered as Completed.
     let status = DocumentStore::get_status(store.as_ref(), &KnowledgeDocumentId::new("doc_prov"))
-        .await.unwrap();
-    assert_eq!(status, Some(IngestStatus::Completed),
-        "document with bundle_source_id must complete ingest successfully");
+        .await
+        .unwrap();
+    assert_eq!(
+        status,
+        Some(IngestStatus::Completed),
+        "document with bundle_source_id must complete ingest successfully"
+    );
 
     // Chunks must be created.
     let chunks = store.all_chunks();
@@ -75,7 +79,8 @@ async fn ingest_with_import_id_succeeds() {
         .unwrap();
 
     let status = DocumentStore::get_status(store.as_ref(), &KnowledgeDocumentId::new("doc_import"))
-        .await.unwrap();
+        .await
+        .unwrap();
     assert_eq!(status, Some(IngestStatus::Completed));
 }
 
@@ -100,8 +105,10 @@ async fn ingest_without_provenance_succeeds() {
         .await
         .unwrap();
 
-    let status = DocumentStore::get_status(store.as_ref(), &KnowledgeDocumentId::new("doc_no_prov"))
-        .await.unwrap();
+    let status =
+        DocumentStore::get_status(store.as_ref(), &KnowledgeDocumentId::new("doc_no_prov"))
+            .await
+            .unwrap();
     assert_eq!(status, Some(IngestStatus::Completed));
 }
 
@@ -129,23 +136,27 @@ async fn export_produces_artifacts_for_ingested_documents() {
         .unwrap();
 
     let bundle = export_svc
-        .export_documents(
-            "test_bundle",
-            &project(),
-            &DocumentExportFilters::default(),
-        )
+        .export_documents("test_bundle", &project(), &DocumentExportFilters::default())
         .await
         .unwrap();
 
-    assert!(!bundle.artifacts.is_empty(), "export must produce at least one artifact");
+    assert!(
+        !bundle.artifacts.is_empty(),
+        "export must produce at least one artifact"
+    );
 
-    let artifact = bundle.artifacts.iter()
+    let artifact = bundle
+        .artifacts
+        .iter()
         .find(|a| a.artifact_logical_id == "doc_export")
         .expect("doc_export must appear in export bundle");
 
     // Artifact must be in the correct project scope.
-    assert_eq!(artifact.origin_scope.project_id.as_deref(), Some("p"),
-        "artifact must carry the correct project_id in its origin scope");
+    assert_eq!(
+        artifact.origin_scope.project_id.as_deref(),
+        Some("p"),
+        "artifact must carry the correct project_id in its origin scope"
+    );
 }
 
 /// Both bundle_source_id and import_id can coexist on the same IngestRequest.
@@ -171,13 +182,21 @@ async fn ingest_with_both_provenance_fields_succeeds() {
 
     // Both fields accepted — pipeline completes successfully.
     let status = DocumentStore::get_status(store.as_ref(), &KnowledgeDocumentId::new("doc_both"))
-        .await.unwrap();
-    assert_eq!(status, Some(IngestStatus::Completed),
-        "document with both provenance fields must ingest without errors");
+        .await
+        .unwrap();
+    assert_eq!(
+        status,
+        Some(IngestStatus::Completed),
+        "document with both provenance fields must ingest without errors"
+    );
 
     let chunks = store.all_chunks();
-    let doc_chunks: Vec<_> = chunks.iter()
+    let doc_chunks: Vec<_> = chunks
+        .iter()
         .filter(|c| c.document_id == KnowledgeDocumentId::new("doc_both"))
         .collect();
-    assert!(!doc_chunks.is_empty(), "chunks must be created for document with full provenance");
+    assert!(
+        !doc_chunks.is_empty(),
+        "chunks must be created for document with full provenance"
+    );
 }

@@ -63,10 +63,7 @@ where
             .ok_or_else(|| RuntimeError::Internal("project not found after create".into()))
     }
 
-    async fn get(
-        &self,
-        project: &ProjectKey,
-    ) -> Result<Option<ProjectRecord>, RuntimeError> {
+    async fn get(&self, project: &ProjectKey) -> Result<Option<ProjectRecord>, RuntimeError> {
         Ok(ProjectReadModel::get_project(self.store.as_ref(), project).await?)
     }
 
@@ -159,45 +156,26 @@ mod tests {
         let store = Arc::new(InMemoryStore::new());
         let svc = ProjectServiceImpl::new(store);
 
-        svc.create(
-            ProjectKey::new("t1", "ws1", "p_a"),
-            "A".to_owned(),
-        )
-        .await
-        .unwrap();
+        svc.create(ProjectKey::new("t1", "ws1", "p_a"), "A".to_owned())
+            .await
+            .unwrap();
 
-        svc.create(
-            ProjectKey::new("t1", "ws1", "p_b"),
-            "B".to_owned(),
-        )
-        .await
-        .unwrap();
+        svc.create(ProjectKey::new("t1", "ws1", "p_b"), "B".to_owned())
+            .await
+            .unwrap();
 
-        svc.create(
-            ProjectKey::new("t1", "ws2", "p_c"),
-            "C".to_owned(),
-        )
-        .await
-        .unwrap();
+        svc.create(ProjectKey::new("t1", "ws2", "p_c"), "C".to_owned())
+            .await
+            .unwrap();
 
         let results = svc
-            .list_by_workspace(
-                &TenantId::new("t1"),
-                &WorkspaceId::new("ws1"),
-                10,
-                0,
-            )
+            .list_by_workspace(&TenantId::new("t1"), &WorkspaceId::new("ws1"), 10, 0)
             .await
             .unwrap();
         assert_eq!(results.len(), 2);
 
         let other_results = svc
-            .list_by_workspace(
-                &TenantId::new("t1"),
-                &WorkspaceId::new("ws2"),
-                10,
-                0,
-            )
+            .list_by_workspace(&TenantId::new("t1"), &WorkspaceId::new("ws2"), 10, 0)
             .await
             .unwrap();
         assert_eq!(other_results.len(), 1);

@@ -18,8 +18,8 @@
 //! let response = embedder.embed("nomic-embed-text", vec!["hello world".into()]).await?;
 //! ```
 
-use serde::{Deserialize, Serialize};
 use cairn_domain::providers::{EmbeddingProvider, EmbeddingResponse, ProviderAdapterError};
+use serde::{Deserialize, Serialize};
 
 // ── Wire types ────────────────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ struct EmbedResponse {
 ///
 /// Uses the `/api/embed` endpoint (added in Ollama 0.1.26).
 pub struct OllamaEmbeddingProvider {
-    host:   String,
+    host: String,
     client: reqwest::Client,
 }
 
@@ -59,7 +59,7 @@ impl OllamaEmbeddingProvider {
     /// Create a provider pointing at the given Ollama host URL.
     pub fn new(host: impl Into<String>) -> Self {
         Self {
-            host:   host.into(),
+            host: host.into(),
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()
@@ -102,8 +102,8 @@ impl EmbeddingProvider for OllamaEmbeddingProvider {
     ) -> Result<EmbeddingResponse, ProviderAdapterError> {
         if texts.is_empty() {
             return Ok(EmbeddingResponse {
-                embeddings:  vec![],
-                model_id:    model_id.to_owned(),
+                embeddings: vec![],
+                model_id: model_id.to_owned(),
                 token_count: 0,
             });
         }
@@ -154,8 +154,8 @@ impl EmbeddingProvider for OllamaEmbeddingProvider {
         }
 
         Ok(EmbeddingResponse {
-            embeddings:  embed.embeddings,
-            model_id:    embed.model.unwrap_or_else(|| model_id.to_owned()),
+            embeddings: embed.embeddings,
+            model_id: embed.model.unwrap_or_else(|| model_id.to_owned()),
             token_count: embed.prompt_eval_count.unwrap_or(0),
         })
     }

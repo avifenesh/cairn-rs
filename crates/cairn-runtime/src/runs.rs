@@ -64,10 +64,7 @@ pub trait RunService: Send + Sync {
     ) -> Result<RunRecord, RuntimeError>;
 
     /// Transition a run to WaitingApproval (approval gate).
-    async fn enter_waiting_approval(
-        &self,
-        run_id: &RunId,
-    ) -> Result<RunRecord, RuntimeError>;
+    async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
 
     /// Transition a run out of WaitingApproval after approval resolution.
     ///

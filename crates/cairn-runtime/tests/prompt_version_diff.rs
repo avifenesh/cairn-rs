@@ -143,10 +143,7 @@ async fn prompt_version_diff_identical_versions() {
 async fn prompt_version_diff_not_found_returns_none() {
     let (_store, svc) = store_and_svc();
 
-    let result = svc
-        .get(&PromptVersionId::new("ghost_a"))
-        .await
-        .unwrap();
+    let result = svc.get(&PromptVersionId::new("ghost_a")).await.unwrap();
 
     assert!(
         result.is_none(),

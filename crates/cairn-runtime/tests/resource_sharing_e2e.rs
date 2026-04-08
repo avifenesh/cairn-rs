@@ -13,13 +13,16 @@
 use std::sync::Arc;
 
 use cairn_domain::{TenantId, WorkspaceId};
-use cairn_runtime::{ResourceSharingService, TenantService, WorkspaceService};
 use cairn_runtime::services::{
     ResourceSharingServiceImpl, TenantServiceImpl, WorkspaceServiceImpl,
 };
+use cairn_runtime::{ResourceSharingService, TenantService, WorkspaceService};
 use cairn_store::InMemoryStore;
 
-async fn setup() -> (Arc<InMemoryStore>, ResourceSharingServiceImpl<InMemoryStore>) {
+async fn setup() -> (
+    Arc<InMemoryStore>,
+    ResourceSharingServiceImpl<InMemoryStore>,
+) {
     let store = Arc::new(InMemoryStore::new());
     let tenants = TenantServiceImpl::new(store.clone());
     let workspaces = WorkspaceServiceImpl::new(store.clone());
@@ -29,11 +32,19 @@ async fn setup() -> (Arc<InMemoryStore>, ResourceSharingServiceImpl<InMemoryStor
         .await
         .unwrap();
     workspaces
-        .create(TenantId::new("tenant_share"), WorkspaceId::new("ws_src"), "Source WS".to_owned())
+        .create(
+            TenantId::new("tenant_share"),
+            WorkspaceId::new("ws_src"),
+            "Source WS".to_owned(),
+        )
         .await
         .unwrap();
     workspaces
-        .create(TenantId::new("tenant_share"), WorkspaceId::new("ws_dst"), "Dest WS".to_owned())
+        .create(
+            TenantId::new("tenant_share"),
+            WorkspaceId::new("ws_dst"),
+            "Dest WS".to_owned(),
+        )
         .await
         .unwrap();
 
@@ -41,9 +52,15 @@ async fn setup() -> (Arc<InMemoryStore>, ResourceSharingServiceImpl<InMemoryStor
     (store, sharing)
 }
 
-fn tenant() -> TenantId { TenantId::new("tenant_share") }
-fn src()    -> WorkspaceId { WorkspaceId::new("ws_src") }
-fn dst()    -> WorkspaceId { WorkspaceId::new("ws_dst") }
+fn tenant() -> TenantId {
+    TenantId::new("tenant_share")
+}
+fn src() -> WorkspaceId {
+    WorkspaceId::new("ws_src")
+}
+fn dst() -> WorkspaceId {
+    WorkspaceId::new("ws_dst")
+}
 
 // ── (1)+(2) Share and verify record fields ────────────────────────────────
 
@@ -75,7 +92,10 @@ async fn share_resource_creates_record_with_correct_fields() {
 
     // get_share confirms it's persisted.
     let fetched = sharing.get_share(&share.share_id).await.unwrap();
-    assert!(fetched.is_some(), "share must be retrievable by ID after creation");
+    assert!(
+        fetched.is_some(),
+        "share must be retrievable by ID after creation"
+    );
     let fetched = fetched.unwrap();
     assert_eq!(fetched.share_id, share.share_id);
     assert_eq!(fetched.permissions, share.permissions);
@@ -88,16 +108,34 @@ async fn list_shares_returns_all_shares_for_workspace() {
     let (_, sharing) = setup().await;
 
     sharing
-        .share(tenant(), src(), dst(), "prompt_asset".to_owned(), "asset_1".to_owned(), vec!["read".to_owned()])
+        .share(
+            tenant(),
+            src(),
+            dst(),
+            "prompt_asset".to_owned(),
+            "asset_1".to_owned(),
+            vec!["read".to_owned()],
+        )
         .await
         .unwrap();
     sharing
-        .share(tenant(), src(), dst(), "knowledge_pack".to_owned(), "pack_2".to_owned(), vec!["read".to_owned()])
+        .share(
+            tenant(),
+            src(),
+            dst(),
+            "knowledge_pack".to_owned(),
+            "pack_2".to_owned(),
+            vec!["read".to_owned()],
+        )
         .await
         .unwrap();
 
     let shares = sharing.list_shares(&tenant(), &dst()).await.unwrap();
-    assert_eq!(shares.len(), 2, "both shares must appear when listing by target workspace");
+    assert_eq!(
+        shares.len(),
+        2,
+        "both shares must appear when listing by target workspace"
+    );
 
     let resource_ids: Vec<_> = shares.iter().map(|s| s.resource_id.as_str()).collect();
     assert!(resource_ids.contains(&"asset_1"));
@@ -115,7 +153,14 @@ async fn list_shares_for_source_workspace_is_scoped() {
     let (_, sharing) = setup().await;
 
     sharing
-        .share(tenant(), src(), dst(), "prompt_asset".to_owned(), "asset_x".to_owned(), vec![])
+        .share(
+            tenant(),
+            src(),
+            dst(),
+            "prompt_asset".to_owned(),
+            "asset_x".to_owned(),
+            vec![],
+        )
         .await
         .unwrap();
 
@@ -139,7 +184,14 @@ async fn revoke_share_removes_it_from_store() {
     let (_, sharing) = setup().await;
 
     let share = sharing
-        .share(tenant(), src(), dst(), "prompt_asset".to_owned(), "asset_revoke".to_owned(), vec!["read".to_owned()])
+        .share(
+            tenant(),
+            src(),
+            dst(),
+            "prompt_asset".to_owned(),
+            "asset_revoke".to_owned(),
+            vec!["read".to_owned()],
+        )
         .await
         .unwrap();
     let share_id = share.share_id.clone();
@@ -162,11 +214,25 @@ async fn revoked_share_disappears_from_list() {
     let (_, sharing) = setup().await;
 
     let s1 = sharing
-        .share(tenant(), src(), dst(), "prompt_asset".to_owned(), "keep_me".to_owned(), vec![])
+        .share(
+            tenant(),
+            src(),
+            dst(),
+            "prompt_asset".to_owned(),
+            "keep_me".to_owned(),
+            vec![],
+        )
         .await
         .unwrap();
     let s2 = sharing
-        .share(tenant(), src(), dst(), "prompt_asset".to_owned(), "revoke_me".to_owned(), vec![])
+        .share(
+            tenant(),
+            src(),
+            dst(),
+            "prompt_asset".to_owned(),
+            "revoke_me".to_owned(),
+            vec![],
+        )
         .await
         .unwrap();
 
@@ -183,8 +249,10 @@ async fn revoked_share_disappears_from_list() {
 #[tokio::test]
 async fn share_with_version_permission_unlocks_cross_workspace_version_create() {
     use cairn_domain::{ProjectKey, PromptAssetId, PromptVersionId};
-    use cairn_runtime::{PromptAssetService, PromptAssetServiceImpl, PromptVersionService, PromptVersionServiceImpl};
     use cairn_runtime::error::RuntimeError;
+    use cairn_runtime::{
+        PromptAssetService, PromptAssetServiceImpl, PromptVersionService, PromptVersionServiceImpl,
+    };
 
     let store = Arc::new(InMemoryStore::new());
     let tenants = TenantServiceImpl::new(store.clone());
@@ -193,21 +261,54 @@ async fn share_with_version_permission_unlocks_cross_workspace_version_create() 
     let assets = PromptAssetServiceImpl::new(store.clone());
     let versions = PromptVersionServiceImpl::new(store.clone());
 
-    tenants.create(TenantId::new("t_gate"), "Gate Tenant".to_owned()).await.unwrap();
-    workspaces.create(TenantId::new("t_gate"), WorkspaceId::new("ws_gate_a"), "A".to_owned()).await.unwrap();
-    workspaces.create(TenantId::new("t_gate"), WorkspaceId::new("ws_gate_b"), "B".to_owned()).await.unwrap();
+    tenants
+        .create(TenantId::new("t_gate"), "Gate Tenant".to_owned())
+        .await
+        .unwrap();
+    workspaces
+        .create(
+            TenantId::new("t_gate"),
+            WorkspaceId::new("ws_gate_a"),
+            "A".to_owned(),
+        )
+        .await
+        .unwrap();
+    workspaces
+        .create(
+            TenantId::new("t_gate"),
+            WorkspaceId::new("ws_gate_b"),
+            "B".to_owned(),
+        )
+        .await
+        .unwrap();
 
     let ws_a = ProjectKey::new("t_gate", "ws_gate_a", "proj_a");
     let ws_b = ProjectKey::new("t_gate", "ws_gate_b", "proj_b");
 
     // Create asset in ws_a.
-    assets.create(&ws_a, PromptAssetId::new("gated_asset"), "Gated".to_owned(), "system".to_owned()).await.unwrap();
+    assets
+        .create(
+            &ws_a,
+            PromptAssetId::new("gated_asset"),
+            "Gated".to_owned(),
+            "system".to_owned(),
+        )
+        .await
+        .unwrap();
 
     // Without share — ws_b cannot create a version.
     let denied = versions
-        .create(&ws_b, PromptVersionId::new("ver_denied"), PromptAssetId::new("gated_asset"), "hash_d".to_owned())
+        .create(
+            &ws_b,
+            PromptVersionId::new("ver_denied"),
+            PromptAssetId::new("gated_asset"),
+            "hash_d".to_owned(),
+        )
         .await;
-    assert!(matches!(denied, Err(RuntimeError::PolicyDenied { .. })), "must be denied without share");
+    assert!(
+        matches!(denied, Err(RuntimeError::PolicyDenied { .. })),
+        "must be denied without share"
+    );
 
     // Share with 'version' permission.
     let share = sharing
@@ -224,7 +325,12 @@ async fn share_with_version_permission_unlocks_cross_workspace_version_create() 
 
     // Now ws_b can create a version.
     let ver = versions
-        .create(&ws_b, PromptVersionId::new("ver_allowed"), PromptAssetId::new("gated_asset"), "hash_a".to_owned())
+        .create(
+            &ws_b,
+            PromptVersionId::new("ver_allowed"),
+            PromptAssetId::new("gated_asset"),
+            "hash_a".to_owned(),
+        )
         .await
         .unwrap();
     assert_eq!(ver.prompt_asset_id, PromptAssetId::new("gated_asset"));
@@ -232,9 +338,17 @@ async fn share_with_version_permission_unlocks_cross_workspace_version_create() 
     // Revoke and confirm gating is restored.
     sharing.revoke(&share.share_id).await.unwrap();
     let denied2 = versions
-        .create(&ws_b, PromptVersionId::new("ver_denied2"), PromptAssetId::new("gated_asset"), "hash_d2".to_owned())
+        .create(
+            &ws_b,
+            PromptVersionId::new("ver_denied2"),
+            PromptAssetId::new("gated_asset"),
+            "hash_d2".to_owned(),
+        )
         .await;
-    assert!(matches!(denied2, Err(RuntimeError::PolicyDenied { .. })), "must be denied after revoke");
+    assert!(
+        matches!(denied2, Err(RuntimeError::PolicyDenied { .. })),
+        "must be denied after revoke"
+    );
 }
 
 // ── (7) Multiple shares for same resource tracked independently ───────────
@@ -246,16 +360,34 @@ async fn multiple_shares_for_same_resource_are_independent() {
     // Add a third workspace.
     let workspaces = WorkspaceServiceImpl::new(store.clone());
     workspaces
-        .create(TenantId::new("tenant_share"), WorkspaceId::new("ws_third"), "Third".to_owned())
+        .create(
+            TenantId::new("tenant_share"),
+            WorkspaceId::new("ws_third"),
+            "Third".to_owned(),
+        )
         .await
         .unwrap();
 
     let s1 = sharing
-        .share(tenant(), src(), dst(), "prompt_asset".to_owned(), "shared_res".to_owned(), vec!["read".to_owned()])
+        .share(
+            tenant(),
+            src(),
+            dst(),
+            "prompt_asset".to_owned(),
+            "shared_res".to_owned(),
+            vec!["read".to_owned()],
+        )
         .await
         .unwrap();
     let s2 = sharing
-        .share(tenant(), src(), WorkspaceId::new("ws_third"), "prompt_asset".to_owned(), "shared_res".to_owned(), vec!["read".to_owned(), "version".to_owned()])
+        .share(
+            tenant(),
+            src(),
+            WorkspaceId::new("ws_third"),
+            "prompt_asset".to_owned(),
+            "shared_res".to_owned(),
+            vec!["read".to_owned(), "version".to_owned()],
+        )
         .await
         .unwrap();
 
@@ -264,8 +396,14 @@ async fn multiple_shares_for_same_resource_are_independent() {
     // Revoke only s1.
     sharing.revoke(&s1.share_id).await.unwrap();
 
-    assert!(sharing.get_share(&s1.share_id).await.unwrap().is_none(), "s1 revoked");
-    assert!(sharing.get_share(&s2.share_id).await.unwrap().is_some(), "s2 still active");
+    assert!(
+        sharing.get_share(&s1.share_id).await.unwrap().is_none(),
+        "s1 revoked"
+    );
+    assert!(
+        sharing.get_share(&s2.share_id).await.unwrap().is_some(),
+        "s2 still active"
+    );
 }
 
 // ── (8) Revoking a non-existent share returns an error ────────────────────
@@ -275,5 +413,8 @@ async fn revoke_nonexistent_share_returns_error() {
     let (_, sharing) = setup().await;
 
     let result = sharing.revoke("share_does_not_exist").await;
-    assert!(result.is_err(), "revoking a non-existent share must return an error");
+    assert!(
+        result.is_err(),
+        "revoking a non-existent share must return an error"
+    );
 }

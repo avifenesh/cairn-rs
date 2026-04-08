@@ -11,8 +11,8 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
-    SessionCreated, SessionId, TenantId, WorkspaceId, ProjectId,
+    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, RunCreated, RunId, RuntimeEvent,
+    SessionCreated, SessionId, TenantId, WorkspaceId,
 };
 use cairn_store::{
     projections::{RunReadModel, SessionReadModel},
@@ -98,7 +98,11 @@ async fn event_log_read_after_position_skips_prior_events() {
     store.append(&[session_event("s2")]).await.unwrap();
 
     let events = store.read_stream(after_first, 10).await.unwrap();
-    assert_eq!(events.len(), 1, "should only return events after given position");
+    assert_eq!(
+        events.len(),
+        1,
+        "should only return events after given position"
+    );
     match &events[0].envelope.payload {
         RuntimeEvent::SessionCreated(e) => assert_eq!(e.session_id.as_str(), "s2"),
         other => panic!("unexpected: {other:?}"),
@@ -129,7 +133,10 @@ async fn append_run_created_produces_run_record() {
     let store = Arc::new(InMemoryStore::new());
 
     store.append(&[session_event("sess_run")]).await.unwrap();
-    store.append(&[run_event("run_1", "sess_run")]).await.unwrap();
+    store
+        .append(&[run_event("run_1", "sess_run")])
+        .await
+        .unwrap();
 
     let record = RunReadModel::get(store.as_ref(), &RunId::new("run_1"))
         .await
@@ -147,8 +154,14 @@ async fn append_run_created_produces_run_record() {
 async fn multiple_sessions_and_runs_are_tracked_independently() {
     let store = Arc::new(InMemoryStore::new());
 
-    store.append(&[session_event("sA"), session_event("sB")]).await.unwrap();
-    store.append(&[run_event("rA1", "sA"), run_event("rA2", "sA")]).await.unwrap();
+    store
+        .append(&[session_event("sA"), session_event("sB")])
+        .await
+        .unwrap();
+    store
+        .append(&[run_event("rA1", "sA"), run_event("rA2", "sA")])
+        .await
+        .unwrap();
     store.append(&[run_event("rB1", "sB")]).await.unwrap();
 
     // All events are in the log (5 individual events across 3 append calls).
@@ -156,14 +169,26 @@ async fn multiple_sessions_and_runs_are_tracked_independently() {
     assert_eq!(head.0, 5, "5 events total");
 
     // Session records exist.
-    assert!(SessionReadModel::get(store.as_ref(), &SessionId::new("sA")).await.unwrap().is_some());
-    assert!(SessionReadModel::get(store.as_ref(), &SessionId::new("sB")).await.unwrap().is_some());
+    assert!(SessionReadModel::get(store.as_ref(), &SessionId::new("sA"))
+        .await
+        .unwrap()
+        .is_some());
+    assert!(SessionReadModel::get(store.as_ref(), &SessionId::new("sB"))
+        .await
+        .unwrap()
+        .is_some());
 
     // Run records exist and are correctly attributed to their sessions.
-    let rA1 = RunReadModel::get(store.as_ref(), &RunId::new("rA1")).await.unwrap().unwrap();
+    let rA1 = RunReadModel::get(store.as_ref(), &RunId::new("rA1"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(rA1.session_id.as_str(), "sA");
 
-    let rB1 = RunReadModel::get(store.as_ref(), &RunId::new("rB1")).await.unwrap().unwrap();
+    let rB1 = RunReadModel::get(store.as_ref(), &RunId::new("rB1"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(rB1.session_id.as_str(), "sB");
 
     // count_active_runs reflects all pending/running runs.

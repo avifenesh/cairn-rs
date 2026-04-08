@@ -16,8 +16,5 @@ use crate::error::OrchestratorError;
 #[async_trait]
 pub trait GatherPhase: Send + Sync {
     /// Collect context for one orchestration step.
-    async fn gather(
-        &self,
-        ctx: &OrchestrationContext,
-    ) -> Result<GatherOutput, OrchestratorError>;
+    async fn gather(&self, ctx: &OrchestrationContext) -> Result<GatherOutput, OrchestratorError>;
 }

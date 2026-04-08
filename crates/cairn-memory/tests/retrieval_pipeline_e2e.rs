@@ -281,7 +281,10 @@ async fn within_document_duplicate_paragraph_stored_once() {
         .unwrap();
 
     let chunks = store.all_chunks();
-    let repeated_count = chunks.iter().filter(|c| c.text.contains("All models are wrong")).count();
+    let repeated_count = chunks
+        .iter()
+        .filter(|c| c.text.contains("All models are wrong"))
+        .count();
 
     assert_eq!(
         repeated_count, 1,
@@ -290,8 +293,13 @@ async fn within_document_duplicate_paragraph_stored_once() {
     );
 
     // The unique paragraph should still be present.
-    let unique_present = chunks.iter().any(|c| c.text.contains("middle paragraph is unique"));
-    assert!(unique_present, "the non-duplicate paragraph must still be stored");
+    let unique_present = chunks
+        .iter()
+        .any(|c| c.text.contains("middle paragraph is unique"));
+    assert!(
+        unique_present,
+        "the non-duplicate paragraph must still be stored"
+    );
 }
 
 // ── Test 4b: Cross-submit dedup — same content, different doc ID ──
@@ -314,7 +322,10 @@ async fn cross_submit_dedup_prevents_duplicate_storage() {
         .unwrap();
 
     let after_first = store.all_chunks().len();
-    assert!(after_first > 0, "first submit must produce at least one chunk");
+    assert!(
+        after_first > 0,
+        "first submit must produce at least one chunk"
+    );
 
     // Second submit: identical content, different document ID.
     pipeline
@@ -448,8 +459,10 @@ async fn source_quality_tracking_chunk_counts_match_paragraphs() {
             .map(|c| c.position)
             .collect();
         positions.sort_unstable();
-        let is_sequential =
-            positions.iter().enumerate().all(|(i, &pos)| pos == i as u32);
+        let is_sequential = positions
+            .iter()
+            .enumerate()
+            .all(|(i, &pos)| pos == i as u32);
         assert!(
             is_sequential,
             "chunk positions for {doc_id} must be sequential starting at 0; got {positions:?}"

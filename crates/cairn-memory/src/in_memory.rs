@@ -108,7 +108,9 @@ impl InMemoryDocumentStore {
 
     /// Return the number of chunks currently flagged as needing re-embedding.
     pub fn pending_reembed_count(&self) -> usize {
-        self.chunks.lock().unwrap()
+        self.chunks
+            .lock()
+            .unwrap()
             .iter()
             .filter(|c| c.needs_reembed)
             .count()
@@ -146,7 +148,14 @@ impl InMemoryDocumentStore {
         for chunk in chunks.iter() {
             chunk_info
                 .entry(chunk.document_id.as_str())
-                .or_insert_with(|| (&chunk.source_id, chunk.text.clone(), chunk.entities.clone(), chunk.created_at));
+                .or_insert_with(|| {
+                    (
+                        &chunk.source_id,
+                        chunk.text.clone(),
+                        chunk.entities.clone(),
+                        chunk.created_at,
+                    )
+                });
         }
         docs.iter()
             .map(|(id, (_, project, source_type))| {
@@ -219,7 +228,11 @@ impl InMemoryDocumentStore {
     }
 
     /// Register a source (no-op stub; returns a SourceSummary).
-    pub fn register_source(&self, _project: &cairn_domain::ProjectKey, source_id: &cairn_domain::SourceId) -> SourceSummary {
+    pub fn register_source(
+        &self,
+        _project: &cairn_domain::ProjectKey,
+        source_id: &cairn_domain::SourceId,
+    ) -> SourceSummary {
         SourceSummary {
             source_id: source_id.clone(),
             document_count: 0,
@@ -243,7 +256,10 @@ impl InMemoryDocumentStore {
     }
 
     /// Get a refresh schedule for a source.
-    pub fn get_refresh_schedule(&self, source_id: &cairn_domain::SourceId) -> Option<RefreshSchedule> {
+    pub fn get_refresh_schedule(
+        &self,
+        source_id: &cairn_domain::SourceId,
+    ) -> Option<RefreshSchedule> {
         let schedules = self.schedules.lock().unwrap();
         schedules
             .values()
@@ -378,11 +394,7 @@ impl crate::ingest::DocumentVersionReadModel for InMemoryDocumentStore {
         _limit: usize,
     ) -> Result<Vec<crate::ingest::DocumentVersion>, IngestError> {
         // Only return a version if the document exists and has been ingested.
-        let exists = self
-            .docs
-            .lock()
-            .unwrap()
-            .contains_key(document_id.as_str());
+        let exists = self.docs.lock().unwrap().contains_key(document_id.as_str());
         if !exists {
             return Ok(vec![]);
         }
@@ -402,11 +414,7 @@ impl crate::ingest::DocumentVersionReadModel for InMemoryDocumentStore {
             .first()
             .and_then(|c| c.content_hash.clone())
             .unwrap_or_default();
-        let ingested_at_ms = doc_chunks
-            .iter()
-            .map(|c| c.created_at)
-            .min()
-            .unwrap_or(0);
+        let ingested_at_ms = doc_chunks.iter().map(|c| c.created_at).min().unwrap_or(0);
 
         Ok(vec![crate::ingest::DocumentVersion {
             document_id: document_id.clone(),
@@ -431,7 +439,12 @@ pub struct InMemoryRetrieval {
 
 impl InMemoryRetrieval {
     pub fn new(store: std::sync::Arc<InMemoryDocumentStore>) -> Self {
-        Self { store, graph: None, embedder: None, last_retrieved: Mutex::new(HashMap::new()) }
+        Self {
+            store,
+            graph: None,
+            embedder: None,
+            last_retrieved: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Create with a diagnostics adapter (stub — diagnostics adapter is ignored in in-memory backend).
@@ -439,7 +452,12 @@ impl InMemoryRetrieval {
         store: std::sync::Arc<InMemoryDocumentStore>,
         _diagnostics: std::sync::Arc<dyn crate::diagnostics::DiagnosticsService>,
     ) -> Self {
-        Self { store, graph: None, embedder: None, last_retrieved: Mutex::new(HashMap::new()) }
+        Self {
+            store,
+            graph: None,
+            embedder: None,
+            last_retrieved: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Attach a graph store for graph-proximity scoring.
@@ -465,12 +483,21 @@ impl InMemoryRetrieval {
 impl RetrievalService for InMemoryRetrieval {
     async fn query(&self, query: RetrievalQuery) -> Result<RetrievalResponse, RetrievalError> {
         // Embed the query text for vector/hybrid modes.
-        let query_embedding = if matches!(query.mode, RetrievalMode::VectorOnly | RetrievalMode::Hybrid) {
+        let query_embedding = if matches!(
+            query.mode,
+            RetrievalMode::VectorOnly | RetrievalMode::Hybrid
+        ) {
             match &self.embedder {
                 Some(e) => {
-                    let emb = e.embed(&query.query_text).await
+                    let emb = e
+                        .embed(&query.query_text)
+                        .await
                         .map_err(|e| RetrievalError::EmbeddingFailed(e.to_string()))?;
-                    if emb.is_empty() { None } else { Some(emb) }
+                    if emb.is_empty() {
+                        None
+                    } else {
+                        Some(emb)
+                    }
                 }
                 None if query.mode == RetrievalMode::VectorOnly => {
                     return Err(RetrievalError::Internal(
@@ -490,8 +517,14 @@ impl RetrievalService for InMemoryRetrieval {
             other => other,
         };
 
-        let use_lexical = matches!(effective_mode, RetrievalMode::LexicalOnly | RetrievalMode::Hybrid);
-        let use_vector = matches!(effective_mode, RetrievalMode::VectorOnly | RetrievalMode::Hybrid);
+        let use_lexical = matches!(
+            effective_mode,
+            RetrievalMode::LexicalOnly | RetrievalMode::Hybrid
+        );
+        let use_vector = matches!(
+            effective_mode,
+            RetrievalMode::VectorOnly | RetrievalMode::Hybrid
+        );
 
         let start = std::time::Instant::now();
         let chunks = self.store.all_chunks();
@@ -504,19 +537,17 @@ impl RetrievalService for InMemoryRetrieval {
             .filter(|c| c.project == query.project)
             .filter(|c| {
                 query.metadata_filters.iter().all(|f| {
-                    c.provenance_metadata
-                        .as_ref()
-                        .is_some_and(|m| {
-                            if let Some(v) = m.get(&f.key).and_then(|v| v.as_str()) {
-                                return v == f.value;
+                    c.provenance_metadata.as_ref().is_some_and(|m| {
+                        if let Some(v) = m.get(&f.key).and_then(|v| v.as_str()) {
+                            return v == f.value;
+                        }
+                        if f.key == "tag" {
+                            if let Some(arr) = m.get("tags").and_then(|v| v.as_array()) {
+                                return arr.iter().any(|v| v.as_str() == Some(&f.value));
                             }
-                            if f.key == "tag" {
-                                if let Some(arr) = m.get("tags").and_then(|v| v.as_array()) {
-                                    return arr.iter().any(|v| v.as_str() == Some(&f.value));
-                                }
-                            }
-                            false
-                        })
+                        }
+                        false
+                    })
                 })
             })
             .filter_map(|c| {
@@ -530,7 +561,9 @@ impl RetrievalService for InMemoryRetrieval {
 
                 let semantic_score = if use_vector {
                     match (&query_embedding, &c.embedding) {
-                        (Some(qe), Some(ce)) => crate::reranking::cosine_similarity(qe, ce).max(0.0),
+                        (Some(qe), Some(ce)) => {
+                            crate::reranking::cosine_similarity(qe, ce).max(0.0)
+                        }
                         _ => 0.0,
                     }
                 } else {
@@ -554,7 +587,9 @@ impl RetrievalService for InMemoryRetrieval {
                     RetrievalMode::Hybrid => item.1 + item.2,
                 }
             };
-            key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal)
+            key(b)
+                .partial_cmp(&key(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // For MMR, keep a larger candidate pool so diversity selection has room.
@@ -576,11 +611,8 @@ impl RetrievalService for InMemoryRetrieval {
         let mut results: Vec<RetrievalResult> = scored
             .into_iter()
             .map(|(chunk, lexical_score, semantic_score)| {
-                let fresh = retrieval::freshness_score(
-                    chunk.created_at,
-                    now,
-                    policy.freshness_decay_days,
-                );
+                let fresh =
+                    retrieval::freshness_score(chunk.created_at, now, policy.freshness_decay_days);
                 let stale = retrieval::staleness_penalty(
                     chunk.updated_at,
                     chunk.created_at,
@@ -588,28 +620,30 @@ impl RetrievalService for InMemoryRetrieval {
                     policy.staleness_threshold_days,
                 );
 
-                let credibility = chunk.credibility_score
+                let credibility = chunk
+                    .credibility_score
                     .map(|s| s.clamp(0.0, 1.0))
                     .unwrap_or(0.0);
 
                 // Recency of use: None if never retrieved, tiered score otherwise.
-                let recency_of_use = last_retrieved_snap
-                    .get(chunk.chunk_id.as_str())
-                    .map(|&last_ms| {
-                        let age_ms = now.saturating_sub(last_ms);
-                        const HOUR_MS: u64 = 3_600_000;
-                        const DAY_MS: u64 = 86_400_000;
-                        const WEEK_MS: u64 = 7 * DAY_MS;
-                        if age_ms <= HOUR_MS {
-                            1.0
-                        } else if age_ms <= DAY_MS {
-                            0.5
-                        } else if age_ms <= WEEK_MS {
-                            0.25
-                        } else {
-                            0.1
-                        }
-                    });
+                let recency_of_use =
+                    last_retrieved_snap
+                        .get(chunk.chunk_id.as_str())
+                        .map(|&last_ms| {
+                            let age_ms = now.saturating_sub(last_ms);
+                            const HOUR_MS: u64 = 3_600_000;
+                            const DAY_MS: u64 = 86_400_000;
+                            const WEEK_MS: u64 = 7 * DAY_MS;
+                            if age_ms <= HOUR_MS {
+                                1.0
+                            } else if age_ms <= DAY_MS {
+                                0.5
+                            } else if age_ms <= WEEK_MS {
+                                0.25
+                            } else {
+                                0.1
+                            }
+                        });
 
                 let breakdown = ScoringBreakdown {
                     semantic_relevance: semantic_score,
@@ -641,7 +675,10 @@ impl RetrievalService for InMemoryRetrieval {
             let total_others = results.len().saturating_sub(1).max(1) as f64;
 
             // Pre-compute per-chunk query-word coverage for lexical fallback.
-            let query_words: Vec<String> = query_lower.split_whitespace().map(|w| w.to_owned()).collect();
+            let query_words: Vec<String> = query_lower
+                .split_whitespace()
+                .map(|w| w.to_owned())
+                .collect();
             let word_count = query_words.len().max(1);
 
             struct ChunkInfo {
@@ -699,10 +736,8 @@ impl RetrievalService for InMemoryRetrieval {
                 if corroborating > 0 {
                     results[i].breakdown.corroboration =
                         (corroborating as f64 / total_others).min(1.0);
-                    results[i].score = retrieval::compute_final_score(
-                        &results[i].breakdown,
-                        &policy.weights,
-                    );
+                    results[i].score =
+                        retrieval::compute_final_score(&results[i].breakdown, &policy.weights);
                 }
             }
 
@@ -750,19 +785,27 @@ impl RetrievalService for InMemoryRetrieval {
 
                 if overlap > 0 {
                     result.breakdown.graph_proximity = (overlap as f64 / total_others).min(1.0);
-                    result.score = retrieval::compute_final_score(&result.breakdown, &policy.weights);
+                    result.score =
+                        retrieval::compute_final_score(&result.breakdown, &policy.weights);
                 }
             }
 
             // Re-sort after graph proximity update.
-            results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            results.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         // Track all dimensions that materially contributed across results.
         if results.iter().any(|r| r.breakdown.lexical_relevance != 0.0) {
             scoring_dims.push("lexical_relevance".to_owned());
         }
-        if results.iter().any(|r| r.breakdown.semantic_relevance != 0.0) {
+        if results
+            .iter()
+            .any(|r| r.breakdown.semantic_relevance != 0.0)
+        {
             scoring_dims.push("semantic_relevance".to_owned());
         }
         if results.iter().any(|r| r.breakdown.freshness != 0.0) {
@@ -771,7 +814,10 @@ impl RetrievalService for InMemoryRetrieval {
         if results.iter().any(|r| r.breakdown.staleness_penalty != 0.0) {
             scoring_dims.push("staleness_penalty".to_owned());
         }
-        if results.iter().any(|r| r.breakdown.source_credibility != 0.0) {
+        if results
+            .iter()
+            .any(|r| r.breakdown.source_credibility != 0.0)
+        {
             scoring_dims.push("source_credibility".to_owned());
         }
         if results.iter().any(|r| r.breakdown.corroboration != 0.0) {
@@ -780,19 +826,30 @@ impl RetrievalService for InMemoryRetrieval {
         if results.iter().any(|r| r.breakdown.graph_proximity != 0.0) {
             scoring_dims.push("graph_proximity".to_owned());
         }
-        if results.iter().any(|r| r.breakdown.recency_of_use.unwrap_or(0.0) != 0.0) {
+        if results
+            .iter()
+            .any(|r| r.breakdown.recency_of_use.unwrap_or(0.0) != 0.0)
+        {
             scoring_dims.push("recency_of_use".to_owned());
         }
 
         // Re-sort by final weighted score.
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let candidates_generated = results.len();
 
         // Apply reranking if requested.
         let base_stages = match effective_mode {
             RetrievalMode::VectorOnly => vec![CandidateStage::Vector],
-            RetrievalMode::Hybrid => vec![CandidateStage::Lexical, CandidateStage::Vector, CandidateStage::Merged],
+            RetrievalMode::Hybrid => vec![
+                CandidateStage::Lexical,
+                CandidateStage::Vector,
+                CandidateStage::Merged,
+            ],
             _ => vec![CandidateStage::Lexical],
         };
 
@@ -846,7 +903,11 @@ impl RetrievalService for InMemoryRetrieval {
 
 impl InMemoryRetrieval {
     /// Register a source in the document store.
-    pub fn register_source(&self, project: &cairn_domain::ProjectKey, source_id: &cairn_domain::SourceId) -> SourceSummary {
+    pub fn register_source(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        source_id: &cairn_domain::SourceId,
+    ) -> SourceSummary {
         let _ = project;
         SourceSummary {
             source_id: source_id.clone(),
@@ -889,11 +950,15 @@ impl InMemoryRetrieval {
         interval_ms: u64,
         refresh_url: Option<String>,
     ) -> RefreshSchedule {
-        self.store.create_refresh_schedule(source_id, project, interval_ms, refresh_url)
+        self.store
+            .create_refresh_schedule(source_id, project, interval_ms, refresh_url)
     }
 
     /// Get a refresh schedule for a source.
-    pub fn get_refresh_schedule(&self, source_id: &cairn_domain::SourceId) -> Option<RefreshSchedule> {
+    pub fn get_refresh_schedule(
+        &self,
+        source_id: &cairn_domain::SourceId,
+    ) -> Option<RefreshSchedule> {
         self.store.get_refresh_schedule(source_id)
     }
 
@@ -1299,7 +1364,9 @@ mod tests {
         use crate::retrieval::CandidateStage;
 
         let store = Arc::new(InMemoryDocumentStore::new());
-        let chunker = ParagraphChunker { max_chunk_size: 500 };
+        let chunker = ParagraphChunker {
+            max_chunk_size: 500,
+        };
         let pipeline = IngestPipeline::new(store.clone(), chunker);
 
         pipeline
@@ -1344,16 +1411,21 @@ mod tests {
 
         // Scoring dimensions that contributed are listed.
         assert!(
-            diag.scoring_dimensions_used.contains(&"lexical_relevance".to_owned()),
+            diag.scoring_dimensions_used
+                .contains(&"lexical_relevance".to_owned()),
             "lexical_relevance must always be listed"
         );
         assert!(
-            diag.scoring_dimensions_used.contains(&"freshness".to_owned()),
+            diag.scoring_dimensions_used
+                .contains(&"freshness".to_owned()),
             "freshness should be listed for recently-created chunks"
         );
 
         // Effective policy is described.
-        let policy_str = diag.effective_policy.as_ref().expect("effective_policy should be Some");
+        let policy_str = diag
+            .effective_policy
+            .as_ref()
+            .expect("effective_policy should be Some");
         assert!(policy_str.contains("freshness_decay"));
         assert!(policy_str.contains("staleness_threshold"));
         assert!(policy_str.contains("recency="));
@@ -1401,9 +1473,10 @@ mod tests {
     async fn vector_only_with_embedder_returns_results() {
         let store = Arc::new(InMemoryDocumentStore::new());
         let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
-        let chunker = ParagraphChunker { max_chunk_size: 500 };
-        let pipeline = IngestPipeline::new(store.clone(), chunker)
-            .with_embedder(embedder.clone());
+        let chunker = ParagraphChunker {
+            max_chunk_size: 500,
+        };
+        let pipeline = IngestPipeline::new(store.clone(), chunker).with_embedder(embedder.clone());
 
         pipeline
             .submit(IngestRequest {
@@ -1437,7 +1510,10 @@ mod tests {
 
         // Verify chunks have embeddings from the pipeline.
         let chunks = store.all_chunks();
-        assert!(chunks.iter().all(|c| c.embedding.is_some()), "pipeline should embed chunks");
+        assert!(
+            chunks.iter().all(|c| c.embedding.is_some()),
+            "pipeline should embed chunks"
+        );
 
         let retrieval = InMemoryRetrieval::new(store).with_embedder(embedder);
 
@@ -1456,7 +1532,10 @@ mod tests {
 
         assert!(!response.results.is_empty());
         assert_eq!(response.diagnostics.mode_used, RetrievalMode::VectorOnly);
-        assert!(response.diagnostics.stages_used.contains(&CandidateStage::Vector));
+        assert!(response
+            .diagnostics
+            .stages_used
+            .contains(&CandidateStage::Vector));
 
         // VectorOnly: semantic populated, lexical zero.
         for r in &response.results {
@@ -1470,9 +1549,10 @@ mod tests {
     async fn hybrid_mode_with_embedder_combines_scores() {
         let store = Arc::new(InMemoryDocumentStore::new());
         let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
-        let chunker = ParagraphChunker { max_chunk_size: 500 };
-        let pipeline = IngestPipeline::new(store.clone(), chunker)
-            .with_embedder(embedder.clone());
+        let chunker = ParagraphChunker {
+            max_chunk_size: 500,
+        };
+        let pipeline = IngestPipeline::new(store.clone(), chunker).with_embedder(embedder.clone());
 
         pipeline
             .submit(IngestRequest {
@@ -1506,14 +1586,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.diagnostics.mode_used, RetrievalMode::Hybrid);
-        assert!(response.diagnostics.stages_used.contains(&CandidateStage::Lexical));
-        assert!(response.diagnostics.stages_used.contains(&CandidateStage::Vector));
-        assert!(response.diagnostics.stages_used.contains(&CandidateStage::Merged));
+        assert!(response
+            .diagnostics
+            .stages_used
+            .contains(&CandidateStage::Lexical));
+        assert!(response
+            .diagnostics
+            .stages_used
+            .contains(&CandidateStage::Vector));
+        assert!(response
+            .diagnostics
+            .stages_used
+            .contains(&CandidateStage::Merged));
 
         // Both dimensions should be populated.
         for r in &response.results {
-            assert!(r.breakdown.lexical_relevance > 0.0, "hybrid should have lexical score");
-            assert!(r.breakdown.semantic_relevance > 0.0, "hybrid should have semantic score");
+            assert!(
+                r.breakdown.lexical_relevance > 0.0,
+                "hybrid should have lexical score"
+            );
+            assert!(
+                r.breakdown.semantic_relevance > 0.0,
+                "hybrid should have semantic score"
+            );
         }
     }
 
@@ -1522,9 +1617,10 @@ mod tests {
     async fn vector_only_ranks_by_similarity() {
         let store = Arc::new(InMemoryDocumentStore::new());
         let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
-        let chunker = ParagraphChunker { max_chunk_size: 500 };
-        let pipeline = IngestPipeline::new(store.clone(), chunker)
-            .with_embedder(embedder.clone());
+        let chunker = ParagraphChunker {
+            max_chunk_size: 500,
+        };
+        let pipeline = IngestPipeline::new(store.clone(), chunker).with_embedder(embedder.clone());
 
         // Ingest two docs: one closely matching the query, one distant.
         pipeline
@@ -1588,7 +1684,9 @@ mod tests {
     async fn pipeline_stores_embedding_model_id_on_chunks() {
         let store = Arc::new(InMemoryDocumentStore::new());
         let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
-        let chunker = ParagraphChunker { max_chunk_size: 500 };
+        let chunker = ParagraphChunker {
+            max_chunk_size: 500,
+        };
         let pipeline = IngestPipeline::new(store.clone(), chunker)
             .with_embedder(embedder)
             .with_embedding_model_id("nomic-embed-v1.5");
@@ -1617,7 +1715,10 @@ mod tests {
                 "model ID must be stored alongside every embedding"
             );
             assert!(chunk.embedding.is_some(), "embedding must be present");
-            assert!(!chunk.needs_reembed, "fresh chunks must not be flagged for re-embedding");
+            assert!(
+                !chunk.needs_reembed,
+                "fresh chunks must not be flagged for re-embedding"
+            );
         }
     }
 
@@ -1626,9 +1727,10 @@ mod tests {
     async fn pipeline_without_model_id_leaves_field_none() {
         let store = Arc::new(InMemoryDocumentStore::new());
         let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
-        let chunker = ParagraphChunker { max_chunk_size: 500 };
-        let pipeline = IngestPipeline::new(store.clone(), chunker)
-            .with_embedder(embedder);
+        let chunker = ParagraphChunker {
+            max_chunk_size: 500,
+        };
+        let pipeline = IngestPipeline::new(store.clone(), chunker).with_embedder(embedder);
         // no with_embedding_model_id call
 
         pipeline
@@ -1661,7 +1763,9 @@ mod tests {
     async fn re_embed_all_marks_stale_chunks_and_updates_sentinel() {
         let store = Arc::new(InMemoryDocumentStore::new());
         let embedder: Arc<dyn crate::pipeline::EmbeddingProvider> = Arc::new(MockEmbedder);
-        let chunker = ParagraphChunker { max_chunk_size: 200 };
+        let chunker = ParagraphChunker {
+            max_chunk_size: 200,
+        };
         let pipeline = IngestPipeline::new(store.clone(), chunker)
             .with_embedder(embedder)
             .with_embedding_model_id("nomic-embed-v1");
@@ -1670,7 +1774,10 @@ mod tests {
         for (i, content) in [
             "Rust ownership model provides memory safety without GC.",
             "Python uses reference counting and a garbage collector.",
-        ].iter().enumerate() {
+        ]
+        .iter()
+        .enumerate()
+        {
             pipeline
                 .submit(IngestRequest {
                     document_id: KnowledgeDocumentId::new(format!("doc_reemb_{i}")),
@@ -1688,13 +1795,22 @@ mod tests {
         }
 
         let before_chunks = store.all_chunks();
-        let embedded_count = before_chunks.iter().filter(|c| c.embedding.is_some()).count();
-        assert!(embedded_count > 0, "chunks must have embeddings before re_embed_all");
+        let embedded_count = before_chunks
+            .iter()
+            .filter(|c| c.embedding.is_some())
+            .count();
+        assert!(
+            embedded_count > 0,
+            "chunks must have embeddings before re_embed_all"
+        );
 
         // Simulate model upgrade.
         let marked = store.re_embed_all("nomic-embed-v2");
 
-        assert_eq!(marked, embedded_count, "re_embed_all must mark exactly the embedded chunks");
+        assert_eq!(
+            marked, embedded_count,
+            "re_embed_all must mark exactly the embedded chunks"
+        );
         assert_eq!(
             store.last_embedding_model_id().as_deref(),
             Some("nomic-embed-v2"),
@@ -1727,7 +1843,9 @@ mod tests {
     async fn re_embed_all_skips_unembedded_chunks() {
         let store = Arc::new(InMemoryDocumentStore::new());
         // Use a no-op embedder (default) — chunks get no embeddings.
-        let chunker = ParagraphChunker { max_chunk_size: 200 };
+        let chunker = ParagraphChunker {
+            max_chunk_size: 200,
+        };
         let pipeline = IngestPipeline::new(store.clone(), chunker);
 
         pipeline
@@ -1746,9 +1864,15 @@ mod tests {
             .unwrap();
 
         let marked = store.re_embed_all("new-model");
-        assert_eq!(marked, 0, "no chunks should be marked when none have embeddings");
+        assert_eq!(
+            marked, 0,
+            "no chunks should be marked when none have embeddings"
+        );
         assert_eq!(store.pending_reembed_count(), 0);
         // Sentinel still updated so future ingests use the new model.
-        assert_eq!(store.last_embedding_model_id().as_deref(), Some("new-model"));
+        assert_eq!(
+            store.last_embedding_model_id().as_deref(),
+            Some("new-model")
+        );
     }
 }

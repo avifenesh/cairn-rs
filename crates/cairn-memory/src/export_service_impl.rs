@@ -197,7 +197,11 @@ impl InMemoryExportService {
             let source_bundle_id = document
                 .provenance
                 .as_ref()
-                .and_then(|p| p.get("source_bundle_id").and_then(|v| v.as_str()).map(str::to_owned))
+                .and_then(|p| {
+                    p.get("source_bundle_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned)
+                })
                 .unwrap_or_else(|| bundle_id.clone());
             let lineage = document
                 .provenance
@@ -275,7 +279,11 @@ impl InMemoryExportService {
                 name: asset.name.clone(),
                 kind: Self::prompt_kind_string(&asset.kind),
                 status: Self::prompt_status_string(&asset.status),
-                library_scope_hint: if asset.scope.is_empty() { None } else { Some(asset.scope.clone()) },
+                library_scope_hint: if asset.scope.is_empty() {
+                    None
+                } else {
+                    Some(asset.scope.clone())
+                },
                 metadata: HashMap::from([
                     (
                         "updated_at".to_owned(),
@@ -285,10 +293,7 @@ impl InMemoryExportService {
                         "workspace_id".to_owned(),
                         serde_json::Value::from(asset.workspace.as_str()),
                     ),
-                    (
-                        "tenant_id".to_owned(),
-                        serde_json::Value::from(tenant_id),
-                    ),
+                    ("tenant_id".to_owned(), serde_json::Value::from(tenant_id)),
                 ]),
             };
             let asset_payload_json =
@@ -341,11 +346,7 @@ impl InMemoryExportService {
                 artifacts.push(ArtifactEntry {
                     artifact_kind: ArtifactKind::PromptVersion,
                     artifact_logical_id: version.prompt_version_id.as_str().to_owned(),
-                    artifact_display_name: format!(
-                        "{} v{}",
-                        asset.name,
-                        version.version_number,
-                    ),
+                    artifact_display_name: format!("{} v{}", asset.name, version.version_number,),
                     origin_scope: Self::workspace_scope(&version.workspace),
                     origin_artifact_id: Some(version.prompt_version_id.as_str().to_owned()),
                     content_hash: version.content_hash.clone(),
@@ -353,8 +354,7 @@ impl InMemoryExportService {
                     origin_timestamp: version.created_at,
                     metadata: HashMap::new(),
                     payload: crate::bundles::ArtifactPayload::InlineJson(
-                        serde_json::to_value(version_payload)
-                            .map_err(|err| err.to_string())?,
+                        serde_json::to_value(version_payload).map_err(|err| err.to_string())?,
                     ),
                     provenance: crate::bundles::ArtifactProvenance::default(),
                     lineage: Some(asset.prompt_asset_id.as_str().to_owned()),
@@ -384,7 +384,6 @@ impl InMemoryExportService {
             },
         })
     }
-
 }
 
 #[async_trait]

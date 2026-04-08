@@ -51,7 +51,12 @@ fn entry(id: &str, provider: &str, tier: ModelTier) -> ModelEntry {
 #[test]
 fn builtin_catalog_has_exactly_five_models() {
     let cat = builtin_catalog();
-    assert_eq!(cat.len(), 5, "GAP-001 requires 5 bundled models; got {}", cat.len());
+    assert_eq!(
+        cat.len(),
+        5,
+        "GAP-001 requires 5 bundled models; got {}",
+        cat.len()
+    );
 }
 
 // ── 2. ModelRegistry loads builtin_catalog correctly ─────────────────────────
@@ -85,8 +90,11 @@ fn list_by_tier_brain_returns_two_models() {
     assert_eq!(brain.len(), 2, "Brain tier must have exactly 2 models");
 
     let ids: Vec<_> = brain.iter().map(|e| e.id.as_str()).collect();
-    assert!(ids.contains(&"claude-3-5-sonnet-20241022"), "Sonnet must be Brain");
-    assert!(ids.contains(&"gpt-4o"),                    "GPT-4o must be Brain");
+    assert!(
+        ids.contains(&"claude-3-5-sonnet-20241022"),
+        "Sonnet must be Brain"
+    );
+    assert!(ids.contains(&"gpt-4o"), "GPT-4o must be Brain");
 }
 
 #[test]
@@ -97,9 +105,15 @@ fn list_by_tier_light_returns_three_models() {
     assert_eq!(light.len(), 3, "Light tier must have exactly 3 models");
 
     let ids: Vec<_> = light.iter().map(|e| e.id.as_str()).collect();
-    assert!(ids.contains(&"claude-3-haiku-20240307"),                  "Haiku must be Light");
-    assert!(ids.contains(&"gpt-4o-mini"),                              "GPT-4o Mini must be Light");
-    assert!(ids.contains(&"meta-llama/llama-3.1-8b-instruct:free"),    "Llama must be Light");
+    assert!(
+        ids.contains(&"claude-3-haiku-20240307"),
+        "Haiku must be Light"
+    );
+    assert!(ids.contains(&"gpt-4o-mini"), "GPT-4o Mini must be Light");
+    assert!(
+        ids.contains(&"meta-llama/llama-3.1-8b-instruct:free"),
+        "Llama must be Light"
+    );
 }
 
 #[test]
@@ -183,7 +197,10 @@ fn reload_replaces_all_existing_entries() {
 
     // Old entries gone.
     for old_id in ["claude-3-5-sonnet-20241022", "gpt-4o"] {
-        assert!(reg.get(old_id).is_none(), "{old_id} must be absent after reload");
+        assert!(
+            reg.get(old_id).is_none(),
+            "{old_id} must be absent after reload"
+        );
     }
 
     // New entries present.
@@ -196,7 +213,10 @@ fn reload_with_empty_iterator_clears_catalog() {
     let mut reg = ModelRegistry::with_entries(builtin_catalog());
     reg.reload(std::iter::empty());
 
-    assert!(reg.is_empty(), "reload with empty iterator must clear all entries");
+    assert!(
+        reg.is_empty(),
+        "reload with empty iterator must clear all entries"
+    );
 }
 
 #[test]
@@ -204,7 +224,11 @@ fn reload_then_repopulate_gives_fresh_catalog() {
     let mut reg = ModelRegistry::with_entries(builtin_catalog());
     reg.reload(builtin_catalog()); // idempotent reload
 
-    assert_eq!(reg.len(), 5, "reloading same catalog must restore 5 entries");
+    assert_eq!(
+        reg.len(),
+        5,
+        "reloading same catalog must restore 5 entries"
+    );
     assert!(reg.get("gpt-4o").is_some());
 }
 
@@ -218,12 +242,30 @@ fn claude_sonnet_capabilities() {
 
     // claude-3-5-sonnet: streaming=true, tools=true, json_mode=true,
     //                    reasoning=false, image input, context=200k
-    assert!(caps.contains(&ProviderCapability::Streaming),         "Sonnet: Streaming");
-    assert!(caps.contains(&ProviderCapability::ToolUse),           "Sonnet: ToolUse");
-    assert!(caps.contains(&ProviderCapability::StructuredOutput),  "Sonnet: StructuredOutput (json_mode)");
-    assert!(caps.contains(&ProviderCapability::ImageInput),        "Sonnet: ImageInput");
-    assert!(caps.contains(&ProviderCapability::HighContextWindow), "Sonnet: HighContextWindow (200k)");
-    assert!(!caps.contains(&ProviderCapability::ReasoningTrace),   "Sonnet: no ReasoningTrace");
+    assert!(
+        caps.contains(&ProviderCapability::Streaming),
+        "Sonnet: Streaming"
+    );
+    assert!(
+        caps.contains(&ProviderCapability::ToolUse),
+        "Sonnet: ToolUse"
+    );
+    assert!(
+        caps.contains(&ProviderCapability::StructuredOutput),
+        "Sonnet: StructuredOutput (json_mode)"
+    );
+    assert!(
+        caps.contains(&ProviderCapability::ImageInput),
+        "Sonnet: ImageInput"
+    );
+    assert!(
+        caps.contains(&ProviderCapability::HighContextWindow),
+        "Sonnet: HighContextWindow (200k)"
+    );
+    assert!(
+        !caps.contains(&ProviderCapability::ReasoningTrace),
+        "Sonnet: no ReasoningTrace"
+    );
 }
 
 #[test]
@@ -237,8 +279,10 @@ fn claude_haiku_capabilities() {
     assert!(caps.contains(&ProviderCapability::ToolUse));
     assert!(caps.contains(&ProviderCapability::ImageInput));
     assert!(caps.contains(&ProviderCapability::HighContextWindow));
-    assert!(!caps.contains(&ProviderCapability::StructuredOutput),
-        "Haiku: no StructuredOutput (json_mode=false)");
+    assert!(
+        !caps.contains(&ProviderCapability::StructuredOutput),
+        "Haiku: no StructuredOutput (json_mode=false)"
+    );
     assert!(!caps.contains(&ProviderCapability::ReasoningTrace));
 }
 
@@ -266,9 +310,18 @@ fn llama_free_capabilities() {
     // llama: streaming=true, tools=true, json_mode=false, text-only, 131k ctx
     assert!(caps.contains(&ProviderCapability::Streaming));
     assert!(caps.contains(&ProviderCapability::ToolUse));
-    assert!(caps.contains(&ProviderCapability::HighContextWindow), "131k >= 100k threshold");
-    assert!(!caps.contains(&ProviderCapability::StructuredOutput), "no json_mode");
-    assert!(!caps.contains(&ProviderCapability::ImageInput),       "text-only input");
+    assert!(
+        caps.contains(&ProviderCapability::HighContextWindow),
+        "131k >= 100k threshold"
+    );
+    assert!(
+        !caps.contains(&ProviderCapability::StructuredOutput),
+        "no json_mode"
+    );
+    assert!(
+        !caps.contains(&ProviderCapability::ImageInput),
+        "text-only input"
+    );
     assert!(!caps.contains(&ProviderCapability::ReasoningTrace));
 }
 
@@ -277,17 +330,23 @@ fn high_context_window_threshold_is_100k() {
     // Below threshold: no flag.
     let mut below = entry("small", "x", ModelTier::Mid);
     below.context_len = 99_999;
-    assert!(!below.capabilities().contains(&ProviderCapability::HighContextWindow));
+    assert!(!below
+        .capabilities()
+        .contains(&ProviderCapability::HighContextWindow));
 
     // At threshold: flag present.
     let mut at = entry("at-threshold", "x", ModelTier::Mid);
     at.context_len = 100_000;
-    assert!(at.capabilities().contains(&ProviderCapability::HighContextWindow));
+    assert!(at
+        .capabilities()
+        .contains(&ProviderCapability::HighContextWindow));
 
     // Above threshold: flag present.
     let mut above = entry("large", "x", ModelTier::Mid);
     above.context_len = 200_000;
-    assert!(above.capabilities().contains(&ProviderCapability::HighContextWindow));
+    assert!(above
+        .capabilities()
+        .contains(&ProviderCapability::HighContextWindow));
 }
 
 #[test]
@@ -311,7 +370,9 @@ fn image_input_capability_requires_image_modality() {
 
     // Text-only: no ImageInput.
     let text_only = entry("text-only", "vendor", ModelTier::Brain);
-    assert!(!text_only.capabilities().contains(&ProviderCapability::ImageInput));
+    assert!(!text_only
+        .capabilities()
+        .contains(&ProviderCapability::ImageInput));
 }
 
 // ── 7. all() returns entries sorted by ID ────────────────────────────────────
@@ -369,8 +430,11 @@ fn estimate_cost_zero_for_free_model() {
     let llama = reg.get("meta-llama/llama-3.1-8b-instruct:free").unwrap();
 
     assert_eq!(llama.cost_type, ProviderCostType::Free);
-    assert_eq!(llama.estimate_cost_micros(1_000_000, 1_000_000), 0,
-        "Free model must return 0 regardless of token counts");
+    assert_eq!(
+        llama.estimate_cost_micros(1_000_000, 1_000_000),
+        0,
+        "Free model must return 0 regardless of token counts"
+    );
 }
 
 // ── 10. enabled() excludes disabled entries ───────────────────────────────────
@@ -389,5 +453,7 @@ fn enabled_excludes_disabled_models() {
     let enabled = reg.enabled();
     assert_eq!(enabled.len(), 3, "3 models remain enabled");
     assert!(enabled.iter().all(|e| e.enabled));
-    assert!(!enabled.iter().any(|e| e.id == "gpt-4o" || e.id == "gpt-4o-mini"));
+    assert!(!enabled
+        .iter()
+        .any(|e| e.id == "gpt-4o" || e.id == "gpt-4o-mini"));
 }

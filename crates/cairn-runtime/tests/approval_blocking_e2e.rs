@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use cairn_domain::*;
 use cairn_runtime::{
-    ApprovalService, ApprovalServiceImpl, RunService, RunServiceImpl, RuntimeError,
-    SessionService, SessionServiceImpl,
+    ApprovalService, ApprovalServiceImpl, RunService, RunServiceImpl, RuntimeError, SessionService,
+    SessionServiceImpl,
 };
 use cairn_store::InMemoryStore;
 

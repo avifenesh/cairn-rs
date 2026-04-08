@@ -135,7 +135,11 @@ async fn event_log_read_after_position_skips_prior_events() {
 
     // Read after position 1 should only return the second event.
     let events = store.read_stream(after_first, 10).await.unwrap();
-    assert_eq!(events.len(), 1, "should only return events after the given position");
+    assert_eq!(
+        events.len(),
+        1,
+        "should only return events after the given position"
+    );
     match &events[0].envelope.payload {
         RuntimeEvent::SessionCreated(e) => assert_eq!(e.session_id.as_str(), "s2"),
         other => panic!("unexpected: {other:?}"),
@@ -169,7 +173,10 @@ async fn dashboard_overview_builds_from_runtime_data() {
             None,
         )
         .await;
-    assert!(run_result.is_ok(), "create run should succeed: {run_result:?}");
+    assert!(
+        run_result.is_ok(),
+        "create run should succeed: {run_result:?}"
+    );
 
     // Count via the store's query methods.
     let active_runs = services.store.count_active_runs().await;

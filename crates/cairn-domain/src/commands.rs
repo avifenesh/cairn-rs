@@ -4,7 +4,9 @@ use crate::ids::{
     PromptAssetId, PromptReleaseId, PromptVersionId, RunId, ScheduledTaskId, SessionId, SignalId,
     TaskId, TenantId, ToolInvocationId, WorkspaceId,
 };
-use crate::lifecycle::{FailureClass, PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget};
+use crate::lifecycle::{
+    FailureClass, PauseReason, ResumeTrigger, RunResumeTarget, TaskResumeTarget,
+};
 use crate::policy::{ApprovalDecision, ExecutionClass};
 use crate::tenancy::{OwnershipKey, ProjectKey};
 use crate::tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget};
@@ -276,21 +278,15 @@ impl RuntimeCommand {
             RuntimeCommand::RecordOutcome(command) => Some(RuntimeEntityRef::Run {
                 run_id: command.run_id.clone(),
             }),
-            RuntimeCommand::CreatePromptAsset(command) => {
-                Some(RuntimeEntityRef::PromptAsset {
-                    prompt_asset_id: command.prompt_asset_id.clone(),
-                })
-            }
-            RuntimeCommand::CreatePromptVersion(command) => {
-                Some(RuntimeEntityRef::PromptVersion {
-                    prompt_version_id: command.prompt_version_id.clone(),
-                })
-            }
-            RuntimeCommand::CreatePromptRelease(command) => {
-                Some(RuntimeEntityRef::PromptRelease {
-                    prompt_release_id: command.prompt_release_id.clone(),
-                })
-            }
+            RuntimeCommand::CreatePromptAsset(command) => Some(RuntimeEntityRef::PromptAsset {
+                prompt_asset_id: command.prompt_asset_id.clone(),
+            }),
+            RuntimeCommand::CreatePromptVersion(command) => Some(RuntimeEntityRef::PromptVersion {
+                prompt_version_id: command.prompt_version_id.clone(),
+            }),
+            RuntimeCommand::CreatePromptRelease(command) => Some(RuntimeEntityRef::PromptRelease {
+                prompt_release_id: command.prompt_release_id.clone(),
+            }),
             RuntimeCommand::TransitionPromptRelease(command) => {
                 Some(RuntimeEntityRef::PromptRelease {
                     prompt_release_id: command.prompt_release_id.clone(),

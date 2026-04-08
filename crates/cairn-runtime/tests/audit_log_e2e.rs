@@ -16,9 +16,9 @@
 
 use std::sync::Arc;
 
-use cairn_domain::{AuditOutcome, AuditLogEntryRecorded, RuntimeEvent, TenantId};
-use cairn_runtime::AuditService;
+use cairn_domain::{AuditLogEntryRecorded, AuditOutcome, RuntimeEvent, TenantId};
 use cairn_runtime::services::AuditServiceImpl;
+use cairn_runtime::AuditService;
 use cairn_store::{EventLog, InMemoryStore};
 
 fn tenant() -> TenantId {
@@ -55,28 +55,53 @@ async fn three_operations_produce_three_audit_events() {
     let (store, audit) = setup();
 
     // Simulate: create tenant
-    audit.record(
-        tenant(), "op_system".to_owned(), "create_tenant".to_owned(),
-        "tenant".to_owned(), "tenant_audit".to_owned(),
-        AuditOutcome::Success, serde_json::json!({"name": "Audit Tenant"}),
-    ).await.unwrap();
+    audit
+        .record(
+            tenant(),
+            "op_system".to_owned(),
+            "create_tenant".to_owned(),
+            "tenant".to_owned(),
+            "tenant_audit".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({"name": "Audit Tenant"}),
+        )
+        .await
+        .unwrap();
 
     // Simulate: create run
-    audit.record(
-        tenant(), "op_alice".to_owned(), "create_run".to_owned(),
-        "run".to_owned(), "run_audit_1".to_owned(),
-        AuditOutcome::Success, serde_json::json!({"session_id": "sess_1"}),
-    ).await.unwrap();
+    audit
+        .record(
+            tenant(),
+            "op_alice".to_owned(),
+            "create_run".to_owned(),
+            "run".to_owned(),
+            "run_audit_1".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({"session_id": "sess_1"}),
+        )
+        .await
+        .unwrap();
 
     // Simulate: complete run
-    audit.record(
-        tenant(), "op_alice".to_owned(), "complete_run".to_owned(),
-        "run".to_owned(), "run_audit_1".to_owned(),
-        AuditOutcome::Success, serde_json::json!({}),
-    ).await.unwrap();
+    audit
+        .record(
+            tenant(),
+            "op_alice".to_owned(),
+            "complete_run".to_owned(),
+            "run".to_owned(),
+            "run_audit_1".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({}),
+        )
+        .await
+        .unwrap();
 
     let events = read_audit_events(&store).await;
-    assert_eq!(events.len(), 3, "one AuditLogEntryRecorded per record() call");
+    assert_eq!(
+        events.len(),
+        3,
+        "one AuditLogEntryRecorded per record() call"
+    );
 
     let actions: Vec<&str> = events.iter().map(|e| e.action.as_str()).collect();
     assert!(actions.contains(&"create_tenant"));
@@ -90,27 +115,56 @@ async fn three_operations_produce_three_audit_events() {
 async fn filter_audit_events_by_resource_type() {
     let (store, audit) = setup();
 
-    audit.record(tenant(), "op_sys".to_owned(), "create_tenant".to_owned(),
-        "tenant".to_owned(), "t1".to_owned(), AuditOutcome::Success, serde_json::json!({}))
-        .await.unwrap();
-    audit.record(tenant(), "op_alice".to_owned(), "create_run".to_owned(),
-        "run".to_owned(), "run_x".to_owned(), AuditOutcome::Success, serde_json::json!({}))
-        .await.unwrap();
-    audit.record(tenant(), "op_alice".to_owned(), "complete_run".to_owned(),
-        "run".to_owned(), "run_x".to_owned(), AuditOutcome::Success, serde_json::json!({}))
-        .await.unwrap();
+    audit
+        .record(
+            tenant(),
+            "op_sys".to_owned(),
+            "create_tenant".to_owned(),
+            "tenant".to_owned(),
+            "t1".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({}),
+        )
+        .await
+        .unwrap();
+    audit
+        .record(
+            tenant(),
+            "op_alice".to_owned(),
+            "create_run".to_owned(),
+            "run".to_owned(),
+            "run_x".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({}),
+        )
+        .await
+        .unwrap();
+    audit
+        .record(
+            tenant(),
+            "op_alice".to_owned(),
+            "complete_run".to_owned(),
+            "run".to_owned(),
+            "run_x".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({}),
+        )
+        .await
+        .unwrap();
 
     let all_events = read_audit_events(&store).await;
 
     // Filter to "run" resource type.
-    let run_events: Vec<_> = all_events.iter()
+    let run_events: Vec<_> = all_events
+        .iter()
         .filter(|e| e.resource_type == "run")
         .collect();
     assert_eq!(run_events.len(), 2, "two run-type audit events expected");
     assert!(run_events.iter().all(|e| e.resource_id == "run_x"));
 
     // Filter to "tenant" resource type.
-    let tenant_events: Vec<_> = all_events.iter()
+    let tenant_events: Vec<_> = all_events
+        .iter()
         .filter(|e| e.resource_type == "tenant")
         .collect();
     assert_eq!(tenant_events.len(), 1);
@@ -128,11 +182,18 @@ async fn audit_event_carries_correct_actor_resource_and_timestamp() {
         .unwrap()
         .as_millis() as u64;
 
-    let entry = audit.record(
-        tenant(), "op_bob".to_owned(), "approve_release".to_owned(),
-        "prompt_release".to_owned(), "rel_007".to_owned(),
-        AuditOutcome::Success, serde_json::json!({"approved_by": "op_bob"}),
-    ).await.unwrap();
+    let entry = audit
+        .record(
+            tenant(),
+            "op_bob".to_owned(),
+            "approve_release".to_owned(),
+            "prompt_release".to_owned(),
+            "rel_007".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({"approved_by": "op_bob"}),
+        )
+        .await
+        .unwrap();
 
     let after_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -167,11 +228,18 @@ async fn audit_event_carries_correct_actor_resource_and_timestamp() {
 async fn failure_outcome_is_stored_in_audit_event() {
     let (store, audit) = setup();
 
-    let entry = audit.record(
-        tenant(), "op_carol".to_owned(), "delete_credential".to_owned(),
-        "credential".to_owned(), "cred_99".to_owned(),
-        AuditOutcome::Failure, serde_json::json!({"reason": "permission_denied"}),
-    ).await.unwrap();
+    let entry = audit
+        .record(
+            tenant(),
+            "op_carol".to_owned(),
+            "delete_credential".to_owned(),
+            "credential".to_owned(),
+            "cred_99".to_owned(),
+            AuditOutcome::Failure,
+            serde_json::json!({"reason": "permission_denied"}),
+        )
+        .await
+        .unwrap();
 
     assert_eq!(entry.outcome, AuditOutcome::Failure);
 
@@ -187,23 +255,43 @@ async fn failure_outcome_is_stored_in_audit_event() {
 async fn audit_events_from_different_tenants_coexist_in_log() {
     let (store, audit) = setup();
 
-    audit.record(
-        TenantId::new("tenant_a"), "op_1".to_owned(), "action_a".to_owned(),
-        "run".to_owned(), "run_a".to_owned(),
-        AuditOutcome::Success, serde_json::json!({}),
-    ).await.unwrap();
-    audit.record(
-        TenantId::new("tenant_b"), "op_2".to_owned(), "action_b".to_owned(),
-        "run".to_owned(), "run_b".to_owned(),
-        AuditOutcome::Success, serde_json::json!({}),
-    ).await.unwrap();
+    audit
+        .record(
+            TenantId::new("tenant_a"),
+            "op_1".to_owned(),
+            "action_a".to_owned(),
+            "run".to_owned(),
+            "run_a".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({}),
+        )
+        .await
+        .unwrap();
+    audit
+        .record(
+            TenantId::new("tenant_b"),
+            "op_2".to_owned(),
+            "action_b".to_owned(),
+            "run".to_owned(),
+            "run_b".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({}),
+        )
+        .await
+        .unwrap();
 
     let all = read_audit_events(&store).await;
     assert_eq!(all.len(), 2, "both tenant events are in the log");
 
     // Tenant-scoped filtering.
-    let a_events: Vec<_> = all.iter().filter(|e| e.tenant_id == TenantId::new("tenant_a")).collect();
-    let b_events: Vec<_> = all.iter().filter(|e| e.tenant_id == TenantId::new("tenant_b")).collect();
+    let a_events: Vec<_> = all
+        .iter()
+        .filter(|e| e.tenant_id == TenantId::new("tenant_a"))
+        .collect();
+    let b_events: Vec<_> = all
+        .iter()
+        .filter(|e| e.tenant_id == TenantId::new("tenant_b"))
+        .collect();
     assert_eq!(a_events.len(), 1);
     assert_eq!(b_events.len(), 1);
     assert_eq!(a_events[0].resource_id, "run_a");
@@ -216,15 +304,18 @@ async fn audit_events_from_different_tenants_coexist_in_log() {
 async fn record_returns_fully_populated_audit_log_entry() {
     let (_, audit) = setup();
 
-    let entry = audit.record(
-        tenant(),
-        "op_dave".to_owned(),
-        "create_workspace".to_owned(),
-        "workspace".to_owned(),
-        "ws_new".to_owned(),
-        AuditOutcome::Success,
-        serde_json::json!({"plan": "pro"}),
-    ).await.unwrap();
+    let entry = audit
+        .record(
+            tenant(),
+            "op_dave".to_owned(),
+            "create_workspace".to_owned(),
+            "workspace".to_owned(),
+            "ws_new".to_owned(),
+            AuditOutcome::Success,
+            serde_json::json!({"plan": "pro"}),
+        )
+        .await
+        .unwrap();
 
     assert!(!entry.entry_id.is_empty(), "entry_id must be non-empty");
     assert_eq!(entry.tenant_id, tenant());
@@ -244,11 +335,18 @@ async fn audit_events_preserve_insertion_order() {
     let (store, audit) = setup();
 
     for i in 0u32..5 {
-        audit.record(
-            tenant(), "op_sys".to_owned(), format!("action_{i}"),
-            "run".to_owned(), format!("run_{i}"),
-            AuditOutcome::Success, serde_json::json!({}),
-        ).await.unwrap();
+        audit
+            .record(
+                tenant(),
+                "op_sys".to_owned(),
+                format!("action_{i}"),
+                "run".to_owned(),
+                format!("run_{i}"),
+                AuditOutcome::Success,
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
     }
 
     let events = read_audit_events(&store).await;

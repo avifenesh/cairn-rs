@@ -2,16 +2,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
-use cairn_memory::deep_search_impl::{
-    GraphExpansionHook, IterativeDeepSearch, QualityGateConfig,
-};
+use cairn_memory::deep_search::{DeepSearchRequest, DeepSearchService};
+use cairn_memory::deep_search_impl::{GraphExpansionHook, IterativeDeepSearch, QualityGateConfig};
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::{IngestRequest, IngestService, SourceType};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_memory::retrieval::{
     RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalResult, RetrievalService,
 };
-use cairn_memory::deep_search::{DeepSearchRequest, DeepSearchService};
 
 async fn ingest_docs(store: Arc<InMemoryDocumentStore>) {
     let chunker = ParagraphChunker {

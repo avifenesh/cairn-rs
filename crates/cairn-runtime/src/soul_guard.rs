@@ -15,9 +15,7 @@
 //! Markdown headings (`## Section Name`) in the patch text (case-insensitive).
 //! A patch with no headings is treated as an operational addition.
 
-use cairn_domain::soul::{
-    SoulDocument, SoulPatchResult, OPERATIONAL_FIELDS, PERSONALITY_FIELDS,
-};
+use cairn_domain::soul::{SoulDocument, SoulPatchResult, OPERATIONAL_FIELDS, PERSONALITY_FIELDS};
 
 /// Stateless soul patch validator.
 ///
@@ -64,7 +62,9 @@ impl SoulGuard {
             .iter()
             .find(|s| OPERATIONAL_FIELDS.iter().any(|of| s.contains(*of)))
             .map(|s| format!("patch targets operational field '{s}'"))
-            .unwrap_or_else(|| "patch contains no recognised section markers; treated as operational".to_owned());
+            .unwrap_or_else(|| {
+                "patch contains no recognised section markers; treated as operational".to_owned()
+            });
 
         SoulPatchResult::allowed(op_reason)
     }
@@ -114,9 +114,18 @@ mod tests {
         let guard = SoulGuard::new();
         let patch = "## Voice\n\nAlways be empathetic and acknowledge feelings before solving.";
         let result = guard.validate_patch(&doc(), patch);
-        assert!(result.allowed, "personality patch must be allowed (pending approval)");
-        assert!(result.requires_approval, "voice section must require approval");
-        assert!(result.reason.contains("approval"), "reason must mention approval");
+        assert!(
+            result.allowed,
+            "personality patch must be allowed (pending approval)"
+        );
+        assert!(
+            result.requires_approval,
+            "voice section must require approval"
+        );
+        assert!(
+            result.reason.contains("approval"),
+            "reason must mention approval"
+        );
     }
 
     /// Patch that modifies `## Values` requires approval.
@@ -125,7 +134,10 @@ mod tests {
         let guard = SoulGuard::new();
         let patch = "## Values (immutable)\n\n- Be honest always.\n- Protect user data.";
         let result = guard.validate_patch(&doc(), patch);
-        assert!(result.requires_approval, "values section must require approval");
+        assert!(
+            result.requires_approval,
+            "values section must require approval"
+        );
     }
 
     /// Patch changing `## Who I Am` requires approval.
@@ -146,7 +158,10 @@ mod tests {
         let patch = "## Auto-execute\n\n- Run integration tests before merging.";
         let result = guard.validate_patch(&doc(), patch);
         assert!(result.allowed, "operational patch must be allowed");
-        assert!(!result.requires_approval, "operational patch must not require approval");
+        assert!(
+            !result.requires_approval,
+            "operational patch must not require approval"
+        );
     }
 
     /// Patch updating `## Commands` is allowed.
@@ -179,8 +194,14 @@ mod tests {
         let patch = "## Values\n\n- New value added by LLM drift.";
         let result = guard.validate_patch(&d, patch);
         assert!(!result.allowed, "locked field must be denied");
-        assert!(!result.requires_approval, "denied patches must not set requires_approval");
-        assert!(result.reason.contains("locked"), "reason must mention 'locked'");
+        assert!(
+            !result.requires_approval,
+            "denied patches must not set requires_approval"
+        );
+        assert!(
+            result.reason.contains("locked"),
+            "reason must mention 'locked'"
+        );
     }
 
     /// Locking an operational field also denies patches to it.
@@ -202,7 +223,10 @@ mod tests {
         let guard = SoulGuard::new();
         let patch = "## Auto-execute\n\n- cargo build\n\n## Voice\n\nBe more terse.";
         let result = guard.validate_patch(&doc(), patch);
-        assert!(result.requires_approval, "mixed patch containing personality field must require approval");
+        assert!(
+            result.requires_approval,
+            "mixed patch containing personality field must require approval"
+        );
     }
 
     // ── Section extraction ────────────────────────────────────────────────
@@ -214,7 +238,10 @@ mod tests {
         assert!(sections.contains(&"voice".to_owned()));
         assert!(sections.contains(&"sub-section".to_owned()));
         assert!(sections.contains(&"values".to_owned()));
-        assert!(!sections.iter().any(|s| s == "title ignored"), "H1 must be ignored");
+        assert!(
+            !sections.iter().any(|s| s == "title ignored"),
+            "H1 must be ignored"
+        );
     }
 
     #[test]

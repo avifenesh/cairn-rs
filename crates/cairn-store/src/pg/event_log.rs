@@ -4,9 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cairn_domain::{EventEnvelope, RuntimeEvent};
 
+use super::projections::PgSyncProjection;
 use crate::error::StoreError;
 use crate::event_log::{EntityRef, EventLog, EventPosition, StoredEvent};
-use super::projections::PgSyncProjection;
 
 /// Postgres-backed append-only event log.
 ///

@@ -122,8 +122,7 @@ fn llm_traces_response_wraps_array_in_traces_key() {
 
     // Most-recent should appear last (handler returns most-recent first from store).
     assert!(
-        arr[0]["created_at_ms"].as_u64().unwrap()
-            < arr[1]["created_at_ms"].as_u64().unwrap()
+        arr[0]["created_at_ms"].as_u64().unwrap() < arr[1]["created_at_ms"].as_u64().unwrap()
             || arr[0]["created_at_ms"].as_u64().unwrap()
                 >= arr[1]["created_at_ms"].as_u64().unwrap(),
         "array order preserved from store result"
@@ -137,5 +136,8 @@ fn llm_traces_response_empty_session_returns_empty_array() {
     let response_body = serde_json::json!({ "traces": traces });
     let json = serde_json::to_value(&response_body).unwrap();
     let arr = json["traces"].as_array().expect("traces must be an array");
-    assert!(arr.is_empty(), "empty session → empty array, not null/missing");
+    assert!(
+        arr.is_empty(),
+        "empty session → empty array, not null/missing"
+    );
 }

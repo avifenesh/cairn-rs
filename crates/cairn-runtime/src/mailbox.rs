@@ -129,8 +129,14 @@ mod tests {
     fn truncate_long_content_appends_marker() {
         let long: String = "x".repeat(MAX_MESSAGE_CONTENT_LEN + 100);
         let result = truncate_message_content(&long);
-        assert!(result.len() <= MAX_MESSAGE_CONTENT_LEN + 20, "truncated string must be near limit");
-        assert!(result.ends_with("... (truncated)"), "must append truncation marker");
+        assert!(
+            result.len() <= MAX_MESSAGE_CONTENT_LEN + 20,
+            "truncated string must be near limit"
+        );
+        assert!(
+            result.ends_with("... (truncated)"),
+            "must append truncation marker"
+        );
         assert!(!result.contains(&"x".repeat(MAX_MESSAGE_CONTENT_LEN + 1)));
     }
 
@@ -166,7 +172,10 @@ mod tests {
             created_at: 1000,
         };
         let result = format_for_injection(&[record]);
-        assert!(result.starts_with("[Inter-agent messages]"), "must start with header");
+        assert!(
+            result.starts_with("[Inter-agent messages]"),
+            "must start with header"
+        );
         assert!(result.contains("From from_task: Hello from orchestrator"));
     }
 }

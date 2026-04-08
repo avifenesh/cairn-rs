@@ -9,12 +9,12 @@
 
 use std::sync::Arc;
 
+use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerReport};
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ExternalWorkerReactivated, ExternalWorkerRegistered,
-    ExternalWorkerReported, ExternalWorkerSuspended, ProjectKey, RuntimeEvent, TaskId,
-    TenantId, WorkerId,
+    ExternalWorkerReported, ExternalWorkerSuspended, ProjectKey, RuntimeEvent, TaskId, TenantId,
+    WorkerId,
 };
-use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerReport};
 use cairn_store::{projections::ExternalWorkerReadModel, EventLog, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -33,11 +33,7 @@ fn worker_id(n: u8) -> WorkerId {
 }
 
 fn ev<P: Into<RuntimeEvent>>(id: &str, payload: P) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(
-        EventId::new(id),
-        EventSource::Runtime,
-        payload.into(),
-    )
+    EventEnvelope::for_runtime_event(EventId::new(id), EventSource::Runtime, payload.into())
 }
 
 fn register_event(n: u8) -> EventEnvelope<RuntimeEvent> {
@@ -111,16 +107,15 @@ async fn register_three_workers_all_listed() {
         .await
         .unwrap();
 
-    let fleet = ExternalWorkerReadModel::list_by_tenant(
-        store.as_ref(),
-        &tenant_id(),
-        100,
-        0,
-    )
-    .await
-    .unwrap();
+    let fleet = ExternalWorkerReadModel::list_by_tenant(store.as_ref(), &tenant_id(), 100, 0)
+        .await
+        .unwrap();
 
-    assert_eq!(fleet.len(), 3, "all 3 registered workers must appear in the fleet listing");
+    assert_eq!(
+        fleet.len(),
+        3,
+        "all 3 registered workers must appear in the fleet listing"
+    );
 
     // Registration order is preserved (sorted by registered_at).
     assert_eq!(fleet[0].worker_id.as_str(), "worker_1");
@@ -129,8 +124,14 @@ async fn register_three_workers_all_listed() {
 
     // All start as "active" with no heartbeat.
     for w in &fleet {
-        assert_eq!(w.status, "active", "freshly registered workers must have status 'active'");
-        assert!(!w.health.is_alive, "no heartbeat yet — is_alive must be false");
+        assert_eq!(
+            w.status, "active",
+            "freshly registered workers must have status 'active'"
+        );
+        assert!(
+            !w.health.is_alive,
+            "no heartbeat yet — is_alive must be false"
+        );
         assert_eq!(w.health.last_heartbeat_ms, 0, "no heartbeat timestamp yet");
     }
 }
@@ -145,10 +146,7 @@ async fn heartbeat_marks_worker_healthy() {
         .await
         .unwrap();
 
-    store
-        .append(&[heartbeat_event(1, 50_000)])
-        .await
-        .unwrap();
+    store.append(&[heartbeat_event(1, 50_000)]).await.unwrap();
 
     let w1 = ExternalWorkerReadModel::get(store.as_ref(), &worker_id(1))
         .await
@@ -218,14 +216,20 @@ async fn fleet_status_healthy_suspended_stale() {
     assert!(w1.health.is_alive, "worker 1 must be alive after heartbeat");
 
     // Worker 2: suspended — not alive, status "suspended".
-    assert_eq!(w2.status, "suspended", "worker 2 must show suspended status");
+    assert_eq!(
+        w2.status, "suspended",
+        "worker 2 must show suspended status"
+    );
     assert!(
         !w2.health.is_alive,
         "worker 2 was never given a heartbeat and should not be alive"
     );
 
     // Worker 3: stale — status still "active" (never explicitly suspended) but no heartbeat.
-    assert_eq!(w3.status, "active", "worker 3 retains 'active' status (not explicitly suspended)");
+    assert_eq!(
+        w3.status, "active",
+        "worker 3 retains 'active' status (not explicitly suspended)"
+    );
     assert!(
         !w3.health.is_alive,
         "worker 3 is stale — no heartbeat received, is_alive must be false"
@@ -248,7 +252,10 @@ async fn fleet_status_healthy_suspended_stale() {
 
     assert_eq!(alive_count, 1, "exactly 1 worker should be alive");
     assert_eq!(suspended_count, 1, "exactly 1 worker should be suspended");
-    assert_eq!(stale_count, 1, "exactly 1 worker should be stale (active but no heartbeat)");
+    assert_eq!(
+        stale_count, 1,
+        "exactly 1 worker should be stale (active but no heartbeat)"
+    );
 }
 
 /// (6) Reactivate worker 2 — status must return to "active".

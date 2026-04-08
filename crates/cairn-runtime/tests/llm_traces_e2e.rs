@@ -80,7 +80,11 @@ async fn record_trace_and_retrieve_by_session() {
     // ── (2) Verify retrievable by session ─────────────────────────────────
     let traces = svc.list_by_session(&sess, 10).await.unwrap();
 
-    assert_eq!(traces.len(), 1, "one trace must be returned for the session");
+    assert_eq!(
+        traces.len(),
+        1,
+        "one trace must be returned for the session"
+    );
 
     let t = &traces[0];
     assert_eq!(t.trace_id, "trace_obs_1");
@@ -109,8 +113,8 @@ async fn multiple_traces_ordered_most_recent_first() {
     // ── (3) Record three traces ────────────────────────────────────────────
     for (i, model) in [
         (0u64, "gpt-4"),
-        (1,    "claude-haiku-4-5"),
-        (2,    "claude-sonnet-4-6"),
+        (1, "claude-haiku-4-5"),
+        (2, "claude-sonnet-4-6"),
     ] {
         svc.record(trace(
             &format!("t_order_{i}"),
@@ -118,9 +122,9 @@ async fn multiple_traces_ordered_most_recent_first() {
             &sess,
             100,
             50,
-            100 + i * 10,   // 100, 110, 120 ms
+            100 + i * 10,    // 100, 110, 120 ms
             1_000 + i * 100, // 1000, 1100, 1200 micros
-            base_ms + i,    // ascending timestamps
+            base_ms + i,     // ascending timestamps
             false,
         ))
         .await
@@ -143,7 +147,10 @@ async fn multiple_traces_ordered_most_recent_first() {
     );
 
     // The most recent trace is index 2 (highest timestamp).
-    assert_eq!(traces[0].trace_id, "t_order_2", "most recent trace must be t_order_2");
+    assert_eq!(
+        traces[0].trace_id, "t_order_2",
+        "most recent trace must be t_order_2"
+    );
     assert_eq!(traces[2].trace_id, "t_order_0", "oldest trace must be last");
 }
 
@@ -182,16 +189,15 @@ async fn cost_aggregation_across_traces() {
 
     let total_cost: u64 = traces.iter().map(|t| t.cost_micros).sum();
     assert_eq!(
-        total_cost,
-        5_000,
+        total_cost, 5_000,
         "aggregated cost must equal sum of all individual trace costs"
     );
 
     // Total tokens.
     let total_prompt: u32 = traces.iter().map(|t| t.prompt_tokens).sum();
     let total_completion: u32 = traces.iter().map(|t| t.completion_tokens).sum();
-    assert_eq!(total_prompt, 800,      "4 × 200 = 800 prompt tokens");
-    assert_eq!(total_completion, 320,  "4 × 80 = 320 completion tokens");
+    assert_eq!(total_prompt, 800, "4 × 200 = 800 prompt tokens");
+    assert_eq!(total_completion, 320, "4 × 80 = 320 completion tokens");
 
     // Average latency.
     let avg_latency: u64 = traces.iter().map(|t| t.latency_ms).sum::<u64>() / traces.len() as u64;
@@ -210,9 +216,37 @@ async fn session_isolation_in_list_by_session() {
     let sess_b = session("sess_iso_b");
     let base_ms = 1_700_000_000_000u64;
 
-    svc.record(trace("ta1", "gpt-4", &sess_a, 100, 40, 100, 1_000, base_ms,     false)).await.unwrap();
-    svc.record(trace("ta2", "gpt-4", &sess_a, 100, 40, 120, 1_100, base_ms + 1, false)).await.unwrap();
-    svc.record(trace("tb1", "gpt-4", &sess_b, 100, 40, 150, 1_200, base_ms + 2, false)).await.unwrap();
+    svc.record(trace(
+        "ta1", "gpt-4", &sess_a, 100, 40, 100, 1_000, base_ms, false,
+    ))
+    .await
+    .unwrap();
+    svc.record(trace(
+        "ta2",
+        "gpt-4",
+        &sess_a,
+        100,
+        40,
+        120,
+        1_100,
+        base_ms + 1,
+        false,
+    ))
+    .await
+    .unwrap();
+    svc.record(trace(
+        "tb1",
+        "gpt-4",
+        &sess_b,
+        100,
+        40,
+        150,
+        1_200,
+        base_ms + 2,
+        false,
+    ))
+    .await
+    .unwrap();
 
     let a_traces = svc.list_by_session(&sess_a, 10).await.unwrap();
     let b_traces = svc.list_by_session(&sess_b, 10).await.unwrap();
@@ -222,7 +256,10 @@ async fn session_isolation_in_list_by_session() {
 
     let a_ids: Vec<&str> = a_traces.iter().map(|t| t.trace_id.as_str()).collect();
     assert!(a_ids.contains(&"ta1") && a_ids.contains(&"ta2"));
-    assert!(!a_ids.contains(&"tb1"), "session B's trace must not appear in session A's list");
+    assert!(
+        !a_ids.contains(&"tb1"),
+        "session B's trace must not appear in session A's list"
+    );
 }
 
 // ── list_all returns traces across sessions ───────────────────────────────────
@@ -237,13 +274,27 @@ async fn list_all_returns_traces_across_sessions() {
     let base_ms = 1_700_000_000_000u64;
 
     for (i, sess) in [(0u64, &s1), (1, &s2), (2, &s1)] {
-        svc.record(trace(&format!("tall_{i}"), "model-x", sess, 50, 20, 80, 500, base_ms + i, false))
-            .await
-            .unwrap();
+        svc.record(trace(
+            &format!("tall_{i}"),
+            "model-x",
+            sess,
+            50,
+            20,
+            80,
+            500,
+            base_ms + i,
+            false,
+        ))
+        .await
+        .unwrap();
     }
 
     let all = svc.list_all(10).await.unwrap();
-    assert_eq!(all.len(), 3, "list_all must return all 3 traces across both sessions");
+    assert_eq!(
+        all.len(),
+        3,
+        "list_all must return all 3 traces across both sessions"
+    );
 
     // Most-recent first.
     assert!(all[0].created_at_ms >= all[1].created_at_ms);
@@ -261,9 +312,19 @@ async fn list_by_session_respects_limit() {
     let base_ms = 1_700_000_000_000u64;
 
     for i in 0u64..5 {
-        svc.record(trace(&format!("tl_{i}"), "m", &sess, 10, 5, 50, 100, base_ms + i, false))
-            .await
-            .unwrap();
+        svc.record(trace(
+            &format!("tl_{i}"),
+            "m",
+            &sess,
+            10,
+            5,
+            50,
+            100,
+            base_ms + i,
+            false,
+        ))
+        .await
+        .unwrap();
     }
 
     let limited = svc.list_by_session(&sess, 3).await.unwrap();
@@ -290,14 +351,34 @@ async fn error_traces_tracked_separately() {
 
     // 3 successes + 2 errors.
     for i in 0u64..3 {
-        svc.record(trace(&format!("ok_{i}"), "m", &sess, 100, 50, 100, 500, base_ms + i, false))
-            .await
-            .unwrap();
+        svc.record(trace(
+            &format!("ok_{i}"),
+            "m",
+            &sess,
+            100,
+            50,
+            100,
+            500,
+            base_ms + i,
+            false,
+        ))
+        .await
+        .unwrap();
     }
     for i in 0u64..2 {
-        svc.record(trace(&format!("err_{i}"), "m", &sess, 100, 0, 50, 0, base_ms + 3 + i, true))
-            .await
-            .unwrap();
+        svc.record(trace(
+            &format!("err_{i}"),
+            "m",
+            &sess,
+            100,
+            0,
+            50,
+            0,
+            base_ms + 3 + i,
+            true,
+        ))
+        .await
+        .unwrap();
     }
 
     let all = svc.list_by_session(&sess, 10).await.unwrap();
@@ -309,7 +390,11 @@ async fn error_traces_tracked_separately() {
     assert_eq!(success_count, 3, "3 success traces must be present");
 
     // Error traces have cost_micros = 0 (failed calls aren't billed).
-    let error_cost: u64 = all.iter().filter(|t| t.is_error).map(|t| t.cost_micros).sum();
+    let error_cost: u64 = all
+        .iter()
+        .filter(|t| t.is_error)
+        .map(|t| t.cost_micros)
+        .sum();
     assert_eq!(error_cost, 0, "error traces must carry zero cost");
 }
 

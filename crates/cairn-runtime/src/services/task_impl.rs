@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{CheckpointStrategyReadModel, TaskDependencyReadModel, TaskDependencyRecord, TaskReadModel, TaskRecord};
+use cairn_store::projections::{
+    CheckpointStrategyReadModel, TaskDependencyReadModel, TaskDependencyRecord, TaskReadModel,
+    TaskRecord,
+};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -174,17 +177,16 @@ where
     }
 
     async fn complete(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        let result = self.transition_task(task_id, TaskState::Completed, None).await?;
+        let result = self
+            .transition_task(task_id, TaskState::Completed, None)
+            .await?;
         // Mark all dependencies with this task as prerequisite as resolved.
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        let _ = TaskDependencyReadModel::resolve_dependency(
-            self.store.as_ref(),
-            task_id,
-            now_ms,
-        ).await;
+        let _ =
+            TaskDependencyReadModel::resolve_dependency(self.store.as_ref(), task_id, now_ms).await;
 
         // Auto-checkpoint: if the parent run has a strategy with
         // trigger_on_task_complete, emit a CheckpointRecorded event.
@@ -198,15 +200,14 @@ where
                         run_id.as_str(),
                         task_id.as_str()
                     ));
-                    let event = make_envelope(RuntimeEvent::CheckpointRecorded(
-                        CheckpointRecorded {
+                    let event =
+                        make_envelope(RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
                             project: result.project.clone(),
                             run_id: run_id.clone(),
                             checkpoint_id: cp_id,
                             disposition: CheckpointDisposition::Latest,
                             data: None,
-                        },
-                    ));
+                        }));
                     let _ = self.store.append(&[event]).await;
                 }
             }
@@ -254,10 +255,9 @@ where
             dependency: dep,
             resolved_at_ms: None,
         };
-        TaskDependencyReadModel::insert_dependency(
-            self.store.as_ref(),
-            record.clone(),
-        ).await.map_err(RuntimeError::Store)?;
+        TaskDependencyReadModel::insert_dependency(self.store.as_ref(), record.clone())
+            .await
+            .map_err(RuntimeError::Store)?;
         Ok(record)
     }
 
@@ -493,7 +493,10 @@ mod tests {
             .unwrap();
 
         // Claim a lease
-        let claimed = svc.claim(&task_id, "worker-1".into(), 60_000).await.unwrap();
+        let claimed = svc
+            .claim(&task_id, "worker-1".into(), 60_000)
+            .await
+            .unwrap();
         assert!(claimed.lease_owner.is_some());
         assert!(claimed.lease_expires_at.is_some());
 
@@ -515,10 +518,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(paused.state, TaskState::Paused);
-        assert!(
-            paused.lease_owner.is_none(),
-            "pause must clear lease_owner"
-        );
+        assert!(paused.lease_owner.is_none(), "pause must clear lease_owner");
         assert!(
             paused.lease_expires_at.is_none(),
             "pause must clear lease_expires_at"
@@ -550,7 +550,11 @@ mod tests {
         .unwrap();
 
         let resumed = svc
-            .resume(&task_id, ResumeTrigger::OperatorResume, TaskResumeTarget::Queued)
+            .resume(
+                &task_id,
+                ResumeTrigger::OperatorResume,
+                TaskResumeTarget::Queued,
+            )
             .await
             .unwrap();
 
@@ -581,10 +585,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(child.task_id, TaskId::new("child_task"));
-        assert_eq!(child.parent_run_id.as_ref().unwrap(), &RunId::new("parent_run"));
         assert_eq!(
-            child.parent_task_id.as_ref().unwrap(),
-            &parent_task_id
+            child.parent_run_id.as_ref().unwrap(),
+            &RunId::new("parent_run")
         );
+        assert_eq!(child.parent_task_id.as_ref().unwrap(), &parent_task_id);
     }
 }

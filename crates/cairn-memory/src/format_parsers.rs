@@ -225,13 +225,17 @@ fn strip_md_inline(line: &str) -> String {
                 chars.next();
                 let mut text = String::new();
                 for c in chars.by_ref() {
-                    if c == ']' { break; }
+                    if c == ']' {
+                        break;
+                    }
                     text.push(c);
                 }
                 if chars.peek() == Some(&'(') {
                     chars.next();
                     for c in chars.by_ref() {
-                        if c == ')' { break; }
+                        if c == ')' {
+                            break;
+                        }
                     }
                 }
                 out.push_str(&text);
@@ -239,13 +243,17 @@ fn strip_md_inline(line: &str) -> String {
             '[' => {
                 let mut text = String::new();
                 for c in chars.by_ref() {
-                    if c == ']' { break; }
+                    if c == ']' {
+                        break;
+                    }
                     text.push(c);
                 }
                 if chars.peek() == Some(&'(') {
                     chars.next();
                     for c in chars.by_ref() {
-                        if c == ')' { break; }
+                        if c == ')' {
+                            break;
+                        }
                     }
                 }
                 out.push_str(&text);
@@ -288,7 +296,9 @@ impl HtmlParser {
             if ch == '<' {
                 let mut tag = String::new();
                 for tc in chars.by_ref() {
-                    if tc == '>' { break; }
+                    if tc == '>' {
+                        break;
+                    }
                     tag.push(tc);
                 }
                 let tag_raw = tag.trim().to_owned();
@@ -339,9 +349,24 @@ impl HtmlParser {
                 // Block-level elements emit line breaks.
                 if matches!(
                     tag_name,
-                    "br" | "p" | "/p" | "div" | "/div" | "li" | "tr"
-                        | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
-                        | "/h1" | "/h2" | "/h3" | "/h4" | "/h5" | "/h6"
+                    "br" | "p"
+                        | "/p"
+                        | "div"
+                        | "/div"
+                        | "li"
+                        | "tr"
+                        | "h1"
+                        | "h2"
+                        | "h3"
+                        | "h4"
+                        | "h5"
+                        | "h6"
+                        | "/h1"
+                        | "/h2"
+                        | "/h3"
+                        | "/h4"
+                        | "/h5"
+                        | "/h6"
                 ) {
                     if !current_line.trim().is_empty() {
                         text_lines.push(current_line.trim().to_owned());
@@ -358,7 +383,9 @@ impl HtmlParser {
                     // Capture heading text until closing tag.
                     let mut heading_text = String::new();
                     while let Some(&next_ch) = chars.peek() {
-                        if next_ch == '<' { break; }
+                        if next_ch == '<' {
+                            break;
+                        }
                         heading_text.push(chars.next().unwrap());
                     }
                     let heading_text = heading_text.trim().to_owned();
@@ -391,9 +418,13 @@ impl HtmlParser {
             if ch == '&' {
                 let mut entity = String::new();
                 for ec in chars.by_ref() {
-                    if ec == ';' { break; }
+                    if ec == ';' {
+                        break;
+                    }
                     entity.push(ec);
-                    if entity.len() > 8 { break; }
+                    if entity.len() > 8 {
+                        break;
+                    }
                 }
                 let decoded = match entity.as_str() {
                     "amp" => '&',
@@ -439,8 +470,7 @@ impl HtmlParser {
 fn parse_meta_tag(tag_lower: &str, tag_raw: &str, metadata: &mut DocumentMetadata) {
     let name = extract_attr(tag_lower, "name");
     // Extract content from the raw (case-preserved) tag.
-    let content = extract_attr(tag_raw, "content")
-        .or_else(|| extract_attr(tag_raw, "Content"));
+    let content = extract_attr(tag_raw, "content").or_else(|| extract_attr(tag_raw, "Content"));
     if let (Some(name), Some(content)) = (name, content) {
         match name.as_str() {
             "author" => metadata.author = Some(content),
@@ -587,7 +617,8 @@ impl TextNormalizer {
                 || ch == '\u{200A}' // HAIR SPACE
                 || ch == '\u{202F}' // NARROW NO-BREAK SPACE
                 || ch == '\u{205F}' // MEDIUM MATHEMATICAL SPACE
-                || ch == '\u{3000}' // IDEOGRAPHIC SPACE
+                || ch == '\u{3000}'
+            // IDEOGRAPHIC SPACE
             {
                 out.push(' ');
                 continue;
@@ -652,9 +683,7 @@ pub fn extract_metadata(content: &str) -> DocumentMetadata {
 
     // Try YAML frontmatter.
     if content.starts_with("---\n") || content.starts_with("---\r\n") {
-        let end = content[4..]
-            .find("\n---")
-            .map(|i| i + 4);
+        let end = content[4..].find("\n---").map(|i| i + 4);
         if let Some(end) = end {
             let frontmatter = &content[4..end];
             for line in frontmatter.lines() {
@@ -874,7 +903,11 @@ mod tests {
     fn markdown_list_items_captured() {
         let md = "- Item one\n- Item two\n* Item three";
         let doc = MarkdownParser::parse(md);
-        let items: Vec<_> = doc.structure_hints.iter().filter(|h| matches!(h, StructureHint::ListItem { .. })).collect();
+        let items: Vec<_> = doc
+            .structure_hints
+            .iter()
+            .filter(|h| matches!(h, StructureHint::ListItem { .. }))
+            .collect();
         assert_eq!(items.len(), 3);
     }
 
@@ -924,7 +957,8 @@ mod tests {
 
     #[test]
     fn html_extracts_meta_author() {
-        let html = "<html><head><meta name=\"author\" content=\"Alice\"></head><body>Text</body></html>";
+        let html =
+            "<html><head><meta name=\"author\" content=\"Alice\"></head><body>Text</body></html>";
         let doc = HtmlParser::parse(html);
         assert_eq!(doc.metadata.author.as_deref(), Some("Alice"));
     }

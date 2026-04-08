@@ -432,20 +432,22 @@ impl ApprovalReadModel for SqliteAdapter {
     }
 
     async fn has_pending_for_run(&self, run_id: &RunId) -> Result<bool, StoreError> {
-        let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM approvals WHERE run_id = $1 AND decision IS NULL",
-        )
-        .bind(run_id.as_str())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| StoreError::Internal(e.to_string()))?;
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM approvals WHERE run_id = $1 AND decision IS NULL")
+                .bind(run_id.as_str())
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| StoreError::Internal(e.to_string()))?;
         Ok(count.0 > 0)
     }
 }
 
 #[async_trait]
 impl CheckpointStrategyReadModel for SqliteAdapter {
-    async fn get_by_run(&self, run_id: &RunId) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
+    async fn get_by_run(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
         // Checkpoint strategies are stored as events; query the strategies table if it exists,
         // otherwise return None (strategy not configured).
         let _ = run_id;
@@ -575,7 +577,11 @@ impl MailboxReadModel for SqliteAdapter {
         rows.into_iter().map(MailboxRow::into_record).collect()
     }
 
-    async fn list_pending(&self, _now_ms: u64, _limit: usize) -> Result<Vec<MailboxRecord>, StoreError> {
+    async fn list_pending(
+        &self,
+        _now_ms: u64,
+        _limit: usize,
+    ) -> Result<Vec<MailboxRecord>, StoreError> {
         // SQLite migration for deliver_at_ms column is out of scope; stub returns empty.
         Ok(vec![])
     }

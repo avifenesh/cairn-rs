@@ -8,21 +8,21 @@ use std::sync::Arc;
 
 use cairn_store::InMemoryStore;
 
+use crate::services::resource_sharing_impl::ResourceSharingServiceImpl;
+use crate::services::ToolInvocationServiceImpl;
 use crate::services::{
     ApprovalPolicyServiceImpl, ApprovalServiceImpl, AuditServiceImpl, BudgetServiceImpl,
     ChannelServiceImpl, CheckpointServiceImpl, CredentialServiceImpl, DefaultsServiceImpl,
     EvalRunServiceImpl, ExternalWorkerServiceImpl, GuardrailServiceImpl, IngestJobServiceImpl,
-    LicenseServiceImpl, MailboxServiceImpl, NotificationServiceImpl, OperatorProfileServiceImpl,
-    ProjectServiceImpl, PromptAssetServiceImpl, PromptReleaseServiceImpl,
-    PromptVersionServiceImpl, ProviderBindingServiceImpl, ProviderConnectionServiceImpl,
-    ProviderConnectionPoolServiceImpl, ProviderHealthServiceImpl, QuotaServiceImpl,
-    RecoveryServiceImpl, RetentionServiceImpl, RoutePolicyServiceImpl, RunCostAlertServiceImpl,
-    RunServiceImpl, RunSlaServiceImpl, SessionServiceImpl, SignalRouterServiceImpl,
-    SignalServiceImpl, TaskServiceImpl, TenantServiceImpl, WorkspaceServiceImpl,
-    WorkspaceMembershipServiceImpl, LlmObservabilityServiceImpl,
+    LicenseServiceImpl, LlmObservabilityServiceImpl, MailboxServiceImpl, NotificationServiceImpl,
+    OperatorProfileServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
+    PromptReleaseServiceImpl, PromptVersionServiceImpl, ProviderBindingServiceImpl,
+    ProviderConnectionPoolServiceImpl, ProviderConnectionServiceImpl, ProviderHealthServiceImpl,
+    QuotaServiceImpl, RecoveryServiceImpl, RetentionServiceImpl, RoutePolicyServiceImpl,
+    RunCostAlertServiceImpl, RunServiceImpl, RunSlaServiceImpl, SessionServiceImpl,
+    SignalRouterServiceImpl, SignalServiceImpl, TaskServiceImpl, TenantServiceImpl,
+    WorkspaceMembershipServiceImpl, WorkspaceServiceImpl,
 };
-use crate::services::resource_sharing_impl::ResourceSharingServiceImpl;
-use crate::services::ToolInvocationServiceImpl;
 
 /// Bundled runtime services backed by `InMemoryStore`.
 ///
@@ -157,9 +157,9 @@ impl InMemoryServices {
             audit: AuditServiceImpl::new(store.clone()),
             tool_invocations: ToolInvocationServiceImpl::new(store.clone()),
             resource_sharing: ResourceSharingServiceImpl::new(store.clone()),
-            runtime_config: std::sync::Arc::new(
-                crate::runtime_config::RuntimeConfig::new(store.clone()),
-            ),
+            runtime_config: std::sync::Arc::new(crate::runtime_config::RuntimeConfig::new(
+                store.clone(),
+            )),
             store,
         }
     }

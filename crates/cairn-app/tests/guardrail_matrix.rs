@@ -9,12 +9,12 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, PolicyId, RuntimeEvent, TenantId,
     events::{GuardrailPolicyCreated, GuardrailPolicyEvaluated},
     policy::{GuardrailDecisionKind, GuardrailSubjectType},
+    EventEnvelope, EventId, EventSource, PolicyId, RuntimeEvent, TenantId,
 };
-use cairn_evals::EvalRunService;
 use cairn_evals::matrices::{EvalMetrics, GuardrailMatrix, GuardrailPolicyRow};
+use cairn_evals::EvalRunService;
 use cairn_store::{EventLog, InMemoryStore};
 
 fn tenant() -> TenantId {

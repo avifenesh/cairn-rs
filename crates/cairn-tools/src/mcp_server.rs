@@ -89,12 +89,19 @@ impl McpServer {
     /// Register an already-connected `McpClient`.
     pub fn add_client(&self, client: McpClient) {
         let name = client.server_name().to_owned();
-        self.clients.lock().unwrap_or_else(|e| e.into_inner()).insert(name, client);
+        self.clients
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(name, client);
     }
 
     /// Connect to an MCP server and register it.
     /// Returns the server name if successful.
-    pub fn connect(&self, server_name: impl Into<String>, endpoint: McpEndpoint) -> Result<String, McpError> {
+    pub fn connect(
+        &self,
+        server_name: impl Into<String>,
+        endpoint: McpEndpoint,
+    ) -> Result<String, McpError> {
         let name = server_name.into();
         let client = McpClient::connect(name.clone(), endpoint)?;
         self.add_client(client);
@@ -149,10 +156,12 @@ impl McpServer {
             code: "server_not_found",
         })?;
 
-        let result = client.call_tool(&req.tool, req.arguments).map_err(|e| McpServerError {
-            error: e.to_string(),
-            code: "tool_call_failed",
-        })?;
+        let result = client
+            .call_tool(&req.tool, req.arguments)
+            .map_err(|e| McpServerError {
+                error: e.to_string(),
+                code: "tool_call_failed",
+            })?;
 
         Ok(McpCallResponse {
             tool: req.tool,
@@ -170,7 +179,9 @@ impl McpServer {
 }
 
 impl Default for McpServer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -209,9 +220,16 @@ pub fn run_mock_mcp_server(max_requests: usize) {
     let mut count = 0;
 
     for line in stdin.lock().lines() {
-        if count >= max_requests { break; }
-        let line = match line { Ok(l) => l, Err(_) => break };
-        if line.trim().is_empty() { continue; }
+        if count >= max_requests {
+            break;
+        }
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
 
         let req: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
@@ -222,7 +240,9 @@ pub fn run_mock_mcp_server(max_requests: usize) {
         let id = req.get("id").cloned();
 
         // Notifications have no id — don't respond.
-        if method == "notifications/initialized" { continue; }
+        if method == "notifications/initialized" {
+            continue;
+        }
 
         let result: Value = match method {
             "initialize" => serde_json::json!({
@@ -408,7 +428,8 @@ for raw in sys.stdin:
                 args: vec![script_path.to_string_lossy().to_string()],
                 env: vec![],
             },
-        ).ok()
+        )
+        .ok()
     }
 }
 
@@ -505,34 +526,43 @@ mod tests {
         let mut client = match MockMcpProcess::spawn_python() {
             Some(c) => c,
             None => {
-                eprintln!("mcp_client_list_tools_from_mock_server: python3 not available, skipping");
+                eprintln!(
+                    "mcp_client_list_tools_from_mock_server: python3 not available, skipping"
+                );
                 return;
             }
         };
 
         let tools = client.list_tools().expect("list_tools must succeed");
-        assert!(!tools.is_empty(), "mock server must return at least one tool");
+        assert!(
+            !tools.is_empty(),
+            "mock server must return at least one tool"
+        );
 
         // Verify expected tools are present.
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(
             names.iter().any(|n| n.contains("echo")),
-            "must have an 'echo' tool; got: {:?}", names
+            "must have an 'echo' tool; got: {:?}",
+            names
         );
         assert!(
             names.iter().any(|n| n.contains("add")),
-            "must have an 'add' tool; got: {:?}", names
+            "must have an 'add' tool; got: {:?}",
+            names
         );
 
         // Tool names must use namespaced convention.
         for tool in &tools {
             assert!(
                 tool.name.starts_with("mcp.mock."),
-                "tool name '{}' must start with 'mcp.mock.'", tool.name
+                "tool name '{}' must start with 'mcp.mock.'",
+                tool.name
             );
             assert!(
                 tool.description.contains("[MCP:mock]"),
-                "description '{}' must contain '[MCP:mock]'", tool.description
+                "description '{}' must contain '[MCP:mock]'",
+                tool.description
             );
         }
 
@@ -570,7 +600,10 @@ mod tests {
         match call_resp {
             Ok(resp) => {
                 let text = resp.result.as_str().unwrap_or("");
-                assert_eq!(text, "hello from cairn", "echo must return the input message");
+                assert_eq!(
+                    text, "hello from cairn",
+                    "echo must return the input message"
+                );
             }
             Err(e) => panic!("call_tool failed: {}", e.error),
         }

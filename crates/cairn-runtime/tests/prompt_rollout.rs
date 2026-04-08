@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use cairn_domain::{ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId, WorkspaceKey};
-use cairn_runtime::{PromptReleaseService, PromptReleaseServiceImpl, PromptVersionService, PromptVersionServiceImpl};
+use cairn_runtime::{
+    PromptReleaseService, PromptReleaseServiceImpl, PromptVersionService, PromptVersionServiceImpl,
+};
 use cairn_store::InMemoryStore;
 
 fn project() -> ProjectKey {
@@ -23,13 +25,15 @@ async fn setup() -> (Arc<InMemoryStore>, PromptReleaseServiceImpl<InMemoryStore>
 }
 
 /// Helper: create, approve, and activate a release.
-async fn make_active_release(
-    svc: &PromptReleaseServiceImpl<InMemoryStore>,
-    release_id: &str,
-) {
-    svc.create(&project(), PromptReleaseId::new(release_id), asset(), PromptVersionId::new("v1"))
-        .await
-        .unwrap();
+async fn make_active_release(svc: &PromptReleaseServiceImpl<InMemoryStore>, release_id: &str) {
+    svc.create(
+        &project(),
+        PromptReleaseId::new(release_id),
+        asset(),
+        PromptVersionId::new("v1"),
+    )
+    .await
+    .unwrap();
     svc.transition(&PromptReleaseId::new(release_id), "approved")
         .await
         .unwrap();
@@ -106,8 +110,12 @@ async fn prompt_rollout_selection_is_deterministic() {
     make_active_release(&svc, "det_a").await;
     make_active_release(&svc, "det_b").await;
 
-    svc.start_rollout(&PromptReleaseId::new("det_a"), 50).await.unwrap();
-    svc.start_rollout(&PromptReleaseId::new("det_b"), 50).await.unwrap();
+    svc.start_rollout(&PromptReleaseId::new("det_a"), 50)
+        .await
+        .unwrap();
+    svc.start_rollout(&PromptReleaseId::new("det_b"), 50)
+        .await
+        .unwrap();
 
     let selector = "my_constant_selector";
     let first = svc.resolve(&project(), &asset(), selector).await.unwrap();
@@ -128,7 +136,9 @@ async fn prompt_rollout_already_active_just_sets_percent() {
 
     make_active_release(&svc, "rel_pre").await;
     // Activate first via normal path
-    svc.transition(&PromptReleaseId::new("rel_pre"), "active").await.unwrap();
+    svc.transition(&PromptReleaseId::new("rel_pre"), "active")
+        .await
+        .unwrap();
 
     // Now start_rollout — should just set percent, not error
     let record = svc
@@ -146,7 +156,9 @@ async fn prompt_rollout_single_release_no_percent_resolves_normally() {
     let (_store, svc) = setup().await;
 
     make_active_release(&svc, "solo").await;
-    svc.transition(&PromptReleaseId::new("solo"), "active").await.unwrap();
+    svc.transition(&PromptReleaseId::new("solo"), "active")
+        .await
+        .unwrap();
 
     let record = svc
         .resolve(&project(), &asset(), "any_selector")
@@ -154,5 +166,8 @@ async fn prompt_rollout_single_release_no_percent_resolves_normally() {
         .unwrap();
 
     assert!(record.is_some(), "active release should resolve");
-    assert_eq!(record.unwrap().prompt_release_id, PromptReleaseId::new("solo"));
+    assert_eq!(
+        record.unwrap().prompt_release_id,
+        PromptReleaseId::new("solo")
+    );
 }

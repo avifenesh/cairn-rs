@@ -1,10 +1,12 @@
 //! RFC 010/011: operator notification preference service with webhook delivery.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::notification_prefs::{NotificationChannel, NotificationPreference, NotificationRecord};
+use cairn_domain::notification_prefs::{
+    NotificationChannel, NotificationPreference, NotificationRecord,
+};
 use cairn_domain::{NotificationPreferenceSet, NotificationSent, RuntimeEvent, TenantId};
 use cairn_store::projections::NotificationReadModel;
 use cairn_store::EventLog;
@@ -29,10 +31,7 @@ fn now_millis() -> u64 {
 
 /// Attempt an HTTP POST to a webhook URL.
 /// The webhook feature is not enabled; returns an error indicating this.
-async fn post_webhook(
-    _url: &str,
-    _body: &serde_json::Value,
-) -> Result<(), String> {
+async fn post_webhook(_url: &str, _body: &serde_json::Value) -> Result<(), String> {
     Err("webhook feature not enabled".to_owned())
 }
 
@@ -127,8 +126,7 @@ where
                     "occurred_at_ms": now,
                 });
 
-                let (delivered, delivery_error) =
-                    attempt_delivery(channel, &webhook_body).await;
+                let (delivered, delivery_error) = attempt_delivery(channel, &webhook_body).await;
 
                 let record = NotificationRecord {
                     record_id: record_id.clone(),
@@ -173,8 +171,12 @@ where
         since_ms: u64,
     ) -> Result<Vec<NotificationRecord>, RuntimeError> {
         Ok(
-            NotificationReadModel::list_sent_notifications(self.store.as_ref(), tenant_id, since_ms)
-                .await?,
+            NotificationReadModel::list_sent_notifications(
+                self.store.as_ref(),
+                tenant_id,
+                since_ms,
+            )
+            .await?,
         )
     }
 
@@ -389,8 +391,15 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(sent.len(), 1, "notification record should exist even on failure");
-        assert!(!sent[0].delivered, "webhook to dead URL must not be delivered=true");
+        assert_eq!(
+            sent.len(),
+            1,
+            "notification record should exist even on failure"
+        );
+        assert!(
+            !sent[0].delivered,
+            "webhook to dead URL must not be delivered=true"
+        );
         assert!(
             sent[0].delivery_error.is_some(),
             "delivery_error must be set on failure"

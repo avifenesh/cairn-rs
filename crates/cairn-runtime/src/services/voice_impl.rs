@@ -79,7 +79,7 @@ impl TextToSpeechService for InMemoryVoiceService {
         let word_count = req.text.split_whitespace().count() as u64;
         let duration_ms = word_count * 400;
         Ok(TextToSpeechResult {
-            audio_bytes: vec![],   // no real synthesis
+            audio_bytes: vec![], // no real synthesis
             duration_ms,
             format: req.format,
         })

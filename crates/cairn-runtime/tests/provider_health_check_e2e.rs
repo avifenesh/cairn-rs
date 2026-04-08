@@ -39,7 +39,11 @@ async fn setup() -> (Arc<InMemoryStore>, ProviderHealthServiceImpl<InMemoryStore
         .await
         .unwrap();
     WorkspaceServiceImpl::new(store.clone())
-        .create(tenant(), WorkspaceId::new("w_health"), "Health WS".to_owned())
+        .create(
+            tenant(),
+            WorkspaceId::new("w_health"),
+            "Health WS".to_owned(),
+        )
         .await
         .unwrap();
     let svc = ProviderHealthServiceImpl::new(store.clone());
@@ -80,7 +84,10 @@ async fn register_schedule_and_record_healthy_check() {
     let before = ProviderHealthReadModel::get(store.as_ref(), &conn("conn_healthy"))
         .await
         .unwrap();
-    assert!(before.is_none(), "no health record should exist before first check");
+    assert!(
+        before.is_none(),
+        "no health record should exist before first check"
+    );
 
     // ── (2) Set a health check schedule ───────────────────────────────────
     let schedule = svc
@@ -88,9 +95,15 @@ async fn register_schedule_and_record_healthy_check() {
         .await
         .unwrap();
 
-    assert_eq!(schedule.interval_ms, 60_000, "schedule interval must be persisted");
+    assert_eq!(
+        schedule.interval_ms, 60_000,
+        "schedule interval must be persisted"
+    );
     assert!(schedule.enabled, "schedule must be enabled by default");
-    assert!(schedule.last_run_ms.is_none(), "last_run_ms must be None before first run");
+    assert!(
+        schedule.last_run_ms.is_none(),
+        "last_run_ms must be None before first run"
+    );
 
     // Schedule must be retrievable from the read model.
     let sched_read = ProviderHealthScheduleReadModel::get_schedule(
@@ -120,7 +133,10 @@ async fn register_schedule_and_record_healthy_check() {
         healthy_record.consecutive_failures, 0,
         "consecutive_failures must be 0 after successful check"
     );
-    assert!(healthy_record.last_checked_ms > 0, "last_checked_ms must be set");
+    assert!(
+        healthy_record.last_checked_ms > 0,
+        "last_checked_ms must be set"
+    );
 
     // get() must return the same record.
     let fetched = svc.get(&conn("conn_healthy")).await.unwrap().unwrap();
@@ -140,7 +156,10 @@ async fn consecutive_failures_trigger_degraded_status() {
     register_connection(&store, &conn("conn_degrade"), "anthropic").await;
 
     // First failure → Unreachable (not yet Degraded).
-    let after_f1 = svc.record_check(&conn("conn_degrade"), 0, false).await.unwrap();
+    let after_f1 = svc
+        .record_check(&conn("conn_degrade"), 0, false)
+        .await
+        .unwrap();
     assert_eq!(
         after_f1.status,
         ProviderHealthStatus::Unreachable,
@@ -150,12 +169,18 @@ async fn consecutive_failures_trigger_degraded_status() {
     assert!(!after_f1.healthy);
 
     // Second failure → still Unreachable.
-    let after_f2 = svc.record_check(&conn("conn_degrade"), 0, false).await.unwrap();
+    let after_f2 = svc
+        .record_check(&conn("conn_degrade"), 0, false)
+        .await
+        .unwrap();
     assert_eq!(after_f2.status, ProviderHealthStatus::Unreachable);
     assert_eq!(after_f2.consecutive_failures, 2);
 
     // ── (5b) Third failure → Degraded ─────────────────────────────────────
-    let degraded_record = svc.record_check(&conn("conn_degrade"), 0, false).await.unwrap();
+    let degraded_record = svc
+        .record_check(&conn("conn_degrade"), 0, false)
+        .await
+        .unwrap();
 
     // ── (6) Verify Degraded status ────────────────────────────────────────
     assert_eq!(
@@ -167,7 +192,10 @@ async fn consecutive_failures_trigger_degraded_status() {
         degraded_record.consecutive_failures, 3,
         "consecutive_failures must equal 3 after third failure"
     );
-    assert!(!degraded_record.healthy, "degraded provider must have healthy=false");
+    assert!(
+        !degraded_record.healthy,
+        "degraded provider must have healthy=false"
+    );
 
     // get() must reflect Degraded.
     let fetched = svc.get(&conn("conn_degrade")).await.unwrap().unwrap();
@@ -201,7 +229,9 @@ async fn mark_recovered_resets_to_healthy() {
 
     // Degrade the connection (3 failures).
     for _ in 0..3 {
-        svc.record_check(&conn("conn_recover"), 0, false).await.unwrap();
+        svc.record_check(&conn("conn_recover"), 0, false)
+            .await
+            .unwrap();
     }
     let degraded = svc.get(&conn("conn_recover")).await.unwrap().unwrap();
     assert_eq!(degraded.status, ProviderHealthStatus::Degraded);
@@ -235,15 +265,22 @@ async fn successful_check_resets_failure_counter() {
     register_connection(&store, &conn("conn_reset"), "openrouter").await;
 
     // Two failures → Unreachable, failures=2.
-    svc.record_check(&conn("conn_reset"), 0, false).await.unwrap();
-    svc.record_check(&conn("conn_reset"), 0, false).await.unwrap();
+    svc.record_check(&conn("conn_reset"), 0, false)
+        .await
+        .unwrap();
+    svc.record_check(&conn("conn_reset"), 0, false)
+        .await
+        .unwrap();
 
     let mid = svc.get(&conn("conn_reset")).await.unwrap().unwrap();
     assert_eq!(mid.consecutive_failures, 2);
     assert_eq!(mid.status, ProviderHealthStatus::Unreachable);
 
     // Success → back to Healthy, failures reset.
-    let after_success = svc.record_check(&conn("conn_reset"), 120, true).await.unwrap();
+    let after_success = svc
+        .record_check(&conn("conn_reset"), 120, true)
+        .await
+        .unwrap();
     assert_eq!(
         after_success.status,
         ProviderHealthStatus::Healthy,
@@ -276,8 +313,16 @@ async fn multiple_connections_tracked_independently() {
     let a = svc.get(&conn("conn_a")).await.unwrap().unwrap();
     let b = svc.get(&conn("conn_b")).await.unwrap().unwrap();
 
-    assert_eq!(a.status, ProviderHealthStatus::Healthy, "conn_a must be Healthy");
-    assert_eq!(b.status, ProviderHealthStatus::Degraded, "conn_b must be Degraded");
+    assert_eq!(
+        a.status,
+        ProviderHealthStatus::Healthy,
+        "conn_a must be Healthy"
+    );
+    assert_eq!(
+        b.status,
+        ProviderHealthStatus::Degraded,
+        "conn_b must be Degraded"
+    );
     assert_eq!(a.consecutive_failures, 0);
     assert_eq!(b.consecutive_failures, 3);
 
@@ -285,10 +330,16 @@ async fn multiple_connections_tracked_independently() {
     let all = svc.list(&tenant(), 10, 0).await.unwrap();
     assert_eq!(all.len(), 2, "list must return both connections");
 
-    let degraded_count = all.iter().filter(|r| r.status == ProviderHealthStatus::Degraded).count();
-    let healthy_count  = all.iter().filter(|r| r.status == ProviderHealthStatus::Healthy).count();
+    let degraded_count = all
+        .iter()
+        .filter(|r| r.status == ProviderHealthStatus::Degraded)
+        .count();
+    let healthy_count = all
+        .iter()
+        .filter(|r| r.status == ProviderHealthStatus::Healthy)
+        .count();
     assert_eq!(degraded_count, 1, "exactly 1 degraded connection");
-    assert_eq!(healthy_count,  1, "exactly 1 healthy connection");
+    assert_eq!(healthy_count, 1, "exactly 1 healthy connection");
 }
 
 // ── Health check requires connection to exist ─────────────────────────────────
@@ -303,7 +354,13 @@ async fn record_check_for_unknown_connection_returns_not_found() {
         .unwrap_err();
 
     assert!(
-        matches!(err, cairn_runtime::error::RuntimeError::NotFound { entity: "provider_connection", .. }),
+        matches!(
+            err,
+            cairn_runtime::error::RuntimeError::NotFound {
+                entity: "provider_connection",
+                ..
+            }
+        ),
         "record_check for unknown connection must return NotFound; got: {err:?}"
     );
 }

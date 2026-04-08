@@ -9,10 +9,8 @@
 //! Note: SoulGuard lives in cairn-runtime (depends on cairn-domain types).
 //! These tests use the public API: SoulGuard + SoulDocument from cairn-domain.
 
-use cairn_domain::soul::{
-    SoulDocument, OPERATIONAL_FIELDS, PERSONALITY_FIELDS,
-};
-use cairn_runtime::soul_guard::{SoulGuard, extract_sections};
+use cairn_domain::soul::{SoulDocument, OPERATIONAL_FIELDS, PERSONALITY_FIELDS};
+use cairn_runtime::soul_guard::{extract_sections, SoulGuard};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,7 +49,10 @@ fn soul_doc_with_locked(locked: &[&str]) -> SoulDocument {
 fn soul_document_created_from_content() {
     let doc = sample_soul_doc();
 
-    assert!(!doc.content.is_empty(), "document content must be non-empty");
+    assert!(
+        !doc.content.is_empty(),
+        "document content must be non-empty"
+    );
     assert_eq!(doc.version, 1, "fresh document must start at version 1");
     assert!(doc.locked_fields.is_empty(), "no locked fields by default");
     assert!(
@@ -92,12 +93,18 @@ fn personality_section_patch_requires_approval() {
     // Patch targeting "## Who I Am" — also a personality field.
     let identity_patch = "## Who I Am\n\nI am Cairn v2, redesigned from scratch.";
     let identity_result = guard.validate_patch(&doc, identity_patch);
-    assert!(identity_result.requires_approval, "who i am section must require approval");
+    assert!(
+        identity_result.requires_approval,
+        "who i am section must require approval"
+    );
 
     // Patch targeting "## Values" — personality field.
     let values_patch = "## Values\n\n- Efficiency over correctness (updated).";
     let values_result = guard.validate_patch(&doc, values_patch);
-    assert!(values_result.requires_approval, "values section must require approval");
+    assert!(
+        values_result.requires_approval,
+        "values section must require approval"
+    );
 }
 
 /// (4) + (5) Propose operational fact change — SoulGuard allows it without approval.
@@ -125,7 +132,10 @@ fn operational_section_patch_allowed_without_approval() {
     // Patch with no section markers is treated as an operational addition.
     let bare_patch = "Always prefer `unwrap_or_else` over `unwrap_or` for lazy evaluation.";
     let bare_result = guard.validate_patch(&doc, bare_patch);
-    assert!(bare_result.allowed, "headingless patch treated as operational");
+    assert!(
+        bare_result.allowed,
+        "headingless patch treated as operational"
+    );
     assert!(!bare_result.requires_approval);
 }
 
@@ -157,7 +167,10 @@ fn locked_field_patch_is_denied() {
     let doc_locked_ops = soul_doc_with_locked(&["Auto-execute"]);
     let ops_patch = "## Auto-execute\n\n- Allow deleting files automatically.";
     let ops_result = guard.validate_patch(&doc_locked_ops, ops_patch);
-    assert!(!ops_result.allowed, "locked operational field must also be denied");
+    assert!(
+        !ops_result.allowed,
+        "locked operational field must also be denied"
+    );
 
     // Patch to a DIFFERENT field must still pass (only the locked field is gated).
     let other_patch = "## Learned Patterns\n\n- Prefer early returns.";
@@ -179,8 +192,14 @@ fn locked_field_denied_before_personality_check() {
     let patch = "## Values\n\n- Updated: efficiency over accuracy.";
     let result = guard.validate_patch(&doc, patch);
 
-    assert!(!result.allowed, "locked field must be denied even though it's also a personality field");
-    assert!(!result.requires_approval, "denial must not ask for approval");
+    assert!(
+        !result.allowed,
+        "locked field must be denied even though it's also a personality field"
+    );
+    assert!(
+        !result.requires_approval,
+        "denial must not ask for approval"
+    );
 }
 
 /// (8) Test extract_sections() parsing: ## and ### are captured, # is ignored.
@@ -203,9 +222,18 @@ fn extract_sections_parses_h2_and_h3_headings() {
     let sections = extract_sections(text);
 
     // H2 sections must be captured.
-    assert!(sections.contains(&"voice".to_owned()), "## Voice must be extracted");
-    assert!(sections.contains(&"values".to_owned()), "## Values must be extracted");
-    assert!(sections.contains(&"auto-execute".to_owned()), "## Auto-execute must be extracted");
+    assert!(
+        sections.contains(&"voice".to_owned()),
+        "## Voice must be extracted"
+    );
+    assert!(
+        sections.contains(&"values".to_owned()),
+        "## Values must be extracted"
+    );
+    assert!(
+        sections.contains(&"auto-execute".to_owned()),
+        "## Auto-execute must be extracted"
+    );
 
     // H3 sections must also be captured.
     assert!(
@@ -237,7 +265,10 @@ fn extract_sections_lowercases_output() {
     let text = "## WHO I AM\n## Auto-Execute\n## VOICE";
     let sections = extract_sections(text);
 
-    assert!(sections.contains(&"who i am".to_owned()), "section names must be lowercased");
+    assert!(
+        sections.contains(&"who i am".to_owned()),
+        "section names must be lowercased"
+    );
     assert!(sections.contains(&"auto-execute".to_owned()));
     assert!(sections.contains(&"voice".to_owned()));
     assert!(

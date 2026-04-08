@@ -1,14 +1,16 @@
 //! Integration test: inter-agent mailbox push delivery (GAP-004).
 
-use std::sync::Arc;
 use cairn_domain::{ProjectKey, RunId, TenantId, WorkspaceId};
+use cairn_runtime::{MailboxDeliveryService, MailboxService, MailboxServiceImpl, MailboxWatcher};
 use cairn_store::InMemoryStore;
-use cairn_runtime::{
-    MailboxDeliveryService, MailboxService, MailboxServiceImpl, MailboxWatcher,
-};
+use std::sync::Arc;
 
 fn test_project() -> ProjectKey {
-    ProjectKey::new(TenantId::new("t1"), WorkspaceId::new("w1"), "proj1".to_owned())
+    ProjectKey::new(
+        TenantId::new("t1"),
+        WorkspaceId::new("w1"),
+        "proj1".to_owned(),
+    )
 }
 
 #[tokio::test]
@@ -40,10 +42,7 @@ async fn mailbox_delivery_run_a_to_run_b() {
     assert_eq!(record.deliver_at_ms, 0); // immediate
 
     // Run B's inbox must contain the message
-    let inbox = mailbox_svc
-        .list_by_run(&run_b, 10, 0)
-        .await
-        .unwrap();
+    let inbox = mailbox_svc.list_by_run(&run_b, 10, 0).await.unwrap();
     assert_eq!(inbox.len(), 1);
     assert_eq!(inbox[0].content, "Hello from A to B");
     assert_eq!(inbox[0].from_run_id, Some(run_a.clone()));
@@ -59,9 +58,36 @@ async fn mailbox_delivery_multiple_messages_to_same_run() {
     let sender = RunId::new("run_sender");
     let receiver = RunId::new("run_receiver");
 
-    delivery.deliver(&project, Some(sender.clone()), Some(receiver.clone()), None, "msg 1".to_owned()).await.unwrap();
-    delivery.deliver(&project, Some(sender.clone()), Some(receiver.clone()), None, "msg 2".to_owned()).await.unwrap();
-    delivery.deliver(&project, Some(sender.clone()), Some(receiver.clone()), None, "msg 3".to_owned()).await.unwrap();
+    delivery
+        .deliver(
+            &project,
+            Some(sender.clone()),
+            Some(receiver.clone()),
+            None,
+            "msg 1".to_owned(),
+        )
+        .await
+        .unwrap();
+    delivery
+        .deliver(
+            &project,
+            Some(sender.clone()),
+            Some(receiver.clone()),
+            None,
+            "msg 2".to_owned(),
+        )
+        .await
+        .unwrap();
+    delivery
+        .deliver(
+            &project,
+            Some(sender.clone()),
+            Some(receiver.clone()),
+            None,
+            "msg 3".to_owned(),
+        )
+        .await
+        .unwrap();
 
     let inbox = mailbox_svc.list_by_run(&receiver, 10, 0).await.unwrap();
     assert_eq!(inbox.len(), 3);

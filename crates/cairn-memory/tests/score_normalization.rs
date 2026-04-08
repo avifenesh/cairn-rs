@@ -84,7 +84,10 @@ async fn score_normalization_top_result_is_one() {
         .await
         .unwrap();
 
-    assert!(response.results.len() >= 2, "need at least 2 results to test normalization");
+    assert!(
+        response.results.len() >= 2,
+        "need at least 2 results to test normalization"
+    );
 
     // ALL scores must be positive.
     for result in &response.results {
@@ -101,7 +104,8 @@ async fn score_normalization_top_result_is_one() {
     for result in &response.results[1..] {
         assert!(
             top_score >= result.score,
-            "top result score {top_score} must be >= {}", result.score
+            "top result score {top_score} must be >= {}",
+            result.score
         );
     }
 }
@@ -186,7 +190,10 @@ async fn score_normalization_preserves_ordering() {
 
     // Top score must be the highest (scores are sorted descending).
     let top = response.results[0].score;
-    assert!(response.results.iter().all(|r| top >= r.score), "top score must be max");
+    assert!(
+        response.results.iter().all(|r| top >= r.score),
+        "top score must be max"
+    );
 
     // All other scores are < 1.0 (relative fractions), except ties.
     // This holds as long as the query produces different lexical scores for each doc.
@@ -197,10 +204,18 @@ async fn score_normalization_preserves_ordering() {
 fn score_normalization_default_weights_are_valid() {
     let weights = ScoringWeights::default();
     // Validate weights sum to ~1.0 (inline — no separate validate fn needed).
-    let sum = weights.semantic_weight + weights.lexical_weight + weights.freshness_weight
-        + weights.staleness_weight + weights.credibility_weight
-        + weights.corroboration_weight + weights.graph_proximity_weight + weights.recency_weight;
-    assert!((sum - 1.0).abs() < 0.05, "default ScoringWeights must sum to ~1.0, got {sum}");
+    let sum = weights.semantic_weight
+        + weights.lexical_weight
+        + weights.freshness_weight
+        + weights.staleness_weight
+        + weights.credibility_weight
+        + weights.corroboration_weight
+        + weights.graph_proximity_weight
+        + weights.recency_weight;
+    assert!(
+        (sum - 1.0).abs() < 0.05,
+        "default ScoringWeights must sum to ~1.0, got {sum}"
+    );
 }
 
 /// normalize_weights: brings over-weighted policy back to sum=1.0.
@@ -218,22 +233,27 @@ fn score_normalization_normalize_weights_corrects_sum() {
     };
     // Sum = 5.0 (way over 1.0) — compute inline.
     let sum_fn = |w: &ScoringWeights| {
-        w.semantic_weight + w.lexical_weight + w.freshness_weight
-            + w.staleness_weight + w.credibility_weight
-            + w.corroboration_weight + w.graph_proximity_weight + w.recency_weight
+        w.semantic_weight
+            + w.lexical_weight
+            + w.freshness_weight
+            + w.staleness_weight
+            + w.credibility_weight
+            + w.corroboration_weight
+            + w.graph_proximity_weight
+            + w.recency_weight
     };
     assert!(sum_fn(&weights) > 1.01);
 
     // Normalize inline: divide each weight by the total sum.
     let total = sum_fn(&weights);
-    weights.semantic_weight    /= total;
-    weights.lexical_weight     /= total;
-    weights.freshness_weight   /= total;
-    weights.staleness_weight   /= total;
+    weights.semantic_weight /= total;
+    weights.lexical_weight /= total;
+    weights.freshness_weight /= total;
+    weights.staleness_weight /= total;
     weights.credibility_weight /= total;
     weights.corroboration_weight /= total;
     weights.graph_proximity_weight /= total;
-    weights.recency_weight     /= total;
+    weights.recency_weight /= total;
 
     let new_sum = sum_fn(&weights);
     assert!(
@@ -314,5 +334,8 @@ async fn score_normalization_overweighted_policy_is_normalized() {
 fn score_normalization_empty_results_no_panic() {
     let results: Vec<cairn_memory::retrieval::RetrievalResult> = vec![];
     // normalize_final_scores is not yet public; verify the invariant holds trivially.
-    assert!(results.is_empty(), "empty result set is trivially normalized");
+    assert!(
+        results.is_empty(),
+        "empty result set is trivially normalized"
+    );
 }

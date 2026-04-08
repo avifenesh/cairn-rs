@@ -74,7 +74,10 @@ async fn create_policy_with_allow_and_deny_rules() {
         .await
         .unwrap();
 
-    assert!(!policy.policy_id.is_empty(), "policy must have a non-empty ID");
+    assert!(
+        !policy.policy_id.is_empty(),
+        "policy must have a non-empty ID"
+    );
     assert_eq!(policy.name, "tool-access-policy");
     assert_eq!(policy.rules.len(), 2, "policy must contain both rules");
     assert!(policy.enabled, "newly created policy must be enabled");
@@ -185,7 +188,11 @@ async fn evaluate_emits_guardrail_policy_evaluated_event() {
 
     let ev = eval_event.expect("GuardrailPolicyEvaluated event must be emitted after evaluate()");
 
-    assert_eq!(ev.tenant_id, tenant(), "event must carry the correct tenant_id");
+    assert_eq!(
+        ev.tenant_id,
+        tenant(),
+        "event must carry the correct tenant_id"
+    );
     assert_eq!(ev.action, "call", "event must carry the correct action");
     assert_eq!(
         ev.subject_id.as_deref(),
@@ -407,21 +414,28 @@ async fn missing_tenant_returns_not_found() {
         .await
         .unwrap_err();
     assert!(
-        matches!(create_err, RuntimeError::NotFound { entity: "tenant", .. }),
+        matches!(
+            create_err,
+            RuntimeError::NotFound {
+                entity: "tenant",
+                ..
+            }
+        ),
         "create_policy for missing tenant must return NotFound; got: {create_err:?}"
     );
 
     let eval_err = svc
-        .evaluate(
-            ghost,
-            GuardrailSubjectType::Tool,
-            None,
-            "invoke".to_owned(),
-        )
+        .evaluate(ghost, GuardrailSubjectType::Tool, None, "invoke".to_owned())
         .await
         .unwrap_err();
     assert!(
-        matches!(eval_err, RuntimeError::NotFound { entity: "tenant", .. }),
+        matches!(
+            eval_err,
+            RuntimeError::NotFound {
+                entity: "tenant",
+                ..
+            }
+        ),
         "evaluate for missing tenant must return NotFound; got: {eval_err:?}"
     );
 }

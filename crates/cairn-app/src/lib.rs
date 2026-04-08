@@ -35,45 +35,42 @@ use cairn_api::feed::{FeedEndpoints, FeedItem, FeedQuery};
 use cairn_api::http::{preserved_route_catalog, ApiError, HttpMethod, ListResponse};
 use cairn_api::memory_api::{MemoryItem, MemoryStatus};
 use cairn_api::onboarding::{
-    create_onboarding_checklist, materialize_template,
-    ProviderBindingBootstrapService, StarterTemplateRegistry,
+    create_onboarding_checklist, materialize_template, ProviderBindingBootstrapService,
+    StarterTemplateRegistry,
 };
 use cairn_api::settings_api::SettingsSummary;
 use cairn_api::sse::SseFrame;
 use cairn_api::sse_publisher::build_sse_frame_with_current_state;
 use cairn_api::{CriticalEventSummary, DashboardOverview};
 use cairn_domain::credentials::CredentialRecord;
-use cairn_domain::policy::{
-    GuardrailRule, GuardrailSubjectType,
-};
+use cairn_domain::policy::{GuardrailRule, GuardrailSubjectType};
 use cairn_domain::providers::{
-    OperationKind, ProviderBudget, ProviderBudgetPeriod, ProviderHealthRecord, ProviderModelCapability, RoutePolicyRule,
+    OperationKind, ProviderBudget, ProviderBudgetPeriod, ProviderHealthRecord,
+    ProviderModelCapability, RoutePolicyRule,
 };
 use cairn_domain::tool_invocation::{ToolInvocationState, ToolInvocationTarget};
 use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerRecord, ExternalWorkerReport};
 use cairn_domain::{
     ApprovalDecision, ApprovalId, ApprovalRequirement, AuditLogEntry, AuditOutcome, ChannelId,
     ChannelRecord, CheckpointId, CheckpointStrategy, CheckpointStrategySet, CredentialId,
-    DefaultFeatureGate, Entitlement, EntitlementSet, EvalRunId,
-    EventEnvelope, EventId, EventSource, ExecutionClass, FeatureGate, FeatureGateResult,
-    IngestJobId, IngestJobState,
+    DefaultFeatureGate, Entitlement, EntitlementSet, EvalRunId, EventEnvelope, EventId,
+    EventSource, ExecutionClass, FeatureGate, FeatureGateResult, IngestJobId, IngestJobState,
     KnowledgeDocumentId, MailboxMessageId, OperatorId, OwnershipKey, PauseReason, PauseReasonKind,
     ProductTier, ProjectId, ProjectKey, PromptAssetId, PromptReleaseId, PromptTemplateVar,
     PromptVersionId, ProviderBindingId, ProviderBindingRecord, ProviderConnectionId,
-    ProviderModelId, ResumeTrigger, RouteDecisionId, RunId, RunResumeTarget, RunState, RunStateChanged,
-    RuntimeEvent, Scope, SessionId, SessionState, SignalId, SourceId,
+    ProviderModelId, ResumeTrigger, RouteDecisionId, RunId, RunResumeTarget, RunState,
+    RunStateChanged, RuntimeEvent, Scope, SessionId, SessionState, SignalId, SourceId,
     StateTransition, TaskId, TaskState, TaskStateChanged, TenantId, ToolInvocationId, WorkerId,
-    WorkspaceId, WorkspaceKey, WorkspaceRole,
-    CREDENTIAL_MANAGEMENT, EVAL_MATRICES, MULTI_PROVIDER,
-};
-use cairn_evals::{
-    EvalBaselineServiceImpl, EvalDatasetServiceImpl, EvalMetrics, EvalRubricServiceImpl, ModelComparisonServiceImpl,
-    EvalRun as ProductEvalRun, EvalRunService as ProductEvalRunService, EvalRunStatus, EvalSubjectKind,
-    GraphIntegration as EvalGraphIntegration, GuardrailMatrix,
-    PluginDimensionScore, PluginRubricScorer, PromptComparisonMatrix, RubricDimension,
-    ProviderRoutingMatrix, ProviderRoutingRow, SkillHealthMatrix,
+    WorkspaceId, WorkspaceKey, WorkspaceRole, CREDENTIAL_MANAGEMENT, EVAL_MATRICES, MULTI_PROVIDER,
 };
 use cairn_evals::services::eval_service::{MemoryDiagnosticsSource, SourceQualitySnapshot};
+use cairn_evals::{
+    EvalBaselineServiceImpl, EvalDatasetServiceImpl, EvalMetrics, EvalRubricServiceImpl,
+    EvalRun as ProductEvalRun, EvalRunService as ProductEvalRunService, EvalRunStatus,
+    EvalSubjectKind, GraphIntegration as EvalGraphIntegration, GuardrailMatrix,
+    ModelComparisonServiceImpl, PluginDimensionScore, PluginRubricScorer, PromptComparisonMatrix,
+    ProviderRoutingMatrix, ProviderRoutingRow, RubricDimension, SkillHealthMatrix,
+};
 use cairn_graph::event_projector::EventProjector as RuntimeGraphProjector;
 use cairn_graph::graph_provenance::GraphProvenanceService;
 use cairn_graph::in_memory::InMemoryGraphStore;
@@ -97,31 +94,29 @@ use cairn_memory::ingest::{DocumentVersionReadModel, IngestRequest, IngestServic
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
 use cairn_runtime::{
-    set_current_trace_id, NotificationService, RunCostAlertService, RunSlaService,
-    ApprovalPolicyService, ApprovalService, AuditService, BudgetService, ChannelService,
-    CheckpointService, CredentialService, DefaultsService, ExternalWorkerService,
+    set_current_trace_id, ApprovalPolicyService, ApprovalService, AuditService, BudgetService,
+    ChannelService, CheckpointService, CredentialService, DefaultsService, ExternalWorkerService,
     GuardrailService, InMemoryServices, IngestJobService, LicenseService, MailboxService,
-    OperatorProfileService, ProjectService, PromptAssetService, PromptReleaseService,
-    PromptVersionService, ProviderBindingService, ProviderConnectionConfig,
+    NotificationService, OperatorProfileService, ProjectService, PromptAssetService,
+    PromptReleaseService, PromptVersionService, ProviderBindingService, ProviderConnectionConfig,
     ProviderConnectionService, ProviderHealthService, QuotaService, RecoveryService,
-    RetentionService, RoutePolicyService, RunService, RuntimeError, SessionService, SignalRouterService,
-    SignalService, TaskService, TenantService, ToolInvocationService, WorkspaceMembershipService,
-    WorkspaceService,
+    RetentionService, RoutePolicyService, RunCostAlertService, RunService, RunSlaService,
+    RuntimeError, SessionService, SignalRouterService, SignalService, TaskService, TenantService,
+    ToolInvocationService, WorkspaceMembershipService, WorkspaceService,
 };
 use cairn_store::projections::{
     ApprovalReadModel, AuditLogReadModel, CheckpointReadModel, CheckpointStrategyReadModel,
-    OperatorInterventionReadModel,
-    PauseScheduleReadModel, PromptReleaseReadModel, PromptVersionReadModel,
-    QuotaReadModel, RetentionPolicyReadModel, RoutePolicyReadModel,
-    LlmCallTraceReadModel, RunCostReadModel, RunReadModel, RunRecord, SessionCostReadModel, SessionRecord,
-    TaskDependencyReadModel, TaskLeaseExpiredReadModel, TaskReadModel, TaskRecord, RecoveryEscalationReadModel, ToolInvocationReadModel,
-    WorkspaceMembershipReadModel,
+    LlmCallTraceReadModel, OperatorInterventionReadModel, PauseScheduleReadModel,
+    PromptReleaseReadModel, PromptVersionReadModel, QuotaReadModel, RecoveryEscalationReadModel,
+    RetentionPolicyReadModel, RoutePolicyReadModel, RunCostReadModel, RunReadModel, RunRecord,
+    SessionCostReadModel, SessionRecord, TaskDependencyReadModel, TaskLeaseExpiredReadModel,
+    TaskReadModel, TaskRecord, ToolInvocationReadModel, WorkspaceMembershipReadModel,
 };
 use cairn_store::{EntityRef, EventLog, EventPosition, StoredEvent};
 use cairn_tools::{
-    build_eval_score_request,
-    cancel_plugin_invocation, execute_eval_score, InMemoryPluginRegistry, PluginCapability, PluginHost, PluginLifecycleSnapshot, PluginLogEntry,
-    PluginManifest, PluginMetrics, PluginRegistry, PluginState, PluginToolDescriptor, StdioPluginHost,
+    build_eval_score_request, cancel_plugin_invocation, execute_eval_score, InMemoryPluginRegistry,
+    PluginCapability, PluginHost, PluginLifecycleSnapshot, PluginLogEntry, PluginManifest,
+    PluginMetrics, PluginRegistry, PluginState, PluginToolDescriptor, StdioPluginHost,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -428,7 +423,10 @@ impl AppMetrics {
     /// Approximate latency percentile (p50 or p95) from histogram buckets.
     /// Returns `None` when no requests have been recorded.
     fn latency_percentile(&self, p: f64) -> Option<u64> {
-        let durations = self.request_durations.lock().unwrap_or_else(|e| e.into_inner());
+        let durations = self
+            .request_durations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut total_count: u64 = 0;
         let mut merged = [0u64; HTTP_DURATION_BUCKETS_MS.len()];
         for sample in durations.values() {
@@ -453,7 +451,10 @@ impl AppMetrics {
 
     /// Fraction of requests with status >= 400 (0.0–1.0).
     fn error_rate(&self) -> f32 {
-        let totals = self.request_totals.lock().unwrap_or_else(|e| e.into_inner());
+        let totals = self
+            .request_totals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut total: u64 = 0;
         let mut errors: u64 = 0;
         for (key, &count) in totals.iter() {
@@ -462,7 +463,11 @@ impl AppMetrics {
                 errors += count;
             }
         }
-        if total == 0 { 0.0 } else { errors as f32 / total as f32 }
+        if total == 0 {
+            0.0
+        } else {
+            errors as f32 / total as f32
+        }
     }
 
     fn render_prometheus(&self) -> String {
@@ -567,15 +572,24 @@ pub struct OperatorTokenStore {
 }
 
 impl OperatorTokenStore {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn insert(&self, raw_token: String, record: OperatorTokenRecord) {
-        self.inner.write().unwrap().insert(record.token_id.clone(), (raw_token, record));
+        self.inner
+            .write()
+            .unwrap()
+            .insert(record.token_id.clone(), (raw_token, record));
     }
 
     /// Raw token string for revocation — not exposed via API.
     pub fn raw_token(&self, token_id: &str) -> Option<String> {
-        self.inner.read().unwrap().get(token_id).map(|(t, _)| t.clone())
+        self.inner
+            .read()
+            .unwrap()
+            .get(token_id)
+            .map(|(t, _)| t.clone())
     }
 
     pub fn remove(&self, token_id: &str) -> bool {
@@ -583,7 +597,12 @@ impl OperatorTokenStore {
     }
 
     pub fn list(&self) -> Vec<OperatorTokenRecord> {
-        self.inner.read().unwrap().values().map(|(_, r)| r.clone()).collect()
+        self.inner
+            .read()
+            .unwrap()
+            .values()
+            .map(|(_, r)| r.clone())
+            .collect()
     }
 }
 
@@ -691,9 +710,9 @@ impl AppState {
                     }
                     // Reconstruct the EvalRun with what the event carries.
                     // Metrics are not in the event — they default to empty.
-                    let subject_kind: EvalSubjectKind = serde_json::from_str(
-                        &format!("\"{}\"", e.subject_kind)
-                    ).unwrap_or(EvalSubjectKind::PromptRelease);
+                    let subject_kind: EvalSubjectKind =
+                        serde_json::from_str(&format!("\"{}\"", e.subject_kind))
+                            .unwrap_or(EvalSubjectKind::PromptRelease);
 
                     self.evals.create_run(
                         e.eval_run_id.clone(),
@@ -774,7 +793,8 @@ impl AppState {
             "cairn-app",
         ));
         let source_metadata = Arc::new(Mutex::new(HashMap::new()));
-        let version_content: Arc<Mutex<HashMap<String, AppVersionContent>>> = Arc::new(Mutex::new(HashMap::new()));
+        let version_content: Arc<Mutex<HashMap<String, AppVersionContent>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let pending_ingest_jobs = Arc::new(Mutex::new(HashMap::new()));
         let mailbox_messages = Arc::new(Mutex::new(HashMap::new()));
         let service_tokens = Arc::new(ServiceTokenRegistry::new());
@@ -782,9 +802,10 @@ impl AppState {
         let rate_limits = Arc::new(Mutex::new(HashMap::new()));
         let metrics = Arc::new(AppMetrics::default());
         let (runtime_sse_tx, _) = broadcast::channel(256);
-        let sse_event_buffer = Arc::new(std::sync::RwLock::new(
-            std::collections::VecDeque::<(u64, SseFrame)>::with_capacity(10_000),
-        ));
+        let sse_event_buffer = Arc::new(std::sync::RwLock::new(std::collections::VecDeque::<(
+            u64,
+            SseFrame,
+        )>::with_capacity(10_000)));
         let sse_seq = Arc::new(std::sync::atomic::AtomicU64::new(1));
         let memory_proposal_hook = Arc::new(sse_hooks::SseMemoryProposalHook::with_sse_channel(
             runtime_sse_tx.clone(),
@@ -861,7 +882,7 @@ impl AppState {
             eval_rubrics,
             graph,
             brain_provider: None,
-            tool_registry:  None,
+            tool_registry: None,
         })
     }
 }
@@ -1053,7 +1074,10 @@ where
             .get::<AuthPrincipal>()
             .map(is_admin_principal)
             .unwrap_or(false);
-        Ok(Self { tenant_id, is_admin })
+        Ok(Self {
+            tenant_id,
+            is_admin,
+        })
     }
 }
 
@@ -1097,7 +1121,10 @@ where
             .extensions()
             .get::<TenantId>()
             .map(|t| t.clone())
-            .map(|tenant_id| TenantScope { tenant_id, is_admin })
+            .map(|tenant_id| TenantScope {
+                tenant_id,
+                is_admin,
+            })
             .ok_or_else(unauthorized_api_error)?;
         let Json(value) = Json::<T>::from_request(request, state)
             .await
@@ -3296,8 +3323,7 @@ impl AppBootstrap {
                     (HttpMethod::Get, "/v1/settings/defaults/resolve/:key") => {
                         router.route(&path, get(resolve_default_setting_handler))
                     }
-                    (HttpMethod::Get, "/v1/stream")
-                    | (HttpMethod::Get, "/v1/streams/runtime") => {
+                    (HttpMethod::Get, "/v1/stream") | (HttpMethod::Get, "/v1/streams/runtime") => {
                         router.route(&path, get(runtime_stream_handler))
                     }
                     (HttpMethod::Get, "/v1/admin/license") => {
@@ -3817,15 +3843,11 @@ impl AppBootstrap {
                     (HttpMethod::Get, "/v1/sessions/:id/llm-traces") => {
                         router.route(&path, get(get_session_llm_traces_handler))
                     }
-                    (HttpMethod::Get, "/v1/fleet") => {
-                        router.route(&path, get(fleet_handler))
-                    }
+                    (HttpMethod::Get, "/v1/fleet") => router.route(&path, get(fleet_handler)),
                     (HttpMethod::Get, "/v1/overview") => {
                         router.route(&path, get(system_status_handler))
                     }
-                    (HttpMethod::Get, "/v1/metrics") => {
-                        router.route(&path, get(metrics_handler))
-                    }
+                    (HttpMethod::Get, "/v1/metrics") => router.route(&path, get(metrics_handler)),
                     (HttpMethod::Get, _) => router.route(&path, get(not_implemented_handler)),
                     (HttpMethod::Post, _) => router.route(&path, post(not_implemented_handler)),
                     (HttpMethod::Put, _) => router.route(&path, put(not_implemented_handler)),
@@ -3838,7 +3860,10 @@ impl AppBootstrap {
             .route("/version", get(version_handler))
             .route("/v1/dashboard/activity", get(dashboard_activity_handler))
             .route("/v1/agent-templates", get(list_agent_templates_handler))
-            .route("/v1/agent-templates/:id/instantiate", post(instantiate_agent_template_handler))
+            .route(
+                "/v1/agent-templates/:id/instantiate",
+                post(instantiate_agent_template_handler),
+            )
             .route(
                 "/v1/sessions",
                 get(list_sessions_handler).post(create_session_handler),
@@ -3849,10 +3874,7 @@ impl AppBootstrap {
                 "/v1/sessions/:id/activity",
                 get(get_session_activity_handler),
             )
-            .route(
-                "/v1/sessions/:id/events",
-                get(list_session_events_handler),
-            )
+            .route("/v1/sessions/:id/events", get(list_session_events_handler))
             .route(
                 "/v1/sessions/:id/active-runs",
                 get(get_session_active_runs_handler),
@@ -3881,11 +3903,17 @@ impl AppBootstrap {
             .route("/v1/runs/:id/spawn", post(spawn_subagent_run_handler))
             .route("/v1/runs/:id/children", get(list_child_runs_handler))
             .route("/v1/runs/:id/orchestrate", post(orchestrate_run_handler))
-            .route("/v1/plugins/:id/capabilities", get(plugin_capabilities_handler))
+            .route(
+                "/v1/plugins/:id/capabilities",
+                get(plugin_capabilities_handler),
+            )
             .route("/v1/plugins/:id/tools", get(plugin_tools_handler))
             .route("/v1/plugins/tools/search", get(plugin_tools_search_handler))
             .route("/v1/evals/dashboard", get(get_eval_dashboard_handler))
-            .route("/v1/evals/matrices/provider-routing", get(get_provider_routing_matrix_handler))
+            .route(
+                "/v1/evals/matrices/provider-routing",
+                get(get_provider_routing_matrix_handler),
+            )
             .route("/v1/evals/runs/:id/start", post(start_eval_run_handler))
             .route(
                 "/v1/evals/runs/:id/complete",
@@ -3894,10 +3922,7 @@ impl AppBootstrap {
             .route("/v1/evals/runs/:id/score", post(score_eval_run_handler))
             .route("/v1/evals/compare", get(compare_eval_runs_handler))
             .route("/v1/memory/feedback", post(memory_feedback_handler))
-            .route(
-                "/v1/memory/documents/:id",
-                get(get_memory_document_handler),
-            )
+            .route("/v1/memory/documents/:id", get(get_memory_document_handler))
             .route(
                 "/v1/memory/documents/:id/versions",
                 get(list_memory_document_versions_handler),
@@ -3958,7 +3983,6 @@ impl AppBootstrap {
                 "/v1/tool-invocations/:id/complete",
                 post(complete_tool_invocation_handler),
             )
-
             .route("/v1/bundles/validate", post(validate_bundle_handler))
             .route("/v1/bundles/plan", post(plan_bundle_handler))
             .route("/v1/bundles/apply", post(apply_bundle_handler))
@@ -4009,125 +4033,342 @@ impl AppBootstrap {
             // catalog_path_to_axum(:id → {id}) produces a static literal in matchit 0.7,
             // so ALL dynamic-param routes must be registered here with :param syntax.
             // ── Admin GET ────────────────────────────────────────────────────────────
-            .route("/v1/admin/audit-log/:resource_type/:resource_id", get(list_audit_log_for_resource_handler))
+            .route(
+                "/v1/admin/audit-log/:resource_type/:resource_id",
+                get(list_audit_log_for_resource_handler),
+            )
             .route("/v1/admin/tenants/:id", get(get_tenant_handler))
-            .route("/v1/admin/tenants/:id/overview", get(get_tenant_overview_handler))
-            .route("/v1/admin/tenants/:id/snapshots", get(list_snapshots_handler))
-            .route("/v1/admin/tenants/:tenant_id/credentials", get(list_credentials_handler))
-            .route("/v1/admin/tenants/:tenant_id/operator-profiles", get(list_operator_profiles_handler))
-            .route("/v1/admin/tenants/:tenant_id/workspaces", get(list_workspaces_handler))
-            .route("/v1/admin/workspaces/:workspace_id/members", get(list_workspace_members_handler))
-            .route("/v1/admin/workspaces/:workspace_id/projects", get(list_projects_handler))
-            .route("/v1/admin/workspaces/:id/shares", get(list_workspace_shares_handler))
-            .route("/v1/admin/operators/:id/notifications", get(get_operator_notifications_handler))
+            .route(
+                "/v1/admin/tenants/:id/overview",
+                get(get_tenant_overview_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:id/snapshots",
+                get(list_snapshots_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:tenant_id/credentials",
+                get(list_credentials_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:tenant_id/operator-profiles",
+                get(list_operator_profiles_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:tenant_id/workspaces",
+                get(list_workspaces_handler),
+            )
+            .route(
+                "/v1/admin/workspaces/:workspace_id/members",
+                get(list_workspace_members_handler),
+            )
+            .route(
+                "/v1/admin/workspaces/:workspace_id/projects",
+                get(list_projects_handler),
+            )
+            .route(
+                "/v1/admin/workspaces/:id/shares",
+                get(list_workspace_shares_handler),
+            )
+            .route(
+                "/v1/admin/operators/:id/notifications",
+                get(get_operator_notifications_handler),
+            )
             // ── Admin POST/DELETE ─────────────────────────────────────────────────────
-            .route("/v1/admin/tenants/:id/compact-event-log", post(compact_event_log_handler))
-            .route("/v1/admin/tenants/:id/snapshot", post(create_snapshot_handler))
-            .route("/v1/admin/tenants/:id/restore", post(restore_from_snapshot_handler))
-            .route("/v1/admin/tenants/:tenant_id/workspaces", post(create_workspace_handler))
-            .route("/v1/admin/tenants/:tenant_id/operator-profiles", post(create_operator_profile_handler))
-            .route("/v1/admin/tenants/:tenant_id/credentials", post(store_credential_handler))
-            .route("/v1/admin/tenants/:tenant_id/credentials/:id", delete(revoke_credential_handler))
-            .route("/v1/admin/workspaces/:workspace_id/projects", post(create_project_handler))
-            .route("/v1/admin/workspaces/:workspace_id/members", post(add_workspace_member_handler))
-            .route("/v1/admin/workspaces/:workspace_id/members/:id", delete(remove_workspace_member_handler))
-            .route("/v1/admin/workspaces/:id/shares", post(create_workspace_share_handler))
-            .route("/v1/admin/workspaces/:id/shares/:share_id", delete(revoke_workspace_share_handler))
-            .route("/v1/admin/operators/:id/notifications", post(set_operator_notifications_handler))
-            .route("/v1/admin/notifications/:id/retry", post(retry_notification_handler))
+            .route(
+                "/v1/admin/tenants/:id/compact-event-log",
+                post(compact_event_log_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:id/snapshot",
+                post(create_snapshot_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:id/restore",
+                post(restore_from_snapshot_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:tenant_id/workspaces",
+                post(create_workspace_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:tenant_id/operator-profiles",
+                post(create_operator_profile_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:tenant_id/credentials",
+                post(store_credential_handler),
+            )
+            .route(
+                "/v1/admin/tenants/:tenant_id/credentials/:id",
+                delete(revoke_credential_handler),
+            )
+            .route(
+                "/v1/admin/workspaces/:workspace_id/projects",
+                post(create_project_handler),
+            )
+            .route(
+                "/v1/admin/workspaces/:workspace_id/members",
+                post(add_workspace_member_handler),
+            )
+            .route(
+                "/v1/admin/workspaces/:workspace_id/members/:id",
+                delete(remove_workspace_member_handler),
+            )
+            .route(
+                "/v1/admin/workspaces/:id/shares",
+                post(create_workspace_share_handler),
+            )
+            .route(
+                "/v1/admin/workspaces/:id/shares/:share_id",
+                delete(revoke_workspace_share_handler),
+            )
+            .route(
+                "/v1/admin/operators/:id/notifications",
+                post(set_operator_notifications_handler),
+            )
+            .route(
+                "/v1/admin/notifications/:id/retry",
+                post(retry_notification_handler),
+            )
             // ── Settings ──────────────────────────────────────────────────────────────
             .route("/v1/settings/defaults/all", get(list_all_defaults_handler))
-            .route("/v1/settings/defaults/resolve/:key", get(resolve_default_setting_handler))
-            .route("/v1/settings/defaults/:scope/:scope_id/:key", put(set_default_setting_handler).delete(clear_default_setting_handler))
+            .route(
+                "/v1/settings/defaults/resolve/:key",
+                get(resolve_default_setting_handler),
+            )
+            .route(
+                "/v1/settings/defaults/:scope/:scope_id/:key",
+                put(set_default_setting_handler).delete(clear_default_setting_handler),
+            )
             // ── Approvals ─────────────────────────────────────────────────────────────
             .route("/v1/approvals/:id/approve", post(approve_approval_handler))
             .route("/v1/approvals/:id/deny", post(deny_approval_handler))
-            .route("/v1/approvals/:id/delegate", post(delegate_approval_handler))
+            .route(
+                "/v1/approvals/:id/delegate",
+                post(delegate_approval_handler),
+            )
             .route("/v1/approvals/:id/reject", post(reject_approval_handler))
             // ── Prompts ───────────────────────────────────────────────────────────────
-            .route("/v1/prompts/assets/:id/versions", get(list_prompt_versions_handler))
-            .route("/v1/prompts/assets/:id/versions", post(create_prompt_version_handler))
-            .route("/v1/prompts/releases/:id/transition", post(transition_prompt_release_handler))
-            .route("/v1/prompts/releases/:id/activate", post(activate_prompt_release_handler))
-            .route("/v1/prompts/releases/:id/rollback", post(rollback_prompt_release_handler))
-            .route("/v1/prompts/releases/:id/rollout", post(start_prompt_rollout_handler))
-            .route("/v1/prompts/releases/:id/request-approval", post(request_approval_handler))
+            .route(
+                "/v1/prompts/assets/:id/versions",
+                get(list_prompt_versions_handler),
+            )
+            .route(
+                "/v1/prompts/assets/:id/versions",
+                post(create_prompt_version_handler),
+            )
+            .route(
+                "/v1/prompts/releases/:id/transition",
+                post(transition_prompt_release_handler),
+            )
+            .route(
+                "/v1/prompts/releases/:id/activate",
+                post(activate_prompt_release_handler),
+            )
+            .route(
+                "/v1/prompts/releases/:id/rollback",
+                post(rollback_prompt_release_handler),
+            )
+            .route(
+                "/v1/prompts/releases/:id/rollout",
+                post(start_prompt_rollout_handler),
+            )
+            .route(
+                "/v1/prompts/releases/:id/request-approval",
+                post(request_approval_handler),
+            )
             // ── Feed ──────────────────────────────────────────────────────────────────
             .route("/v1/feed/:id/read", post(mark_feed_item_read_handler))
             // ── Runs ──────────────────────────────────────────────────────────────────
             .route("/v1/runs/:id", get(get_run_handler))
             .route("/v1/runs/:id/cost-alert", post(set_run_cost_alert_handler))
-            .route("/v1/runs/:id/sla", get(get_run_sla_handler).post(set_run_sla_handler))
-            .route("/v1/runs/:id/interventions", get(list_run_interventions_handler))
+            .route(
+                "/v1/runs/:id/sla",
+                get(get_run_sla_handler).post(set_run_sla_handler),
+            )
+            .route(
+                "/v1/runs/:id/interventions",
+                get(list_run_interventions_handler),
+            )
             .route("/v1/runs/:id/diagnose", post(diagnose_run_handler))
             .route("/v1/runs/:id/intervene", post(intervene_run_handler))
             .route("/v1/runs/:id/checkpoint", post(save_checkpoint_handler))
             // ── Tasks ─────────────────────────────────────────────────────────────────
             .route("/v1/tasks/:id/cancel", post(cancel_task_handler))
-            .route("/v1/tasks/:id/release-lease", post(release_task_lease_handler))
+            .route(
+                "/v1/tasks/:id/release-lease",
+                post(release_task_lease_handler),
+            )
             .route("/v1/tasks/:id/priority", post(set_task_priority_handler))
             // ── Tool invocations ──────────────────────────────────────────────────────
             .route("/v1/tool-invocations/:id", get(get_tool_invocation_handler))
-            .route("/v1/tool-invocations/:id/progress", get(get_tool_invocation_progress_handler))
-            .route("/v1/tool-invocations/:id/cancel", post(cancel_tool_invocation_handler))
+            .route(
+                "/v1/tool-invocations/:id/progress",
+                get(get_tool_invocation_progress_handler),
+            )
+            .route(
+                "/v1/tool-invocations/:id/cancel",
+                post(cancel_tool_invocation_handler),
+            )
             // ── Checkpoints ───────────────────────────────────────────────────────────
             .route("/v1/checkpoints/:id", get(get_checkpoint_handler))
-            .route("/v1/checkpoints/:id/restore", post(restore_checkpoint_handler))
+            .route(
+                "/v1/checkpoints/:id/restore",
+                post(restore_checkpoint_handler),
+            )
             // ── Plugins ───────────────────────────────────────────────────────────────
-            .route("/v1/plugins/:id", get(get_plugin_handler).delete(unregister_plugin_handler))
+            .route(
+                "/v1/plugins/:id",
+                get(get_plugin_handler).delete(unregister_plugin_handler),
+            )
             .route("/v1/plugins/:id/health", get(plugin_health_handler))
             .route("/v1/plugins/:id/metrics", get(plugin_metrics_handler))
             .route("/v1/plugins/:id/logs", get(plugin_logs_handler))
-            .route("/v1/plugins/:id/pending-signals", get(plugin_pending_signals_handler))
-            .route("/v1/plugins/:id/eval-score", post(plugin_eval_score_handler))
+            .route(
+                "/v1/plugins/:id/pending-signals",
+                get(plugin_pending_signals_handler),
+            )
+            .route(
+                "/v1/plugins/:id/eval-score",
+                post(plugin_eval_score_handler),
+            )
             // ── Evals ─────────────────────────────────────────────────────────────────
             .route("/v1/evals/datasets/:id", get(get_eval_dataset_handler))
-            .route("/v1/evals/datasets/:id/entries", post(add_eval_dataset_entry_handler))
+            .route(
+                "/v1/evals/datasets/:id/entries",
+                post(add_eval_dataset_entry_handler),
+            )
             .route("/v1/evals/baselines/:id", get(get_eval_baseline_handler))
             .route("/v1/evals/rubrics/:id", get(get_eval_rubric_handler))
             .route("/v1/evals/runs/:id", get(get_eval_run_handler))
-            .route("/v1/evals/runs/:id/score-rubric", post(score_eval_run_with_rubric_handler))
-            .route("/v1/evals/runs/:id/compare-baseline", post(compare_eval_run_baseline_handler))
+            .route(
+                "/v1/evals/runs/:id/score-rubric",
+                post(score_eval_run_with_rubric_handler),
+            )
+            .route(
+                "/v1/evals/runs/:id/compare-baseline",
+                post(compare_eval_run_baseline_handler),
+            )
             .route("/v1/evals/scorecard/:asset_id", get(get_scorecard_handler))
-            .route("/v1/evals/assets/:asset_id/report", get(get_eval_asset_report_handler))
-            .route("/v1/evals/assets/:asset_id/trend", get(get_eval_asset_trend_handler))
-            .route("/v1/evals/assets/:asset_id/winner", get(get_eval_asset_winner_handler))
-            .route("/v1/evals/assets/:asset_id/export", get(get_eval_asset_export_handler))
+            .route(
+                "/v1/evals/assets/:asset_id/report",
+                get(get_eval_asset_report_handler),
+            )
+            .route(
+                "/v1/evals/assets/:asset_id/trend",
+                get(get_eval_asset_trend_handler),
+            )
+            .route(
+                "/v1/evals/assets/:asset_id/winner",
+                get(get_eval_asset_winner_handler),
+            )
+            .route(
+                "/v1/evals/assets/:asset_id/export",
+                get(get_eval_asset_export_handler),
+            )
             // ── Sources / Ingest ──────────────────────────────────────────────────────
-            .route("/v1/sources/:id", get(get_source_handler).put(update_source_handler).delete(delete_source_handler))
+            .route(
+                "/v1/sources/:id",
+                get(get_source_handler)
+                    .put(update_source_handler)
+                    .delete(delete_source_handler),
+            )
             .route("/v1/sources/:id/chunks", get(list_source_chunks_handler))
             .route("/v1/sources/:id/quality", get(source_quality_handler))
-            .route("/v1/sources/:id/refresh-schedule", get(get_source_refresh_schedule_handler).post(create_source_refresh_schedule_handler))
+            .route(
+                "/v1/sources/:id/refresh-schedule",
+                get(get_source_refresh_schedule_handler)
+                    .post(create_source_refresh_schedule_handler),
+            )
             .route("/v1/ingest/jobs/:id", get(get_ingest_job_handler))
-            .route("/v1/ingest/jobs/:id/complete", post(complete_ingest_job_handler))
+            .route(
+                "/v1/ingest/jobs/:id/complete",
+                post(complete_ingest_job_handler),
+            )
             .route("/v1/ingest/jobs/:id/fail", post(fail_ingest_job_handler))
             // ── Channels ──────────────────────────────────────────────────────────────
-            .route("/v1/channels/:id/messages", get(list_channel_messages_handler))
+            .route(
+                "/v1/channels/:id/messages",
+                get(list_channel_messages_handler),
+            )
             .route("/v1/channels/:id/send", post(send_channel_message_handler))
-            .route("/v1/channels/:id/consume", post(consume_channel_message_handler))
+            .route(
+                "/v1/channels/:id/consume",
+                post(consume_channel_message_handler),
+            )
             // ── Sessions ──────────────────────────────────────────────────────────────
-            .route("/v1/sessions/:id/llm-traces", get(get_session_llm_traces_handler))
+            .route(
+                "/v1/sessions/:id/llm-traces",
+                get(get_session_llm_traces_handler),
+            )
             // ── Graph ─────────────────────────────────────────────────────────────────
-            .route("/v1/graph/execution-trace/:run_id", get(execution_trace_handler))
-            .route("/v1/graph/dependency-path/:run_id", get(dependency_path_handler))
-            .route("/v1/graph/prompt-provenance/:release_id", get(prompt_provenance_handler))
-            .route("/v1/graph/retrieval-provenance/:run_id", get(retrieval_provenance_handler))
-            .route("/v1/graph/provenance/:node_id", get(graph_provenance_handler))
+            .route(
+                "/v1/graph/execution-trace/:run_id",
+                get(execution_trace_handler),
+            )
+            .route(
+                "/v1/graph/dependency-path/:run_id",
+                get(dependency_path_handler),
+            )
+            .route(
+                "/v1/graph/prompt-provenance/:release_id",
+                get(prompt_provenance_handler),
+            )
+            .route(
+                "/v1/graph/retrieval-provenance/:run_id",
+                get(retrieval_provenance_handler),
+            )
+            .route(
+                "/v1/graph/provenance/:node_id",
+                get(graph_provenance_handler),
+            )
             .route("/v1/graph/multi-hop/:node_id", get(multi_hop_graph_handler))
             // ── Memory ────────────────────────────────────────────────────────────────
-            .route("/v1/memory/provenance/:document_id", get(memory_provenance_handler))
+            .route(
+                "/v1/memory/provenance/:document_id",
+                get(memory_provenance_handler),
+            )
             // ── Providers ─────────────────────────────────────────────────────────────
-            .route("/v1/providers/:id/health-check", post(manual_provider_health_check_handler))
+            .route(
+                "/v1/providers/:id/health-check",
+                post(manual_provider_health_check_handler),
+            )
             .route("/v1/providers/:id/recover", post(recover_provider_handler))
-            .route("/v1/providers/pools/:id/connections", post(add_pool_connection_handler))
-            .route("/v1/providers/pools/:id/connections/:conn_id", delete(remove_pool_connection_handler))
-            .route("/v1/providers/bindings/:id/cost-stats", get(get_binding_cost_stats_handler))
-            .route("/v1/providers/connections/:id/models", get(list_provider_models_handler).post(register_provider_model_handler))
-            .route("/v1/providers/connections/:id/health-schedule", get(get_provider_health_schedule_handler).post(set_provider_health_schedule_handler))
-            .route("/v1/providers/connections/:id/retry-policy", put(set_provider_retry_policy_handler))
-            .route("/v1/providers/connections/:id/resolve-key", get(resolve_provider_key_handler))
+            .route(
+                "/v1/providers/pools/:id/connections",
+                post(add_pool_connection_handler),
+            )
+            .route(
+                "/v1/providers/pools/:id/connections/:conn_id",
+                delete(remove_pool_connection_handler),
+            )
+            .route(
+                "/v1/providers/bindings/:id/cost-stats",
+                get(get_binding_cost_stats_handler),
+            )
+            .route(
+                "/v1/providers/connections/:id/models",
+                get(list_provider_models_handler).post(register_provider_model_handler),
+            )
+            .route(
+                "/v1/providers/connections/:id/health-schedule",
+                get(get_provider_health_schedule_handler)
+                    .post(set_provider_health_schedule_handler),
+            )
+            .route(
+                "/v1/providers/connections/:id/retry-policy",
+                put(set_provider_retry_policy_handler),
+            )
+            .route(
+                "/v1/providers/connections/:id/resolve-key",
+                get(resolve_provider_key_handler),
+            )
             // ── Auth tokens ───────────────────────────────────────────────────────────
-            .route("/v1/auth/tokens", post(create_auth_token_handler).get(list_auth_tokens_handler))
+            .route(
+                "/v1/auth/tokens",
+                post(create_auth_token_handler).get(list_auth_tokens_handler),
+            )
             .route("/v1/auth/tokens/:id", delete(delete_auth_token_handler))
             // ── Events + Stats ───────────────────────────────────────────────────────
             .route("/v1/events/recent", get(recent_events_handler))
@@ -4249,7 +4490,8 @@ impl ServerBootstrap for AppBootstrap {
                 let listener = TcpListener::bind(addr)
                     .await
                     .map_err(|err| format!("failed to bind {addr}: {err}"))?;
-                self.serve_with_shutdown(listener, router, shutdown_signal()).await
+                self.serve_with_shutdown(listener, router, shutdown_signal())
+                    .await
             }
         })
     }
@@ -4325,7 +4567,11 @@ async fn rate_limit_middleware(
         }
 
         if bucket.count >= MAX_REQUESTS {
-            Some((WINDOW_MS - now.saturating_sub(bucket.window_started_ms)).max(1).div_ceil(1000))
+            Some(
+                (WINDOW_MS - now.saturating_sub(bucket.window_started_ms))
+                    .max(1)
+                    .div_ceil(1000),
+            )
         } else {
             bucket.count += 1;
             None
@@ -4359,12 +4605,18 @@ async fn request_id_middleware(mut request: Request, next: Next) -> Response {
 
     let request_id = Uuid::new_v4().to_string();
     // Span ID: first 8 hex chars of the request UUID (no extra dep needed).
-    let span_id = request_id.chars().filter(|c| c.is_ascii_hexdigit()).take(8).collect::<String>();
+    let span_id = request_id
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .take(8)
+        .collect::<String>();
 
     // Propagate trace context to extensions so handlers can read it.
     request.extensions_mut().insert(TraceId(trace_id.clone()));
     request.extensions_mut().insert(SpanId(span_id.clone()));
-    request.extensions_mut().insert(RequestId(request_id.clone()));
+    request
+        .extensions_mut()
+        .insert(RequestId(request_id.clone()));
 
     // Set thread-local so make_envelope() attaches trace_id to events.
     set_current_trace_id(&trace_id);
@@ -4483,14 +4735,10 @@ async fn lookup_workspace_role(
         return Ok(None);
     };
 
-    WorkspaceMembershipReadModel::get_member(
-        state.runtime.store.as_ref(),
-        workspace_key,
-        member_id,
-    )
-    .await
-    .map(|membership| membership.map(|membership| membership.role))
-    .map_err(store_error_response)
+    WorkspaceMembershipReadModel::get_member(state.runtime.store.as_ref(), workspace_key, member_id)
+        .await
+        .map(|membership| membership.map(|membership| membership.role))
+        .map_err(store_error_response)
 }
 
 async fn infer_workspace_role_for_request(
@@ -4576,7 +4824,8 @@ async fn ensure_workspace_role_for_project(
     project: &ProjectKey,
     minimum_role: WorkspaceRole,
 ) -> Result<(), Response> {
-    let Some(role) = lookup_workspace_role(state, principal, &project.workspace_key()).await? else {
+    let Some(role) = lookup_workspace_role(state, principal, &project.workspace_key()).await?
+    else {
         return Ok(());
     };
     if !role.has_at_least(minimum_role) {
@@ -4629,7 +4878,9 @@ async fn observability_middleware(
 async fn refresh_activity_metrics(state: &AppState) {
     let active_runs = state.runtime.store.count_active_runs().await;
     let active_tasks = state.runtime.store.count_active_tasks().await;
-    state.metrics.set_active_counts(active_runs as usize, active_tasks as usize);
+    state
+        .metrics
+        .set_active_counts(active_runs as usize, active_tasks as usize);
 }
 
 async fn build_health_report(state: &AppState) -> HealthReport {
@@ -4785,7 +5036,9 @@ async fn runtime_stream_handler(
 
     // Collect all buffered frames after last_seq.
     let replay_frames: Vec<SseFrame> = {
-        let buf = state.sse_event_buffer.read()
+        let buf = state
+            .sse_event_buffer
+            .read()
             .expect("sse_event_buffer poisoned");
         match last_seq {
             None => vec![],
@@ -4843,13 +5096,16 @@ async fn publish_runtime_frames_since(state: &Arc<AppState>, after: Option<Event
     for stored in events {
         if let Some(mut frame) = build_runtime_sse_frame(state, &stored).await {
             // Assign a monotonic sequence ID for Last-Event-ID replay.
-            let seq = state.sse_seq
+            let seq = state
+                .sse_seq
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             frame.id = Some(seq.to_string());
 
             // Push to replay buffer (trim oldest if at capacity).
             {
-                let mut buf = state.sse_event_buffer.write()
+                let mut buf = state
+                    .sse_event_buffer
+                    .write()
                     .expect("sse_event_buffer poisoned");
                 if buf.len() >= SSE_BUFFER_CAPACITY {
                     buf.pop_front();
@@ -4955,11 +5211,15 @@ async fn system_status_handler(State(state): State<Arc<AppState>>) -> impl IntoR
 
     // plugin_registry: degraded if any plugin is in a degraded lifecycle state
     let plugins = state.plugin_registry.list_all();
-    let any_plugin_degraded = state.plugin_host.lock().map(|h| {
-        plugins
-            .iter()
-            .any(|m| matches!(h.state(&m.id), Some(cairn_tools::PluginState::Failed)))
-    }).unwrap_or(false);
+    let any_plugin_degraded = state
+        .plugin_host
+        .lock()
+        .map(|h| {
+            plugins
+                .iter()
+                .any(|m| matches!(h.state(&m.id), Some(cairn_tools::PluginState::Failed)))
+        })
+        .unwrap_or(false);
     components.push(ComponentStatus {
         name: "plugin_registry".to_owned(),
         status: if any_plugin_degraded {
@@ -5153,71 +5413,94 @@ async fn recent_events_handler(
         .collect();
 
     let count = items.len();
-    (StatusCode::OK, Json(serde_json::json!({
-        "items": items,
-        "count": count,
-        "limit": limit,
-    }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "items": items,
+            "count": count,
+            "limit": limit,
+        })),
+    )
+        .into_response()
 }
 
 /// `GET /v1/stats` — lightweight aggregate counts for the deployment.
 ///
 /// Uses only public store methods — no private state access.
-async fn stats_handler(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn stats_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let store = state.runtime.store.as_ref();
 
     // Event log head position is the last event index; +1 gives total count.
     let total_events: u64 = store
-        .head_position().await
-        .ok().flatten()
+        .head_position()
+        .await
+        .ok()
+        .flatten()
         .map(|p| p.0 + 1)
         .unwrap_or(0);
 
     // Use public count helpers (O(N) scans, acceptable for in-memory store).
-    let active_runs:  u64 = store.count_active_runs().await;
+    let active_runs: u64 = store.count_active_runs().await;
     let active_tasks: u64 = store.count_active_tasks().await;
 
     // Total counts from list-all queries.
     use cairn_store::projections::SessionReadModel;
     let total_sessions: u64 = SessionReadModel::list_active(store, usize::MAX)
-        .await.unwrap_or_default().len() as u64;
+        .await
+        .unwrap_or_default()
+        .len() as u64;
 
-    let _total_runs: u64 = match state.runtime.runs.list_by_session(
-        &cairn_domain::SessionId::new("__stats__"), usize::MAX, 0,
-    ).await {
+    let _total_runs: u64 = match state
+        .runtime
+        .runs
+        .list_by_session(&cairn_domain::SessionId::new("__stats__"), usize::MAX, 0)
+        .await
+    {
         Ok(_) => 0, // session-scoped — use read_stream count instead
         Err(_) => 0,
     };
     // More reliable: count runs from the read_stream events
     let total_runs: u64 = if total_events > 0 {
         match store.read_stream(None, usize::MAX).await {
-            Ok(events) => events.iter().filter(|e| matches!(
-                e.envelope.payload, cairn_domain::RuntimeEvent::RunCreated(_)
-            )).count() as u64,
+            Ok(events) => events
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e.envelope.payload,
+                        cairn_domain::RuntimeEvent::RunCreated(_)
+                    )
+                })
+                .count() as u64,
             Err(_) => 0,
         }
-    } else { 0 };
+    } else {
+        0
+    };
 
     let pending_approvals: u64 = {
         let dummy = cairn_domain::ProjectKey::new("", "", "");
         use cairn_store::projections::ApprovalReadModel;
         ApprovalReadModel::list_pending(store, &dummy, usize::MAX, 0)
-            .await.unwrap_or_default().len() as u64
+            .await
+            .unwrap_or_default()
+            .len() as u64
     };
 
     let uptime_seconds = state.started_at.elapsed().as_secs();
 
-    (StatusCode::OK, Json(serde_json::json!({
-        "total_events":      total_events,
-        "total_sessions":    total_sessions,
-        "total_runs":        total_runs,
-        "total_tasks":       active_tasks,
-        "active_runs":       active_runs,
-        "pending_approvals": pending_approvals,
-        "uptime_seconds":    uptime_seconds,
-    }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "total_events":      total_events,
+            "total_sessions":    total_sessions,
+            "total_runs":        total_runs,
+            "total_tasks":       active_tasks,
+            "active_runs":       active_runs,
+            "pending_approvals": pending_approvals,
+            "uptime_seconds":    uptime_seconds,
+        })),
+    )
+        .into_response()
 }
 
 async fn dashboard_handler(
@@ -5534,11 +5817,22 @@ fn event_message(event: &RuntimeEvent) -> String {
         RuntimeEvent::OperatorIntervention(intervention) => format!(
             "Operator intervention {} applied to run {}",
             intervention.action,
-            intervention.run_id.as_ref().map(|id| id.as_str()).unwrap_or("?")
+            intervention
+                .run_id
+                .as_ref()
+                .map(|id| id.as_str())
+                .unwrap_or("?")
         ),
         RuntimeEvent::TaskCreated(created) => format!("Task {} created", created.task_id),
         RuntimeEvent::PauseScheduled(schedule) => {
-            format!("Pause scheduled for run {}", schedule.run_id.as_ref().map(|id| id.as_str()).unwrap_or("?"))
+            format!(
+                "Pause scheduled for run {}",
+                schedule
+                    .run_id
+                    .as_ref()
+                    .map(|id| id.as_str())
+                    .unwrap_or("?")
+            )
         }
         RuntimeEvent::TaskLeaseClaimed(claimed) => {
             format!("Task {} leased to {}", claimed.task_id, claimed.lease_owner)
@@ -5592,7 +5886,11 @@ fn event_message(event: &RuntimeEvent) -> String {
             format!(
                 "Checkpoint strategy {} set for run {}",
                 strategy.strategy_id,
-                strategy.run_id.as_ref().map(|id| id.as_str()).unwrap_or("?")
+                strategy
+                    .run_id
+                    .as_ref()
+                    .map(|id| id.as_str())
+                    .unwrap_or("?")
             )
         }
         RuntimeEvent::CheckpointRestored(restored) => {
@@ -5898,20 +6196,31 @@ fn event_message(event: &RuntimeEvent) -> String {
             )
         }
         RuntimeEvent::PromptRolloutStarted(e) => {
-            format!("Prompt rollout started for release {} at {}%",
-                e.release_id.as_ref().map(|r| r.to_string()).unwrap_or_default(),
-                e.percent)
+            format!(
+                "Prompt rollout started for release {} at {}%",
+                e.release_id
+                    .as_ref()
+                    .map(|r| r.to_string())
+                    .unwrap_or_default(),
+                e.percent
+            )
         }
-        RuntimeEvent::TaskPriorityChanged(_) | RuntimeEvent::TaskLeaseExpired(_) | RuntimeEvent::ProviderModelRegistered(_)
-            | RuntimeEvent::ProviderRetryPolicySet(_) | RuntimeEvent::NotificationPreferenceSet(_) | RuntimeEvent::NotificationSent(_)
-            | RuntimeEvent::ProviderPoolCreated(_) | RuntimeEvent::ProviderPoolConnectionAdded(_) | RuntimeEvent::ProviderPoolConnectionRemoved(_)
-            | RuntimeEvent::ResourceShared(_)
-            | RuntimeEvent::ResourceShareRevoked(_)
-            | RuntimeEvent::SoulPatchProposed(_)
-            | RuntimeEvent::SoulPatchApplied(_)
-            | RuntimeEvent::SpendAlertTriggered(_)
-            | RuntimeEvent::OutcomeRecorded(_)
-            | RuntimeEvent::ScheduledTaskCreated(_) => "unknown".to_string(),
+        RuntimeEvent::TaskPriorityChanged(_)
+        | RuntimeEvent::TaskLeaseExpired(_)
+        | RuntimeEvent::ProviderModelRegistered(_)
+        | RuntimeEvent::ProviderRetryPolicySet(_)
+        | RuntimeEvent::NotificationPreferenceSet(_)
+        | RuntimeEvent::NotificationSent(_)
+        | RuntimeEvent::ProviderPoolCreated(_)
+        | RuntimeEvent::ProviderPoolConnectionAdded(_)
+        | RuntimeEvent::ProviderPoolConnectionRemoved(_)
+        | RuntimeEvent::ResourceShared(_)
+        | RuntimeEvent::ResourceShareRevoked(_)
+        | RuntimeEvent::SoulPatchProposed(_)
+        | RuntimeEvent::SoulPatchApplied(_)
+        | RuntimeEvent::SpendAlertTriggered(_)
+        | RuntimeEvent::OutcomeRecorded(_)
+        | RuntimeEvent::ScheduledTaskCreated(_) => "unknown".to_string(),
     }
 }
 
@@ -5919,12 +6228,16 @@ fn run_id_for_event(event: &RuntimeEvent) -> Option<String> {
     match event {
         RuntimeEvent::RunCreated(run) => Some(run.run_id.to_string()),
         RuntimeEvent::RunStateChanged(run) => Some(run.run_id.to_string()),
-        RuntimeEvent::OperatorIntervention(intervention) => intervention.run_id.as_ref().map(ToString::to_string),
+        RuntimeEvent::OperatorIntervention(intervention) => {
+            intervention.run_id.as_ref().map(ToString::to_string)
+        }
         RuntimeEvent::ApprovalRequested(approval) => {
             approval.run_id.as_ref().map(ToString::to_string)
         }
         RuntimeEvent::CheckpointRecorded(checkpoint) => Some(checkpoint.run_id.to_string()),
-        RuntimeEvent::CheckpointStrategySet(strategy) => strategy.run_id.as_ref().map(ToString::to_string),
+        RuntimeEvent::CheckpointStrategySet(strategy) => {
+            strategy.run_id.as_ref().map(ToString::to_string)
+        }
         RuntimeEvent::CheckpointRestored(checkpoint) => Some(checkpoint.run_id.to_string()),
         RuntimeEvent::ExternalWorkerReported(report) => {
             report.report.run_id.as_ref().map(ToString::to_string)
@@ -5935,7 +6248,9 @@ fn run_id_for_event(event: &RuntimeEvent) -> Option<String> {
         RuntimeEvent::RecoveryCompleted(recovery) => {
             recovery.run_id.as_ref().map(ToString::to_string)
         }
-        RuntimeEvent::RecoveryEscalated(recovery) => recovery.run_id.as_ref().map(ToString::to_string),
+        RuntimeEvent::RecoveryEscalated(recovery) => {
+            recovery.run_id.as_ref().map(ToString::to_string)
+        }
         RuntimeEvent::ToolInvocationStarted(invocation) => {
             invocation.run_id.as_ref().map(ToString::to_string)
         }
@@ -5967,14 +6282,14 @@ async fn get_onboarding_status_handler(
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct AgentTemplate {
-    id:              String,
-    name:            String,
-    description:     String,
-    icon:            String,
-    default_prompt:  String,
-    default_tools:   Vec<String>,
+    id: String,
+    name: String,
+    description: String,
+    icon: String,
+    default_prompt: String,
+    default_tools: Vec<String>,
     approval_policy: String,
-    agent_role:      String,
+    agent_role: String,
 }
 
 fn agent_template_catalog() -> Vec<AgentTemplate> {
@@ -5983,13 +6298,17 @@ fn agent_template_catalog() -> Vec<AgentTemplate> {
             id: "knowledge-assistant".to_owned(),
             name: "Knowledge Assistant".to_owned(),
             description: "Retrieval-aware agent that searches memory, stores new knowledge, \
-                          and fetches web pages to answer questions with cited sources.".to_owned(),
+                          and fetches web pages to answer questions with cited sources."
+                .to_owned(),
             icon: "BookOpen".to_owned(),
             default_prompt: "You are a helpful knowledge assistant. Search memory for relevant \
                              information before answering. Store any new facts you discover. \
-                             Always cite your sources.".to_owned(),
+                             Always cite your sources."
+                .to_owned(),
             default_tools: vec![
-                "memory_search".to_owned(), "memory_store".to_owned(), "web_fetch".to_owned(),
+                "memory_search".to_owned(),
+                "memory_store".to_owned(),
+                "web_fetch".to_owned(),
             ],
             approval_policy: "none".to_owned(),
             agent_role: "researcher".to_owned(),
@@ -5998,14 +6317,18 @@ fn agent_template_catalog() -> Vec<AgentTemplate> {
             id: "code-reviewer".to_owned(),
             name: "Code Reviewer".to_owned(),
             description: "Reads files, searches for patterns, inspects git history, and \
-                          scores code quality. Requires approval before posting comments.".to_owned(),
+                          scores code quality. Requires approval before posting comments."
+                .to_owned(),
             icon: "Code2".to_owned(),
             default_prompt: "You are a thorough code reviewer. Read files under review, search \
                              for anti-patterns, inspect recent git changes, and produce a \
-                             structured review with severity ratings.".to_owned(),
+                             structured review with severity ratings."
+                .to_owned(),
             default_tools: vec![
-                "file_read".to_owned(), "grep_search".to_owned(),
-                "git_operations".to_owned(), "eval_score".to_owned(),
+                "file_read".to_owned(),
+                "grep_search".to_owned(),
+                "git_operations".to_owned(),
+                "eval_score".to_owned(),
             ],
             approval_policy: "sensitive".to_owned(),
             agent_role: "reviewer".to_owned(),
@@ -6014,14 +6337,18 @@ fn agent_template_catalog() -> Vec<AgentTemplate> {
             id: "data-analyst".to_owned(),
             name: "Data Analyst".to_owned(),
             description: "Fetches data from HTTP APIs, extracts fields with JSONPath, \
-                          performs calculations, and reads reference files.".to_owned(),
+                          performs calculations, and reads reference files."
+                .to_owned(),
             icon: "BarChart3".to_owned(),
             default_prompt: "You are a data analyst. Fetch data from the provided endpoints, \
                              extract relevant fields, perform calculations, and summarise \
-                             your findings clearly with numbers.".to_owned(),
+                             your findings clearly with numbers."
+                .to_owned(),
             default_tools: vec![
-                "http_request".to_owned(), "json_extract".to_owned(),
-                "calculate".to_owned(), "file_read".to_owned(),
+                "http_request".to_owned(),
+                "json_extract".to_owned(),
+                "calculate".to_owned(),
+                "file_read".to_owned(),
             ],
             approval_policy: "none".to_owned(),
             agent_role: "executor".to_owned(),
@@ -6052,15 +6379,20 @@ async fn instantiate_agent_template_handler(
     let catalog = agent_template_catalog();
     let Some(template) = catalog.iter().find(|t| t.id == template_id) else {
         return AppApiError::new(
-            StatusCode::NOT_FOUND, "not_found",
+            StatusCode::NOT_FOUND,
+            "not_found",
             format!("agent template '{template_id}' not found"),
-        ).into_response();
+        )
+        .into_response();
     };
 
     if body.goal.trim().is_empty() {
         return AppApiError::new(
-            StatusCode::BAD_REQUEST, "validation_error", "goal must not be empty",
-        ).into_response();
+            StatusCode::BAD_REQUEST,
+            "validation_error",
+            "goal must not be empty",
+        )
+        .into_response();
     }
 
     let t_id = TenantId::new(body.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID));
@@ -6070,45 +6402,81 @@ async fn instantiate_agent_template_handler(
 
     let suffix = &now_ms().to_string()[8..]; // last 6 digits of epoch-ms for uniqueness
     let sess_id = SessionId::new(format!("sess_tmpl_{}_{}", template.id, suffix));
-    let run_id  = RunId::new(format!("run_tmpl_{}_{}", template.id, suffix));
+    let run_id = RunId::new(format!("run_tmpl_{}_{}", template.id, suffix));
 
     // Create session
-    let session = match state.runtime.sessions.create(&project, sess_id.clone()).await {
+    let session = match state
+        .runtime
+        .sessions
+        .create(&project, sess_id.clone())
+        .await
+    {
         Ok(s) => s,
-        Err(e) => return AppApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR, "session_error", e.to_string(),
-        ).into_response(),
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_error",
+                e.to_string(),
+            )
+            .into_response()
+        }
     };
 
     // Create run (use plain start; agent_role stored via defaults below)
-    let run = match state.runtime.runs.start(&project, &sess_id, run_id, None).await {
+    let run = match state
+        .runtime
+        .runs
+        .start(&project, &sess_id, run_id, None)
+        .await
+    {
         Ok(r) => r,
-        Err(e) => return AppApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR, "run_error", e.to_string(),
-        ).into_response(),
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "run_error",
+                e.to_string(),
+            )
+            .into_response()
+        }
     };
 
     // Store goal and template config as tenant-scoped defaults for this run
     let run_key = run.run_id.as_str().to_owned();
-    let _ = state.runtime.defaults.set(
-        cairn_domain::tenancy::Scope::Tenant, t_id.as_str().to_owned(),
-        format!("run:{run_key}:goal"), serde_json::json!(body.goal.trim()),
-    ).await;
-    let _ = state.runtime.defaults.set(
-        cairn_domain::tenancy::Scope::Tenant, t_id.as_str().to_owned(),
-        format!("run:{run_key}:agent_role"), serde_json::json!(template.agent_role),
-    ).await;
+    let _ = state
+        .runtime
+        .defaults
+        .set(
+            cairn_domain::tenancy::Scope::Tenant,
+            t_id.as_str().to_owned(),
+            format!("run:{run_key}:goal"),
+            serde_json::json!(body.goal.trim()),
+        )
+        .await;
+    let _ = state
+        .runtime
+        .defaults
+        .set(
+            cairn_domain::tenancy::Scope::Tenant,
+            t_id.as_str().to_owned(),
+            format!("run:{run_key}:agent_role"),
+            serde_json::json!(template.agent_role),
+        )
+        .await;
 
-    (StatusCode::CREATED, Json(serde_json::json!({
-        "template_id":    template.id,
-        "template_name":  template.name,
-        "session_id":     session.session_id.as_str(),
-        "run_id":         run.run_id.as_str(),
-        "goal":           body.goal.trim(),
-        "default_tools":  template.default_tools,
-        "agent_role":     template.agent_role,
-        "approval_policy": template.approval_policy,
-    }))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "template_id":    template.id,
+            "template_name":  template.name,
+            "session_id":     session.session_id.as_str(),
+            "run_id":         run.run_id.as_str(),
+            "goal":           body.goal.trim(),
+            "default_tools":  template.default_tools,
+            "agent_role":     template.agent_role,
+            "approval_policy": template.approval_policy,
+        })),
+    )
+        .into_response()
 }
 
 async fn list_onboarding_templates_handler(
@@ -6138,13 +6506,8 @@ async fn materialize_onboarding_template_handler(
             .unwrap_or_else(|| DEFAULT_PROJECT_ID.to_owned()),
     );
 
-    let provenance = materialize_template(
-        &template,
-        &tenant_id,
-        &workspace_id,
-        &project_id,
-        now_ms(),
-    );
+    let provenance =
+        materialize_template(&template, &tenant_id, &workspace_id, &project_id, now_ms());
     (StatusCode::OK, Json(provenance)).into_response()
 }
 
@@ -6214,12 +6577,8 @@ fn tls_settings_summary(config: &BootstrapConfig) -> Result<TlsSettingsResponse,
 async fn get_tls_settings_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match tls_settings_summary(&state.config) {
         Ok(summary) => (StatusCode::OK, Json(summary)).into_response(),
-        Err(err) => AppApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            err,
-        )
-        .into_response(),
+        Err(err) => AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err)
+            .into_response(),
     }
 }
 
@@ -6274,9 +6633,7 @@ async fn clear_default_setting_handler(
 ///   "total": 2
 /// }
 /// ```
-async fn list_all_defaults_handler(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn list_all_defaults_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     use cairn_domain::Scope;
     use cairn_store::projections::DefaultsReadModel;
 
@@ -6285,7 +6642,8 @@ async fn list_all_defaults_handler(
     // Collect settings at Scope::System ("system") — always queried.
     let mut all_settings: Vec<serde_json::Value> = Vec::new();
 
-    if let Ok(sys_settings) = DefaultsReadModel::list_by_scope(store, Scope::System, "system").await {
+    if let Ok(sys_settings) = DefaultsReadModel::list_by_scope(store, Scope::System, "system").await
+    {
         for s in sys_settings {
             all_settings.push(serde_json::json!({
                 "scope":    "system",
@@ -6300,7 +6658,8 @@ async fn list_all_defaults_handler(
     if let Ok(tenants) = cairn_store::projections::TenantReadModel::list(store, 200, 0).await {
         for tenant in &tenants {
             let tid = tenant.tenant_id.as_str();
-            if let Ok(settings) = DefaultsReadModel::list_by_scope(store, Scope::Tenant, tid).await {
+            if let Ok(settings) = DefaultsReadModel::list_by_scope(store, Scope::Tenant, tid).await
+            {
                 for s in settings {
                     all_settings.push(serde_json::json!({
                         "scope":    "tenant",
@@ -6315,7 +6674,8 @@ async fn list_all_defaults_handler(
 
     // Collect workspace-scoped settings for the default workspace.
     // (Full multi-workspace iteration would require a list_all method on WorkspaceReadModel.)
-    if let Ok(settings) = DefaultsReadModel::list_by_scope(store, Scope::Workspace, "default").await {
+    if let Ok(settings) = DefaultsReadModel::list_by_scope(store, Scope::Workspace, "default").await
+    {
         for s in settings {
             all_settings.push(serde_json::json!({
                 "scope":    "workspace",
@@ -6521,7 +6881,10 @@ async fn compact_event_log_handler(
     Json(body): Json<CompactEventLogRequest>,
 ) -> impl IntoResponse {
     let tenant_id = TenantId::new(id);
-    let report = state.runtime.store.compact_event_log(&tenant_id, Some(body.retain_last_n as u64));
+    let report = state
+        .runtime
+        .store
+        .compact_event_log(&tenant_id, Some(body.retain_last_n as u64));
     (StatusCode::OK, Json(report)).into_response()
 }
 
@@ -6531,13 +6894,17 @@ async fn create_snapshot_handler(
 ) -> impl IntoResponse {
     let tenant_id = TenantId::new(id);
     let snapshot = state.runtime.store.create_snapshot(&tenant_id);
-    (StatusCode::CREATED, Json(serde_json::json!({
-        "snapshot_id": snapshot.snapshot_id,
-        "tenant_id": snapshot.tenant_id.as_str(),
-        "event_position": snapshot.event_position,
-        "state_hash": snapshot.state_hash,
-        "created_at_ms": snapshot.created_at_ms,
-    }))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "snapshot_id": snapshot.snapshot_id,
+            "tenant_id": snapshot.tenant_id.as_str(),
+            "event_position": snapshot.event_position,
+            "state_hash": snapshot.state_hash,
+            "created_at_ms": snapshot.created_at_ms,
+        })),
+    )
+        .into_response()
 }
 
 async fn list_snapshots_handler(
@@ -6548,14 +6915,26 @@ async fn list_snapshots_handler(
     let tenant_id = TenantId::new(id);
     match SnapshotReadModel::list_by_tenant(state.runtime.store.as_ref(), &tenant_id).await {
         Ok(snapshots) => {
-            let items: Vec<_> = snapshots.iter().map(|s| serde_json::json!({
-                "snapshot_id": s.snapshot_id,
-                "tenant_id": s.tenant_id.as_str(),
-                "event_position": s.event_position,
-                "state_hash": s.state_hash,
-                "created_at_ms": s.created_at_ms,
-            })).collect();
-            (StatusCode::OK, Json(ListResponse { items, has_more: false })).into_response()
+            let items: Vec<_> = snapshots
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "snapshot_id": s.snapshot_id,
+                        "tenant_id": s.tenant_id.as_str(),
+                        "event_position": s.event_position,
+                        "state_hash": s.state_hash,
+                        "created_at_ms": s.created_at_ms,
+                    })
+                })
+                .collect();
+            (
+                StatusCode::OK,
+                Json(ListResponse {
+                    items,
+                    has_more: false,
+                }),
+            )
+                .into_response()
         }
         Err(err) => store_error_response(err),
     }
@@ -6567,9 +6946,17 @@ async fn restore_from_snapshot_handler(
 ) -> impl IntoResponse {
     use cairn_store::projections::SnapshotReadModel;
     let tenant_id = TenantId::new(id);
-    let latest = match SnapshotReadModel::get_latest(state.runtime.store.as_ref(), &tenant_id).await {
+    let latest = match SnapshotReadModel::get_latest(state.runtime.store.as_ref(), &tenant_id).await
+    {
         Ok(Some(s)) => s,
-        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "no snapshot found for tenant").into_response(),
+        Ok(None) => {
+            return AppApiError::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "no snapshot found for tenant",
+            )
+            .into_response()
+        }
         Err(err) => return store_error_response(err),
     };
     let report = state.runtime.store.restore_from_snapshot(&latest);
@@ -7665,12 +8052,7 @@ async fn ingest_signal_handler(
         Ok(record) => {
             state.feed.push_item(feed_item_from_signal(&record));
             // Route signal to subscribers
-            if let Ok(routed) = state
-                .runtime
-                .signal_router
-                .route_signal(&record.id)
-                .await
-            {
+            if let Ok(routed) = state.runtime.signal_router.route_signal(&record.id).await {
                 if !routed.mailbox_message_ids.is_empty() {
                     let mut mailbox_messages = state
                         .mailbox_messages
@@ -7880,7 +8262,7 @@ async fn fleet_handler(
     State(state): State<Arc<AppState>>,
     tenant_scope: TenantScope,
 ) -> impl IntoResponse {
-    use cairn_runtime::{FleetServiceImpl, FleetService};
+    use cairn_runtime::{FleetService, FleetServiceImpl};
     let svc = FleetServiceImpl::new(state.runtime.store.clone());
     match svc.fleet_report(tenant_scope.tenant_id(), 200).await {
         Ok(report) => (StatusCode::OK, Json(report)).into_response(),
@@ -8046,10 +8428,13 @@ async fn list_stalled_runs_handler(
     Query(query): Query<StalledRunsQuery>,
 ) -> impl IntoResponse {
     let stale_after_ms = query.stale_after_ms();
-    let running_runs = match RunReadModel::list_by_state(state.runtime.store.as_ref(), RunState::Running, 10_000).await {
-        Ok(runs) => runs,
-        Err(err) => return store_error_response(err),
-    };
+    let running_runs =
+        match RunReadModel::list_by_state(state.runtime.store.as_ref(), RunState::Running, 10_000)
+            .await
+        {
+            Ok(runs) => runs,
+            Err(err) => return store_error_response(err),
+        };
 
     let mut items = Vec::new();
     for run in running_runs {
@@ -8115,16 +8500,15 @@ async fn get_run_audit_trail_handler(
     }
 
     // Read all events for this run from the event log
-    let stored_events =
-        match state
-            .runtime
-            .store
-            .read_by_entity(&EntityRef::Run(run_id.clone()), None, 1000)
-            .await
-        {
-            Ok(events) => events,
-            Err(err) => return store_error_response(err),
-        };
+    let stored_events = match state
+        .runtime
+        .store
+        .read_by_entity(&EntityRef::Run(run_id.clone()), None, 1000)
+        .await
+    {
+        Ok(events) => events,
+        Err(err) => return store_error_response(err),
+    };
 
     let mut entries: Vec<AuditEntry> = Vec::new();
     for stored in &stored_events {
@@ -8166,7 +8550,14 @@ async fn get_run_audit_trail_handler(
 
     entries.sort_by_key(|e| e.timestamp_ms);
 
-    (StatusCode::OK, Json(AuditTrail { run_id: id, entries })).into_response()
+    (
+        StatusCode::OK,
+        Json(AuditTrail {
+            run_id: id,
+            entries,
+        }),
+    )
+        .into_response()
 }
 
 async fn diagnose_run_handler(
@@ -8224,7 +8615,11 @@ async fn list_run_events_handler(
 
     let has_more = fetched.len() > limit;
     let page: Vec<StoredEvent> = fetched.into_iter().take(limit).collect();
-    let next_cursor = if has_more { page.last().map(|e| e.position.0) } else { None };
+    let next_cursor = if has_more {
+        page.last().map(|e| e.position.0)
+    } else {
+        None
+    };
 
     let events: Vec<EventSummary> = page
         .into_iter()
@@ -8241,7 +8636,15 @@ async fn list_run_events_handler(
         return (StatusCode::OK, Json(events)).into_response();
     }
 
-    (StatusCode::OK, Json(EventsPage { events, next_cursor, has_more })).into_response()
+    (
+        StatusCode::OK,
+        Json(EventsPage {
+            events,
+            next_cursor,
+            has_more,
+        }),
+    )
+        .into_response()
 }
 
 async fn list_session_events_handler(
@@ -8279,7 +8682,11 @@ async fn list_session_events_handler(
 
     let has_more = fetched.len() > limit;
     let page: Vec<StoredEvent> = fetched.into_iter().take(limit).collect();
-    let next_cursor = if has_more { page.last().map(|e| e.position.0) } else { None };
+    let next_cursor = if has_more {
+        page.last().map(|e| e.position.0)
+    } else {
+        None
+    };
 
     let events = page
         .into_iter()
@@ -8291,7 +8698,15 @@ async fn list_session_events_handler(
         })
         .collect();
 
-    (StatusCode::OK, Json(EventsPage { events, next_cursor, has_more })).into_response()
+    (
+        StatusCode::OK,
+        Json(EventsPage {
+            events,
+            next_cursor,
+            has_more,
+        }),
+    )
+        .into_response()
 }
 
 async fn replay_run_handler(
@@ -8338,7 +8753,10 @@ async fn replay_run_to_checkpoint_handler(
     let run_id = RunId::new(id);
     let run = match state.runtime.runs.get(&run_id).await {
         Ok(Some(run))
-            if tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id() => run,
+            if tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
+            run
+        }
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
                 .into_response()
@@ -8649,30 +9067,43 @@ async fn orchestrate_run_handler(
         RuntimeExecutePhase, StandardGatherPhase,
     };
     use cairn_runtime::services::{
-        ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl,
-        RunServiceImpl, TaskServiceImpl, ToolInvocationServiceImpl,
+        ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RunServiceImpl,
+        TaskServiceImpl, ToolInvocationServiceImpl,
     };
     use cairn_store::projections::RunReadModel;
     use cairn_tools::{
-        BuiltinToolRegistry, MemorySearchTool, MemoryStoreTool, NotifyOperatorTool,
-        NotificationSink, ToolSearchTool, WebFetchTool, ShellExecTool,
+        BuiltinToolRegistry, MemorySearchTool, MemoryStoreTool, NotificationSink,
+        NotifyOperatorTool, ShellExecTool, ToolSearchTool, WebFetchTool,
     };
 
     let run_id = RunId::new(run_id_str);
     let run = match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
         Ok(Some(r)) => r,
-        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response(),
-        Err(e) => return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response(),
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response()
+        }
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                e.to_string(),
+            )
+            .into_response()
+        }
     };
 
     // Transition run to Running if it's still Pending
     if run.state == cairn_domain::RunState::Pending {
-        use cairn_domain::{RuntimeEvent, RunStateChanged, StateTransition, RunState};
+        use cairn_domain::{RunState, RunStateChanged, RuntimeEvent, StateTransition};
         use cairn_runtime::services::event_helpers::make_envelope;
         let evt = make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
             project: run.project.clone(),
             run_id: run.run_id.clone(),
-            transition: StateTransition { from: Some(RunState::Pending), to: RunState::Running },
+            transition: StateTransition {
+                from: Some(RunState::Pending),
+                to: RunState::Running,
+            },
             failure_class: None,
             pause_reason: None,
             resume_trigger: None,
@@ -8693,7 +9124,8 @@ async fn orchestrate_run_handler(
 
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_millis() as u64;
+        .unwrap_or_default()
+        .as_millis() as u64;
 
     let ctx = OrchestrationContext {
         project: run.project.clone(),
@@ -8701,8 +9133,12 @@ async fn orchestrate_run_handler(
         run_id: run.run_id.clone(),
         task_id: None,
         iteration: 0,
-        goal: body.goal.unwrap_or_else(|| "Execute the run objective.".to_owned()),
-        agent_type: run.agent_role_id.unwrap_or_else(|| "orchestrator".to_owned()),
+        goal: body
+            .goal
+            .unwrap_or_else(|| "Execute the run objective.".to_owned()),
+        agent_type: run
+            .agent_role_id
+            .unwrap_or_else(|| "orchestrator".to_owned()),
         run_started_at_ms: now_ms,
         discovered_tool_names: vec![],
     };
@@ -8722,16 +9158,18 @@ async fn orchestrate_run_handler(
     // ── SSE notification sink for notify_operator ───────────────────────────
     // Wraps the broadcast channel so notify_operator can push realtime events.
     struct SseSink {
-        tx:      tokio::sync::broadcast::Sender<cairn_api::sse::SseFrame>,
-        seq:     std::sync::Arc<std::sync::atomic::AtomicU64>,
-        buf:     std::sync::Arc<std::sync::RwLock<std::collections::VecDeque<(u64, cairn_api::sse::SseFrame)>>>,
+        tx: tokio::sync::broadcast::Sender<cairn_api::sse::SseFrame>,
+        seq: std::sync::Arc<std::sync::atomic::AtomicU64>,
+        buf: std::sync::Arc<
+            std::sync::RwLock<std::collections::VecDeque<(u64, cairn_api::sse::SseFrame)>>,
+        >,
     }
     #[async_trait::async_trait]
     impl NotificationSink for SseSink {
         async fn emit(&self, channel: &str, severity: &str, message: &str) {
             let frame = cairn_api::sse::SseFrame {
                 event: cairn_api::sse::SseEventName::OperatorNotification,
-                data:  serde_json::json!({
+                data: serde_json::json!({
                     "channel":  channel,
                     "severity": severity,
                     "message":  message,
@@ -8743,21 +9181,22 @@ async fn orchestrate_run_handler(
             frame_with_id.id = Some(seq.to_string());
             {
                 let mut buf = self.buf.write().unwrap();
-                if buf.len() >= 10_000 { buf.pop_front(); }
+                if buf.len() >= 10_000 {
+                    buf.pop_front();
+                }
                 buf.push_back((seq, frame_with_id));
             }
             let _ = self.tx.send(frame);
         }
     }
     let sse_sink: std::sync::Arc<dyn NotificationSink> = std::sync::Arc::new(SseSink {
-        tx:  state.runtime_sse_tx.clone(),
+        tx: state.runtime_sse_tx.clone(),
         seq: state.sse_seq.clone(),
         buf: state.sse_event_buffer.clone(),
     });
-    let mailbox_svc: std::sync::Arc<dyn cairn_runtime::MailboxService> =
-        std::sync::Arc::new(cairn_runtime::services::MailboxServiceImpl::new(
-            state.runtime.store.clone(),
-        ));
+    let mailbox_svc: std::sync::Arc<dyn cairn_runtime::MailboxService> = std::sync::Arc::new(
+        cairn_runtime::services::MailboxServiceImpl::new(state.runtime.store.clone()),
+    );
 
     // ── Build BuiltinToolRegistry ────────────────────────────────────────────
     // Prefer real memory tool implementations (wired at startup with live
@@ -8771,12 +9210,12 @@ async fn orchestrate_run_handler(
         ) = if let Some(ref real) = state.tool_registry {
             // Extract the real tools from the pre-built registry.
             // If somehow not present, fall through to stubs.
-            let search: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-                real.get("memory_search")
-                    .unwrap_or_else(|| std::sync::Arc::new(MemorySearchTool::new()));
-            let store: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-                real.get("memory_store")
-                    .unwrap_or_else(|| std::sync::Arc::new(MemoryStoreTool::new()));
+            let search: std::sync::Arc<dyn cairn_tools::ToolHandler> = real
+                .get("memory_search")
+                .unwrap_or_else(|| std::sync::Arc::new(MemorySearchTool::new()));
+            let store: std::sync::Arc<dyn cairn_tools::ToolHandler> = real
+                .get("memory_store")
+                .unwrap_or_else(|| std::sync::Arc::new(MemoryStoreTool::new()));
             (search, store)
         } else {
             (
@@ -8798,8 +9237,9 @@ async fn orchestrate_run_handler(
                 .register(web_fetch.clone())
                 .register(shell_exec.clone())
                 .register(std::sync::Arc::new(NotifyOperatorTool::new(
-                    Some(mailbox_svc.clone()), sse_sink.clone(),
-                )))
+                    Some(mailbox_svc.clone()),
+                    sse_sink.clone(),
+                ))),
         );
 
         // Full registry with ToolSearchTool that can search the deferred tier.
@@ -8810,19 +9250,23 @@ async fn orchestrate_run_handler(
                 .register(web_fetch)
                 .register(shell_exec)
                 .register(std::sync::Arc::new(NotifyOperatorTool::new(
-                    Some(mailbox_svc), sse_sink,
+                    Some(mailbox_svc),
+                    sse_sink,
                 )))
-                .register(std::sync::Arc::new(ToolSearchTool::new(inner)))
+                .register(std::sync::Arc::new(ToolSearchTool::new(inner))),
         )
     };
 
-    let decide = LlmDecidePhase::new(brain, model_id.clone())
-        .with_tools(registry.clone());
+    let decide = LlmDecidePhase::new(brain, model_id.clone()).with_tools(registry.clone());
 
     // Build loop config first so checkpoint policy is available for execute.
     let mut cfg = LoopConfig::default();
-    if let Some(m) = body.max_iterations { cfg.max_iterations = m; }
-    if let Some(t) = body.timeout_ms     { cfg.timeout_ms = t; }
+    if let Some(m) = body.max_iterations {
+        cfg.max_iterations = m;
+    }
+    if let Some(t) = body.timeout_ms {
+        cfg.timeout_ms = t;
+    }
 
     // Build RuntimeExecutePhase from the shared runtime store.
     // All service impls share the same Arc<InMemoryStore> so writes from one
@@ -8855,58 +9299,97 @@ async fn orchestrate_run_handler(
         async fn on_started(&self, ctx: &cairn_orchestrator::OrchestrationContext) {
             self.inner.on_started(ctx).await;
         }
-        async fn on_gather_completed(&self, ctx: &cairn_orchestrator::OrchestrationContext, g: &cairn_orchestrator::GatherOutput) {
+        async fn on_gather_completed(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            g: &cairn_orchestrator::GatherOutput,
+        ) {
             self.inner.on_gather_completed(ctx, g).await;
         }
-        async fn on_decide_completed(&self, ctx: &cairn_orchestrator::OrchestrationContext, d: &cairn_orchestrator::DecideOutput) {
+        async fn on_decide_completed(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            d: &cairn_orchestrator::DecideOutput,
+        ) {
             self.inner.on_decide_completed(ctx, d).await;
             // Emit ProviderCallCompleted so LLM traces are populated.
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default().as_millis() as u64;
+                .unwrap_or_default()
+                .as_millis() as u64;
             let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
             let event = cairn_domain::EventEnvelope::for_runtime_event(
                 cairn_domain::EventId::new(format!("evt_trace_{call_id}")),
                 cairn_domain::EventSource::Runtime,
-                cairn_domain::RuntimeEvent::ProviderCallCompleted(cairn_domain::events::ProviderCallCompleted {
-                    project: ctx.project.clone(),
-                    provider_call_id: cairn_domain::ProviderCallId::new(&call_id),
-                    route_decision_id: cairn_domain::RouteDecisionId::new(format!("rd_{call_id}")),
-                    route_attempt_id: cairn_domain::RouteAttemptId::new(format!("ra_{call_id}")),
-                    provider_binding_id: cairn_domain::ProviderBindingId::new("brain"),
-                    provider_connection_id: cairn_domain::ProviderConnectionId::new("brain"),
-                    provider_model_id: cairn_domain::ProviderModelId::new(&d.model_id),
-                    operation_kind: cairn_domain::providers::OperationKind::Generate,
-                    status: cairn_domain::providers::ProviderCallStatus::Succeeded,
-                    latency_ms: Some(d.latency_ms),
-                    input_tokens: d.input_tokens,
-                    output_tokens: d.output_tokens,
-                    cost_micros: None,
-                    completed_at: now,
-                    session_id: Some(ctx.session_id.clone()),
-                    run_id: Some(ctx.run_id.clone()),
-                    error_class: None,
-                    raw_error_message: None,
-                    retry_count: 0,
-                    task_id: ctx.task_id.as_ref().map(|t| cairn_domain::TaskId::new(t.as_str())),
-                    prompt_release_id: None,
-                    fallback_position: 0,
-                    started_at: now.saturating_sub(d.latency_ms),
-                    finished_at: now,
-                }),
+                cairn_domain::RuntimeEvent::ProviderCallCompleted(
+                    cairn_domain::events::ProviderCallCompleted {
+                        project: ctx.project.clone(),
+                        provider_call_id: cairn_domain::ProviderCallId::new(&call_id),
+                        route_decision_id: cairn_domain::RouteDecisionId::new(format!(
+                            "rd_{call_id}"
+                        )),
+                        route_attempt_id: cairn_domain::RouteAttemptId::new(format!(
+                            "ra_{call_id}"
+                        )),
+                        provider_binding_id: cairn_domain::ProviderBindingId::new("brain"),
+                        provider_connection_id: cairn_domain::ProviderConnectionId::new("brain"),
+                        provider_model_id: cairn_domain::ProviderModelId::new(&d.model_id),
+                        operation_kind: cairn_domain::providers::OperationKind::Generate,
+                        status: cairn_domain::providers::ProviderCallStatus::Succeeded,
+                        latency_ms: Some(d.latency_ms),
+                        input_tokens: d.input_tokens,
+                        output_tokens: d.output_tokens,
+                        cost_micros: None,
+                        completed_at: now,
+                        session_id: Some(ctx.session_id.clone()),
+                        run_id: Some(ctx.run_id.clone()),
+                        error_class: None,
+                        raw_error_message: None,
+                        retry_count: 0,
+                        task_id: ctx
+                            .task_id
+                            .as_ref()
+                            .map(|t| cairn_domain::TaskId::new(t.as_str())),
+                        prompt_release_id: None,
+                        fallback_position: 0,
+                        started_at: now.saturating_sub(d.latency_ms),
+                        finished_at: now,
+                    },
+                ),
             );
             let _ = self.store.append(&[event]).await;
         }
-        async fn on_tool_called(&self, ctx: &cairn_orchestrator::OrchestrationContext, name: &str, args: Option<&serde_json::Value>) {
+        async fn on_tool_called(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            name: &str,
+            args: Option<&serde_json::Value>,
+        ) {
             self.inner.on_tool_called(ctx, name, args).await;
         }
-        async fn on_tool_result(&self, ctx: &cairn_orchestrator::OrchestrationContext, name: &str, ok: bool, out: Option<&serde_json::Value>, err: Option<&str>) {
+        async fn on_tool_result(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            name: &str,
+            ok: bool,
+            out: Option<&serde_json::Value>,
+            err: Option<&str>,
+        ) {
             self.inner.on_tool_result(ctx, name, ok, out, err).await;
         }
-        async fn on_step_completed(&self, ctx: &cairn_orchestrator::OrchestrationContext, d: &cairn_orchestrator::DecideOutput, e: &cairn_orchestrator::ExecuteOutcome) {
+        async fn on_step_completed(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            d: &cairn_orchestrator::DecideOutput,
+            e: &cairn_orchestrator::ExecuteOutcome,
+        ) {
             self.inner.on_step_completed(ctx, d, e).await;
         }
-        async fn on_finished(&self, ctx: &cairn_orchestrator::OrchestrationContext, t: &cairn_orchestrator::LoopTermination) {
+        async fn on_finished(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            t: &cairn_orchestrator::LoopTermination,
+        ) {
             self.inner.on_finished(ctx, t).await;
         }
     }
@@ -8918,27 +9401,57 @@ async fn orchestrate_run_handler(
 
     match OrchestratorLoop::new(gather, decide, execute, cfg)
         .with_emitter(emitter)
-        .run(ctx).await
+        .run(ctx)
+        .await
     {
-        Ok(LoopTermination::Completed { summary }) => (StatusCode::OK, Json(serde_json::json!({
-            "termination": "completed", "summary": summary, "model_id": model_id,
-        }))).into_response(),
-        Ok(LoopTermination::Failed { reason }) => (StatusCode::OK, Json(serde_json::json!({
-            "termination": "failed", "reason": reason,
-        }))).into_response(),
-        Ok(LoopTermination::MaxIterationsReached) => (StatusCode::OK, Json(serde_json::json!({
-            "termination": "max_iterations_reached",
-        }))).into_response(),
-        Ok(LoopTermination::TimedOut) => (StatusCode::OK, Json(serde_json::json!({
-            "termination": "timed_out",
-        }))).into_response(),
-        Ok(LoopTermination::WaitingApproval { approval_id }) => (StatusCode::ACCEPTED, Json(serde_json::json!({
-            "termination": "waiting_approval", "approval_id": approval_id.as_str(),
-        }))).into_response(),
-        Ok(LoopTermination::WaitingSubagent { child_task_id }) => (StatusCode::ACCEPTED, Json(serde_json::json!({
-            "termination": "waiting_subagent", "child_task_id": child_task_id.as_str(),
-        }))).into_response(),
-        Err(e) => AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "orchestration_error", format!("{e}")).into_response(),
+        Ok(LoopTermination::Completed { summary }) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "termination": "completed", "summary": summary, "model_id": model_id,
+            })),
+        )
+            .into_response(),
+        Ok(LoopTermination::Failed { reason }) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "termination": "failed", "reason": reason,
+            })),
+        )
+            .into_response(),
+        Ok(LoopTermination::MaxIterationsReached) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "termination": "max_iterations_reached",
+            })),
+        )
+            .into_response(),
+        Ok(LoopTermination::TimedOut) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "termination": "timed_out",
+            })),
+        )
+            .into_response(),
+        Ok(LoopTermination::WaitingApproval { approval_id }) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "termination": "waiting_approval", "approval_id": approval_id.as_str(),
+            })),
+        )
+            .into_response(),
+        Ok(LoopTermination::WaitingSubagent { child_task_id }) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "termination": "waiting_subagent", "child_task_id": child_task_id.as_str(),
+            })),
+        )
+            .into_response(),
+        Err(e) => AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "orchestration_error",
+            format!("{e}"),
+        )
+        .into_response(),
     }
 }
 
@@ -9362,7 +9875,10 @@ async fn get_session_handler(
     }
 }
 
-fn runtime_event_to_activity_entry(event: &RuntimeEvent, timestamp_ms: u64) -> Option<ActivityEntry> {
+fn runtime_event_to_activity_entry(
+    event: &RuntimeEvent,
+    timestamp_ms: u64,
+) -> Option<ActivityEntry> {
     match event {
         RuntimeEvent::RunCreated(e) => Some(ActivityEntry {
             entry_type: "run_created".to_owned(),
@@ -9456,10 +9972,9 @@ async fn get_session_activity_handler(
         {
             Ok(events) => {
                 for stored in events {
-                    if let Some(entry) = runtime_event_to_activity_entry(
-                        &stored.envelope.payload,
-                        stored.stored_at,
-                    ) {
+                    if let Some(entry) =
+                        runtime_event_to_activity_entry(&stored.envelope.payload, stored.stored_at)
+                    {
                         entries.push(entry);
                     }
                 }
@@ -9468,16 +9983,13 @@ async fn get_session_activity_handler(
         }
 
         // Read task-scoped events for each task in this run
-        let tasks = match TaskReadModel::list_by_parent_run(
-            state.runtime.store.as_ref(),
-            &run.run_id,
-            200,
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(err) => return store_error_response(err),
-        };
+        let tasks =
+            match TaskReadModel::list_by_parent_run(state.runtime.store.as_ref(), &run.run_id, 200)
+                .await
+            {
+                Ok(t) => t,
+                Err(err) => return store_error_response(err),
+            };
 
         for task in &tasks {
             match state
@@ -9508,7 +10020,14 @@ async fn get_session_activity_handler(
         entries.drain(0..len - 100);
     }
 
-    (StatusCode::OK, Json(SessionActivity { session_id: id, entries })).into_response()
+    (
+        StatusCode::OK,
+        Json(SessionActivity {
+            session_id: id,
+            entries,
+        }),
+    )
+        .into_response()
 }
 
 async fn get_session_active_runs_handler(
@@ -9539,10 +10058,16 @@ async fn get_session_active_runs_handler(
         Err(err) => return store_error_response(err),
     };
 
-    let active: Vec<RunRecord> = runs.into_iter().filter(|r| !r.state.is_terminal()).collect();
+    let active: Vec<RunRecord> = runs
+        .into_iter()
+        .filter(|r| !r.state.is_terminal())
+        .collect();
     (
         StatusCode::OK,
-        Json(ListResponse::<RunRecord> { items: active, has_more: false }),
+        Json(ListResponse::<RunRecord> {
+            items: active,
+            has_more: false,
+        }),
     )
         .into_response()
 }
@@ -9612,14 +10137,14 @@ async fn get_session_llm_traces_handler(
         Err(err) => return runtime_error_response(err),
     }
 
-    match LlmCallTraceReadModel::list_by_session(
-        state.runtime.store.as_ref(),
-        &session_id,
-        200,
-    )
-    .await
+    match LlmCallTraceReadModel::list_by_session(state.runtime.store.as_ref(), &session_id, 200)
+        .await
     {
-        Ok(traces) => (StatusCode::OK, Json(serde_json::json!({ "traces": traces }))).into_response(),
+        Ok(traces) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "traces": traces })),
+        )
+            .into_response(),
         Err(err) => store_error_response(err),
     }
 }
@@ -9660,9 +10185,7 @@ async fn set_run_cost_alert_handler(
     Json(body): Json<SetRunCostAlertRequest>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
-    let tenant_id = TenantId::new(
-        body.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
-    );
+    let tenant_id = TenantId::new(body.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID));
     match state
         .runtime
         .run_cost_alerts
@@ -9704,7 +10227,9 @@ struct SetRunSlaRequest {
     alert_at_percent: u8,
 }
 
-fn default_alert_pct() -> u8 { 80 }
+fn default_alert_pct() -> u8 {
+    80
+}
 
 async fn set_run_sla_handler(
     State(state): State<Arc<AppState>>,
@@ -9716,7 +10241,12 @@ async fn set_run_sla_handler(
     match state
         .runtime
         .run_sla
-        .set_sla(run_id, tenant_id, body.target_completion_ms, body.alert_at_percent)
+        .set_sla(
+            run_id,
+            tenant_id,
+            body.target_completion_ms,
+            body.alert_at_percent,
+        )
         .await
     {
         Ok(config) => (StatusCode::CREATED, Json(config)).into_response(),
@@ -9731,10 +10261,12 @@ async fn get_run_sla_handler(
     let run_id = RunId::new(id);
     match state.runtime.run_sla.check_sla(&run_id).await {
         Ok(status) => (StatusCode::OK, Json(status)).into_response(),
-        Err(RuntimeError::NotFound { .. }) => {
-            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "SLA not configured for run")
-                .into_response()
-        }
+        Err(RuntimeError::NotFound { .. }) => AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "SLA not configured for run",
+        )
+        .into_response(),
         Err(err) => runtime_error_response(err),
     }
 }
@@ -9751,7 +10283,10 @@ async fn list_sla_breached_handler(
     {
         Ok(items) => (
             StatusCode::OK,
-            Json(ListResponse::<cairn_domain::sla::SlaBreach> { items, has_more: false }),
+            Json(ListResponse::<cairn_domain::sla::SlaBreach> {
+                items,
+                has_more: false,
+            }),
         )
             .into_response(),
         Err(err) => runtime_error_response(err),
@@ -10013,14 +10548,14 @@ async fn set_task_priority_handler(
     // set_priority is not yet implemented in TaskService; return task as-is
     match state.runtime.tasks.get(&task_id).await {
         Ok(Some(record)) => (StatusCode::OK, Json(record)).into_response(),
-        Ok(None) => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found").into_response(),
+        Ok(None) => {
+            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found").into_response()
+        }
         Err(err) => runtime_error_response(err),
     }
 }
 
-async fn list_expired_tasks_handler(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn list_expired_tasks_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -10028,16 +10563,17 @@ async fn list_expired_tasks_handler(
     match TaskLeaseExpiredReadModel::list_expired(state.runtime.store.as_ref(), now_ms).await {
         Ok(tasks) => (
             StatusCode::OK,
-            Json(ListResponse::<TaskRecord> { items: tasks, has_more: false }),
+            Json(ListResponse::<TaskRecord> {
+                items: tasks,
+                has_more: false,
+            }),
         )
             .into_response(),
         Err(err) => store_error_response(err),
     }
 }
 
-async fn expire_task_leases_handler(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn expire_task_leases_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -10070,7 +10606,13 @@ async fn expire_task_leases_handler(
         }
     }
     let expired_count = task_ids.len() as u32;
-    (StatusCode::OK, Json(ExpireLeasesResponse { expired_count, task_ids }))
+    (
+        StatusCode::OK,
+        Json(ExpireLeasesResponse {
+            expired_count,
+            task_ids,
+        }),
+    )
         .into_response()
 }
 
@@ -10107,10 +10649,7 @@ async fn heartbeat_task_handler(
     match state
         .runtime
         .tasks
-        .heartbeat(
-            &TaskId::new(id),
-            body.lease_extension_ms.unwrap_or(60_000),
-        )
+        .heartbeat(&TaskId::new(id), body.lease_extension_ms.unwrap_or(60_000))
         .await
     {
         Ok(task) => {
@@ -10214,9 +10753,16 @@ async fn complete_task_handler(
                 {
                     if strategy.trigger_on_task_complete {
                         let cp_id = CheckpointId::new(format!(
-                            "cp_auto_{}_{}_{}", parent_run_id, task_id, now_ms()
+                            "cp_auto_{}_{}_{}",
+                            parent_run_id,
+                            task_id,
+                            now_ms()
                         ));
-                        let _ = state.runtime.checkpoints.save(&task.project, parent_run_id, cp_id).await;
+                        let _ = state
+                            .runtime
+                            .checkpoints
+                            .save(&task.project, parent_run_id, cp_id)
+                            .await;
                     }
                 }
             }
@@ -10491,7 +11037,11 @@ async fn cancel_tool_invocation_handler(
     {
         Ok(()) => {
             publish_runtime_frames_since(&state, before).await;
-            (StatusCode::OK, Json(serde_json::json!({ "cancelled": true }))).into_response()
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "cancelled": true })),
+            )
+                .into_response()
         }
         Err(err) => runtime_error_response(err),
     }
@@ -10547,12 +11097,15 @@ async fn restore_checkpoint_handler(
     let checkpoint_id = CheckpointId::new(&checkpoint_id_str);
 
     // Resolve the checkpoint → run_id.
-    let checkpoint = match CheckpointReadModel::get(state.runtime.store.as_ref(), &checkpoint_id).await {
-        Ok(Some(c)) => c,
-        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "checkpoint not found")
-            .into_response(),
-        Err(err) => return store_error_response(err),
-    };
+    let checkpoint =
+        match CheckpointReadModel::get(state.runtime.store.as_ref(), &checkpoint_id).await {
+            Ok(Some(c)) => c,
+            Ok(None) => {
+                return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "checkpoint not found")
+                    .into_response()
+            }
+            Err(err) => return store_error_response(err),
+        };
 
     // Find the event-log position at which the checkpoint was recorded.
     let position = match checkpoint_recorded_position(
@@ -10563,22 +11116,18 @@ async fn restore_checkpoint_handler(
     .await
     {
         Ok(Some(p)) => p,
-        Ok(None) => return AppApiError::new(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "checkpoint event not found in event log",
-        )
-        .into_response(),
+        Ok(None) => {
+            return AppApiError::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "checkpoint event not found in event log",
+            )
+            .into_response()
+        }
         Err(err) => return store_error_response(err),
     };
 
-    match build_run_replay_result(
-        state.as_ref(),
-        &checkpoint.run_id,
-        None,
-        Some(position.0),
-    )
-    .await
+    match build_run_replay_result(state.as_ref(), &checkpoint.run_id, None, Some(position.0)).await
     {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(err) => store_error_response(err),
@@ -10672,8 +11221,8 @@ async fn set_checkpoint_strategy_handler(
 
     // Emit the CheckpointStrategySet event with full fields so the projection
     // can restore them on query.
-    let event = operator_event_envelope(RuntimeEvent::CheckpointStrategySet(
-        CheckpointStrategySet {
+    let event =
+        operator_event_envelope(RuntimeEvent::CheckpointStrategySet(CheckpointStrategySet {
             strategy_id: strategy.strategy_id.clone(),
             description: String::new(),
             set_at_ms: now_ms(),
@@ -10681,8 +11230,7 @@ async fn set_checkpoint_strategy_handler(
             interval_ms: body.interval_ms,
             max_checkpoints: body.max_checkpoints,
             trigger_on_task_complete: body.trigger_on_task_complete,
-        },
-    ));
+        }));
 
     let before = current_event_head(&state).await;
     match state.runtime.store.append(&[event]).await {
@@ -10896,7 +11444,10 @@ async fn plugin_eval_score_handler(
 ) -> impl IntoResponse {
     let manifest = match state.plugin_registry.get(&id) {
         Some(m) => m,
-        None => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found").into_response(),
+        None => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found")
+                .into_response()
+        }
     };
 
     // Run the plugin synchronously (blocking on the Mutex since plugin I/O is synchronous).
@@ -10930,7 +11481,8 @@ async fn plugin_eval_score_handler(
             // samples = [{ "expected": expected_output }]
             let target = serde_json::json!({ "actual": actual });
             let sample = serde_json::json!({ "expected": expected });
-            let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+            let project =
+                ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
             let req = build_eval_score_request("eval_1", "inv_1", &project, target, vec![sample]);
 
             let response = host.send_request(&id, &req).map_err(|e| e.to_string())?;
@@ -10939,11 +11491,27 @@ async fn plugin_eval_score_handler(
             let _ = host.shutdown(&id);
 
             // Parse result.score and result.passed from the JSON-RPC result.
-            let score = response.result.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let passed = response.result.get("passed").and_then(|v| v.as_bool()).unwrap_or(false);
-            let reasoning = response.result.get("feedback").and_then(|v| v.as_str()).map(str::to_owned);
+            let score = response
+                .result
+                .get("score")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let passed = response
+                .result
+                .get("passed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let reasoning = response
+                .result
+                .get("feedback")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned);
 
-            Ok(cairn_tools::EvalScoreResult { score, passed, reasoning })
+            Ok(cairn_tools::EvalScoreResult {
+                score,
+                passed,
+                reasoning,
+            })
         }
     })
     .await
@@ -10951,11 +11519,15 @@ async fn plugin_eval_score_handler(
     .and_then(|r| r);
 
     match result {
-        Ok(result) => (StatusCode::OK, Json(serde_json::json!({
-            "score": result.score,
-            "passed": result.passed,
-            "reasoning": result.reasoning,
-        }))).into_response(),
+        Ok(result) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "score": result.score,
+                "passed": result.passed,
+                "reasoning": result.reasoning,
+            })),
+        )
+            .into_response(),
         Err(err) => AppApiError::new(
             StatusCode::BAD_REQUEST,
             "plugin_eval_failed",
@@ -11001,10 +11573,7 @@ async fn plugin_capabilities_handler(
         .iter()
         .enumerate()
         .map(|(i, cap)| {
-            let verified = verifications
-                .get(i)
-                .map(|v| v.verified)
-                .unwrap_or(false);
+            let verified = verifications.get(i).map(|v| v.verified).unwrap_or(false);
             serde_json::json!({
                 "capability": cap,
                 "verified": verified,
@@ -11033,7 +11602,10 @@ async fn plugin_tools_handler(
         Ok(host) => match host.get_tools(&id) {
             Ok(tools) => (
                 StatusCode::OK,
-                Json(PluginToolsResponse { plugin_id: id, tools }),
+                Json(PluginToolsResponse {
+                    plugin_id: id,
+                    tools,
+                }),
             )
                 .into_response(),
             Err(err) => (
@@ -11084,7 +11656,10 @@ async fn list_prompt_assets_handler(
 ) -> impl IntoResponse {
     let workspace = WorkspaceKey::new(
         query.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
-        query.workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID),
+        query
+            .workspace_id
+            .as_deref()
+            .unwrap_or(DEFAULT_WORKSPACE_ID),
     );
     match state
         .runtime
@@ -11184,7 +11759,10 @@ async fn create_prompt_version_handler(
             // Cache content and template vars (not carried in the event).
             state.version_content.lock().unwrap().insert(
                 version_id_str,
-                AppVersionContent { content, template_vars },
+                AppVersionContent {
+                    content,
+                    template_vars,
+                },
             );
             (StatusCode::CREATED, Json(record)).into_response()
         }
@@ -11203,7 +11781,10 @@ async fn render_prompt_version_handler(
             return AppApiError::new(
                 StatusCode::NOT_FOUND,
                 "not_found",
-                format!("prompt version {} not found for asset {}", prompt_version_id, id),
+                format!(
+                    "prompt version {} not found for asset {}",
+                    prompt_version_id, id
+                ),
             )
             .into_response();
         }
@@ -11220,10 +11801,23 @@ async fn render_prompt_version_handler(
     };
     let _ = version_exists;
 
-    let cached = state.version_content.lock().unwrap().get(&version_id).cloned();
+    let cached = state
+        .version_content
+        .lock()
+        .unwrap()
+        .get(&version_id)
+        .cloned();
     let (content_template, template_vars) = match cached {
         Some(vc) => (vc.content, vc.template_vars),
-        None => return (StatusCode::OK, Json(RenderPromptVersionResponse { content: String::new() })).into_response(),
+        None => {
+            return (
+                StatusCode::OK,
+                Json(RenderPromptVersionResponse {
+                    content: String::new(),
+                }),
+            )
+                .into_response()
+        }
     };
 
     // Validate required vars and apply defaults.
@@ -11248,7 +11842,11 @@ async fn render_prompt_version_handler(
         rendered = rendered.replace(&format!("{{{{{}}}}}", var.name), &value);
     }
 
-    (StatusCode::OK, Json(RenderPromptVersionResponse { content: rendered })).into_response()
+    (
+        StatusCode::OK,
+        Json(RenderPromptVersionResponse { content: rendered }),
+    )
+        .into_response()
 }
 
 async fn list_prompt_template_vars_handler(
@@ -11395,7 +11993,12 @@ async fn request_prompt_release_approval_handler(
     Path(release_id): Path<String>,
 ) -> impl IntoResponse {
     let release_id = PromptReleaseId::new(release_id);
-    match state.runtime.prompt_releases.request_approval(&release_id).await {
+    match state
+        .runtime
+        .prompt_releases
+        .request_approval(&release_id)
+        .await
+    {
         Ok(approval) => (
             StatusCode::OK,
             Json(serde_json::json!({
@@ -11441,9 +12044,11 @@ async fn register_provider_model_handler(
     let conn_id = ProviderConnectionId::new(connection_id.clone());
     let tenant_id = TenantId::new("default");
 
-    let ops: Vec<OperationKind> = body.operation_kinds.iter().filter_map(|k| {
-        serde_json::from_value(serde_json::Value::String(k.clone())).ok()
-    }).collect();
+    let ops: Vec<OperationKind> = body
+        .operation_kinds
+        .iter()
+        .filter_map(|k| serde_json::from_value(serde_json::Value::String(k.clone())).ok())
+        .collect();
 
     let caps = ProviderModelCapability {
         model_id: cairn_domain::ProviderModelId::new(body.model_id.clone()),
@@ -11460,7 +12065,11 @@ async fn register_provider_model_handler(
     // ProviderModelServiceImpl requires ProviderModelReadModel which InMemoryStore does not implement;
     // return the capability record directly as a stub.
     let _ = (tenant_id, conn_id);
-    (StatusCode::OK, Json(serde_json::to_value(&caps).unwrap_or_default())).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::to_value(&caps).unwrap_or_default()),
+    )
+        .into_response()
 }
 
 async fn list_provider_models_handler(
@@ -11470,7 +12079,11 @@ async fn list_provider_models_handler(
     // ProviderModelServiceImpl requires ProviderModelReadModel which InMemoryStore does not implement;
     // return empty list as stub.
     let models: Vec<ProviderModelCapability> = vec![];
-    (StatusCode::OK, Json(serde_json::to_value(&models).unwrap_or_default())).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::to_value(&models).unwrap_or_default()),
+    )
+        .into_response()
 }
 
 async fn start_prompt_rollout_handler(
@@ -11485,17 +12098,27 @@ async fn start_prompt_rollout_handler(
         .start_rollout(&release_id, body.percent)
         .await
     {
-        Ok(record) => (StatusCode::OK, Json(serde_json::json!({
-            "release_id": record.prompt_release_id.as_str(),
-            "state": record.state,
-            "rollout_percent": record.rollout_percent,
-        }))).into_response(),
+        Ok(record) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "release_id": record.prompt_release_id.as_str(),
+                "state": record.state,
+                "rollout_percent": record.rollout_percent,
+            })),
+        )
+            .into_response(),
         Err(crate::RuntimeError::NotFound { entity, id }) => AppApiError::new(
-            StatusCode::NOT_FOUND, "not_found", format!("{entity} not found: {id}"),
-        ).into_response(),
+            StatusCode::NOT_FOUND,
+            "not_found",
+            format!("{entity} not found: {id}"),
+        )
+        .into_response(),
         Err(err) => AppApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string(),
-        ).into_response(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            err.to_string(),
+        )
+        .into_response(),
     }
 }
 
@@ -11542,18 +12165,17 @@ async fn compare_prompt_releases_handler(
         let version_number = if version.version_number > 0 {
             version.version_number
         } else {
-            match PromptVersionReadModel::list_by_asset(
-                store,
-                &release.prompt_asset_id,
-                1000,
-                0,
-            )
-            .await
+            match PromptVersionReadModel::list_by_asset(store, &release.prompt_asset_id, 1000, 0)
+                .await
             {
-                Ok(records) => records.into_iter().enumerate().find_map(|(index, record)| {
-                    (record.prompt_version_id == version.prompt_version_id)
-                        .then_some((index + 1) as u32)
-                }).unwrap_or(0),
+                Ok(records) => records
+                    .into_iter()
+                    .enumerate()
+                    .find_map(|(index, record)| {
+                        (record.prompt_version_id == version.prompt_version_id)
+                            .then_some((index + 1) as u32)
+                    })
+                    .unwrap_or(0),
                 Err(err) => return store_error_response(err),
             }
         };
@@ -11562,11 +12184,7 @@ async fn compare_prompt_releases_handler(
             release_id: release.prompt_release_id.to_string(),
             state: release.state.clone(),
             version_number: Some(version_number),
-            content_preview: version
-                .content_hash
-                .chars()
-                .take(200)
-                .collect(),
+            content_preview: version.content_hash.chars().take(200).collect(),
             eval_score: latest_eval_score_for_release(&state.evals, &release),
         });
     }
@@ -11614,8 +12232,14 @@ async fn diff_prompt_versions_handler(
     Query(query): Query<PromptVersionDiffQuery>,
 ) -> impl IntoResponse {
     let cache = state.version_content.lock().unwrap();
-    let content_a = cache.get(&version_id).map(|vc| vc.content.clone()).unwrap_or_default();
-    let content_b = cache.get(&query.compare_to).map(|vc| vc.content.clone()).unwrap_or_default();
+    let content_a = cache
+        .get(&version_id)
+        .map(|vc| vc.content.clone())
+        .unwrap_or_default();
+    let content_b = cache
+        .get(&query.compare_to)
+        .map(|vc| vc.content.clone())
+        .unwrap_or_default();
     drop(cache);
 
     let lines_a: Vec<&str> = content_a.lines().collect();
@@ -11624,9 +12248,21 @@ async fn diff_prompt_versions_handler(
     let set_a: std::collections::HashSet<&str> = lines_a.iter().copied().collect();
     let set_b: std::collections::HashSet<&str> = lines_b.iter().copied().collect();
 
-    let added_lines: Vec<String> = lines_b.iter().filter(|l| !set_a.contains(*l)).map(|l| l.to_string()).collect();
-    let removed_lines: Vec<String> = lines_a.iter().filter(|l| !set_b.contains(*l)).map(|l| l.to_string()).collect();
-    let unchanged_lines: Vec<String> = lines_a.iter().filter(|l| set_b.contains(*l)).map(|l| l.to_string()).collect();
+    let added_lines: Vec<String> = lines_b
+        .iter()
+        .filter(|l| !set_a.contains(*l))
+        .map(|l| l.to_string())
+        .collect();
+    let removed_lines: Vec<String> = lines_a
+        .iter()
+        .filter(|l| !set_b.contains(*l))
+        .map(|l| l.to_string())
+        .collect();
+    let unchanged_lines: Vec<String> = lines_a
+        .iter()
+        .filter(|l| set_b.contains(*l))
+        .map(|l| l.to_string())
+        .collect();
 
     let total = lines_a.len() + lines_b.len();
     let similarity_score = if total == 0 {
@@ -11934,7 +12570,9 @@ async fn export_bundle_handler(
         Ok(project) => project,
         Err(err) => return bad_request_response(err),
     };
-    let filters = DocumentExportFilters { bundle_source_id: None, import_id: None,
+    let filters = DocumentExportFilters {
+        bundle_source_id: None,
+        import_id: None,
         source_ids: query.source_ids(),
         tags: vec![],
         created_after_ms: None,
@@ -12008,7 +12646,9 @@ async fn export_filtered_bundle_handler(
         Err(err) => return bad_request_response(err),
     };
     let bundle_name = body.bundle_name().to_owned();
-    let filters = DocumentExportFilters { bundle_source_id: None, import_id: None,
+    let filters = DocumentExportFilters {
+        bundle_source_id: None,
+        import_id: None,
         source_ids: body.source_ids,
         tags: body.tags,
         created_after_ms: body.created_after_ms,
@@ -12075,9 +12715,7 @@ async fn create_model_comparison_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateModelComparisonRequest>,
 ) -> impl IntoResponse {
-    let tenant_id = TenantId::new(
-        body.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
-    );
+    let tenant_id = TenantId::new(body.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID));
     let comparison = state.model_comparisons.create(
         tenant_id,
         body.dataset_id,
@@ -12094,8 +12732,12 @@ async fn get_model_comparison_handler(
 ) -> impl IntoResponse {
     match state.model_comparisons.get(&id) {
         Some(comparison) => (StatusCode::OK, Json(comparison)).into_response(),
-        None => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "model comparison not found")
-            .into_response(),
+        None => AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "model comparison not found",
+        )
+        .into_response(),
     }
 }
 
@@ -12110,12 +12752,8 @@ async fn submit_model_comparison_result_handler(
         .submit_result(&id, &body.binding_id, body.metrics)
     {
         Ok(comparison) => (StatusCode::OK, Json(comparison)).into_response(),
-        Err(err) => AppApiError::new(
-            StatusCode::BAD_REQUEST,
-            "comparison_error",
-            err.to_string(),
-        )
-        .into_response(),
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "comparison_error", err.to_string())
+            .into_response(),
     }
 }
 
@@ -12273,9 +12911,9 @@ async fn create_eval_run_handler(
         Err(err) => return bad_request_response(err),
     };
     // Convert cairn_domain::EvalSubjectKind to cairn_evals::EvalSubjectKind via serde.
-    let subject_kind: EvalSubjectKind = serde_json::from_value(
-        serde_json::to_value(domain_subject_kind).unwrap_or_default()
-    ).unwrap_or(EvalSubjectKind::PromptRelease);
+    let subject_kind: EvalSubjectKind =
+        serde_json::from_value(serde_json::to_value(domain_subject_kind).unwrap_or_default())
+            .unwrap_or(EvalSubjectKind::PromptRelease);
 
     if let Some(dataset_id) = body.dataset_id.as_deref() {
         if state.eval_datasets.get(dataset_id).is_none() {
@@ -12301,7 +12939,9 @@ async fn create_eval_run_handler(
         body.prompt_asset_id.as_deref().map(PromptAssetId::new),
         body.prompt_version_id.as_deref().map(PromptVersionId::new),
         body.prompt_release_id.as_deref().map(PromptReleaseId::new),
-        body.created_by.as_deref().map(cairn_domain::OperatorId::new),
+        body.created_by
+            .as_deref()
+            .map(cairn_domain::OperatorId::new),
     );
 
     // Persist to the event log so eval runs survive restarts (replay_evals on boot).
@@ -12321,7 +12961,10 @@ async fn create_eval_run_handler(
             prompt_asset_id: body.prompt_asset_id.as_deref().map(PromptAssetId::new),
             prompt_version_id: body.prompt_version_id.as_deref().map(PromptVersionId::new),
             prompt_release_id: body.prompt_release_id.as_deref().map(PromptReleaseId::new),
-            created_by: body.created_by.as_deref().map(cairn_domain::OperatorId::new),
+            created_by: body
+                .created_by
+                .as_deref()
+                .map(cairn_domain::OperatorId::new),
         }),
     );
     // Best-effort: log warning but don't fail the request if event write fails.
@@ -12445,15 +13088,22 @@ async fn get_eval_dashboard_handler(
     let project_key = query.project();
     let _workspace_key = WorkspaceKey::new(
         query.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
-        query.workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID),
+        query
+            .workspace_id
+            .as_deref()
+            .unwrap_or(DEFAULT_WORKSPACE_ID),
     );
     let project_id = project_key.project_id.clone();
 
-    let assets =
-        match state.runtime.prompt_assets.list_by_project(&project_key, 500, 0).await {
-            Ok(a) => a,
-            Err(err) => return runtime_error_response(err),
-        };
+    let assets = match state
+        .runtime
+        .prompt_assets
+        .list_by_project(&project_key, 500, 0)
+        .await
+    {
+        Ok(a) => a,
+        Err(err) => return runtime_error_response(err),
+    };
 
     let all_runs = state.evals.list_by_project(&project_id);
 
@@ -12479,7 +13129,10 @@ async fn get_eval_dashboard_handler(
         .map(|asset| {
             let asset_runs: Vec<_> = all_runs
                 .iter()
-                .filter(|r| r.prompt_asset_id.as_ref().map(|id| id.as_str()) == Some(asset.prompt_asset_id.as_str()))
+                .filter(|r| {
+                    r.prompt_asset_id.as_ref().map(|id| id.as_str())
+                        == Some(asset.prompt_asset_id.as_str())
+                })
                 .collect();
 
             let total_eval_runs = asset_runs.len() as u32;
@@ -12530,7 +13183,13 @@ async fn get_eval_dashboard_handler(
         })
         .collect();
 
-    (StatusCode::OK, Json(EvalDashboard { generated_at_ms: now, prompt_assets }))
+    (
+        StatusCode::OK,
+        Json(EvalDashboard {
+            generated_at_ms: now,
+            prompt_assets,
+        }),
+    )
         .into_response()
 }
 
@@ -12708,10 +13367,8 @@ async fn get_provider_routing_matrix_handler(
     };
 
     // Aggregate per-binding: (total_cost_micros, success_count, total_count)
-    let mut binding_stats: std::collections::HashMap<
-        String,
-        (ProviderBindingId, u64, u64, u64),
-    > = std::collections::HashMap::new();
+    let mut binding_stats: std::collections::HashMap<String, (ProviderBindingId, u64, u64, u64)> =
+        std::collections::HashMap::new();
 
     for stored in &all_events {
         if let RuntimeEvent::ProviderCallCompleted(e) = &stored.envelope.payload {
@@ -12719,9 +13376,9 @@ async fn get_provider_routing_matrix_handler(
                 continue;
             }
             let key = e.provider_binding_id.as_str().to_owned();
-            let entry = binding_stats.entry(key).or_insert_with(|| {
-                (e.provider_binding_id.clone(), 0, 0, 0)
-            });
+            let entry = binding_stats
+                .entry(key)
+                .or_insert_with(|| (e.provider_binding_id.clone(), 0, 0, 0));
             entry.1 += e.cost_micros.unwrap_or(0);
             entry.3 += 1;
             if e.status == cairn_domain::providers::ProviderCallStatus::Succeeded {
@@ -12747,7 +13404,8 @@ async fn get_provider_routing_matrix_handler(
     // Find the latest eval run for this project to associate with the rows.
     let eval_run_id = provider_project_id
         .and_then(|pid| {
-            state.evals
+            state
+                .evals
                 .list_by_project(&pid)
                 .into_iter()
                 .next()
@@ -12758,7 +13416,11 @@ async fn get_provider_routing_matrix_handler(
     let rows: Vec<ProviderRoutingRow> = binding_stats
         .into_values()
         .map(|(binding_id, cost_micros, successes, total)| {
-            let success_rate = if total > 0 { successes as f64 / total as f64 } else { 0.0 };
+            let success_rate = if total > 0 {
+                successes as f64 / total as f64
+            } else {
+                0.0
+            };
             ProviderRoutingRow {
                 project_id: cairn_domain::ProjectId::new(&query.tenant_id),
                 route_decision_id: RouteDecisionId::new(""),
@@ -12779,10 +13441,9 @@ async fn get_scorecard_handler(
     Query(query): Query<OptionalProjectScopedQuery>,
     Path(asset_id): Path<String>,
 ) -> impl IntoResponse {
-    let scorecard = state.evals.build_scorecard(
-        &query.project().project_id,
-        &PromptAssetId::new(asset_id),
-    );
+    let scorecard = state
+        .evals
+        .build_scorecard(&query.project().project_id, &PromptAssetId::new(asset_id));
     (StatusCode::OK, Json(scorecard)).into_response()
 }
 
@@ -12795,10 +13456,12 @@ async fn get_eval_asset_trend_handler(
     let metric = query.metric.clone();
     let days = query.days();
     let tenant_id = query.tenant_id();
-    match state
-        .evals
-        .get_trend(tenant_id.as_str(), &PromptAssetId::new(asset_id), metric, days)
-    {
+    match state.evals.get_trend(
+        tenant_id.as_str(),
+        &PromptAssetId::new(asset_id),
+        metric,
+        days,
+    ) {
         Ok(points) => (StatusCode::OK, Json(points)).into_response(),
         Err(err) => (
             StatusCode::BAD_REQUEST,
@@ -12861,10 +13524,22 @@ async fn get_eval_asset_export_handler(
             csv.push_str(&format!(
                 "{},{},{},{},{},{}\n",
                 run.eval_run_id,
-                run.prompt_release_id.as_ref().map(|r| r.as_str()).unwrap_or(""),
-                run.metrics.task_success_rate.map(|v| v.to_string()).unwrap_or_default(),
-                run.metrics.latency_p50_ms.map(|v| v.to_string()).unwrap_or_default(),
-                run.metrics.cost_per_run.map(|v| v.to_string()).unwrap_or_default(),
+                run.prompt_release_id
+                    .as_ref()
+                    .map(|r| r.as_str())
+                    .unwrap_or(""),
+                run.metrics
+                    .task_success_rate
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+                run.metrics
+                    .latency_p50_ms
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+                run.metrics
+                    .cost_per_run
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
                 run.completed_at.unwrap_or(0),
             ));
         }
@@ -12896,7 +13571,11 @@ async fn list_sources_handler(
     Query(query): Query<ProjectScopedQuery>,
 ) -> impl IntoResponse {
     let all = state.document_store.list_sources(&query.project());
-    let items: Vec<_> = all.into_iter().skip(query.offset()).take(query.limit()).collect();
+    let items: Vec<_> = all
+        .into_iter()
+        .skip(query.offset())
+        .take(query.limit())
+        .collect();
     (StatusCode::OK, Json(items))
 }
 
@@ -13214,9 +13893,7 @@ async fn create_source_refresh_schedule_handler(
         .into_response()
 }
 
-async fn process_source_refresh_handler(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn process_source_refresh_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -13350,12 +14027,23 @@ async fn get_memory_document_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let document_id = KnowledgeDocumentId::new(id);
-    let Some(document) = exportable_document_by_id(&state.document_store, document_id.as_str()) else {
-        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "memory document not found")
-            .into_response();
+    let Some(document) = exportable_document_by_id(&state.document_store, document_id.as_str())
+    else {
+        return AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "memory document not found",
+        )
+        .into_response();
     };
 
-    match <dyn DocumentVersionReadModel>::list_versions(state.document_store.as_ref(), &document_id, 1).await {
+    match <dyn DocumentVersionReadModel>::list_versions(
+        state.document_store.as_ref(),
+        &document_id,
+        1,
+    )
+    .await
+    {
         Ok(versions) => {
             let chunk_count = state
                 .document_store
@@ -13376,8 +14064,12 @@ async fn get_memory_document_handler(
                     })),
                 )
                     .into_response(),
-                None => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "memory document version not found")
-                    .into_response(),
+                None => AppApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    "memory document version not found",
+                )
+                .into_response(),
             }
         }
         Err(err) => {
@@ -13396,7 +14088,13 @@ async fn list_memory_document_versions_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let document_id = KnowledgeDocumentId::new(id);
-    match <dyn DocumentVersionReadModel>::list_versions(state.document_store.as_ref(), &document_id, 100).await {
+    match <dyn DocumentVersionReadModel>::list_versions(
+        state.document_store.as_ref(),
+        &document_id,
+        100,
+    )
+    .await
+    {
         Ok(versions) => (StatusCode::OK, Json(versions)).into_response(),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -13591,8 +14289,8 @@ async fn complete_ingest_job_handler(
                     content: pending.content.clone(),
                     tags: Vec::new(),
                     corpus_id: None,
-            bundle_source_id: None,
-            import_id: None,
+                    bundle_source_id: None,
+                    import_id: None,
                 })
                 .await
             {
@@ -13840,11 +14538,15 @@ async fn memory_deep_search_handler(
         })
         .await
     {
-        Ok(response) => (StatusCode::OK, Json(serde_json::json!({
-            "hops": response.hops,
-            "merged_results": response.merged_results,
-            "total_latency_ms": response.total_latency_ms,
-        }))).into_response(),
+        Ok(response) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "hops": response.hops,
+                "merged_results": response.merged_results,
+                "total_latency_ms": response.total_latency_ms,
+            })),
+        )
+            .into_response(),
         Err(err) => AppApiError::new(
             StatusCode::BAD_REQUEST,
             "deep_search_failed",
@@ -14022,10 +14724,7 @@ async fn get_trace_handler(
                 .envelope
                 .primary_entity_ref()
                 .map(|r| format!("{r:?}"));
-            let description = format!(
-                "{} at position {}",
-                event_type, stored.position.0
-            );
+            let description = format!("{} at position {}", event_type, stored.position.0);
             TraceSpan {
                 event_type,
                 entity_id,
@@ -14279,10 +14978,12 @@ async fn get_provider_health_schedule_handler(
         Ok(Some(schedule)) => (StatusCode::OK, Json(schedule)).into_response(),
         Ok(None) => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "schedule not found")
             .into_response(),
-        Err(err) => {
-            AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", err.to_string())
-                .into_response()
-        }
+        Err(err) => AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            err.to_string(),
+        )
+        .into_response(),
     }
 }
 
@@ -14299,7 +15000,7 @@ async fn set_provider_retry_policy_handler(
     Path(connection_id): Path<String>,
     Json(body): Json<SetProviderRetryPolicyRequest>,
 ) -> impl IntoResponse {
-    use cairn_domain::{ProviderRetryPolicySet, providers::RetryPolicy};
+    use cairn_domain::{providers::RetryPolicy, ProviderRetryPolicySet};
     let event = cairn_runtime::services::event_helpers::make_envelope(
         RuntimeEvent::ProviderRetryPolicySet(ProviderRetryPolicySet {
             connection_id: ProviderConnectionId::new(connection_id),
@@ -14492,22 +15193,30 @@ async fn create_provider_connection_handler(
             // Link credential to connection via defaults store so resolve-key can find it.
             if let Some(cred_id) = credential_id {
                 let key = format!("provider_credential_{conn_id}");
-                let _ = state.runtime.defaults.set(
-                    cairn_domain::Scope::System,
-                    "system".to_owned(),
-                    key,
-                    serde_json::json!(cred_id),
-                ).await;
+                let _ = state
+                    .runtime
+                    .defaults
+                    .set(
+                        cairn_domain::Scope::System,
+                        "system".to_owned(),
+                        key,
+                        serde_json::json!(cred_id),
+                    )
+                    .await;
             }
             // Store endpoint_url if provided.
             if let Some(url) = endpoint_url {
                 let key = format!("provider_endpoint_{conn_id}");
-                let _ = state.runtime.defaults.set(
-                    cairn_domain::Scope::System,
-                    "system".to_owned(),
-                    key,
-                    serde_json::json!(url),
-                ).await;
+                let _ = state
+                    .runtime
+                    .defaults
+                    .set(
+                        cairn_domain::Scope::System,
+                        "system".to_owned(),
+                        key,
+                        serde_json::json!(url),
+                    )
+                    .await;
             }
             (StatusCode::CREATED, Json(record)).into_response()
         }
@@ -14534,8 +15243,12 @@ async fn resolve_provider_key_handler(
     let connection = match state.runtime.provider_connections.get(&conn_id).await {
         Ok(Some(c)) => c,
         Ok(None) => {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "provider connection not found")
-                .into_response()
+            return AppApiError::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "provider connection not found",
+            )
+            .into_response()
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -14649,8 +15362,12 @@ async fn get_binding_cost_stats_handler(
     .await
     {
         Ok(Some(stats)) => (StatusCode::OK, Json(stats)).into_response(),
-        Ok(None) => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "no cost stats for binding")
-            .into_response(),
+        Ok(None) => AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "no cost stats for binding",
+        )
+        .into_response(),
         Err(err) => store_error_response(err),
     }
 }
@@ -14666,8 +15383,11 @@ async fn list_binding_cost_ranking_handler(
 ) -> impl IntoResponse {
     use cairn_store::projections::ProviderBindingCostStatsReadModel;
     let tenant_id = TenantId::new(query.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID));
-    match ProviderBindingCostStatsReadModel::list_by_tenant(state.runtime.store.as_ref(), &tenant_id)
-        .await
+    match ProviderBindingCostStatsReadModel::list_by_tenant(
+        state.runtime.store.as_ref(),
+        &tenant_id,
+    )
+    .await
     {
         Ok(items) => (
             StatusCode::OK,
@@ -14944,7 +15664,9 @@ fn event_relates_to_run(
     match event {
         RuntimeEvent::RunCreated(run) => run.run_id == *run_id,
         RuntimeEvent::RunStateChanged(run) => run.run_id == *run_id,
-        RuntimeEvent::OperatorIntervention(intervention) => intervention.run_id.as_ref() == Some(run_id),
+        RuntimeEvent::OperatorIntervention(intervention) => {
+            intervention.run_id.as_ref() == Some(run_id)
+        }
         RuntimeEvent::TaskCreated(task) => {
             let matches = task.parent_run_id.as_ref() == Some(run_id);
             if matches {
@@ -15006,11 +15728,11 @@ fn event_relates_to_run(
             }
             matches
         }
-        RuntimeEvent::PermissionDecisionRecorded(invocation) => {
-            invocation.invocation_id.as_deref()
-                .map(|id| tracked_invocations.contains(&ToolInvocationId::new(id)))
-                .unwrap_or(false)
-        }
+        RuntimeEvent::PermissionDecisionRecorded(invocation) => invocation
+            .invocation_id
+            .as_deref()
+            .map(|id| tracked_invocations.contains(&ToolInvocationId::new(id)))
+            .unwrap_or(false),
         RuntimeEvent::ToolInvocationProgressUpdated(invocation) => {
             tracked_invocations.contains(&invocation.invocation_id)
         }
@@ -15082,8 +15804,8 @@ async fn build_diagnosis_report(
     stale_after_ms: u64,
 ) -> Result<(DiagnosisReport, bool), cairn_store::StoreError> {
     let now = now_ms();
-    let tasks = TaskReadModel::list_by_parent_run(state.runtime.store.as_ref(), &run.run_id, 1_000)
-        .await?;
+    let tasks =
+        TaskReadModel::list_by_parent_run(state.runtime.store.as_ref(), &run.run_id, 1_000).await?;
     let events = collect_run_events(state, &run.run_id).await?;
 
     let mut task_activity = HashMap::<String, u64>::new();
@@ -15456,8 +16178,10 @@ fn parse_task_state(value: &str) -> Result<TaskState, String> {
 }
 
 fn parse_eval_subject_kind(value: &str) -> Result<cairn_domain::EvalSubjectKind, String> {
-    serde_json::from_value::<cairn_domain::EvalSubjectKind>(serde_json::Value::String(value.to_owned()))
-        .map_err(|_| format!("invalid eval subject_kind: {value}"))
+    serde_json::from_value::<cairn_domain::EvalSubjectKind>(serde_json::Value::String(
+        value.to_owned(),
+    ))
+    .map_err(|_| format!("invalid eval subject_kind: {value}"))
 }
 
 fn parse_tool_invocation_state(value: &str) -> Result<ToolInvocationState, String> {
@@ -15718,9 +16442,7 @@ where
 /// Unlike `POST /v1/providers/run-health-checks` (which only runs *due*
 /// scheduled checks), this endpoint always runs and returns a full snapshot.
 #[allow(dead_code)]
-async fn check_provider_health_handler(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn check_provider_health_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Run any overdue scheduled checks so the snapshot is fresh.
     let _ = state.runtime.provider_health.run_due_health_checks().await;
 
@@ -15766,9 +16488,13 @@ struct SendNotificationRequest {
 }
 
 #[allow(dead_code)]
-fn default_operator_id() -> String { "system".to_owned() }
+fn default_operator_id() -> String {
+    "system".to_owned()
+}
 #[allow(dead_code)]
-fn default_severity()    -> String { "info".to_owned() }
+fn default_severity() -> String {
+    "info".to_owned()
+}
 
 /// `POST /v1/notifications/send` — dispatch an ad-hoc notification through
 /// the operator notification service.
@@ -15820,7 +16546,6 @@ macro_rules! stub_handler {
     };
 }
 
-
 /// `POST /v1/runs/:id/checkpoint` — record a checkpoint for a run.
 ///
 /// Alias for `save_checkpoint_handler`; provides the `record_checkpoint_handler`
@@ -15846,7 +16571,6 @@ async fn start_rollout_handler(
 ) -> impl IntoResponse {
     start_prompt_rollout_handler(state, path, body).await
 }
-
 
 /// `POST /v1/admin/tenants/:id/snapshot` — create a tenant state snapshot.
 /// Delegates to create_snapshot_handler (catalog-compatibility alias).
@@ -15883,9 +16607,7 @@ async fn request_approval_for_release_handler(
 /// Format-aware bundle serialization is not yet implemented.
 /// Returns 501 so callers get a clear error rather than 404.
 /// Planned formats: json, yaml, csv.
-async fn export_bundle_by_format_handler(
-    Path(format): Path<String>,
-) -> impl IntoResponse {
+async fn export_bundle_by_format_handler(Path(format): Path<String>) -> impl IntoResponse {
     AppApiError::new(
         StatusCode::NOT_IMPLEMENTED,
         "not_implemented",
@@ -15914,7 +16636,10 @@ async fn compare_eval_run_baseline_handler(
     // `baseline_run_id` in the body is accepted for forward-compat but the
     // service currently selects the baseline from the locked asset record.
     let _ = body; // suppress unused warning until explicit-baseline is wired
-    match state.eval_baselines.compare_to_baseline(&EvalRunId::new(id)) {
+    match state
+        .eval_baselines
+        .compare_to_baseline(&EvalRunId::new(id))
+    {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(err) => (
             StatusCode::BAD_REQUEST,
@@ -15952,9 +16677,9 @@ async fn unregister_plugin_handler(
 #[derive(serde::Deserialize)]
 struct CreateAuthTokenRequest {
     operator_id: String,
-    tenant_id:   String,
-    name:        String,
-    expires_at:  Option<u64>,
+    tenant_id: String,
+    name: String,
+    expires_at: Option<u64>,
 }
 
 /// `POST /v1/auth/tokens` — create an operator API token.
@@ -15966,10 +16691,14 @@ async fn create_auth_token_handler(
     Json(body): Json<CreateAuthTokenRequest>,
 ) -> impl IntoResponse {
     if !is_admin_principal(&principal) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({
-            "error": "forbidden",
-            "detail": "only the admin token may create operator tokens"
-        }))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "forbidden",
+                "detail": "only the admin token may create operator tokens"
+            })),
+        )
+            .into_response();
     }
     if body.operator_id.trim().is_empty() {
         return bad_request_response("operator_id must not be empty");
@@ -15978,41 +16707,46 @@ async fn create_auth_token_handler(
         return bad_request_response("name must not be empty");
     }
 
-    let token_id  = format!("tok_{}", uuid::Uuid::new_v4().simple());
+    let token_id = format!("tok_{}", uuid::Uuid::new_v4().simple());
     let raw_token = format!("sk_{}", uuid::Uuid::new_v4().simple());
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_millis() as u64;
+        .unwrap_or_default()
+        .as_millis() as u64;
 
     let record = OperatorTokenRecord {
-        token_id:    token_id.clone(),
+        token_id: token_id.clone(),
         operator_id: body.operator_id.clone(),
-        tenant_id:   body.tenant_id.clone(),
-        name:        body.name.clone(),
+        tenant_id: body.tenant_id.clone(),
+        name: body.name.clone(),
         created_at,
-        expires_at:  body.expires_at,
+        expires_at: body.expires_at,
     };
 
     state.service_tokens.register(
         raw_token.clone(),
         AuthPrincipal::Operator {
             operator_id: cairn_domain::ids::OperatorId::new(&body.operator_id),
-            tenant: cairn_domain::tenancy::TenantKey::new(
-                cairn_domain::TenantId::new(&body.tenant_id),
-            ),
+            tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new(
+                &body.tenant_id,
+            )),
         },
     );
     state.operator_tokens.insert(raw_token.clone(), record);
 
-    (StatusCode::CREATED, Json(serde_json::json!({
-        "token":       raw_token,
-        "token_id":    token_id,
-        "operator_id": body.operator_id,
-        "tenant_id":   body.tenant_id,
-        "name":        body.name,
-        "created_at":  created_at,
-        "expires_at":  body.expires_at,
-    }))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "token":       raw_token,
+            "token_id":    token_id,
+            "operator_id": body.operator_id,
+            "tenant_id":   body.tenant_id,
+            "name":        body.name,
+            "created_at":  created_at,
+            "expires_at":  body.expires_at,
+        })),
+    )
+        .into_response()
 }
 
 /// `GET /v1/auth/tokens` — list operator tokens (raw token redacted).
@@ -16021,19 +16755,27 @@ async fn list_auth_tokens_handler(
     Extension(principal): Extension<AuthPrincipal>,
 ) -> impl IntoResponse {
     if !is_admin_principal(&principal) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "forbidden" }))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "forbidden" })),
+        )
+            .into_response();
     }
-    let tokens: Vec<serde_json::Value> = state.operator_tokens.list()
+    let tokens: Vec<serde_json::Value> = state
+        .operator_tokens
+        .list()
         .into_iter()
-        .map(|r| serde_json::json!({
-            "token_id":    r.token_id,
-            "operator_id": r.operator_id,
-            "tenant_id":   r.tenant_id,
-            "name":        r.name,
-            "created_at":  r.created_at,
-            "expires_at":  r.expires_at,
-            "token":       "[redacted]",
-        }))
+        .map(|r| {
+            serde_json::json!({
+                "token_id":    r.token_id,
+                "operator_id": r.operator_id,
+                "tenant_id":   r.tenant_id,
+                "name":        r.name,
+                "created_at":  r.created_at,
+                "expires_at":  r.expires_at,
+                "token":       "[redacted]",
+            })
+        })
         .collect();
     let total = tokens.len();
     Json(serde_json::json!({ "tokens": tokens, "total": total })).into_response()
@@ -16046,17 +16788,31 @@ async fn delete_auth_token_handler(
     Path(token_id): Path<String>,
 ) -> impl IntoResponse {
     if !is_admin_principal(&principal) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "forbidden" }))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "forbidden" })),
+        )
+            .into_response();
     }
     let raw = match state.operator_tokens.raw_token(&token_id) {
         Some(t) => t,
-        None => return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-            "error": "not_found", "token_id": token_id
-        }))).into_response(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "not_found", "token_id": token_id
+                })),
+            )
+                .into_response()
+        }
     };
     state.service_tokens.revoke(&raw);
     state.operator_tokens.remove(&token_id);
-    (StatusCode::OK, Json(serde_json::json!({ "revoked": true, "token_id": token_id }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "revoked": true, "token_id": token_id })),
+    )
+        .into_response()
 }
 
 /// `true` for the bootstrap admin service account or the System principal.
@@ -16199,12 +16955,13 @@ mod tests {
     #[tokio::test]
     async fn plugin_capabilities_route_reports_verified_manifest_capabilities() {
         let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
-        state
-            .service_tokens
-            .register("test-token".to_owned(), AuthPrincipal::ServiceAccount {
+        state.service_tokens.register(
+            "test-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
                 name: "service_token".to_owned(),
                 tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new(DEFAULT_TENANT_ID)),
-            });
+            },
+        );
 
         let manifest = PluginManifest {
             id: "com.example.verified-plugin".to_owned(),
@@ -16263,7 +17020,13 @@ mod tests {
         let project_key = ProjectKey::new("tenant_rbac", "ws_rbac", "proj_rbac");
         let session_id = SessionId::new("sess_rbac");
 
-        state.service_tokens.register("rbac-token".to_owned(), AuthPrincipal::ServiceAccount { name: "service_token".to_owned(), tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()) });
+        state.service_tokens.register(
+            "rbac-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "service_token".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()),
+            },
+        );
 
         state
             .runtime
@@ -16274,7 +17037,11 @@ mod tests {
         state
             .runtime
             .workspaces
-            .create(tenant_id.clone(), workspace_id.clone(), "RBAC WS".to_owned())
+            .create(
+                tenant_id.clone(),
+                workspace_id.clone(),
+                "RBAC WS".to_owned(),
+            )
             .await
             .unwrap();
         state
@@ -16378,9 +17145,13 @@ mod tests {
         let session_id = SessionId::new("sess_audit");
         let run_id = RunId::new("run_audit_1");
 
-        state
-            .service_tokens
-            .register("audit-token".to_owned(), AuthPrincipal::ServiceAccount { name: "service_token".to_owned(), tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()) });
+        state.service_tokens.register(
+            "audit-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "service_token".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()),
+            },
+        );
 
         state
             .runtime
@@ -16437,7 +17208,11 @@ mod tests {
         state
             .runtime
             .runs
-            .resume(&run_id, ResumeTrigger::OperatorResume, RunResumeTarget::Running)
+            .resume(
+                &run_id,
+                ResumeTrigger::OperatorResume,
+                RunResumeTarget::Running,
+            )
             .await
             .unwrap();
 
@@ -16492,7 +17267,13 @@ mod tests {
         let project_key = ProjectKey::new("tenant_saf", "ws_saf", "proj_saf");
         let session_id = SessionId::new("sess_saf");
 
-        state.service_tokens.register("saf-token".to_owned(), AuthPrincipal::ServiceAccount { name: "service_token".to_owned(), tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()) });
+        state.service_tokens.register(
+            "saf-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "service_token".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()),
+            },
+        );
 
         state
             .runtime
@@ -16545,13 +17326,25 @@ mod tests {
         state
             .runtime
             .tasks
-            .submit(&project_key, task_id_1.clone(), Some(run_id_1.clone()), None, 0)
+            .submit(
+                &project_key,
+                task_id_1.clone(),
+                Some(run_id_1.clone()),
+                None,
+                0,
+            )
             .await
             .unwrap();
         state
             .runtime
             .tasks
-            .submit(&project_key, task_id_2.clone(), Some(run_id_2.clone()), None, 0)
+            .submit(
+                &project_key,
+                task_id_2.clone(),
+                Some(run_id_2.clone()),
+                None,
+                0,
+            )
             .await
             .unwrap();
 
@@ -16595,7 +17388,10 @@ mod tests {
             .collect();
         let mut sorted_ts = timestamps.clone();
         sorted_ts.sort_unstable();
-        assert_eq!(timestamps, sorted_ts, "entries must be in chronological order");
+        assert_eq!(
+            timestamps, sorted_ts,
+            "entries must be in chronological order"
+        );
 
         // GET /v1/sessions/sess_saf/active-runs
         let active_runs_response = AppBootstrap::build_router(state.clone())
@@ -16633,7 +17429,13 @@ mod tests {
         let session_id = SessionId::new("sess_evp");
         let run_id = RunId::new("run_evp");
 
-        state.service_tokens.register("evp-token".to_owned(), AuthPrincipal::ServiceAccount { name: "service_token".to_owned(), tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()) });
+        state.service_tokens.register(
+            "evp-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "service_token".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()),
+            },
+        );
         state
             .runtime
             .tenants
@@ -16734,16 +17536,23 @@ mod tests {
 
         let events2 = page2["events"].as_array().unwrap();
         assert_eq!(events2.len(), 5, "page 2 should have 5 remaining events");
-        assert_eq!(page2["has_more"], false, "has_more should be false on last page");
+        assert_eq!(
+            page2["has_more"], false,
+            "has_more should be false on last page"
+        );
     }
 
     #[tokio::test]
     async fn eval_dashboard_returns_assets_with_run_counts_and_trend() {
         let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
 
-        state
-            .service_tokens
-            .register("evd-token".to_owned(), AuthPrincipal::ServiceAccount { name: "service_token".to_owned(), tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new("t_evd")) });
+        state.service_tokens.register(
+            "evd-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "service_token".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new("t_evd")),
+            },
+        );
 
         let workspace_key = WorkspaceKey::new("t_evd", "ws_evd");
         let project_key_evd = ProjectKey::new("t_evd", "ws_evd", "proj_evd");
@@ -16868,9 +17677,13 @@ mod tests {
     #[tokio::test]
     async fn plugin_tools_list_and_search() {
         let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
-        state
-            .service_tokens
-            .register("tools-token".to_owned(), AuthPrincipal::ServiceAccount { name: "service_token".to_owned(), tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new(DEFAULT_TENANT_ID)) });
+        state.service_tokens.register(
+            "tools-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "service_token".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new(DEFAULT_TENANT_ID)),
+            },
+        );
 
         let manifest = PluginManifest {
             id: "com.example.tools-plugin".to_owned(),
@@ -16924,7 +17737,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(tools_response.status(), StatusCode::OK);
-        let body = to_bytes(tools_response.into_body(), usize::MAX).await.unwrap();
+        let body = to_bytes(tools_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let tools = resp["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 2, "expected 2 tools");
@@ -16945,7 +17760,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(search_response.status(), StatusCode::OK);
-        let body = to_bytes(search_response.into_body(), usize::MAX).await.unwrap();
+        let body = to_bytes(search_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let matches: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let hits = matches.as_array().unwrap();
         assert_eq!(hits.len(), 1, "search for 'commit' should return 1 match");
@@ -16965,17 +17782,62 @@ mod tests {
         let run_id = RunId::new("run_tle");
         let task_id = TaskId::new("task_tle");
 
-        state.service_tokens.register("tle-token".to_owned(), AuthPrincipal::ServiceAccount { name: "service_token".to_owned(), tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()) });
+        state.service_tokens.register(
+            "tle-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "service_token".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()),
+            },
+        );
 
-        state.runtime.tenants.create(tenant_id.clone(), "T".to_owned()).await.unwrap();
-        state.runtime.workspaces.create(tenant_id.clone(), WorkspaceId::new("ws_tle"), "W".to_owned()).await.unwrap();
-        state.runtime.projects.create(project_key.clone(), "P".to_owned()).await.unwrap();
-        state.runtime.sessions.create(&project_key, session_id.clone()).await.unwrap();
-        state.runtime.runs.start(&project_key, &session_id, run_id.clone(), None).await.unwrap();
+        state
+            .runtime
+            .tenants
+            .create(tenant_id.clone(), "T".to_owned())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .workspaces
+            .create(
+                tenant_id.clone(),
+                WorkspaceId::new("ws_tle"),
+                "W".to_owned(),
+            )
+            .await
+            .unwrap();
+        state
+            .runtime
+            .projects
+            .create(project_key.clone(), "P".to_owned())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project_key, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project_key, &session_id, run_id.clone(), None)
+            .await
+            .unwrap();
 
         // Create and claim a task with a 50ms lease
-        state.runtime.tasks.submit(&project_key, task_id.clone(), Some(run_id.clone()), None, 0).await.unwrap();
-        state.runtime.tasks.claim(&task_id, "worker_tle".to_owned(), 50).await.unwrap();
+        state
+            .runtime
+            .tasks
+            .submit(&project_key, task_id.clone(), Some(run_id.clone()), None, 0)
+            .await
+            .unwrap();
+        state
+            .runtime
+            .tasks
+            .claim(&task_id, "worker_tle".to_owned(), 50)
+            .await
+            .unwrap();
 
         // Confirm it's Leased
         let claimed = state.runtime.tasks.get(&task_id).await.unwrap().unwrap();
@@ -17001,16 +17863,30 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(result["expired_count"].as_u64().unwrap(), 1, "expected 1 expired task");
+        assert_eq!(
+            result["expired_count"].as_u64().unwrap(),
+            1,
+            "expected 1 expired task"
+        );
         let ids = result["task_ids"].as_array().unwrap();
         assert_eq!(ids.len(), 1);
         assert_eq!(ids[0], "task_tle");
 
         // Confirm task is back in Queued state
         let requeued = state.runtime.tasks.get(&task_id).await.unwrap().unwrap();
-        assert_eq!(requeued.state, TaskState::Queued, "task should be re-queued after lease expiry");
-        assert!(requeued.lease_owner.is_none(), "lease_owner should be cleared");
-        assert!(requeued.lease_expires_at.is_none(), "lease_expires_at should be cleared");
+        assert_eq!(
+            requeued.state,
+            TaskState::Queued,
+            "task should be re-queued after lease expiry"
+        );
+        assert!(
+            requeued.lease_owner.is_none(),
+            "lease_owner should be cleared"
+        );
+        assert!(
+            requeued.lease_expires_at.is_none(),
+            "lease_expires_at should be cleared"
+        );
     }
 
     #[tokio::test]
@@ -17024,14 +17900,29 @@ mod tests {
         let task_id_1 = TaskId::new("task_rac_1");
         let task_id_2 = TaskId::new("task_rac_2");
 
-        state.service_tokens.register("rac-token".to_owned(), AuthPrincipal::ServiceAccount { name: "service_token".to_owned(), tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()) });
+        state.service_tokens.register(
+            "rac-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "service_token".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(tenant_id.clone()),
+            },
+        );
 
         // Infrastructure setup
-        state.runtime.tenants.create(tenant_id.clone(), "T".to_owned()).await.unwrap();
+        state
+            .runtime
+            .tenants
+            .create(tenant_id.clone(), "T".to_owned())
+            .await
+            .unwrap();
         state
             .runtime
             .workspaces
-            .create(tenant_id.clone(), WorkspaceId::new("ws_rac"), "W".to_owned())
+            .create(
+                tenant_id.clone(),
+                WorkspaceId::new("ws_rac"),
+                "W".to_owned(),
+            )
             .await
             .unwrap();
         state
@@ -17079,13 +17970,25 @@ mod tests {
         state
             .runtime
             .tasks
-            .submit(&project_key, task_id_1.clone(), Some(run_id.clone()), None, 0)
+            .submit(
+                &project_key,
+                task_id_1.clone(),
+                Some(run_id.clone()),
+                None,
+                0,
+            )
             .await
             .unwrap();
         state
             .runtime
             .tasks
-            .submit(&project_key, task_id_2.clone(), Some(run_id.clone()), None, 0)
+            .submit(
+                &project_key,
+                task_id_2.clone(),
+                Some(run_id.clone()),
+                None,
+                0,
+            )
             .await
             .unwrap();
         state
@@ -17149,9 +18052,13 @@ mod tests {
     #[tokio::test]
     async fn eval_provider_matrix_returns_row_with_binding_and_cost() {
         let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
-        state
-            .service_tokens
-            .register("epm-token".to_owned(), AuthPrincipal::ServiceAccount { name: "service_token".to_owned(), tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new(DEFAULT_TENANT_ID)) });
+        state.service_tokens.register(
+            "epm-token".to_owned(),
+            AuthPrincipal::ServiceAccount {
+                name: "service_token".to_owned(),
+                tenant: cairn_domain::tenancy::TenantKey::new(TenantId::new(DEFAULT_TENANT_ID)),
+            },
+        );
 
         let eval_run_id = EvalRunId::new("eval_run_epm");
         let project_id = ProjectId::new(DEFAULT_PROJECT_ID);
@@ -17160,44 +18067,56 @@ mod tests {
             project_id.clone(),
             EvalSubjectKind::PromptRelease,
             "accuracy".to_owned(),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         state.evals.start_run(&eval_run_id).unwrap();
-        state.evals.complete_run(&eval_run_id, EvalMetrics::default(), None).unwrap();
+        state
+            .evals
+            .complete_run(&eval_run_id, EvalMetrics::default(), None)
+            .unwrap();
 
         let binding_id = ProviderBindingId::new("binding_epm");
-        let project_key = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let project_key =
+            ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
 
-        state.runtime.store.append(&[EventEnvelope::for_runtime_event(
-            EventId::new("evt_epm_call"),
-            EventSource::Runtime,
-            RuntimeEvent::ProviderCallCompleted(cairn_domain::events::ProviderCallCompleted {
-                project: project_key.clone(),
-                provider_call_id: cairn_domain::ProviderCallId::new("call_epm"),
-                route_decision_id: cairn_domain::RouteDecisionId::new("rd_epm"),
-                route_attempt_id: cairn_domain::RouteAttemptId::new("ra_epm"),
-                provider_binding_id: binding_id.clone(),
-                provider_connection_id: ProviderConnectionId::new("conn_epm"),
-                provider_model_id: ProviderModelId::new("model_epm"),
-                session_id: None,
-                run_id: None,
-                operation_kind: OperationKind::Generate,
-                status: cairn_domain::providers::ProviderCallStatus::Succeeded,
-                latency_ms: Some(120),
-                input_tokens: None,
-                output_tokens: None,
-                cost_micros: Some(500),
-                error_class: None,
-                raw_error_message: None,
-                retry_count: 0,
-                task_id: None,
-                prompt_release_id: None,
-                fallback_position: 0,
-                started_at: 0,
-                finished_at: 0,
-                completed_at: 1000,
-            }),
-        )]).await.unwrap();
+        state
+            .runtime
+            .store
+            .append(&[EventEnvelope::for_runtime_event(
+                EventId::new("evt_epm_call"),
+                EventSource::Runtime,
+                RuntimeEvent::ProviderCallCompleted(cairn_domain::events::ProviderCallCompleted {
+                    project: project_key.clone(),
+                    provider_call_id: cairn_domain::ProviderCallId::new("call_epm"),
+                    route_decision_id: cairn_domain::RouteDecisionId::new("rd_epm"),
+                    route_attempt_id: cairn_domain::RouteAttemptId::new("ra_epm"),
+                    provider_binding_id: binding_id.clone(),
+                    provider_connection_id: ProviderConnectionId::new("conn_epm"),
+                    provider_model_id: ProviderModelId::new("model_epm"),
+                    session_id: None,
+                    run_id: None,
+                    operation_kind: OperationKind::Generate,
+                    status: cairn_domain::providers::ProviderCallStatus::Succeeded,
+                    latency_ms: Some(120),
+                    input_tokens: None,
+                    output_tokens: None,
+                    cost_micros: Some(500),
+                    error_class: None,
+                    raw_error_message: None,
+                    retry_count: 0,
+                    task_id: None,
+                    prompt_release_id: None,
+                    fallback_position: 0,
+                    started_at: 0,
+                    finished_at: 0,
+                    completed_at: 1000,
+                }),
+            )])
+            .await
+            .unwrap();
 
         let response = AppBootstrap::build_router(state.clone())
             .oneshot(
@@ -17260,20 +18179,17 @@ mod tests {
     }
 
     /// Helper: GET a path and return parsed JSON body.
-    async fn get_json(
-        app: axum::Router,
-        path: &str,
-        token: &str,
-    ) -> serde_json::Value {
-        let resp = app.oneshot(
-            Request::builder()
-                .uri(path)
-                .header("authorization", format!("Bearer {token}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    async fn get_json(app: axum::Router, path: &str, token: &str) -> serde_json::Value {
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK, "GET {path} returned non-200");
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice(&bytes).expect("response is valid JSON")
@@ -17286,14 +18202,33 @@ mod tests {
 
         let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
         let session_id = SessionId::new("sess_deny_test");
-        let run_id     = RunId::new("run_deny_test");
-        let appr_id    = ApprovalId::new("appr_deny_test");
+        let run_id = RunId::new("run_deny_test");
+        let appr_id = ApprovalId::new("appr_deny_test");
 
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.runs.start(&project, &session_id, run_id.clone(), None).await.unwrap();
-        state.runtime.approvals
-            .request(&project, appr_id.clone(), Some(run_id), None, ApprovalRequirement::Required)
-            .await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project, &session_id, run_id.clone(), None)
+            .await
+            .unwrap();
+        state
+            .runtime
+            .approvals
+            .request(
+                &project,
+                appr_id.clone(),
+                Some(run_id),
+                None,
+                ApprovalRequirement::Required,
+            )
+            .await
+            .unwrap();
 
         let app = AppBootstrap::build_router(state);
         let resp = post_json(
@@ -17301,9 +18236,14 @@ mod tests {
             "/v1/approvals/appr_deny_test/deny",
             "deny-token",
             serde_json::json!({}),
-        ).await;
+        )
+        .await;
 
-        assert_eq!(resp.status(), StatusCode::OK, "deny approval should return 200");
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "deny approval should return 200"
+        );
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
@@ -17321,14 +18261,29 @@ mod tests {
         let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
         register_token(&state, "cancel-token");
 
-        let project    = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
         let session_id = SessionId::new("sess_cancel_test");
-        let run_id     = RunId::new("run_cancel_test");
-        let task_id    = TaskId::new("task_cancel_test");
+        let run_id = RunId::new("run_cancel_test");
+        let task_id = TaskId::new("task_cancel_test");
 
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.runs.start(&project, &session_id, run_id.clone(), None).await.unwrap();
-        state.runtime.tasks.submit(&project, task_id.clone(), None, None, 0).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project, &session_id, run_id.clone(), None)
+            .await
+            .unwrap();
+        state
+            .runtime
+            .tasks
+            .submit(&project, task_id.clone(), None, None, 0)
+            .await
+            .unwrap();
 
         let app = AppBootstrap::build_router(state);
         let resp = post_json(
@@ -17336,9 +18291,14 @@ mod tests {
             "/v1/tasks/task_cancel_test/cancel",
             "cancel-token",
             serde_json::json!({}),
-        ).await;
+        )
+        .await;
 
-        assert_eq!(resp.status(), StatusCode::OK, "cancel task should return 200");
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "cancel task should return 200"
+        );
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
@@ -17365,7 +18325,10 @@ mod tests {
         let count = body["count"].as_u64().unwrap_or(0);
         let items_len = body["items"].as_array().unwrap().len() as u64;
         assert_eq!(count, items_len, "count must match items length");
-        assert!(body["limit"].as_u64().unwrap_or(0) > 0, "limit must be positive");
+        assert!(
+            body["limit"].as_u64().unwrap_or(0) > 0,
+            "limit must be positive"
+        );
     }
 
     #[tokio::test]
@@ -17374,19 +18337,30 @@ mod tests {
         register_token(&state, "events2-token");
 
         // Create some state to generate events.
-        let project    = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
         let session_id = SessionId::new("sess_events_test");
-        state.runtime.sessions.create(&project, session_id).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id)
+            .await
+            .unwrap();
 
         let app = AppBootstrap::build_router(state);
         let body = get_json(app, "/v1/events/recent?limit=50", "events2-token").await;
 
         let items = body["items"].as_array().unwrap();
-        assert!(!items.is_empty(), "must have at least one event after session create");
+        assert!(
+            !items.is_empty(),
+            "must have at least one event after session create"
+        );
 
         // Each item must have required fields.
         let first = &items[0];
-        assert!(first["event_type"].is_string(), "event_type must be a string");
+        assert!(
+            first["event_type"].is_string(),
+            "event_type must be a string"
+        );
         assert!(first["stored_at"].is_number(), "stored_at must be a number");
         assert!(first["position"].is_number(), "position must be a number");
     }
@@ -17401,13 +18375,19 @@ mod tests {
 
         // All fields must be present and non-negative.
         for field in &[
-            "total_events", "total_sessions", "total_runs",
-            "total_tasks", "active_runs", "pending_approvals", "uptime_seconds",
+            "total_events",
+            "total_sessions",
+            "total_runs",
+            "total_tasks",
+            "active_runs",
+            "pending_approvals",
+            "uptime_seconds",
         ] {
             assert!(
                 body[field].is_number(),
                 "field '{}' must be a number, got: {:?}",
-                field, body[field]
+                field,
+                body[field]
             );
             assert!(
                 body[field].as_u64().is_some(),
@@ -17422,12 +18402,22 @@ mod tests {
         let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
         register_token(&state, "stats2-token");
 
-        let project    = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
         let session_id = SessionId::new("sess_stats_test");
-        let run_id     = RunId::new("run_stats_test");
+        let run_id = RunId::new("run_stats_test");
 
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.runs.start(&project, &session_id, run_id, None).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project, &session_id, run_id, None)
+            .await
+            .unwrap();
 
         let app = AppBootstrap::build_router(state);
         let body = get_json(app, "/v1/stats", "stats2-token").await;
@@ -17487,26 +18477,43 @@ mod tests {
 
         // Confirm the run is NOT present before replay.
         assert!(
-            fresh_state.evals.get(&EvalRunId::new("eval_replay_1")).is_none(),
+            fresh_state
+                .evals
+                .get(&EvalRunId::new("eval_replay_1"))
+                .is_none(),
             "eval run should not be in a fresh state before replay"
         );
 
         // Instead of a full replay (which requires the same store), verify the
         // write-side: the original state has the event in the store.
         use cairn_store::event_log::EventLog;
-        let events = state.runtime.store.read_stream(None, usize::MAX).await.unwrap();
+        let events = state
+            .runtime
+            .store
+            .read_stream(None, usize::MAX)
+            .await
+            .unwrap();
         let eval_event = events.iter().find(|e| {
             matches!(&e.envelope.payload,
                 cairn_domain::RuntimeEvent::EvalRunStarted(ev) if ev.eval_run_id.as_str() == "eval_replay_1"
             )
         });
-        assert!(eval_event.is_some(), "EvalRunStarted event must be in the store");
+        assert!(
+            eval_event.is_some(),
+            "EvalRunStarted event must be in the store"
+        );
 
         if let Some(stored) = eval_event {
             if let cairn_domain::RuntimeEvent::EvalRunStarted(ev) = &stored.envelope.payload {
                 assert_eq!(ev.evaluator_type, "accuracy");
-                assert_eq!(ev.prompt_asset_id.as_ref().map(|id| id.as_str()), Some("pa_1"));
-                assert_eq!(ev.prompt_release_id.as_ref().map(|id| id.as_str()), Some("rel_1"));
+                assert_eq!(
+                    ev.prompt_asset_id.as_ref().map(|id| id.as_str()),
+                    Some("pa_1")
+                );
+                assert_eq!(
+                    ev.prompt_release_id.as_ref().map(|id| id.as_str()),
+                    Some("rel_1")
+                );
             }
         }
 
@@ -17555,12 +18562,12 @@ mod tests {
     fn operator_token_store_insert_list_remove() {
         let store = OperatorTokenStore::new();
         let record = OperatorTokenRecord {
-            token_id:    "tok_1".to_owned(),
+            token_id: "tok_1".to_owned(),
             operator_id: "op_1".to_owned(),
-            tenant_id:   "t1".to_owned(),
-            name:        "ci-bot".to_owned(),
-            created_at:  0,
-            expires_at:  None,
+            tenant_id: "t1".to_owned(),
+            name: "ci-bot".to_owned(),
+            created_at: 0,
+            expires_at: None,
         };
         store.insert("sk_raw".to_owned(), record);
         assert_eq!(store.list().len(), 1);
@@ -17573,12 +18580,12 @@ mod tests {
     fn token_store_raw_token_used_for_revocation() {
         let store = OperatorTokenStore::new();
         let record = OperatorTokenRecord {
-            token_id:    "tok_abc".to_owned(),
+            token_id: "tok_abc".to_owned(),
             operator_id: "op_1".to_owned(),
-            tenant_id:   "t1".to_owned(),
-            name:        "deploy-bot".to_owned(),
-            created_at:  0,
-            expires_at:  None,
+            tenant_id: "t1".to_owned(),
+            name: "deploy-bot".to_owned(),
+            created_at: 0,
+            expires_at: None,
         };
         store.insert("sk_secret123".to_owned(), record);
         assert_eq!(store.raw_token("tok_abc").unwrap(), "sk_secret123");
@@ -17603,6 +18610,4 @@ mod tests {
         // Second revoke is idempotent (returns false).
         assert!(!reg.revoke("tok"));
     }
-
-
 }

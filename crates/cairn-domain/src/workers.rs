@@ -1,4 +1,4 @@
-use crate::ids::{TenantId, RunId, TaskId, WorkerId};
+use crate::ids::{RunId, TaskId, TenantId, WorkerId};
 use crate::lifecycle::{FailureClass, PauseReason};
 use crate::tenancy::ProjectKey;
 use serde::{Deserialize, Serialize};

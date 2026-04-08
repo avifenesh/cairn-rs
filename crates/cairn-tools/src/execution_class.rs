@@ -68,13 +68,11 @@ pub fn select_execution_config(manifest: &PluginManifest, mode: DeploymentMode) 
     let _max_concurrency = manifest.limits.as_ref().and_then(|l| l.max_concurrency);
 
     match effective_class {
-        ExecutionClass::SupervisedProcess => {
-            SelectedConfig::Supervised(SupervisedProcessConfig {
-                timeout_ms,
-                granted_permissions: manifest.permissions.permissions.clone(),
-                ..Default::default()
-            })
-        }
+        ExecutionClass::SupervisedProcess => SelectedConfig::Supervised(SupervisedProcessConfig {
+            timeout_ms,
+            granted_permissions: manifest.permissions.permissions.clone(),
+            ..Default::default()
+        }),
         ExecutionClass::Sensitive | ExecutionClass::SandboxedProcess => {
             SelectedConfig::Sandboxed(SandboxedProcessConfig {
                 timeout_ms,

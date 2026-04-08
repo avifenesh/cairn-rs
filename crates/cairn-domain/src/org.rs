@@ -71,4 +71,3 @@ pub fn validate_operator_preferences(prefs: &serde_json::Value) -> Result<(), St
 
     Ok(())
 }
-

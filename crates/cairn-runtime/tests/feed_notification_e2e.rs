@@ -71,7 +71,10 @@ async fn list_returns_items_most_recent_first() {
     let result = store.list(&project(), &FeedQuery::default()).await.unwrap();
     assert_eq!(result.items.len(), 3);
     // push_item inserts at front of order — most recently pushed is first.
-    assert_eq!(result.items[0].id, "3", "most recently pushed item must be first");
+    assert_eq!(
+        result.items[0].id, "3",
+        "most recently pushed item must be first"
+    );
     assert_eq!(result.items[1].id, "2");
     assert_eq!(result.items[2].id, "1", "earliest item must be last");
 }
@@ -130,21 +133,33 @@ async fn read_all_marks_every_unread_item_and_returns_count() {
     store.mark_read("1").await.unwrap();
 
     let changed = store.read_all(&project()).await.unwrap();
-    assert_eq!(changed, 2, "read_all must return count of newly-read items (2 were unread)");
+    assert_eq!(
+        changed, 2,
+        "read_all must return count of newly-read items (2 were unread)"
+    );
 
     // Verify all are read.
     let unread = store
         .list(
             &project(),
-            &FeedQuery { unread: Some(true), ..FeedQuery::default() },
+            &FeedQuery {
+                unread: Some(true),
+                ..FeedQuery::default()
+            },
         )
         .await
         .unwrap();
-    assert!(unread.items.is_empty(), "no items must remain unread after read_all");
+    assert!(
+        unread.items.is_empty(),
+        "no items must remain unread after read_all"
+    );
 
     // All items must now have is_read = true.
     let all = store.list(&project(), &FeedQuery::default()).await.unwrap();
-    assert!(all.items.iter().all(|i| i.is_read), "all items must be is_read=true");
+    assert!(
+        all.items.iter().all(|i| i.is_read),
+        "all items must be is_read=true"
+    );
 }
 
 #[tokio::test]
@@ -171,12 +186,19 @@ async fn source_filter_returns_only_matching_items() {
     let slack_only = store
         .list(
             &project(),
-            &FeedQuery { source: Some("slack".to_owned()), ..FeedQuery::default() },
+            &FeedQuery {
+                source: Some("slack".to_owned()),
+                ..FeedQuery::default()
+            },
         )
         .await
         .unwrap();
 
-    assert_eq!(slack_only.items.len(), 2, "source=slack must return exactly 2 items");
+    assert_eq!(
+        slack_only.items.len(),
+        2,
+        "source=slack must return exactly 2 items"
+    );
     assert!(slack_only.items.iter().all(|i| i.source == "slack"));
 }
 
@@ -194,13 +216,19 @@ async fn unread_filter_excludes_read_items() {
     let unread = store
         .list(
             &project(),
-            &FeedQuery { unread: Some(true), ..FeedQuery::default() },
+            &FeedQuery {
+                unread: Some(true),
+                ..FeedQuery::default()
+            },
         )
         .await
         .unwrap();
 
     assert_eq!(unread.items.len(), 2, "only 2 unread items must appear");
-    assert!(!unread.items.iter().any(|i| i.id == "u2"), "read item u2 must be excluded");
+    assert!(
+        !unread.items.iter().any(|i| i.id == "u2"),
+        "read item u2 must be excluded"
+    );
     assert!(unread.items.iter().all(|i| !i.is_read));
 }
 
@@ -216,13 +244,19 @@ async fn limit_restricts_number_of_returned_items() {
     let page = store
         .list(
             &project(),
-            &FeedQuery { limit: Some(3), ..FeedQuery::default() },
+            &FeedQuery {
+                limit: Some(3),
+                ..FeedQuery::default()
+            },
         )
         .await
         .unwrap();
 
     assert_eq!(page.items.len(), 3, "limit=3 must return exactly 3 items");
-    assert!(page.has_more, "has_more must be true when results were capped by limit");
+    assert!(
+        page.has_more,
+        "has_more must be true when results were capped by limit"
+    );
 }
 
 // ── (10) mark_read on unknown ID returns error ────────────────────────────
@@ -233,5 +267,8 @@ async fn mark_read_on_unknown_id_returns_error() {
     store.push_item(item("known", "api"));
 
     let result = store.mark_read("does_not_exist").await;
-    assert!(result.is_err(), "mark_read on unknown ID must return an error");
+    assert!(
+        result.is_err(),
+        "mark_read on unknown ID must return an error"
+    );
 }

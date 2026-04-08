@@ -19,9 +19,9 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use cairn_domain::{
-    ActionProposal, ActionType,
-    agent_roles::{AgentRole, default_roles},
+    agent_roles::{default_roles, AgentRole},
     providers::{GenerationProvider, ProviderBindingSettings},
+    ActionProposal, ActionType,
 };
 
 use cairn_tools::builtins::{BuiltinToolDescriptor, BuiltinToolRegistry};
@@ -39,7 +39,7 @@ use crate::error::OrchestratorError;
 /// tokenizers) when accuracy becomes important.
 #[inline]
 pub fn estimate_tokens(text: &str) -> usize {
-    (text.len() + 3) / 4  // round up so we never under-count
+    (text.len() + 3) / 4 // round up so we never under-count
 }
 
 /// Token budget for a single LLM call.
@@ -103,9 +103,9 @@ impl Default for TokenBudget {
 ///
 /// Thread-safe: all fields are `Arc` or immutable.
 pub struct LlmDecidePhase {
-    provider:    Arc<dyn GenerationProvider>,
-    model_id:    String,
-    settings:    ProviderBindingSettings,
+    provider: Arc<dyn GenerationProvider>,
+    model_id: String,
+    settings: ProviderBindingSettings,
     /// Optional fixed confidence offset applied to every proposal
     /// (replaces a full `ConfidenceCalibrator` when historical data is absent).
     confidence_bias: f64,
@@ -120,27 +120,29 @@ impl LlmDecidePhase {
     pub fn new(provider: Arc<dyn GenerationProvider>, model_id: impl Into<String>) -> Self {
         Self {
             provider,
-            model_id:        model_id.into(),
-            settings:        ProviderBindingSettings {
+            model_id: model_id.into(),
+            settings: ProviderBindingSettings {
                 max_output_tokens: Some(2048),
                 ..Default::default()
             },
             confidence_bias: 0.0,
-            token_budget:    None,
-            tools:           None,
+            token_budget: None,
+            tools: None,
         }
     }
 
     /// Override generation settings (e.g. temperature, max_output_tokens).
     pub fn with_settings(mut self, s: ProviderBindingSettings) -> Self {
-        self.settings = s; self
+        self.settings = s;
+        self
     }
 
     /// Apply a fixed bias to every proposal's confidence (clamped to [0, 1]).
     /// Positive = boost, negative = penalise.  Use when a full calibrator
     /// is not wired up yet.
     pub fn with_confidence_bias(mut self, bias: f64) -> Self {
-        self.confidence_bias = bias; self
+        self.confidence_bias = bias;
+        self
     }
 
     /// Set a token budget for prompt truncation.
@@ -149,7 +151,8 @@ impl LlmDecidePhase {
     /// model discovery).  The `PromptBuilder` will truncate memory chunks,
     /// step history, and graph context to fit within the available input budget.
     pub fn with_token_budget(mut self, budget: TokenBudget) -> Self {
-        self.token_budget = Some(budget); self
+        self.token_budget = Some(budget);
+        self
     }
 
     /// Convenience: build a `TokenBudget` from a known context window size and
@@ -160,7 +163,8 @@ impl LlmDecidePhase {
 
     /// Attach a BuiltinToolRegistry; Core + Registered tools appear in the system prompt.
     pub fn with_tools(mut self, registry: std::sync::Arc<BuiltinToolRegistry>) -> Self {
-        self.tools = Some(registry); self
+        self.tools = Some(registry);
+        self
     }
 }
 
@@ -175,7 +179,8 @@ impl DecidePhase for LlmDecidePhase {
         // 1. Core + Registered tools (always included)
         // 2. Deferred tools discovered via tool_search in prior iterations
         //    (ctx.discovered_tool_names carries them across the loop boundary)
-        let mut tool_descs: Vec<BuiltinToolDescriptor> = self.tools
+        let mut tool_descs: Vec<BuiltinToolDescriptor> = self
+            .tools
             .as_ref()
             .map(|r| r.prompt_tools())
             .unwrap_or_default();
@@ -196,14 +201,15 @@ impl DecidePhase for LlmDecidePhase {
         }
 
         let system = build_system_prompt(&ctx.agent_type, &tool_descs);
-        let user   = build_user_message(ctx, gather, self.token_budget.as_ref());
+        let user = build_user_message(ctx, gather, self.token_budget.as_ref());
         let messages = vec![
             serde_json::json!({ "role": "system", "content": system }),
             serde_json::json!({ "role": "user",   "content": user   }),
         ];
 
         let t0 = Instant::now();
-        let resp = self.provider
+        let resp = self
+            .provider
             .generate(&self.model_id, messages.clone(), &self.settings)
             .await
             .map_err(|e| OrchestratorError::Decide(e.to_string()))?;
@@ -223,7 +229,11 @@ impl DecidePhase for LlmDecidePhase {
                 serde_json::json!({ "role": "system", "content": system }),
                 serde_json::json!({ "role": "user",   "content": retry_user }),
             ];
-            match self.provider.generate(&self.model_id, retry_messages, &self.settings).await {
+            match self
+                .provider
+                .generate(&self.model_id, retry_messages, &self.settings)
+                .await
+            {
                 Ok(r2) => {
                     let second = parse_proposals(&r2.text);
                     if !is_fallback_escalation(&second) {
@@ -295,7 +305,8 @@ fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> Str
 
     // Build the tool list section (shown only when tools are registered).
     let tools_section = if !tools.is_empty() {
-        let lines = tools.iter()
+        let lines = tools
+            .iter()
             .map(|t| format!("  - {}", t.prompt_line()))
             .collect::<Vec<_>>()
             .join("\n");
@@ -373,11 +384,14 @@ fn build_user_message(
     let goal_part = format!("## Goal\n{}", ctx.goal);
     let run_state_part = format!(
         "## Run state\nrun_id: {}\niteration: {}\nagent_type: {}",
-        ctx.run_id.as_str(), ctx.iteration, ctx.agent_type,
+        ctx.run_id.as_str(),
+        ctx.iteration,
+        ctx.agent_type,
     );
     let has_memory = !gather.memory_chunks.is_empty();
     let memory_hint = if has_memory {
-        "Memory contains relevant information — use it to answer the goal, then complete_run.".to_owned()
+        "Memory contains relevant information — use it to answer the goal, then complete_run."
+            .to_owned()
     } else {
         "Memory is empty. You have enough knowledge to answer this goal directly. \
          Return complete_run immediately with your best answer — do NOT call memory_search again \
@@ -410,7 +424,11 @@ fn build_user_message(
     } else {
         let mut snippets: Vec<String> = Vec::new();
         for (i, r) in gather.memory_chunks.iter().enumerate() {
-            let line = format!("[{}] {}", i + 1, r.chunk.text.chars().take(400).collect::<String>());
+            let line = format!(
+                "[{}] {}",
+                i + 1,
+                r.chunk.text.chars().take(400).collect::<String>()
+            );
             if let Some(rem) = remaining.as_mut() {
                 let cost = estimate_tokens(&line) + 1;
                 if *rem < cost {
@@ -449,7 +467,10 @@ fn build_user_message(
         if lines.is_empty() {
             None
         } else {
-            Some(format!("## Step history (most recent first)\n{}", lines.join("\n")))
+            Some(format!(
+                "## Step history (most recent first)\n{}",
+                lines.join("\n")
+            ))
         }
     };
 
@@ -457,7 +478,9 @@ fn build_user_message(
     let settings_section: Option<String> = if gather.operator_settings.is_empty() {
         None
     } else {
-        let text = gather.operator_settings.iter()
+        let text = gather
+            .operator_settings
+            .iter()
             .map(|s| format!("  {}: {}", s.key, s.value))
             .collect::<Vec<_>>()
             .join("\n");
@@ -483,7 +506,9 @@ fn build_user_message(
         );
         if let Some(rem) = remaining.as_mut() {
             let cost = estimate_tokens(&section);
-            if *rem < cost { return None; }
+            if *rem < cost {
+                return None;
+            }
             *rem = rem.saturating_sub(cost);
         }
         Some(section)
@@ -497,7 +522,9 @@ fn build_user_message(
         for node in &gather.graph_nodes {
             let cost = node.node_id.len() / 4 + 2;
             if let Some(rem) = remaining.as_mut() {
-                if *rem < cost { break; }
+                if *rem < cost {
+                    break;
+                }
                 *rem = rem.saturating_sub(cost);
             }
             node_ids.push(node.node_id.as_str());
@@ -505,17 +532,30 @@ fn build_user_message(
         if node_ids.is_empty() {
             None
         } else {
-            Some(format!("## Graph context\nNearby nodes: {}", node_ids.join(", ")))
+            Some(format!(
+                "## Graph context\nNearby nodes: {}",
+                node_ids.join(", ")
+            ))
         }
     };
 
     // ── Assemble ──────────────────────────────────────────────────────────────
     let mut parts: Vec<String> = vec![goal_part, run_state_part];
-    if let Some(s) = memory_section    { parts.push(s); }
-    if let Some(s) = step_section      { parts.push(s); }
-    if let Some(s) = settings_section  { parts.push(s); }
-    if let Some(s) = checkpoint_section { parts.push(s); }
-    if let Some(s) = graph_section     { parts.push(s); }
+    if let Some(s) = memory_section {
+        parts.push(s);
+    }
+    if let Some(s) = step_section {
+        parts.push(s);
+    }
+    if let Some(s) = settings_section {
+        parts.push(s);
+    }
+    if let Some(s) = checkpoint_section {
+        parts.push(s);
+    }
+    if let Some(s) = graph_section {
+        parts.push(s);
+    }
     parts.push(footer);
     parts.join("\n\n")
 }
@@ -543,7 +583,10 @@ fn parse_proposals(raw: &str) -> Vec<ActionProposal> {
 
     // Fallback escalation
     vec![ActionProposal::escalate(
-        format!("LLM returned a non-JSON response (first 200 chars): {}", &raw[..raw.len().min(200)]),
+        format!(
+            "LLM returned a non-JSON response (first 200 chars): {}",
+            &raw[..raw.len().min(200)]
+        ),
         0.0,
     )]
 }
@@ -561,21 +604,42 @@ fn strip_markdown_fence(s: &str) -> &str {
 fn parse_one(v: serde_json::Value) -> Option<ActionProposal> {
     let obj = v.as_object()?;
     let action_type = match obj.get("action_type")?.as_str()? {
-        "spawn_subagent"       => ActionType::SpawnSubagent,
-        "invoke_tool"          => ActionType::InvokeTool,
-        "create_memory"        => ActionType::CreateMemory,
-        "send_notification"    => ActionType::SendNotification,
-        "complete_run"         => ActionType::CompleteRun,
+        "spawn_subagent" => ActionType::SpawnSubagent,
+        "invoke_tool" => ActionType::InvokeTool,
+        "create_memory" => ActionType::CreateMemory,
+        "send_notification" => ActionType::SendNotification,
+        "complete_run" => ActionType::CompleteRun,
         "escalate_to_operator" => ActionType::EscalateToOperator,
         _ => return None,
     };
-    let description    = obj.get("description").and_then(|d| d.as_str()).unwrap_or("").to_owned();
-    let confidence     = obj.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.5).clamp(0.0, 1.0);
-    let requires_approval = obj.get("requires_approval").and_then(|r| r.as_bool()).unwrap_or(false);
-    let tool_name      = obj.get("tool_name").and_then(|n| n.as_str()).map(str::to_owned);
-    let tool_args      = obj.get("tool_args").cloned();
+    let description = obj
+        .get("description")
+        .and_then(|d| d.as_str())
+        .unwrap_or("")
+        .to_owned();
+    let confidence = obj
+        .get("confidence")
+        .and_then(|c| c.as_f64())
+        .unwrap_or(0.5)
+        .clamp(0.0, 1.0);
+    let requires_approval = obj
+        .get("requires_approval")
+        .and_then(|r| r.as_bool())
+        .unwrap_or(false);
+    let tool_name = obj
+        .get("tool_name")
+        .and_then(|n| n.as_str())
+        .map(str::to_owned);
+    let tool_args = obj.get("tool_args").cloned();
 
-    Some(ActionProposal { action_type, description, confidence, tool_name, tool_args, requires_approval })
+    Some(ActionProposal {
+        action_type,
+        description,
+        confidence,
+        tool_name,
+        tool_args,
+        requires_approval,
+    })
 }
 
 /// Returns true when `proposals` is exactly a single `EscalateToOperator`
@@ -587,15 +651,25 @@ fn parse_one(v: serde_json::Value) -> Option<ActionProposal> {
 /// Models sometimes over-cautiously set `requires_approval=true` for memory
 /// searches or HTTP GETs.  This guard corrects that before the approval gate.
 fn is_safe_read_action(proposal: &ActionProposal) -> bool {
-    use ActionType::{InvokeTool, CreateMemory, CompleteRun};
+    use ActionType::{CompleteRun, CreateMemory, InvokeTool};
     match proposal.action_type {
         InvokeTool => {
             let name = proposal.tool_name.as_deref().unwrap_or("").to_lowercase();
             matches!(
                 name.as_str(),
-                "memory_search" | "web_fetch" | "http_request" | "get_run" | "get_task"
-                | "search_memory" | "list_runs" | "glob_find" | "grep_search"
-                | "read_document" | "file_read" | "graph_query" | "search_events"
+                "memory_search"
+                    | "web_fetch"
+                    | "http_request"
+                    | "get_run"
+                    | "get_task"
+                    | "search_memory"
+                    | "list_runs"
+                    | "glob_find"
+                    | "grep_search"
+                    | "read_document"
+                    | "file_read"
+                    | "graph_query"
+                    | "search_events"
             )
         }
         CreateMemory | CompleteRun => true,
@@ -618,7 +692,9 @@ mod tests {
 
     // ── Mock provider ─────────────────────────────────────────────────────────
 
-    struct MockProvider { response: String }
+    struct MockProvider {
+        response: String,
+    }
 
     #[async_trait]
     impl GenerationProvider for MockProvider {
@@ -629,11 +705,11 @@ mod tests {
             _settings: &ProviderBindingSettings,
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Ok(GenerationResponse {
-                text:          self.response.clone(),
-                input_tokens:  Some(150),
+                text: self.response.clone(),
+                input_tokens: Some(150),
                 output_tokens: Some(100),
-                model_id:      "test-brain".to_owned(),
-                tool_calls:    vec![],
+                model_id: "test-brain".to_owned(),
+                tool_calls: vec![],
             })
         }
     }
@@ -643,7 +719,10 @@ mod tests {
     #[async_trait]
     impl GenerationProvider for FailingProvider {
         async fn generate(
-            &self, _: &str, _: Vec<serde_json::Value>, _: &ProviderBindingSettings,
+            &self,
+            _: &str,
+            _: Vec<serde_json::Value>,
+            _: &ProviderBindingSettings,
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Err(ProviderAdapterError::TransportFailure("offline".to_owned()))
         }
@@ -653,13 +732,13 @@ mod tests {
 
     fn ctx() -> OrchestrationContext {
         OrchestrationContext {
-            project:         cairn_domain::ProjectKey::new("t", "w", "p"),
-            session_id:      cairn_domain::SessionId::new("sess_1"),
-            run_id:          cairn_domain::RunId::new("run_1"),
-            task_id:         None,
-            iteration:       0,
-            goal:            "Summarise the cairn-rs architecture document.".to_owned(),
-            agent_type:      "orchestrator".to_owned(),
+            project: cairn_domain::ProjectKey::new("t", "w", "p"),
+            session_id: cairn_domain::SessionId::new("sess_1"),
+            run_id: cairn_domain::RunId::new("run_1"),
+            task_id: None,
+            iteration: 0,
+            goal: "Summarise the cairn-rs architecture document.".to_owned(),
+            agent_type: "orchestrator".to_owned(),
             run_started_at_ms: 0,
             discovered_tool_names: vec![],
         }
@@ -674,40 +753,50 @@ mod tests {
     #[test]
     fn system_prompt_references_orchestrator_role() {
         let sys = build_system_prompt("orchestrator", &[]);
-        assert!(sys.contains("orchestrator"), "should mention orchestrator role");
-        assert!(sys.contains("JSON array"),   "should instruct JSON array return");
+        assert!(
+            sys.contains("orchestrator"),
+            "should mention orchestrator role"
+        );
+        assert!(
+            sys.contains("JSON array"),
+            "should instruct JSON array return"
+        );
         assert!(sys.contains("spawn_subagent"), "should list spawn_subagent");
-        assert!(sys.contains("complete_run"),   "should list complete_run");
+        assert!(sys.contains("complete_run"), "should list complete_run");
     }
 
     #[test]
     fn system_prompt_fallback_for_unknown_role() {
         let sys = build_system_prompt("wizard", &[]);
-        assert!(sys.contains("JSON array"), "fallback must still instruct JSON return");
+        assert!(
+            sys.contains("JSON array"),
+            "fallback must still instruct JSON return"
+        );
     }
 
     #[test]
     fn user_message_contains_goal_and_run_id() {
         let msg = build_user_message(&ctx(), &empty_gather(), None);
         assert!(msg.contains("cairn-rs architecture"), "goal must appear");
-        assert!(msg.contains("run_1"),                 "run_id must appear");
-        assert!(msg.contains("orchestrator"),          "agent_type must appear");
+        assert!(msg.contains("run_1"), "run_id must appear");
+        assert!(msg.contains("orchestrator"), "agent_type must appear");
     }
 
     #[test]
     fn user_message_embeds_step_history() {
         let mut g = empty_gather();
-        g.step_history = vec![
-            crate::context::StepSummary {
-                iteration:   0,
-                action_kind: "invoke_tool".to_owned(),
-                summary:     "searched for architecture docs".to_owned(),
-                succeeded:   true,
-            },
-        ];
+        g.step_history = vec![crate::context::StepSummary {
+            iteration: 0,
+            action_kind: "invoke_tool".to_owned(),
+            summary: "searched for architecture docs".to_owned(),
+            succeeded: true,
+        }];
         let msg = build_user_message(&ctx(), &g, None);
-        assert!(msg.contains("architecture docs"), "step history must appear");
-        assert!(msg.contains("invoke_tool"),       "action kind must appear");
+        assert!(
+            msg.contains("architecture docs"),
+            "step history must appear"
+        );
+        assert!(msg.contains("invoke_tool"), "action kind must appear");
     }
 
     // ── Response parser tests ─────────────────────────────────────────────────
@@ -733,8 +822,14 @@ mod tests {
         let proposals = parse_proposals(raw);
         assert_eq!(proposals.len(), 1);
         assert_eq!(proposals[0].action_type, ActionType::EscalateToOperator);
-        assert!(proposals[0].requires_approval, "escalation must require approval");
-        assert_eq!(proposals[0].confidence, 0.0, "fallback confidence must be 0");
+        assert!(
+            proposals[0].requires_approval,
+            "escalation must require approval"
+        );
+        assert_eq!(
+            proposals[0].confidence, 0.0,
+            "fallback confidence must be 0"
+        );
         assert!(is_fallback_escalation(&proposals));
     }
 
@@ -802,7 +897,10 @@ mod tests {
         });
         let phase = LlmDecidePhase::new(mock, "gemma4");
         let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
-        assert!(out.requires_approval, "requires_approval must be true when any proposal is flagged");
+        assert!(
+            out.requires_approval,
+            "requires_approval must be true when any proposal is flagged"
+        );
     }
 
     #[tokio::test]
@@ -812,7 +910,10 @@ mod tests {
         });
         let phase = LlmDecidePhase::new(mock, "gemma4").with_confidence_bias(0.2);
         let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
-        assert!((out.proposals[0].confidence - 0.7).abs() < 1e-9, "bias should increase confidence");
+        assert!(
+            (out.proposals[0].confidence - 0.7).abs() < 1e-9,
+            "bias should increase confidence"
+        );
     }
 
     // ── TokenBudget tests ─────────────────────────────────────────────────────
@@ -856,8 +957,8 @@ mod tests {
     fn tight_budget_drops_optional_content() {
         let mut g = empty_gather();
         // Add memory and step history that would normally appear
-        g.memory_chunks = (0..5).map(|i| {
-            cairn_memory::retrieval::RetrievalResult {
+        g.memory_chunks = (0..5)
+            .map(|i| cairn_memory::retrieval::RetrievalResult {
                 chunk: {
                     let mut c = cairn_memory::ingest::ChunkRecord {
                         chunk_id: cairn_domain::ChunkId::new(format!("c{i}")),
@@ -882,16 +983,16 @@ mod tests {
                 },
                 score: 1.0 - i as f64 * 0.1,
                 breakdown: Default::default(),
-            }
-        }).collect();
-        g.step_history = (0..3).map(|i| {
-            crate::context::StepSummary {
+            })
+            .collect();
+        g.step_history = (0..3)
+            .map(|i| crate::context::StepSummary {
                 iteration: i,
                 action_kind: "invoke_tool".to_owned(),
                 summary: "did a thing".to_owned(),
                 succeeded: true,
-            }
-        }).collect();
+            })
+            .collect();
 
         // Budget of 50 tokens — can barely fit goal + run_state + footer
         let tight = TokenBudget::new(50).with_reserved_output(0);
@@ -909,57 +1010,65 @@ mod tests {
     #[test]
     fn no_budget_includes_all_content() {
         let mut g = empty_gather();
-        g.step_history = vec![
-            crate::context::StepSummary {
-                iteration: 0,
-                action_kind: "invoke_tool".to_owned(),
-                summary: "searched for architecture docs".to_owned(),
-                succeeded: true,
-            },
-        ];
+        g.step_history = vec![crate::context::StepSummary {
+            iteration: 0,
+            action_kind: "invoke_tool".to_owned(),
+            summary: "searched for architecture docs".to_owned(),
+            succeeded: true,
+        }];
         // memory chunk with distinctive text
-        g.memory_chunks = vec![
-            cairn_memory::retrieval::RetrievalResult {
-                chunk: {
-                    cairn_memory::ingest::ChunkRecord {
-                        chunk_id: cairn_domain::ChunkId::new("c0"),
-                        document_id: cairn_domain::KnowledgeDocumentId::new("doc"),
-                        source_id: cairn_domain::SourceId::new("src"),
-                        source_type: cairn_memory::ingest::SourceType::PlainText,
-                        project: ctx().project,
-                        text: "cairn uses event sourcing for durability".to_owned(),
-                        position: 0,
-                        created_at: 0,
-                        updated_at: None,
-                        provenance_metadata: None,
-                        credibility_score: None,
-                        graph_linkage: None,
-                        embedding: None,
-                        content_hash: None,
-                        entities: vec![],
-                        embedding_model_id: None,
-                        needs_reembed: false,
-                    }
-                },
-                score: 0.9,
-                breakdown: Default::default(),
+        g.memory_chunks = vec![cairn_memory::retrieval::RetrievalResult {
+            chunk: {
+                cairn_memory::ingest::ChunkRecord {
+                    chunk_id: cairn_domain::ChunkId::new("c0"),
+                    document_id: cairn_domain::KnowledgeDocumentId::new("doc"),
+                    source_id: cairn_domain::SourceId::new("src"),
+                    source_type: cairn_memory::ingest::SourceType::PlainText,
+                    project: ctx().project,
+                    text: "cairn uses event sourcing for durability".to_owned(),
+                    position: 0,
+                    created_at: 0,
+                    updated_at: None,
+                    provenance_metadata: None,
+                    credibility_score: None,
+                    graph_linkage: None,
+                    embedding: None,
+                    content_hash: None,
+                    entities: vec![],
+                    embedding_model_id: None,
+                    needs_reembed: false,
+                }
             },
-        ];
+            score: 0.9,
+            breakdown: Default::default(),
+        }];
 
         let msg = build_user_message(&ctx(), &g, None);
 
-        assert!(msg.contains("cairn uses event sourcing"), "memory chunk must appear without budget");
-        assert!(msg.contains("architecture docs"), "step history must appear without budget");
+        assert!(
+            msg.contains("cairn uses event sourcing"),
+            "memory chunk must appear without budget"
+        );
+        assert!(
+            msg.contains("architecture docs"),
+            "step history must appear without budget"
+        );
     }
 
     /// Memory chunks are included most-relevant-first; least relevant are dropped
     /// when the budget is tight.
     #[test]
     fn memory_chunks_most_relevant_first() {
-        let texts = ["highly relevant content here", "somewhat relevant", "least relevant stuff"];
+        let texts = [
+            "highly relevant content here",
+            "somewhat relevant",
+            "least relevant stuff",
+        ];
         let mut g = empty_gather();
-        g.memory_chunks = texts.iter().enumerate().map(|(i, text)| {
-            cairn_memory::retrieval::RetrievalResult {
+        g.memory_chunks = texts
+            .iter()
+            .enumerate()
+            .map(|(i, text)| cairn_memory::retrieval::RetrievalResult {
                 chunk: cairn_memory::ingest::ChunkRecord {
                     chunk_id: cairn_domain::ChunkId::new(format!("c{i}")),
                     document_id: cairn_domain::KnowledgeDocumentId::new("doc"),
@@ -981,8 +1090,8 @@ mod tests {
                 },
                 score: 1.0 - i as f64 * 0.3,
                 breakdown: Default::default(),
-            }
-        }).collect();
+            })
+            .collect();
 
         // Large budget — all three included
         let msg = build_user_message(&ctx(), &g, None);

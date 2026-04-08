@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use cairn_domain::{OutcomeId, ProjectKey, RunId};
 use cairn_domain::events::ActualOutcome;
+use cairn_domain::{OutcomeId, ProjectKey, RunId};
 use serde::{Deserialize, Serialize};
 
 use crate::error::StoreError;

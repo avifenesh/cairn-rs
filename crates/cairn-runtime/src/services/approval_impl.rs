@@ -105,16 +105,12 @@ where
         if let Some(ref run_id) = approval.run_id {
             if let Some(run) = RunReadModel::get(self.store.as_ref(), run_id).await? {
                 let (to_state, failure_class, resume_trigger) = match decision {
-                    ApprovalDecision::Approved => (
-                        RunState::Running,
-                        None,
-                        Some(ResumeTrigger::OperatorResume),
-                    ),
-                    ApprovalDecision::Rejected => (
-                        RunState::Failed,
-                        Some(FailureClass::ApprovalRejected),
-                        None,
-                    ),
+                    ApprovalDecision::Approved => {
+                        (RunState::Running, None, Some(ResumeTrigger::OperatorResume))
+                    }
+                    ApprovalDecision::Rejected => {
+                        (RunState::Failed, Some(FailureClass::ApprovalRejected), None)
+                    }
                 };
                 if can_transition_run_state(run.state, to_state) {
                     let transition_event =

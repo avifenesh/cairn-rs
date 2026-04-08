@@ -30,7 +30,13 @@ fn now_millis() -> u64 {
 #[async_trait]
 impl<S> RetentionService for RetentionServiceImpl<S>
 where
-    S: EventLog + RetentionPolicyReadModel + RetentionMaintenance + TenantReadModel + Send + Sync + 'static,
+    S: EventLog
+        + RetentionPolicyReadModel
+        + RetentionMaintenance
+        + TenantReadModel
+        + Send
+        + Sync
+        + 'static,
 {
     async fn set_policy(
         &self,
@@ -131,26 +137,30 @@ mod tests {
 
         let project = ProjectKey::new("tenant_retention", "ws_retention", "project_retention");
         let session_id = SessionId::new("session_retention");
-        store.append(&[make_runtime_event(RuntimeEvent::SessionCreated(SessionCreated {
-            project: project.clone(),
-            session_id: session_id.clone(),
-        }))])
-        .await
-        .unwrap();
-
-        for idx in 0..19 {
-            store.append(&[make_runtime_event(RuntimeEvent::SessionStateChanged(
-                SessionStateChanged {
+        store
+            .append(&[make_runtime_event(RuntimeEvent::SessionCreated(
+                SessionCreated {
                     project: project.clone(),
                     session_id: session_id.clone(),
-                    transition: StateTransition {
-                        from: Some(SessionState::Open),
-                        to: SessionState::Open,
-                    },
                 },
             ))])
             .await
             .unwrap();
+
+        for idx in 0..19 {
+            store
+                .append(&[make_runtime_event(RuntimeEvent::SessionStateChanged(
+                    SessionStateChanged {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                        transition: StateTransition {
+                            from: Some(SessionState::Open),
+                            to: SessionState::Open,
+                        },
+                    },
+                ))])
+                .await
+                .unwrap();
             if idx == 18 {
                 // no-op to keep loop structure obvious for 20 total events on one entity
             }

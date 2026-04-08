@@ -34,11 +34,12 @@ async fn setup() -> (
             source_id: SourceId::new("wiki"),
             source_type: SourceType::Html,
             project: project(),
-            content: "<h1>Deployment Guide</h1>\
+            content:
+                "<h1>Deployment Guide</h1>\
                       <p>Step 1: Build the container image using <code>docker build</code>.</p>\
                       <p>Step 2: Push to the registry with <code>docker push</code>.</p>\
                       <p>Step 3: Apply the Kubernetes manifest with <code>kubectl apply</code>.</p>"
-                .to_owned(),
+                    .to_owned(),
             tags: vec![],
             corpus_id: None,
             bundle_source_id: None,
@@ -224,10 +225,7 @@ async fn metadata_filter_restricts_to_html_source_type() {
         .await
         .unwrap();
 
-    assert!(
-        !filtered.results.is_empty(),
-        "should find Html results"
-    );
+    assert!(!filtered.results.is_empty(), "should find Html results");
     for result in &filtered.results {
         assert_eq!(
             result.chunk.source_type,

@@ -41,7 +41,11 @@ pub struct AgentRole {
 }
 
 impl AgentRole {
-    pub fn new(role_id: impl Into<String>, display_name: impl Into<String>, tier: AgentRoleTier) -> Self {
+    pub fn new(
+        role_id: impl Into<String>,
+        display_name: impl Into<String>,
+        tier: AgentRoleTier,
+    ) -> Self {
         Self {
             role_id: role_id.into(),
             display_name: display_name.into(),
@@ -79,7 +83,6 @@ pub fn default_roles() -> Vec<AgentRole> {
                  and synthesize results. You have access to all tools.",
             )
             .with_max_context_tokens(200_000),
-
         AgentRole::new("researcher", "Researcher", AgentRoleTier::Research)
             .with_system_prompt(
                 "You are a researcher. Focus on information gathering, analysis, and synthesis. \
@@ -94,7 +97,6 @@ pub fn default_roles() -> Vec<AgentRole> {
                 "cairn.fetchUrl",
             ])
             .with_max_context_tokens(128_000),
-
         AgentRole::new("executor", "Executor", AgentRoleTier::Standard)
             .with_system_prompt(
                 "You are an executor. Carry out well-defined tasks precisely and reliably. \
@@ -107,7 +109,6 @@ pub fn default_roles() -> Vec<AgentRole> {
                 "cairn.listFiles",
                 "cairn.search",
             ]),
-
         AgentRole::new("reviewer", "Reviewer", AgentRoleTier::Standard)
             .with_system_prompt(
                 "You are a reviewer. Inspect, evaluate, and report findings. \
@@ -163,6 +164,9 @@ mod tests {
         let roles = default_roles();
         let rev = roles.iter().find(|r| r.role_id == "reviewer").unwrap();
         // Reviewer must NOT include write tools.
-        assert!(!rev.allowed_tools.iter().any(|t| t.contains("write") || t.contains("Write")));
+        assert!(!rev
+            .allowed_tools
+            .iter()
+            .any(|t| t.contains("write") || t.contains("Write")));
     }
 }

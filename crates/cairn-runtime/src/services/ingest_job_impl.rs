@@ -136,14 +136,9 @@ mod tests {
         let svc = IngestJobServiceImpl::new(store);
         let project = test_project();
 
-        svc.start(
-            &project,
-            IngestJobId::new("job_2"),
-            None,
-            3,
-        )
-        .await
-        .unwrap();
+        svc.start(&project, IngestJobId::new("job_2"), None, 3)
+            .await
+            .unwrap();
 
         let record = svc
             .complete(&project, IngestJobId::new("job_2"), true, None)
@@ -160,14 +155,9 @@ mod tests {
         let svc = IngestJobServiceImpl::new(store);
         let project = test_project();
 
-        svc.start(
-            &project,
-            IngestJobId::new("job_3"),
-            None,
-            1,
-        )
-        .await
-        .unwrap();
+        svc.start(&project, IngestJobId::new("job_3"), None, 1)
+            .await
+            .unwrap();
 
         let record = svc
             .complete(
@@ -189,14 +179,9 @@ mod tests {
         let svc = IngestJobServiceImpl::new(store);
         let project = test_project();
 
-        svc.start(
-            &project,
-            IngestJobId::new("job_4"),
-            None,
-            2,
-        )
-        .await
-        .unwrap();
+        svc.start(&project, IngestJobId::new("job_4"), None, 2)
+            .await
+            .unwrap();
 
         let found = svc.get(&IngestJobId::new("job_4")).await.unwrap();
         assert!(found.is_some());

@@ -153,7 +153,7 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
             if j < len {
                 // We found a closing '$' for the tag.
                 let tag: String = chars[tag_start..=j].iter().collect(); // includes both $
-                // Now scan forward to find the matching closing tag.
+                                                                         // Now scan forward to find the matching closing tag.
                 let closing_start = j + 1;
                 let tag_chars: Vec<char> = tag.chars().collect();
                 let tag_len = tag_chars.len();
@@ -254,8 +254,16 @@ CREATE TRIGGER trg BEFORE INSERT ON chunks FOR EACH ROW EXECUTE FUNCTION tsv_tri
         let stmts = split_sql_statements(sql);
         // Should be exactly 2: the function and the trigger.
         assert_eq!(stmts.len(), 2, "got: {stmts:?}");
-        assert!(stmts[0].contains("LANGUAGE plpgsql"), "first stmt: {}", stmts[0]);
-        assert!(stmts[1].contains("CREATE TRIGGER"), "second stmt: {}", stmts[1]);
+        assert!(
+            stmts[0].contains("LANGUAGE plpgsql"),
+            "first stmt: {}",
+            stmts[0]
+        );
+        assert!(
+            stmts[1].contains("CREATE TRIGGER"),
+            "second stmt: {}",
+            stmts[1]
+        );
     }
 
     #[test]
@@ -277,7 +285,12 @@ CREATE TRIGGER trg BEFORE INSERT ON chunks FOR EACH ROW EXECUTE FUNCTION tsv_tri
         // ALTER TABLE, CREATE INDEX, CREATE FUNCTION, CREATE TRIGGER.
         let sql = include_str!("../../migrations/V014__add_chunks_fts.sql");
         let stmts = split_sql_statements(sql);
-        assert_eq!(stmts.len(), 4, "expected 4 statements, got {}: {stmts:?}", stmts.len());
+        assert_eq!(
+            stmts.len(),
+            4,
+            "expected 4 statements, got {}: {stmts:?}",
+            stmts.len()
+        );
     }
 }
 

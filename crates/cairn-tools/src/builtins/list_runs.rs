@@ -47,9 +47,13 @@ impl ListRunsTool {
 
 #[async_trait]
 impl ToolHandler for ListRunsTool {
-    fn name(&self) -> &str { "list_runs" }
+    fn name(&self) -> &str {
+        "list_runs"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
 
     fn description(&self) -> &str {
         "List runs in the current project, optionally filtered by state."
@@ -83,13 +87,15 @@ impl ToolHandler for ListRunsTool {
     }
 
     async fn execute(&self, project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
-        let limit = args.get("limit")
+        let limit = args
+            .get("limit")
             .and_then(|v| v.as_u64())
             .unwrap_or(DEFAULT_LIMIT as u64)
             .min(MAX_LIMIT as u64) as usize;
 
         // Parse optional state filter.
-        let state_filter: Option<RunState> = match args.get("state_filter").and_then(|v| v.as_str()) {
+        let state_filter: Option<RunState> = match args.get("state_filter").and_then(|v| v.as_str())
+        {
             None => None,
             Some(s) => {
                 let state = parse_run_state(s).ok_or_else(|| ToolError::InvalidArgs {
@@ -101,26 +107,31 @@ impl ToolHandler for ListRunsTool {
         };
 
         let records = match state_filter {
-            Some(state) => {
-                RunReadModel::list_by_state(self.store.as_ref(), state, limit).await
-                    .map_err(|e| ToolError::Transient(e.to_string()))?
-            }
+            Some(state) => RunReadModel::list_by_state(self.store.as_ref(), state, limit)
+                .await
+                .map_err(|e| ToolError::Transient(e.to_string()))?,
             None => {
                 // No filter: list active runs for the project.
-                RunReadModel::list_active_by_project(self.store.as_ref(), project, limit).await
+                RunReadModel::list_active_by_project(self.store.as_ref(), project, limit)
+                    .await
                     .map_err(|e| ToolError::Transient(e.to_string()))?
             }
         };
 
-        let runs: Vec<Value> = records.iter().map(|r| serde_json::json!({
-            "run_id":         r.run_id.as_str(),
-            "session_id":     r.session_id.as_str(),
-            "state":          format!("{:?}", r.state).to_lowercase(),
-            "agent_role":     r.agent_role_id,
-            "parent_run_id":  r.parent_run_id.as_ref().map(|id| id.as_str()),
-            "created_at":     r.created_at,
-            "updated_at":     r.updated_at,
-        })).collect();
+        let runs: Vec<Value> = records
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "run_id":         r.run_id.as_str(),
+                    "session_id":     r.session_id.as_str(),
+                    "state":          format!("{:?}", r.state).to_lowercase(),
+                    "agent_role":     r.agent_role_id,
+                    "parent_run_id":  r.parent_run_id.as_ref().map(|id| id.as_str()),
+                    "created_at":     r.created_at,
+                    "updated_at":     r.updated_at,
+                })
+            })
+            .collect();
 
         let total = runs.len();
         Ok(ToolResult::ok(serde_json::json!({
@@ -133,15 +144,15 @@ impl ToolHandler for ListRunsTool {
 /// Parse a snake_case run state string.
 fn parse_run_state(s: &str) -> Option<RunState> {
     match s {
-        "pending"            => Some(RunState::Pending),
-        "running"            => Some(RunState::Running),
-        "waiting_approval"   => Some(RunState::WaitingApproval),
-        "paused"             => Some(RunState::Paused),
+        "pending" => Some(RunState::Pending),
+        "running" => Some(RunState::Running),
+        "waiting_approval" => Some(RunState::WaitingApproval),
+        "paused" => Some(RunState::Paused),
         "waiting_dependency" => Some(RunState::WaitingDependency),
-        "completed"          => Some(RunState::Completed),
-        "failed"             => Some(RunState::Failed),
-        "canceled"           => Some(RunState::Canceled),
-        _                    => None,
+        "completed" => Some(RunState::Completed),
+        "failed" => Some(RunState::Failed),
+        "canceled" => Some(RunState::Canceled),
+        _ => None,
     }
 }
 
@@ -150,24 +161,32 @@ fn parse_run_state(s: &str) -> Option<RunState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use async_trait::async_trait;
     use cairn_domain::{RunId, SessionId};
-    use cairn_store::{projections::RunRecord, error::StoreError};
+    use cairn_store::{error::StoreError, projections::RunRecord};
+    use std::sync::Arc;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     // ── Minimal stub ──────────────────────────────────────────────────────────
 
-    struct StubStore { records: Vec<RunRecord> }
+    struct StubStore {
+        records: Vec<RunRecord>,
+    }
 
     #[async_trait]
     impl RunReadModel for StubStore {
         async fn get(&self, id: &RunId) -> Result<Option<RunRecord>, StoreError> {
             Ok(self.records.iter().find(|r| r.run_id == *id).cloned())
         }
-        async fn list_by_session(&self, _: &SessionId, limit: usize, _: usize)
-            -> Result<Vec<RunRecord>, StoreError> {
+        async fn list_by_session(
+            &self,
+            _: &SessionId,
+            limit: usize,
+            _: usize,
+        ) -> Result<Vec<RunRecord>, StoreError> {
             Ok(self.records.iter().take(limit).cloned().collect())
         }
         async fn any_non_terminal(&self, _: &SessionId) -> Result<bool, StoreError> {
@@ -176,31 +195,43 @@ mod tests {
         async fn latest_root_run(&self, _: &SessionId) -> Result<Option<RunRecord>, StoreError> {
             Ok(self.records.first().cloned())
         }
-        async fn list_by_state(&self, state: RunState, limit: usize)
-            -> Result<Vec<RunRecord>, StoreError> {
-            Ok(self.records.iter().filter(|r| r.state == state).take(limit).cloned().collect())
+        async fn list_by_state(
+            &self,
+            state: RunState,
+            limit: usize,
+        ) -> Result<Vec<RunRecord>, StoreError> {
+            Ok(self
+                .records
+                .iter()
+                .filter(|r| r.state == state)
+                .take(limit)
+                .cloned()
+                .collect())
         }
-        async fn list_active_by_project(&self, _: &ProjectKey, limit: usize)
-            -> Result<Vec<RunRecord>, StoreError> {
+        async fn list_active_by_project(
+            &self,
+            _: &ProjectKey,
+            limit: usize,
+        ) -> Result<Vec<RunRecord>, StoreError> {
             Ok(self.records.iter().take(limit).cloned().collect())
         }
     }
 
     fn run_record(id: &str, state: RunState) -> RunRecord {
         RunRecord {
-            run_id:           RunId::new(id),
-            session_id:       SessionId::new("sess_1"),
-            parent_run_id:    None,
-            project:          project(),
+            run_id: RunId::new(id),
+            session_id: SessionId::new("sess_1"),
+            parent_run_id: None,
+            project: project(),
             state,
             prompt_release_id: None,
-            agent_role_id:    None,
-            failure_class:    None,
-            pause_reason:     None,
-            resume_trigger:   None,
-            version:          1,
-            created_at:       1_000_000,
-            updated_at:       1_000_001,
+            agent_role_id: None,
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+            version: 1,
+            created_at: 1_000_000,
+            updated_at: 1_000_001,
         }
     }
 
@@ -224,7 +255,8 @@ mod tests {
     async fn unknown_state_is_invalid() {
         let err = make_tool(vec![])
             .execute(&project(), serde_json::json!({"state_filter": "zombie"}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { field, .. } if field == "state_filter"));
     }
 
@@ -234,7 +266,8 @@ mod tests {
     async fn empty_store_returns_empty_list() {
         let result = make_tool(vec![])
             .execute(&project(), serde_json::json!({}))
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(result.output["total"], 0);
         assert_eq!(result.output["runs"].as_array().unwrap().len(), 0);
     }
@@ -247,7 +280,8 @@ mod tests {
         ];
         let result = make_tool(records)
             .execute(&project(), serde_json::json!({}))
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(result.output["total"], 2);
         let runs = result.output["runs"].as_array().unwrap();
         let ids: Vec<&str> = runs.iter().map(|r| r["run_id"].as_str().unwrap()).collect();
@@ -264,7 +298,8 @@ mod tests {
         ];
         let result = make_tool(records)
             .execute(&project(), serde_json::json!({"state_filter": "running"}))
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(result.output["total"], 2);
         let runs = result.output["runs"].as_array().unwrap();
         assert!(runs.iter().all(|r| r["state"] == "running"));
@@ -272,10 +307,13 @@ mod tests {
 
     #[tokio::test]
     async fn limit_is_respected() {
-        let records = (0..50).map(|i| run_record(&format!("run_{i:02}"), RunState::Running)).collect();
+        let records = (0..50)
+            .map(|i| run_record(&format!("run_{i:02}"), RunState::Running))
+            .collect();
         let result = make_tool(records)
             .execute(&project(), serde_json::json!({"limit": 5}))
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(result.output["total"], 5);
     }
 
@@ -286,7 +324,8 @@ mod tests {
             .collect();
         let result = make_tool(records)
             .execute(&project(), serde_json::json!({"limit": 999}))
-            .await.unwrap();
+            .await
+            .unwrap();
         // StubStore::list_active_by_project truncates to the capped limit
         assert!(result.output["total"].as_u64().unwrap() <= 100);
     }
@@ -295,7 +334,8 @@ mod tests {
     async fn run_fields_are_populated() {
         let result = make_tool(vec![run_record("run_x", RunState::Running)])
             .execute(&project(), serde_json::json!({}))
-            .await.unwrap();
+            .await
+            .unwrap();
         let run = &result.output["runs"][0];
         assert_eq!(run["run_id"], "run_x");
         assert_eq!(run["state"], "running");
@@ -306,14 +346,14 @@ mod tests {
     #[test]
     fn parse_run_state_round_trips() {
         for (s, state) in [
-            ("pending",            RunState::Pending),
-            ("running",            RunState::Running),
-            ("waiting_approval",   RunState::WaitingApproval),
-            ("paused",             RunState::Paused),
+            ("pending", RunState::Pending),
+            ("running", RunState::Running),
+            ("waiting_approval", RunState::WaitingApproval),
+            ("paused", RunState::Paused),
             ("waiting_dependency", RunState::WaitingDependency),
-            ("completed",          RunState::Completed),
-            ("failed",             RunState::Failed),
-            ("canceled",           RunState::Canceled),
+            ("completed", RunState::Completed),
+            ("failed", RunState::Failed),
+            ("canceled", RunState::Canceled),
         ] {
             assert_eq!(parse_run_state(s), Some(state), "failed for '{s}'");
         }

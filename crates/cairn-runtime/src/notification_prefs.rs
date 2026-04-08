@@ -1,7 +1,9 @@
 //! RFC 008: operator notification preferences service boundary.
 
 use async_trait::async_trait;
-use cairn_domain::notification_prefs::{NotificationChannel, NotificationPreference, NotificationRecord};
+use cairn_domain::notification_prefs::{
+    NotificationChannel, NotificationPreference, NotificationRecord,
+};
 use cairn_domain::TenantId;
 
 use crate::error::RuntimeError;

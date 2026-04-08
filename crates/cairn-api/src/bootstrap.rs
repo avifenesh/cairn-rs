@@ -233,7 +233,11 @@ impl BootstrapConfig {
             }
         }
 
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
@@ -295,8 +299,12 @@ mod tests {
     fn validate_rejects_sqlite_in_team_mode() {
         let config = BootstrapConfig {
             mode: DeploymentMode::SelfHostedTeam,
-            storage: StorageBackend::Sqlite { path: "cairn.db".to_owned() },
-            encryption_key: EncryptionKeySource::EnvVar { var_name: "KEY".to_owned() },
+            storage: StorageBackend::Sqlite {
+                path: "cairn.db".to_owned(),
+            },
+            encryption_key: EncryptionKeySource::EnvVar {
+                var_name: "KEY".to_owned(),
+            },
             ..BootstrapConfig::default()
         };
         let errs = config.validate().unwrap_err();
@@ -308,8 +316,12 @@ mod tests {
     fn validate_accepts_postgres_in_team_mode_with_key() {
         let config = BootstrapConfig {
             mode: DeploymentMode::SelfHostedTeam,
-            storage: StorageBackend::Postgres { connection_url: "postgres://localhost/cairn".to_owned() },
-            encryption_key: EncryptionKeySource::EnvVar { var_name: "CAIRN_KEY".to_owned() },
+            storage: StorageBackend::Postgres {
+                connection_url: "postgres://localhost/cairn".to_owned(),
+            },
+            encryption_key: EncryptionKeySource::EnvVar {
+                var_name: "CAIRN_KEY".to_owned(),
+            },
             ..BootstrapConfig::default()
         };
         assert!(config.validate().is_ok());
@@ -327,7 +339,9 @@ mod tests {
     fn validate_rejects_missing_key_in_team_mode() {
         let config = BootstrapConfig {
             mode: DeploymentMode::SelfHostedTeam,
-            storage: StorageBackend::Postgres { connection_url: "postgres://localhost/cairn".to_owned() },
+            storage: StorageBackend::Postgres {
+                connection_url: "postgres://localhost/cairn".to_owned(),
+            },
             encryption_key: EncryptionKeySource::None,
             ..BootstrapConfig::default()
         };
@@ -362,12 +376,27 @@ mod tests {
     #[test]
     fn process_role_parse_variants() {
         assert_eq!(ProcessRole::from_str_loose("api"), ProcessRole::ApiOnly);
-        assert_eq!(ProcessRole::from_str_loose("api-only"), ProcessRole::ApiOnly);
-        assert_eq!(ProcessRole::from_str_loose("worker"), ProcessRole::WorkerOnly);
-        assert_eq!(ProcessRole::from_str_loose("worker_only"), ProcessRole::WorkerOnly);
+        assert_eq!(
+            ProcessRole::from_str_loose("api-only"),
+            ProcessRole::ApiOnly
+        );
+        assert_eq!(
+            ProcessRole::from_str_loose("worker"),
+            ProcessRole::WorkerOnly
+        );
+        assert_eq!(
+            ProcessRole::from_str_loose("worker_only"),
+            ProcessRole::WorkerOnly
+        );
         assert_eq!(ProcessRole::from_str_loose("all"), ProcessRole::AllInOne);
-        assert_eq!(ProcessRole::from_str_loose("all-in-one"), ProcessRole::AllInOne);
-        assert_eq!(ProcessRole::from_str_loose("unknown"), ProcessRole::AllInOne);
+        assert_eq!(
+            ProcessRole::from_str_loose("all-in-one"),
+            ProcessRole::AllInOne
+        );
+        assert_eq!(
+            ProcessRole::from_str_loose("unknown"),
+            ProcessRole::AllInOne
+        );
     }
 
     #[test]
@@ -389,13 +418,18 @@ mod rfc011_tests {
     fn rfc011_team_mode_rejects_sqlite_fail_closed() {
         let config = BootstrapConfig {
             mode: DeploymentMode::SelfHostedTeam,
-            storage: StorageBackend::Sqlite { path: "cairn.db".to_owned() },
-            encryption_key: EncryptionKeySource::EnvVar { var_name: "KEY".to_owned() },
+            storage: StorageBackend::Sqlite {
+                path: "cairn.db".to_owned(),
+            },
+            encryption_key: EncryptionKeySource::EnvVar {
+                var_name: "KEY".to_owned(),
+            },
             ..BootstrapConfig::default()
         };
         let errs = config.validate().unwrap_err();
         assert!(
-            errs.iter().any(|e| *e == ConfigValidationError::SqliteNotSupportedInTeamMode),
+            errs.iter()
+                .any(|e| *e == ConfigValidationError::SqliteNotSupportedInTeamMode),
             "RFC 011: SQLite must be rejected in self-hosted team mode"
         );
     }
@@ -405,7 +439,9 @@ mod rfc011_tests {
     fn rfc011_team_mode_without_key_fails_closed() {
         let config = BootstrapConfig {
             mode: DeploymentMode::SelfHostedTeam,
-            storage: StorageBackend::Postgres { connection_url: "postgres://localhost/cairn".to_owned() },
+            storage: StorageBackend::Postgres {
+                connection_url: "postgres://localhost/cairn".to_owned(),
+            },
             encryption_key: EncryptionKeySource::None,
             ..BootstrapConfig::default()
         };
@@ -415,7 +451,8 @@ mod rfc011_tests {
         );
         let errs = config.validate().unwrap_err();
         assert!(
-            errs.iter().any(|e| *e == ConfigValidationError::MissingEncryptionKeyInTeamMode),
+            errs.iter()
+                .any(|e| *e == ConfigValidationError::MissingEncryptionKeyInTeamMode),
             "RFC 011: missing encryption key must be a validation error"
         );
     }
@@ -429,8 +466,11 @@ mod rfc011_tests {
         for role in &all_roles {
             // Each role must be expressible and distinct.
             let config = BootstrapConfig::default();
-            assert!(config.has_role(*role),
-                "RFC 011: all-in-one default must have role {:?}", role);
+            assert!(
+                config.has_role(*role),
+                "RFC 011: all-in-one default must have role {:?}",
+                role
+            );
         }
     }
 
@@ -439,10 +479,14 @@ mod rfc011_tests {
     fn rfc011_local_mode_is_first_class_valid_deployment() {
         let config = BootstrapConfig::default();
         assert_eq!(config.mode, DeploymentMode::Local);
-        assert!(config.validate().is_ok(),
-            "RFC 011: default local mode must pass validation");
-        assert!(config.credentials_available(),
-            "RFC 011: local mode with LocalAuto key must have credentials available");
+        assert!(
+            config.validate().is_ok(),
+            "RFC 011: default local mode must pass validation"
+        );
+        assert!(
+            config.credentials_available(),
+            "RFC 011: local mode with LocalAuto key must have credentials available"
+        );
     }
 
     /// RFC 011: self-hosted team mode with valid postgres+key passes.
@@ -450,11 +494,17 @@ mod rfc011_tests {
     fn rfc011_team_mode_with_postgres_and_key_is_valid() {
         let config = BootstrapConfig {
             mode: DeploymentMode::SelfHostedTeam,
-            storage: StorageBackend::Postgres { connection_url: "postgres://localhost/cairn".to_owned() },
-            encryption_key: EncryptionKeySource::EnvVar { var_name: "CAIRN_KEK".to_owned() },
+            storage: StorageBackend::Postgres {
+                connection_url: "postgres://localhost/cairn".to_owned(),
+            },
+            encryption_key: EncryptionKeySource::EnvVar {
+                var_name: "CAIRN_KEK".to_owned(),
+            },
             ..BootstrapConfig::default()
         };
-        assert!(config.validate().is_ok(),
-            "RFC 011: team mode with Postgres and env key must pass validation");
+        assert!(
+            config.validate().is_ok(),
+            "RFC 011: team mode with Postgres and env key must pass validation"
+        );
     }
 }

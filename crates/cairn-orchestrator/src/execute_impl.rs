@@ -20,15 +20,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::{
-    ActionType, ApprovalId, CheckpointId, ExecutionClass, SessionId, TaskId,
-    ToolInvocationId,
     policy::ApprovalRequirement,
     tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget},
+    ActionType, ApprovalId, CheckpointId, ExecutionClass, SessionId, TaskId, ToolInvocationId,
 };
 use cairn_runtime::{
-    ApprovalService, CheckpointService, RunService,
     mailbox::MailboxService,
     services::{TaskServiceImpl, ToolInvocationService},
+    ApprovalService, CheckpointService, RunService,
 };
 use cairn_store::InMemoryStore;
 use cairn_tools::builtins::BuiltinToolRegistry;
@@ -48,11 +47,11 @@ use crate::execute::ExecutePhase;
 /// same underlying `InMemoryStore` so writes from one service are immediately
 /// visible to reads from another.
 pub struct RuntimeExecutePhase {
-    run_service:             Arc<dyn RunService>,
-    task_service:            Arc<TaskServiceImpl<InMemoryStore>>,
-    approval_service:        Arc<dyn ApprovalService>,
-    checkpoint_service:      Arc<dyn CheckpointService>,
-    mailbox_service:         Arc<dyn MailboxService>,
+    run_service: Arc<dyn RunService>,
+    task_service: Arc<TaskServiceImpl<InMemoryStore>>,
+    approval_service: Arc<dyn ApprovalService>,
+    checkpoint_service: Arc<dyn CheckpointService>,
+    mailbox_service: Arc<dyn MailboxService>,
     tool_invocation_service: Arc<dyn ToolInvocationService>,
     /// Registered built-in tools (memory_search, memory_store, …).
     /// When `Some`, tool names are looked up here before falling back to the
@@ -72,51 +71,62 @@ impl RuntimeExecutePhase {
 
 #[derive(Default)]
 pub struct RuntimeExecutePhaseBuilder {
-    run_service:             Option<Arc<dyn RunService>>,
-    task_service:            Option<Arc<TaskServiceImpl<InMemoryStore>>>,
-    approval_service:        Option<Arc<dyn ApprovalService>>,
-    checkpoint_service:      Option<Arc<dyn CheckpointService>>,
-    mailbox_service:         Option<Arc<dyn MailboxService>>,
+    run_service: Option<Arc<dyn RunService>>,
+    task_service: Option<Arc<TaskServiceImpl<InMemoryStore>>>,
+    approval_service: Option<Arc<dyn ApprovalService>>,
+    checkpoint_service: Option<Arc<dyn CheckpointService>>,
+    mailbox_service: Option<Arc<dyn MailboxService>>,
     tool_invocation_service: Option<Arc<dyn ToolInvocationService>>,
-    tool_registry:           Option<Arc<BuiltinToolRegistry>>,
+    tool_registry: Option<Arc<BuiltinToolRegistry>>,
     checkpoint_every_n_tool_calls: u32,
 }
 
 impl RuntimeExecutePhaseBuilder {
     pub fn run_service(mut self, s: Arc<dyn RunService>) -> Self {
-        self.run_service = Some(s); self
+        self.run_service = Some(s);
+        self
     }
     pub fn task_service(mut self, s: Arc<TaskServiceImpl<InMemoryStore>>) -> Self {
-        self.task_service = Some(s); self
+        self.task_service = Some(s);
+        self
     }
     pub fn approval_service(mut self, s: Arc<dyn ApprovalService>) -> Self {
-        self.approval_service = Some(s); self
+        self.approval_service = Some(s);
+        self
     }
     pub fn checkpoint_service(mut self, s: Arc<dyn CheckpointService>) -> Self {
-        self.checkpoint_service = Some(s); self
+        self.checkpoint_service = Some(s);
+        self
     }
     pub fn mailbox_service(mut self, s: Arc<dyn MailboxService>) -> Self {
-        self.mailbox_service = Some(s); self
+        self.mailbox_service = Some(s);
+        self
     }
     pub fn tool_invocation_service(mut self, s: Arc<dyn ToolInvocationService>) -> Self {
-        self.tool_invocation_service = Some(s); self
+        self.tool_invocation_service = Some(s);
+        self
     }
     pub fn tool_registry(mut self, r: Arc<BuiltinToolRegistry>) -> Self {
-        self.tool_registry = Some(r); self
+        self.tool_registry = Some(r);
+        self
     }
     pub fn checkpoint_every_n_tool_calls(mut self, n: u32) -> Self {
-        self.checkpoint_every_n_tool_calls = n; self
+        self.checkpoint_every_n_tool_calls = n;
+        self
     }
     pub fn build(self) -> RuntimeExecutePhase {
         RuntimeExecutePhase {
-            run_service:             self.run_service.expect("run_service required"),
-            task_service:            self.task_service.expect("task_service required"),
-            approval_service:        self.approval_service.expect("approval_service required"),
-            checkpoint_service:      self.checkpoint_service.expect("checkpoint_service required"),
-            mailbox_service:         self.mailbox_service.expect("mailbox_service required"),
-            tool_invocation_service: self.tool_invocation_service
+            run_service: self.run_service.expect("run_service required"),
+            task_service: self.task_service.expect("task_service required"),
+            approval_service: self.approval_service.expect("approval_service required"),
+            checkpoint_service: self
+                .checkpoint_service
+                .expect("checkpoint_service required"),
+            mailbox_service: self.mailbox_service.expect("mailbox_service required"),
+            tool_invocation_service: self
+                .tool_invocation_service
                 .expect("tool_invocation_service required"),
-            tool_registry:           self.tool_registry,
+            tool_registry: self.tool_registry,
             checkpoint_every_n_tool_calls: self.checkpoint_every_n_tool_calls.max(1),
         }
     }
@@ -158,7 +168,10 @@ impl ExecutePhase for RuntimeExecutePhase {
             }
         }
 
-        Ok(ExecuteOutcome { results, loop_signal })
+        Ok(ExecuteOutcome {
+            results,
+            loop_signal,
+        })
     }
 }
 
@@ -183,7 +196,9 @@ impl RuntimeExecutePhase {
                         Some(ctx.session_id.clone()),
                         Some(ctx.run_id.clone()),
                         ctx.task_id.clone(),
-                        ToolInvocationTarget::Builtin { tool_name: tool_name.clone() },
+                        ToolInvocationTarget::Builtin {
+                            tool_name: tool_name.clone(),
+                        },
                         ExecutionClass::SandboxedProcess,
                     )
                     .await
@@ -194,12 +209,18 @@ impl RuntimeExecutePhase {
                     // Look up the tool in the built-in registry.
                     // `execute()` returns Result<ToolResult, ToolError>; map to
                     // the flat Result<Value, String> expected below.
-                    registry.execute(
-                        &tool_name,
-                        &ctx.project,
-                        proposal.tool_args.clone().unwrap_or(serde_json::Value::Null),
-                    ).await.map(|r| r.output)
-                       .map_err(|e| e.to_string())
+                    registry
+                        .execute(
+                            &tool_name,
+                            &ctx.project,
+                            proposal
+                                .tool_args
+                                .clone()
+                                .unwrap_or(serde_json::Value::Null),
+                        )
+                        .await
+                        .map(|r| r.output)
+                        .map_err(|e| e.to_string())
                 } else {
                     dispatch_tool(&tool_name, proposal.tool_args.as_ref())
                 };
@@ -257,10 +278,11 @@ impl RuntimeExecutePhase {
 
             // ── SpawnSubagent ──────────────────────────────────────────────
             ActionType::SpawnSubagent => {
-                let child_task_id    = TaskId::new(new_id("child_task"));
+                let child_task_id = TaskId::new(new_id("child_task"));
                 let child_session_id = SessionId::new(new_id("child_sess"));
 
-                match self.task_service
+                match self
+                    .task_service
                     .spawn_subagent(
                         &ctx.project,
                         ctx.run_id.clone(),
@@ -279,7 +301,9 @@ impl RuntimeExecutePhase {
                     }),
                     Err(e) => Ok(ActionResult {
                         proposal: proposal.clone(),
-                        status: ActionStatus::Failed { reason: e.to_string() },
+                        status: ActionStatus::Failed {
+                            reason: e.to_string(),
+                        },
                         tool_output: None,
                         invocation_id: None,
                     }),
@@ -302,11 +326,16 @@ impl RuntimeExecutePhase {
                         });
                     }
                 };
-                let to_task = TaskId::new(
-                    proposal.tool_name.as_deref().unwrap_or(ctx.run_id.as_str()),
-                );
-                match self.mailbox_service
-                    .send(&ctx.project, from_task, to_task, proposal.description.clone())
+                let to_task =
+                    TaskId::new(proposal.tool_name.as_deref().unwrap_or(ctx.run_id.as_str()));
+                match self
+                    .mailbox_service
+                    .send(
+                        &ctx.project,
+                        from_task,
+                        to_task,
+                        proposal.description.clone(),
+                    )
                     .await
                 {
                     Ok(_) => Ok(ActionResult {
@@ -317,7 +346,9 @@ impl RuntimeExecutePhase {
                     }),
                     Err(e) => Ok(ActionResult {
                         proposal: proposal.clone(),
-                        status: ActionStatus::Failed { reason: e.to_string() },
+                        status: ActionStatus::Failed {
+                            reason: e.to_string(),
+                        },
                         tool_output: None,
                         invocation_id: None,
                     }),
@@ -325,27 +356,28 @@ impl RuntimeExecutePhase {
             }
 
             // ── CompleteRun ────────────────────────────────────────────────
-            ActionType::CompleteRun => {
-                match self.run_service.complete(&ctx.run_id).await {
-                    Ok(_) => Ok(ActionResult {
-                        proposal: proposal.clone(),
-                        status: ActionStatus::Succeeded,
-                        tool_output: None,
-                        invocation_id: None,
-                    }),
-                    Err(e) => Ok(ActionResult {
-                        proposal: proposal.clone(),
-                        status: ActionStatus::Failed { reason: e.to_string() },
-                        tool_output: None,
-                        invocation_id: None,
-                    }),
-                }
-            }
+            ActionType::CompleteRun => match self.run_service.complete(&ctx.run_id).await {
+                Ok(_) => Ok(ActionResult {
+                    proposal: proposal.clone(),
+                    status: ActionStatus::Succeeded,
+                    tool_output: None,
+                    invocation_id: None,
+                }),
+                Err(e) => Ok(ActionResult {
+                    proposal: proposal.clone(),
+                    status: ActionStatus::Failed {
+                        reason: e.to_string(),
+                    },
+                    tool_output: None,
+                    invocation_id: None,
+                }),
+            },
 
             // ── EscalateToOperator ─────────────────────────────────────────
             ActionType::EscalateToOperator => {
                 let approval_id = ApprovalId::new(new_id("appr"));
-                match self.approval_service
+                match self
+                    .approval_service
                     .request(
                         &ctx.project,
                         approval_id.clone(),
@@ -363,7 +395,9 @@ impl RuntimeExecutePhase {
                     }),
                     Err(e) => Ok(ActionResult {
                         proposal: proposal.clone(),
-                        status: ActionStatus::Failed { reason: e.to_string() },
+                        status: ActionStatus::Failed {
+                            reason: e.to_string(),
+                        },
                         tool_output: None,
                         invocation_id: None,
                     }),
@@ -404,15 +438,15 @@ fn derive_signal(result: &ActionResult, current: &LoopSignal) -> LoopSignal {
                 LoopSignal::Continue
             }
         }
-        ActionStatus::SubagentSpawned { child_task_id } => {
-            LoopSignal::WaitSubagent { child_task_id: child_task_id.clone() }
-        }
-        ActionStatus::AwaitingApproval { approval_id } => {
-            LoopSignal::WaitApproval { approval_id: approval_id.clone() }
-        }
-        ActionStatus::Failed { reason } => {
-            LoopSignal::Failed { reason: reason.clone() }
-        }
+        ActionStatus::SubagentSpawned { child_task_id } => LoopSignal::WaitSubagent {
+            child_task_id: child_task_id.clone(),
+        },
+        ActionStatus::AwaitingApproval { approval_id } => LoopSignal::WaitApproval {
+            approval_id: approval_id.clone(),
+        },
+        ActionStatus::Failed { reason } => LoopSignal::Failed {
+            reason: reason.clone(),
+        },
     }
 }
 
@@ -437,8 +471,8 @@ fn dispatch_tool(
     args: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     match tool_name {
-        "search_memory" | "read_document" | "write_document" | "send_message"
-        | "list_tasks" | "http_get" | "http_post" => Ok(serde_json::json!({
+        "search_memory" | "read_document" | "write_document" | "send_message" | "list_tasks"
+        | "http_get" | "http_post" => Ok(serde_json::json!({
             "tool":   tool_name,
             "args":   args,
             "result": null,
@@ -466,26 +500,31 @@ fn new_id(prefix: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use cairn_domain::{ActionProposal, ActionType, ProjectKey, RunId, SessionId};
     use cairn_domain::{
-        EventEnvelope, EventId, EventSource, RunStateChanged, StateTransition,
-        lifecycle::RunState,
+        lifecycle::RunState, EventEnvelope, EventId, EventSource, RunStateChanged, StateTransition,
     };
+    use cairn_domain::{ActionProposal, ActionType, ProjectKey, RunId, SessionId};
     use cairn_runtime::{
-        InMemoryServices, RunService, SessionService,
         services::{
-            ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl,
-            RunServiceImpl, TaskServiceImpl, ToolInvocationServiceImpl,
+            ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RunServiceImpl,
+            TaskServiceImpl, ToolInvocationServiceImpl,
         },
+        InMemoryServices, RunService, SessionService,
     };
     use cairn_store::EventLog;
+    use std::sync::Arc;
 
     use crate::context::{DecideOutput, LoopSignal, OrchestrationContext};
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
-    fn run_id()    -> RunId     { RunId::new("run_exec_test") }
-    fn session_id() -> SessionId { SessionId::new("sess_exec_test") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
+    fn run_id() -> RunId {
+        RunId::new("run_exec_test")
+    }
+    fn session_id() -> SessionId {
+        SessionId::new("sess_exec_test")
+    }
 
     /// Build all services wired to the same shared store.
     fn make_services() -> Arc<InMemoryServices> {
@@ -513,13 +552,13 @@ mod tests {
 
     fn ctx() -> OrchestrationContext {
         OrchestrationContext {
-            project:           project(),
-            session_id:        session_id(),
-            run_id:            run_id(),
-            task_id:           None,
-            iteration:         0,
-            goal:              "test goal".to_owned(),
-            agent_type:        "test_agent".to_owned(),
+            project: project(),
+            session_id: session_id(),
+            run_id: run_id(),
+            task_id: None,
+            iteration: 0,
+            goal: "test goal".to_owned(),
+            agent_type: "test_agent".to_owned(),
             run_started_at_ms: 0,
             discovered_tool_names: vec![],
         }
@@ -527,14 +566,14 @@ mod tests {
 
     fn decide_with(proposals: Vec<ActionProposal>) -> DecideOutput {
         DecideOutput {
-            raw_response:          "{}".to_owned(),
+            raw_response: "{}".to_owned(),
             proposals,
             calibrated_confidence: 0.9,
-            requires_approval:     false,
-            model_id:              "stub_model".to_owned(),
-            latency_ms:            0,
-            input_tokens:          None,
-            output_tokens:         None,
+            requires_approval: false,
+            model_id: "stub_model".to_owned(),
+            latency_ms: 0,
+            input_tokens: None,
+            output_tokens: None,
         }
     }
 
@@ -542,24 +581,30 @@ mod tests {
     /// transitions are valid.
     async fn setup_run(svc: &Arc<InMemoryServices>) {
         svc.sessions.create(&project(), session_id()).await.unwrap();
-        svc.runs.start(&project(), &session_id(), run_id(), None).await.unwrap();
+        svc.runs
+            .start(&project(), &session_id(), run_id(), None)
+            .await
+            .unwrap();
 
         // RunService::complete requires Running state.  Emit a transition event.
-        svc.store.append(&[EventEnvelope::for_runtime_event(
-            EventId::new("evt_run_start_exec_test"),
-            EventSource::Runtime,
-            cairn_domain::RuntimeEvent::RunStateChanged(RunStateChanged {
-                project: project(),
-                run_id:  run_id(),
-                transition: StateTransition {
-                    from: Some(RunState::Pending),
-                    to:   RunState::Running,
-                },
-                failure_class: None,
-                pause_reason:  None,
-                resume_trigger: None,
-            }),
-        )]).await.unwrap();
+        svc.store
+            .append(&[EventEnvelope::for_runtime_event(
+                EventId::new("evt_run_start_exec_test"),
+                EventSource::Runtime,
+                cairn_domain::RuntimeEvent::RunStateChanged(RunStateChanged {
+                    project: project(),
+                    run_id: run_id(),
+                    transition: StateTransition {
+                        from: Some(RunState::Pending),
+                        to: RunState::Running,
+                    },
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
+                }),
+            )])
+            .await
+            .unwrap();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -572,9 +617,10 @@ mod tests {
         setup_run(&svc).await;
 
         let outcome = make_phase(&svc)
-            .execute(&ctx(), &decide_with(vec![
-                ActionProposal::complete_run("all done", 0.95)
-            ]))
+            .execute(
+                &ctx(),
+                &decide_with(vec![ActionProposal::complete_run("all done", 0.95)]),
+            )
             .await
             .unwrap();
 
@@ -595,15 +641,17 @@ mod tests {
         setup_run(&svc).await;
 
         let outcome = make_phase(&svc)
-            .execute(&ctx(), &decide_with(vec![
-                ActionProposal::escalate("need human", 0.3)
-            ]))
+            .execute(
+                &ctx(),
+                &decide_with(vec![ActionProposal::escalate("need human", 0.3)]),
+            )
             .await
             .unwrap();
 
         assert!(
             matches!(outcome.loop_signal, LoopSignal::WaitApproval { .. }),
-            "expected WaitApproval, got {:?}", outcome.loop_signal
+            "expected WaitApproval, got {:?}",
+            outcome.loop_signal
         );
         assert!(matches!(
             outcome.results[0].status,
@@ -621,28 +669,36 @@ mod tests {
         setup_run(&svc).await;
 
         let outcome = make_phase(&svc)
-            .execute(&ctx(), &decide_with(vec![
-                ActionProposal::invoke_tool(
+            .execute(
+                &ctx(),
+                &decide_with(vec![ActionProposal::invoke_tool(
                     "search_memory",
                     serde_json::json!({ "q": "rust ownership" }),
                     "search for context",
                     0.8,
                     false,
-                ),
-            ]))
+                )]),
+            )
             .await
             .unwrap();
 
         assert_eq!(outcome.loop_signal, LoopSignal::Continue);
         assert_eq!(outcome.results[0].status, ActionStatus::Succeeded);
-        assert!(outcome.results[0].invocation_id.is_some(),
-            "tool call must record a ToolInvocationId");
-        assert!(outcome.results[0].tool_output.is_some(),
-            "tool call must return an observation");
+        assert!(
+            outcome.results[0].invocation_id.is_some(),
+            "tool call must record a ToolInvocationId"
+        );
+        assert!(
+            outcome.results[0].tool_output.is_some(),
+            "tool call must return an observation"
+        );
 
         // Checkpoint must have been saved (checkpoint_every_n=1).
         let cp = svc.checkpoints.latest_for_run(&run_id()).await.unwrap();
-        assert!(cp.is_some(), "checkpoint must be saved after successful tool call");
+        assert!(
+            cp.is_some(),
+            "checkpoint must be saved after successful tool call"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -655,15 +711,16 @@ mod tests {
         setup_run(&svc).await;
 
         let outcome = make_phase(&svc)
-            .execute(&ctx(), &decide_with(vec![
-                ActionProposal::invoke_tool(
+            .execute(
+                &ctx(),
+                &decide_with(vec![ActionProposal::invoke_tool(
                     "nonexistent_tool",
                     serde_json::json!({}),
                     "call unknown tool",
                     0.5,
                     false,
-                ),
-            ]))
+                )]),
+            )
             .await
             .unwrap();
 
@@ -687,14 +744,17 @@ mod tests {
         setup_run(&svc).await;
 
         let outcome = make_phase(&svc)
-            .execute(&ctx(), &decide_with(vec![ActionProposal {
-                action_type:        ActionType::SpawnSubagent,
-                description:        "delegate to researcher".to_owned(),
-                confidence:         0.75,
-                tool_name:          Some("research_agent".to_owned()),
-                tool_args:          None,
-                requires_approval:  false,
-            }]))
+            .execute(
+                &ctx(),
+                &decide_with(vec![ActionProposal {
+                    action_type: ActionType::SpawnSubagent,
+                    description: "delegate to researcher".to_owned(),
+                    confidence: 0.75,
+                    tool_name: Some("research_agent".to_owned()),
+                    tool_args: None,
+                    requires_approval: false,
+                }]),
+            )
             .await
             .unwrap();
 
@@ -718,14 +778,17 @@ mod tests {
         setup_run(&svc).await;
 
         let outcome = make_phase(&svc)
-            .execute(&ctx(), &decide_with(vec![ActionProposal {
-                action_type:       ActionType::CreateMemory,
-                description:       "store knowledge".to_owned(),
-                confidence:        0.9,
-                tool_name:         None,
-                tool_args:         Some(serde_json::json!({ "content": "sky is blue" })),
-                requires_approval: false,
-            }]))
+            .execute(
+                &ctx(),
+                &decide_with(vec![ActionProposal {
+                    action_type: ActionType::CreateMemory,
+                    description: "store knowledge".to_owned(),
+                    confidence: 0.9,
+                    tool_name: None,
+                    tool_args: Some(serde_json::json!({ "content": "sky is blue" })),
+                    requires_approval: false,
+                }]),
+            )
             .await
             .unwrap();
 
@@ -743,22 +806,36 @@ mod tests {
         setup_run(&svc).await;
 
         let outcome = make_phase(&svc)
-            .execute(&ctx(), &decide_with(vec![
-                ActionProposal::invoke_tool(
-                    "search_memory", serde_json::json!({}), "search first", 0.8, false,
-                ),
-                ActionProposal::complete_run("done", 0.95),
-                // This third proposal must NOT be executed.
-                ActionProposal::invoke_tool(
-                    "http_get", serde_json::json!({}), "never reached", 0.5, false,
-                ),
-            ]))
+            .execute(
+                &ctx(),
+                &decide_with(vec![
+                    ActionProposal::invoke_tool(
+                        "search_memory",
+                        serde_json::json!({}),
+                        "search first",
+                        0.8,
+                        false,
+                    ),
+                    ActionProposal::complete_run("done", 0.95),
+                    // This third proposal must NOT be executed.
+                    ActionProposal::invoke_tool(
+                        "http_get",
+                        serde_json::json!({}),
+                        "never reached",
+                        0.5,
+                        false,
+                    ),
+                ]),
+            )
             .await
             .unwrap();
 
         assert_eq!(outcome.loop_signal, LoopSignal::Done);
-        assert_eq!(outcome.results.len(), 2,
-            "third proposal must be cut off after complete_run");
+        assert_eq!(
+            outcome.results.len(),
+            2,
+            "third proposal must be cut off after complete_run"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -782,10 +859,28 @@ mod tests {
             .build();
 
         // 2 tool calls → count = 2, neither is divisible by 3 → no checkpoint yet.
-        phase.execute(&ctx(), &decide_with(vec![
-            ActionProposal::invoke_tool("search_memory", serde_json::json!({}), "s1", 0.8, false),
-            ActionProposal::invoke_tool("search_memory", serde_json::json!({}), "s2", 0.8, false),
-        ])).await.unwrap();
+        phase
+            .execute(
+                &ctx(),
+                &decide_with(vec![
+                    ActionProposal::invoke_tool(
+                        "search_memory",
+                        serde_json::json!({}),
+                        "s1",
+                        0.8,
+                        false,
+                    ),
+                    ActionProposal::invoke_tool(
+                        "search_memory",
+                        serde_json::json!({}),
+                        "s2",
+                        0.8,
+                        false,
+                    ),
+                ]),
+            )
+            .await
+            .unwrap();
         let cp = svc.checkpoints.latest_for_run(&run_id()).await.unwrap();
         assert!(cp.is_none(), "no checkpoint after 2 of 3 required calls");
     }
@@ -801,7 +896,10 @@ mod tests {
 
         let phase: Box<dyn ExecutePhase> = Box::new(make_phase(&svc));
         let outcome = phase
-            .execute(&ctx(), &decide_with(vec![ActionProposal::complete_run("done", 1.0)]))
+            .execute(
+                &ctx(),
+                &decide_with(vec![ActionProposal::complete_run("done", 1.0)]),
+            )
             .await
             .unwrap();
         assert_eq!(outcome.loop_signal, LoopSignal::Done);

@@ -131,14 +131,14 @@ impl DiagnosticsService for InMemoryDiagnostics {
             stale_chunks: 0,
         }))
     }
-
 }
 
 impl InMemoryDiagnostics {
     /// Count total documents for a tenant (approximated from source quality records).
     pub fn total_documents_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u32 {
         let sources = self.sources.lock().unwrap();
-        sources.values()
+        sources
+            .values()
             .filter(|v| v.project.tenant_id == *tenant_id)
             .count() as u32
     }

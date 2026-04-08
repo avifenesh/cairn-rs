@@ -45,13 +45,13 @@ impl PluginHealthMonitor {
     /// Record a heartbeat for a plugin. Resets the missed counter.
     pub fn record_heartbeat(&self, plugin_id: &str) {
         let mut map = self.state.write().unwrap();
-        let entry = map.entry(plugin_id.to_owned()).or_insert_with(|| {
-            PluginHealthState {
+        let entry = map
+            .entry(plugin_id.to_owned())
+            .or_insert_with(|| PluginHealthState {
                 last_heartbeat_ms: 0,
                 consecutive_missed: 0,
                 last_error: None,
-            }
-        });
+            });
         entry.last_heartbeat_ms = now_ms();
         entry.consecutive_missed = 0;
     }
@@ -67,13 +67,13 @@ impl PluginHealthMonitor {
     /// Record an error from a plugin (crash, protocol violation, etc.).
     pub fn record_error(&self, plugin_id: &str, error: String) {
         let mut map = self.state.write().unwrap();
-        let entry = map.entry(plugin_id.to_owned()).or_insert_with(|| {
-            PluginHealthState {
+        let entry = map
+            .entry(plugin_id.to_owned())
+            .or_insert_with(|| PluginHealthState {
                 last_heartbeat_ms: 0,
                 consecutive_missed: 0,
                 last_error: None,
-            }
-        });
+            });
         entry.last_error = Some(error);
     }
 

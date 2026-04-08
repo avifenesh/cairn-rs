@@ -245,9 +245,7 @@ where
 
         ProviderHealthScheduleReadModel::get_schedule(self.store.as_ref(), &schedule_id)
             .await?
-            .ok_or_else(|| {
-                RuntimeError::Internal("schedule not found after set".to_owned())
-            })
+            .ok_or_else(|| RuntimeError::Internal("schedule not found after set".to_owned()))
     }
 
     async fn run_due_health_checks(&self) -> Result<Vec<ProviderHealthRecord>, RuntimeError> {
@@ -275,17 +273,18 @@ where
                 Some(ProviderConnectionStatus::Active)
             );
 
-            let record = self.record_check(&schedule.connection_id, 0, success).await?;
+            let record = self
+                .record_check(&schedule.connection_id, 0, success)
+                .await?;
 
-            let trigger_event =
-                make_envelope(RuntimeEvent::ProviderHealthScheduleTriggered(
-                    ProviderHealthScheduleTriggered {
-                        schedule_id: schedule.schedule_id.clone(),
-                        connection_id: schedule.connection_id.clone(),
-                        tenant_id: schedule.tenant_id.clone(),
-                        triggered_at_ms: now,
-                    },
-                ));
+            let trigger_event = make_envelope(RuntimeEvent::ProviderHealthScheduleTriggered(
+                ProviderHealthScheduleTriggered {
+                    schedule_id: schedule.schedule_id.clone(),
+                    connection_id: schedule.connection_id.clone(),
+                    tenant_id: schedule.tenant_id.clone(),
+                    triggered_at_ms: now,
+                },
+            ));
             self.store.append(&[trigger_event]).await?;
 
             results.push(record);
@@ -507,13 +506,10 @@ mod tests {
             .unwrap();
 
         // Verify schedule exists with no last_run_ms
-        let schedule = ProviderHealthScheduleReadModel::get_schedule(
-            store.as_ref(),
-            "conn_sched",
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let schedule = ProviderHealthScheduleReadModel::get_schedule(store.as_ref(), "conn_sched")
+            .await
+            .unwrap()
+            .unwrap();
         assert!(schedule.last_run_ms.is_none());
         assert_eq!(schedule.interval_ms, 10);
         assert!(schedule.enabled);
@@ -526,13 +522,10 @@ mod tests {
         assert_eq!(results.len(), 1);
 
         // Assert last_run_ms is now set
-        let updated = ProviderHealthScheduleReadModel::get_schedule(
-            store.as_ref(),
-            "conn_sched",
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let updated = ProviderHealthScheduleReadModel::get_schedule(store.as_ref(), "conn_sched")
+            .await
+            .unwrap()
+            .unwrap();
         assert!(updated.last_run_ms.is_some());
     }
 }

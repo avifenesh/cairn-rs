@@ -1,7 +1,10 @@
 //! Run SLA service boundary per RFC 005.
 
 use async_trait::async_trait;
-use cairn_domain::{RunId, TenantId, sla::{SlaConfig, SlaStatus, SlaBreach}};
+use cairn_domain::{
+    sla::{SlaBreach, SlaConfig, SlaStatus},
+    RunId, TenantId,
+};
 
 use crate::error::RuntimeError;
 

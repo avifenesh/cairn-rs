@@ -54,15 +54,15 @@ fn all_v001_to_v017_migrations_registered_in_order() {
     let migrations = registered_migrations();
 
     let expected: &[(u32, &str)] = &[
-        (1,  "create_event_log"),
-        (2,  "create_sessions"),
-        (3,  "create_runs"),
-        (4,  "create_tasks"),
-        (5,  "create_approvals"),
-        (6,  "create_checkpoints"),
-        (7,  "create_mailbox"),
-        (8,  "create_tool_invocations"),
-        (9,  "create_migration_history"),
+        (1, "create_event_log"),
+        (2, "create_sessions"),
+        (3, "create_runs"),
+        (4, "create_tasks"),
+        (5, "create_approvals"),
+        (6, "create_checkpoints"),
+        (7, "create_mailbox"),
+        (8, "create_tool_invocations"),
+        (9, "create_migration_history"),
         (10, "create_documents"),
         (11, "create_chunks"),
         (12, "create_graph_nodes"),
@@ -74,7 +74,9 @@ fn all_v001_to_v017_migrations_registered_in_order() {
     ];
 
     for (version, name) in expected {
-        let found = migrations.iter().find(|(v, n, _)| v == version && n == name);
+        let found = migrations
+            .iter()
+            .find(|(v, n, _)| v == version && n == name);
         assert!(
             found.is_some(),
             "migration V{version:03}__{name} must be registered; \
@@ -119,9 +121,11 @@ fn migration_versions_are_sequential_no_gaps() {
 
     for window in versions.windows(2) {
         assert_eq!(
-            window[1], window[0] + 1,
+            window[1],
+            window[0] + 1,
             "migration versions must be sequential: gap between {} and {}",
-            window[0], window[1]
+            window[0],
+            window[1]
         );
     }
 }
@@ -134,7 +138,11 @@ fn migration_versions_are_unique() {
     let original_len = versions.len();
     versions.sort_unstable();
     versions.dedup();
-    assert_eq!(versions.len(), original_len, "duplicate version numbers detected");
+    assert_eq!(
+        versions.len(),
+        original_len,
+        "duplicate version numbers detected"
+    );
 }
 
 // ── (4): Table names match InMemoryStore projection fields ───────────────────
@@ -149,18 +157,20 @@ fn core_table_names_match_inmemory_projection_fields() {
     let migrations = registered_migrations();
 
     let table_contracts: &[(u32, &str)] = &[
-        (1,  "event_log"),            // State.events (global log)
-        (2,  "sessions"),             // State.sessions
-        (3,  "runs"),                 // State.runs
-        (4,  "tasks"),                // State.tasks
-        (5,  "approvals"),            // State.approvals
-        (6,  "checkpoints"),          // State.checkpoints
-        (7,  "mailbox_messages"),     // State.mailbox_messages
-        (8,  "tool_invocations"),     // State.tool_invocations
+        (1, "event_log"),        // State.events (global log)
+        (2, "sessions"),         // State.sessions
+        (3, "runs"),             // State.runs
+        (4, "tasks"),            // State.tasks
+        (5, "approvals"),        // State.approvals
+        (6, "checkpoints"),      // State.checkpoints
+        (7, "mailbox_messages"), // State.mailbox_messages
+        (8, "tool_invocations"), // State.tool_invocations
     ];
 
     for (version, expected_table) in table_contracts {
-        let migration = migrations.iter().find(|(v, _, _)| v == version)
+        let migration = migrations
+            .iter()
+            .find(|(v, _, _)| v == version)
             .unwrap_or_else(|| panic!("migration V{version:03} must exist"));
 
         let sql = migration.2;
@@ -180,7 +190,9 @@ fn core_table_names_match_inmemory_projection_fields() {
 #[test]
 fn v017_org_hierarchy_creates_tenants_workspaces_projects() {
     let migrations = registered_migrations();
-    let v017 = migrations.iter().find(|(v, _, _)| *v == 17)
+    let v017 = migrations
+        .iter()
+        .find(|(v, _, _)| *v == 17)
         .expect("V017 create_org_hierarchy must exist");
     let sql = v017.2;
 
@@ -198,7 +210,9 @@ fn v017_org_hierarchy_creates_tenants_workspaces_projects() {
 #[test]
 fn v016_prompt_routing_creates_prompt_tables() {
     let migrations = registered_migrations();
-    let v016 = migrations.iter().find(|(v, _, _)| *v == 16)
+    let v016 = migrations
+        .iter()
+        .find(|(v, _, _)| *v == 16)
         .expect("V016 create_prompt_and_routing_state must exist");
     let sql = v016.2;
 
@@ -243,7 +257,8 @@ fn migration_names_are_stable_snake_case_identifiers() {
             "migration V{version:03} must have a non-empty name"
         );
         assert!(
-            name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+            name.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
             "migration V{version:03} name '{name}' must be lowercase_snake_case \
              (only [a-z0-9_] allowed)"
         );

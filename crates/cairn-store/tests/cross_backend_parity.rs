@@ -592,11 +592,16 @@ mod sqlite_parity {
         assert_eq!(pending_sqlite.len(), 3);
 
         let ids_mem: Vec<&str> = pending_mem.iter().map(|a| a.approval_id.as_str()).collect();
-        let ids_sqlite: Vec<&str> =
-            pending_sqlite.iter().map(|a| a.approval_id.as_str()).collect();
+        let ids_sqlite: Vec<&str> = pending_sqlite
+            .iter()
+            .map(|a| a.approval_id.as_str())
+            .collect();
         let mut sorted = ids_mem.clone();
         sorted.sort();
-        assert_eq!(ids_mem, sorted, "approvals should be in deterministic order");
+        assert_eq!(
+            ids_mem, sorted,
+            "approvals should be in deterministic order"
+        );
         assert_eq!(ids_mem, ids_sqlite, "backend ordering should match");
 
         // Resolve one — list should shrink on both backends.
@@ -622,14 +627,19 @@ mod sqlite_parity {
         assert_eq!(pending_after_mem.len(), 2);
         assert_eq!(pending_after_sqlite.len(), 2);
 
-        let ids_after_mem: Vec<&str> =
-            pending_after_mem.iter().map(|a| a.approval_id.as_str()).collect();
+        let ids_after_mem: Vec<&str> = pending_after_mem
+            .iter()
+            .map(|a| a.approval_id.as_str())
+            .collect();
         let ids_after_sqlite: Vec<&str> = pending_after_sqlite
             .iter()
             .map(|a| a.approval_id.as_str())
             .collect();
         assert_eq!(ids_after_mem, vec!["ap_bravo", "ap_charlie"]);
-        assert_eq!(ids_after_mem, ids_after_sqlite, "backend ordering should match");
+        assert_eq!(
+            ids_after_mem, ids_after_sqlite,
+            "backend ordering should match"
+        );
     }
 
     /// Mailbox list ordering: messages for a run returned in deterministic order.
@@ -654,11 +664,11 @@ mod sqlite_parity {
                     from_run_id: None,
                     from_task_id: None,
                     deliver_at_ms: 0,
-                                          sender: None,
-                     recipient: None,
-                     body: None,
-                     sent_at: None,
-                     delivery_status: None,
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None,
                 },
             ))])
             .await

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cairn_domain::{PromptAssetId, PromptVersionId, PromptReleaseId, ProjectKey};
+use cairn_domain::{ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId};
 use serde::{Deserialize, Serialize};
 
 use crate::error::StoreError;
@@ -28,7 +28,12 @@ pub struct PromptAssetRecord {
 #[async_trait]
 pub trait PromptAssetReadModel: Send + Sync {
     async fn get(&self, id: &PromptAssetId) -> Result<Option<PromptAssetRecord>, StoreError>;
-    async fn list_by_project(&self, project: &ProjectKey, limit: usize, offset: usize) -> Result<Vec<PromptAssetRecord>, StoreError>;
+    async fn list_by_project(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<PromptAssetRecord>, StoreError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -49,7 +54,12 @@ pub struct PromptVersionRecord {
 #[async_trait]
 pub trait PromptVersionReadModel: Send + Sync {
     async fn get(&self, id: &PromptVersionId) -> Result<Option<PromptVersionRecord>, StoreError>;
-    async fn list_by_asset(&self, asset_id: &PromptAssetId, limit: usize, offset: usize) -> Result<Vec<PromptVersionRecord>, StoreError>;
+    async fn list_by_asset(
+        &self,
+        asset_id: &PromptAssetId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<PromptVersionRecord>, StoreError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -89,6 +99,16 @@ pub struct PromptReleaseRecord {
 #[async_trait]
 pub trait PromptReleaseReadModel: Send + Sync {
     async fn get(&self, id: &PromptReleaseId) -> Result<Option<PromptReleaseRecord>, StoreError>;
-    async fn list_by_project(&self, project: &ProjectKey, limit: usize, offset: usize) -> Result<Vec<PromptReleaseRecord>, StoreError>;
-    async fn active_for_selector(&self, project: &ProjectKey, prompt_asset_id: &PromptAssetId, selector: &str) -> Result<Option<PromptReleaseRecord>, StoreError>;
+    async fn list_by_project(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<PromptReleaseRecord>, StoreError>;
+    async fn active_for_selector(
+        &self,
+        project: &ProjectKey,
+        prompt_asset_id: &PromptAssetId,
+        selector: &str,
+    ) -> Result<Option<PromptReleaseRecord>, StoreError>;
 }

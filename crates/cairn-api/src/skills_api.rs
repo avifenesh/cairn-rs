@@ -75,7 +75,10 @@ impl From<&SkillInvocation> for InvokeSkillResponse {
 pub fn build_catalog_response(skills: &[&Skill]) -> SkillCatalogResponse {
     let summaries: Vec<SkillSummary> = skills.iter().map(|s| SkillSummary::from(*s)).collect();
     let total = summaries.len();
-    SkillCatalogResponse { skills: summaries, total }
+    SkillCatalogResponse {
+        skills: summaries,
+        total,
+    }
 }
 
 #[cfg(test)]
@@ -93,7 +96,11 @@ mod tests {
             required_permissions: vec![],
             tags: vec!["general".to_owned()],
             enabled,
-            status: if enabled { SkillStatus::Active } else { SkillStatus::Proposed },
+            status: if enabled {
+                SkillStatus::Active
+            } else {
+                SkillStatus::Proposed
+            },
         }
     }
 
@@ -145,7 +152,12 @@ mod tests {
         };
         let resp = InvokeSkillResponse::from(&inv);
         let json = serde_json::to_value(&resp).unwrap();
-        assert_eq!(json["invocationId"].as_str().or_else(|| json["invocation_id"].as_str()), Some("inv_1"));
+        assert_eq!(
+            json["invocationId"]
+                .as_str()
+                .or_else(|| json["invocation_id"].as_str()),
+            Some("inv_1")
+        );
         assert_eq!(json["status"], "completed");
     }
 
@@ -156,6 +168,11 @@ mod tests {
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["total"], 1);
         assert!(json["skills"].is_array());
-        assert_eq!(json["skills"][0]["skillId"].as_str().or_else(|| json["skills"][0]["skill_id"].as_str()), Some("coder"));
+        assert_eq!(
+            json["skills"][0]["skillId"]
+                .as_str()
+                .or_else(|| json["skills"][0]["skill_id"].as_str()),
+            Some("coder")
+        );
     }
 }

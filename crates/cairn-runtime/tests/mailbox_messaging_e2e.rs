@@ -12,11 +12,13 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, MailboxMessageAppended, MailboxMessageId,
-    ProjectKey, RunId, RuntimeEvent, SessionId, TaskId,
+    EventEnvelope, EventId, EventSource, MailboxMessageAppended, MailboxMessageId, ProjectKey,
+    RunId, RuntimeEvent, SessionId, TaskId,
 };
-use cairn_runtime::{MailboxService, MailboxServiceImpl, RunService, RunServiceImpl,
-    SessionService, SessionServiceImpl};
+use cairn_runtime::{
+    MailboxService, MailboxServiceImpl, RunService, RunServiceImpl, SessionService,
+    SessionServiceImpl,
+};
 use cairn_store::projections::MailboxReadModel;
 use cairn_store::{EventLog, InMemoryStore};
 
@@ -161,7 +163,11 @@ async fn list_by_run_returns_all_messages_for_run() {
     }
 
     let messages = mailbox.list_by_run(&run_id, 10, 0).await.unwrap();
-    assert_eq!(messages.len(), 3, "all 3 messages must be listed for the run");
+    assert_eq!(
+        messages.len(),
+        3,
+        "all 3 messages must be listed for the run"
+    );
 
     // All messages belong to the expected run.
     assert!(messages.iter().all(|m| m.run_id == Some(run_id.clone())));
@@ -298,19 +304,18 @@ async fn deferred_message_appears_in_list_pending() {
     );
 
     // After the delivery time: list_pending at now=far_future+1 should return it.
-    let pending_future = MailboxReadModel::list_pending(
-        store.as_ref(),
-        deliver_at + 1,
-        10,
-    )
-    .await
-    .unwrap();
+    let pending_future = MailboxReadModel::list_pending(store.as_ref(), deliver_at + 1, 10)
+        .await
+        .unwrap();
     assert_eq!(
         pending_future.len(),
         1,
         "deferred message must appear in list_pending once its time arrives"
     );
-    assert_eq!(pending_future[0].message_id, MailboxMessageId::new("msg_deferred"));
+    assert_eq!(
+        pending_future[0].message_id,
+        MailboxMessageId::new("msg_deferred")
+    );
 }
 
 // ── (7) Task-to-task send via MailboxService::send ────────────────────────
@@ -324,7 +329,12 @@ async fn send_task_to_task_creates_mailbox_record() {
     let message = "Here is the result of my analysis.";
 
     let record = mailbox
-        .send(&project(), from_task.clone(), to_task.clone(), message.to_owned())
+        .send(
+            &project(),
+            from_task.clone(),
+            to_task.clone(),
+            message.to_owned(),
+        )
         .await
         .unwrap();
 

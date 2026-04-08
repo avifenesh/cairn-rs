@@ -21,10 +21,10 @@
 //! }
 //! ```
 
-use serde::{Deserialize, Serialize};
 use cairn_domain::providers::{
     GenerationProvider, GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
 };
+use serde::{Deserialize, Serialize};
 
 // ── Thinking-mode detection ───────────────────────────────────────────────────
 
@@ -55,9 +55,9 @@ struct OllamaOptions {
 
 #[derive(Serialize)]
 struct ChatRequest<'a> {
-    model:    &'a str,
+    model: &'a str,
     messages: &'a [serde_json::Value],
-    stream:   bool,
+    stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -87,7 +87,7 @@ struct ChatMessage {
 
 #[derive(Deserialize, Default)]
 struct UsageBlock {
-    prompt_tokens:     Option<u32>,
+    prompt_tokens: Option<u32>,
     completion_tokens: Option<u32>,
 }
 
@@ -108,7 +108,7 @@ pub struct OllamaModel {
 ///
 /// Uses Ollama's OpenAI-compatible `/v1/chat/completions` endpoint.
 pub struct OllamaProvider {
-    host:   String,
+    host: String,
     client: reqwest::Client,
 }
 
@@ -118,7 +118,7 @@ impl OllamaProvider {
     /// `host` should be a base URL such as `"http://localhost:11434"`.
     pub fn new(host: impl Into<String>) -> Self {
         Self {
-            host:   host.into(),
+            host: host.into(),
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(300))
                 .build()
@@ -195,9 +195,7 @@ impl GenerationProvider for OllamaProvider {
         let url = format!("{}/v1/chat/completions", self.host);
 
         // Convert temperature: domain stores it in milli-degrees (700 = 0.7).
-        let temperature = settings
-            .temperature_milli
-            .map(|m| m as f32 / 1_000.0);
+        let temperature = settings.temperature_milli.map(|m| m as f32 / 1_000.0);
 
         // Some models default to chain-of-thought reasoning, which adds several
         // seconds of latency and hundreds of extra output tokens.  Passing
@@ -218,11 +216,11 @@ impl GenerationProvider for OllamaProvider {
         };
 
         let body = ChatRequest {
-            model:       model_id,
-            messages:    &messages,
-            stream:      false,
+            model: model_id,
+            messages: &messages,
+            stream: false,
             temperature,
-            max_tokens:  settings.max_output_tokens,
+            max_tokens: settings.max_output_tokens,
             options,
         };
 
@@ -267,10 +265,10 @@ impl GenerationProvider for OllamaProvider {
 
         Ok(GenerationResponse {
             text,
-            input_tokens:  usage.prompt_tokens,
+            input_tokens: usage.prompt_tokens,
             output_tokens: usage.completion_tokens,
-            model_id:      chat.model.unwrap_or_else(|| model_id.to_owned()),
-            tool_calls:    vec![],
+            model_id: chat.model.unwrap_or_else(|| model_id.to_owned()),
+            tool_calls: vec![],
         })
     }
 }

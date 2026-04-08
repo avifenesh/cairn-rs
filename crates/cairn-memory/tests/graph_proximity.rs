@@ -61,9 +61,21 @@ async fn graph_proximity_linked_docs_score_higher_than_isolated() {
 
     // Ingest three documents with unique but query-matching content.
     for (doc_id, src, body) in [
-        ("doc_a", "src_a", "Rust memory safety ownership borrow checker alpha edition"),
-        ("doc_b", "src_b", "Rust memory safety ownership enables fearless concurrency beta"),
-        ("doc_c", "src_c", "Rust memory safety ownership prevents dangling references gamma"),
+        (
+            "doc_a",
+            "src_a",
+            "Rust memory safety ownership borrow checker alpha edition",
+        ),
+        (
+            "doc_b",
+            "src_b",
+            "Rust memory safety ownership enables fearless concurrency beta",
+        ),
+        (
+            "doc_c",
+            "src_c",
+            "Rust memory safety ownership prevents dangling references gamma",
+        ),
     ] {
         pipeline
             .submit(IngestRequest {
@@ -251,8 +263,16 @@ async fn graph_proximity_appears_in_scoring_dimensions() {
     let retrieval = InMemoryRetrieval::new(store.clone()).with_graph(graph.clone());
 
     for (doc_id, src, body) in [
-        ("dim_a", "src_dim_a", "scoring dimensions graph proximity test alpha content"),
-        ("dim_b", "src_dim_b", "scoring dimensions graph proximity test beta content"),
+        (
+            "dim_a",
+            "src_dim_a",
+            "scoring dimensions graph proximity test alpha content",
+        ),
+        (
+            "dim_b",
+            "src_dim_b",
+            "scoring dimensions graph proximity test beta content",
+        ),
     ] {
         pipeline
             .submit(IngestRequest {

@@ -23,10 +23,7 @@ pub trait TaskDependencyReadModel: Send + Sync {
     ) -> Result<Vec<TaskDependencyRecord>, StoreError>;
 
     /// Insert a new dependency record.
-    async fn insert_dependency(
-        &self,
-        record: TaskDependencyRecord,
-    ) -> Result<(), StoreError>;
+    async fn insert_dependency(&self, record: TaskDependencyRecord) -> Result<(), StoreError>;
 
     /// Mark all dependencies with the given prerequisite task as resolved.
     async fn resolve_dependency(

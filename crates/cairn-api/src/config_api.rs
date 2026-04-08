@@ -87,10 +87,7 @@ pub trait ConfigEndpoints: Send + Sync {
     async fn delete_config(&self, key: &str) -> Result<ConfigDeleteResponse, Self::Error>;
 
     /// `GET /v1/config?prefix=`
-    async fn list_config(
-        &self,
-        query: ConfigListQuery,
-    ) -> Result<ConfigListResponse, Self::Error>;
+    async fn list_config(&self, query: ConfigListQuery) -> Result<ConfigListResponse, Self::Error>;
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -101,8 +98,14 @@ mod tests {
 
     #[test]
     fn config_entry_equality() {
-        let a = ConfigEntry { key: "agent.model".to_owned(), value: "sonnet".to_owned() };
-        let b = ConfigEntry { key: "agent.model".to_owned(), value: "sonnet".to_owned() };
+        let a = ConfigEntry {
+            key: "agent.model".to_owned(),
+            value: "sonnet".to_owned(),
+        };
+        let b = ConfigEntry {
+            key: "agent.model".to_owned(),
+            value: "sonnet".to_owned(),
+        };
         assert_eq!(a, b);
     }
 
@@ -114,7 +117,9 @@ mod tests {
 
     #[test]
     fn config_set_request_round_trips() {
-        let req = ConfigSetRequest { value: "haiku".to_owned() };
+        let req = ConfigSetRequest {
+            value: "haiku".to_owned(),
+        };
         let json = serde_json::to_string(&req).unwrap();
         let parsed: ConfigSetRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.value, "haiku");
@@ -122,7 +127,10 @@ mod tests {
 
     #[test]
     fn config_get_response_none_value() {
-        let resp = ConfigGetResponse { key: "missing".to_owned(), value: None };
+        let resp = ConfigGetResponse {
+            key: "missing".to_owned(),
+            value: None,
+        };
         let json = serde_json::to_value(&resp).unwrap();
         assert!(json["value"].is_null());
     }
@@ -132,8 +140,14 @@ mod tests {
         let resp = ConfigListResponse {
             prefix: "agent.".to_owned(),
             entries: vec![
-                ConfigEntry { key: "agent.model".to_owned(), value: "sonnet".to_owned() },
-                ConfigEntry { key: "agent.provider".to_owned(), value: "anthropic".to_owned() },
+                ConfigEntry {
+                    key: "agent.model".to_owned(),
+                    value: "sonnet".to_owned(),
+                },
+                ConfigEntry {
+                    key: "agent.provider".to_owned(),
+                    value: "anthropic".to_owned(),
+                },
             ],
             count: 2,
         };

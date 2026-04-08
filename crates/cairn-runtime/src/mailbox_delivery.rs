@@ -4,9 +4,9 @@
 //! durable `MailboxService`. `MailboxWatcher` polls for deferred messages
 //! whose delivery time has arrived.
 
-use std::sync::Arc;
 use cairn_domain::{MailboxMessageId, ProjectKey, RunId, TaskId};
 use cairn_store::projections::{MailboxReadModel, MailboxRecord};
+use std::sync::Arc;
 
 use crate::error::RuntimeError;
 use crate::mailbox::MailboxService;
@@ -36,7 +36,15 @@ impl<M: MailboxService> MailboxDeliveryService<M> {
     ) -> Result<MailboxRecord, RuntimeError> {
         let message_id = MailboxMessageId::new(format!("msg_{}", uuid_like()));
         self.mailbox
-            .append(project, message_id, to_run_id, to_task_id, content, from_run_id, 0)
+            .append(
+                project,
+                message_id,
+                to_run_id,
+                to_task_id,
+                content,
+                from_run_id,
+                0,
+            )
             .await
     }
 
@@ -52,14 +60,24 @@ impl<M: MailboxService> MailboxDeliveryService<M> {
     ) -> Result<MailboxRecord, RuntimeError> {
         let message_id = MailboxMessageId::new(format!("msg_{}", uuid_like()));
         self.mailbox
-            .append(project, message_id, to_run_id, to_task_id, content, from_run_id, deliver_at_ms)
+            .append(
+                project,
+                message_id,
+                to_run_id,
+                to_task_id,
+                content,
+                from_run_id,
+                deliver_at_ms,
+            )
             .await
     }
 }
 
 fn uuid_like() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     format!("{:x}_{:x}", t.as_secs(), t.subsec_nanos())
 }
 

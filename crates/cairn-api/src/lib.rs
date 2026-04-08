@@ -2,14 +2,14 @@
 
 pub mod admin;
 pub mod assistant;
-pub mod config_api;
 pub mod auth;
 pub mod bootstrap;
+pub mod config_api;
 pub mod endpoints;
-pub mod fleet;
 pub mod evals_api;
 pub mod external_workers;
 pub mod feed;
+pub mod fleet;
 pub mod graph_api;
 pub mod http;
 pub mod memory_api;
@@ -28,10 +28,6 @@ pub mod sse_payloads;
 pub mod sse_publisher;
 
 pub use admin::AdminEndpoints;
-pub use config_api::{
-    ConfigDeleteResponse, ConfigEndpoints, ConfigEntry, ConfigGetResponse, ConfigListQuery,
-    ConfigListResponse, ConfigSetRequest, ConfigSetResponse,
-};
 pub use assistant::{
     AssistantEndpoints, AssistantMessageRequest, AssistantMessageResponse, AssistantSession,
     ChatMessage, ChatRole,
@@ -42,6 +38,10 @@ pub use auth::{
 pub use bootstrap::{
     BootstrapConfig, DeploymentMode, EncryptionKeySource, ServerBootstrap, ServerRole,
     StorageBackend,
+};
+pub use config_api::{
+    ConfigDeleteResponse, ConfigEndpoints, ConfigEntry, ConfigGetResponse, ConfigListQuery,
+    ConfigListResponse, ConfigSetRequest, ConfigSetResponse,
 };
 pub use endpoints::{ListQuery, RuntimeReadEndpoints};
 pub use external_workers::{ExternalWorkerEndpoints, WorkerReportRequest};
@@ -55,19 +55,18 @@ pub use memory_api::{
     CreateMemoryRequest, MemoryEndpoints, MemoryItem, MemorySearchQuery, MemoryStatus,
 };
 pub use operator::{OperatorCommandEndpoints, OperatorReadEndpoints, RunDetail};
-pub use policies_api::{PolicyDecisionSummary, PolicyEndpoints};
-pub use prompts_api::PromptEndpoints;
-pub use providers_api::{ProviderEndpoints, ProviderHealthSummary};
 pub use overview::{
     CostSummary, CriticalEventSummary, DashboardOverview, MetricsSummary, OverviewEndpoints,
     SystemStatus,
 };
+pub use policies_api::{PolicyDecisionSummary, PolicyEndpoints};
+pub use prompts_api::PromptEndpoints;
+pub use providers_api::{ProviderEndpoints, ProviderHealthSummary};
 pub use read_models::{ApprovalSummary, ReadModelQuery, RunSummary, TaskSummary};
 pub use settings_api::{SettingsEndpoints, SettingsSummary};
 pub use sources_channels::{ChannelEndpoints, SourceEndpoints};
 pub use sse::{SseEventEntry, SseEventName, SseFrame, SseStream};
 pub use sse_publisher::{SsePublisher, SseReplayQuery};
-
 
 #[cfg(test)]
 mod tests {

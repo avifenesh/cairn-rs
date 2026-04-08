@@ -12,11 +12,11 @@
 //!   (9) multiple plugins in registry are all listed
 
 use cairn_domain::ExecutionClass;
+use cairn_tools::permissions::{DeclaredPermissions, Permission};
 use cairn_tools::{
     InMemoryPluginRegistry, PluginCapability, PluginHost, PluginLimits, PluginManifest,
     PluginRegistry, PluginState, StdioPluginHost,
 };
-use cairn_tools::permissions::{DeclaredPermissions, Permission};
 
 fn manifest(id: &str, capabilities: Vec<PluginCapability>) -> PluginManifest {
     PluginManifest {
@@ -37,9 +37,12 @@ fn manifest(id: &str, capabilities: Vec<PluginCapability>) -> PluginManifest {
 }
 
 fn tool_provider_manifest(id: &str, tools: &[&str]) -> PluginManifest {
-    manifest(id, vec![PluginCapability::ToolProvider {
-        tools: tools.iter().map(|t| t.to_string()).collect(),
-    }])
+    manifest(
+        id,
+        vec![PluginCapability::ToolProvider {
+            tools: tools.iter().map(|t| t.to_string()).collect(),
+        }],
+    )
 }
 
 // ── (1)+(2) Register and verify it appears ───────────────────────────────
@@ -48,7 +51,9 @@ fn tool_provider_manifest(id: &str, tools: &[&str]) -> PluginManifest {
 fn register_plugin_appears_in_registry() {
     let registry = InMemoryPluginRegistry::new();
 
-    registry.register(tool_provider_manifest("com.test.alpha", &["alpha.run"])).unwrap();
+    registry
+        .register(tool_provider_manifest("com.test.alpha", &["alpha.run"]))
+        .unwrap();
 
     let found = registry.get("com.test.alpha").unwrap();
     assert_eq!(found.id, "com.test.alpha");
@@ -67,7 +72,9 @@ fn registered_plugin_capabilities_are_preserved() {
     let registry = InMemoryPluginRegistry::new();
 
     let caps = vec![
-        PluginCapability::ToolProvider { tools: vec!["search".to_owned(), "index".to_owned()] },
+        PluginCapability::ToolProvider {
+            tools: vec!["search".to_owned(), "index".to_owned()],
+        },
         PluginCapability::PostTurnHook,
     ];
     registry.register(manifest("com.test.multi", caps)).unwrap();
@@ -78,7 +85,10 @@ fn registered_plugin_capabilities_are_preserved() {
     let has_tool_provider = found.capabilities.iter().any(|c| {
         matches!(c, PluginCapability::ToolProvider { tools } if tools.contains(&"search".to_owned()))
     });
-    let has_post_turn = found.capabilities.iter().any(|c| matches!(c, PluginCapability::PostTurnHook));
+    let has_post_turn = found
+        .capabilities
+        .iter()
+        .any(|c| matches!(c, PluginCapability::PostTurnHook));
 
     assert!(has_tool_provider, "ToolProvider capability must be present");
     assert!(has_post_turn, "PostTurnHook capability must be present");
@@ -87,7 +97,12 @@ fn registered_plugin_capabilities_are_preserved() {
 #[test]
 fn tool_names_within_capability_are_preserved() {
     let registry = InMemoryPluginRegistry::new();
-    registry.register(tool_provider_manifest("com.test.git", &["git.status", "git.diff", "git.log"])).unwrap();
+    registry
+        .register(tool_provider_manifest(
+            "com.test.git",
+            &["git.status", "git.diff", "git.log"],
+        ))
+        .unwrap();
 
     let found = registry.get("com.test.git").unwrap();
     if let PluginCapability::ToolProvider { tools } = &found.capabilities[0] {
@@ -105,7 +120,8 @@ fn tool_names_within_capability_are_preserved() {
 #[test]
 fn register_in_host_sets_discovered_state() {
     let mut host = StdioPluginHost::new();
-    host.register(tool_provider_manifest("com.test.host", &["host.tool"])).unwrap();
+    host.register(tool_provider_manifest("com.test.host", &["host.tool"]))
+        .unwrap();
 
     assert_eq!(
         host.state("com.test.host"),
@@ -132,13 +148,21 @@ fn host_and_registry_track_same_plugin_independently() {
 #[test]
 fn unregister_removes_plugin_from_registry() {
     let registry = InMemoryPluginRegistry::new();
-    registry.register(tool_provider_manifest("com.test.remove", &["r.tool"])).unwrap();
+    registry
+        .register(tool_provider_manifest("com.test.remove", &["r.tool"]))
+        .unwrap();
     assert!(registry.get("com.test.remove").is_some());
 
     registry.unregister("com.test.remove").unwrap();
 
-    assert!(registry.get("com.test.remove").is_none(), "plugin must be absent after unregister");
-    assert!(!registry.list_all().iter().any(|m| m.id == "com.test.remove"));
+    assert!(
+        registry.get("com.test.remove").is_none(),
+        "plugin must be absent after unregister"
+    );
+    assert!(!registry
+        .list_all()
+        .iter()
+        .any(|m| m.id == "com.test.remove"));
 }
 
 // ── (7) Duplicate registration rejected ──────────────────────────────────
@@ -146,7 +170,9 @@ fn unregister_removes_plugin_from_registry() {
 #[test]
 fn duplicate_register_returns_already_registered_error() {
     let registry = InMemoryPluginRegistry::new();
-    registry.register(tool_provider_manifest("com.test.dup", &["d.tool"])).unwrap();
+    registry
+        .register(tool_provider_manifest("com.test.dup", &["d.tool"]))
+        .unwrap();
 
     let result = registry.register(tool_provider_manifest("com.test.dup", &["d.tool"]));
     assert!(result.is_err());
@@ -159,7 +185,8 @@ fn duplicate_register_returns_already_registered_error() {
 #[test]
 fn host_duplicate_register_returns_error() {
     let mut host = StdioPluginHost::new();
-    host.register(tool_provider_manifest("com.test.hostdup", &["t"])).unwrap();
+    host.register(tool_provider_manifest("com.test.hostdup", &["t"]))
+        .unwrap();
 
     let result = host.register(tool_provider_manifest("com.test.hostdup", &["t"]));
     assert!(result.is_err(), "host must reject duplicate register");
@@ -173,7 +200,10 @@ fn unregister_nonexistent_returns_not_found_error() {
 
     let result = registry.unregister("com.test.ghost");
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), cairn_tools::RegistryError::NotFound(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        cairn_tools::RegistryError::NotFound(_)
+    ));
 }
 
 // ── (9) Multiple plugins all listed ──────────────────────────────────────
@@ -183,21 +213,30 @@ fn multiple_plugins_all_appear_in_list_all() {
     let registry = InMemoryPluginRegistry::new();
     let ids = ["com.test.a", "com.test.b", "com.test.c"];
     for id in &ids {
-        registry.register(tool_provider_manifest(id, &["tool"])).unwrap();
+        registry
+            .register(tool_provider_manifest(id, &["tool"]))
+            .unwrap();
     }
 
     let all = registry.list_all();
     assert_eq!(all.len(), 3);
     for id in &ids {
-        assert!(all.iter().any(|m| m.id == *id), "plugin {id} must appear in list_all");
+        assert!(
+            all.iter().any(|m| m.id == *id),
+            "plugin {id} must appear in list_all"
+        );
     }
 }
 
 #[test]
 fn registry_is_empty_after_all_plugins_unregistered() {
     let registry = InMemoryPluginRegistry::new();
-    registry.register(tool_provider_manifest("com.test.x", &["x"])).unwrap();
-    registry.register(tool_provider_manifest("com.test.y", &["y"])).unwrap();
+    registry
+        .register(tool_provider_manifest("com.test.x", &["x"]))
+        .unwrap();
+    registry
+        .register(tool_provider_manifest("com.test.y", &["y"]))
+        .unwrap();
 
     registry.unregister("com.test.x").unwrap();
     registry.unregister("com.test.y").unwrap();
@@ -210,9 +249,20 @@ fn registry_is_empty_after_all_plugins_unregistered() {
 #[test]
 fn description_and_homepage_are_stored_in_registry() {
     let registry = InMemoryPluginRegistry::new();
-    registry.register(manifest("com.test.meta", vec![PluginCapability::EvalScorer])).unwrap();
+    registry
+        .register(manifest(
+            "com.test.meta",
+            vec![PluginCapability::EvalScorer],
+        ))
+        .unwrap();
 
     let found = registry.get("com.test.meta").unwrap();
-    assert_eq!(found.description.as_deref(), Some("Test plugin for lifecycle validation"));
-    assert_eq!(found.homepage.as_deref(), Some("https://example.test/plugin"));
+    assert_eq!(
+        found.description.as_deref(),
+        Some("Test plugin for lifecycle validation")
+    );
+    assert_eq!(
+        found.homepage.as_deref(),
+        Some("https://example.test/plugin")
+    );
 }

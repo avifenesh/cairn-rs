@@ -244,7 +244,10 @@ mod tests {
         let frame = build_sse_frame_with_current_state(&stored, Some(&record), None).unwrap();
         assert_eq!(frame.event, SseEventName::TaskUpdate);
         assert_eq!(frame.data["task"]["title"], "Draft weekly digest");
-        assert_eq!(frame.data["task"]["description"], "Collect updates and prepare digest.");
+        assert_eq!(
+            frame.data["task"]["description"],
+            "Collect updates and prepare digest."
+        );
         assert_eq!(frame.data["task"]["createdAt"], "1000");
     }
 
@@ -276,8 +279,14 @@ mod tests {
 
         let frame = build_sse_frame_with_current_state(&stored, None, Some(&record)).unwrap();
         assert_eq!(frame.event, SseEventName::ApprovalRequired);
-        assert_eq!(frame.data["approval"]["title"], "Approve GitHub write action");
-        assert_eq!(frame.data["approval"]["description"], "Agent wants to create a PR.");
+        assert_eq!(
+            frame.data["approval"]["title"],
+            "Approve GitHub write action"
+        );
+        assert_eq!(
+            frame.data["approval"]["description"],
+            "Agent wants to create a PR."
+        );
         assert_eq!(frame.data["approval"]["createdAt"], "2000");
     }
 

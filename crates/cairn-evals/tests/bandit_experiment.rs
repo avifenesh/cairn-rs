@@ -9,7 +9,7 @@
 //! - win_rates() computed from arm state matches expected ratios.
 
 use cairn_domain::{
-    bandit::{BanditStrategy},
+    bandit::BanditStrategy,
     ids::{PromptReleaseId, TenantId},
 };
 use cairn_runtime::bandit::{BanditServiceImpl, CreateExperimentRequest};
@@ -87,7 +87,11 @@ fn create_experiment_with_three_arms() {
     // All arms start with 0 pulls and 0 reward.
     for arm in &exp.arms {
         assert_eq!(arm.pulls, 0, "arm {} must start with 0 pulls", arm.arm_id);
-        assert_eq!(arm.reward_sum, 0.0, "arm {} must start with 0 reward", arm.arm_id);
+        assert_eq!(
+            arm.reward_sum, 0.0,
+            "arm {} must start with 0 reward",
+            arm.arm_id
+        );
     }
 }
 
@@ -104,22 +108,31 @@ fn record_wins_updates_arm_state() {
     );
 
     // Record wins + enough losses to differentiate win rates.
-    record_outcomes(&svc, "exp_record", "arm_a", 50, 0);  // 100% win rate
+    record_outcomes(&svc, "exp_record", "arm_a", 50, 0); // 100% win rate
     record_outcomes(&svc, "exp_record", "arm_b", 10, 40); // 20% win rate
-    record_outcomes(&svc, "exp_record", "arm_c", 5, 45);  // 10% win rate
+    record_outcomes(&svc, "exp_record", "arm_c", 5, 45); // 10% win rate
 
     let exp = svc.get_experiment("exp_record").unwrap();
 
     let arm_a = exp.arms.iter().find(|a| a.arm_id == "arm_a").unwrap();
     assert_eq!(arm_a.pulls, 50, "arm_a must have 50 pulls");
-    assert_eq!(arm_a.reward_sum, 50.0, "arm_a reward_sum must be 50.0 (50 wins × 1.0)");
+    assert_eq!(
+        arm_a.reward_sum, 50.0,
+        "arm_a reward_sum must be 50.0 (50 wins × 1.0)"
+    );
 
     let arm_b = exp.arms.iter().find(|a| a.arm_id == "arm_b").unwrap();
-    assert_eq!(arm_b.pulls, 50, "arm_b must have 50 pulls (10 wins + 40 losses)");
+    assert_eq!(
+        arm_b.pulls, 50,
+        "arm_b must have 50 pulls (10 wins + 40 losses)"
+    );
     assert_eq!(arm_b.reward_sum, 10.0, "arm_b reward_sum must be 10.0");
 
     let arm_c = exp.arms.iter().find(|a| a.arm_id == "arm_c").unwrap();
-    assert_eq!(arm_c.pulls, 50, "arm_c must have 50 pulls (5 wins + 45 losses)");
+    assert_eq!(
+        arm_c.pulls, 50,
+        "arm_c must have 50 pulls (5 wins + 45 losses)"
+    );
     assert_eq!(arm_c.reward_sum, 5.0, "arm_c reward_sum must be 5.0");
 
     assert_eq!(
@@ -145,9 +158,9 @@ fn epsilon_greedy_exploit_selects_best_arm_overwhelmingly() {
         0.0,
     );
 
-    record_outcomes(&svc, "exp_exploit", "arm_a", 50, 0);  // mean = 1.0
+    record_outcomes(&svc, "exp_exploit", "arm_a", 50, 0); // mean = 1.0
     record_outcomes(&svc, "exp_exploit", "arm_b", 10, 40); // mean = 0.2
-    record_outcomes(&svc, "exp_exploit", "arm_c", 5, 45);  // mean = 0.1
+    record_outcomes(&svc, "exp_exploit", "arm_c", 5, 45); // mean = 0.1
 
     // Run 100 selections — pure exploitation must always pick arm_a.
     let mut counts = std::collections::HashMap::new();
@@ -186,9 +199,9 @@ fn epsilon_greedy_real_rng_selects_best_arm_majority() {
         0.1,
     );
 
-    record_outcomes(&svc, "exp_stat", "arm_a", 50, 0);  // mean = 1.0
+    record_outcomes(&svc, "exp_stat", "arm_a", 50, 0); // mean = 1.0
     record_outcomes(&svc, "exp_stat", "arm_b", 10, 90); // mean = 0.1
-    record_outcomes(&svc, "exp_stat", "arm_c", 5, 95);  // mean = 0.05
+    record_outcomes(&svc, "exp_stat", "arm_c", 5, 95); // mean = 0.05
 
     let mut arm_a_count = 0u32;
     for _ in 0..100 {
@@ -226,7 +239,8 @@ fn ucb1_selects_unexplored_arms_first() {
     for _ in 0..3 {
         let selected = svc.select_arm("exp_ucb1").unwrap();
         // Simulate a pull + record outcome so the arm is no longer "unexplored".
-        svc.record_reward("exp_ucb1", &selected.arm_id, 0.5).unwrap();
+        svc.record_reward("exp_ucb1", &selected.arm_id, 0.5)
+            .unwrap();
         first_three_selections.push(selected.arm_id);
     }
 
@@ -238,26 +252,33 @@ fn ucb1_selects_unexplored_arms_first() {
         "UCB1 must explore all 3 arms before revisiting any; got: {first_three_selections:?}"
     );
 
-    assert!(unique.contains(&"arm_a".to_owned()), "arm_a must be explored");
-    assert!(unique.contains(&"arm_b".to_owned()), "arm_b must be explored");
-    assert!(unique.contains(&"arm_c".to_owned()), "arm_c must be explored");
+    assert!(
+        unique.contains(&"arm_a".to_owned()),
+        "arm_a must be explored"
+    );
+    assert!(
+        unique.contains(&"arm_b".to_owned()),
+        "arm_b must be explored"
+    );
+    assert!(
+        unique.contains(&"arm_c".to_owned()),
+        "arm_c must be explored"
+    );
 }
 
 /// UCB1 selects the arm with 0 pulls even when others have been pulled.
 #[test]
 fn ucb1_always_prefers_unpulled_arm() {
     let svc = BanditServiceImpl::new();
-    make_three_arm_experiment(
-        &svc,
-        "exp_ucb1_unpulled",
-        BanditStrategy::Ucb1,
-        0.0,
-    );
+    make_three_arm_experiment(&svc, "exp_ucb1_unpulled", BanditStrategy::Ucb1, 0.0);
 
     // Pull arm_a and arm_b — arm_c remains unexplored.
-    svc.record_reward("exp_ucb1_unpulled", "arm_a", 0.9).unwrap();
-    svc.record_reward("exp_ucb1_unpulled", "arm_a", 0.8).unwrap();
-    svc.record_reward("exp_ucb1_unpulled", "arm_b", 0.7).unwrap();
+    svc.record_reward("exp_ucb1_unpulled", "arm_a", 0.9)
+        .unwrap();
+    svc.record_reward("exp_ucb1_unpulled", "arm_a", 0.8)
+        .unwrap();
+    svc.record_reward("exp_ucb1_unpulled", "arm_b", 0.7)
+        .unwrap();
 
     // arm_c has 0 pulls → UCB1 score = f64::MAX → must be selected.
     let selected = svc.select_arm("exp_ucb1_unpulled").unwrap();

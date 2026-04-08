@@ -11,11 +11,12 @@
 
 use std::sync::Arc;
 
-use cairn_domain::{EvalRunId, ProjectId, ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId};
+use cairn_domain::{
+    EvalRunId, ProjectId, ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId,
+};
 use cairn_evals::{EvalMetrics, EvalRunService, EvalSubjectKind};
 use cairn_runtime::{
-    PromptAssetService, PromptAssetServiceImpl,
-    PromptReleaseService, PromptReleaseServiceImpl,
+    PromptAssetService, PromptAssetServiceImpl, PromptReleaseService, PromptReleaseServiceImpl,
     PromptVersionService, PromptVersionServiceImpl,
 };
 use cairn_store::InMemoryStore;
@@ -54,21 +55,39 @@ async fn seed_release(
     content_hash: &str,
 ) {
     svc.assets
-        .create(&project(), asset_id.clone(), "Comparison Asset".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "Comparison Asset".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .ok(); // idempotent — asset may already exist
 
     svc.versions
-        .create(&project(), version_id.clone(), asset_id.clone(), content_hash.to_owned())
+        .create(
+            &project(),
+            version_id.clone(),
+            asset_id.clone(),
+            content_hash.to_owned(),
+        )
         .await
         .unwrap();
 
     svc.releases
-        .create(&project(), release_id.clone(), asset_id.clone(), version_id.clone())
+        .create(
+            &project(),
+            release_id.clone(),
+            asset_id.clone(),
+            version_id.clone(),
+        )
         .await
         .unwrap();
 
-    svc.releases.transition(release_id, "approved").await.unwrap();
+    svc.releases
+        .transition(release_id, "approved")
+        .await
+        .unwrap();
     svc.releases.activate(release_id).await.unwrap();
 }
 
@@ -119,18 +138,45 @@ async fn two_releases_for_same_asset_second_supersedes_first() {
     let rel2 = PromptReleaseId::new("rel_cmp_1b");
 
     svc.assets
-        .create(&project(), asset_id.clone(), "Dual Release Asset".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "Dual Release Asset".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
 
-    svc.versions.create(&project(), v1.clone(), asset_id.clone(), "hash_v1".to_owned()).await.unwrap();
-    svc.releases.create(&project(), rel1.clone(), asset_id.clone(), v1).await.unwrap();
+    svc.versions
+        .create(
+            &project(),
+            v1.clone(),
+            asset_id.clone(),
+            "hash_v1".to_owned(),
+        )
+        .await
+        .unwrap();
+    svc.releases
+        .create(&project(), rel1.clone(), asset_id.clone(), v1)
+        .await
+        .unwrap();
     svc.releases.transition(&rel1, "approved").await.unwrap();
     let r1 = svc.releases.activate(&rel1).await.unwrap();
     assert_eq!(r1.state, "active");
 
-    svc.versions.create(&project(), v2.clone(), asset_id.clone(), "hash_v2".to_owned()).await.unwrap();
-    svc.releases.create(&project(), rel2.clone(), asset_id.clone(), v2).await.unwrap();
+    svc.versions
+        .create(
+            &project(),
+            v2.clone(),
+            asset_id.clone(),
+            "hash_v2".to_owned(),
+        )
+        .await
+        .unwrap();
+    svc.releases
+        .create(&project(), rel2.clone(), asset_id.clone(), v2)
+        .await
+        .unwrap();
     svc.releases.transition(&rel2, "approved").await.unwrap();
     let r2 = svc.releases.activate(&rel2).await.unwrap();
     assert_eq!(r2.state, "active");
@@ -152,20 +198,55 @@ async fn scorecard_contains_entry_for_each_evaluated_release() {
 
     seed_release(&svc, &asset_id, &v1, &rel1, "hash_sc_v1").await;
 
-    svc.versions.create(&project(), v2.clone(), asset_id.clone(), "hash_sc_v2".to_owned()).await.unwrap();
-    svc.releases.create(&project(), rel2.clone(), asset_id.clone(), v2.clone()).await.unwrap();
+    svc.versions
+        .create(
+            &project(),
+            v2.clone(),
+            asset_id.clone(),
+            "hash_sc_v2".to_owned(),
+        )
+        .await
+        .unwrap();
+    svc.releases
+        .create(&project(), rel2.clone(), asset_id.clone(), v2.clone())
+        .await
+        .unwrap();
     svc.releases.transition(&rel2, "approved").await.unwrap();
     svc.releases.activate(&rel2).await.unwrap();
 
-    run_scored_eval(&svc, &EvalRunId::new("eval_sc_2a"), &asset_id, &v1, &rel1, 0.78, 250);
-    run_scored_eval(&svc, &EvalRunId::new("eval_sc_2b"), &asset_id, &v2, &rel2, 0.91, 180);
+    run_scored_eval(
+        &svc,
+        &EvalRunId::new("eval_sc_2a"),
+        &asset_id,
+        &v1,
+        &rel1,
+        0.78,
+        250,
+    );
+    run_scored_eval(
+        &svc,
+        &EvalRunId::new("eval_sc_2b"),
+        &asset_id,
+        &v2,
+        &rel2,
+        0.91,
+        180,
+    );
 
     let scorecard = svc.evals.build_scorecard(&project_id(), &asset_id);
 
     assert_eq!(scorecard.prompt_asset_id, asset_id);
-    assert_eq!(scorecard.entries.len(), 2, "scorecard must have one entry per evaluated release");
+    assert_eq!(
+        scorecard.entries.len(),
+        2,
+        "scorecard must have one entry per evaluated release"
+    );
 
-    let ids: Vec<_> = scorecard.entries.iter().map(|e| &e.prompt_release_id).collect();
+    let ids: Vec<_> = scorecard
+        .entries
+        .iter()
+        .map(|e| &e.prompt_release_id)
+        .collect();
     assert!(ids.contains(&&rel1), "rel1 must be in scorecard");
     assert!(ids.contains(&&rel2), "rel2 must be in scorecard");
 }
@@ -183,13 +264,40 @@ async fn winner_is_release_with_higher_task_success_rate() {
 
     seed_release(&svc, &asset_id, &v1, &rel1, "hash_win_v1").await;
 
-    svc.versions.create(&project(), v2.clone(), asset_id.clone(), "hash_win_v2".to_owned()).await.unwrap();
-    svc.releases.create(&project(), rel2.clone(), asset_id.clone(), v2.clone()).await.unwrap();
+    svc.versions
+        .create(
+            &project(),
+            v2.clone(),
+            asset_id.clone(),
+            "hash_win_v2".to_owned(),
+        )
+        .await
+        .unwrap();
+    svc.releases
+        .create(&project(), rel2.clone(), asset_id.clone(), v2.clone())
+        .await
+        .unwrap();
     svc.releases.transition(&rel2, "approved").await.unwrap();
     svc.releases.activate(&rel2).await.unwrap();
 
-    run_scored_eval(&svc, &EvalRunId::new("eval_win_3a"), &asset_id, &v1, &rel1, 0.65, 300);
-    run_scored_eval(&svc, &EvalRunId::new("eval_win_3b"), &asset_id, &v2, &rel2, 0.88, 200);
+    run_scored_eval(
+        &svc,
+        &EvalRunId::new("eval_win_3a"),
+        &asset_id,
+        &v1,
+        &rel1,
+        0.65,
+        300,
+    );
+    run_scored_eval(
+        &svc,
+        &EvalRunId::new("eval_win_3b"),
+        &asset_id,
+        &v2,
+        &rel2,
+        0.88,
+        200,
+    );
 
     let scorecard = svc.evals.build_scorecard(&project_id(), &asset_id);
     assert_eq!(scorecard.entries.len(), 2);
@@ -198,7 +306,8 @@ async fn winner_is_release_with_higher_task_success_rate() {
         .entries
         .iter()
         .max_by(|a, b| {
-            a.metrics.task_success_rate
+            a.metrics
+                .task_success_rate
                 .partial_cmp(&b.metrics.task_success_rate)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
@@ -264,7 +373,11 @@ async fn incomplete_eval_runs_excluded_from_scorecard() {
     );
 
     let scorecard = svc.evals.build_scorecard(&project_id(), &asset_id);
-    assert_eq!(scorecard.entries.len(), 1, "only completed runs appear in scorecard");
+    assert_eq!(
+        scorecard.entries.len(),
+        1,
+        "only completed runs appear in scorecard"
+    );
     assert_eq!(scorecard.entries[0].eval_run_id, done_id);
 }
 
@@ -276,27 +389,70 @@ async fn full_comparison_two_releases_winner_determined() {
     let asset_id = PromptAssetId::new("asset_full_cmp");
 
     svc.assets
-        .create(&project(), asset_id.clone(), "Full Comparison Asset".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "Full Comparison Asset".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
 
     // Version A: 0.70 success, 400ms latency.
     let va = PromptVersionId::new("ver_full_a");
     let rela = PromptReleaseId::new("rel_full_a");
-    svc.versions.create(&project(), va.clone(), asset_id.clone(), "sha256:v1".to_owned()).await.unwrap();
-    svc.releases.create(&project(), rela.clone(), asset_id.clone(), va.clone()).await.unwrap();
+    svc.versions
+        .create(
+            &project(),
+            va.clone(),
+            asset_id.clone(),
+            "sha256:v1".to_owned(),
+        )
+        .await
+        .unwrap();
+    svc.releases
+        .create(&project(), rela.clone(), asset_id.clone(), va.clone())
+        .await
+        .unwrap();
     svc.releases.transition(&rela, "approved").await.unwrap();
     svc.releases.activate(&rela).await.unwrap();
-    run_scored_eval(&svc, &EvalRunId::new("full_a"), &asset_id, &va, &rela, 0.70, 400);
+    run_scored_eval(
+        &svc,
+        &EvalRunId::new("full_a"),
+        &asset_id,
+        &va,
+        &rela,
+        0.70,
+        400,
+    );
 
     // Version B: 0.95 success, 180ms latency — clear winner.
     let vb = PromptVersionId::new("ver_full_b");
     let relb = PromptReleaseId::new("rel_full_b");
-    svc.versions.create(&project(), vb.clone(), asset_id.clone(), "sha256:v2".to_owned()).await.unwrap();
-    svc.releases.create(&project(), relb.clone(), asset_id.clone(), vb.clone()).await.unwrap();
+    svc.versions
+        .create(
+            &project(),
+            vb.clone(),
+            asset_id.clone(),
+            "sha256:v2".to_owned(),
+        )
+        .await
+        .unwrap();
+    svc.releases
+        .create(&project(), relb.clone(), asset_id.clone(), vb.clone())
+        .await
+        .unwrap();
     svc.releases.transition(&relb, "approved").await.unwrap();
     svc.releases.activate(&relb).await.unwrap();
-    run_scored_eval(&svc, &EvalRunId::new("full_b"), &asset_id, &vb, &relb, 0.95, 180);
+    run_scored_eval(
+        &svc,
+        &EvalRunId::new("full_b"),
+        &asset_id,
+        &vb,
+        &relb,
+        0.95,
+        180,
+    );
 
     let scorecard = svc.evals.build_scorecard(&project_id(), &asset_id);
     assert_eq!(scorecard.entries.len(), 2, "both releases must appear");
@@ -305,13 +461,20 @@ async fn full_comparison_two_releases_winner_determined() {
         .entries
         .iter()
         .max_by(|a, b| {
-            a.metrics.task_success_rate
+            a.metrics
+                .task_success_rate
                 .partial_cmp(&b.metrics.task_success_rate)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .unwrap();
 
-    assert_eq!(winner.prompt_release_id, relb, "rel_full_b (0.95) is the winner");
+    assert_eq!(
+        winner.prompt_release_id, relb,
+        "rel_full_b (0.95) is the winner"
+    );
     assert_eq!(winner.metrics.task_success_rate, Some(0.95));
-    assert!(winner.metrics.latency_p50_ms.unwrap() < 200, "winner has lower latency");
+    assert!(
+        winner.metrics.latency_p50_ms.unwrap() < 200,
+        "winner has lower latency"
+    );
 }

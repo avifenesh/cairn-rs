@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use cairn_domain::{
-    ApprovalPolicyCreated, ApprovalPolicyRecord, ProjectKey, PromptReleaseId, RuntimeEvent, TenantId,
-    WorkspaceRole,
+    ApprovalPolicyCreated, ApprovalPolicyRecord, ProjectKey, PromptReleaseId, RuntimeEvent,
+    TenantId, WorkspaceRole,
 };
 use cairn_store::projections::ApprovalPolicyReadModel;
 use cairn_store::EventLog;
@@ -136,16 +136,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use async_trait::async_trait;
+    use cairn_domain::events::EventEnvelope;
+    use cairn_domain::RuntimeEvent;
     use cairn_domain::{ApprovalPolicyRecord, PromptReleaseId, TenantId, WorkspaceRole};
     use cairn_store::error::StoreError;
     use cairn_store::event_log::EventPosition;
-    use cairn_domain::events::EventEnvelope;
     use cairn_store::projections::ApprovalPolicyReadModel;
-    use cairn_domain::RuntimeEvent;
 
     use crate::approval_policies::ApprovalPolicyService;
     use crate::services::ApprovalPolicyServiceImpl;
@@ -157,7 +157,9 @@ mod tests {
 
     impl MockPolicyStore {
         fn new() -> Self {
-            Self { policies: std::sync::Mutex::new(HashMap::new()) }
+            Self {
+                policies: std::sync::Mutex::new(HashMap::new()),
+            }
         }
     }
 
@@ -171,16 +173,19 @@ mod tests {
             let mut policies = self.policies.lock().unwrap();
             for envelope in events {
                 if let RuntimeEvent::ApprovalPolicyCreated(e) = &envelope.payload {
-                    policies.insert(e.policy_id.clone(), ApprovalPolicyRecord {
-                        policy_id: e.policy_id.clone(),
-                        tenant_id: e.tenant_id.clone(),
-                        name: e.name.clone(),
-                        required_approvers: e.required_approvers,
-                        allowed_approver_roles: e.allowed_approver_roles.clone(),
-                        auto_approve_after_ms: e.auto_approve_after_ms,
-                        auto_reject_after_ms: e.auto_reject_after_ms,
-                        attached_release_ids: vec![],
-                    });
+                    policies.insert(
+                        e.policy_id.clone(),
+                        ApprovalPolicyRecord {
+                            policy_id: e.policy_id.clone(),
+                            tenant_id: e.tenant_id.clone(),
+                            name: e.name.clone(),
+                            required_approvers: e.required_approvers,
+                            allowed_approver_roles: e.allowed_approver_roles.clone(),
+                            auto_approve_after_ms: e.auto_approve_after_ms,
+                            auto_reject_after_ms: e.auto_reject_after_ms,
+                            attached_release_ids: vec![],
+                        },
+                    );
                 }
             }
             Ok((0..events.len()).map(|i| EventPosition(i as u64)).collect())
@@ -230,7 +235,10 @@ mod tests {
             _limit: usize,
             _offset: usize,
         ) -> Result<Vec<ApprovalPolicyRecord>, StoreError> {
-            Ok(self.policies.lock().unwrap()
+            Ok(self
+                .policies
+                .lock()
+                .unwrap()
                 .values()
                 .filter(|p| &p.tenant_id == tenant_id)
                 .cloned()
@@ -269,12 +277,22 @@ mod tests {
         let svc = ApprovalPolicyServiceImpl::new(store);
 
         let policy = svc
-            .create(TenantId::new("t1"), "Gate".to_owned(), 1, vec![], None, None)
+            .create(
+                TenantId::new("t1"),
+                "Gate".to_owned(),
+                1,
+                vec![],
+                None,
+                None,
+            )
             .await
             .unwrap();
 
         let release_id = PromptReleaseId::new("release_1");
-        let updated = svc.attach_to_release(&policy.policy_id, release_id.clone()).await.unwrap();
+        let updated = svc
+            .attach_to_release(&policy.policy_id, release_id.clone())
+            .await
+            .unwrap();
         assert_eq!(updated.attached_release_ids, vec![release_id]);
     }
 
@@ -284,14 +302,29 @@ mod tests {
         let svc = ApprovalPolicyServiceImpl::new(store);
 
         let policy = svc
-            .create(TenantId::new("t1"), "Gate".to_owned(), 1, vec![], None, None)
+            .create(
+                TenantId::new("t1"),
+                "Gate".to_owned(),
+                1,
+                vec![],
+                None,
+                None,
+            )
             .await
             .unwrap();
 
         let release_id = PromptReleaseId::new("release_1");
-        svc.attach_to_release(&policy.policy_id, release_id.clone()).await.unwrap();
-        let final_policy = svc.attach_to_release(&policy.policy_id, release_id).await.unwrap();
-        assert_eq!(final_policy.attached_release_ids.len(), 1,
-            "duplicate attach must not add a second entry");
+        svc.attach_to_release(&policy.policy_id, release_id.clone())
+            .await
+            .unwrap();
+        let final_policy = svc
+            .attach_to_release(&policy.policy_id, release_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            final_policy.attached_release_ids.len(),
+            1,
+            "duplicate attach must not add a second entry"
+        );
     }
 }

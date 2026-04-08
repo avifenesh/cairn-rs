@@ -7,14 +7,14 @@
 //!   cairn-app --addr 0.0.0.0          # bind all interfaces
 //!
 #[allow(dead_code)]
-mod sse_hooks;
-mod openapi_spec;
-#[allow(dead_code)]
-mod templates;
+mod bundles;
 #[allow(dead_code)]
 mod entitlements;
+mod openapi_spec;
 #[allow(dead_code)]
-mod bundles;
+mod sse_hooks;
+#[allow(dead_code)]
+mod templates;
 #[allow(dead_code)]
 mod validate;
 
@@ -24,41 +24,46 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
-use axum::http::{Request, StatusCode};
+use axum::extract::{Path, Query, State};
 use axum::http::header::AUTHORIZATION;
+use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
-use tracing::Level;
 use axum::Json;
 use axum::Router;
-use cairn_api::auth::{AuthPrincipal, Authenticator, ServiceTokenAuthenticator, ServiceTokenRegistry};
-use cairn_api::bootstrap::{BootstrapConfig, DeploymentMode, EncryptionKeySource, StorageBackend};
-use cairn_domain::{
-    ApprovalDecision, ApprovalId, ProjectKey, RunId, TaskId,
+use cairn_api::auth::{
+    AuthPrincipal, Authenticator, ServiceTokenAuthenticator, ServiceTokenRegistry,
 };
+use cairn_api::bootstrap::{BootstrapConfig, DeploymentMode, EncryptionKeySource, StorageBackend};
+use cairn_domain::{ApprovalDecision, ApprovalId, ProjectKey, RunId, TaskId};
+use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
+use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::provider_health::ProviderHealthService;
 use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
-use cairn_runtime::{InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OpenAiCompatProvider};
-use cairn_store::projections::{ApprovalReadModel, LlmCallTraceReadModel, RunReadModel, SessionReadModel, TaskReadModel, ToolInvocationReadModel};
-use cairn_store::{EventLog, EventPosition};
-use cairn_store::DbAdapter;
-use cairn_store::pg::{PgAdapter, PgEventLog};
+use cairn_runtime::{
+    InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OpenAiCompatProvider,
+};
 use cairn_store::pg::PgMigrationRunner;
+use cairn_store::pg::{PgAdapter, PgEventLog};
+use cairn_store::projections::{
+    ApprovalReadModel, LlmCallTraceReadModel, RunReadModel, SessionReadModel, TaskReadModel,
+    ToolInvocationReadModel,
+};
 use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog};
+use cairn_store::DbAdapter;
+use cairn_store::{EventLog, EventPosition};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
-use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
-use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqlitePoolOptions;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 // ── Postgres backend ──────────────────────────────────────────────────────────
 
@@ -70,7 +75,7 @@ use sqlx::sqlite::SqlitePoolOptions;
 #[derive(Clone)]
 struct PgBackend {
     event_log: Arc<PgEventLog>,
-    adapter:   Arc<PgAdapter>,
+    adapter: Arc<PgAdapter>,
 }
 
 /// Bundled SQLite connection handles.
@@ -80,7 +85,7 @@ struct PgBackend {
 #[derive(Clone)]
 struct SqliteBackend {
     event_log: Arc<SqliteEventLog>,
-    adapter:   Arc<SqliteAdapter>,
+    adapter: Arc<SqliteAdapter>,
 }
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
@@ -160,15 +165,15 @@ pub enum NotifType {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Notification {
-    pub id:         String,
+    pub id: String,
     #[serde(rename = "type")]
     pub notif_type: NotifType,
-    pub message:    String,
+    pub message: String,
     /// Entity ID the notification links to (run_id, approval_id, task_id, …).
-    pub entity_id:  Option<String>,
+    pub entity_id: Option<String>,
     /// Hash navigation target for the UI (e.g. "runs", "approvals").
-    pub href:       String,
-    pub read:       bool,
+    pub href: String,
+    pub read: bool,
     pub created_at: u64,
 }
 
@@ -178,7 +183,9 @@ pub struct NotificationBuffer {
 
 impl NotificationBuffer {
     fn new() -> Self {
-        Self { entries: std::collections::VecDeque::with_capacity(NOTIF_RING_SIZE) }
+        Self {
+            entries: std::collections::VecDeque::with_capacity(NOTIF_RING_SIZE),
+        }
     }
 
     fn push(&mut self, n: Notification) {
@@ -189,7 +196,14 @@ impl NotificationBuffer {
     }
 
     fn list(&self, limit: usize) -> Vec<&Notification> {
-        self.entries.iter().rev().take(limit).collect::<Vec<_>>().into_iter().rev().collect()
+        self.entries
+            .iter()
+            .rev()
+            .take(limit)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
     }
 
     fn mark_read(&mut self, id: &str) -> bool {
@@ -202,7 +216,9 @@ impl NotificationBuffer {
     }
 
     fn mark_all_read(&mut self) {
-        for n in &mut self.entries { n.read = true; }
+        for n in &mut self.entries {
+            n.read = true;
+        }
     }
 
     fn unread_count(&self) -> usize {
@@ -219,20 +235,20 @@ impl NotificationBuffer {
 const LATENCY_RING_SIZE: usize = 1_000;
 
 struct AppMetrics {
-    total_requests:   u64,
+    total_requests: u64,
     requests_by_path: std::collections::HashMap<String, u64>,
     errors_by_status: std::collections::HashMap<u16, u64>,
     /// Rolling window — LATENCY_RING_SIZE most-recent latencies in ms.
-    latency_ring:     std::collections::VecDeque<u64>,
+    latency_ring: std::collections::VecDeque<u64>,
 }
 
 impl AppMetrics {
     fn new() -> Self {
         Self {
-            total_requests:   0,
+            total_requests: 0,
             requests_by_path: std::collections::HashMap::new(),
             errors_by_status: std::collections::HashMap::new(),
-            latency_ring:     std::collections::VecDeque::with_capacity(LATENCY_RING_SIZE),
+            latency_ring: std::collections::VecDeque::with_capacity(LATENCY_RING_SIZE),
         }
     }
     fn percentile(&self, p: f64) -> u64 {
@@ -269,15 +285,15 @@ const LOG_RING_SIZE: usize = 2_000;
 /// One structured request log entry.
 #[derive(Clone, Serialize)]
 pub struct LogEntry {
-    pub timestamp:          String,
-    pub level:              &'static str,
-    pub message:            String,
-    pub request_id:         String,
-    pub method:             String,
-    pub path:               String,
-    pub query:              Option<String>,
-    pub status:             u16,
-    pub latency_ms:         u64,
+    pub timestamp: String,
+    pub level: &'static str,
+    pub message: String,
+    pub request_id: String,
+    pub method: String,
+    pub path: String,
+    pub query: Option<String>,
+    pub status: u16,
+    pub latency_ms: u64,
     /// Wall-clock start time in Unix nanoseconds.  Used for OTLP span export.
     pub start_time_unix_ns: u64,
 }
@@ -289,7 +305,9 @@ pub struct RequestLogBuffer {
 
 impl RequestLogBuffer {
     fn new() -> Self {
-        Self { entries: std::collections::VecDeque::with_capacity(LOG_RING_SIZE) }
+        Self {
+            entries: std::collections::VecDeque::with_capacity(LOG_RING_SIZE),
+        }
     }
     /// Return the last `n` entries whose level matches the filter (empty = all).
     fn tail(&self, n: usize, level_filter: &[&str]) -> Vec<&LogEntry> {
@@ -374,10 +392,10 @@ fn pagination_headers(
     offset: usize,
     limit: usize,
 ) -> axum::response::AppendHeaders<[(String, String); 4]> {
-    let per_page   = limit.max(1);
-    let page       = offset / per_page + 1;
-    let last_page  = (total.max(1) + per_page - 1) / per_page;
-    let has_next   = offset + per_page < total;
+    let per_page = limit.max(1);
+    let page = offset / per_page + 1;
+    let last_page = (total.max(1) + per_page - 1) / per_page;
+    let has_next = offset + per_page < total;
 
     let link = if has_next {
         format!(
@@ -391,9 +409,9 @@ fn pagination_headers(
 
     axum::response::AppendHeaders([
         ("X-Total-Count".to_owned(), total.to_string()),
-        ("X-Page".to_owned(),        page.to_string()),
-        ("X-Per-Page".to_owned(),    per_page.to_string()),
-        ("Link".to_owned(),          link),
+        ("X-Page".to_owned(), page.to_string()),
+        ("X-Per-Page".to_owned(), per_page.to_string()),
+        ("Link".to_owned(), link),
     ])
 }
 
@@ -426,7 +444,9 @@ struct ProjectQuery {
 impl ProjectQuery {
     fn project_key(&self) -> Option<ProjectKey> {
         match (&self.tenant_id, &self.workspace_id, &self.project_id) {
-            (Some(t), Some(w), Some(p)) => Some(ProjectKey::new(t.as_str(), w.as_str(), p.as_str())),
+            (Some(t), Some(w), Some(p)) => {
+                Some(ProjectKey::new(t.as_str(), w.as_str(), p.as_str()))
+            }
             _ => None,
         }
     }
@@ -483,7 +503,10 @@ async fn version_header_middleware(req: Request<Body>, next: Next) -> Response {
 /// Public endpoint — no auth required.
 async fn changelog_handler() -> impl IntoResponse {
     (
-        [(axum::http::header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/json; charset=utf-8",
+        )],
         CHANGELOG,
     )
 }
@@ -492,15 +515,15 @@ async fn changelog_handler() -> impl IntoResponse {
 
 #[derive(serde::Deserialize)]
 struct TestWebhookRequest {
-    url:        String,
+    url: String,
     event_type: String,
 }
 
 #[derive(serde::Serialize)]
 struct TestWebhookResponse {
-    success:    bool,
+    success: bool,
     status_code: u16,
-    latency_ms:  u64,
+    latency_ms: u64,
 }
 
 async fn test_webhook_handler(
@@ -542,7 +565,7 @@ async fn test_webhook_handler(
             })
         }
         Err(_) => axum::Json(TestWebhookResponse {
-            success:     false,
+            success: false,
             status_code: 0,
             latency_ms,
         }),
@@ -557,7 +580,8 @@ async fn test_webhook_handler(
 /// a single 1 000 req/min bucket.  Falls back to `X-Forwarded-For` or the
 /// socket peer address when no token is present (100 req/min bucket).
 fn rate_limit_key(req: &Request<Body>) -> (String, u32) {
-    let token = req.headers()
+    let token = req
+        .headers()
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
@@ -567,7 +591,8 @@ fn rate_limit_key(req: &Request<Body>) -> (String, u32) {
         return (format!("tok:{tok}"), RATE_LIMIT_TOKEN);
     }
 
-    let ip = req.headers()
+    let ip = req
+        .headers()
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.split(',').next())
@@ -587,7 +612,10 @@ async fn rate_limit_status_handler(
     let (count, reset_in_secs) = match table.get(&key) {
         Some(bucket) if bucket.window_start.elapsed() < RATE_WINDOW => {
             let elapsed = bucket.window_start.elapsed();
-            let reset_in = RATE_WINDOW.checked_sub(elapsed).unwrap_or(RATE_WINDOW).as_secs();
+            let reset_in = RATE_WINDOW
+                .checked_sub(elapsed)
+                .unwrap_or(RATE_WINDOW)
+                .as_secs();
             (bucket.count, reset_in)
         }
         _ => (0, RATE_WINDOW.as_secs()),
@@ -611,38 +639,38 @@ async fn rate_limit_status_handler(
 /// Per-subsystem health entry.
 #[derive(Serialize)]
 struct CheckEntry {
-    status:     &'static str,
+    status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    models:     Option<usize>,
+    models: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    size:       Option<usize>,
+    size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    capacity:   Option<usize>,
+    capacity: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rss_mb:     Option<u64>,
+    rss_mb: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    heap_mb:    Option<u64>,
+    heap_mb: Option<u64>,
 }
 
 #[derive(Serialize)]
 struct DetailedHealthChecks {
-    store:        CheckEntry,
-    ollama:       CheckEntry,
+    store: CheckEntry,
+    ollama: CheckEntry,
     event_buffer: CheckEntry,
-    memory:       CheckEntry,
+    memory: CheckEntry,
 }
 
 #[derive(Serialize)]
 struct DetailedHealthResponse {
-    status:         &'static str,
-    checks:         DetailedHealthChecks,
+    status: &'static str,
+    checks: DetailedHealthChecks,
     uptime_seconds: u64,
-    version:        &'static str,
-    started_at:     String,
+    version: &'static str,
+    started_at: String,
     /// RFC 011: current process role.
-    role:           String,
+    role: String,
 }
 
 /// Read resident set size from `/proc/self/status` (Linux only).
@@ -652,12 +680,20 @@ fn read_proc_memory() -> (u64, u64) {
     {
         if let Ok(text) = std::fs::read_to_string("/proc/self/status") {
             let mut rss = 0u64;
-            let mut vm  = 0u64;
+            let mut vm = 0u64;
             for line in text.lines() {
                 if line.starts_with("VmRSS:") {
-                    rss = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+                    rss = line
+                        .split_whitespace()
+                        .nth(1)
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
                 } else if line.starts_with("VmSize:") {
-                    vm  = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+                    vm = line
+                        .split_whitespace()
+                        .nth(1)
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
                 }
             }
             return (rss, vm);
@@ -680,9 +716,13 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
     let store_latency = store_start.elapsed().as_millis() as u64;
 
     let store_check = CheckEntry {
-        status:     if store_ok { "healthy" } else { "unhealthy" },
+        status: if store_ok { "healthy" } else { "unhealthy" },
         latency_ms: Some(store_latency),
-        models: None, size: None, capacity: None, rss_mb: None, heap_mb: None,
+        models: None,
+        size: None,
+        capacity: None,
+        rss_mb: None,
+        heap_mb: None,
     };
 
     // ── Ollama check ──────────────────────────────────────────────────────────
@@ -690,20 +730,33 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
         let t = Instant::now();
         match provider.health_check().await {
             Ok(tags) => CheckEntry {
-                status:     "healthy",
+                status: "healthy",
                 latency_ms: Some(t.elapsed().as_millis() as u64),
-                models:     Some(tags.models.len()),
-                size: None, capacity: None, rss_mb: None, heap_mb: None,
+                models: Some(tags.models.len()),
+                size: None,
+                capacity: None,
+                rss_mb: None,
+                heap_mb: None,
             },
             Err(_) => CheckEntry {
-                status: "unhealthy", latency_ms: None,
-                models: None, size: None, capacity: None, rss_mb: None, heap_mb: None,
+                status: "unhealthy",
+                latency_ms: None,
+                models: None,
+                size: None,
+                capacity: None,
+                rss_mb: None,
+                heap_mb: None,
             },
         }
     } else {
         CheckEntry {
-            status: "unconfigured", latency_ms: None,
-            models: None, size: None, capacity: None, rss_mb: None, heap_mb: None,
+            status: "unconfigured",
+            latency_ms: None,
+            models: None,
+            size: None,
+            capacity: None,
+            rss_mb: None,
+            heap_mb: None,
         }
     };
 
@@ -711,23 +764,29 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
     // The SSE ring buffer lives in lib.rs AppState only.  For completeness we
     // report it as healthy with unknown size.
     let event_buffer_check = CheckEntry {
-        status: "healthy", latency_ms: None,
-        size: None, capacity: None,
-        models: None, rss_mb: None, heap_mb: None,
+        status: "healthy",
+        latency_ms: None,
+        size: None,
+        capacity: None,
+        models: None,
+        rss_mb: None,
+        heap_mb: None,
     };
 
     // ── Process memory ────────────────────────────────────────────────────────
     let (rss_kb, _vm_kb) = read_proc_memory();
     let memory_check = CheckEntry {
-        status:  "healthy",
-        rss_mb:  Some(rss_kb / 1024),
-        heap_mb: None,          // allocator-level heap not easily available without jemalloc
-        latency_ms: None, models: None, size: None, capacity: None,
+        status: "healthy",
+        rss_mb: Some(rss_kb / 1024),
+        heap_mb: None, // allocator-level heap not easily available without jemalloc
+        latency_ms: None,
+        models: None,
+        size: None,
+        capacity: None,
     };
 
     // ── Overall status ────────────────────────────────────────────────────────
-    let degraded = !store_ok
-        || matches!(ollama_check.status, "unhealthy");
+    let degraded = !store_ok || matches!(ollama_check.status, "unhealthy");
 
     let overall = if degraded { "degraded" } else { "healthy" };
 
@@ -740,7 +799,7 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
         .saturating_sub(uptime);
     let started_at = format!(
         "{}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        1970 + started_secs / 31_557_600,   // approx — good enough for display
+        1970 + started_secs / 31_557_600, // approx — good enough for display
         ((started_secs % 31_557_600) / 2_629_800) + 1,
         ((started_secs % 2_629_800) / 86_400) + 1,
         (started_secs % 86_400) / 3_600,
@@ -751,10 +810,10 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
     Json(DetailedHealthResponse {
         status: overall,
         checks: DetailedHealthChecks {
-            store:        store_check,
-            ollama:       ollama_check,
+            store: store_check,
+            ollama: ollama_check,
             event_buffer: event_buffer_check,
-            memory:       memory_check,
+            memory: memory_check,
         },
         uptime_seconds: uptime,
         version: env!("CARGO_PKG_VERSION"),
@@ -939,13 +998,13 @@ async fn list_run_tasks_handler(
     // Verify the run exists before listing its tasks.
     match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
         Ok(None) => return Err(not_found(format!("run {id} not found"))),
-        Err(e)   => return Err(internal_error(e.to_string())),
+        Err(e) => return Err(internal_error(e.to_string())),
         Ok(Some(_)) => {}
     }
 
     match TaskReadModel::list_by_parent_run(state.runtime.store.as_ref(), &run_id, 1000).await {
         Ok(tasks) => Ok(Json(tasks)),
-        Err(e)    => Err(internal_error(e.to_string())),
+        Err(e) => Err(internal_error(e.to_string())),
     }
 }
 
@@ -977,22 +1036,34 @@ async fn create_run_task_handler(
 
     let run = match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
         Ok(None) => return Err(not_found(format!("run {run_id_str} not found"))),
-        Err(e)   => return Err(internal_error(e.to_string())),
+        Err(e) => return Err(internal_error(e.to_string())),
         Ok(Some(r)) => r,
     };
 
     let task_id = TaskId::new(
-        body.task_id.as_deref()
+        body.task_id
+            .as_deref()
             .unwrap_or(&uuid::Uuid::new_v4().to_string()),
     );
 
-    match state.runtime.tasks.submit(&run.project, task_id, Some(run_id), None, 0).await {
+    match state
+        .runtime
+        .tasks
+        .submit(&run.project, task_id, Some(run_id), None, 0)
+        .await
+    {
         Ok(record) => {
             let mut value = serde_json::to_value(&record).unwrap_or_default();
             if let Some(obj) = value.as_object_mut() {
-                obj.insert("name".to_owned(),        serde_json::json!(body.name));
-                obj.insert("description".to_owned(), serde_json::json!(body.description));
-                obj.insert("metadata".to_owned(),    body.metadata.unwrap_or(serde_json::json!({})));
+                obj.insert("name".to_owned(), serde_json::json!(body.name));
+                obj.insert(
+                    "description".to_owned(),
+                    serde_json::json!(body.description),
+                );
+                obj.insert(
+                    "metadata".to_owned(),
+                    body.metadata.unwrap_or(serde_json::json!({})),
+                );
             }
             Ok((StatusCode::CREATED, Json(value)))
         }
@@ -1037,7 +1108,12 @@ async fn fail_task_handler(
     Json(body): Json<FailTaskBody>,
 ) -> impl axum::response::IntoResponse {
     let task_id = TaskId::new(id.clone());
-    match state.runtime.tasks.fail(&task_id, cairn_domain::FailureClass::ExecutionError).await {
+    match state
+        .runtime
+        .tasks
+        .fail(&task_id, cairn_domain::FailureClass::ExecutionError)
+        .await
+    {
         Ok(record) => {
             let mut value = serde_json::to_value(&record).unwrap_or_default();
             if let Some(obj) = value.as_object_mut() {
@@ -1069,7 +1145,7 @@ async fn list_run_approvals_handler(
     // Verify the run exists.
     match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
         Ok(None) => return Err(not_found(format!("run {id} not found"))),
-        Err(e)   => return Err(internal_error(e.to_string())),
+        Err(e) => return Err(internal_error(e.to_string())),
         Ok(Some(_)) => {}
     }
 
@@ -1095,7 +1171,7 @@ async fn list_session_runs_handler(
     // Verify session exists.
     match SessionReadModel::get(state.runtime.store.as_ref(), &session_id).await {
         Ok(None) => return Err(not_found(format!("session {id} not found"))),
-        Err(e)   => return Err(internal_error(e.to_string())),
+        Err(e) => return Err(internal_error(e.to_string())),
         Ok(Some(_)) => {}
     }
 
@@ -1104,19 +1180,21 @@ async fn list_session_runs_handler(
         &session_id,
         q.limit,
         q.offset,
-    ).await {
+    )
+    .await
+    {
         Ok(runs) => Ok(Json(runs)),
-        Err(e)   => Err(internal_error(e.to_string())),
+        Err(e) => Err(internal_error(e.to_string())),
     }
 }
 
 #[derive(Deserialize)]
 struct CreateRunBody {
-    tenant_id:    Option<String>,
+    tenant_id: Option<String>,
     workspace_id: Option<String>,
-    project_id:   Option<String>,
-    session_id:   Option<String>,
-    run_id:       Option<String>,
+    project_id: Option<String>,
+    session_id: Option<String>,
+    run_id: Option<String>,
     parent_run_id: Option<String>,
 }
 
@@ -1138,10 +1216,14 @@ async fn batch_create_runs_handler(
     Json(body): Json<BatchCreateRunsBody>,
 ) -> impl axum::response::IntoResponse {
     if body.runs.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "code": "bad_request",
-            "message": "runs array must not be empty",
-        }))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "code": "bad_request",
+                "message": "runs array must not be empty",
+            })),
+        )
+            .into_response();
     }
 
     let mut results: Vec<serde_json::Value> = Vec::with_capacity(body.runs.len());
@@ -1152,22 +1234,36 @@ async fn batch_create_runs_handler(
             run_body.workspace_id.as_deref().unwrap_or("default"),
             run_body.project_id.as_deref().unwrap_or("default"),
         );
-        let session_id = cairn_domain::SessionId::new(
-            run_body.session_id.as_deref().unwrap_or("session_1"),
-        );
+        let session_id =
+            cairn_domain::SessionId::new(run_body.session_id.as_deref().unwrap_or("session_1"));
         let run_id = RunId::new(
-            run_body.run_id.as_deref().unwrap_or(&uuid::Uuid::new_v4().to_string()),
+            run_body
+                .run_id
+                .as_deref()
+                .unwrap_or(&uuid::Uuid::new_v4().to_string()),
         );
         let parent_run_id = run_body.parent_run_id.as_deref().map(RunId::new);
 
-        match RunService::start(&state.runtime.runs, &project, &session_id, run_id, parent_run_id).await {
+        match RunService::start(
+            &state.runtime.runs,
+            &project,
+            &session_id,
+            run_id,
+            parent_run_id,
+        )
+        .await
+        {
             Ok(record) => results.push(serde_json::json!({ "ok": true,  "run": record })),
-            Err(e)     => results.push(serde_json::json!({ "ok": false, "error": e.to_string() })),
+            Err(e) => results.push(serde_json::json!({ "ok": false, "error": e.to_string() })),
         }
     }
 
     let all_ok = results.iter().all(|r| r["ok"].as_bool().unwrap_or(false));
-    let status = if all_ok { StatusCode::CREATED } else { StatusCode::MULTI_STATUS };
+    let status = if all_ok {
+        StatusCode::CREATED
+    } else {
+        StatusCode::MULTI_STATUS
+    };
     (status, Json(serde_json::json!({ "results": results }))).into_response()
 }
 
@@ -1187,10 +1283,14 @@ async fn batch_cancel_tasks_handler(
     Json(body): Json<BatchCancelTasksBody>,
 ) -> impl axum::response::IntoResponse {
     if body.task_ids.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "code": "bad_request",
-            "message": "task_ids array must not be empty",
-        }))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "code": "bad_request",
+                "message": "task_ids array must not be empty",
+            })),
+        )
+            .into_response();
     }
 
     let mut cancelled: u32 = 0;
@@ -1207,10 +1307,14 @@ async fn batch_cancel_tasks_handler(
         }
     }
 
-    (StatusCode::OK, Json(serde_json::json!({
-        "cancelled": cancelled,
-        "failed":    failed,
-    }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "cancelled": cancelled,
+            "failed":    failed,
+        })),
+    )
+        .into_response()
 }
 
 // ── Export / Import handlers ──────────────────────────────────────────────────
@@ -1250,29 +1354,36 @@ async fn export_run_handler(
     // Fetch the run record.
     let run = match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
         Ok(Some(r)) => r,
-        Ok(None)    => return Err(not_found(format!("run {id} not found"))),
-        Err(e)      => return Err(internal_error(e.to_string())),
+        Ok(None) => return Err(not_found(format!("run {id} not found"))),
+        Err(e) => return Err(internal_error(e.to_string())),
     };
 
     // Fetch tasks.
-    let tasks = match TaskReadModel::list_by_parent_run(
-        state.runtime.store.as_ref(), &run_id, 2000,
-    ).await {
-        Ok(t)  => t,
+    let tasks = match TaskReadModel::list_by_parent_run(state.runtime.store.as_ref(), &run_id, 2000)
+        .await
+    {
+        Ok(t) => t,
         Err(e) => return Err(internal_error(e.to_string())),
     };
 
     // Fetch events (summaries — full payloads are not stored by default).
-    let events = match state.runtime.store
+    let events = match state
+        .runtime
+        .store
         .read_by_entity(&cairn_store::EntityRef::Run(run_id), None, 2000)
         .await
     {
-        Ok(evts) => evts.into_iter().map(|e| serde_json::json!({
-            "position":   e.position.0,
-            "stored_at":  e.stored_at,
-            "event_type": event_type_name(&e.envelope.payload),
-            "event_id":   e.envelope.event_id.as_str(),
-        })).collect::<Vec<_>>(),
+        Ok(evts) => evts
+            .into_iter()
+            .map(|e| {
+                serde_json::json!({
+                    "position":   e.position.0,
+                    "stored_at":  e.stored_at,
+                    "event_type": event_type_name(&e.envelope.payload),
+                    "event_id":   e.envelope.event_id.as_str(),
+                })
+            })
+            .collect::<Vec<_>>(),
         Err(e) => return Err(internal_error(e.to_string())),
     };
 
@@ -1292,7 +1403,8 @@ async fn export_run_handler(
     let mut resp = (StatusCode::OK, Json(body)).into_response();
     resp.headers_mut().insert(
         axum::http::header::CONTENT_DISPOSITION,
-        axum::http::HeaderValue::from_str(&content_disposition).unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment")),
+        axum::http::HeaderValue::from_str(&content_disposition)
+            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment")),
     );
     Ok(resp)
 }
@@ -1307,15 +1419,20 @@ async fn export_session_handler(
     // Fetch the session record.
     let session = match SessionReadModel::get(state.runtime.store.as_ref(), &session_id).await {
         Ok(Some(s)) => s,
-        Ok(None)    => return Err(not_found(format!("session {id} not found"))),
-        Err(e)      => return Err(internal_error(e.to_string())),
+        Ok(None) => return Err(not_found(format!("session {id} not found"))),
+        Err(e) => return Err(internal_error(e.to_string())),
     };
 
     // All runs in this session.
     let runs = match RunReadModel::list_by_session(
-        state.runtime.store.as_ref(), &session_id, 500, 0,
-    ).await {
-        Ok(r)  => r,
+        state.runtime.store.as_ref(),
+        &session_id,
+        500,
+        0,
+    )
+    .await
+    {
+        Ok(r) => r,
         Err(e) => return Err(internal_error(e.to_string())),
     };
 
@@ -1323,9 +1440,9 @@ async fn export_session_handler(
     let mut all_tasks: Vec<serde_json::Value> = Vec::new();
     for run in &runs {
         let rid = run.run_id.clone();
-        if let Ok(tasks) = TaskReadModel::list_by_parent_run(
-            state.runtime.store.as_ref(), &rid, 2000,
-        ).await {
+        if let Ok(tasks) =
+            TaskReadModel::list_by_parent_run(state.runtime.store.as_ref(), &rid, 2000).await
+        {
             for t in tasks {
                 all_tasks.push(serde_json::to_value(t).unwrap_or(serde_json::Value::Null));
             }
@@ -1333,16 +1450,23 @@ async fn export_session_handler(
     }
 
     // Events for the session itself.
-    let events = match state.runtime.store
+    let events = match state
+        .runtime
+        .store
         .read_by_entity(&cairn_store::EntityRef::Session(session_id), None, 2000)
         .await
     {
-        Ok(evts) => evts.into_iter().map(|e| serde_json::json!({
-            "position":   e.position.0,
-            "stored_at":  e.stored_at,
-            "event_type": event_type_name(&e.envelope.payload),
-            "event_id":   e.envelope.event_id.as_str(),
-        })).collect::<Vec<_>>(),
+        Ok(evts) => evts
+            .into_iter()
+            .map(|e| {
+                serde_json::json!({
+                    "position":   e.position.0,
+                    "stored_at":  e.stored_at,
+                    "event_type": event_type_name(&e.envelope.payload),
+                    "event_id":   e.envelope.event_id.as_str(),
+                })
+            })
+            .collect::<Vec<_>>(),
         Err(e) => return Err(internal_error(e.to_string())),
     };
 
@@ -1363,7 +1487,8 @@ async fn export_session_handler(
     let mut resp = (StatusCode::OK, Json(body)).into_response();
     resp.headers_mut().insert(
         axum::http::header::CONTENT_DISPOSITION,
-        axum::http::HeaderValue::from_str(&content_disposition).unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment")),
+        axum::http::HeaderValue::from_str(&content_disposition)
+            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("attachment")),
     );
     Ok(resp)
 }
@@ -1394,32 +1519,51 @@ async fn import_session_handler(
     // Validate version
     if let Some(ref v) = body.version {
         if v != EXPORT_VERSION {
-            return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(ApiError {
-                code: "version_mismatch",
-                message: format!("export version {v} is not supported; expected {EXPORT_VERSION}"),
-            })));
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ApiError {
+                    code: "version_mismatch",
+                    message: format!(
+                        "export version {v} is not supported; expected {EXPORT_VERSION}"
+                    ),
+                }),
+            ));
         }
     }
 
     // Validate type
     match body.export_type.as_deref() {
         Some("session_export") | None => {}
-        Some(t) => return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(ApiError {
-            code: "wrong_export_type",
-            message: format!("expected 'session_export', got '{t}'"),
-        }))),
+        Some(t) => {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ApiError {
+                    code: "wrong_export_type",
+                    message: format!("expected 'session_export', got '{t}'"),
+                }),
+            ))
+        }
     }
 
-    let session_data = body.data
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(ApiError {
-            code: "missing_data",
-            message: "import body must include a 'data' field".to_owned(),
-        })))?;
+    let session_data = body.data.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                code: "missing_data",
+                message: "import body must include a 'data' field".to_owned(),
+            }),
+        )
+    })?;
 
-    let session_json = session_data.session.ok_or_else(|| (StatusCode::BAD_REQUEST, Json(ApiError {
-        code: "missing_session",
-        message: "'data.session' is required".to_owned(),
-    })))?;
+    let session_json = session_data.session.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                code: "missing_session",
+                message: "'data.session' is required".to_owned(),
+            }),
+        )
+    })?;
 
     // Extract fields from the exported session record.
     let session_id_str = session_json
@@ -1428,19 +1572,31 @@ async fn import_session_handler(
         .unwrap_or("imported_session");
 
     let project_obj = session_json.get("project");
-    let tenant_id    = project_obj.and_then(|p| p.get("tenant_id")).and_then(|v| v.as_str()).unwrap_or("default");
-    let workspace_id = project_obj.and_then(|p| p.get("workspace_id")).and_then(|v| v.as_str()).unwrap_or("default");
-    let project_id   = project_obj.and_then(|p| p.get("project_id")).and_then(|v| v.as_str()).unwrap_or("default");
+    let tenant_id = project_obj
+        .and_then(|p| p.get("tenant_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+    let workspace_id = project_obj
+        .and_then(|p| p.get("workspace_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+    let project_id = project_obj
+        .and_then(|p| p.get("project_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
 
-    let project    = ProjectKey::new(tenant_id, workspace_id, project_id);
+    let project = ProjectKey::new(tenant_id, workspace_id, project_id);
     let session_id = cairn_domain::SessionId::new(session_id_str);
 
     match SessionService::create(&state.runtime.sessions, &project, session_id).await {
         Ok(record) => Ok((StatusCode::CREATED, Json(serde_json::json!(record)))),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiError {
-            code: "create_failed",
-            message: e.to_string(),
-        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError {
+                code: "create_failed",
+                message: e.to_string(),
+            }),
+        )),
     }
 }
 
@@ -1457,7 +1613,7 @@ async fn list_pending_approvals_handler(
 ) -> impl axum::response::IntoResponse {
     // Use total approval count (all states) as the pagination denominator.
     let total = state.runtime.store.count_all_approvals();
-    let hdrs  = pagination_headers("/v1/approvals/pending", total, q.offset, q.limit);
+    let hdrs = pagination_headers("/v1/approvals/pending", total, q.offset, q.limit);
     if let Some(project) = q.project_key() {
         match ApprovalReadModel::list_pending(
             state.runtime.store.as_ref(),
@@ -1485,7 +1641,10 @@ async fn list_all_pending(
     limit: usize,
     offset: usize,
 ) -> Result<Vec<cairn_store::projections::ApprovalRecord>, cairn_store::StoreError> {
-    Ok(state.runtime.store.list_all_pending_approvals(limit, offset))
+    Ok(state
+        .runtime
+        .store
+        .list_all_pending_approvals(limit, offset))
 }
 
 #[derive(Deserialize)]
@@ -1526,17 +1685,32 @@ async fn resolve_approval_handler(
     let decision = match body.decision.to_lowercase().as_str() {
         "approved" | "approve" => ApprovalDecision::Approved,
         "rejected" | "reject" => ApprovalDecision::Rejected,
-        other => return Err(bad_request(format!("unknown decision: {other}; use 'approved' or 'rejected'"))),
+        other => {
+            return Err(bad_request(format!(
+                "unknown decision: {other}; use 'approved' or 'rejected'"
+            )))
+        }
     };
-    match state.runtime.approvals.resolve(&approval_id, decision).await {
-        Ok(record) => Ok((StatusCode::OK, Json(ResolveApprovalResponse {
-            record,
-            reason: body.reason,
-        }))),
+    match state
+        .runtime
+        .approvals
+        .resolve(&approval_id, decision)
+        .await
+    {
+        Ok(record) => Ok((
+            StatusCode::OK,
+            Json(ResolveApprovalResponse {
+                record,
+                reason: body.reason,
+            }),
+        )),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") || msg.contains("NotFound") {
-                Err(not_found(format!("approval {} not found", approval_id.as_str())))
+                Err(not_found(format!(
+                    "approval {} not found",
+                    approval_id.as_str()
+                )))
             } else {
                 Err(internal_error(msg))
             }
@@ -1690,8 +1864,8 @@ async fn append_events_handler(
         // ── Notification hook ──────────────────────────────────────────────────
         // Inspect each event and push a notification for operator-relevant ones.
         {
-            use cairn_domain::RuntimeEvent as E;
             use cairn_domain::lifecycle::RunState;
+            use cairn_domain::RuntimeEvent as E;
             use std::time::SystemTime;
             let now_ms = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -1701,53 +1875,54 @@ async fn append_events_handler(
 
             let maybe_notif: Option<Notification> = match &envelope.payload {
                 E::ApprovalRequested(e) => Some(Notification {
-                    id:         notif_id,
+                    id: notif_id,
                     notif_type: NotifType::ApprovalRequested,
-                    message:    format!(
+                    message: format!(
                         "Approval requested for {}",
                         e.run_id.as_ref().map(|r| r.as_str()).unwrap_or("a task"),
                     ),
-                    entity_id:  Some(e.approval_id.as_str().to_owned()),
-                    href:       "approvals".to_owned(),
-                    read:       false,
+                    entity_id: Some(e.approval_id.as_str().to_owned()),
+                    href: "approvals".to_owned(),
+                    read: false,
                     created_at: now_ms,
                 }),
                 E::ApprovalResolved(e) => Some(Notification {
-                    id:         notif_id,
+                    id: notif_id,
                     notif_type: NotifType::ApprovalResolved,
-                    message:    format!(
+                    message: format!(
                         "Approval {} — decision: {:?}",
                         e.approval_id.as_str(),
                         e.decision,
                     ),
-                    entity_id:  Some(e.approval_id.as_str().to_owned()),
-                    href:       "approvals".to_owned(),
-                    read:       false,
+                    entity_id: Some(e.approval_id.as_str().to_owned()),
+                    href: "approvals".to_owned(),
+                    read: false,
                     created_at: now_ms,
                 }),
                 E::RunStateChanged(e) => match &e.transition.to {
                     RunState::Completed => Some(Notification {
-                        id:         notif_id,
+                        id: notif_id,
                         notif_type: NotifType::RunCompleted,
-                        message:    format!("Run {} completed", e.run_id.as_str()),
-                        entity_id:  Some(e.run_id.as_str().to_owned()),
-                        href:       format!("run/{}", e.run_id.as_str()),
-                        read:       false,
+                        message: format!("Run {} completed", e.run_id.as_str()),
+                        entity_id: Some(e.run_id.as_str().to_owned()),
+                        href: format!("run/{}", e.run_id.as_str()),
+                        read: false,
                         created_at: now_ms,
                     }),
                     RunState::Failed => Some(Notification {
-                        id:         notif_id,
+                        id: notif_id,
                         notif_type: NotifType::RunFailed,
-                        message:    format!(
+                        message: format!(
                             "Run {} failed{}",
                             e.run_id.as_str(),
-                            e.failure_class.as_ref()
+                            e.failure_class
+                                .as_ref()
                                 .map(|f| format!(" ({f:?})"))
                                 .unwrap_or_default(),
                         ),
-                        entity_id:  Some(e.run_id.as_str().to_owned()),
-                        href:       format!("run/{}", e.run_id.as_str()),
-                        read:       false,
+                        entity_id: Some(e.run_id.as_str().to_owned()),
+                        href: format!("run/{}", e.run_id.as_str()),
+                        read: false,
                         created_at: now_ms,
                     }),
                     _ => None,
@@ -1755,19 +1930,21 @@ async fn append_events_handler(
                 E::TaskStateChanged(e) => {
                     use cairn_domain::lifecycle::TaskState;
                     match &e.transition.to {
-                        TaskState::DeadLettered | TaskState::RetryableFailed => Some(Notification {
-                            id:         notif_id,
-                            notif_type: NotifType::TaskStuck,
-                            message:    format!(
-                                "Task {} is stuck ({:?})",
-                                e.task_id.as_str(),
-                                e.transition.to,
-                            ),
-                            entity_id:  Some(e.task_id.as_str().to_owned()),
-                            href:       "tasks".to_owned(),
-                            read:       false,
-                            created_at: now_ms,
-                        }),
+                        TaskState::DeadLettered | TaskState::RetryableFailed => {
+                            Some(Notification {
+                                id: notif_id,
+                                notif_type: NotifType::TaskStuck,
+                                message: format!(
+                                    "Task {} is stuck ({:?})",
+                                    e.task_id.as_str(),
+                                    e.transition.to,
+                                ),
+                                entity_id: Some(e.task_id.as_str().to_owned()),
+                                href: "tasks".to_owned(),
+                                read: false,
+                                created_at: now_ms,
+                            })
+                        }
                         _ => None,
                     }
                 }
@@ -1877,7 +2054,7 @@ async fn db_status_handler(State(state): State<AppState>) -> Json<DbStatusRespon
         Json(DbStatusResponse {
             backend: "sqlite",
             connected,
-            migration_count: None,   // SQLite uses single-shot migrate(), no versioned log
+            migration_count: None, // SQLite uses single-shot migrate(), no versioned log
             schema_current: Some(connected),
         })
     } else {
@@ -1901,7 +2078,7 @@ struct NotifListQuery {
 #[derive(Serialize)]
 struct NotifListResponse {
     notifications: Vec<Notification>,
-    unread_count:  usize,
+    unread_count: usize,
 }
 
 /// `GET /v1/notifications?limit=50` — list recent notifications.
@@ -1910,10 +2087,16 @@ async fn list_notifications_handler(
     Query(q): Query<NotifListQuery>,
 ) -> impl IntoResponse {
     let limit = q.limit.unwrap_or(50).min(200);
-    let buf = state.notifications.read().expect("notification lock poisoned");
+    let buf = state
+        .notifications
+        .read()
+        .expect("notification lock poisoned");
     let notifications: Vec<Notification> = buf.list(limit).into_iter().map(|n| n.clone()).collect();
     let unread_count = buf.unread_count();
-    Json(NotifListResponse { notifications, unread_count })
+    Json(NotifListResponse {
+        notifications,
+        unread_count,
+    })
 }
 
 /// `POST /v1/notifications/:id/read` — mark one notification as read.
@@ -1921,21 +2104,30 @@ async fn mark_notification_read_handler(
     State(state): State<AppState>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    let found = state.notifications.write()
+    let found = state
+        .notifications
+        .write()
         .expect("notification lock poisoned")
         .mark_read(&id);
     if found {
         StatusCode::NO_CONTENT.into_response()
     } else {
-        (StatusCode::NOT_FOUND, Json(ApiError { code: "not_found", message: format!("notification {id} not found") })).into_response()
+        (
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                code: "not_found",
+                message: format!("notification {id} not found"),
+            }),
+        )
+            .into_response()
     }
 }
 
 /// `POST /v1/notifications/read-all` — mark all notifications as read.
-async fn mark_all_notifications_read_handler(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    state.notifications.write()
+async fn mark_all_notifications_read_handler(State(state): State<AppState>) -> impl IntoResponse {
+    state
+        .notifications
+        .write()
         .expect("notification lock poisoned")
         .mark_all_read();
     StatusCode::NO_CONTENT
@@ -1952,7 +2144,9 @@ struct LogsQuery {
     level: Option<String>,
 }
 
-fn default_logs_limit() -> usize { 100 }
+fn default_logs_limit() -> usize {
+    100
+}
 
 /// `GET /v1/admin/logs?limit=100&level=error,warn` — structured request log tail.
 ///
@@ -1963,31 +2157,39 @@ async fn list_request_logs_handler(
     Query(q): Query<LogsQuery>,
 ) -> impl IntoResponse {
     let limit = q.limit.min(500);
-    let level_filter: Vec<&'static str> = q.level
+    let level_filter: Vec<&'static str> = q
+        .level
         .as_deref()
         .map(|s| {
             s.split(',')
                 .filter_map(|l| match l.trim() {
-                    "info"  => Some("info"),
-                    "warn"  => Some("warn"),
+                    "info" => Some("info"),
+                    "warn" => Some("warn"),
                     "error" => Some("error"),
-                    _       => None,
+                    _ => None,
                 })
                 .collect()
         })
         .unwrap_or_default();
 
     let entries: Vec<LogEntry> = match state.request_log.read() {
-        Ok(log) => log.tail(limit, &level_filter).into_iter().cloned().collect(),
-        Err(_)  => vec![],
+        Ok(log) => log
+            .tail(limit, &level_filter)
+            .into_iter()
+            .cloned()
+            .collect(),
+        Err(_) => vec![],
     };
 
     let total = entries.len();
-    (StatusCode::OK, Json(serde_json::json!({
-        "entries": entries,
-        "total":   total,
-        "limit":   limit,
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "entries": entries,
+            "total":   total,
+            "limit":   limit,
+        })),
+    )
 }
 
 // ── OpenTelemetry OTLP trace export ──────────────────────────────────────────
@@ -2000,7 +2202,7 @@ struct TraceExportQuery {
     format: Option<String>,
     /// Maximum number of spans to include (default 200, max 2 000).
     #[serde(default)]
-    limit:  Option<usize>,
+    limit: Option<usize>,
 }
 
 /// Convert a UUID string (with hyphens) to a 32-char lowercase hex trace ID.
@@ -2024,10 +2226,10 @@ fn ns_to_otlp_time(ns: u64) -> String {
 /// Build a single OTLP JSON span from a `LogEntry`.
 fn log_entry_to_otlp_span(entry: &LogEntry) -> serde_json::Value {
     let trace_id = uuid_to_trace_id(&entry.request_id);
-    let span_id  = uuid_to_span_id(&entry.request_id);
+    let span_id = uuid_to_span_id(&entry.request_id);
 
     let start_ns = entry.start_time_unix_ns;
-    let end_ns   = start_ns + entry.latency_ms * 1_000_000;
+    let end_ns = start_ns + entry.latency_ms * 1_000_000;
 
     // OTLP span status: 1 = OK, 2 = ERROR
     let (status_code, status_msg) = if entry.status >= 500 {
@@ -2097,7 +2299,8 @@ async fn export_otlp_handler(
                 Json(serde_json::json!({
                     "error": format!("unsupported format '{fmt}'; only 'otlp' is supported"),
                 })),
-            ).into_response();
+            )
+                .into_response();
         }
     }
 
@@ -2105,13 +2308,10 @@ async fn export_otlp_handler(
 
     let entries: Vec<LogEntry> = match state.request_log.read() {
         Ok(log) => log.tail(limit, &[]).into_iter().cloned().collect(),
-        Err(_)  => vec![],
+        Err(_) => vec![],
     };
 
-    let spans: Vec<serde_json::Value> = entries
-        .iter()
-        .map(log_entry_to_otlp_span)
-        .collect();
+    let spans: Vec<serde_json::Value> = entries.iter().map(log_entry_to_otlp_span).collect();
 
     let body = serde_json::json!({
         "resourceSpans": [{
@@ -2138,7 +2338,8 @@ async fn export_otlp_handler(
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         Json(body),
-    ).into_response()
+    )
+        .into_response()
 }
 
 // ── Admin snapshot / restore ──────────────────────────────────────────────────
@@ -2149,12 +2350,10 @@ async fn export_otlp_handler(
 /// The snapshot contains all events in position order. Restoring it via
 /// `POST /v1/admin/restore` will replay every event and rebuild all
 /// projections from scratch, giving a consistent store state.
-async fn admin_snapshot_handler(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn admin_snapshot_handler(State(state): State<AppState>) -> impl IntoResponse {
     let snap = state.runtime.store.dump_events();
     let json = match serde_json::to_vec_pretty(&snap) {
-        Ok(b)  => b,
+        Ok(b) => b,
         Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -2162,7 +2361,8 @@ async fn admin_snapshot_handler(
                     .status(500)
                     .body(axum::body::Body::from(e.to_string()))
                     .unwrap(),
-            ).into_response();
+            )
+                .into_response();
         }
     };
     let filename = format!(
@@ -2175,7 +2375,10 @@ async fn admin_snapshot_handler(
     axum::response::Response::builder()
         .status(200)
         .header("Content-Type", "application/json; charset=utf-8")
-        .header("Content-Disposition", format!("attachment; filename=\"{filename}\""))
+        .header(
+            "Content-Disposition",
+            format!("attachment; filename=\"{filename}\""),
+        )
         .header("X-Event-Count", snap.event_count.to_string())
         .body(axum::body::Body::from(json))
         .unwrap()
@@ -2192,11 +2395,14 @@ async fn admin_restore_handler(
 ) -> impl IntoResponse {
     let event_count = snap.event_count;
     let replayed = state.runtime.store.load_snapshot(snap);
-    (StatusCode::OK, Json(serde_json::json!({
-        "ok":           true,
-        "event_count":  event_count,
-        "replayed":     replayed,
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "ok":           true,
+            "event_count":  event_count,
+            "replayed":     replayed,
+        })),
+    )
 }
 
 // ── Projection rebuild + event inspection handlers ────────────────────────────
@@ -2213,9 +2419,7 @@ async fn admin_restore_handler(
 /// `apply_projection` on every stored event in order.
 ///
 /// Returns: `{ events_replayed: N, duration_ms: N }`
-async fn rebuild_projections_handler(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn rebuild_projections_handler(State(state): State<AppState>) -> impl IntoResponse {
     let t0 = std::time::Instant::now();
     let snap = state.runtime.store.dump_events();
     let events_replayed = state.runtime.store.load_snapshot(snap);
@@ -2223,10 +2427,13 @@ async fn rebuild_projections_handler(
 
     tracing::info!(events_replayed, duration_ms, "projections rebuilt");
 
-    (StatusCode::OK, Json(serde_json::json!({
-        "events_replayed": events_replayed,
-        "duration_ms":     duration_ms,
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "events_replayed": events_replayed,
+            "duration_ms":     duration_ms,
+        })),
+    )
 }
 
 /// `GET /v1/admin/event-count` — total event count and a per-type breakdown.
@@ -2235,18 +2442,18 @@ async fn rebuild_projections_handler(
 ///
 /// Useful for a quick health check on event log cardinality and for spotting
 /// unexpected event type distributions.
-async fn event_count_handler(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn event_count_handler(State(state): State<AppState>) -> impl IntoResponse {
     let events = match state.runtime.store.read_stream(None, usize::MAX).await {
-        Ok(v)  => v,
+        Ok(v) => v,
         Err(e) => return Err(internal_error(e.to_string())),
     };
 
     let total = events.len() as u64;
     let mut by_type: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     for ev in &events {
-        *by_type.entry(event_type_name(&ev.envelope.payload).to_owned()).or_insert(0) += 1;
+        *by_type
+            .entry(event_type_name(&ev.envelope.payload).to_owned())
+            .or_insert(0) += 1;
     }
 
     // Sort the breakdown for deterministic output.
@@ -2276,22 +2483,28 @@ async fn event_count_handler(
 #[derive(Deserialize)]
 struct EventLogQuery {
     #[serde(default)]
-    from:  u64,
+    from: u64,
     #[serde(default = "default_event_log_limit")]
     limit: usize,
 }
 
-fn default_event_log_limit() -> usize { 100 }
+fn default_event_log_limit() -> usize {
+    100
+}
 
 async fn admin_event_log_handler(
     State(state): State<AppState>,
     Query(q): Query<EventLogQuery>,
 ) -> impl IntoResponse {
     let limit = q.limit.min(500);
-    let after = if q.from > 0 { Some(EventPosition(q.from - 1)) } else { None };
+    let after = if q.from > 0 {
+        Some(EventPosition(q.from - 1))
+    } else {
+        None
+    };
 
     let events = match state.runtime.store.read_stream(after, limit + 1).await {
-        Ok(v)  => v,
+        Ok(v) => v,
         Err(e) => return Err(internal_error(e.to_string())),
     };
 
@@ -2299,13 +2512,15 @@ async fn admin_event_log_handler(
     let page: Vec<serde_json::Value> = events
         .into_iter()
         .take(limit)
-        .map(|e| serde_json::json!({
-            "position":   e.position.0,
-            "stored_at":  e.stored_at,
-            "event_type": event_type_name(&e.envelope.payload),
-            "event_id":   e.envelope.event_id.as_str(),
-            "payload":    e.envelope.payload,
-        }))
+        .map(|e| {
+            serde_json::json!({
+                "position":   e.position.0,
+                "stored_at":  e.stored_at,
+                "event_type": event_type_name(&e.envelope.payload),
+                "event_id":   e.envelope.event_id.as_str(),
+                "payload":    e.envelope.payload,
+            })
+        })
         .collect();
 
     let total = page.len();
@@ -2323,25 +2538,31 @@ async fn admin_event_log_handler(
 /// Returns `200` with a JSON array of model names when Ollama is configured and
 /// reachable, `503` when Ollama is not wired (OLLAMA_HOST unset), and `502`
 /// when the daemon cannot be reached at call time.
-async fn ollama_models_handler(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn ollama_models_handler(State(state): State<AppState>) -> impl IntoResponse {
     if let Some(provider) = &state.ollama {
         match provider.list_models().await {
             Ok(models) => {
-                let names: Vec<&str> = models.iter().map(|m: &OllamaModel| m.name.as_str()).collect();
-                (StatusCode::OK, axum::Json(serde_json::json!({
-                    "host":   provider.host(),
-                    "models": names,
-                    "count":  names.len(),
-                }))).into_response()
+                let names: Vec<&str> = models
+                    .iter()
+                    .map(|m: &OllamaModel| m.name.as_str())
+                    .collect();
+                (
+                    StatusCode::OK,
+                    axum::Json(serde_json::json!({
+                        "host":   provider.host(),
+                        "models": names,
+                        "count":  names.len(),
+                    })),
+                )
+                    .into_response()
             }
             Err(e) => (
                 StatusCode::BAD_GATEWAY,
                 axum::Json(serde_json::json!({
                     "error": format!("Ollama unreachable: {e}")
                 })),
-            ).into_response(),
+            )
+                .into_response(),
         }
     } else {
         // No Ollama — report configured OpenAI-compat providers as synthetic model list.
@@ -2354,14 +2575,18 @@ async fn ollama_models_handler(
         }
         if let Some(ref brain) = state.openai_compat_brain {
             models.push("cyankiwi/gemma-4-31B-it-AWQ-4bit");
-            if host.is_empty() { host = brain.base_url().to_owned(); }
+            if host.is_empty() {
+                host = brain.base_url().to_owned();
+            }
         }
         if let Some(ref or_) = state.openai_compat_openrouter {
             models.push("openrouter/free");
             models.push("google/gemma-3-4b-it:free");
             models.push("google/gemma-3-27b-it:free");
             models.push("meta-llama/llama-3.3-70b-instruct:free");
-            if host.is_empty() { host = or_.base_url().to_owned(); }
+            if host.is_empty() {
+                host = or_.base_url().to_owned();
+            }
         }
         if models.is_empty() {
             return (
@@ -2371,12 +2596,16 @@ async fn ollama_models_handler(
                 })),
             ).into_response();
         }
-        (StatusCode::OK, axum::Json(serde_json::json!({
-            "host":     host,
-            "models":   models,
-            "count":    models.len(),
-            "provider": "openai_compat",
-        }))).into_response()
+        (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({
+                "host":     host,
+                "models":   models,
+                "count":    models.len(),
+                "provider": "openai_compat",
+            })),
+        )
+            .into_response()
     }
 }
 
@@ -2385,14 +2614,14 @@ async fn ollama_models_handler(
 /// Unified model record returned by `discover-models`.
 #[derive(serde::Serialize, Clone, Debug)]
 struct DiscoveredModel {
-    model_id:       String,
-    name:           String,
+    model_id: String,
+    name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     parameter_size: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    quantization:   Option<String>,
+    quantization: Option<String>,
     /// Inferred capabilities: "generate", "embed", "rerank".
-    capabilities:   Vec<String>,
+    capabilities: Vec<String>,
     /// Maximum context window in tokens, if known (from /v1/models or /api/show).
     #[serde(skip_serializing_if = "Option::is_none")]
     context_window_tokens: Option<u32>,
@@ -2426,44 +2655,60 @@ async fn discover_models_handler(
     use cairn_store::projections::ProviderConnectionReadModel;
 
     let conn_id = ProviderConnectionId::new(connection_id.clone());
-    let adapter_type = match ProviderConnectionReadModel::get(
-        state.runtime.store.as_ref(),
-        &conn_id,
-    )
-    .await
-    {
-        Ok(Some(rec)) => rec.adapter_type.to_lowercase(),
-        Ok(None) => {
-            if query.endpoint_url.is_none() {
-                return (StatusCode::NOT_FOUND, axum::Json(serde_json::json!({
+    let adapter_type =
+        match ProviderConnectionReadModel::get(state.runtime.store.as_ref(), &conn_id).await {
+            Ok(Some(rec)) => rec.adapter_type.to_lowercase(),
+            Ok(None) => {
+                if query.endpoint_url.is_none() {
+                    return (StatusCode::NOT_FOUND, axum::Json(serde_json::json!({
                     "error": format!("provider connection '{connection_id}' not found"),
                     "hint": "pass ?endpoint_url=... to discover without a registered connection",
                 }))).into_response();
+                }
+                query
+                    .adapter_type
+                    .clone()
+                    .unwrap_or_else(|| "openai_compat".to_owned())
             }
-            query.adapter_type.clone().unwrap_or_else(|| "openai_compat".to_owned())
-        }
-        Err(e) => return internal_error(format!("store error: {e}")).into_response(),
-    };
+            Err(e) => return internal_error(format!("store error: {e}")).into_response(),
+        };
     // Allow query param to override stored adapter_type.
-    let adapter_type = query.adapter_type.as_deref().unwrap_or(&adapter_type).to_lowercase();
+    let adapter_type = query
+        .adapter_type
+        .as_deref()
+        .unwrap_or(&adapter_type)
+        .to_lowercase();
 
     if adapter_type == "ollama" {
         discover_ollama_models_live(&state, query.endpoint_url.as_deref()).await
     } else {
-        discover_openai_compat_models_live(&state, query.endpoint_url.as_deref(), query.api_key.as_deref()).await
+        discover_openai_compat_models_live(
+            &state,
+            query.endpoint_url.as_deref(),
+            query.api_key.as_deref(),
+        )
+        .await
     }
 }
 
-async fn discover_ollama_models_live(state: &AppState, endpoint_override: Option<&str>) -> axum::response::Response {
-    let host = match endpoint_override {
-        Some(url) => url.trim_end_matches('/').to_owned(),
-        None => match &state.ollama {
-            Some(p) => p.host().to_owned(),
-            None => return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
-                "error": "Ollama not configured — set OLLAMA_HOST or pass ?endpoint_url="
-            }))).into_response(),
-        },
-    };
+async fn discover_ollama_models_live(
+    state: &AppState,
+    endpoint_override: Option<&str>,
+) -> axum::response::Response {
+    let host =
+        match endpoint_override {
+            Some(url) => url.trim_end_matches('/').to_owned(),
+            None => match &state.ollama {
+                Some(p) => p.host().to_owned(),
+                None => return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    axum::Json(serde_json::json!({
+                        "error": "Ollama not configured — set OLLAMA_HOST or pass ?endpoint_url="
+                    })),
+                )
+                    .into_response(),
+            },
+        };
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -2473,10 +2718,13 @@ async fn discover_ollama_models_live(state: &AppState, endpoint_override: Option
             match resp.json::<serde_json::Value>().await {
                 Ok(body) => {
                     let names: Vec<String> = body
-                        .get("models").and_then(|m| m.as_array())
-                        .map(|arr| arr.iter()
-                            .filter_map(|m| m.get("name")?.as_str().map(str::to_owned))
-                            .collect())
+                        .get("models")
+                        .and_then(|m| m.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|m| m.get("name")?.as_str().map(str::to_owned))
+                                .collect()
+                        })
                         .unwrap_or_default();
 
                     // Call /api/show for each model to get num_ctx.
@@ -2487,21 +2735,33 @@ async fn discover_ollama_models_live(state: &AppState, endpoint_override: Option
                         models.push(ollama_name_to_discovered_with_ctx(name, ctx));
                     }
 
-                    (StatusCode::OK, axum::Json(serde_json::json!({
-                        "provider": "ollama",
-                        "endpoint": host,
-                        "models":   models,
-                    }))).into_response()
+                    (
+                        StatusCode::OK,
+                        axum::Json(serde_json::json!({
+                            "provider": "ollama",
+                            "endpoint": host,
+                            "models":   models,
+                        })),
+                    )
+                        .into_response()
                 }
                 Err(e) => internal_error(format!("parse error: {e}")).into_response(),
             }
         }
-        Ok(resp) => (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({
-            "error": format!("Ollama returned HTTP {}", resp.status()),
-        }))).into_response(),
-        Err(e) => (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({
-            "error": format!("Ollama unreachable: {e}"),
-        }))).into_response(),
+        Ok(resp) => (
+            StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({
+                "error": format!("Ollama returned HTTP {}", resp.status()),
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({
+                "error": format!("Ollama unreachable: {e}"),
+            })),
+        )
+            .into_response(),
     }
 }
 
@@ -2528,7 +2788,8 @@ async fn fetch_ollama_context_window(
     // Ollama /api/show nests context length as model_info.*.context_length
     // or directly as model_info.llama.context_length.
     // Try a few paths before giving up.
-    if let Some(n) = body.pointer("/model_info/llama.context_length")
+    if let Some(n) = body
+        .pointer("/model_info/llama.context_length")
         .or_else(|| body.pointer("/model_info/context_length"))
     {
         return n.as_u64().map(|v| v as u32);
@@ -2540,10 +2801,7 @@ async fn fetch_ollama_context_window(
     // Some versions put it under /details/parameter_size or model_info flatly.
     body.get("model_info")
         .and_then(|mi| mi.as_object())
-        .and_then(|obj| {
-            obj.values()
-                .find_map(|v| v.as_u64().map(|n| n as u32))
-        })
+        .and_then(|obj| obj.values().find_map(|v| v.as_u64().map(|n| n as u32)))
         .filter(|&n| n >= 512) // sanity: must be a plausible context size
 }
 
@@ -2576,45 +2834,64 @@ async fn discover_openai_compat_models_live(
                     // Each item in `data` is a full model object — pass the
                     // whole object so we can extract context_length / max_model_len.
                     let models: Vec<DiscoveredModel> = body
-                        .get("data").and_then(|d| d.as_array())
-                        .map(|arr| arr.iter()
-                            .filter_map(|m| openai_model_obj_to_discovered(m))
-                            .collect())
+                        .get("data")
+                        .and_then(|d| d.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|m| openai_model_obj_to_discovered(m))
+                                .collect()
+                        })
                         .unwrap_or_default();
-                    (StatusCode::OK, axum::Json(serde_json::json!({
-                        "provider": "openai_compat",
-                        "endpoint": base_url,
-                        "models":   models,
-                    }))).into_response()
+                    (
+                        StatusCode::OK,
+                        axum::Json(serde_json::json!({
+                            "provider": "openai_compat",
+                            "endpoint": base_url,
+                            "models":   models,
+                        })),
+                    )
+                        .into_response()
                 }
                 Err(e) => internal_error(format!("parse error: {e}")).into_response(),
             }
         }
-        Ok(resp) => (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({
-            "error": format!("Provider returned HTTP {}", resp.status()),
-        }))).into_response(),
-        Err(e) => (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({
-            "error": format!("Provider unreachable: {e}"),
-        }))).into_response(),
+        Ok(resp) => (
+            StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({
+                "error": format!("Provider returned HTTP {}", resp.status()),
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({
+                "error": format!("Provider unreachable: {e}"),
+            })),
+        )
+            .into_response(),
     }
 }
 
 fn ollama_name_to_discovered_with_ctx(name: &str, ctx_window: Option<u32>) -> DiscoveredModel {
     let (base, tag) = name.split_once(':').unwrap_or((name, ""));
     let mut parts = tag.split('-');
-    let param_size = parts.next().filter(|s| !s.is_empty()).map(str::to_lowercase);
+    let param_size = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase);
     let quantization = parts
         .filter(|s| s.to_lowercase().starts_with('q') || s.contains('_'))
         .max_by_key(|s| s.len())
         .map(str::to_owned);
     let lower = base.to_lowercase();
-    let capabilities = if lower.contains("embed") || lower.contains("nomic") || lower.contains("all-minilm") {
-        vec!["embed".to_owned()]
-    } else if lower.contains("rerank") {
-        vec!["rerank".to_owned()]
-    } else {
-        vec!["generate".to_owned()]
-    };
+    let capabilities =
+        if lower.contains("embed") || lower.contains("nomic") || lower.contains("all-minilm") {
+            vec!["embed".to_owned()]
+        } else if lower.contains("rerank") {
+            vec!["rerank".to_owned()]
+        } else {
+            vec!["generate".to_owned()]
+        };
     // Fall back to well-known defaults when the provider didn't report context length.
     let ctx = ctx_window.or_else(|| known_context_window(name));
     DiscoveredModel {
@@ -2640,17 +2917,18 @@ fn openai_model_obj_to_discovered(obj: &serde_json::Value) -> Option<DiscoveredM
         vec!["generate".to_owned()]
     };
     // OpenAI-compat providers use various field names for context window.
-    let ctx = obj.get("context_length")
+    let ctx = obj
+        .get("context_length")
         .or_else(|| obj.get("max_model_len"))
         .or_else(|| obj.get("context_window"))
         .and_then(|v| v.as_u64())
         .map(|n| n as u32)
         .or_else(|| known_context_window(id));
     Some(DiscoveredModel {
-        model_id:              id.to_owned(),
-        name:                  id.to_owned(),
-        parameter_size:        None,
-        quantization:          None,
+        model_id: id.to_owned(),
+        name: id.to_owned(),
+        parameter_size: None,
+        quantization: None,
         capabilities,
         context_window_tokens: ctx,
     })
@@ -2669,10 +2947,10 @@ fn known_context_window(model_id: &str) -> Option<u32> {
     } else if lower.contains("gemma-3-27b") || lower.contains("gemma3-27b") {
         Some(131_072) // google/gemma-3-27b-it — 131K context
     } else if lower.contains("gemma-3-4b") || lower.contains("gemma3-4b") {
-        Some(32_768)  // google/gemma-3-4b-it — 32K context
+        Some(32_768) // google/gemma-3-4b-it — 32K context
     } else if lower.contains("llama-3.3-70b") {
-        Some(65_536)  // meta-llama/llama-3.3-70b-instruct — 65K context
-    // ── agntic.garden / self-hosted ──────────────────────────────────────────
+        Some(65_536) // meta-llama/llama-3.3-70b-instruct — 65K context
+                     // ── agntic.garden / self-hosted ──────────────────────────────────────────
     } else if lower.contains("gemma-4") || lower.contains("gemma4") || lower.contains("cyankiwi") {
         Some(131_072) // gemma-4-31B: 128K context
     } else if lower.contains("qwen3.5") || lower.contains("qwen3-embedding") {
@@ -2733,47 +3011,77 @@ async fn test_connection_handler(
     use cairn_store::projections::ProviderConnectionReadModel;
 
     let conn_id = ProviderConnectionId::new(connection_id.clone());
-    let adapter_type = match ProviderConnectionReadModel::get(
-        state.runtime.store.as_ref(),
-        &conn_id,
-    )
-    .await
-    {
-        Ok(Some(rec)) => rec.adapter_type.to_lowercase(),
-        Ok(None) => {
-            if query.endpoint_url.is_none() {
-                return (StatusCode::NOT_FOUND, axum::Json(serde_json::json!({
+    let adapter_type =
+        match ProviderConnectionReadModel::get(state.runtime.store.as_ref(), &conn_id).await {
+            Ok(Some(rec)) => rec.adapter_type.to_lowercase(),
+            Ok(None) => {
+                if query.endpoint_url.is_none() {
+                    return (StatusCode::NOT_FOUND, axum::Json(serde_json::json!({
                     "error": format!("provider connection '{connection_id}' not found"),
                     "hint": "pass ?endpoint_url=... to test without a registered connection",
                 }))).into_response();
+                }
+                query
+                    .adapter_type
+                    .clone()
+                    .unwrap_or_else(|| "openai_compat".to_owned())
             }
-            query.adapter_type.clone().unwrap_or_else(|| "openai_compat".to_owned())
-        }
-        Err(e) => return internal_error(format!("store error: {e}")).into_response(),
-    };
-    let adapter_type = query.adapter_type.as_deref().unwrap_or(&adapter_type).to_lowercase();
+            Err(e) => return internal_error(format!("store error: {e}")).into_response(),
+        };
+    let adapter_type = query
+        .adapter_type
+        .as_deref()
+        .unwrap_or(&adapter_type)
+        .to_lowercase();
 
     let (probe_url, auth_header) = if adapter_type == "ollama" {
-        let host = query.endpoint_url.as_deref()
+        let host = query
+            .endpoint_url
+            .as_deref()
             .map(|u| u.trim_end_matches('/').to_owned())
             .or_else(|| state.ollama.as_ref().map(|p| p.host().to_owned()));
         match host {
             Some(h) => (format!("{h}/api/tags"), None),
-            None => return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "error": "Ollama not configured" }))).into_response(),
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    axum::Json(serde_json::json!({ "error": "Ollama not configured" })),
+                )
+                    .into_response()
+            }
         }
     } else {
-        let base = query.endpoint_url.as_deref()
+        let base = query
+            .endpoint_url
+            .as_deref()
             .map(|u| u.trim_end_matches('/').to_owned())
-            .or_else(|| state.openai_compat.as_ref().map(|p| p.base_url().to_owned()));
+            .or_else(|| {
+                state
+                    .openai_compat
+                    .as_ref()
+                    .map(|p| p.base_url().to_owned())
+            });
         match base {
             Some(b) => {
-                let key = query.api_key.clone()
+                let key = query
+                    .api_key
+                    .clone()
                     .or_else(|| std::env::var("OPENAI_COMPAT_API_KEY").ok())
                     .unwrap_or_default();
-                let auth = if key.is_empty() { None } else { Some(format!("Bearer {key}")) };
+                let auth = if key.is_empty() {
+                    None
+                } else {
+                    Some(format!("Bearer {key}"))
+                };
                 (format!("{b}/models"), auth)
             }
-            None => return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "error": "Provider not configured" }))).into_response(),
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    axum::Json(serde_json::json!({ "error": "Provider not configured" })),
+                )
+                    .into_response()
+            }
         }
     };
 
@@ -2790,21 +3098,29 @@ async fn test_connection_handler(
         Ok(resp) => {
             let latency_ms = start.elapsed().as_millis() as u64;
             let ok = resp.status().is_success();
-            (StatusCode::OK, axum::Json(serde_json::json!({
-                "ok":         ok,
-                "latency_ms": latency_ms,
-                "provider":   adapter_type,
-                "status":     resp.status().as_u16(),
-                "detail":     if ok { "reachable" } else { "returned non-2xx" },
-            }))).into_response()
+            (
+                StatusCode::OK,
+                axum::Json(serde_json::json!({
+                    "ok":         ok,
+                    "latency_ms": latency_ms,
+                    "provider":   adapter_type,
+                    "status":     resp.status().as_u16(),
+                    "detail":     if ok { "reachable" } else { "returned non-2xx" },
+                })),
+            )
+                .into_response()
         }
-        Err(e) => (StatusCode::OK, axum::Json(serde_json::json!({
-            "ok":         false,
-            "latency_ms": start.elapsed().as_millis() as u64,
-            "provider":   adapter_type,
-            "status":     0u16,
-            "detail":     format!("connection error: {e}"),
-        }))).into_response(),
+        Err(e) => (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({
+                "ok":         false,
+                "latency_ms": start.elapsed().as_millis() as u64,
+                "provider":   adapter_type,
+                "status":     0u16,
+                "detail":     format!("connection error: {e}"),
+            })),
+        )
+            .into_response(),
     }
 }
 
@@ -2817,10 +3133,10 @@ async fn test_connection_handler(
 /// unreachable, 500 on model errors.
 #[derive(serde::Deserialize)]
 struct OllamaGenerateRequest {
-    model:    Option<String>,
+    model: Option<String>,
     /// Single-turn prompt (used when `messages` is absent).
     #[serde(default)]
-    prompt:   String,
+    prompt: String,
     /// Multi-turn conversation history. When present, `prompt` is ignored.
     /// Each element must be `{"role": "user"|"assistant"|"system", "content": "..."}`.
     #[serde(default)]
@@ -2846,10 +3162,7 @@ async fn ollama_generate_handler(
 
     // Provider priority for generation: Ollama → brain → worker → OpenRouter.
     let default_model = state.runtime.runtime_config.default_generate_model().await;
-    let model_id = body.model
-        .as_deref()
-        .unwrap_or(&default_model)
-        .to_owned();
+    let model_id = body.model.as_deref().unwrap_or(&default_model).to_owned();
 
     // Route to the appropriate tier based on model name.
     // Brain tier: heavy models (gemma, cyankiwi, qwen3-coder, …).
@@ -2862,36 +3175,37 @@ async fn ollama_generate_handler(
         || model_id.to_lowercase().contains("cyankiwi")
         || model_id.to_lowercase().contains("brain");
 
-    let provider: &dyn cairn_domain::providers::GenerationProvider =
-        if let Some(ref ollama) = state.ollama {
-            ollama.as_ref()
-        } else if is_brain_model {
-            // Brain-tier model — prefer brain, fall back to worker, then OpenRouter.
-            if let Some(ref brain) = state.openai_compat_brain {
-                brain.as_ref()
-            } else if let Some(ref worker) = state.openai_compat_worker {
-                worker.as_ref()
-            } else if let Some(ref or_) = state.openai_compat_openrouter {
-                or_.as_ref()
-            } else {
-                return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
+    let provider: &dyn cairn_domain::providers::GenerationProvider = if let Some(ref ollama) =
+        state.ollama
+    {
+        ollama.as_ref()
+    } else if is_brain_model {
+        // Brain-tier model — prefer brain, fall back to worker, then OpenRouter.
+        if let Some(ref brain) = state.openai_compat_brain {
+            brain.as_ref()
+        } else if let Some(ref worker) = state.openai_compat_worker {
+            worker.as_ref()
+        } else if let Some(ref or_) = state.openai_compat_openrouter {
+            or_.as_ref()
+        } else {
+            return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
                     "error": "Brain provider not configured — set CAIRN_BRAIN_URL or OPENROUTER_API_KEY"
                 }))).into_response();
-            }
+        }
+    } else {
+        // Worker-tier model — prefer worker, fall back to brain, then OpenRouter.
+        if let Some(ref worker) = state.openai_compat_worker {
+            worker.as_ref()
+        } else if let Some(ref brain) = state.openai_compat_brain {
+            brain.as_ref()
+        } else if let Some(ref or_) = state.openai_compat_openrouter {
+            or_.as_ref()
         } else {
-            // Worker-tier model — prefer worker, fall back to brain, then OpenRouter.
-            if let Some(ref worker) = state.openai_compat_worker {
-                worker.as_ref()
-            } else if let Some(ref brain) = state.openai_compat_brain {
-                brain.as_ref()
-            } else if let Some(ref or_) = state.openai_compat_openrouter {
-                or_.as_ref()
-            } else {
-                return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
+            return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
                     "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, CAIRN_WORKER_URL, or OPENROUTER_API_KEY"
                 }))).into_response();
-            }
-        };
+        }
+    };
 
     let messages = vec![serde_json::json!({
         "role":    "user",
@@ -2907,11 +3221,17 @@ async fn ollama_generate_handler(
     //   2. known_context_window(model_id)             — model-family defaults
     //   3. Hardcoded 8K conservative default           — unknown models
     let input_tokens = estimate_tokens(&body.prompt)
-        + body.messages.as_ref().map(|m| {
-            m.iter().map(|msg| {
-                estimate_tokens(msg.get("content").and_then(|v| v.as_str()).unwrap_or(""))
-            }).sum::<u32>()
-        }).unwrap_or(0);
+        + body
+            .messages
+            .as_ref()
+            .map(|m| {
+                m.iter()
+                    .map(|msg| {
+                        estimate_tokens(msg.get("content").and_then(|v| v.as_str()).unwrap_or(""))
+                    })
+                    .sum::<u32>()
+            })
+            .unwrap_or(0);
 
     let max_output_tokens: u32 = if let Some(explicit) = body.max_tokens {
         explicit
@@ -2929,24 +3249,30 @@ async fn ollama_generate_handler(
     match provider.generate(&model_id, messages, &settings).await {
         Ok(resp) => {
             let latency_ms = start.elapsed().as_millis() as u64;
-            (StatusCode::OK, axum::Json(serde_json::json!({
-                "text":       resp.text,
-                "model":      resp.model_id,
-                "tokens_in":  resp.input_tokens,
-                "tokens_out": resp.output_tokens,
-                "latency_ms": latency_ms,
-            }))).into_response()
+            (
+                StatusCode::OK,
+                axum::Json(serde_json::json!({
+                    "text":       resp.text,
+                    "model":      resp.model_id,
+                    "tokens_in":  resp.input_tokens,
+                    "tokens_out": resp.output_tokens,
+                    "latency_ms": latency_ms,
+                })),
+            )
+                .into_response()
         }
         Err(e) => {
             let (status, msg) = match &e {
-                cairn_domain::providers::ProviderAdapterError::TimedOut =>
-                    (StatusCode::GATEWAY_TIMEOUT, e.to_string()),
-                cairn_domain::providers::ProviderAdapterError::RateLimited =>
-                    (StatusCode::TOO_MANY_REQUESTS, e.to_string()),
-                cairn_domain::providers::ProviderAdapterError::TransportFailure(_) =>
-                    (StatusCode::BAD_GATEWAY, e.to_string()),
-                _ =>
-                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                cairn_domain::providers::ProviderAdapterError::TimedOut => {
+                    (StatusCode::GATEWAY_TIMEOUT, e.to_string())
+                }
+                cairn_domain::providers::ProviderAdapterError::RateLimited => {
+                    (StatusCode::TOO_MANY_REQUESTS, e.to_string())
+                }
+                cairn_domain::providers::ProviderAdapterError::TransportFailure(_) => {
+                    (StatusCode::BAD_GATEWAY, e.to_string())
+                }
+                _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             };
             (status, axum::Json(serde_json::json!({ "error": msg }))).into_response()
         }
@@ -2977,56 +3303,68 @@ async fn ollama_embed_handler(
         return (
             StatusCode::BAD_REQUEST,
             axum::Json(serde_json::json!({ "error": "texts must not be empty" })),
-        ).into_response();
+        )
+            .into_response();
     }
 
     // Provider priority for embedding: Ollama → worker → brain → OpenRouter.
-    let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> =
-        if let Some(ref ollama) = state.ollama {
-            Arc::new(OllamaEmbeddingProvider::new(ollama.host()))
-        } else if let Some(ref worker) = state.openai_compat_worker {
-            worker.clone()
-        } else if let Some(ref brain) = state.openai_compat_brain {
-            brain.clone()
-        } else if let Some(ref or_) = state.openai_compat_openrouter {
-            or_.clone()
-        } else {
-            return (
+    let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> = if let Some(ref ollama) =
+        state.ollama
+    {
+        Arc::new(OllamaEmbeddingProvider::new(ollama.host()))
+    } else if let Some(ref worker) = state.openai_compat_worker {
+        worker.clone()
+    } else if let Some(ref brain) = state.openai_compat_brain {
+        brain.clone()
+    } else if let Some(ref or_) = state.openai_compat_openrouter {
+        or_.clone()
+    } else {
+        return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 axum::Json(serde_json::json!({
                     "error": "No embedding provider configured — set OLLAMA_HOST, CAIRN_WORKER_URL, CAIRN_BRAIN_URL, or OPENROUTER_API_KEY"
                 })),
             ).into_response();
-        };
+    };
 
-    let default_ollama_embed = state.runtime.runtime_config.default_ollama_embed_model().await;
+    let default_ollama_embed = state
+        .runtime
+        .runtime_config
+        .default_ollama_embed_model()
+        .await;
     let default_compat_embed = state.runtime.runtime_config.default_embed_model().await;
     let model_id = body.model.as_deref().unwrap_or_else(|| {
-        if state.ollama.is_some() { &default_ollama_embed } else { &default_compat_embed }
+        if state.ollama.is_some() {
+            &default_ollama_embed
+        } else {
+            &default_compat_embed
+        }
     });
 
     let start = std::time::Instant::now();
     match embedder.embed(model_id, body.texts).await {
         Ok(resp) => {
             let latency_ms = start.elapsed().as_millis() as u64;
-            (StatusCode::OK, axum::Json(serde_json::json!({
-                "embeddings":   resp.embeddings,
-                "model":        resp.model_id,
-                "token_count":  resp.token_count,
-                "latency_ms":   latency_ms,
-            }))).into_response()
+            (
+                StatusCode::OK,
+                axum::Json(serde_json::json!({
+                    "embeddings":   resp.embeddings,
+                    "model":        resp.model_id,
+                    "token_count":  resp.token_count,
+                    "latency_ms":   latency_ms,
+                })),
+            )
+                .into_response()
         }
         Err(e) => {
             use cairn_domain::providers::ProviderAdapterError;
             let (status, msg) = match &e {
-                ProviderAdapterError::TimedOut =>
-                    (StatusCode::GATEWAY_TIMEOUT, e.to_string()),
-                ProviderAdapterError::RateLimited =>
-                    (StatusCode::TOO_MANY_REQUESTS, e.to_string()),
-                ProviderAdapterError::TransportFailure(_) =>
-                    (StatusCode::BAD_GATEWAY, e.to_string()),
-                _ =>
-                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                ProviderAdapterError::TimedOut => (StatusCode::GATEWAY_TIMEOUT, e.to_string()),
+                ProviderAdapterError::RateLimited => (StatusCode::TOO_MANY_REQUESTS, e.to_string()),
+                ProviderAdapterError::TransportFailure(_) => {
+                    (StatusCode::BAD_GATEWAY, e.to_string())
+                }
+                _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             };
             (status, axum::Json(serde_json::json!({ "error": msg }))).into_response()
         }
@@ -3049,39 +3387,51 @@ async fn ollama_stream_handler(
     // Provider resolution: Ollama first, then OpenAI-compat brain, then worker.
     // All three expose /v1/chat/completions (OpenAI wire format) so the same
     // streaming logic applies — only URL construction differs.
-    let (stream_url, stream_api_key): (String, String) =
-        if let Some(ref o) = state.ollama {
-            (format!("{}/v1/chat/completions", o.host()), String::new())
-        } else if let Some(ref brain) = state.openai_compat_brain {
-            (format!("{}/chat/completions", brain.base_url()), brain.api_key().to_owned())
-        } else if let Some(ref worker) = state.openai_compat_worker {
-            (format!("{}/chat/completions", worker.base_url()), worker.api_key().to_owned())
-        } else if let Some(ref or_) = state.openai_compat_openrouter {
-            (format!("{}/chat/completions", or_.base_url()), or_.api_key().to_owned())
-        } else {
-            return (
+    let (stream_url, stream_api_key): (String, String) = if let Some(ref o) = state.ollama {
+        (format!("{}/v1/chat/completions", o.host()), String::new())
+    } else if let Some(ref brain) = state.openai_compat_brain {
+        (
+            format!("{}/chat/completions", brain.base_url()),
+            brain.api_key().to_owned(),
+        )
+    } else if let Some(ref worker) = state.openai_compat_worker {
+        (
+            format!("{}/chat/completions", worker.base_url()),
+            worker.api_key().to_owned(),
+        )
+    } else if let Some(ref or_) = state.openai_compat_openrouter {
+        (
+            format!("{}/chat/completions", or_.base_url()),
+            or_.api_key().to_owned(),
+        )
+    } else {
+        return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 axum::Json(serde_json::json!({
                     "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, CAIRN_WORKER_URL, or OPENROUTER_API_KEY"
                 })),
             ).into_response();
-        };
+    };
 
     let default_stream = state.runtime.runtime_config.default_stream_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
     // Resolve thinking-mode flag before spawning (RuntimeConfig is not Send across spawn).
-    let disable_thinking = state.runtime.runtime_config.supports_thinking_mode(&model_id).await;
+    let disable_thinking = state
+        .runtime
+        .runtime_config
+        .supports_thinking_mode(&model_id)
+        .await;
     // Use full message history when provided; fall back to single-turn prompt.
-    let messages: Vec<serde_json::Value> = body.messages.unwrap_or_else(|| {
-        vec![serde_json::json!({"role": "user", "content": body.prompt})]
-    });
+    let messages: Vec<serde_json::Value> = body
+        .messages
+        .unwrap_or_else(|| vec![serde_json::json!({"role": "user", "content": body.prompt})]);
 
     // Spawn a task that calls the provider with stream=true and forwards chunks via channel.
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
 
     tokio::spawn(async move {
-        let start   = std::time::Instant::now();
-        let client  = reqwest::Client::builder()
+        let start = std::time::Instant::now();
+        let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(180))
             .build()
             .expect("reqwest client");
@@ -3105,20 +3455,22 @@ async fn ollama_stream_handler(
         let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
-                let _ = tx.send(Ok(Event::default()
-                    .event("error")
-                    .data(serde_json::json!({"error": e.to_string()}).to_string())
-                )).await;
+                let _ = tx
+                    .send(Ok(Event::default().event("error").data(
+                        serde_json::json!({"error": e.to_string()}).to_string(),
+                    )))
+                    .await;
                 return;
             }
         };
 
         if !resp.status().is_success() {
             let msg = resp.text().await.unwrap_or_default();
-            let _ = tx.send(Ok(Event::default()
-                .event("error")
-                .data(serde_json::json!({"error": msg}).to_string())
-            )).await;
+            let _ = tx
+                .send(Ok(Event::default()
+                    .event("error")
+                    .data(serde_json::json!({"error": msg}).to_string())))
+                .await;
             return;
         }
 
@@ -3129,10 +3481,11 @@ async fn ollama_stream_handler(
             let bytes = match chunk {
                 Ok(b) => b,
                 Err(e) => {
-                    let _ = tx.send(Ok(Event::default()
-                        .event("error")
-                        .data(serde_json::json!({"error": e.to_string()}).to_string())
-                    )).await;
+                    let _ = tx
+                        .send(Ok(Event::default().event("error").data(
+                            serde_json::json!({"error": e.to_string()}).to_string(),
+                        )))
+                        .await;
                     return;
                 }
             };
@@ -3165,10 +3518,11 @@ async fn ollama_stream_handler(
                     .and_then(|c| c.as_str())
                 {
                     if !text.is_empty() {
-                        let _ = tx.send(Ok(Event::default()
-                            .event("token")
-                            .data(serde_json::json!({"text": text}).to_string())
-                        )).await;
+                        let _ = tx
+                            .send(Ok(Event::default()
+                                .event("token")
+                                .data(serde_json::json!({"text": text}).to_string())))
+                            .await;
                     }
                 }
             }
@@ -3176,10 +3530,11 @@ async fn ollama_stream_handler(
 
         // Emit done event with timing.
         let latency_ms = start.elapsed().as_millis() as u64;
-        let _ = tx.send(Ok(Event::default()
-            .event("done")
-            .data(serde_json::json!({"latency_ms": latency_ms, "model": model_id}).to_string())
-        )).await;
+        let _ = tx
+            .send(Ok(Event::default().event("done").data(
+                serde_json::json!({"latency_ms": latency_ms, "model": model_id}).to_string(),
+            )))
+            .await;
     });
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
@@ -3207,8 +3562,11 @@ async fn ollama_pull_handler(
     Json(body): Json<OllamaModelNameRequest>,
 ) -> impl IntoResponse {
     let Some(provider) = &state.ollama else {
-        return (StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(serde_json::json!({"error": "Ollama not configured"}))).into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "Ollama not configured"})),
+        )
+            .into_response();
     };
     let url = format!("{}/api/pull", provider.host());
     let client = reqwest::Client::builder()
@@ -3217,7 +3575,8 @@ async fn ollama_pull_handler(
         .build()
         .unwrap_or_default();
 
-    match client.post(&url)
+    match client
+        .post(&url)
         .json(&serde_json::json!({"name": body.model, "stream": false}))
         .send()
         .await
@@ -3226,16 +3585,24 @@ async fn ollama_pull_handler(
             let status = resp.status();
             let body_text = resp.text().await.unwrap_or_default();
             if status.is_success() {
-                (StatusCode::OK,
-                 axum::Json(serde_json::json!({"status": "success", "model": body.model})))
+                (
+                    StatusCode::OK,
+                    axum::Json(serde_json::json!({"status": "success", "model": body.model})),
+                )
                     .into_response()
             } else {
-                (StatusCode::BAD_GATEWAY,
-                 axum::Json(serde_json::json!({"error": body_text}))).into_response()
+                (
+                    StatusCode::BAD_GATEWAY,
+                    axum::Json(serde_json::json!({"error": body_text})),
+                )
+                    .into_response()
             }
         }
-        Err(e) => (StatusCode::BAD_GATEWAY,
-            axum::Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
     }
 }
 
@@ -3250,13 +3617,17 @@ async fn ollama_delete_model_handler(
     Json(body): Json<OllamaModelNameRequest>,
 ) -> impl IntoResponse {
     let Some(provider) = &state.ollama else {
-        return (StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(serde_json::json!({"error": "Ollama not configured"}))).into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "Ollama not configured"})),
+        )
+            .into_response();
     };
     let url = format!("{}/api/delete", provider.host());
     let client = reqwest::Client::new();
 
-    match client.delete(&url)
+    match client
+        .delete(&url)
         .json(&serde_json::json!({"name": body.model}))
         .send()
         .await
@@ -3264,8 +3635,10 @@ async fn ollama_delete_model_handler(
         Ok(resp) => {
             let status = resp.status();
             if status.is_success() || status == reqwest::StatusCode::OK {
-                (StatusCode::OK,
-                 axum::Json(serde_json::json!({"status": "deleted", "model": body.model})))
+                (
+                    StatusCode::OK,
+                    axum::Json(serde_json::json!({"status": "deleted", "model": body.model})),
+                )
                     .into_response()
             } else {
                 let msg = resp.text().await.unwrap_or_default();
@@ -3277,8 +3650,11 @@ async fn ollama_delete_model_handler(
                 (code, axum::Json(serde_json::json!({"error": msg}))).into_response()
             }
         }
-        Err(e) => (StatusCode::BAD_GATEWAY,
-            axum::Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            axum::Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
     }
 }
 
@@ -3307,18 +3683,22 @@ async fn ollama_model_info_handler(
     Path(name): Path<String>,
 ) -> impl IntoResponse {
     let Some(provider) = &state.ollama else {
-        return (StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(serde_json::json!({"error": "Ollama not configured"}))).into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"error": "Ollama not configured"})),
+        )
+            .into_response();
     };
 
-    let host   = provider.host().to_owned();
+    let host = provider.host().to_owned();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .unwrap_or_default();
 
     // ── Call /api/show ────────────────────────────────────────────────────────
-    let show_resp = match client.post(format!("{host}/api/show"))
+    let show_resp = match client
+        .post(format!("{host}/api/show"))
         .json(&serde_json::json!({"name": name}))
         .send()
         .await
@@ -3326,26 +3706,39 @@ async fn ollama_model_info_handler(
         Ok(r) if r.status().is_success() => r,
         Ok(r) => {
             let msg = r.text().await.unwrap_or_default();
-            return (StatusCode::NOT_FOUND,
-                axum::Json(serde_json::json!({"error": msg}))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                axum::Json(serde_json::json!({"error": msg})),
+            )
+                .into_response();
         }
-        Err(e) => return (StatusCode::BAD_GATEWAY,
-            axum::Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                axum::Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
     };
 
     let show: serde_json::Value = match show_resp.json().await {
         Ok(v) => v,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
-            axum::Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
     };
 
     // ── Extract fields from `details` + `model_info` ─────────────────────────
-    let details      = &show["details"];
-    let model_info   = &show["model_info"];
+    let details = &show["details"];
+    let model_info = &show["model_info"];
 
-    let family             = details["family"].as_str().unwrap_or("unknown");
-    let format             = details["format"].as_str().unwrap_or("unknown");
-    let parameter_size     = details["parameter_size"].as_str().unwrap_or("unknown");
+    let family = details["family"].as_str().unwrap_or("unknown");
+    let format = details["format"].as_str().unwrap_or("unknown");
+    let parameter_size = details["parameter_size"].as_str().unwrap_or("unknown");
     let quantization_level = details["quantization_level"].as_str().unwrap_or("unknown");
 
     // Derive architecture key (e.g. "qwen3", "llama") for model_info lookups.
@@ -3356,7 +3749,11 @@ async fn ollama_model_info_handler(
     let context_length = model_info
         .get(format!("{arch}.context_length"))
         .and_then(|v| v.as_u64())
-        .or_else(|| model_info.get("llama.context_length").and_then(|v| v.as_u64()));
+        .or_else(|| {
+            model_info
+                .get("llama.context_length")
+                .and_then(|v| v.as_u64())
+        });
     let embedding_length = model_info
         .get(format!("{arch}.embedding_length"))
         .and_then(|v| v.as_u64());
@@ -3405,12 +3802,10 @@ async fn ollama_model_info_handler(
 ///
 /// Returns compile-time build metadata, runtime capabilities, and
 /// sanitised environment configuration (secrets are masked).
-async fn system_info_handler(
-    State(state): State<AppState>,
-) -> impl axum::response::IntoResponse {
+async fn system_info_handler(State(state): State<AppState>) -> impl axum::response::IntoResponse {
     let deployment_mode = match state.mode {
         DeploymentMode::SelfHostedTeam => "self_hosted_team",
-        DeploymentMode::Local          => "local",
+        DeploymentMode::Local => "local",
     };
     let store_type = if state.pg.is_some() {
         "postgres"
@@ -3500,16 +3895,15 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
                             connection_url: val.clone(),
                         };
                     } else {
-                        config.storage = StorageBackend::Sqlite {
-                            path: val.clone(),
-                        };
+                        config.storage = StorageBackend::Sqlite { path: val.clone() };
                     }
                 }
             }
             "--role" => {
                 i += 1;
                 if i < args.len() {
-                    config.process_role = cairn_api::bootstrap::ProcessRole::from_str_loose(&args[i]);
+                    config.process_role =
+                        cairn_api::bootstrap::ProcessRole::from_str_loose(&args[i]);
                 }
             }
             "--encryption-key-env" => {
@@ -3589,26 +3983,36 @@ async fn flush_state_to_disk(state: &AppState) {
             vec![]
         }
     };
-    let event_snapshots: Vec<serde_json::Value> = events.iter().map(|e| serde_json::json!({
-        "position":   e.position.0,
-        "stored_at":  e.stored_at,
-        "event_type": event_type_name(&e.envelope.payload),
-    })).collect();
+    let event_snapshots: Vec<serde_json::Value> = events
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "position":   e.position.0,
+                "stored_at":  e.stored_at,
+                "event_type": event_type_name(&e.envelope.payload),
+            })
+        })
+        .collect();
 
     // ── Notifications ─────────────────────────────────────────────────────────
     // Serialise while holding the lock, then release before writing to disk.
     let (notif_count, notif_json) = match state.notifications.read() {
         Ok(buf) => {
             let list = buf.list(200);
-            let json: Vec<serde_json::Value> = list.iter().map(|n| serde_json::json!({
-                "id":         n.id,
-                "type":       n.notif_type,
-                "message":    n.message,
-                "entity_id":  n.entity_id,
-                "href":       n.href,
-                "read":       n.read,
-                "created_at": n.created_at,
-            })).collect();
+            let json: Vec<serde_json::Value> = list
+                .iter()
+                .map(|n| {
+                    serde_json::json!({
+                        "id":         n.id,
+                        "type":       n.notif_type,
+                        "message":    n.message,
+                        "entity_id":  n.entity_id,
+                        "href":       n.href,
+                        "read":       n.read,
+                        "created_at": n.created_at,
+                    })
+                })
+                .collect();
             (json.len(), json)
         }
         Err(_) => (0, vec![]),
@@ -3628,12 +4032,12 @@ async fn flush_state_to_disk(state: &AppState) {
 
     match serde_json::to_string_pretty(&payload) {
         Ok(text) => match std::fs::write(FLUSH_PATH, text) {
-            Ok(())  => eprintln!(
+            Ok(()) => eprintln!(
                 "shutdown: flushed {} events + {} notifications → {FLUSH_PATH}",
                 events.len(),
                 notif_count,
             ),
-            Err(e)  => eprintln!("shutdown: write failed ({FLUSH_PATH}): {e}"),
+            Err(e) => eprintln!("shutdown: write failed ({FLUSH_PATH}): {e}"),
         },
         Err(e) => eprintln!("shutdown: serialisation failed: {e}"),
     }
@@ -3648,26 +4052,25 @@ async fn flush_state_to_disk(state: &AppState) {
 /// a partially-seeded store is better than no server at all.
 async fn seed_demo_data(state: &AppState) {
     use cairn_domain::{
-        ApprovalId, AuditOutcome, FailureClass, PauseReason, PauseReasonKind,
-        RunId, SessionId, TaskId, TenantId,
         policy::{ApprovalDecision, ApprovalRequirement},
         tenancy::ProjectKey,
+        ApprovalId, AuditOutcome, FailureClass, PauseReason, PauseReasonKind, RunId, SessionId,
+        TaskId, TenantId,
     };
     use cairn_runtime::{
-        audits::AuditService,
-        approvals::ApprovalService,
-        runs::RunService,
-        sessions::SessionService,
-        tasks::TaskService,
+        approvals::ApprovalService, audits::AuditService, runs::RunService,
+        sessions::SessionService, tasks::TaskService,
     };
 
     let project = ProjectKey::new("default_tenant", "default_workspace", "demo_project");
-    let tenant  = TenantId::new("default_tenant");
+    let tenant = TenantId::new("default_tenant");
 
     // ── 3 Sessions ────────────────────────────────────────────────────────────
     let s_ids: &[&str] = &["sess_alpha", "sess_beta", "sess_gamma"];
     for id in s_ids {
-        if let Err(e) = state.runtime.sessions
+        if let Err(e) = state
+            .runtime
+            .sessions
             .create(&project, SessionId::new(*id))
             .await
         {
@@ -3689,7 +4092,9 @@ async fn seed_demo_data(state: &AppState) {
         ("run_e", "sess_gamma"),
     ];
     for (run, sess) in run_defs {
-        if let Err(e) = state.runtime.runs
+        if let Err(e) = state
+            .runtime
+            .runs
             .start(&project, &SessionId::new(*sess), RunId::new(*run), None)
             .await
         {
@@ -3698,16 +4103,24 @@ async fn seed_demo_data(state: &AppState) {
     }
     let _ = state.runtime.runs.complete(&RunId::new("run_a")).await;
     let _ = state.runtime.runs.complete(&RunId::new("run_b")).await;
-    let _ = state.runtime.runs.fail(&RunId::new("run_d"), FailureClass::ExecutionError).await;
-    let _ = state.runtime.runs.pause(
-        &RunId::new("run_e"),
-        PauseReason {
-            kind:            PauseReasonKind::OperatorPause,
-            detail:          Some("Demo pause".into()),
-            resume_after_ms: None,
-            actor:           Some("demo_seed".into()),
-        },
-    ).await;
+    let _ = state
+        .runtime
+        .runs
+        .fail(&RunId::new("run_d"), FailureClass::ExecutionError)
+        .await;
+    let _ = state
+        .runtime
+        .runs
+        .pause(
+            &RunId::new("run_e"),
+            PauseReason {
+                kind: PauseReasonKind::OperatorPause,
+                detail: Some("Demo pause".into()),
+                resume_after_ms: None,
+                actor: Some("demo_seed".into()),
+            },
+        )
+        .await;
 
     // ── 12 Tasks ──────────────────────────────────────────────────────────────
     // Distribution: 3 queued, 2 claimed, 2 running, 4 completed, 1 failed, 1 cancelled (=13 total incl task_12)
@@ -3726,7 +4139,9 @@ async fn seed_demo_data(state: &AppState) {
         ("task_12", "run_e"),
     ];
     for (tid, rid) in task_defs {
-        if let Err(e) = state.runtime.tasks
+        if let Err(e) = state
+            .runtime
+            .tasks
             .submit(&project, TaskId::new(*tid), Some(RunId::new(*rid)), None, 0)
             .await
         {
@@ -3735,24 +4150,44 @@ async fn seed_demo_data(state: &AppState) {
     }
     // Complete task_01–04
     for tid in &["task_01", "task_02", "task_03", "task_04"] {
-        let _ = state.runtime.tasks.claim(&TaskId::new(*tid), "demo-worker".to_owned(), 300_000).await;
+        let _ = state
+            .runtime
+            .tasks
+            .claim(&TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
+            .await;
         let _ = state.runtime.tasks.start(&TaskId::new(*tid)).await;
         let _ = state.runtime.tasks.complete(&TaskId::new(*tid)).await;
     }
     // Running: task_05, task_06
     for tid in &["task_05", "task_06"] {
-        let _ = state.runtime.tasks.claim(&TaskId::new(*tid), "demo-worker".to_owned(), 300_000).await;
+        let _ = state
+            .runtime
+            .tasks
+            .claim(&TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
+            .await;
         let _ = state.runtime.tasks.start(&TaskId::new(*tid)).await;
     }
     // Claimed: task_07, task_08
     for tid in &["task_07", "task_08"] {
-        let _ = state.runtime.tasks.claim(&TaskId::new(*tid), "demo-worker".to_owned(), 300_000).await;
+        let _ = state
+            .runtime
+            .tasks
+            .claim(&TaskId::new(*tid), "demo-worker".to_owned(), 300_000)
+            .await;
     }
     // task_09, task_12 remain queued
     // Fail task_10, cancel task_11
-    let _ = state.runtime.tasks.claim(&TaskId::new("task_10"), "demo-worker".to_owned(), 300_000).await;
+    let _ = state
+        .runtime
+        .tasks
+        .claim(&TaskId::new("task_10"), "demo-worker".to_owned(), 300_000)
+        .await;
     let _ = state.runtime.tasks.start(&TaskId::new("task_10")).await;
-    let _ = state.runtime.tasks.fail(&TaskId::new("task_10"), FailureClass::ExecutionError).await;
+    let _ = state
+        .runtime
+        .tasks
+        .fail(&TaskId::new("task_10"), FailureClass::ExecutionError)
+        .await;
     let _ = state.runtime.tasks.cancel(&TaskId::new("task_11")).await;
 
     // ── 3 Approvals ───────────────────────────────────────────────────────────
@@ -3765,49 +4200,131 @@ async fn seed_demo_data(state: &AppState) {
         ("appr_03", "run_d"),
     ];
     for (aid, rid) in appr_defs {
-        if let Err(e) = state.runtime.approvals.request(
-            &project,
-            ApprovalId::new(*aid),
-            Some(RunId::new(*rid)),
-            None,
-            ApprovalRequirement::Required,
-        ).await {
+        if let Err(e) = state
+            .runtime
+            .approvals
+            .request(
+                &project,
+                ApprovalId::new(*aid),
+                Some(RunId::new(*rid)),
+                None,
+                ApprovalRequirement::Required,
+            )
+            .await
+        {
             eprintln!("seed: approval {aid}: {e}");
         }
     }
-    let _ = state.runtime.approvals.resolve(&ApprovalId::new("appr_02"), ApprovalDecision::Approved).await;
-    let _ = state.runtime.approvals.resolve(&ApprovalId::new("appr_03"), ApprovalDecision::Rejected).await;
+    let _ = state
+        .runtime
+        .approvals
+        .resolve(&ApprovalId::new("appr_02"), ApprovalDecision::Approved)
+        .await;
+    let _ = state
+        .runtime
+        .approvals
+        .resolve(&ApprovalId::new("appr_03"), ApprovalDecision::Rejected)
+        .await;
 
     // ── 10 Audit log entries ──────────────────────────────────────────────────
     let audit_entries: &[(&str, &str, &str, &str, AuditOutcome)] = &[
-        ("operator",    "create_session", "session",  "sess_alpha", AuditOutcome::Success),
-        ("operator",    "create_session", "session",  "sess_beta",  AuditOutcome::Success),
-        ("operator",    "create_session", "session",  "sess_gamma", AuditOutcome::Success),
-        ("operator",    "start_run",      "run",      "run_a",      AuditOutcome::Success),
-        ("operator",    "start_run",      "run",      "run_c",      AuditOutcome::Success),
-        ("demo-worker", "complete_run",   "run",      "run_a",      AuditOutcome::Success),
-        ("demo-worker", "fail_run",       "run",      "run_d",      AuditOutcome::Failure),
-        ("operator",    "pause_run",      "run",      "run_e",      AuditOutcome::Success),
-        ("operator",    "approve",        "approval", "appr_02",    AuditOutcome::Success),
-        ("operator",    "reject",         "approval", "appr_03",    AuditOutcome::Success),
+        (
+            "operator",
+            "create_session",
+            "session",
+            "sess_alpha",
+            AuditOutcome::Success,
+        ),
+        (
+            "operator",
+            "create_session",
+            "session",
+            "sess_beta",
+            AuditOutcome::Success,
+        ),
+        (
+            "operator",
+            "create_session",
+            "session",
+            "sess_gamma",
+            AuditOutcome::Success,
+        ),
+        (
+            "operator",
+            "start_run",
+            "run",
+            "run_a",
+            AuditOutcome::Success,
+        ),
+        (
+            "operator",
+            "start_run",
+            "run",
+            "run_c",
+            AuditOutcome::Success,
+        ),
+        (
+            "demo-worker",
+            "complete_run",
+            "run",
+            "run_a",
+            AuditOutcome::Success,
+        ),
+        (
+            "demo-worker",
+            "fail_run",
+            "run",
+            "run_d",
+            AuditOutcome::Failure,
+        ),
+        (
+            "operator",
+            "pause_run",
+            "run",
+            "run_e",
+            AuditOutcome::Success,
+        ),
+        (
+            "operator",
+            "approve",
+            "approval",
+            "appr_02",
+            AuditOutcome::Success,
+        ),
+        (
+            "operator",
+            "reject",
+            "approval",
+            "appr_03",
+            AuditOutcome::Success,
+        ),
     ];
     for (actor, action, rtype, rid, outcome) in audit_entries {
-        if let Err(e) = state.runtime.audits.record(
-            tenant.clone(),
-            (*actor).to_owned(),
-            (*action).to_owned(),
-            (*rtype).to_owned(),
-            (*rid).to_owned(),
-            outcome.clone(),
-            serde_json::json!({"source": "demo_seed"}),
-        ).await {
+        if let Err(e) = state
+            .runtime
+            .audits
+            .record(
+                tenant.clone(),
+                (*actor).to_owned(),
+                (*action).to_owned(),
+                (*rtype).to_owned(),
+                (*rid).to_owned(),
+                outcome.clone(),
+                serde_json::json!({"source": "demo_seed"}),
+            )
+            .await
+        {
             eprintln!("seed: audit {action}/{rid}: {e}");
         }
     }
 
     eprintln!(
         "seed: demo data ready — {} sessions, {} runs, {} tasks, {} approvals, {} audit entries",
-        s_ids.len(), run_defs.len(), task_defs.len(), appr_defs.len(), audit_entries.len(),
+        s_ids.len(),
+        run_defs.len(),
+        task_defs.len(),
+        appr_defs.len(),
+        audit_entries.len(),
     );
 }
 
@@ -3879,7 +4396,7 @@ async fn main() {
                     let pg_event_log = Arc::new(PgEventLog::new(pool.clone()));
                     let backend = Arc::new(PgBackend {
                         event_log: pg_event_log.clone(),
-                        adapter:   Arc::new(PgAdapter::new(pool)),
+                        adapter: Arc::new(PgAdapter::new(pool)),
                     });
                     eprintln!("store: Postgres backend active (all service events dual-written)");
                     pg = Some(backend);
@@ -3900,7 +4417,7 @@ async fn main() {
             };
             eprintln!("store: connecting to SQLite at {url}");
             match SqlitePoolOptions::new()
-                .max_connections(1)   // SQLite is not safe with multiple writers
+                .max_connections(1) // SQLite is not safe with multiple writers
                 .connect(&url)
                 .await
             {
@@ -3917,7 +4434,7 @@ async fn main() {
                     let sqlite_event_log = Arc::new(SqliteEventLog::new(pool));
                     let backend = Arc::new(SqliteBackend {
                         event_log: sqlite_event_log.clone(),
-                        adapter:   Arc::new(adapter),
+                        adapter: Arc::new(adapter),
                     });
                     eprintln!("store: SQLite backend active (all service events dual-written)");
                     pg = None;
@@ -3947,9 +4464,7 @@ async fn main() {
         admin_token.clone(),
         AuthPrincipal::ServiceAccount {
             name: "admin".to_owned(),
-            tenant: cairn_domain::tenancy::TenantKey::new(
-                cairn_domain::TenantId::new("default"),
-            ),
+            tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new("default")),
         },
     );
 
@@ -4014,7 +4529,12 @@ async fn main() {
     // InMemory head position ensures IDs are unique across restarts even if
     // two events happen to share the same millisecond timestamp.
     {
-        let head = lib_state.runtime.store.head_position().await.unwrap_or(None);
+        let head = lib_state
+            .runtime
+            .store
+            .head_position()
+            .await
+            .unwrap_or(None);
         let floor = head.map(|p| p.0).unwrap_or(0);
         cairn_runtime::seed_event_counter(floor);
     }
@@ -4028,7 +4548,11 @@ async fn main() {
                     eprintln!("ollama: reachable but no models loaded");
                 } else {
                     let names: Vec<&str> = tags.models.iter().map(|m| m.name.as_str()).collect();
-                    eprintln!("ollama: {} model(s) available: {}", names.len(), names.join(", "));
+                    eprintln!(
+                        "ollama: {} model(s) available: {}",
+                        names.len(),
+                        names.join(", ")
+                    );
                 }
                 Some(Arc::new(provider))
             }
@@ -4100,11 +4624,24 @@ async fn main() {
     // Arc::get_mut is safe here: lib_state has not been cloned yet.
     {
         use cairn_domain::providers::GenerationProvider;
-        let brain: Option<Arc<dyn GenerationProvider>> =
-            openai_compat_brain.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>)
-            .or_else(|| openai_compat_worker.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>))
-            .or_else(|| openai_compat_openrouter.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>))
-            .or_else(|| ollama.as_ref().map(|p| p.clone() as Arc<dyn GenerationProvider>));
+        let brain: Option<Arc<dyn GenerationProvider>> = openai_compat_brain
+            .as_ref()
+            .map(|p| p.clone() as Arc<dyn GenerationProvider>)
+            .or_else(|| {
+                openai_compat_worker
+                    .as_ref()
+                    .map(|p| p.clone() as Arc<dyn GenerationProvider>)
+            })
+            .or_else(|| {
+                openai_compat_openrouter
+                    .as_ref()
+                    .map(|p| p.clone() as Arc<dyn GenerationProvider>)
+            })
+            .or_else(|| {
+                ollama
+                    .as_ref()
+                    .map(|p| p.clone() as Arc<dyn GenerationProvider>)
+            });
         if let Some(b) = brain {
             let lib_mut = Arc::get_mut(&mut lib_state)
                 .expect("lib_state must not be cloned before brain_provider is wired");
@@ -4119,8 +4656,8 @@ async fn main() {
     {
         use cairn_memory::{retrieval::RetrievalService, IngestService};
         let retrieval = lib_state.retrieval.clone() as Arc<dyn RetrievalService>;
-        let ingest    = lib_state.ingest.clone()    as Arc<dyn IngestService>;
-        let registry  = cairn_app::tool_impls::build_tool_registry(retrieval, ingest);
+        let ingest = lib_state.ingest.clone() as Arc<dyn IngestService>;
+        let registry = cairn_app::tool_impls::build_tool_registry(retrieval, ingest);
         let lib_mut = Arc::get_mut(&mut lib_state)
             .expect("lib_state must not be cloned before tool_registry is wired");
         lib_mut.tool_registry = Some(Arc::new(registry));
@@ -4157,10 +4694,16 @@ async fn main() {
     // setting the secondary log here once. Any event written by RunService,
     // TaskService, ApprovalService etc. is automatically dual-written.
     if let Some(ref pg_backend) = state.pg {
-        state.runtime.store.set_secondary_log(pg_backend.event_log.clone());
+        state
+            .runtime
+            .store
+            .set_secondary_log(pg_backend.event_log.clone());
         eprintln!("store: service-layer events will dual-write to Postgres");
     } else if let Some(ref sq_backend) = state.sqlite {
-        state.runtime.store.set_secondary_log(sq_backend.event_log.clone());
+        state
+            .runtime
+            .store
+            .set_secondary_log(sq_backend.event_log.clone());
         eprintln!("store: service-layer events will dual-write to SQLite");
     }
 
@@ -4180,20 +4723,32 @@ async fn main() {
     // which we ignore. Needed so provider connections, route policies, etc.
     // work out-of-the-box on first boot.
     {
-        use cairn_domain::{TenantId, tenancy::ProjectKey};
+        use cairn_domain::{tenancy::ProjectKey, TenantId};
         use cairn_runtime::{
-            tenants::TenantService, workspaces::WorkspaceService, projects::ProjectService,
+            projects::ProjectService, tenants::TenantService, workspaces::WorkspaceService,
         };
-        let _ = state.runtime.tenants.create(TenantId::new("default"), "Default".into()).await;
-        let _ = state.runtime.workspaces.create(
-            TenantId::new("default"),
-            cairn_domain::WorkspaceId::new("default"),
-            "Default".into(),
-        ).await;
-        let _ = state.runtime.projects.create(
-            ProjectKey::new("default", "default", "default"),
-            "Default".into(),
-        ).await;
+        let _ = state
+            .runtime
+            .tenants
+            .create(TenantId::new("default"), "Default".into())
+            .await;
+        let _ = state
+            .runtime
+            .workspaces
+            .create(
+                TenantId::new("default"),
+                cairn_domain::WorkspaceId::new("default"),
+                "Default".into(),
+            )
+            .await;
+        let _ = state
+            .runtime
+            .projects
+            .create(
+                ProjectKey::new("default", "default", "default"),
+                "Default".into(),
+            )
+            .await;
     }
 
     if state.mode == DeploymentMode::Local && event_log_empty {
@@ -4229,8 +4784,12 @@ async fn main() {
         let watchdog = tokio::spawn(async move {
             let mut rx = signal_rx;
             loop {
-                if rx.changed().await.is_err() { return; }
-                if *rx.borrow() { break; }
+                if rx.changed().await.is_err() {
+                    return;
+                }
+                if *rx.borrow() {
+                    break;
+                }
             }
             eprintln!("shutdown: draining in-flight requests (max 30s)…");
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
@@ -4292,7 +4851,7 @@ async fn list_all_traces_handler(
     // Fetch all traces to obtain the true total, then page.
     match LlmCallTraceReadModel::list_all_traces(state.runtime.store.as_ref(), usize::MAX).await {
         Ok(all_traces) => {
-            let total  = all_traces.len();
+            let total = all_traces.len();
             let traces: Vec<_> = all_traces.into_iter().skip(q.offset).take(limit).collect();
             Ok((
                 pagination_headers("/v1/traces", total, q.offset, limit),
@@ -4308,7 +4867,10 @@ async fn list_all_traces_handler(
 /// `GET /v1/openapi.json` — OpenAPI 3.0 specification.
 async fn openapi_json_handler() -> impl IntoResponse {
     (
-        [(axum::http::header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/json; charset=utf-8",
+        )],
         openapi_spec::OPENAPI_JSON,
     )
 }
@@ -4353,7 +4915,10 @@ async fn serve_frontend(uri: axum::http::Uri) -> impl IntoResponse {
         // handles client-side navigation (e.g. #settings, #runs).
         None => match FrontendAssets::get("index.html") {
             Some(index) => (
-                [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8".to_owned())],
+                [(
+                    axum::http::header::CONTENT_TYPE,
+                    "text/html; charset=utf-8".to_owned(),
+                )],
                 index.data.to_vec(),
             )
                 .into_response(),
@@ -4371,7 +4936,10 @@ async fn metrics_prometheus_handler(State(state): State<AppState>) -> impl IntoR
 
     out.push_str("# HELP cairn_http_requests_total Total HTTP requests handled\n");
     out.push_str("# TYPE cairn_http_requests_total counter\n");
-    out.push_str(&format!("cairn_http_requests_total {}\n\n", m.total_requests));
+    out.push_str(&format!(
+        "cairn_http_requests_total {}\n\n",
+        m.total_requests
+    ));
 
     out.push_str("# HELP cairn_http_requests_by_path_total Requests grouped by path\n");
     out.push_str("# TYPE cairn_http_requests_by_path_total counter\n");
@@ -4379,16 +4947,30 @@ async fn metrics_prometheus_handler(State(state): State<AppState>) -> impl IntoR
     paths.sort_by_key(|(p, _)| p.as_str());
     for (path, count) in &paths {
         let safe = path.replace('\\', "\\\\").replace('"', "\\\"");
-        out.push_str(&format!("cairn_http_requests_by_path_total{{path=\"{safe}\"}} {count}\n"));
+        out.push_str(&format!(
+            "cairn_http_requests_by_path_total{{path=\"{safe}\"}} {count}\n"
+        ));
     }
     out.push('\n');
 
     out.push_str("# HELP cairn_http_latency_ms HTTP request latency quantiles (ms)\n");
     out.push_str("# TYPE cairn_http_latency_ms gauge\n");
-    out.push_str(&format!("cairn_http_latency_ms{{quantile=\"0.50\"}} {}\n", m.percentile(50.0)));
-    out.push_str(&format!("cairn_http_latency_ms{{quantile=\"0.95\"}} {}\n", m.percentile(95.0)));
-    out.push_str(&format!("cairn_http_latency_ms{{quantile=\"0.99\"}} {}\n", m.percentile(99.0)));
-    out.push_str(&format!("cairn_http_latency_ms{{quantile=\"avg\"}} {}\n", m.avg_latency_ms()));
+    out.push_str(&format!(
+        "cairn_http_latency_ms{{quantile=\"0.50\"}} {}\n",
+        m.percentile(50.0)
+    ));
+    out.push_str(&format!(
+        "cairn_http_latency_ms{{quantile=\"0.95\"}} {}\n",
+        m.percentile(95.0)
+    ));
+    out.push_str(&format!(
+        "cairn_http_latency_ms{{quantile=\"0.99\"}} {}\n",
+        m.percentile(99.0)
+    ));
+    out.push_str(&format!(
+        "cairn_http_latency_ms{{quantile=\"avg\"}} {}\n",
+        m.avg_latency_ms()
+    ));
     out.push('\n');
 
     out.push_str("# HELP cairn_http_error_rate Fraction of requests with 4xx/5xx status\n");
@@ -4400,11 +4982,16 @@ async fn metrics_prometheus_handler(State(state): State<AppState>) -> impl IntoR
     let mut statuses: Vec<(&u16, &u64)> = m.errors_by_status.iter().collect();
     statuses.sort_by_key(|(s, _)| *s);
     for (status, count) in &statuses {
-        out.push_str(&format!("cairn_http_errors_by_status{{status=\"{status}\"}} {count}\n"));
+        out.push_str(&format!(
+            "cairn_http_errors_by_status{{status=\"{status}\"}} {count}\n"
+        ));
     }
 
     (
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
         out,
     )
 }
@@ -4430,7 +5017,9 @@ async fn entitlements_handler(
     let tenant_id = q.tenant_id.as_deref().unwrap_or("default");
     match state.entitlements.get_usage(tenant_id) {
         Some(report) => Ok(Json(report)),
-        None => Err(not_found(format!("no plan assigned to tenant '{tenant_id}'"))),
+        None => Err(not_found(format!(
+            "no plan assigned to tenant '{tenant_id}'"
+        ))),
     }
 }
 
@@ -4442,7 +5031,9 @@ async fn entitlements_usage_handler(
     let tenant_id = q.tenant_id.as_deref().unwrap_or("default");
     match state.entitlements.get_detailed_usage(tenant_id) {
         Some(report) => Ok(Json(report)),
-        None => Err(not_found(format!("no plan assigned to tenant '{tenant_id}'"))),
+        None => Err(not_found(format!(
+            "no plan assigned to tenant '{tenant_id}'"
+        ))),
     }
 }
 
@@ -4453,16 +5044,14 @@ struct TenantQuery {
 }
 
 /// `POST /v1/bundles/import` — import a bundle into a target project.
-async fn bundle_import_handler(
-    Json(body): Json<bundles::ImportRequest>,
-) -> impl IntoResponse {
-    if let Err(msg) = validate::check_all(&[
-        validate::require_id("project_id", &body.project_id),
-    ]) {
+async fn bundle_import_handler(Json(body): Json<bundles::ImportRequest>) -> impl IntoResponse {
+    if let Err(msg) = validate::check_all(&[validate::require_id("project_id", &body.project_id)]) {
         return Err(bad_request(msg));
     }
     if body.existing_ids.len() > 10_000 {
-        return Err(bad_request("existing_ids exceeds maximum of 10,000 entries"));
+        return Err(bad_request(
+            "existing_ids exceeds maximum of 10,000 entries",
+        ));
     }
 
     // Validate the bundle.
@@ -4527,8 +5116,8 @@ async fn apply_template_handler(
 
 fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router {
     // ── Base: 197 catalog-driven routes from lib.rs ──────────────────────
-    let catalog_routes = cairn_app::AppBootstrap::build_catalog_routes()
-        .with_state(lib_state.clone());
+    let catalog_routes =
+        cairn_app::AppBootstrap::build_catalog_routes().with_state(lib_state.clone());
 
     // ── Binary-specific routes (not in the catalog) ──────────────────────
     let binary_routes: Router = Router::new()
@@ -4536,71 +5125,101 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
         .route("/v1/ws", get(ws_handler))
         // System introspection
         .route("/v1/health/detailed", get(detailed_health_handler))
-        .route("/v1/system/info",     get(system_info_handler))
-        .route("/v1/system/role",     get(system_role_handler))
+        .route("/v1/system/info", get(system_info_handler))
+        .route("/v1/system/role", get(system_role_handler))
         // /v1/overview served by catalog
         // Runs — binary-specific views
-        .route("/v1/runs/batch",                post(batch_create_runs_handler))
-        .route("/v1/runs/:id/tool-invocations", get(list_run_tool_invocations_handler))
-        .route("/v1/runs/:id/tasks",            get(list_run_tasks_handler).post(create_run_task_handler))
-        .route("/v1/runs/:id/approvals",        get(list_run_approvals_handler))
-        .route("/v1/runs/:id/export",           get(export_run_handler))
+        .route("/v1/runs/batch", post(batch_create_runs_handler))
+        .route(
+            "/v1/runs/:id/tool-invocations",
+            get(list_run_tool_invocations_handler),
+        )
+        .route(
+            "/v1/runs/:id/tasks",
+            get(list_run_tasks_handler).post(create_run_task_handler),
+        )
+        .route("/v1/runs/:id/approvals", get(list_run_approvals_handler))
+        .route("/v1/runs/:id/export", get(export_run_handler))
         // Sessions — binary-specific views
-        .route("/v1/sessions/import",     post(import_session_handler))
-        .route("/v1/sessions/:id/runs",   get(list_session_runs_handler))
+        .route("/v1/sessions/import", post(import_session_handler))
+        .route("/v1/sessions/:id/runs", get(list_session_runs_handler))
         .route("/v1/sessions/:id/export", get(export_session_handler))
         // Approvals — /resolve as primary per W3 decision
-        .route("/v1/approvals/pending",      get(list_pending_approvals_handler))
-        .route("/v1/approvals/:id/resolve",  post(resolve_approval_handler))
+        .route("/v1/approvals/pending", get(list_pending_approvals_handler))
+        .route("/v1/approvals/:id/resolve", post(resolve_approval_handler))
         // Events
-        .route("/v1/events",        get(list_events_handler))
+        .route("/v1/events", get(list_events_handler))
         .route("/v1/events/append", post(append_events_handler))
         // Tasks — binary-specific (complete served by catalog)
-        .route("/v1/tasks/batch/cancel",   post(batch_cancel_tasks_handler))
-        .route("/v1/tasks/:id/start",      post(start_task_handler))
-        .route("/v1/tasks/:id/fail",       post(fail_task_handler))
+        .route("/v1/tasks/batch/cancel", post(batch_cancel_tasks_handler))
+        .route("/v1/tasks/:id/start", post(start_task_handler))
+        .route("/v1/tasks/:id/fail", post(fail_task_handler))
         // Traces
-        .route("/v1/traces",        get(list_all_traces_handler))
+        .route("/v1/traces", get(list_all_traces_handler))
         .route("/v1/traces/export", get(export_otlp_handler))
         // Admin utilities
-        .route("/v1/admin/logs",                get(list_request_logs_handler))
-        .route("/v1/admin/snapshot",            post(admin_snapshot_handler))
-        .route("/v1/admin/restore",             post(admin_restore_handler))
-        .route("/v1/admin/rebuild-projections", post(rebuild_projections_handler))
-        .route("/v1/admin/event-count",         get(event_count_handler))
-        .route("/v1/admin/event-log",           get(admin_event_log_handler))
+        .route("/v1/admin/logs", get(list_request_logs_handler))
+        .route("/v1/admin/snapshot", post(admin_snapshot_handler))
+        .route("/v1/admin/restore", post(admin_restore_handler))
+        .route(
+            "/v1/admin/rebuild-projections",
+            post(rebuild_projections_handler),
+        )
+        .route("/v1/admin/event-count", get(event_count_handler))
+        .route("/v1/admin/event-log", get(admin_event_log_handler))
         // Notifications
-        .route("/v1/notifications",          get(list_notifications_handler))
-        .route("/v1/notifications/read-all", post(mark_all_notifications_read_handler))
-        .route("/v1/notifications/:id/read", post(mark_notification_read_handler))
+        .route("/v1/notifications", get(list_notifications_handler))
+        .route(
+            "/v1/notifications/read-all",
+            post(mark_all_notifications_read_handler),
+        )
+        .route(
+            "/v1/notifications/:id/read",
+            post(mark_notification_read_handler),
+        )
         // Bundles — /import aliases to /apply per W3 decision
         .route("/v1/bundles/import", post(bundle_import_handler))
         // Entitlements
-        .route("/v1/entitlements",       get(entitlements_handler))
+        .route("/v1/entitlements", get(entitlements_handler))
         .route("/v1/entitlements/usage", get(entitlements_usage_handler))
         // Templates
-        .route("/v1/templates",           get(list_templates_handler))
-        .route("/v1/templates/:id",       get(get_template_handler))
+        .route("/v1/templates", get(list_templates_handler))
+        .route("/v1/templates/:id", get(get_template_handler))
         .route("/v1/templates/:id/apply", post(apply_template_handler))
         // Ollama local LLM provider
         // Provider connection discovery + health test
-        .route("/v1/providers/connections/:id/discover-models", get(discover_models_handler))
-        .route("/v1/providers/connections/:id/test",            get(test_connection_handler))
-        .route("/v1/providers/ollama/models",            get(ollama_models_handler))
-        .route("/v1/providers/ollama/models/:name/info", get(ollama_model_info_handler))
-        .route("/v1/providers/ollama/generate",          post(ollama_generate_handler))
-        .route("/v1/providers/ollama/stream",            post(ollama_stream_handler))
-        .route("/v1/providers/ollama/pull",              post(ollama_pull_handler))
-        .route("/v1/providers/ollama/delete",            post(ollama_delete_model_handler))
-        .route("/v1/memory/embed",                       post(ollama_embed_handler))
+        .route(
+            "/v1/providers/connections/:id/discover-models",
+            get(discover_models_handler),
+        )
+        .route(
+            "/v1/providers/connections/:id/test",
+            get(test_connection_handler),
+        )
+        .route("/v1/providers/ollama/models", get(ollama_models_handler))
+        .route(
+            "/v1/providers/ollama/models/:name/info",
+            get(ollama_model_info_handler),
+        )
+        .route(
+            "/v1/providers/ollama/generate",
+            post(ollama_generate_handler),
+        )
+        .route("/v1/providers/ollama/stream", post(ollama_stream_handler))
+        .route("/v1/providers/ollama/pull", post(ollama_pull_handler))
+        .route(
+            "/v1/providers/ollama/delete",
+            post(ollama_delete_model_handler),
+        )
+        .route("/v1/memory/embed", post(ollama_embed_handler))
         // Database diagnostics
         .route("/v1/db/status", get(db_status_handler))
         // /v1/metrics served by catalog; prometheus is binary-only
         .route("/v1/metrics/prometheus", get(metrics_prometheus_handler))
         // OpenAPI + docs
         .route("/v1/openapi.json", get(openapi_json_handler))
-        .route("/v1/docs",         get(swagger_ui_handler))
-        .route("/v1/changelog",    get(changelog_handler))
+        .route("/v1/docs", get(swagger_ui_handler))
+        .route("/v1/changelog", get(changelog_handler))
         // Test
         .route("/v1/test/webhook", post(test_webhook_handler))
         // Rate-limit status
@@ -4676,7 +5295,9 @@ mod tests {
 
     impl RecordingBootstrap {
         fn new() -> Self {
-            Self { seen: Mutex::new(None) }
+            Self {
+                seen: Mutex::new(None),
+            }
         }
         fn seen(&self) -> Option<BootstrapConfig> {
             self.seen.lock().unwrap().clone()
@@ -4704,16 +5325,23 @@ mod tests {
             TEST_TOKEN.to_owned(),
             AuthPrincipal::ServiceAccount {
                 name: "test-admin".to_owned(),
-                tenant: cairn_domain::tenancy::TenantKey::new(
-                    cairn_domain::TenantId::new("test-tenant"),
-                ),
+                tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new(
+                    "test-tenant",
+                )),
             },
         );
         {
-            let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
-            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+            let doc_store =
+                std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
+            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(
+                doc_store.clone(),
+            ));
             let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
-                doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
+                doc_store.clone(),
+                cairn_memory::pipeline::ParagraphChunker {
+                    max_chunk_size: 512,
+                },
+            ));
             AppState {
                 runtime: Arc::new(InMemoryServices::new()),
                 started_at: Arc::new(Instant::now()),
@@ -4732,10 +5360,10 @@ mod tests {
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
-        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
-        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
-        entitlements: Arc::new(entitlements::EntitlementService::new()),
-        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
+                notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+                templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+                entitlements: Arc::new(entitlements::EntitlementService::new()),
+                process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
     }
@@ -4759,14 +5387,9 @@ mod tests {
 
     /// Issue a GET request with NO auth header.
     async fn unauthed_get(app: Router, uri: &str) -> axum::response::Response {
-        app.oneshot(
-            Request::builder()
-                .uri(uri)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap()
+        app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap()
     }
 
     /// Build a GET request that includes the test auth token.
@@ -4802,7 +5425,9 @@ mod tests {
     #[test]
     fn parse_args_promotes_team_mode_to_public_bind() {
         let config = parse_args_from(&[
-            "cairn-app".to_owned(), "--mode".to_owned(), "team".to_owned(),
+            "cairn-app".to_owned(),
+            "--mode".to_owned(),
+            "team".to_owned(),
         ]);
         assert_eq!(config.mode, DeploymentMode::SelfHostedTeam);
         assert_eq!(config.listen_addr, "0.0.0.0");
@@ -4819,7 +5444,9 @@ mod tests {
     #[test]
     fn parse_args_db_flag_sets_postgres() {
         let c = parse_args_from(&[
-            "cairn-app".to_owned(), "--db".to_owned(), "postgres://localhost/cairn".to_owned(),
+            "cairn-app".to_owned(),
+            "--db".to_owned(),
+            "postgres://localhost/cairn".to_owned(),
         ]);
         assert!(matches!(c.storage, StorageBackend::Postgres { .. }));
     }
@@ -4827,7 +5454,9 @@ mod tests {
     #[test]
     fn parse_args_db_flag_sets_sqlite() {
         let c = parse_args_from(&[
-            "cairn-app".to_owned(), "--db".to_owned(), "my_data.db".to_owned(),
+            "cairn-app".to_owned(),
+            "--db".to_owned(),
+            "my_data.db".to_owned(),
         ]);
         assert!(matches!(c.storage, StorageBackend::Sqlite { .. }));
     }
@@ -4835,7 +5464,9 @@ mod tests {
     #[test]
     fn team_mode_clears_local_auto_encryption() {
         let c = parse_args_from(&[
-            "cairn-app".to_owned(), "--mode".to_owned(), "team".to_owned(),
+            "cairn-app".to_owned(),
+            "--mode".to_owned(),
+            "team".to_owned(),
         ]);
         assert!(!c.credentials_available());
     }
@@ -4843,7 +5474,9 @@ mod tests {
     #[test]
     fn parse_args_port_flag_overrides_default() {
         let c = parse_args_from(&[
-            "cairn-app".to_owned(), "--port".to_owned(), "8080".to_owned(),
+            "cairn-app".to_owned(),
+            "--port".to_owned(),
+            "8080".to_owned(),
         ]);
         assert_eq!(c.listen_port, 8080);
     }
@@ -4852,7 +5485,11 @@ mod tests {
 
     /// Drive the SSE stream from an HTTP request using tower's oneshot and
     /// collect the first N bytes of the SSE body.
-    async fn collect_sse_bytes(app: axum::Router, uri: &str, extra_headers: Vec<(&str, &str)>) -> Vec<u8> {
+    async fn collect_sse_bytes(
+        app: axum::Router,
+        uri: &str,
+        extra_headers: Vec<(&str, &str)>,
+    ) -> Vec<u8> {
         let mut builder = Request::builder().uri(uri);
         for (k, v) in extra_headers {
             builder = builder.header(k, v);
@@ -4873,8 +5510,14 @@ mod tests {
         let app = make_app(make_state());
         let raw = collect_sse_bytes(app, "/v1/stream", vec![]).await;
         let text = String::from_utf8_lossy(&raw);
-        assert!(text.contains("event: connected"), "missing connected event; got: {text}");
-        assert!(text.contains("head_position"), "connected payload missing head_position; got: {text}");
+        assert!(
+            text.contains("event: connected"),
+            "missing connected event; got: {text}"
+        );
+        assert!(
+            text.contains("head_position"),
+            "connected payload missing head_position; got: {text}"
+        );
     }
 
     #[tokio::test]
@@ -4956,7 +5599,10 @@ mod tests {
         let text = String::from_utf8_lossy(&raw);
 
         let count = text.matches("event: session_created").count();
-        assert_eq!(count, 2, "expected 2 replayed events; got {count} in: {text}");
+        assert_eq!(
+            count, 2,
+            "expected 2 replayed events; got {count} in: {text}"
+        );
     }
 
     #[tokio::test]
@@ -4968,7 +5614,10 @@ mod tests {
 
         // Only the connected event, no session_created events.
         assert!(text.contains("event: connected"));
-        assert!(!text.contains("event: session_created"), "unexpected events: {text}");
+        assert!(
+            !text.contains("event: session_created"),
+            "unexpected events: {text}"
+        );
     }
 
     // ── Integration-style route tests ──
@@ -4977,10 +5626,7 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn get_runs_empty_store_returns_empty_list() {
         let app = make_app(make_state());
-        let resp = app
-            .oneshot(authed_req("/v1/runs"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(authed_req("/v1/runs")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let runs: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5008,7 +5654,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn list_run_tasks_returns_empty_for_run_with_no_tasks() {
-        use cairn_domain::{EventEnvelope, EventId, EventSource, RuntimeEvent, RunCreated};
+        use cairn_domain::{EventEnvelope, EventId, EventSource, RunCreated, RuntimeEvent};
 
         let state = make_state();
         let project = ProjectKey::new("t_task", "w_task", "p_task");
@@ -5016,9 +5662,16 @@ mod tests {
         let run_id = cairn_domain::RunId::new("run_notasks");
 
         // Create session + run but add no tasks.
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .store
+            .append(&[EventEnvelope::for_runtime_event(
                 EventId::new("evt_run_notasks"),
                 EventSource::Runtime,
                 RuntimeEvent::RunCreated(RunCreated {
@@ -5029,8 +5682,9 @@ mod tests {
                     prompt_release_id: None,
                     agent_role_id: None,
                 }),
-            ),
-        ]).await.unwrap();
+            )])
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = app
@@ -5044,18 +5698,24 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), StatusCode::OK, "run with no tasks returns 200");
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "run with no tasks returns 200"
+        );
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let tasks: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(tasks.as_array().unwrap().is_empty(), "no tasks = empty array");
+        assert!(
+            tasks.as_array().unwrap().is_empty(),
+            "no tasks = empty array"
+        );
     }
 
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn list_run_tasks_returns_tasks_for_run() {
         use cairn_domain::{
-            EventEnvelope, EventId, EventSource, RuntimeEvent,
-            RunCreated, TaskCreated,
+            EventEnvelope, EventId, EventSource, RunCreated, RuntimeEvent, TaskCreated,
         };
 
         let state = make_state();
@@ -5063,45 +5723,55 @@ mod tests {
         let session_id = SessionId::new("sess_tasks");
         let run_id = cairn_domain::RunId::new("run_withtasks");
 
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
 
         // Create run + two tasks.
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_run_wt"),
-                EventSource::Runtime,
-                RuntimeEvent::RunCreated(RunCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                    run_id: run_id.clone(),
-                    parent_run_id: None,
-                    prompt_release_id: None,
-                    agent_role_id: None,
-                }),
-            ),
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_task_1"),
-                EventSource::Runtime,
-                RuntimeEvent::TaskCreated(TaskCreated {
-                    project: project.clone(),
-                    task_id: cairn_domain::TaskId::new("task_alpha"),
-                    parent_run_id: Some(run_id.clone()),
-                    parent_task_id: None,
-                    prompt_release_id: None,
-                }),
-            ),
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_task_2"),
-                EventSource::Runtime,
-                RuntimeEvent::TaskCreated(TaskCreated {
-                    project: project.clone(),
-                    task_id: cairn_domain::TaskId::new("task_beta"),
-                    parent_run_id: Some(run_id.clone()),
-                    parent_task_id: None,
-                    prompt_release_id: None,
-                }),
-            ),
-        ]).await.unwrap();
+        state
+            .runtime
+            .store
+            .append(&[
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_run_wt"),
+                    EventSource::Runtime,
+                    RuntimeEvent::RunCreated(RunCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                        run_id: run_id.clone(),
+                        parent_run_id: None,
+                        prompt_release_id: None,
+                        agent_role_id: None,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_task_1"),
+                    EventSource::Runtime,
+                    RuntimeEvent::TaskCreated(TaskCreated {
+                        project: project.clone(),
+                        task_id: cairn_domain::TaskId::new("task_alpha"),
+                        parent_run_id: Some(run_id.clone()),
+                        parent_task_id: None,
+                        prompt_release_id: None,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_task_2"),
+                    EventSource::Runtime,
+                    RuntimeEvent::TaskCreated(TaskCreated {
+                        project: project.clone(),
+                        task_id: cairn_domain::TaskId::new("task_beta"),
+                        parent_run_id: Some(run_id.clone()),
+                        parent_task_id: None,
+                        prompt_release_id: None,
+                    }),
+                ),
+            ])
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = app
@@ -5122,12 +5792,20 @@ mod tests {
         assert_eq!(arr.len(), 2, "two tasks must be returned");
 
         let task_ids: Vec<_> = arr.iter().map(|t| t["task_id"].as_str().unwrap()).collect();
-        assert!(task_ids.contains(&"task_alpha"), "task_alpha must be in response");
-        assert!(task_ids.contains(&"task_beta"),  "task_beta must be in response");
+        assert!(
+            task_ids.contains(&"task_alpha"),
+            "task_alpha must be in response"
+        );
+        assert!(
+            task_ids.contains(&"task_beta"),
+            "task_beta must be in response"
+        );
         // Each task must link back to the run.
         for t in arr {
-            assert_eq!(t["parent_run_id"], "run_withtasks",
-                "every task must reference its parent run");
+            assert_eq!(
+                t["parent_run_id"], "run_withtasks",
+                "every task must reference its parent run"
+            );
         }
     }
 
@@ -5144,8 +5822,11 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND,
-            "unknown run must return 404");
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "unknown run must return 404"
+        );
     }
 
     // ── Approval endpoint tests ──────────────────────────────────────────────
@@ -5153,7 +5834,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn list_run_approvals_empty_for_run_with_no_approvals() {
-        use cairn_domain::{EventEnvelope, EventId, EventSource, RuntimeEvent, RunCreated};
+        use cairn_domain::{EventEnvelope, EventId, EventSource, RunCreated, RuntimeEvent};
 
         let state = make_state();
         let project = ProjectKey::new("ta", "wa", "pa");
@@ -5161,9 +5842,16 @@ mod tests {
         let run_id_str = "run_appr_empty";
         let run_id = cairn_domain::RunId::new(run_id_str);
 
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .store
+            .append(&[EventEnvelope::for_runtime_event(
                 EventId::new("evt_run_ae"),
                 EventSource::Runtime,
                 RuntimeEvent::RunCreated(RunCreated {
@@ -5174,8 +5862,9 @@ mod tests {
                     prompt_release_id: None,
                     agent_role_id: None,
                 }),
-            ),
-        ]).await.unwrap();
+            )])
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = app
@@ -5192,18 +5881,20 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let approvals: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(approvals.as_array().unwrap().is_empty(),
-            "run with no approvals must return empty array");
+        assert!(
+            approvals.as_array().unwrap().is_empty(),
+            "run with no approvals must return empty array"
+        );
     }
 
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn list_run_approvals_shows_pending_approval() {
-        use cairn_domain::{
-            ApprovalId, ApprovalRequested, EventEnvelope, EventId, EventSource,
-            RuntimeEvent, RunCreated,
-        };
         use cairn_domain::policy::ApprovalRequirement;
+        use cairn_domain::{
+            ApprovalId, ApprovalRequested, EventEnvelope, EventId, EventSource, RunCreated,
+            RuntimeEvent,
+        };
 
         let state = make_state();
         let project = ProjectKey::new("tb", "wb", "pb");
@@ -5212,32 +5903,42 @@ mod tests {
         let run_id = cairn_domain::RunId::new(run_id_str);
         let approval_id = ApprovalId::new("appr_pend");
 
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_run_ap"),
-                EventSource::Runtime,
-                RuntimeEvent::RunCreated(RunCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                    run_id: run_id.clone(),
-                    parent_run_id: None,
-                    prompt_release_id: None,
-                    agent_role_id: None,
-                }),
-            ),
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_appr_pend"),
-                EventSource::Runtime,
-                RuntimeEvent::ApprovalRequested(ApprovalRequested {
-                    project: project.clone(),
-                    approval_id: approval_id.clone(),
-                    run_id: Some(run_id.clone()),
-                    task_id: None,
-                    requirement: ApprovalRequirement::Required,
-                }),
-            ),
-        ]).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .store
+            .append(&[
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_run_ap"),
+                    EventSource::Runtime,
+                    RuntimeEvent::RunCreated(RunCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                        run_id: run_id.clone(),
+                        parent_run_id: None,
+                        prompt_release_id: None,
+                        agent_role_id: None,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_appr_pend"),
+                    EventSource::Runtime,
+                    RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                        project: project.clone(),
+                        approval_id: approval_id.clone(),
+                        run_id: Some(run_id.clone()),
+                        task_id: None,
+                        requirement: ApprovalRequirement::Required,
+                    }),
+                ),
+            ])
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = app
@@ -5257,17 +5958,20 @@ mod tests {
         let arr = approvals.as_array().unwrap();
         assert_eq!(arr.len(), 1, "one pending approval");
         assert_eq!(arr[0]["approval_id"], "appr_pend");
-        assert!(arr[0]["decision"].is_null(), "pending approval has no decision");
+        assert!(
+            arr[0]["decision"].is_null(),
+            "pending approval has no decision"
+        );
     }
 
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn list_run_approvals_shows_resolved_decision() {
-        use cairn_domain::{
-            ApprovalId, ApprovalRequested, ApprovalResolved,
-            EventEnvelope, EventId, EventSource, RuntimeEvent, RunCreated,
-        };
         use cairn_domain::policy::{ApprovalDecision, ApprovalRequirement};
+        use cairn_domain::{
+            ApprovalId, ApprovalRequested, ApprovalResolved, EventEnvelope, EventId, EventSource,
+            RunCreated, RuntimeEvent,
+        };
 
         let state = make_state();
         let project = ProjectKey::new("tc", "wc", "pc");
@@ -5276,41 +5980,51 @@ mod tests {
         let run_id = cairn_domain::RunId::new(run_id_str);
         let approval_id = ApprovalId::new("appr_res");
 
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_run_ar"),
-                EventSource::Runtime,
-                RuntimeEvent::RunCreated(RunCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                    run_id: run_id.clone(),
-                    parent_run_id: None,
-                    prompt_release_id: None,
-                    agent_role_id: None,
-                }),
-            ),
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_appr_req"),
-                EventSource::Runtime,
-                RuntimeEvent::ApprovalRequested(ApprovalRequested {
-                    project: project.clone(),
-                    approval_id: approval_id.clone(),
-                    run_id: Some(run_id.clone()),
-                    task_id: None,
-                    requirement: ApprovalRequirement::Required,
-                }),
-            ),
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_appr_res"),
-                EventSource::Runtime,
-                RuntimeEvent::ApprovalResolved(ApprovalResolved {
-                    project: project.clone(),
-                    approval_id: approval_id.clone(),
-                    decision: ApprovalDecision::Approved,
-                }),
-            ),
-        ]).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .store
+            .append(&[
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_run_ar"),
+                    EventSource::Runtime,
+                    RuntimeEvent::RunCreated(RunCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                        run_id: run_id.clone(),
+                        parent_run_id: None,
+                        prompt_release_id: None,
+                        agent_role_id: None,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_appr_req"),
+                    EventSource::Runtime,
+                    RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                        project: project.clone(),
+                        approval_id: approval_id.clone(),
+                        run_id: Some(run_id.clone()),
+                        task_id: None,
+                        requirement: ApprovalRequirement::Required,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_appr_res"),
+                    EventSource::Runtime,
+                    RuntimeEvent::ApprovalResolved(ApprovalResolved {
+                        project: project.clone(),
+                        approval_id: approval_id.clone(),
+                        decision: ApprovalDecision::Approved,
+                    }),
+                ),
+            ])
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = app
@@ -5331,8 +6045,10 @@ mod tests {
         assert_eq!(arr.len(), 1, "one resolved approval");
         assert_eq!(arr[0]["approval_id"], "appr_res");
         // Decision must be populated after resolution.
-        assert_eq!(arr[0]["decision"], "approved",
-            "resolved approval must carry the decision");
+        assert_eq!(
+            arr[0]["decision"], "approved",
+            "resolved approval must carry the decision"
+        );
     }
 
     // ── Session runs endpoint tests ──────────────────────────────────────────
@@ -5347,16 +6063,19 @@ mod tests {
         let session_id = SessionId::new("sess_noruns");
 
         // Create session via event but add no runs.
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
+        state
+            .runtime
+            .store
+            .append(&[EventEnvelope::for_runtime_event(
                 EventId::new("evt_sess_nr"),
                 EventSource::Runtime,
                 RuntimeEvent::SessionCreated(SessionCreated {
                     project: project.clone(),
                     session_id: session_id.clone(),
                 }),
-            ),
-        ]).await.unwrap();
+            )])
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = app
@@ -5373,53 +6092,62 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let runs: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(runs.as_array().unwrap().is_empty(),
-            "session with no runs must return empty array");
+        assert!(
+            runs.as_array().unwrap().is_empty(),
+            "session with no runs must return empty array"
+        );
     }
 
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn list_session_runs_returns_two_runs() {
-        use cairn_domain::{EventEnvelope, EventId, EventSource, RuntimeEvent, RunCreated, SessionCreated};
+        use cairn_domain::{
+            EventEnvelope, EventId, EventSource, RunCreated, RuntimeEvent, SessionCreated,
+        };
 
         let state = make_state();
         let project = ProjectKey::new("tr2", "wr2", "pr2");
         let session_id = SessionId::new("sess_tworuns");
 
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_sess_tr"),
-                EventSource::Runtime,
-                RuntimeEvent::SessionCreated(SessionCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                }),
-            ),
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_run_tr1"),
-                EventSource::Runtime,
-                RuntimeEvent::RunCreated(RunCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                    run_id: cairn_domain::RunId::new("run_tr_1"),
-                    parent_run_id: None,
-                    prompt_release_id: None,
-                    agent_role_id: None,
-                }),
-            ),
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_run_tr2"),
-                EventSource::Runtime,
-                RuntimeEvent::RunCreated(RunCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                    run_id: cairn_domain::RunId::new("run_tr_2"),
-                    parent_run_id: None,
-                    prompt_release_id: None,
-                    agent_role_id: None,
-                }),
-            ),
-        ]).await.unwrap();
+        state
+            .runtime
+            .store
+            .append(&[
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_sess_tr"),
+                    EventSource::Runtime,
+                    RuntimeEvent::SessionCreated(SessionCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_run_tr1"),
+                    EventSource::Runtime,
+                    RuntimeEvent::RunCreated(RunCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                        run_id: cairn_domain::RunId::new("run_tr_1"),
+                        parent_run_id: None,
+                        prompt_release_id: None,
+                        agent_role_id: None,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_run_tr2"),
+                    EventSource::Runtime,
+                    RuntimeEvent::RunCreated(RunCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                        run_id: cairn_domain::RunId::new("run_tr_2"),
+                        parent_run_id: None,
+                        prompt_release_id: None,
+                        agent_role_id: None,
+                    }),
+                ),
+            ])
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = app
@@ -5451,48 +6179,55 @@ mod tests {
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn list_session_runs_shows_parent_run_id_for_subagent() {
-        use cairn_domain::{EventEnvelope, EventId, EventSource, RuntimeEvent, RunCreated, SessionCreated};
+        use cairn_domain::{
+            EventEnvelope, EventId, EventSource, RunCreated, RuntimeEvent, SessionCreated,
+        };
 
         let state = make_state();
         let project = ProjectKey::new("tr3", "wr3", "pr3");
         let session_id = SessionId::new("sess_subagent");
 
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_sess_sa"),
-                EventSource::Runtime,
-                RuntimeEvent::SessionCreated(SessionCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                }),
-            ),
-            // Root orchestrator run.
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_run_root"),
-                EventSource::Runtime,
-                RuntimeEvent::RunCreated(RunCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                    run_id: cairn_domain::RunId::new("run_root"),
-                    parent_run_id: None,
-                    prompt_release_id: None,
-                    agent_role_id: Some("orchestrator".to_owned()),
-                }),
-            ),
-            // Subagent spawned by root.
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_run_sub"),
-                EventSource::Runtime,
-                RuntimeEvent::RunCreated(RunCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                    run_id: cairn_domain::RunId::new("run_subagent"),
-                    parent_run_id: Some(cairn_domain::RunId::new("run_root")),
-                    prompt_release_id: None,
-                    agent_role_id: Some("researcher".to_owned()),
-                }),
-            ),
-        ]).await.unwrap();
+        state
+            .runtime
+            .store
+            .append(&[
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_sess_sa"),
+                    EventSource::Runtime,
+                    RuntimeEvent::SessionCreated(SessionCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                    }),
+                ),
+                // Root orchestrator run.
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_run_root"),
+                    EventSource::Runtime,
+                    RuntimeEvent::RunCreated(RunCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                        run_id: cairn_domain::RunId::new("run_root"),
+                        parent_run_id: None,
+                        prompt_release_id: None,
+                        agent_role_id: Some("orchestrator".to_owned()),
+                    }),
+                ),
+                // Subagent spawned by root.
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_run_sub"),
+                    EventSource::Runtime,
+                    RuntimeEvent::RunCreated(RunCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                        run_id: cairn_domain::RunId::new("run_subagent"),
+                        parent_run_id: Some(cairn_domain::RunId::new("run_root")),
+                        prompt_release_id: None,
+                        agent_role_id: Some("researcher".to_owned()),
+                    }),
+                ),
+            ])
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = app
@@ -5513,13 +6248,14 @@ mod tests {
         assert_eq!(arr.len(), 2, "root + subagent = 2 runs");
 
         let root = arr.iter().find(|r| r["run_id"] == "run_root").unwrap();
-        assert!(root["parent_run_id"].is_null(),
-            "root run has no parent");
+        assert!(root["parent_run_id"].is_null(), "root run has no parent");
         assert_eq!(root["agent_role_id"], "orchestrator");
 
         let sub = arr.iter().find(|r| r["run_id"] == "run_subagent").unwrap();
-        assert_eq!(sub["parent_run_id"], "run_root",
-            "subagent must reference root run as parent");
+        assert_eq!(
+            sub["parent_run_id"], "run_root",
+            "subagent must reference root run as parent"
+        );
         assert_eq!(sub["agent_role_id"], "researcher");
     }
 
@@ -5623,14 +6359,21 @@ mod tests {
         let project = ProjectKey::new("t1", "w1", "p1");
         let session_id = cairn_domain::SessionId::new("sess_1");
         let run_id = cairn_domain::RunId::new("run_1");
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.runs.start(&project, &session_id, run_id, None).await.unwrap();
-
-        let app = make_app(state);
-        let resp = app
-            .oneshot(authed_req("/v1/runs"))
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
             .await
             .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project, &session_id, run_id, None)
+            .await
+            .unwrap();
+
+        let app = make_app(state);
+        let resp = app.oneshot(authed_req("/v1/runs")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let runs: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5645,11 +6388,21 @@ mod tests {
         let project = ProjectKey::new("t2", "w2", "p2");
         let session_id = SessionId::new("sess_2");
         let run_id_str = "run_2";
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
         state
             .runtime
             .runs
-            .start(&project, &session_id, cairn_domain::RunId::new(run_id_str), None)
+            .start(
+                &project,
+                &session_id,
+                cairn_domain::RunId::new(run_id_str),
+                None,
+            )
             .await
             .unwrap();
 
@@ -5676,13 +6429,15 @@ mod tests {
         let state = make_state();
         let project = ProjectKey::new("t3", "w3", "p3");
         let session_id = SessionId::new("sess_3");
-        state.runtime.sessions.create(&project, session_id).await.unwrap();
-
-        let app = make_app(state);
-        let resp = app
-            .oneshot(authed_req("/v1/sessions"))
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id)
             .await
             .unwrap();
+
+        let app = make_app(state);
+        let resp = app.oneshot(authed_req("/v1/sessions")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let sessions: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5696,10 +6451,7 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn prompt_assets_empty_store_returns_empty_list() {
         let app = make_app(make_state());
-        let resp = app
-            .oneshot(authed_req("/v1/prompts/assets"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(authed_req("/v1/prompts/assets")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let items: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5717,15 +6469,17 @@ mod tests {
         state
             .runtime
             .prompt_assets
-            .create(&project, PromptAssetId::new("asset_a"), "My Prompt".to_owned(), "system".to_owned())
+            .create(
+                &project,
+                PromptAssetId::new("asset_a"),
+                "My Prompt".to_owned(),
+                "system".to_owned(),
+            )
             .await
             .unwrap();
 
         let app = make_app(state);
-        let resp = app
-            .oneshot(authed_req("/v1/prompts/assets"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(authed_req("/v1/prompts/assets")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let items: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5754,10 +6508,7 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn costs_empty_store_returns_zeros() {
         let app = make_app(make_state());
-        let resp = app
-            .oneshot(authed_req("/v1/costs"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(authed_req("/v1/costs")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let cost: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5769,19 +6520,30 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn costs_reflects_run_cost_events() {
         use cairn_domain::{
-            EventEnvelope, EventId, EventSource, RuntimeEvent,
-            events::RunCostUpdated,
+            events::RunCostUpdated, EventEnvelope, EventId, EventSource, RuntimeEvent,
         };
 
         let state = make_state();
         let project = ProjectKey::new("tc", "wc", "pc");
         let session_id = SessionId::new("sess_c");
         let run_id = cairn_domain::RunId::new("run_c");
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.runs.start(&project, &session_id, run_id.clone(), None).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project, &session_id, run_id.clone(), None)
+            .await
+            .unwrap();
 
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
+        state
+            .runtime
+            .store
+            .append(&[EventEnvelope::for_runtime_event(
                 EventId::new("evt_cost_c"),
                 EventSource::Runtime,
                 RuntimeEvent::RunCostUpdated(RunCostUpdated {
@@ -5795,14 +6557,12 @@ mod tests {
                     provider_call_id: "call_c".to_owned(),
                     updated_at_ms: 1000,
                 }),
-            ),
-        ]).await.unwrap();
-
-        let app = make_app(state);
-        let resp = app
-            .oneshot(authed_req("/v1/costs"))
+            )])
             .await
             .unwrap();
+
+        let app = make_app(state);
+        let resp = app.oneshot(authed_req("/v1/costs")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let cost: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5817,10 +6577,7 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn providers_empty_store_returns_empty_list() {
         let app = make_app(make_state());
-        let resp = app
-            .oneshot(authed_req("/v1/providers"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(authed_req("/v1/providers")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let items: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5831,17 +6588,19 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn providers_reflects_created_binding() {
         use cairn_domain::{
-            EventEnvelope, EventId, EventSource, ProviderBindingId, ProviderConnectionId,
-            ProviderModelId, RuntimeEvent,
             events::ProviderBindingCreated,
             providers::{OperationKind, ProviderBindingSettings},
+            EventEnvelope, EventId, EventSource, ProviderBindingId, ProviderConnectionId,
+            ProviderModelId, RuntimeEvent,
         };
 
         let state = make_state();
         let project = ProjectKey::new("tp", "wp", "pp");
 
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
+        state
+            .runtime
+            .store
+            .append(&[EventEnvelope::for_runtime_event(
                 EventId::new("evt_bind_p"),
                 EventSource::Runtime,
                 RuntimeEvent::ProviderBindingCreated(ProviderBindingCreated {
@@ -5856,14 +6615,12 @@ mod tests {
                     created_at: 1000,
                     estimated_cost_micros: None,
                 }),
-            ),
-        ]).await.unwrap();
-
-        let app = make_app(state);
-        let resp = app
-            .oneshot(authed_req("/v1/providers"))
+            )])
             .await
             .unwrap();
+
+        let app = make_app(state);
+        let resp = app.oneshot(authed_req("/v1/providers")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let items: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5877,10 +6634,7 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn events_empty_store_returns_empty_list() {
         let app = make_app(make_state());
-        let resp = app
-            .oneshot(authed_req("/v1/events"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(authed_req("/v1/events")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -5894,13 +6648,15 @@ mod tests {
         let project = ProjectKey::new("te", "we", "pe");
         let session_id = SessionId::new("sess_e");
         // Creating a session appends a SessionCreated event.
-        state.runtime.sessions.create(&project, session_id).await.unwrap();
-
-        let app = make_app(state);
-        let resp = app
-            .oneshot(authed_req("/v1/events"))
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id)
             .await
             .unwrap();
+
+        let app = make_app(state);
+        let resp = app.oneshot(authed_req("/v1/events")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -6013,13 +6769,20 @@ mod tests {
     }
 
     /// Same as above but with a causation_id for idempotency testing.
-    fn session_created_with_causation(event_id: &str, session_id: &str, causation_id: &str) -> serde_json::Value {
+    fn session_created_with_causation(
+        event_id: &str,
+        session_id: &str,
+        causation_id: &str,
+    ) -> serde_json::Value {
         let mut e = session_created_envelope(event_id, session_id);
         e["causation_id"] = serde_json::json!(causation_id);
         e
     }
 
-    async fn post_append(app: axum::Router, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+    async fn post_append(
+        app: axum::Router,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
         let resp = app
             .oneshot(
                 Request::builder()
@@ -6048,7 +6811,10 @@ mod tests {
         let arr = results.as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["event_id"], "evt_a1");
-        assert!(arr[0]["position"].as_u64().unwrap() > 0, "position must be ≥ 1");
+        assert!(
+            arr[0]["position"].as_u64().unwrap() > 0,
+            "position must be ≥ 1"
+        );
         assert_eq!(arr[0]["appended"], true);
     }
 
@@ -6074,7 +6840,10 @@ mod tests {
         let arr = results.as_array().unwrap();
         assert_eq!(arr.len(), 3);
 
-        let positions: Vec<u64> = arr.iter().map(|r| r["position"].as_u64().unwrap()).collect();
+        let positions: Vec<u64> = arr
+            .iter()
+            .map(|r| r["position"].as_u64().unwrap())
+            .collect();
         // All positions must be distinct and strictly increasing.
         assert!(positions[0] < positions[1]);
         assert!(positions[1] < positions[2]);
@@ -6089,7 +6858,8 @@ mod tests {
 
         // First append — creates the event.
         let env = session_created_with_causation("evt_idem1", "sess_idem1", causation);
-        let (status1, res1) = post_append(make_app(state.clone()), serde_json::json!([env.clone()])).await;
+        let (status1, res1) =
+            post_append(make_app(state.clone()), serde_json::json!([env.clone()])).await;
         assert_eq!(status1, StatusCode::CREATED);
         let first_pos = res1[0]["position"].as_u64().unwrap();
         assert_eq!(res1[0]["appended"], true);
@@ -6099,8 +6869,14 @@ mod tests {
         let (status2, res2) = post_append(make_app(state.clone()), serde_json::json!([env2])).await;
         assert_eq!(status2, StatusCode::CREATED);
         let second_pos = res2[0]["position"].as_u64().unwrap();
-        assert_eq!(res2[0]["appended"], false, "second append should be idempotent");
-        assert_eq!(second_pos, first_pos, "idempotent append must return the original position");
+        assert_eq!(
+            res2[0]["appended"], false,
+            "second append should be idempotent"
+        );
+        assert_eq!(
+            second_pos, first_pos,
+            "idempotent append must return the original position"
+        );
     }
 
     #[tokio::test]
@@ -6119,12 +6895,16 @@ mod tests {
         let (status, results) = post_append(
             make_app(state.clone()),
             serde_json::json!([env_dup, env_new]),
-        ).await;
+        )
+        .await;
 
         assert_eq!(status, StatusCode::CREATED);
         let arr = results.as_array().unwrap();
         assert_eq!(arr.len(), 2);
-        assert_eq!(arr[0]["appended"], false, "first should be idempotent duplicate");
+        assert_eq!(
+            arr[0]["appended"], false,
+            "first should be idempotent duplicate"
+        );
         assert_eq!(arr[1]["appended"], true, "second should be newly appended");
         assert!(
             arr[1]["position"].as_u64().unwrap() > arr[0]["position"].as_u64().unwrap(),
@@ -6145,10 +6925,7 @@ mod tests {
         let appended_pos = results[0]["position"].as_u64().unwrap();
 
         // The event should now appear in GET /v1/events.
-        let resp = app2
-            .oneshot(authed_req("/v1/events"))
-            .await
-            .unwrap();
+        let resp = app2.oneshot(authed_req("/v1/events")).await.unwrap();
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let positions: Vec<u64> = events
@@ -6179,10 +6956,9 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
 
         // The receiver should have gotten the event immediately.
-        let received = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            async { receiver.recv().await },
-        )
+        let received = tokio::time::timeout(std::time::Duration::from_millis(200), async {
+            receiver.recv().await
+        })
         .await
         .expect("broadcast delivery timed out")
         .expect("broadcast channel closed");
@@ -6286,9 +7062,15 @@ mod tests {
             },
         );
         let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
-        let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+        let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(
+            doc_store.clone(),
+        ));
         let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
-            doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
+            doc_store.clone(),
+            cairn_memory::pipeline::ParagraphChunker {
+                max_chunk_size: 512,
+            },
+        ));
         let state = AppState {
             runtime: Arc::new(InMemoryServices::new()),
             started_at: Arc::new(Instant::now()),
@@ -6301,16 +7083,16 @@ mod tests {
             ingest,
             ollama: None,
             openai_compat_brain: None,
-                openai_compat_worker: None,
-                openai_compat_openrouter: None,
-                openai_compat: None,
+            openai_compat_worker: None,
+            openai_compat_openrouter: None,
+            openai_compat: None,
             metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
-        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
-        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
-        entitlements: Arc::new(entitlements::EntitlementService::new()),
-        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
+            notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+            templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+            entitlements: Arc::new(entitlements::EntitlementService::new()),
+            process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
         };
         let app = make_app(state);
 
@@ -6371,10 +7153,16 @@ mod tests {
         let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
         // All four contract fields must be present.
-        assert!(status.get("backend").is_some(),           "missing backend");
-        assert!(status.get("connected").is_some(),         "missing connected");
-        assert!(status.get("migration_count").is_some(),   "missing migration_count");
-        assert!(status.get("schema_current").is_some(),    "missing schema_current");
+        assert!(status.get("backend").is_some(), "missing backend");
+        assert!(status.get("connected").is_some(), "missing connected");
+        assert!(
+            status.get("migration_count").is_some(),
+            "missing migration_count"
+        );
+        assert!(
+            status.get("schema_current").is_some(),
+            "missing schema_current"
+        );
     }
 
     // ── End-to-end write → project → read cycle tests ────────────────────────
@@ -6390,18 +7178,27 @@ mod tests {
     async fn e2e_append_session_then_list_sessions_shows_it() {
         let state = make_state();
         let envelope = session_created_envelope("evt_e2e_s1", "sess_e2e_1");
-        let (status, results) = post_append(make_app(state.clone()), serde_json::json!([envelope])).await;
+        let (status, results) =
+            post_append(make_app(state.clone()), serde_json::json!([envelope])).await;
         assert_eq!(status, StatusCode::CREATED);
-        assert_eq!(results[0]["appended"], true, "event must be freshly appended");
+        assert_eq!(
+            results[0]["appended"], true,
+            "event must be freshly appended"
+        );
 
-        let resp = make_app(state).oneshot(authed_req("/v1/sessions")).await.unwrap();
+        let resp = make_app(state)
+            .oneshot(authed_req("/v1/sessions"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let sessions: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = sessions.as_array().unwrap();
         assert_eq!(arr.len(), 1, "one session must appear after append");
-        assert_eq!(arr[0]["session_id"], "sess_e2e_1",
-            "session_id must match what GET /v1/sessions returns");
+        assert_eq!(
+            arr[0]["session_id"], "sess_e2e_1",
+            "session_id must match what GET /v1/sessions returns"
+        );
     }
 
     /// (2) POST RunCreated via /v1/events/append → GET /v1/runs shows it.
@@ -6409,7 +7206,8 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn e2e_append_run_then_list_runs_shows_it() {
         let state = make_state();
-        let proj = serde_json::json!({"tenant_id":"t_e2e","workspace_id":"w_e2e","project_id":"p_e2e"});
+        let proj =
+            serde_json::json!({"tenant_id":"t_e2e","workspace_id":"w_e2e","project_id":"p_e2e"});
         let sess_env = session_created_envelope("evt_e2e_sess", "sess_e2e_run");
         post_append(make_app(state.clone()), serde_json::json!([sess_env])).await;
 
@@ -6424,18 +7222,24 @@ mod tests {
                 "parent_run_id": null, "prompt_release_id": null, "agent_role_id": null
             }
         });
-        let (status, results) = post_append(make_app(state.clone()), serde_json::json!([run_env])).await;
+        let (status, results) =
+            post_append(make_app(state.clone()), serde_json::json!([run_env])).await;
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(results[0]["appended"], true);
 
-        let resp = make_app(state).oneshot(authed_req("/v1/runs")).await.unwrap();
+        let resp = make_app(state)
+            .oneshot(authed_req("/v1/runs"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let runs: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = runs.as_array().unwrap();
         assert_eq!(arr.len(), 1, "one run must appear after append");
-        assert_eq!(arr[0]["run_id"], "run_e2e_1",
-            "run_id must match what GET /v1/runs returns");
+        assert_eq!(
+            arr[0]["run_id"], "run_e2e_1",
+            "run_id must match what GET /v1/runs returns"
+        );
     }
 
     /// (3) POST ApprovalRequested → GET /v1/approvals/pending shows it.
@@ -6443,7 +7247,8 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn e2e_append_approval_then_list_pending_shows_it() {
         let state = make_state();
-        let proj = serde_json::json!({"tenant_id":"t_ap","workspace_id":"w_ap","project_id":"p_ap"});
+        let proj =
+            serde_json::json!({"tenant_id":"t_ap","workspace_id":"w_ap","project_id":"p_ap"});
         let approval_env = serde_json::json!({
             "event_id": "evt_e2e_ap1",
             "source": {"source_type": "runtime"},
@@ -6455,19 +7260,30 @@ mod tests {
                 "run_id": null, "task_id": null, "requirement": "required"
             }
         });
-        let (status, _) = post_append(make_app(state.clone()), serde_json::json!([approval_env])).await;
+        let (status, _) =
+            post_append(make_app(state.clone()), serde_json::json!([approval_env])).await;
         assert_eq!(status, StatusCode::CREATED);
 
         let resp = make_app(state)
-            .oneshot(authed_req("/v1/approvals/pending?tenant_id=t_ap&workspace_id=w_ap&project_id=p_ap"))
-            .await.unwrap();
+            .oneshot(authed_req(
+                "/v1/approvals/pending?tenant_id=t_ap&workspace_id=w_ap&project_id=p_ap",
+            ))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let approvals: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = approvals.as_array().unwrap();
-        assert_eq!(arr.len(), 1, "one pending approval must appear after append");
+        assert_eq!(
+            arr.len(),
+            1,
+            "one pending approval must appear after append"
+        );
         assert_eq!(arr[0]["approval_id"], "appr_e2e_1");
-        assert!(arr[0]["decision"].is_null(), "pending approval must have null decision");
+        assert!(
+            arr[0]["decision"].is_null(),
+            "pending approval must have null decision"
+        );
     }
 
     /// (4) POST ApprovalRequested then POST /v1/approvals/:id/resolve(Approved)
@@ -6476,7 +7292,8 @@ mod tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn e2e_resolve_approval_removes_from_pending() {
         let state = make_state();
-        let proj = serde_json::json!({"tenant_id":"t_res","workspace_id":"w_res","project_id":"p_res"});
+        let proj =
+            serde_json::json!({"tenant_id":"t_res","workspace_id":"w_res","project_id":"p_res"});
         let approval_env = serde_json::json!({
             "event_id": "evt_e2e_res1",
             "source": {"source_type": "runtime"},
@@ -6491,20 +7308,38 @@ mod tests {
         post_append(make_app(state.clone()), serde_json::json!([approval_env])).await;
 
         let resolve_resp = make_app(state.clone())
-            .oneshot(authed_post("/v1/approvals/appr_e2e_res/resolve", serde_json::json!({"decision": "approved"})))
-            .await.unwrap();
-        assert_eq!(resolve_resp.status(), StatusCode::OK, "resolve must return 200");
-        let rbody = to_bytes(resolve_resp.into_body(), usize::MAX).await.unwrap();
+            .oneshot(authed_post(
+                "/v1/approvals/appr_e2e_res/resolve",
+                serde_json::json!({"decision": "approved"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            resolve_resp.status(),
+            StatusCode::OK,
+            "resolve must return 200"
+        );
+        let rbody = to_bytes(resolve_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let resolved: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
-        assert_eq!(resolved["decision"], "approved", "resolved approval must carry decision=approved");
+        assert_eq!(
+            resolved["decision"], "approved",
+            "resolved approval must carry decision=approved"
+        );
 
         let resp = make_app(state)
-            .oneshot(authed_req("/v1/approvals/pending?tenant_id=t_res&workspace_id=w_res&project_id=p_res"))
-            .await.unwrap();
+            .oneshot(authed_req(
+                "/v1/approvals/pending?tenant_id=t_res&workspace_id=w_res&project_id=p_res",
+            ))
+            .await
+            .unwrap();
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let pending: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(pending.as_array().unwrap().is_empty(),
-            "pending list must be empty after approval resolved");
+        assert!(
+            pending.as_array().unwrap().is_empty(),
+            "pending list must be empty after approval resolved"
+        );
     }
 
     /// (5) Append session + run, then GET /v1/dashboard shows active_runs=1.
@@ -6513,12 +7348,19 @@ mod tests {
     async fn e2e_dashboard_active_runs_reflects_appended_run() {
         let state = make_state();
 
-        let resp0 = make_app(state.clone()).oneshot(authed_req("/v1/dashboard")).await.unwrap();
+        let resp0 = make_app(state.clone())
+            .oneshot(authed_req("/v1/dashboard"))
+            .await
+            .unwrap();
         let body0 = to_bytes(resp0.into_body(), usize::MAX).await.unwrap();
         let dash0: serde_json::Value = serde_json::from_slice(&body0).unwrap();
-        assert_eq!(dash0["active_runs"], 0, "dashboard must start with 0 active runs");
+        assert_eq!(
+            dash0["active_runs"], 0,
+            "dashboard must start with 0 active runs"
+        );
 
-        let proj = serde_json::json!({"tenant_id":"t_dash","workspace_id":"w_dash","project_id":"p_dash"});
+        let proj =
+            serde_json::json!({"tenant_id":"t_dash","workspace_id":"w_dash","project_id":"p_dash"});
         let sess_env = serde_json::json!({
             "event_id": "evt_dash_sess",
             "source": {"source_type": "runtime"},
@@ -6541,13 +7383,21 @@ mod tests {
         });
         post_append(make_app(state.clone()), serde_json::json!([run_env])).await;
 
-        let resp1 = make_app(state).oneshot(authed_req("/v1/dashboard")).await.unwrap();
+        let resp1 = make_app(state)
+            .oneshot(authed_req("/v1/dashboard"))
+            .await
+            .unwrap();
         assert_eq!(resp1.status(), StatusCode::OK);
         let body1 = to_bytes(resp1.into_body(), usize::MAX).await.unwrap();
         let dash1: serde_json::Value = serde_json::from_slice(&body1).unwrap();
-        assert_eq!(dash1["active_runs"], 1,
-            "dashboard must show active_runs=1 after appending one RunCreated");
-        assert!(dash1["system_healthy"].as_bool().unwrap_or(false), "system must be healthy");
+        assert_eq!(
+            dash1["active_runs"], 1,
+            "dashboard must show active_runs=1 after appending one RunCreated"
+        );
+        assert!(
+            dash1["system_healthy"].as_bool().unwrap_or(false),
+            "system must be healthy"
+        );
     }
 
     // ── CORS tests ────────────────────────────────────────────────────────────
@@ -6555,37 +7405,62 @@ mod tests {
     #[tokio::test]
     async fn options_preflight_returns_cors_headers() {
         let app = make_app(make_state());
-        let resp = app.oneshot(
-            Request::builder()
-                .method("OPTIONS")
-                .uri("/v1/events/append")
-                .header("origin", "http://localhost:5173")
-                .header("access-control-request-method", "POST")
-                .header("access-control-request-headers", "content-type,authorization")
-                .body(Body::empty()).unwrap(),
-        ).await.unwrap();
-        assert!(resp.status().is_success(),
-            "OPTIONS preflight must succeed; got {}", resp.status());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/v1/events/append")
+                    .header("origin", "http://localhost:5173")
+                    .header("access-control-request-method", "POST")
+                    .header(
+                        "access-control-request-headers",
+                        "content-type,authorization",
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            resp.status().is_success(),
+            "OPTIONS preflight must succeed; got {}",
+            resp.status()
+        );
         let h = resp.headers();
-        assert!(h.contains_key("access-control-allow-origin"),   "missing ACAO header");
-        assert!(h.contains_key("access-control-allow-methods"),  "missing ACAM header");
-        assert!(h.contains_key("access-control-allow-headers"),  "missing ACAH header");
+        assert!(
+            h.contains_key("access-control-allow-origin"),
+            "missing ACAO header"
+        );
+        assert!(
+            h.contains_key("access-control-allow-methods"),
+            "missing ACAM header"
+        );
+        assert!(
+            h.contains_key("access-control-allow-headers"),
+            "missing ACAH header"
+        );
     }
 
     #[tokio::test]
     async fn cors_allow_origin_is_wildcard() {
         let app = make_app(make_state());
-        let resp = app.oneshot(
-            Request::builder()
-                .method("OPTIONS")
-                .uri("/health")
-                .header("origin", "https://example.com")
-                .header("access-control-request-method", "GET")
-                .body(Body::empty()).unwrap(),
-        ).await.unwrap();
-        let acao = resp.headers()
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/health")
+                    .header("origin", "https://example.com")
+                    .header("access-control-request-method", "GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let acao = resp
+            .headers()
             .get("access-control-allow-origin")
-            .and_then(|v| v.to_str().ok()).unwrap_or("");
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
         assert_eq!(acao, "*", "allow_origin must be wildcard (*)");
     }
 
@@ -6593,28 +7468,40 @@ mod tests {
     async fn regular_get_includes_cors_header() {
         let resp = authed_get(make_app(make_state()), "/v1/status").await;
         let acao = resp.headers().get("access-control-allow-origin");
-        assert!(acao.is_some(), "GET response must include Access-Control-Allow-Origin");
+        assert!(
+            acao.is_some(),
+            "GET response must include Access-Control-Allow-Origin"
+        );
     }
 
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn cors_allow_methods_includes_required_verbs() {
         let app = make_app(make_state());
-        let resp = app.oneshot(
-            Request::builder()
-                .method("OPTIONS")
-                .uri("/v1/events/append")
-                .header("origin", "http://localhost:3000")
-                .header("access-control-request-method", "POST")
-                .header("access-control-request-headers", "authorization")
-                .body(Body::empty()).unwrap(),
-        ).await.unwrap();
-        let methods = resp.headers()
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/v1/events/append")
+                    .header("origin", "http://localhost:3000")
+                    .header("access-control-request-method", "POST")
+                    .header("access-control-request-headers", "authorization")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let methods = resp
+            .headers()
             .get("access-control-allow-methods")
-            .and_then(|v| v.to_str().ok()).unwrap_or("").to_uppercase();
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_uppercase();
         for verb in ["GET", "POST", "PUT", "DELETE", "OPTIONS"] {
-            assert!(methods.contains(verb),
-                "Access-Control-Allow-Methods must include {verb}; got: {methods}");
+            assert!(
+                methods.contains(verb),
+                "Access-Control-Allow-Methods must include {verb}; got: {methods}"
+            );
         }
     }
 
@@ -6637,7 +7524,12 @@ mod tests {
         let state = make_state();
         let project = ProjectKey::new("t_sev", "w_sev", "p_sev");
         let session_id = SessionId::new("sess_sev");
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = authed_get(app, "/v1/sessions/sess_sev/events").await;
@@ -6656,8 +7548,18 @@ mod tests {
         let state = make_state();
         let project = ProjectKey::new("t_scope", "w_scope", "p_scope");
         // Create two sessions — each gets a SessionCreated event.
-        state.runtime.sessions.create(&project, SessionId::new("sess_scope_a")).await.unwrap();
-        state.runtime.sessions.create(&project, SessionId::new("sess_scope_b")).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, SessionId::new("sess_scope_a"))
+            .await
+            .unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, SessionId::new("sess_scope_b"))
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = authed_get(app, "/v1/sessions/sess_scope_a/events").await;
@@ -6665,46 +7567,62 @@ mod tests {
         let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = events.as_array().unwrap();
         // Only sess_scope_a events must appear — not sess_scope_b.
-        assert_eq!(arr.len(), 1, "only one SessionCreated event for sess_scope_a");
+        assert_eq!(
+            arr.len(),
+            1,
+            "only one SessionCreated event for sess_scope_a"
+        );
     }
 
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn session_events_after_cursor_paginates() {
         use cairn_domain::{
+            events::SessionStateChanged, events::StateTransition as ST, tenancy::OwnershipKey,
             EventEnvelope, EventId, EventSource, SessionState,
-            events::SessionStateChanged,
-            events::StateTransition as ST,
-            tenancy::OwnershipKey,
         };
 
         let state = make_state();
         let project = ProjectKey::new("t_cur", "w_cur", "p_cur");
         let session_id = SessionId::new("sess_cur");
         // SessionCreated → event 1 (session-scoped).
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
         // Append a SessionStateChanged directly → event 2 (also session-scoped).
-        state.runtime.store.append(&[
-            EventEnvelope::new(
+        state
+            .runtime
+            .store
+            .append(&[EventEnvelope::new(
                 EventId::new("evt_ssc_cur"),
                 EventSource::Runtime,
                 OwnershipKey::Project(project.clone()),
                 cairn_domain::RuntimeEvent::SessionStateChanged(SessionStateChanged {
                     project: project.clone(),
                     session_id: session_id.clone(),
-                    transition: ST { from: Some(cairn_domain::SessionState::Open), to: cairn_domain::SessionState::Completed },
+                    transition: ST {
+                        from: Some(cairn_domain::SessionState::Open),
+                        to: cairn_domain::SessionState::Completed,
+                    },
                 }),
-            ),
-        ]).await.unwrap();
+            )])
+            .await
+            .unwrap();
 
-        let app_all  = make_app(state.clone());
+        let app_all = make_app(state.clone());
         let app_page = make_app(state.clone());
 
         let resp_all = authed_get(app_all, "/v1/sessions/sess_cur/events").await;
         let body_all = to_bytes(resp_all.into_body(), usize::MAX).await.unwrap();
         let all: serde_json::Value = serde_json::from_slice(&body_all).unwrap();
         let all_arr = all.as_array().unwrap();
-        assert!(all_arr.len() >= 2, "expect session_created + session_state_changed");
+        assert!(
+            all_arr.len() >= 2,
+            "expect session_created + session_state_changed"
+        );
 
         // Use the first event position as cursor.
         let first_pos = all_arr[0]["position"].as_u64().unwrap();
@@ -6713,38 +7631,53 @@ mod tests {
         let body_page = to_bytes(resp_page.into_body(), usize::MAX).await.unwrap();
         let page: serde_json::Value = serde_json::from_slice(&body_page).unwrap();
         let page_arr = page.as_array().unwrap();
-        assert_eq!(page_arr.len(), all_arr.len() - 1,
-            "after=first_pos must return one fewer event");
-        assert!(page_arr.iter().all(|e| e["position"].as_u64().unwrap() > first_pos));
+        assert_eq!(
+            page_arr.len(),
+            all_arr.len() - 1,
+            "after=first_pos must return one fewer event"
+        );
+        assert!(page_arr
+            .iter()
+            .all(|e| e["position"].as_u64().unwrap() > first_pos));
     }
 
-        // ── GET /v1/runs/:id/cost tests ──────────────────────────────────────────
+    // ── GET /v1/runs/:id/cost tests ──────────────────────────────────────────
 
-        #[tokio::test]
+    #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
-        async fn run_cost_returns_zeros_when_no_provider_calls() {
+    async fn run_cost_returns_zeros_when_no_provider_calls() {
         let state = make_state();
         let project = ProjectKey::new("t_cost", "w_cost", "p_cost");
         let session_id = SessionId::new("sess_cost");
         let run_id = cairn_domain::RunId::new("run_cost_zero");
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.runs.start(&project, &session_id, run_id, None).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project, &session_id, run_id, None)
+            .await
+            .unwrap();
 
         let app = make_app(state);
         let resp = authed_get(app, "/v1/runs/run_cost_zero/cost").await;
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let cost: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(cost["run_id"],              "run_cost_zero");
-        assert_eq!(cost["total_cost_micros"],  0);
-        assert_eq!(cost["total_tokens_in"],    0);
-        assert_eq!(cost["total_tokens_out"],   0);
-        assert_eq!(cost["provider_calls"],     0);
-        }
+        assert_eq!(cost["run_id"], "run_cost_zero");
+        assert_eq!(cost["total_cost_micros"], 0);
+        assert_eq!(cost["total_tokens_in"], 0);
+        assert_eq!(cost["total_tokens_out"], 0);
+        assert_eq!(cost["provider_calls"], 0);
+    }
 
-        #[tokio::test]
+    #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
-        async fn run_cost_returns_zeros_for_unknown_run() {
+    async fn run_cost_returns_zeros_for_unknown_run() {
         // Unknown run → no cost record → zero response (not 404).
         let app = make_app(make_state());
         let resp = authed_get(app, "/v1/runs/nonexistent_run_cost/cost").await;
@@ -6752,44 +7685,58 @@ mod tests {
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let cost: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(cost["total_cost_micros"], 0);
-        assert_eq!(cost["provider_calls"],    0);
-        }
+        assert_eq!(cost["provider_calls"], 0);
+    }
 
-        #[tokio::test]
+    #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
-        async fn run_cost_reflects_run_cost_updated_events() {
+    async fn run_cost_reflects_run_cost_updated_events() {
         use cairn_domain::{
-            EventEnvelope, EventId, EventSource, TenantId,
-            events::RunCostUpdated,
-            tenancy::OwnershipKey,
+            events::RunCostUpdated, tenancy::OwnershipKey, EventEnvelope, EventId, EventSource,
+            TenantId,
         };
 
         let state = make_state();
         let project = ProjectKey::new("t_rcu", "w_rcu", "p_rcu");
         let session_id = SessionId::new("sess_rcu");
-        let run_id     = cairn_domain::RunId::new("run_rcu");
+        let run_id = cairn_domain::RunId::new("run_rcu");
 
-        state.runtime.sessions.create(&project, session_id.clone()).await.unwrap();
-        state.runtime.runs.start(&project, &session_id, run_id.clone(), None).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project, &session_id, run_id.clone(), None)
+            .await
+            .unwrap();
 
         // Two provider calls: 300 + 200 micros, 50+30 tokens in, 20+10 tokens out.
         for (i, (cost, t_in, t_out)) in [(300u64, 50u64, 20u64), (200, 30, 10)].iter().enumerate() {
-            state.runtime.store.append(&[EventEnvelope::new(
-                EventId::new(format!("evt_rcu_{i}")),
-                EventSource::Runtime,
-                OwnershipKey::Project(project.clone()),
-                cairn_domain::RuntimeEvent::RunCostUpdated(RunCostUpdated {
-                    project: project.clone(),
-                    run_id: run_id.clone(),
-                    session_id: Some(session_id.clone()),
-                    tenant_id: Some(TenantId::new("t_rcu")),
-                    delta_cost_micros: *cost,
-                    delta_tokens_in: *t_in,
-                    delta_tokens_out: *t_out,
-                    provider_call_id: format!("call_{i}"),
-                    updated_at_ms: 1_000,
-                }),
-            )]).await.unwrap();
+            state
+                .runtime
+                .store
+                .append(&[EventEnvelope::new(
+                    EventId::new(format!("evt_rcu_{i}")),
+                    EventSource::Runtime,
+                    OwnershipKey::Project(project.clone()),
+                    cairn_domain::RuntimeEvent::RunCostUpdated(RunCostUpdated {
+                        project: project.clone(),
+                        run_id: run_id.clone(),
+                        session_id: Some(session_id.clone()),
+                        tenant_id: Some(TenantId::new("t_rcu")),
+                        delta_cost_micros: *cost,
+                        delta_tokens_in: *t_in,
+                        delta_tokens_out: *t_out,
+                        provider_call_id: format!("call_{i}"),
+                        updated_at_ms: 1_000,
+                    }),
+                )])
+                .await
+                .unwrap();
         }
 
         let app = make_app(state);
@@ -6797,32 +7744,37 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let cost: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(cost["run_id"],             "run_rcu");
-        assert_eq!(cost["total_cost_micros"],  500,  "300+200 micros");
-        assert_eq!(cost["total_tokens_in"],    80,   "50+30 tokens in");
-        assert_eq!(cost["total_tokens_out"],   30,   "20+10 tokens out");
-        assert_eq!(cost["provider_calls"],     2,    "2 provider calls");
-        }
+        assert_eq!(cost["run_id"], "run_rcu");
+        assert_eq!(cost["total_cost_micros"], 500, "300+200 micros");
+        assert_eq!(cost["total_tokens_in"], 80, "50+30 tokens in");
+        assert_eq!(cost["total_tokens_out"], 30, "20+10 tokens out");
+        assert_eq!(cost["provider_calls"], 2, "2 provider calls");
+    }
 
-        #[tokio::test]
+    #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
-        async fn run_cost_response_has_correct_shape() {
+    async fn run_cost_response_has_correct_shape() {
         let app = make_app(make_state());
         let resp = authed_get(app, "/v1/runs/any_run/cost").await;
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let cost: serde_json::Value = serde_json::from_slice(&body).unwrap();
         // All four contract fields must be present.
-        for field in ["run_id", "total_cost_micros", "total_tokens_in", "total_tokens_out", "provider_calls"] {
+        for field in [
+            "run_id",
+            "total_cost_micros",
+            "total_tokens_in",
+            "total_tokens_out",
+            "provider_calls",
+        ] {
             assert!(cost.get(field).is_some(), "missing field: {field}");
         }
-        }
-
+    }
 }
 
 #[cfg(test)]
 mod run_events_tests {
-    use super::*;
     use super::test_make_app as make_app;
+    use super::*;
     use axum::body::to_bytes;
     use axum::body::Body;
     use axum::http::Request;
@@ -6836,16 +7788,23 @@ mod run_events_tests {
             TOKEN.to_owned(),
             AuthPrincipal::ServiceAccount {
                 name: "test-run-events".to_owned(),
-                tenant: cairn_domain::tenancy::TenantKey::new(
-                    cairn_domain::TenantId::new("tenant_re"),
-                ),
+                tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new(
+                    "tenant_re",
+                )),
             },
         );
         {
-            let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
-            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+            let doc_store =
+                std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
+            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(
+                doc_store.clone(),
+            ));
             let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
-                doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
+                doc_store.clone(),
+                cairn_memory::pipeline::ParagraphChunker {
+                    max_chunk_size: 512,
+                },
+            ));
             AppState {
                 runtime: Arc::new(InMemoryServices::new()),
                 started_at: Arc::new(std::time::Instant::now()),
@@ -6864,10 +7823,10 @@ mod run_events_tests {
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
-        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
-        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
-        entitlements: Arc::new(entitlements::EntitlementService::new()),
-        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
+                notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+                templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+                entitlements: Arc::new(entitlements::EntitlementService::new()),
+                process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
     }
@@ -6885,12 +7844,17 @@ mod run_events_tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn run_events_unknown_run_returns_empty() {
         let app = make_app(make_state());
-        let resp = app.oneshot(authed_req("/v1/runs/no_such_run/events")).await.unwrap();
+        let resp = app
+            .oneshot(authed_req("/v1/runs/no_such_run/events"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(events.as_array().unwrap().is_empty(),
-            "unknown run must return empty event list");
+        assert!(
+            events.as_array().unwrap().is_empty(),
+            "unknown run must return empty event list"
+        );
     }
 
     /// GET /v1/runs/:id/events returns all events for the run after they are appended.
@@ -6907,33 +7871,58 @@ mod run_events_tests {
         let project = ProjectKey::new("tenant_re", "ws_re", "proj_re");
 
         // Create a session and run directly in the store.
-        state.runtime.sessions
+        state
+            .runtime
+            .sessions
             .create(&project, SessionId::new("sess_re_1"))
-            .await.unwrap();
-        state.runtime.runs
-            .start(&project, &SessionId::new("sess_re_1"), RunId::new("run_re_1"), None)
-            .await.unwrap();
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(
+                &project,
+                &SessionId::new("sess_re_1"),
+                RunId::new("run_re_1"),
+                None,
+            )
+            .await
+            .unwrap();
 
         // GET /v1/runs/run_re_1/events must return at least the RunCreated event.
         let app = make_app(state);
-        let resp = app.oneshot(authed_req("/v1/runs/run_re_1/events")).await.unwrap();
+        let resp = app
+            .oneshot(authed_req("/v1/runs/run_re_1/events"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = events.as_array().unwrap();
 
-        assert!(!arr.is_empty(), "run events must not be empty after run is created");
+        assert!(
+            !arr.is_empty(),
+            "run events must not be empty after run is created"
+        );
 
         // Every returned event must carry a position and event_type.
         for event in arr {
-            assert!(event["position"].as_u64().is_some(), "event must have a position");
-            assert!(!event["event_type"].as_str().unwrap_or("").is_empty(),
-                "event must have an event_type");
+            assert!(
+                event["position"].as_u64().is_some(),
+                "event must have a position"
+            );
+            assert!(
+                !event["event_type"].as_str().unwrap_or("").is_empty(),
+                "event must have an event_type"
+            );
         }
 
         // The RunCreated event must appear.
         let has_run_created = arr.iter().any(|e| e["event_type"] == "run_created");
-        assert!(has_run_created, "run_created event must appear in the run event stream");
+        assert!(
+            has_run_created,
+            "run_created event must appear in the run event stream"
+        );
     }
 
     /// Cursor-based pagination: after=<position> skips earlier events.
@@ -6945,15 +7934,29 @@ mod run_events_tests {
         let state = make_state();
         let project = ProjectKey::new("tenant_re", "ws_re", "proj_pg");
 
-        state.runtime.sessions
+        state
+            .runtime
+            .sessions
             .create(&project, SessionId::new("sess_pg"))
-            .await.unwrap();
-        state.runtime.runs
-            .start(&project, &SessionId::new("sess_pg"), RunId::new("run_pg"), None)
-            .await.unwrap();
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(
+                &project,
+                &SessionId::new("sess_pg"),
+                RunId::new("run_pg"),
+                None,
+            )
+            .await
+            .unwrap();
 
         let app1 = make_app(state.clone());
-        let resp_all = app1.oneshot(authed_req("/v1/runs/run_pg/events")).await.unwrap();
+        let resp_all = app1
+            .oneshot(authed_req("/v1/runs/run_pg/events"))
+            .await
+            .unwrap();
         let body_all = to_bytes(resp_all.into_body(), usize::MAX).await.unwrap();
         let all: serde_json::Value = serde_json::from_slice(&body_all).unwrap();
         let all_arr = all.as_array().unwrap();
@@ -6969,10 +7972,17 @@ mod run_events_tests {
         let page: serde_json::Value = serde_json::from_slice(&body_page).unwrap();
         let page_arr = page.as_array().unwrap();
 
-        assert_eq!(page_arr.len(), all_arr.len() - 1,
-            "after=first_pos must skip the first event");
-        assert!(page_arr.iter().all(|e| e["position"].as_u64().unwrap() > first_pos),
-            "all paginated events must be after the cursor position");
+        assert_eq!(
+            page_arr.len(),
+            all_arr.len() - 1,
+            "after=first_pos must skip the first event"
+        );
+        assert!(
+            page_arr
+                .iter()
+                .all(|e| e["position"].as_u64().unwrap() > first_pos),
+            "all paginated events must be after the cursor position"
+        );
     }
 
     /// The run event stream is scoped to its run — events from other runs are excluded.
@@ -6984,19 +7994,41 @@ mod run_events_tests {
         let state = make_state();
         let project = ProjectKey::new("tenant_re", "ws_re", "proj_sc");
 
-        state.runtime.sessions
+        state
+            .runtime
+            .sessions
             .create(&project, SessionId::new("sess_sc"))
-            .await.unwrap();
-        state.runtime.runs
-            .start(&project, &SessionId::new("sess_sc"), RunId::new("run_sc_a"), None)
-            .await.unwrap();
-        state.runtime.runs
-            .start(&project, &SessionId::new("sess_sc"), RunId::new("run_sc_b"), None)
-            .await.unwrap();
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(
+                &project,
+                &SessionId::new("sess_sc"),
+                RunId::new("run_sc_a"),
+                None,
+            )
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(
+                &project,
+                &SessionId::new("sess_sc"),
+                RunId::new("run_sc_b"),
+                None,
+            )
+            .await
+            .unwrap();
 
         // Events for run_sc_a must not include run_sc_b events.
         let app = make_app(state);
-        let resp = app.oneshot(authed_req("/v1/runs/run_sc_a/events")).await.unwrap();
+        let resp = app
+            .oneshot(authed_req("/v1/runs/run_sc_a/events"))
+            .await
+            .unwrap();
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = events.as_array().unwrap();
@@ -7004,26 +8036,31 @@ mod run_events_tests {
         assert!(!arr.is_empty(), "run_sc_a must have events");
         // All returned event_type values should be run-lifecycle types, not b's events.
         // Since event_type is derived from payload, just verify run_created is present once.
-        let run_created_count = arr.iter().filter(|e| e["event_type"] == "run_created").count();
-        assert_eq!(run_created_count, 1,
-            "exactly one run_created must appear (for run_sc_a, not run_sc_b)");
+        let run_created_count = arr
+            .iter()
+            .filter(|e| e["event_type"] == "run_created")
+            .count();
+        assert_eq!(
+            run_created_count, 1,
+            "exactly one run_created must appear (for run_sc_a, not run_sc_b)"
+        );
     }
 }
 
 #[cfg(test)]
 mod tool_invocations_tests {
-    use super::*;
     use super::test_make_app as make_app;
+    use super::*;
     use axum::body::to_bytes;
     use axum::body::Body;
     use axum::http::Request;
-    use tower::ServiceExt as _;
     use cairn_domain::{
-        ProjectKey, RunId, SessionId, ToolInvocationId,
-        tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget},
         policy::ExecutionClass,
+        tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget},
+        ProjectKey, RunId, SessionId, ToolInvocationId,
     };
-    use cairn_runtime::{ToolInvocationService as _};
+    use cairn_runtime::ToolInvocationService as _;
+    use tower::ServiceExt as _;
 
     const TOKEN: &str = "test-tool-inv-token";
 
@@ -7033,16 +8070,23 @@ mod tool_invocations_tests {
             TOKEN.to_owned(),
             AuthPrincipal::ServiceAccount {
                 name: "test-tool-inv".to_owned(),
-                tenant: cairn_domain::tenancy::TenantKey::new(
-                    cairn_domain::TenantId::new("tenant_ti"),
-                ),
+                tenant: cairn_domain::tenancy::TenantKey::new(cairn_domain::TenantId::new(
+                    "tenant_ti",
+                )),
             },
         );
         {
-            let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
-            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+            let doc_store =
+                std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
+            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(
+                doc_store.clone(),
+            ));
             let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
-                doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
+                doc_store.clone(),
+                cairn_memory::pipeline::ParagraphChunker {
+                    max_chunk_size: 512,
+                },
+            ));
             AppState {
                 runtime: Arc::new(InMemoryServices::new()),
                 started_at: Arc::new(std::time::Instant::now()),
@@ -7061,10 +8105,10 @@ mod tool_invocations_tests {
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
-        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
-        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
-        entitlements: Arc::new(entitlements::EntitlementService::new()),
-        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
+                notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+                templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+                entitlements: Arc::new(entitlements::EntitlementService::new()),
+                process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
     }
@@ -7083,20 +8127,36 @@ mod tool_invocations_tests {
         let state = make_state();
         let project = ProjectKey::new("tenant_ti", "ws_ti", "proj_ti");
 
-        state.runtime.sessions
+        state
+            .runtime
+            .sessions
             .create(&project, SessionId::new("sess_ti_empty"))
-            .await.unwrap();
-        state.runtime.runs
-            .start(&project, &SessionId::new("sess_ti_empty"), RunId::new("run_ti_empty"), None)
-            .await.unwrap();
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(
+                &project,
+                &SessionId::new("sess_ti_empty"),
+                RunId::new("run_ti_empty"),
+                None,
+            )
+            .await
+            .unwrap();
 
         let app = make_app(state);
-        let resp = app.oneshot(authed_req("/v1/runs/run_ti_empty/tool-invocations")).await.unwrap();
+        let resp = app
+            .oneshot(authed_req("/v1/runs/run_ti_empty/tool-invocations"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let records: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(records.as_array().unwrap().is_empty(),
-            "run with no tool calls must return empty list");
+        assert!(
+            records.as_array().unwrap().is_empty(),
+            "run with no tool calls must return empty list"
+        );
     }
 
     /// GET /v1/runs/:id/tool-invocations returns both calls after they are recorded.
@@ -7108,12 +8168,26 @@ mod tool_invocations_tests {
         let run = RunId::new("run_ti_two");
         let sess = SessionId::new("sess_ti_two");
 
-        state.runtime.sessions.create(&project, sess.clone()).await.unwrap();
-        state.runtime.runs.start(&project, &sess, run.clone(), None).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, sess.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project, &sess, run.clone(), None)
+            .await
+            .unwrap();
 
         // Record two tool calls on the run.
-        let target = ToolInvocationTarget::Builtin { tool_name: "read_file".to_owned() };
-        state.runtime.tool_invocations
+        let target = ToolInvocationTarget::Builtin {
+            tool_name: "read_file".to_owned(),
+        };
+        state
+            .runtime
+            .tool_invocations
             .record_start(
                 &project,
                 ToolInvocationId::new("inv_ti_1"),
@@ -7123,39 +8197,62 @@ mod tool_invocations_tests {
                 target.clone(),
                 ExecutionClass::SandboxedProcess,
             )
-            .await.unwrap();
-        state.runtime.tool_invocations
+            .await
+            .unwrap();
+        state
+            .runtime
+            .tool_invocations
             .record_start(
                 &project,
                 ToolInvocationId::new("inv_ti_2"),
                 None,
                 Some(run.clone()),
                 None,
-                ToolInvocationTarget::Builtin { tool_name: "write_file".to_owned() },
+                ToolInvocationTarget::Builtin {
+                    tool_name: "write_file".to_owned(),
+                },
                 ExecutionClass::SupervisedProcess,
             )
-            .await.unwrap();
+            .await
+            .unwrap();
 
         let app = make_app(state);
-        let resp = app.oneshot(authed_req("/v1/runs/run_ti_two/tool-invocations")).await.unwrap();
+        let resp = app
+            .oneshot(authed_req("/v1/runs/run_ti_two/tool-invocations"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let records: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = records.as_array().unwrap();
 
-        assert_eq!(arr.len(), 2, "run must have exactly 2 tool invocation records");
+        assert_eq!(
+            arr.len(),
+            2,
+            "run must have exactly 2 tool invocation records"
+        );
 
         // Both invocation IDs must be present.
-        let inv_ids: Vec<&str> = arr.iter()
+        let inv_ids: Vec<&str> = arr
+            .iter()
             .map(|r| r["invocation_id"].as_str().unwrap_or(""))
             .collect();
-        assert!(inv_ids.contains(&"inv_ti_1"), "inv_ti_1 must be in the response");
-        assert!(inv_ids.contains(&"inv_ti_2"), "inv_ti_2 must be in the response");
+        assert!(
+            inv_ids.contains(&"inv_ti_1"),
+            "inv_ti_1 must be in the response"
+        );
+        assert!(
+            inv_ids.contains(&"inv_ti_2"),
+            "inv_ti_2 must be in the response"
+        );
 
         // Both are scoped to the run.
         for record in arr {
-            assert_eq!(record["run_id"].as_str().unwrap_or(""), "run_ti_two",
-                "all records must be for run_ti_two");
+            assert_eq!(
+                record["run_id"].as_str().unwrap_or(""),
+                "run_ti_two",
+                "all records must be for run_ti_two"
+            );
         }
     }
 
@@ -7171,87 +8268,122 @@ mod tool_invocations_tests {
         let run = RunId::new("run_ti_outcome");
         let sess = SessionId::new("sess_ti_outcome");
 
-        state.runtime.sessions.create(&project, sess.clone()).await.unwrap();
-        state.runtime.runs.start(&project, &sess, run.clone(), None).await.unwrap();
+        state
+            .runtime
+            .sessions
+            .create(&project, sess.clone())
+            .await
+            .unwrap();
+        state
+            .runtime
+            .runs
+            .start(&project, &sess, run.clone(), None)
+            .await
+            .unwrap();
 
         // Start a tool call.
-        state.runtime.tool_invocations
+        state
+            .runtime
+            .tool_invocations
             .record_start(
                 &project,
                 ToolInvocationId::new("inv_ti_outcome"),
                 None,
                 Some(run.clone()),
                 None,
-                ToolInvocationTarget::Builtin { tool_name: "bash".to_owned() },
+                ToolInvocationTarget::Builtin {
+                    tool_name: "bash".to_owned(),
+                },
                 ExecutionClass::SupervisedProcess,
             )
-            .await.unwrap();
+            .await
+            .unwrap();
 
         // Before completion: outcome must be null, state is not terminal.
         let app1 = make_app(state.clone());
-        let resp1 = app1.oneshot(authed_req("/v1/runs/run_ti_outcome/tool-invocations")).await.unwrap();
+        let resp1 = app1
+            .oneshot(authed_req("/v1/runs/run_ti_outcome/tool-invocations"))
+            .await
+            .unwrap();
         let body1 = to_bytes(resp1.into_body(), usize::MAX).await.unwrap();
         let before: serde_json::Value = serde_json::from_slice(&body1).unwrap();
         let before_rec = &before.as_array().unwrap()[0];
-        assert!(before_rec["outcome"].is_null(),
-            "outcome must be null before completion");
+        assert!(
+            before_rec["outcome"].is_null(),
+            "outcome must be null before completion"
+        );
         let before_state = before_rec["state"].as_str().unwrap_or("");
         assert!(!before_state.is_empty(), "state field must be present");
 
         // Complete the call with Success.
-        state.runtime.tool_invocations
+        state
+            .runtime
+            .tool_invocations
             .record_completed(
                 &project,
                 ToolInvocationId::new("inv_ti_outcome"),
                 None,
                 "bash".to_owned(),
             )
-            .await.unwrap();
+            .await
+            .unwrap();
 
         // After completion: outcome must be "success", state must be "completed".
         let app2 = make_app(state);
-        let resp2 = app2.oneshot(authed_req("/v1/runs/run_ti_outcome/tool-invocations")).await.unwrap();
+        let resp2 = app2
+            .oneshot(authed_req("/v1/runs/run_ti_outcome/tool-invocations"))
+            .await
+            .unwrap();
         let body2 = to_bytes(resp2.into_body(), usize::MAX).await.unwrap();
         let after: serde_json::Value = serde_json::from_slice(&body2).unwrap();
         let after_rec = &after.as_array().unwrap()[0];
 
         let outcome = after_rec["outcome"].as_str().unwrap_or("<null>");
-        assert_eq!(outcome, "success",
-            "outcome must be 'success' after ToolInvocationCompleted");
-        assert_eq!(after_rec["state"].as_str().unwrap_or(""), "completed",
-            "state must be 'completed' after successful completion");
+        assert_eq!(
+            outcome, "success",
+            "outcome must be 'success' after ToolInvocationCompleted"
+        );
+        assert_eq!(
+            after_rec["state"].as_str().unwrap_or(""),
+            "completed",
+            "state must be 'completed' after successful completion"
+        );
     }
 
     /// Tool invocations endpoint requires auth.
     #[tokio::test]
     async fn tool_invocations_requires_auth() {
         let app = make_app(make_state());
-        let resp = app.oneshot(
-            Request::builder()
-                .uri("/v1/runs/any_run/tool-invocations")
-                .body(Body::empty())
-                .unwrap(),
-        ).await.unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/runs/any_run/tool-invocations")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
-
 }
 
 #[cfg(test)]
 mod provider_health_tests {
-    use super::*;
     use super::test_make_app as make_app;
+    use super::*;
     use axum::body::to_bytes;
     use axum::body::Body;
     use axum::http::Request;
-    use tower::ServiceExt as _;
     use cairn_domain::{
-        EventEnvelope, EventId, EventSource, ProviderConnectionId, ProjectKey, RuntimeEvent,
-        TenantId, ProviderBindingId, ProviderModelId,
         events::{ProviderConnectionRegistered, ProviderHealthChecked, ProviderMarkedDegraded},
-        providers::{OperationKind, ProviderBindingSettings, ProviderConnectionStatus, ProviderHealthStatus},
+        providers::{
+            OperationKind, ProviderBindingSettings, ProviderConnectionStatus, ProviderHealthStatus,
+        },
         tenancy::TenantKey,
+        EventEnvelope, EventId, EventSource, ProjectKey, ProviderBindingId, ProviderConnectionId,
+        ProviderModelId, RuntimeEvent, TenantId,
     };
+    use tower::ServiceExt as _;
 
     const TOKEN: &str = "test-ph-token";
 
@@ -7265,10 +8397,17 @@ mod provider_health_tests {
             },
         );
         {
-            let doc_store = std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
-            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(doc_store.clone()));
+            let doc_store =
+                std::sync::Arc::new(cairn_memory::in_memory::InMemoryDocumentStore::new());
+            let retrieval = std::sync::Arc::new(cairn_memory::in_memory::InMemoryRetrieval::new(
+                doc_store.clone(),
+            ));
             let ingest = std::sync::Arc::new(cairn_memory::pipeline::IngestPipeline::new(
-                doc_store.clone(), cairn_memory::pipeline::ParagraphChunker { max_chunk_size: 512 }));
+                doc_store.clone(),
+                cairn_memory::pipeline::ParagraphChunker {
+                    max_chunk_size: 512,
+                },
+            ));
             AppState {
                 runtime: Arc::new(InMemoryServices::new()),
                 started_at: Arc::new(std::time::Instant::now()),
@@ -7287,10 +8426,10 @@ mod provider_health_tests {
                 metrics: Arc::new(std::sync::RwLock::new(AppMetrics::new())),
                 rate_limits: Arc::new(Mutex::new(HashMap::new())),
                 request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
-        notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
-        templates: Arc::new(templates::TemplateRegistry::with_builtins()),
-        entitlements: Arc::new(entitlements::EntitlementService::new()),
-        process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
+                notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
+                templates: Arc::new(templates::TemplateRegistry::with_builtins()),
+                entitlements: Arc::new(entitlements::EntitlementService::new()),
+                process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
     }
@@ -7308,12 +8447,17 @@ mod provider_health_tests {
     #[ignore = "router unification: covered by integration tests"]
     async fn provider_health_empty_with_no_providers() {
         let app = make_app(make_state());
-        let resp = app.oneshot(authed_req("/v1/providers/health")).await.unwrap();
+        let resp = app
+            .oneshot(authed_req("/v1/providers/health"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let health: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(health.as_array().unwrap().is_empty(),
-            "no providers registered — health list must be empty");
+        assert!(
+            health.as_array().unwrap().is_empty(),
+            "no providers registered — health list must be empty"
+        );
     }
 
     /// After a healthy check, the health entry shows healthy=true and correct fields.
@@ -7326,52 +8470,62 @@ mod provider_health_tests {
         let project = ProjectKey::new("t_ph", "ws_ph", "proj_ph");
 
         // Register connection + binding (needed to derive tenant for health query).
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_ph_conn"),
-                EventSource::Runtime,
-                RuntimeEvent::ProviderConnectionRegistered(ProviderConnectionRegistered {
-                    tenant: TenantKey::new("t_ph"),
-                    provider_connection_id: ProviderConnectionId::new("conn_ph_1"),
-                    provider_family: "openai".to_owned(),
-                    adapter_type: "responses".to_owned(),
-                    supported_models: vec![],
-                    status: ProviderConnectionStatus::Active,
-                    registered_at: 1_000,
-                }),
-            ),
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_ph_bind"),
-                EventSource::Runtime,
-                RuntimeEvent::ProviderBindingCreated(ProviderBindingCreated {
-                    project: project.clone(),
-                    provider_binding_id: ProviderBindingId::new("conn_ph_1"),
-                    provider_connection_id: ProviderConnectionId::new("conn_ph_1"),
-                    provider_model_id: ProviderModelId::new(state.runtime.runtime_config.default_generate_model().await),
-                    operation_kind: OperationKind::Generate,
-                    settings: ProviderBindingSettings::default(),
-                    policy_id: None,
-                    active: true,
-                    created_at: 1_000,
-                    estimated_cost_micros: None,
-                }),
-            ),
-            // Healthy check.
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_ph_check"),
-                EventSource::Runtime,
-                RuntimeEvent::ProviderHealthChecked(ProviderHealthChecked {
-                    tenant_id: TenantId::new("t_ph"),
-                    connection_id: ProviderConnectionId::new("conn_ph_1"),
-                    status: ProviderHealthStatus::Healthy,
-                    latency_ms: Some(95),
-                    checked_at_ms: 5_000,
-                }),
-            ),
-        ]).await.unwrap();
+        state
+            .runtime
+            .store
+            .append(&[
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_ph_conn"),
+                    EventSource::Runtime,
+                    RuntimeEvent::ProviderConnectionRegistered(ProviderConnectionRegistered {
+                        tenant: TenantKey::new("t_ph"),
+                        provider_connection_id: ProviderConnectionId::new("conn_ph_1"),
+                        provider_family: "openai".to_owned(),
+                        adapter_type: "responses".to_owned(),
+                        supported_models: vec![],
+                        status: ProviderConnectionStatus::Active,
+                        registered_at: 1_000,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_ph_bind"),
+                    EventSource::Runtime,
+                    RuntimeEvent::ProviderBindingCreated(ProviderBindingCreated {
+                        project: project.clone(),
+                        provider_binding_id: ProviderBindingId::new("conn_ph_1"),
+                        provider_connection_id: ProviderConnectionId::new("conn_ph_1"),
+                        provider_model_id: ProviderModelId::new(
+                            state.runtime.runtime_config.default_generate_model().await,
+                        ),
+                        operation_kind: OperationKind::Generate,
+                        settings: ProviderBindingSettings::default(),
+                        policy_id: None,
+                        active: true,
+                        created_at: 1_000,
+                        estimated_cost_micros: None,
+                    }),
+                ),
+                // Healthy check.
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_ph_check"),
+                    EventSource::Runtime,
+                    RuntimeEvent::ProviderHealthChecked(ProviderHealthChecked {
+                        tenant_id: TenantId::new("t_ph"),
+                        connection_id: ProviderConnectionId::new("conn_ph_1"),
+                        status: ProviderHealthStatus::Healthy,
+                        latency_ms: Some(95),
+                        checked_at_ms: 5_000,
+                    }),
+                ),
+            ])
+            .await
+            .unwrap();
 
         let app = make_app(state);
-        let resp = app.oneshot(authed_req("/v1/providers/health")).await.unwrap();
+        let resp = app
+            .oneshot(authed_req("/v1/providers/health"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let health: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -7379,12 +8533,17 @@ mod provider_health_tests {
 
         assert_eq!(arr.len(), 1, "one health entry must appear");
         assert_eq!(arr[0]["connection_id"], "conn_ph_1");
-        assert_eq!(arr[0]["healthy"], true, "must be healthy after health check");
+        assert_eq!(
+            arr[0]["healthy"], true,
+            "must be healthy after health check"
+        );
         assert_eq!(arr[0]["consecutive_failures"], 0);
         assert_eq!(arr[0]["last_checked_at"], 5_000);
         // Status serializes to lowercase.
-        assert!(!arr[0]["status"].as_str().unwrap_or("").is_empty(),
-            "status must be set");
+        assert!(
+            !arr[0]["status"].as_str().unwrap_or("").is_empty(),
+            "status must be set"
+        );
     }
 
     /// After ProviderMarkedDegraded, the health entry reflects degraded status.
@@ -7396,47 +8555,63 @@ mod provider_health_tests {
         let state = make_state();
         let project = ProjectKey::new("t_ph", "ws_ph", "proj_ph2");
 
-        state.runtime.store.append(&[
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_ph2_bind"),
-                EventSource::Runtime,
-                RuntimeEvent::ProviderBindingCreated(ProviderBindingCreated {
-                    project: project.clone(),
-                    provider_binding_id: ProviderBindingId::new("conn_ph_deg"),
-                    provider_connection_id: ProviderConnectionId::new("conn_ph_deg"),
-                    provider_model_id: ProviderModelId::new(state.runtime.runtime_config.default_generate_model().await),
-                    operation_kind: OperationKind::Generate,
-                    settings: ProviderBindingSettings::default(),
-                    policy_id: None,
-                    active: true,
-                    created_at: 1_000,
-                    estimated_cost_micros: None,
-                }),
-            ),
-            EventEnvelope::for_runtime_event(
-                EventId::new("evt_ph2_degrade"),
-                EventSource::Runtime,
-                RuntimeEvent::ProviderMarkedDegraded(ProviderMarkedDegraded {
-                    tenant_id: TenantId::new("t_ph"),
-                    connection_id: ProviderConnectionId::new("conn_ph_deg"),
-                    reason: "upstream latency exceeded threshold".to_owned(),
-                    marked_at_ms: 8_000,
-                }),
-            ),
-        ]).await.unwrap();
+        state
+            .runtime
+            .store
+            .append(&[
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_ph2_bind"),
+                    EventSource::Runtime,
+                    RuntimeEvent::ProviderBindingCreated(ProviderBindingCreated {
+                        project: project.clone(),
+                        provider_binding_id: ProviderBindingId::new("conn_ph_deg"),
+                        provider_connection_id: ProviderConnectionId::new("conn_ph_deg"),
+                        provider_model_id: ProviderModelId::new(
+                            state.runtime.runtime_config.default_generate_model().await,
+                        ),
+                        operation_kind: OperationKind::Generate,
+                        settings: ProviderBindingSettings::default(),
+                        policy_id: None,
+                        active: true,
+                        created_at: 1_000,
+                        estimated_cost_micros: None,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_ph2_degrade"),
+                    EventSource::Runtime,
+                    RuntimeEvent::ProviderMarkedDegraded(ProviderMarkedDegraded {
+                        tenant_id: TenantId::new("t_ph"),
+                        connection_id: ProviderConnectionId::new("conn_ph_deg"),
+                        reason: "upstream latency exceeded threshold".to_owned(),
+                        marked_at_ms: 8_000,
+                    }),
+                ),
+            ])
+            .await
+            .unwrap();
 
         let app = make_app(state);
-        let resp = app.oneshot(authed_req("/v1/providers/health")).await.unwrap();
+        let resp = app
+            .oneshot(authed_req("/v1/providers/health"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let health: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let arr = health.as_array().unwrap();
 
         assert_eq!(arr.len(), 1, "one health entry");
-        assert_eq!(arr[0]["healthy"], false, "must be unhealthy after degraded mark");
-        assert!(arr[0]["error_message"].as_str()
-            .map_or(false, |e| e.contains("latency")),
-            "error_message must contain the degradation reason");
+        assert_eq!(
+            arr[0]["healthy"], false,
+            "must be unhealthy after degraded mark"
+        );
+        assert!(
+            arr[0]["error_message"]
+                .as_str()
+                .map_or(false, |e| e.contains("latency")),
+            "error_message must contain the degradation reason"
+        );
         assert_eq!(arr[0]["last_checked_at"], 8_000);
     }
 
@@ -7444,12 +8619,15 @@ mod provider_health_tests {
     #[tokio::test]
     async fn provider_health_requires_auth() {
         let app = make_app(make_state());
-        let resp = app.oneshot(
-            Request::builder()
-                .uri("/v1/providers/health")
-                .body(Body::empty())
-                .unwrap(),
-        ).await.unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/providers/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }

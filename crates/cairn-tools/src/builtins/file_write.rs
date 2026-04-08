@@ -35,9 +35,7 @@ use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use serde_json::Value;
 
-use super::{
-    file_read::resolve_safe_path, ToolError, ToolHandler, ToolResult, ToolTier,
-};
+use super::{file_read::resolve_safe_path, ToolError, ToolHandler, ToolResult, ToolTier};
 
 /// Write a file within the project workspace.
 ///
@@ -50,15 +48,21 @@ pub struct FileWriteTool {
 impl FileWriteTool {
     /// Construct with an absolute path to the workspace root.
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
-        Self { workspace_root: workspace_root.into() }
+        Self {
+            workspace_root: workspace_root.into(),
+        }
     }
 }
 
 #[async_trait]
 impl ToolHandler for FileWriteTool {
-    fn name(&self) -> &str { "file_write" }
+    fn name(&self) -> &str {
+        "file_write"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
 
     fn description(&self) -> &str {
         "Write content to a file in the project workspace. \
@@ -89,51 +93,59 @@ impl ToolHandler for FileWriteTool {
     }
 
     /// `Sensitive` — requires operator approval before execution.
-    fn execution_class(&self) -> ExecutionClass { ExecutionClass::SupervisedProcess }
+    fn execution_class(&self) -> ExecutionClass {
+        ExecutionClass::SupervisedProcess
+    }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
-        let rel_path = args.get("path").and_then(|v| v.as_str())
+        let rel_path =
+            args.get("path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidArgs {
+                    field: "path".into(),
+                    message: "required string".into(),
+                })?;
+
+        let content = args
+            .get("content")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs {
-                field:   "path".into(),
+                field: "content".into(),
                 message: "required string".into(),
             })?;
 
-        let content = args.get("content").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidArgs {
-                field:   "content".into(),
-                message: "required string".into(),
-            })?;
-
-        let mode = args.get("mode").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidArgs {
-                field:   "mode".into(),
-                message: "required: 'create' | 'overwrite' | 'append'".into(),
-            })?;
+        let mode =
+            args.get("mode")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidArgs {
+                    field: "mode".into(),
+                    message: "required: 'create' | 'overwrite' | 'append'".into(),
+                })?;
 
         let abs_path = resolve_safe_path(&self.workspace_root, rel_path)?;
 
         // Create parent directories as needed.
         if let Some(parent) = abs_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| ToolError::Transient(
-                    format!("failed to create parent directories: {e}")))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                ToolError::Transient(format!("failed to create parent directories: {e}"))
+            })?;
         }
 
         let bytes_written = match mode {
             "create" => {
                 // Fail if file already exists.
                 if abs_path.exists() {
-                    return Err(ToolError::Permanent(
-                        format!("file already exists: {rel_path} (use mode=overwrite to replace)")
-                    ));
+                    return Err(ToolError::Permanent(format!(
+                        "file already exists: {rel_path} (use mode=overwrite to replace)"
+                    )));
                 }
                 write_all(&abs_path, content, false)?
             }
             "overwrite" => write_all(&abs_path, content, false)?,
-            "append"    => write_all(&abs_path, content, true)?,
+            "append" => write_all(&abs_path, content, true)?,
             other => {
                 return Err(ToolError::InvalidArgs {
-                    field:   "mode".into(),
+                    field: "mode".into(),
                     message: format!("unknown mode '{other}' — use create, overwrite, or append"),
                 });
             }
@@ -156,14 +168,15 @@ fn write_all(path: &std::path::Path, content: &str, append: bool) -> Result<usiz
         .truncate(!append)
         .open(path)
         .map_err(|e| match e.kind() {
-            std::io::ErrorKind::PermissionDenied =>
-                ToolError::Permanent(format!("permission denied: {}", path.display())),
-            _ =>
-                ToolError::Transient(format!("open error: {e}")),
+            std::io::ErrorKind::PermissionDenied => {
+                ToolError::Permanent(format!("permission denied: {}", path.display()))
+            }
+            _ => ToolError::Transient(format!("open error: {e}")),
         })?;
 
     let mut writer = std::io::BufWriter::new(file);
-    writer.write_all(content.as_bytes())
+    writer
+        .write_all(content.as_bytes())
         .map_err(|e| ToolError::Transient(format!("write error: {e}")))?;
     Ok(content.len())
 }
@@ -175,7 +188,9 @@ mod tests {
     use super::*;
     use cairn_domain::ProjectKey;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     fn temp_workspace() -> tempfile::TempDir {
         tempfile::tempdir().expect("failed to create temp dir")
@@ -187,11 +202,17 @@ mod tests {
     async fn creates_new_file() {
         let ws = temp_workspace();
         let tool = FileWriteTool::new(ws.path());
-        let result = tool.execute(&project(), serde_json::json!({
-            "path":    "hello.txt",
-            "content": "Hello, cairn-rs!",
-            "mode":    "create"
-        })).await.unwrap();
+        let result = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "path":    "hello.txt",
+                    "content": "Hello, cairn-rs!",
+                    "mode":    "create"
+                }),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["bytes_written"], 16);
         assert_eq!(result.output["mode"], "create");
         let on_disk = std::fs::read_to_string(ws.path().join("hello.txt")).unwrap();
@@ -203,9 +224,15 @@ mod tests {
         let ws = temp_workspace();
         std::fs::write(ws.path().join("existing.txt"), "old").unwrap();
         let tool = FileWriteTool::new(ws.path());
-        let err = tool.execute(&project(), serde_json::json!({
-            "path": "existing.txt", "content": "new", "mode": "create"
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "path": "existing.txt", "content": "new", "mode": "create"
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::Permanent(_)));
         assert!(err.to_string().contains("already exists"));
         // Original content must be intact.
@@ -220,9 +247,15 @@ mod tests {
         let ws = temp_workspace();
         std::fs::write(ws.path().join("file.txt"), "old content").unwrap();
         let tool = FileWriteTool::new(ws.path());
-        let result = tool.execute(&project(), serde_json::json!({
-            "path": "file.txt", "content": "new content", "mode": "overwrite"
-        })).await.unwrap();
+        let result = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "path": "file.txt", "content": "new content", "mode": "overwrite"
+                }),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["mode"], "overwrite");
         let on_disk = std::fs::read_to_string(ws.path().join("file.txt")).unwrap();
         assert_eq!(on_disk, "new content");
@@ -232,10 +265,18 @@ mod tests {
     async fn overwrite_creates_if_absent() {
         let ws = temp_workspace();
         let tool = FileWriteTool::new(ws.path());
-        tool.execute(&project(), serde_json::json!({
-            "path": "new.txt", "content": "fresh", "mode": "overwrite"
-        })).await.unwrap();
-        assert_eq!(std::fs::read_to_string(ws.path().join("new.txt")).unwrap(), "fresh");
+        tool.execute(
+            &project(),
+            serde_json::json!({
+                "path": "new.txt", "content": "fresh", "mode": "overwrite"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(ws.path().join("new.txt")).unwrap(),
+            "fresh"
+        );
     }
 
     // ── append mode ────────────────────────────────────────────────────────────
@@ -245,9 +286,14 @@ mod tests {
         let ws = temp_workspace();
         std::fs::write(ws.path().join("log.txt"), "line1\n").unwrap();
         let tool = FileWriteTool::new(ws.path());
-        tool.execute(&project(), serde_json::json!({
-            "path": "log.txt", "content": "line2\n", "mode": "append"
-        })).await.unwrap();
+        tool.execute(
+            &project(),
+            serde_json::json!({
+                "path": "log.txt", "content": "line2\n", "mode": "append"
+            }),
+        )
+        .await
+        .unwrap();
         let on_disk = std::fs::read_to_string(ws.path().join("log.txt")).unwrap();
         assert_eq!(on_disk, "line1\nline2\n");
     }
@@ -258,9 +304,14 @@ mod tests {
     async fn creates_parent_directories() {
         let ws = temp_workspace();
         let tool = FileWriteTool::new(ws.path());
-        tool.execute(&project(), serde_json::json!({
-            "path": "a/b/c/deep.txt", "content": "deep", "mode": "create"
-        })).await.unwrap();
+        tool.execute(
+            &project(),
+            serde_json::json!({
+                "path": "a/b/c/deep.txt", "content": "deep", "mode": "create"
+            }),
+        )
+        .await
+        .unwrap();
         assert!(ws.path().join("a/b/c/deep.txt").exists());
     }
 
@@ -270,9 +321,15 @@ mod tests {
     async fn rejects_parent_traversal() {
         let ws = temp_workspace();
         let tool = FileWriteTool::new(ws.path());
-        let err = tool.execute(&project(), serde_json::json!({
-            "path": "../../etc/cron.d/evil", "content": "hack", "mode": "create"
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "path": "../../etc/cron.d/evil", "content": "hack", "mode": "create"
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
         assert!(err.to_string().contains("traversal"));
     }
@@ -281,9 +338,15 @@ mod tests {
     async fn rejects_absolute_path() {
         let ws = temp_workspace();
         let tool = FileWriteTool::new(ws.path());
-        let err = tool.execute(&project(), serde_json::json!({
-            "path": "/etc/shadow", "content": "hack", "mode": "overwrite"
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "path": "/etc/shadow", "content": "hack", "mode": "overwrite"
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
         assert!(err.to_string().contains("absolute"));
     }
@@ -294,9 +357,15 @@ mod tests {
     async fn missing_path_is_invalid_args() {
         let ws = temp_workspace();
         let tool = FileWriteTool::new(ws.path());
-        let err = tool.execute(&project(), serde_json::json!({
-            "content": "x", "mode": "create"
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "content": "x", "mode": "create"
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -304,9 +373,15 @@ mod tests {
     async fn unknown_mode_is_invalid_args() {
         let ws = temp_workspace();
         let tool = FileWriteTool::new(ws.path());
-        let err = tool.execute(&project(), serde_json::json!({
-            "path": "x.txt", "content": "x", "mode": "upsert"
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "path": "x.txt", "content": "x", "mode": "upsert"
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -330,7 +405,8 @@ mod tests {
         let tool = FileWriteTool::new("/tmp");
         let schema = tool.parameters_schema();
         let required: Vec<String> = schema["required"]
-            .as_array().unwrap()
+            .as_array()
+            .unwrap()
             .iter()
             .filter_map(|v| v.as_str().map(str::to_owned))
             .collect();

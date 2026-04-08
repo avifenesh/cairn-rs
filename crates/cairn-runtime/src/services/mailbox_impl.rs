@@ -109,11 +109,11 @@ where
                 from_run_id: None,
                 content: truncated,
                 deliver_at_ms: 0,
-                                  sender: None,
-                 recipient: None,
-                 body: None,
-                 sent_at: None,
-                 delivery_status: None,
+                sender: None,
+                recipient: None,
+                body: None,
+                sent_at: None,
+                delivery_status: None,
             },
         ));
         self.store.append(&[event]).await?;

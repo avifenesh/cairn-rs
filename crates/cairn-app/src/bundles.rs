@@ -194,10 +194,46 @@ pub fn validate_bundle(bundle: &CairnBundle) -> BundleValidationResult {
     }
 
     // Check for duplicate IDs within each section.
-    check_duplicates(&bundle.contents.prompts.iter().map(|p| &p.id).collect::<Vec<_>>(), "prompts", &mut errors);
-    check_duplicates(&bundle.contents.eval_suites.iter().map(|e| &e.id).collect::<Vec<_>>(), "eval_suites", &mut errors);
-    check_duplicates(&bundle.contents.provider_configs.iter().map(|c| &c.id).collect::<Vec<_>>(), "provider_configs", &mut errors);
-    check_duplicates(&bundle.contents.sources.iter().map(|s| &s.id).collect::<Vec<_>>(), "sources", &mut errors);
+    check_duplicates(
+        &bundle
+            .contents
+            .prompts
+            .iter()
+            .map(|p| &p.id)
+            .collect::<Vec<_>>(),
+        "prompts",
+        &mut errors,
+    );
+    check_duplicates(
+        &bundle
+            .contents
+            .eval_suites
+            .iter()
+            .map(|e| &e.id)
+            .collect::<Vec<_>>(),
+        "eval_suites",
+        &mut errors,
+    );
+    check_duplicates(
+        &bundle
+            .contents
+            .provider_configs
+            .iter()
+            .map(|c| &c.id)
+            .collect::<Vec<_>>(),
+        "provider_configs",
+        &mut errors,
+    );
+    check_duplicates(
+        &bundle
+            .contents
+            .sources
+            .iter()
+            .map(|s| &s.id)
+            .collect::<Vec<_>>(),
+        "sources",
+        &mut errors,
+    );
 
     BundleValidationResult {
         valid: errors.is_empty(),
@@ -273,38 +309,70 @@ pub fn plan_import(
     let mut actions = Vec::new();
 
     plan_section_import(
-        &bundle.contents.prompts.iter().map(|p| p.id.clone()).collect::<Vec<_>>(),
+        &bundle
+            .contents
+            .prompts
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<Vec<_>>(),
         "prompts",
         existing_ids,
         strategy,
         &mut actions,
     );
     plan_section_import(
-        &bundle.contents.eval_suites.iter().map(|e| e.id.clone()).collect::<Vec<_>>(),
+        &bundle
+            .contents
+            .eval_suites
+            .iter()
+            .map(|e| e.id.clone())
+            .collect::<Vec<_>>(),
         "eval_suites",
         existing_ids,
         strategy,
         &mut actions,
     );
     plan_section_import(
-        &bundle.contents.provider_configs.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+        &bundle
+            .contents
+            .provider_configs
+            .iter()
+            .map(|c| c.id.clone())
+            .collect::<Vec<_>>(),
         "provider_configs",
         existing_ids,
         strategy,
         &mut actions,
     );
     plan_section_import(
-        &bundle.contents.sources.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
+        &bundle
+            .contents
+            .sources
+            .iter()
+            .map(|s| s.id.clone())
+            .collect::<Vec<_>>(),
         "sources",
         existing_ids,
         strategy,
         &mut actions,
     );
 
-    let total_creates = actions.iter().filter(|a| a.action == ImportActionKind::Create).count();
-    let total_skips = actions.iter().filter(|a| a.action == ImportActionKind::Skip).count();
-    let total_overwrites = actions.iter().filter(|a| a.action == ImportActionKind::Overwrite).count();
-    let total_renames = actions.iter().filter(|a| a.action == ImportActionKind::Rename).count();
+    let total_creates = actions
+        .iter()
+        .filter(|a| a.action == ImportActionKind::Create)
+        .count();
+    let total_skips = actions
+        .iter()
+        .filter(|a| a.action == ImportActionKind::Skip)
+        .count();
+    let total_overwrites = actions
+        .iter()
+        .filter(|a| a.action == ImportActionKind::Overwrite)
+        .count();
+    let total_renames = actions
+        .iter()
+        .filter(|a| a.action == ImportActionKind::Rename)
+        .count();
 
     ImportPlan {
         project_id: project_id.to_owned(),
@@ -420,12 +488,8 @@ pub fn new_bundle(contents: BundleContents) -> CairnBundle {
 /// Serialize a bundle to the requested format.
 pub fn serialize_bundle(bundle: &CairnBundle, format: BundleFormat) -> Result<String, String> {
     match format {
-        BundleFormat::Json => {
-            serde_json::to_string_pretty(bundle).map_err(|e| e.to_string())
-        }
-        BundleFormat::Yaml => {
-            serde_yaml::to_string(bundle).map_err(|e| e.to_string())
-        }
+        BundleFormat::Json => serde_json::to_string_pretty(bundle).map_err(|e| e.to_string()),
+        BundleFormat::Yaml => serde_yaml::to_string(bundle).map_err(|e| e.to_string()),
     }
 }
 
@@ -464,40 +528,32 @@ mod tests {
 
     fn sample_bundle() -> CairnBundle {
         new_bundle(BundleContents {
-            prompts: vec![
-                BundlePrompt {
-                    id: "prompt_1".into(),
-                    name: "System Prompt".into(),
-                    kind: "system".into(),
-                    content: "You are helpful.".into(),
-                    version: Some("v1".into()),
-                },
-            ],
-            eval_suites: vec![
-                BundleEvalSuite {
-                    id: "eval_1".into(),
-                    name: "Basic QA".into(),
-                    evaluator: "exact_match".into(),
-                    cases: vec![serde_json::json!({"input": "hi", "expected": "hello"})],
-                },
-            ],
-            provider_configs: vec![
-                BundleProviderConfig {
-                    id: "provider_1".into(),
-                    provider_family: "openai".into(),
-                    model_id: "gpt-4o".into(),
-                    operation: "generate".into(),
-                    settings: serde_json::json!({}),
-                },
-            ],
-            sources: vec![
-                BundleSource {
-                    id: "source_1".into(),
-                    name: "docs".into(),
-                    source_type: "markdown".into(),
-                    document_count: 10,
-                },
-            ],
+            prompts: vec![BundlePrompt {
+                id: "prompt_1".into(),
+                name: "System Prompt".into(),
+                kind: "system".into(),
+                content: "You are helpful.".into(),
+                version: Some("v1".into()),
+            }],
+            eval_suites: vec![BundleEvalSuite {
+                id: "eval_1".into(),
+                name: "Basic QA".into(),
+                evaluator: "exact_match".into(),
+                cases: vec![serde_json::json!({"input": "hi", "expected": "hello"})],
+            }],
+            provider_configs: vec![BundleProviderConfig {
+                id: "provider_1".into(),
+                provider_family: "openai".into(),
+                model_id: "gpt-4o".into(),
+                operation: "generate".into(),
+                settings: serde_json::json!({}),
+            }],
+            sources: vec![BundleSource {
+                id: "source_1".into(),
+                name: "docs".into(),
+                source_type: "markdown".into(),
+                document_count: 10,
+            }],
         })
     }
 
@@ -549,7 +605,10 @@ mod tests {
         });
         let result = validate_bundle(&bundle);
         assert!(!result.valid);
-        assert!(result.errors.iter().any(|e| e.message.contains("duplicate")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("duplicate")));
     }
 
     // ── JSON serialization round-trip ────────────────────────────────────
@@ -591,7 +650,11 @@ mod tests {
 
         assert_eq!(plan.total_skips, 1);
         assert_eq!(plan.total_creates, 3); // eval, provider, source
-        let skip_action = plan.actions.iter().find(|a| a.artifact_id == "prompt_1").unwrap();
+        let skip_action = plan
+            .actions
+            .iter()
+            .find(|a| a.artifact_id == "prompt_1")
+            .unwrap();
         assert_eq!(skip_action.action, ImportActionKind::Skip);
     }
 
@@ -605,7 +668,11 @@ mod tests {
 
         assert_eq!(plan.total_overwrites, 1);
         assert_eq!(plan.total_creates, 3);
-        let ow_action = plan.actions.iter().find(|a| a.artifact_id == "prompt_1").unwrap();
+        let ow_action = plan
+            .actions
+            .iter()
+            .find(|a| a.artifact_id == "prompt_1")
+            .unwrap();
         assert_eq!(ow_action.action, ImportActionKind::Overwrite);
     }
 
@@ -619,7 +686,11 @@ mod tests {
 
         assert_eq!(plan.total_renames, 1);
         assert_eq!(plan.total_creates, 3);
-        let rename_action = plan.actions.iter().find(|a| a.artifact_id == "prompt_1").unwrap();
+        let rename_action = plan
+            .actions
+            .iter()
+            .find(|a| a.artifact_id == "prompt_1")
+            .unwrap();
         assert_eq!(rename_action.action, ImportActionKind::Rename);
         assert_eq!(rename_action.renamed_to, Some("prompt_1_imported".into()));
     }
@@ -634,7 +705,10 @@ mod tests {
 
         assert_eq!(plan.total_creates, 4);
         assert_eq!(plan.total_skips, 0);
-        assert!(plan.actions.iter().all(|a| a.action == ImportActionKind::Create));
+        assert!(plan
+            .actions
+            .iter()
+            .all(|a| a.action == ImportActionKind::Create));
     }
 
     // ── Execute import ───────────────────────────────────────────────────
@@ -701,7 +775,12 @@ mod tests {
 
         // Plan with one conflict
         let existing: HashSet<String> = ["source_1".into()].into();
-        let plan = plan_import(&imported, "target_proj", &existing, ConflictStrategy::Rename);
+        let plan = plan_import(
+            &imported,
+            "target_proj",
+            &existing,
+            ConflictStrategy::Rename,
+        );
         assert_eq!(plan.total_creates, 3);
         assert_eq!(plan.total_renames, 1);
 

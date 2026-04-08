@@ -18,26 +18,26 @@
 //! time so each phase can be tested and replaced independently.
 
 pub mod context;
-pub mod emitter;
-pub mod error;
-pub mod gather;
 pub mod decide;
 pub mod decide_impl;
+pub mod emitter;
+pub mod error;
 pub mod execute;
+pub mod gather;
 pub mod loop_runner;
 
 // ── Public re-exports ─────────────────────────────────────────────────────────
 
 pub use context::{
-    ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput,
-    LoopConfig, LoopSignal, LoopTermination, OrchestrationContext, StepSummary,
+    ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput, LoopConfig, LoopSignal,
+    LoopTermination, OrchestrationContext, StepSummary,
 };
-pub use emitter::{ChannelEmitter, NoOpEmitter, OrchestratorEvent, OrchestratorEventEmitter};
-pub use error::OrchestratorError;
-pub use gather::GatherPhase;
 pub use decide::DecidePhase;
 pub use decide_impl::{estimate_tokens, LlmDecidePhase, TokenBudget};
+pub use emitter::{ChannelEmitter, NoOpEmitter, OrchestratorEvent, OrchestratorEventEmitter};
+pub use error::OrchestratorError;
 pub use execute::ExecutePhase;
+pub use gather::GatherPhase;
 pub use loop_runner::OrchestratorLoop;
 
 pub mod gather_impl;

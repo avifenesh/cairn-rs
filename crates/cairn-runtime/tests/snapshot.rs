@@ -7,7 +7,9 @@ use cairn_runtime::services::{
     ProjectServiceImpl, RunServiceImpl, SessionServiceImpl, TaskServiceImpl, TenantServiceImpl,
     WorkspaceServiceImpl,
 };
-use cairn_runtime::{ProjectService, RunService, SessionService, TaskService, TenantService, WorkspaceService};
+use cairn_runtime::{
+    ProjectService, RunService, SessionService, TaskService, TenantService, WorkspaceService,
+};
 use cairn_store::projections::RunReadModel;
 use cairn_store::{EventLog, InMemoryStore};
 
@@ -29,16 +31,47 @@ async fn snapshot_create_restore_preserves_run_state() {
     let run_id = RunId::new("run_snap");
 
     // Build initial state
-    tenant_svc.create(tenant_id.clone(), "Snap Tenant".to_owned()).await.unwrap();
-    workspace_svc.create(tenant_id.clone(), workspace_id, "WS".to_owned()).await.unwrap();
-    project_svc.create(project.clone(), "Proj".to_owned()).await.unwrap();
-    session_svc.create(&project, session_id.clone()).await.unwrap();
-    run_svc.start(&project, &session_id, run_id.clone(), None).await.unwrap();
-    task_svc.submit(&project, TaskId::new("task_snap"), Some(run_id.clone()), None, 0).await.unwrap();
+    tenant_svc
+        .create(tenant_id.clone(), "Snap Tenant".to_owned())
+        .await
+        .unwrap();
+    workspace_svc
+        .create(tenant_id.clone(), workspace_id, "WS".to_owned())
+        .await
+        .unwrap();
+    project_svc
+        .create(project.clone(), "Proj".to_owned())
+        .await
+        .unwrap();
+    session_svc
+        .create(&project, session_id.clone())
+        .await
+        .unwrap();
+    run_svc
+        .start(&project, &session_id, run_id.clone(), None)
+        .await
+        .unwrap();
+    task_svc
+        .submit(
+            &project,
+            TaskId::new("task_snap"),
+            Some(run_id.clone()),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
 
     // Verify initial run state
-    let run_before = RunReadModel::get(store.as_ref(), &run_id).await.unwrap().unwrap();
-    assert_eq!(run_before.state, RunState::Pending, "run should start Pending");
+    let run_before = RunReadModel::get(store.as_ref(), &run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        run_before.state,
+        RunState::Pending,
+        "run should start Pending"
+    );
 
     // Create snapshot — captures current tenant events
     let snapshot = store.create_snapshot(&tenant_id);
@@ -51,7 +84,6 @@ async fn snapshot_create_restore_preserves_run_state() {
         EventId::new("evt_snap_fail"),
         EventSource::Runtime,
         RuntimeEvent::RunStateChanged(RunStateChanged {
-
             project: project.clone(),
             run_id: run_id.clone(),
             transition: StateTransition {
@@ -66,16 +98,32 @@ async fn snapshot_create_restore_preserves_run_state() {
     store.append(&[fail_evt]).await.unwrap();
 
     // Confirm run is now Failed
-    let run_failed = RunReadModel::get(store.as_ref(), &run_id).await.unwrap().unwrap();
-    assert_eq!(run_failed.state, RunState::Failed, "run should be Failed after deliberate transition");
+    let run_failed = RunReadModel::get(store.as_ref(), &run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        run_failed.state,
+        RunState::Failed,
+        "run should be Failed after deliberate transition"
+    );
 
     // Restore from snapshot
     let report = store.restore_from_snapshot(&snapshot);
-    assert!(report["events_before"].as_u64().unwrap_or(0) > 0, "should report events before restore");
-    assert!(report["events_after"].as_u64().unwrap_or(0) > 0, "should retain snapshot events");
+    assert!(
+        report["events_before"].as_u64().unwrap_or(0) > 0,
+        "should report events before restore"
+    );
+    assert!(
+        report["events_after"].as_u64().unwrap_or(0) > 0,
+        "should retain snapshot events"
+    );
 
     // Assert run is back to original Pending state
-    let run_restored = RunReadModel::get(store.as_ref(), &run_id).await.unwrap().unwrap();
+    let run_restored = RunReadModel::get(store.as_ref(), &run_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         run_restored.state,
         RunState::Pending,
@@ -88,5 +136,9 @@ async fn snapshot_create_restore_preserves_run_state() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(task_restored.state, TaskState::Queued, "task should be back to Queued");
+    assert_eq!(
+        task_restored.state,
+        TaskState::Queued,
+        "task should be back to Queued"
+    );
 }

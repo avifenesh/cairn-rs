@@ -214,11 +214,7 @@ impl PromptReleasePipeline {
     /// Gap 1: Diff two prompt versions by their IDs.
     ///
     /// Returns `None` if either version's content hasn't been stored.
-    pub fn diff_versions(
-        &self,
-        old_version_id: &str,
-        new_version_id: &str,
-    ) -> Option<VersionDiff> {
+    pub fn diff_versions(&self, old_version_id: &str, new_version_id: &str) -> Option<VersionDiff> {
         let content = self.version_content.lock().unwrap();
         let old = content.get(old_version_id)?;
         let new = content.get(new_version_id)?;
@@ -279,11 +275,7 @@ impl PromptReleasePipeline {
     ///
     /// `rand_value` should be a uniform random in [0.0, 1.0).
     /// Returns `Candidate` if rand < percent/100, `Stable` otherwise.
-    pub fn resolve_with_rollout(
-        &self,
-        release_id: &str,
-        rand_value: f64,
-    ) -> RoutingDecision {
+    pub fn resolve_with_rollout(&self, release_id: &str, rand_value: f64) -> RoutingDecision {
         let map = self.rollouts.lock().unwrap();
         let state = match map.get(release_id) {
             Some(s) => s,
@@ -375,7 +367,9 @@ impl PromptReleasePipeline {
             .lock()
             .unwrap()
             .values()
-            .filter(|s| s.status == RolloutStatus::Active || s.status == RolloutStatus::PendingApproval)
+            .filter(|s| {
+                s.status == RolloutStatus::Active || s.status == RolloutStatus::PendingApproval
+            })
             .cloned()
             .collect()
     }
@@ -420,7 +414,10 @@ mod tests {
     #[test]
     fn diff_removed_line() {
         let lines = diff_texts("line1\nremoved\nline2", "line1\nline2");
-        let removed: Vec<_> = lines.iter().filter(|l| l.kind == DiffKind::Removed).collect();
+        let removed: Vec<_> = lines
+            .iter()
+            .filter(|l| l.kind == DiffKind::Removed)
+            .collect();
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].content, "removed");
     }
@@ -428,7 +425,10 @@ mod tests {
     #[test]
     fn diff_changed_line() {
         let lines = diff_texts("hello world", "hello rust");
-        let removed: Vec<_> = lines.iter().filter(|l| l.kind == DiffKind::Removed).collect();
+        let removed: Vec<_> = lines
+            .iter()
+            .filter(|l| l.kind == DiffKind::Removed)
+            .collect();
         let added: Vec<_> = lines.iter().filter(|l| l.kind == DiffKind::Added).collect();
         assert_eq!(removed.len(), 1);
         assert_eq!(added.len(), 1);

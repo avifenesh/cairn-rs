@@ -136,7 +136,13 @@ async fn resolve_stale_dependency_resumes_when_children_terminal() {
 
     // Create child task linked to parent run
     task_svc
-        .submit(&p, TaskId::new("child"), Some(RunId::new("parent")), None, 0)
+        .submit(
+            &p,
+            TaskId::new("child"),
+            Some(RunId::new("parent")),
+            None,
+            0,
+        )
         .await
         .unwrap();
 

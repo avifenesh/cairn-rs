@@ -67,5 +67,9 @@ pub trait MailboxReadModel: Send + Sync {
     ) -> Result<Vec<MailboxRecord>, StoreError>;
 
     /// List messages whose `deliver_at_ms > 0` and `deliver_at_ms <= now_ms` (deferred delivery).
-    async fn list_pending(&self, now_ms: u64, limit: usize) -> Result<Vec<MailboxRecord>, StoreError>;
+    async fn list_pending(
+        &self,
+        now_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<MailboxRecord>, StoreError>;
 }

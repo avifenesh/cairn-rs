@@ -8,7 +8,9 @@ use cairn_memory::api_impl::SourceTagsApiImpl;
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::{IngestRequest, IngestService, SourceType};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
-use cairn_memory::retrieval::{MetadataFilter, RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
+use cairn_memory::retrieval::{
+    MetadataFilter, RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService,
+};
 
 fn project() -> ProjectKey {
     ProjectKey::new("t", "w", "p")
@@ -103,10 +105,7 @@ async fn source_tagging_filter_by_tag_returns_matching_chunks() {
 #[tokio::test]
 async fn source_tagging_tags_propagate_to_all_chunks() {
     let store = Arc::new(InMemoryDocumentStore::new());
-    let pipeline = IngestPipeline::new(
-        store.clone(),
-        ParagraphChunker { max_chunk_size: 30 },
-    );
+    let pipeline = IngestPipeline::new(store.clone(), ParagraphChunker { max_chunk_size: 30 });
 
     pipeline
         .submit(IngestRequest {
@@ -159,7 +158,10 @@ async fn source_tagging_api_add_and_get_source_tags() {
 
     // Before tagging — GET returns empty list.
     let before = api.get_source_tags("src_ops").await.unwrap();
-    assert!(before.tags.is_empty(), "source should have no tags initially");
+    assert!(
+        before.tags.is_empty(),
+        "source should have no tags initially"
+    );
 
     // POST tags to the source.
     let added = api

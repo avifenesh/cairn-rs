@@ -42,12 +42,7 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn msg(
-    evt_id: &str,
-    msg_id: &str,
-    run_id: &str,
-    content: &str,
-) -> EventEnvelope<RuntimeEvent> {
+fn msg(evt_id: &str, msg_id: &str, run_id: &str, content: &str) -> EventEnvelope<RuntimeEvent> {
     evt(
         evt_id,
         RuntimeEvent::MailboxMessageAppended(MailboxMessageAppended {
@@ -59,11 +54,11 @@ fn msg(
             from_run_id: None,
             from_task_id: None,
             deliver_at_ms: 0,
-                          sender: None,
-             recipient: None,
-             body: None,
-             sent_at: None,
-             delivery_status: None,
+            sender: None,
+            recipient: None,
+            body: None,
+            sent_at: None,
+            delivery_status: None,
         }),
     )
 }
@@ -90,11 +85,11 @@ async fn message_appended_stores_all_fields() {
                 from_run_id: Some(from_run.clone()),
                 from_task_id: None,
                 deliver_at_ms: 0,
-                                  sender: None,
-                 recipient: None,
-                 body: None,
-                 sent_at: None,
-                 delivery_status: None,
+                sender: None,
+                recipient: None,
+                body: None,
+                sent_at: None,
+                delivery_status: None,
             }),
         )])
         .await
@@ -130,14 +125,9 @@ async fn list_by_run_returns_all_messages() {
         .await
         .unwrap();
 
-    let messages = MailboxReadModel::list_by_run(
-        &store,
-        &RunId::new("run_multi"),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let messages = MailboxReadModel::list_by_run(&store, &RunId::new("run_multi"), 10, 0)
+        .await
+        .unwrap();
 
     assert_eq!(messages.len(), 3);
     // Sorted by message_id lexicographically.
@@ -166,14 +156,9 @@ async fn list_by_run_order_is_lexicographic_by_message_id() {
         .await
         .unwrap();
 
-    let messages = MailboxReadModel::list_by_run(
-        &store,
-        &RunId::new("run_order"),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let messages = MailboxReadModel::list_by_run(&store, &RunId::new("run_order"), 10, 0)
+        .await
+        .unwrap();
 
     assert_eq!(messages.len(), 3);
     assert_eq!(messages[0].message_id.as_str(), "msg_a");
@@ -233,7 +218,9 @@ async fn messages_are_isolated_between_runs() {
         .await
         .unwrap();
     assert_eq!(for_a.len(), 2);
-    assert!(for_a.iter().all(|m| m.run_id == Some(RunId::new("run_iso_a"))));
+    assert!(for_a
+        .iter()
+        .all(|m| m.run_id == Some(RunId::new("run_iso_a"))));
 
     let for_b = MailboxReadModel::list_by_run(&store, &RunId::new("run_iso_b"), 10, 0)
         .await
@@ -269,17 +256,20 @@ async fn inter_agent_routing_fields_are_preserved() {
                 from_run_id: Some(RunId::new("run_orchestrator")),
                 from_task_id: Some(TaskId::new("task_orchestrator")),
                 deliver_at_ms: 0,
-                                  sender: None,
-                 recipient: None,
-                 body: None,
-                 sent_at: None,
-                 delivery_status: None,
+                sender: None,
+                recipient: None,
+                body: None,
+                sent_at: None,
+                delivery_status: None,
             }),
         )])
         .await
         .unwrap();
 
-    let record = MailboxReadModel::get(&store, &msg_id).await.unwrap().unwrap();
+    let record = MailboxReadModel::get(&store, &msg_id)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.from_run_id, Some(RunId::new("run_orchestrator")));
     assert_eq!(record.from_task_id, Some(TaskId::new("task_orchestrator")));
@@ -309,11 +299,11 @@ async fn list_by_task_returns_task_scoped_messages() {
                     from_run_id: None,
                     from_task_id: None,
                     deliver_at_ms: 0,
-                                          sender: None,
-                     recipient: None,
-                     body: None,
-                     sent_at: None,
-                     delivery_status: None,
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None,
                 }),
             ),
             evt(
@@ -327,11 +317,11 @@ async fn list_by_task_returns_task_scoped_messages() {
                     from_run_id: None,
                     from_task_id: None,
                     deliver_at_ms: 0,
-                                          sender: None,
-                     recipient: None,
-                     body: None,
-                     sent_at: None,
-                     delivery_status: None,
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None,
                 }),
             ),
             // Message addressed to a different task — must not appear.
@@ -346,11 +336,11 @@ async fn list_by_task_returns_task_scoped_messages() {
                     from_run_id: None,
                     from_task_id: None,
                     deliver_at_ms: 0,
-                                          sender: None,
-                     recipient: None,
-                     body: None,
-                     sent_at: None,
-                     delivery_status: None,
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None,
                 }),
             ),
         ])
@@ -389,11 +379,11 @@ async fn list_pending_returns_only_due_messages() {
                     from_run_id: None,
                     from_task_id: None,
                     deliver_at_ms: now - 1_000,
-                                          sender: None,
-                     recipient: None,
-                     body: None,
-                     sent_at: None,
-                     delivery_status: None,   // 1 second ago
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None, // 1 second ago
                 }),
             ),
             // Future delivery (not yet due).
@@ -408,11 +398,11 @@ async fn list_pending_returns_only_due_messages() {
                     from_run_id: None,
                     from_task_id: None,
                     deliver_at_ms: now + 60_000,
-                                          sender: None,
-                     recipient: None,
-                     body: None,
-                     sent_at: None,
-                     delivery_status: None,  // 1 minute from now
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None, // 1 minute from now
                 }),
             ),
             // Immediate delivery (deliver_at_ms == 0) — not included in pending.
@@ -427,11 +417,11 @@ async fn list_pending_returns_only_due_messages() {
                     from_run_id: None,
                     from_task_id: None,
                     deliver_at_ms: 0,
-                                          sender: None,
-                     recipient: None,
-                     body: None,
-                     sent_at: None,
-                     delivery_status: None,
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None,
                 }),
             ),
         ])
@@ -485,11 +475,11 @@ async fn messages_are_isolated_across_projects() {
                     from_run_id: None,
                     from_task_id: None,
                     deliver_at_ms: 0,
-                                          sender: None,
-                     recipient: None,
-                     body: None,
-                     sent_at: None,
-                     delivery_status: None,
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None,
                 }),
             ),
             evt(
@@ -497,17 +487,17 @@ async fn messages_are_isolated_across_projects() {
                 RuntimeEvent::MailboxMessageAppended(MailboxMessageAppended {
                     project: proj_b.clone(),
                     message_id: MailboxMessageId::new("msg_proj_b"),
-                    run_id: Some(RunId::new("run_shared_id")),  // same run_id string, different project
+                    run_id: Some(RunId::new("run_shared_id")), // same run_id string, different project
                     task_id: None,
                     content: "from project B".to_owned(),
                     from_run_id: None,
                     from_task_id: None,
                     deliver_at_ms: 0,
-                                          sender: None,
-                     recipient: None,
-                     body: None,
-                     sent_at: None,
-                     delivery_status: None,
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None,
                 }),
             ),
         ])

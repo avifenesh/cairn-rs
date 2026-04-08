@@ -7,9 +7,7 @@ use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
-use crate::projections::{
-    EdgeKind, GraphEdge, GraphNode, GraphProjection, GraphProjectionError,
-};
+use crate::projections::{EdgeKind, GraphEdge, GraphNode, GraphProjection, GraphProjectionError};
 use crate::queries::{
     GraphQuery, GraphQueryError, GraphQueryService, Subgraph, TraversalDirection,
 };
@@ -849,7 +847,12 @@ mod tests {
 
         // Only Spawned neighbors.
         let spawned = store
-            .neighbors("a", Some(EdgeKind::Spawned), TraversalDirection::Downstream, 10)
+            .neighbors(
+                "a",
+                Some(EdgeKind::Spawned),
+                TraversalDirection::Downstream,
+                10,
+            )
             .await
             .unwrap();
         assert_eq!(spawned.len(), 1);
@@ -896,10 +899,7 @@ mod tests {
 
         let nodes = store.all_nodes();
         let node = &nodes["scoped_sess"];
-        assert_eq!(
-            node.project.as_ref().unwrap().project_id.as_str(),
-            "docs"
-        );
+        assert_eq!(node.project.as_ref().unwrap().project_id.as_str(), "docs");
     }
 
     // ── Gap 1: Edge query tests ──────────────────────────────────────────
@@ -1126,7 +1126,10 @@ mod tests {
         let ids: Vec<&str> = subgraph.nodes.iter().map(|n| n.node_id.as_str()).collect();
         assert!(ids.contains(&"a"));
         assert!(ids.contains(&"b"));
-        assert!(!ids.contains(&"d"), "d is 3 hops away, should not be reached");
+        assert!(
+            !ids.contains(&"d"),
+            "d is 3 hops away, should not be reached"
+        );
     }
 
     #[tokio::test]
@@ -1212,7 +1215,10 @@ mod tests {
         let ids: Vec<&str> = filtered.nodes.iter().map(|n| n.node_id.as_str()).collect();
         assert!(ids.contains(&"x"));
         assert!(ids.contains(&"y"));
-        assert!(!ids.contains(&"z"), "z should be pruned by confidence filter");
+        assert!(
+            !ids.contains(&"z"),
+            "z should be pruned by confidence filter"
+        );
         assert_eq!(filtered.edges.len(), 1);
     }
 
@@ -1256,7 +1262,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(subgraph.nodes.len(), 3, "cycle detection should prevent infinite traversal");
+        assert_eq!(
+            subgraph.nodes.len(),
+            3,
+            "cycle detection should prevent infinite traversal"
+        );
     }
 }
 
@@ -1272,7 +1282,8 @@ impl GraphQueryService for std::sync::Arc<InMemoryGraphStore> {
         edge_filter: Option<crate::projections::EdgeKind>,
         direction: crate::queries::TraversalDirection,
         limit: usize,
-    ) -> Result<Vec<(crate::projections::GraphEdge, crate::projections::GraphNode)>, GraphQueryError> {
+    ) -> Result<Vec<(crate::projections::GraphEdge, crate::projections::GraphNode)>, GraphQueryError>
+    {
         GraphQueryService::neighbors(self.as_ref(), node_id, edge_filter, direction, limit).await
     }
 
@@ -1282,7 +1293,8 @@ impl GraphQueryService for std::sync::Arc<InMemoryGraphStore> {
         edge_filter: Option<crate::projections::EdgeKind>,
         limit: usize,
     ) -> Result<Vec<crate::projections::GraphEdge>, GraphQueryError> {
-        GraphQueryService::find_edges_by_source(self.as_ref(), source_node_id, edge_filter, limit).await
+        GraphQueryService::find_edges_by_source(self.as_ref(), source_node_id, edge_filter, limit)
+            .await
     }
 
     async fn find_edges_by_target(
@@ -1291,7 +1303,8 @@ impl GraphQueryService for std::sync::Arc<InMemoryGraphStore> {
         edge_filter: Option<crate::projections::EdgeKind>,
         limit: usize,
     ) -> Result<Vec<crate::projections::GraphEdge>, GraphQueryError> {
-        GraphQueryService::find_edges_by_target(self.as_ref(), target_node_id, edge_filter, limit).await
+        GraphQueryService::find_edges_by_target(self.as_ref(), target_node_id, edge_filter, limit)
+            .await
     }
 
     async fn shortest_path(
@@ -1301,6 +1314,13 @@ impl GraphQueryService for std::sync::Arc<InMemoryGraphStore> {
         edge_filter: Option<crate::projections::EdgeKind>,
         max_depth: u32,
     ) -> Result<Option<Subgraph>, GraphQueryError> {
-        GraphQueryService::shortest_path(self.as_ref(), from_node_id, to_node_id, edge_filter, max_depth).await
+        GraphQueryService::shortest_path(
+            self.as_ref(),
+            from_node_id,
+            to_node_id,
+            edge_filter,
+            max_depth,
+        )
+        .await
     }
 }

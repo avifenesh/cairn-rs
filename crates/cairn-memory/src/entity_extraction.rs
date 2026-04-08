@@ -178,15 +178,82 @@ impl EntityExtractor for RegexEntityExtractor {
 
 /// Common words that start sentences but are not proper nouns.
 const STOPWORDS: &[&str] = &[
-    "The", "A", "An", "This", "That", "These", "Those", "It", "Its",
-    "He", "She", "They", "We", "I", "You", "My", "Your", "Our", "Their",
-    "His", "Her", "Its", "One", "Some", "Any", "All", "Each", "Every",
-    "In", "At", "On", "For", "To", "By", "From", "With", "Of", "And",
-    "But", "Or", "Not", "No", "So", "As", "If", "When", "Where", "While",
-    "Although", "Because", "Since", "After", "Before", "During", "Among",
-    "Between", "Into", "Through", "About", "Above", "Below", "Against",
-    "Also", "Both", "Just", "Only", "Even", "Then", "Than", "There",
-    "Here", "Now", "Still", "However", "Therefore", "Thus",
+    "The",
+    "A",
+    "An",
+    "This",
+    "That",
+    "These",
+    "Those",
+    "It",
+    "Its",
+    "He",
+    "She",
+    "They",
+    "We",
+    "I",
+    "You",
+    "My",
+    "Your",
+    "Our",
+    "Their",
+    "His",
+    "Her",
+    "Its",
+    "One",
+    "Some",
+    "Any",
+    "All",
+    "Each",
+    "Every",
+    "In",
+    "At",
+    "On",
+    "For",
+    "To",
+    "By",
+    "From",
+    "With",
+    "Of",
+    "And",
+    "But",
+    "Or",
+    "Not",
+    "No",
+    "So",
+    "As",
+    "If",
+    "When",
+    "Where",
+    "While",
+    "Although",
+    "Because",
+    "Since",
+    "After",
+    "Before",
+    "During",
+    "Among",
+    "Between",
+    "Into",
+    "Through",
+    "About",
+    "Above",
+    "Below",
+    "Against",
+    "Also",
+    "Both",
+    "Just",
+    "Only",
+    "Even",
+    "Then",
+    "Than",
+    "There",
+    "Here",
+    "Now",
+    "Still",
+    "However",
+    "Therefore",
+    "Thus",
 ];
 
 /// A token: stripped text.
@@ -203,7 +270,9 @@ fn tokenize(text: &str) -> Vec<Token> {
         // Strip trailing punctuation.
         let clean = clean.trim_end_matches(['.', '!', '?', ',', ';', ':', '"', ')', ']', '\'']);
         if !clean.is_empty() {
-            tokens.push(Token { text: clean.to_owned() });
+            tokens.push(Token {
+                text: clean.to_owned(),
+            });
         }
     }
     tokens
@@ -213,7 +282,9 @@ fn tokenize(text: &str) -> Vec<Token> {
 /// This accepts "London", "Turing", "OpenAI", "DeepMind" but not "USA", "AI", "HTTP".
 fn is_title_case(word: &str) -> bool {
     let mut chars = word.chars();
-    let Some(first) = chars.next() else { return false };
+    let Some(first) = chars.next() else {
+        return false;
+    };
     if !first.is_uppercase() {
         return false;
     }
@@ -257,8 +328,21 @@ fn extract_capitalized_spans(tokens: &[Token]) -> Vec<Vec<String>> {
 
     // Also capture honorific-led names that may have been broken by the above loop.
     let honorifics = [
-        "Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Sir", "Dame", "Lord", "Lady",
-        "President", "Director", "CEO", "CTO", "CFO", "VP",
+        "Mr.",
+        "Mrs.",
+        "Ms.",
+        "Dr.",
+        "Prof.",
+        "Sir",
+        "Dame",
+        "Lord",
+        "Lady",
+        "President",
+        "Director",
+        "CEO",
+        "CTO",
+        "CFO",
+        "VP",
     ];
     for (i, token) in tokens.iter().enumerate() {
         if honorifics.contains(&token.text.as_str()) {
@@ -293,24 +377,94 @@ fn flush_span(current: &mut Vec<String>, spans: &mut Vec<Vec<String>>) {
 // ── Org suffix detection ───────────────────────────────────────────────────
 
 const ORG_SUFFIXES: &[&str] = &[
-    "Inc", "Inc.", "Corp", "Corp.", "Ltd", "Ltd.", "LLC", "LLP",
-    "Co", "Co.", "Company", "Companies", "Group", "Groups",
-    "Foundation", "Institute", "University", "College", "School",
-    "Association", "Society", "Council", "Agency",
-    "Labs", "Lab", "Technologies", "Technology", "Systems", "Solutions",
-    "Services", "Ventures", "Capital", "Partners", "Consulting",
-    "Network", "Networks", "Media", "Global", "International",
-    "Incorporated", "Limited",
+    "Inc",
+    "Inc.",
+    "Corp",
+    "Corp.",
+    "Ltd",
+    "Ltd.",
+    "LLC",
+    "LLP",
+    "Co",
+    "Co.",
+    "Company",
+    "Companies",
+    "Group",
+    "Groups",
+    "Foundation",
+    "Institute",
+    "University",
+    "College",
+    "School",
+    "Association",
+    "Society",
+    "Council",
+    "Agency",
+    "Labs",
+    "Lab",
+    "Technologies",
+    "Technology",
+    "Systems",
+    "Solutions",
+    "Services",
+    "Ventures",
+    "Capital",
+    "Partners",
+    "Consulting",
+    "Network",
+    "Networks",
+    "Media",
+    "Global",
+    "International",
+    "Incorporated",
+    "Limited",
 ];
 
 const ORG_PREFIXES: &[&str] = &[
-    "Google", "Microsoft", "Apple", "Amazon", "Meta", "OpenAI", "Anthropic",
-    "Nvidia", "Intel", "IBM", "Oracle", "Salesforce", "Adobe", "Netflix",
-    "Twitter", "LinkedIn", "Facebook", "Instagram", "Tesla", "SpaceX",
-    "Stripe", "Uber", "Airbnb", "Databricks", "Snowflake", "Palantir",
-    "DeepMind", "DeepSeek", "Mistral", "Cohere", "Stability", "Midjourney",
-    "Stanford", "MIT", "Harvard", "Oxford", "Cambridge", "Berkeley",
-    "NASA", "CERN", "WHO", "UNESCO", "UNICEF", "NATO",
+    "Google",
+    "Microsoft",
+    "Apple",
+    "Amazon",
+    "Meta",
+    "OpenAI",
+    "Anthropic",
+    "Nvidia",
+    "Intel",
+    "IBM",
+    "Oracle",
+    "Salesforce",
+    "Adobe",
+    "Netflix",
+    "Twitter",
+    "LinkedIn",
+    "Facebook",
+    "Instagram",
+    "Tesla",
+    "SpaceX",
+    "Stripe",
+    "Uber",
+    "Airbnb",
+    "Databricks",
+    "Snowflake",
+    "Palantir",
+    "DeepMind",
+    "DeepSeek",
+    "Mistral",
+    "Cohere",
+    "Stability",
+    "Midjourney",
+    "Stanford",
+    "MIT",
+    "Harvard",
+    "Oxford",
+    "Cambridge",
+    "Berkeley",
+    "NASA",
+    "CERN",
+    "WHO",
+    "UNESCO",
+    "UNICEF",
+    "NATO",
 ];
 
 fn is_org_span(span: &[String]) -> bool {
@@ -349,37 +503,169 @@ fn is_person_span(span: &[String]) -> bool {
 
 // ── Location extraction ───────────────────────────────────────────────────
 
-const SPATIAL_PREPOSITIONS: &[&str] = &["in", "at", "from", "to", "near", "of", "outside", "inside", "across"];
+const SPATIAL_PREPOSITIONS: &[&str] = &[
+    "in", "at", "from", "to", "near", "of", "outside", "inside", "across",
+];
 
 const KNOWN_LOCATIONS: &[&str] = &[
     // Countries
-    "Afghanistan", "Albania", "Algeria", "Argentina", "Australia", "Austria",
-    "Belgium", "Brazil", "Canada", "Chile", "China", "Colombia", "Croatia",
-    "Czech", "Denmark", "Egypt", "Finland", "France", "Germany", "Greece",
-    "Hungary", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel",
-    "Italy", "Japan", "Jordan", "Kenya", "Korea", "Malaysia", "Mexico",
-    "Morocco", "Netherlands", "NewZealand", "Nigeria", "Norway", "Pakistan",
-    "Peru", "Philippines", "Poland", "Portugal", "Romania", "Russia",
-    "SaudiArabia", "Singapore", "SouthAfrica", "Spain", "Sweden", "Switzerland",
-    "Taiwan", "Thailand", "Turkey", "Ukraine", "UnitedKingdom", "UK", "USA",
-    "UnitedStates", "Vietnam",
+    "Afghanistan",
+    "Albania",
+    "Algeria",
+    "Argentina",
+    "Australia",
+    "Austria",
+    "Belgium",
+    "Brazil",
+    "Canada",
+    "Chile",
+    "China",
+    "Colombia",
+    "Croatia",
+    "Czech",
+    "Denmark",
+    "Egypt",
+    "Finland",
+    "France",
+    "Germany",
+    "Greece",
+    "Hungary",
+    "India",
+    "Indonesia",
+    "Iran",
+    "Iraq",
+    "Ireland",
+    "Israel",
+    "Italy",
+    "Japan",
+    "Jordan",
+    "Kenya",
+    "Korea",
+    "Malaysia",
+    "Mexico",
+    "Morocco",
+    "Netherlands",
+    "NewZealand",
+    "Nigeria",
+    "Norway",
+    "Pakistan",
+    "Peru",
+    "Philippines",
+    "Poland",
+    "Portugal",
+    "Romania",
+    "Russia",
+    "SaudiArabia",
+    "Singapore",
+    "SouthAfrica",
+    "Spain",
+    "Sweden",
+    "Switzerland",
+    "Taiwan",
+    "Thailand",
+    "Turkey",
+    "Ukraine",
+    "UnitedKingdom",
+    "UK",
+    "USA",
+    "UnitedStates",
+    "Vietnam",
     // Major cities
-    "Amsterdam", "Athens", "Bangkok", "Barcelona", "Beijing", "Berlin",
-    "Brussels", "Buenos", "Cairo", "Chicago", "Dubai", "Geneva", "Helsinki",
-    "HongKong", "Istanbul", "Jakarta", "Johannesburg", "Kyoto", "Lagos",
-    "Lima", "Lisbon", "London", "LosAngeles", "Madrid", "Melbourne",
-    "MexicoCity", "Miami", "Milan", "Moscow", "Mumbai", "Munich", "Nairobi",
-    "NewYork", "Oslo", "Paris", "Prague", "Rome", "SanFrancisco", "Santiago",
-    "Seoul", "Shanghai", "Singapore", "Stockholm", "Sydney", "Taipei",
-    "Tehran", "Tokyo", "Toronto", "Vancouver", "Vienna", "Warsaw", "Zurich",
+    "Amsterdam",
+    "Athens",
+    "Bangkok",
+    "Barcelona",
+    "Beijing",
+    "Berlin",
+    "Brussels",
+    "Buenos",
+    "Cairo",
+    "Chicago",
+    "Dubai",
+    "Geneva",
+    "Helsinki",
+    "HongKong",
+    "Istanbul",
+    "Jakarta",
+    "Johannesburg",
+    "Kyoto",
+    "Lagos",
+    "Lima",
+    "Lisbon",
+    "London",
+    "LosAngeles",
+    "Madrid",
+    "Melbourne",
+    "MexicoCity",
+    "Miami",
+    "Milan",
+    "Moscow",
+    "Mumbai",
+    "Munich",
+    "Nairobi",
+    "NewYork",
+    "Oslo",
+    "Paris",
+    "Prague",
+    "Rome",
+    "SanFrancisco",
+    "Santiago",
+    "Seoul",
+    "Shanghai",
+    "Singapore",
+    "Stockholm",
+    "Sydney",
+    "Taipei",
+    "Tehran",
+    "Tokyo",
+    "Toronto",
+    "Vancouver",
+    "Vienna",
+    "Warsaw",
+    "Zurich",
     // US States
-    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
-    "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
-    "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
-    "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Missouri",
-    "Montana", "Nebraska", "Nevada", "NewHampshire", "NewJersey", "NewMexico",
-    "NewYork", "NorthCarolina", "Ohio", "Oklahoma", "Oregon", "Pennsylvania",
-    "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
+    "Alabama",
+    "Alaska",
+    "Arizona",
+    "Arkansas",
+    "California",
+    "Colorado",
+    "Connecticut",
+    "Delaware",
+    "Florida",
+    "Georgia",
+    "Hawaii",
+    "Idaho",
+    "Illinois",
+    "Indiana",
+    "Iowa",
+    "Kansas",
+    "Kentucky",
+    "Louisiana",
+    "Maine",
+    "Maryland",
+    "Massachusetts",
+    "Michigan",
+    "Minnesota",
+    "Missouri",
+    "Montana",
+    "Nebraska",
+    "Nevada",
+    "NewHampshire",
+    "NewJersey",
+    "NewMexico",
+    "NewYork",
+    "NorthCarolina",
+    "Ohio",
+    "Oklahoma",
+    "Oregon",
+    "Pennsylvania",
+    "Tennessee",
+    "Texas",
+    "Utah",
+    "Vermont",
+    "Virginia",
+    "Washington",
     "Wisconsin",
 ];
 
@@ -433,10 +719,26 @@ fn camel_to_spaces(s: &str) -> String {
 // ── Fact extraction ───────────────────────────────────────────────────────
 
 const FACT_VERBS: &[&str] = &[
-    " is ", " was ", " are ", " were ", " has ", " have ", " had ",
-    " can ", " will ", " would ", " does ", " did ",
-    " became ", " becomes ", " remains ", " remained ",
-    " contains ", " includes ", " requires ", " produces ",
+    " is ",
+    " was ",
+    " are ",
+    " were ",
+    " has ",
+    " have ",
+    " had ",
+    " can ",
+    " will ",
+    " would ",
+    " does ",
+    " did ",
+    " became ",
+    " becomes ",
+    " remains ",
+    " remained ",
+    " contains ",
+    " includes ",
+    " requires ",
+    " produces ",
 ];
 
 fn extract_facts(text: &str) -> Vec<String> {
@@ -451,7 +753,10 @@ fn extract_facts(text: &str) -> Vec<String> {
         let has_fact_verb = FACT_VERBS.iter().any(|v| lower.contains(v));
         if has_fact_verb {
             // Trim trailing punctuation for clean storage.
-            let clean = s.trim_end_matches(|c: char| ".!?,;:".contains(c)).trim().to_owned();
+            let clean = s
+                .trim_end_matches(|c: char| ".!?,;:".contains(c))
+                .trim()
+                .to_owned();
             if !clean.is_empty() {
                 facts.push(clean);
             }
@@ -527,20 +832,27 @@ mod tests {
         };
         let result = extractor().extract(&req);
         assert!(
-            result.persons.iter().any(|p| p.contains("Alan") || p.contains("Turing")),
-            "expected Alan Turing in persons, got: {:?}", result.persons
+            result
+                .persons
+                .iter()
+                .any(|p| p.contains("Alan") || p.contains("Turing")),
+            "expected Alan Turing in persons, got: {:?}",
+            result.persons
         );
         assert!(
-            result.persons.iter().any(|p| p.contains("Marie") || p.contains("Curie")),
-            "expected Marie Curie in persons, got: {:?}", result.persons
+            result
+                .persons
+                .iter()
+                .any(|p| p.contains("Marie") || p.contains("Curie")),
+            "expected Marie Curie in persons, got: {:?}",
+            result.persons
         );
     }
 
     #[test]
     fn extract_org_names_with_suffix() {
         let req = EntityExtractionRequest {
-            text: "Anthropic Inc was founded in 2021. OpenAI develops GPT models."
-                .to_owned(),
+            text: "Anthropic Inc was founded in 2021. OpenAI develops GPT models.".to_owned(),
             project: project(),
             extract_persons: false,
             extract_orgs: true,
@@ -550,11 +862,13 @@ mod tests {
         let result = extractor().extract(&req);
         assert!(
             result.orgs.iter().any(|o| o.contains("Anthropic")),
-            "expected Anthropic in orgs, got: {:?}", result.orgs
+            "expected Anthropic in orgs, got: {:?}",
+            result.orgs
         );
         assert!(
             result.orgs.iter().any(|o| o.contains("OpenAI")),
-            "expected OpenAI in orgs, got: {:?}", result.orgs
+            "expected OpenAI in orgs, got: {:?}",
+            result.orgs
         );
     }
 
@@ -571,8 +885,12 @@ mod tests {
         };
         let result = extractor().extract(&req);
         assert!(
-            result.locations.iter().any(|l| l.contains("San") || l.contains("Francisco") || l.contains("London")),
-            "expected San Francisco or London in locations, got: {:?}", result.locations
+            result
+                .locations
+                .iter()
+                .any(|l| l.contains("San") || l.contains("Francisco") || l.contains("London")),
+            "expected San Francisco or London in locations, got: {:?}",
+            result.locations
         );
     }
 
@@ -590,7 +908,8 @@ mod tests {
         let result = extractor().extract(&req);
         assert!(
             result.facts.len() >= 2,
-            "expected at least 2 facts, got {:?}", result.facts
+            "expected at least 2 facts, got {:?}",
+            result.facts
         );
     }
 

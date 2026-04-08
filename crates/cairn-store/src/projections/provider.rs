@@ -134,7 +134,10 @@ pub trait ProviderHealthScheduleReadModel: Send + Sync {
 #[async_trait]
 pub trait ProviderModelReadModel: Send + Sync {
     /// Get capabilities for a specific model_id.
-    async fn get_model(&self, model_id: &str) -> Result<Option<ProviderModelCapability>, StoreError>;
+    async fn get_model(
+        &self,
+        model_id: &str,
+    ) -> Result<Option<ProviderModelCapability>, StoreError>;
 
     /// List all registered models for a connection.
     async fn list_by_connection(

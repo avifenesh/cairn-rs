@@ -67,23 +67,19 @@ impl<Q: GraphQueryService + 'static> GraphExpansionHook for GraphBackedExpansion
 
                 let neighbors = self
                     .query_service
-                    .neighbors(
-                        doc_id,
-                        Some(*edge_kind),
-                        TraversalDirection::Upstream,
-                        3,
-                    )
+                    .neighbors(doc_id, Some(*edge_kind), TraversalDirection::Upstream, 3)
                     .await;
 
                 if let Ok(neighbors) = neighbors {
                     for (_, node) in neighbors {
                         if (node.kind == NodeKind::Document || node.kind == NodeKind::Source)
-                            && seen.insert(node.node_id.clone()) {
-                                expansions.push(node.node_id);
-                                if expansions.len() >= self.max_expansions {
-                                    break;
-                                }
+                            && seen.insert(node.node_id.clone())
+                        {
+                            expansions.push(node.node_id);
+                            if expansions.len() >= self.max_expansions {
+                                break;
                             }
+                        }
                     }
                 }
             }

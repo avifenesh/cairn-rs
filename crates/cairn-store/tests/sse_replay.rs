@@ -60,7 +60,11 @@ async fn ten_events_assigned_sequential_positions() {
 
     assert_eq!(positions.len(), 10);
     for (i, pos) in positions.iter().enumerate() {
-        assert_eq!(pos.0, (i + 1) as u64, "position should be 1-indexed and sequential");
+        assert_eq!(
+            pos.0,
+            (i + 1) as u64,
+            "position should be 1-indexed and sequential"
+        );
     }
 }
 
@@ -87,7 +91,10 @@ async fn read_stream_position_zero_returns_all_events() {
 
     // EventPosition(0) is the "before the first event" sentinel used when
     // SSE clients connect without a Last-Event-ID header.
-    let events = store.read_stream(Some(EventPosition(0)), 100).await.unwrap();
+    let events = store
+        .read_stream(Some(EventPosition(0)), 100)
+        .await
+        .unwrap();
 
     assert_eq!(events.len(), 10, "position 0 is before all events");
     assert_eq!(events[0].position.0, 1);
@@ -102,11 +109,20 @@ async fn read_stream_from_mid_position_returns_tail() {
     append_n(&store, 10).await;
 
     // SSE client sends Last-Event-ID: 5 → replay events after position 5.
-    let events = store.read_stream(Some(EventPosition(5)), 100).await.unwrap();
+    let events = store
+        .read_stream(Some(EventPosition(5)), 100)
+        .await
+        .unwrap();
 
     assert_eq!(events.len(), 5, "positions 6-10 = 5 events");
-    assert_eq!(events[0].position.0, 6, "first replayed event is position 6");
-    assert_eq!(events[4].position.0, 10, "last replayed event is position 10");
+    assert_eq!(
+        events[0].position.0, 6,
+        "first replayed event is position 6"
+    );
+    assert_eq!(
+        events[4].position.0, 10,
+        "last replayed event is position 10"
+    );
 
     // Each replayed event's session ID should match the expected ordinal.
     for (i, stored) in events.iter().enumerate() {
@@ -188,7 +204,10 @@ async fn batch_append_produces_same_replay_semantics() {
     assert_eq!(positions[9].0, 10);
 
     // Replay semantics are the same regardless of append granularity.
-    let tail = store.read_stream(Some(EventPosition(5)), 100).await.unwrap();
+    let tail = store
+        .read_stream(Some(EventPosition(5)), 100)
+        .await
+        .unwrap();
     assert_eq!(tail.len(), 5);
     assert_eq!(tail[0].position.0, 6);
 }

@@ -10,14 +10,14 @@
 
 use std::sync::Arc;
 
-use cairn_domain::{
-    ApprovalId, ApprovalPolicyCreated, ApprovalRequested, ApprovalResolved,
-    EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId,
-    RuntimeEvent, SessionCreated, SessionId, StateTransition, TenantId,
-};
+use cairn_domain::events::RunStateChanged;
 use cairn_domain::lifecycle::RunState;
 use cairn_domain::policy::{ApprovalDecision, ApprovalRequirement};
-use cairn_domain::events::RunStateChanged;
+use cairn_domain::{
+    ApprovalId, ApprovalPolicyCreated, ApprovalRequested, ApprovalResolved, EventEnvelope, EventId,
+    EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent, SessionCreated, SessionId,
+    StateTransition, TenantId,
+};
 use cairn_store::{
     projections::{ApprovalPolicyReadModel, ApprovalReadModel, RunReadModel},
     EventLog, InMemoryStore,
@@ -46,11 +46,7 @@ fn approval_id(n: &str) -> ApprovalId {
 }
 
 fn ev<P: Into<RuntimeEvent>>(id: &str, payload: P) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(
-        EventId::new(id),
-        EventSource::Runtime,
-        payload.into(),
-    )
+    EventEnvelope::for_runtime_event(EventId::new(id), EventSource::Runtime, payload.into())
 }
 
 /// Seed a session + run in a given project.
@@ -82,11 +78,7 @@ async fn seed_run(store: &Arc<InMemoryStore>, project: &ProjectKey, run: &RunId)
 }
 
 /// Transition a run to WaitingApproval state.
-async fn set_run_waiting_approval(
-    store: &Arc<InMemoryStore>,
-    project: &ProjectKey,
-    run: &RunId,
-) {
+async fn set_run_waiting_approval(store: &Arc<InMemoryStore>, project: &ProjectKey, run: &RunId) {
     store
         .append(&[
             ev(
@@ -175,7 +167,10 @@ async fn run_in_waiting_approval_state_shows_pending() {
 
     assert_eq!(rec.approval_id, approval_id("1"));
     assert_eq!(rec.run_id, Some(run_id("1")));
-    assert!(rec.decision.is_none(), "approval must be pending (no decision yet)");
+    assert!(
+        rec.decision.is_none(),
+        "approval must be pending (no decision yet)"
+    );
     assert_eq!(rec.requirement, ApprovalRequirement::Required);
     assert_eq!(rec.version, 1, "initial version must be 1");
 
@@ -214,7 +209,11 @@ async fn multiple_approvals_for_same_run_tracked_independently() {
     let pending = ApprovalReadModel::list_pending(store.as_ref(), &project_a(), 10, 0)
         .await
         .unwrap();
-    assert_eq!(pending.len(), 3, "all 3 approvals must appear in pending list");
+    assert_eq!(
+        pending.len(),
+        3,
+        "all 3 approvals must appear in pending list"
+    );
 
     let ids: Vec<&str> = pending.iter().map(|r| r.approval_id.as_str()).collect();
     assert!(ids.contains(&"appr_x"), "appr_x must be in pending list");
@@ -242,7 +241,9 @@ async fn multiple_approvals_for_same_run_tracked_independently() {
         2,
         "after resolving appr_x, only 2 approvals must remain pending"
     );
-    assert!(!still_pending.iter().any(|r| r.approval_id.as_str() == "appr_x"));
+    assert!(!still_pending
+        .iter()
+        .any(|r| r.approval_id.as_str() == "appr_x"));
 }
 
 /// (4) Approval with policy_id links to ApprovalPolicyRecord via ApprovalPolicyReadModel.
@@ -271,7 +272,13 @@ async fn approval_policy_record_is_linkable() {
 
     seed_run(&store, &project_a(), &run_id("policy")).await;
     set_run_waiting_approval(&store, &project_a(), &run_id("policy")).await;
-    request_approval(&store, &project_a(), &approval_id("policy"), &run_id("policy")).await;
+    request_approval(
+        &store,
+        &project_a(),
+        &approval_id("policy"),
+        &run_id("policy"),
+    )
+    .await;
 
     // The approval record can be fetched.
     let appr = ApprovalReadModel::get(store.as_ref(), &approval_id("policy"))
@@ -295,14 +302,10 @@ async fn approval_policy_record_is_linkable() {
     assert_eq!(policy.tenant_id, tenant_id());
 
     // Listing policies by tenant returns the policy.
-    let tenant_policies = ApprovalPolicyReadModel::list_by_tenant(
-        store.as_ref(),
-        &tenant_id(),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let tenant_policies =
+        ApprovalPolicyReadModel::list_by_tenant(store.as_ref(), &tenant_id(), 10, 0)
+            .await
+            .unwrap();
     assert_eq!(tenant_policies.len(), 1);
     assert_eq!(tenant_policies[0].policy_id, "policy_senior_review");
 }
@@ -316,24 +319,48 @@ async fn approvals_are_isolated_per_project() {
     // Seed and request approvals in both projects.
     seed_run(&store, &project_a(), &run_id("proj_a")).await;
     set_run_waiting_approval(&store, &project_a(), &run_id("proj_a")).await;
-    request_approval(&store, &project_a(), &approval_id("proj_a_1"), &run_id("proj_a")).await;
-    request_approval(&store, &project_a(), &approval_id("proj_a_2"), &run_id("proj_a")).await;
+    request_approval(
+        &store,
+        &project_a(),
+        &approval_id("proj_a_1"),
+        &run_id("proj_a"),
+    )
+    .await;
+    request_approval(
+        &store,
+        &project_a(),
+        &approval_id("proj_a_2"),
+        &run_id("proj_a"),
+    )
+    .await;
 
     seed_run(&store, &project_b(), &run_id("proj_b")).await;
     set_run_waiting_approval(&store, &project_b(), &run_id("proj_b")).await;
-    request_approval(&store, &project_b(), &approval_id("proj_b_1"), &run_id("proj_b")).await;
+    request_approval(
+        &store,
+        &project_b(),
+        &approval_id("proj_b_1"),
+        &run_id("proj_b"),
+    )
+    .await;
 
     // Project A sees only its own approvals.
     let a_pending = ApprovalReadModel::list_pending(store.as_ref(), &project_a(), 10, 0)
         .await
         .unwrap();
-    assert_eq!(a_pending.len(), 2, "project_a must see exactly 2 pending approvals");
+    assert_eq!(
+        a_pending.len(),
+        2,
+        "project_a must see exactly 2 pending approvals"
+    );
     assert!(
         a_pending.iter().all(|r| r.project == project_a()),
         "all project_a approvals must be scoped to project_a"
     );
     assert!(
-        !a_pending.iter().any(|r| r.approval_id.as_str() == "appr_proj_b_1"),
+        !a_pending
+            .iter()
+            .any(|r| r.approval_id.as_str() == "appr_proj_b_1"),
         "project_a must not see project_b's approval"
     );
 
@@ -341,10 +368,16 @@ async fn approvals_are_isolated_per_project() {
     let b_pending = ApprovalReadModel::list_pending(store.as_ref(), &project_b(), 10, 0)
         .await
         .unwrap();
-    assert_eq!(b_pending.len(), 1, "project_b must see exactly 1 pending approval");
+    assert_eq!(
+        b_pending.len(),
+        1,
+        "project_b must see exactly 1 pending approval"
+    );
     assert_eq!(b_pending[0].approval_id.as_str(), "appr_proj_b_1");
     assert!(
-        !b_pending.iter().any(|r| r.approval_id.as_str().starts_with("appr_proj_a")),
+        !b_pending
+            .iter()
+            .any(|r| r.approval_id.as_str().starts_with("appr_proj_a")),
         "project_b must not see project_a's approvals"
     );
 }
@@ -364,7 +397,10 @@ async fn approval_version_increments_on_resolve() {
         .unwrap()
         .unwrap();
     assert_eq!(before.version, 1, "initial approval version must be 1");
-    assert!(before.decision.is_none(), "approval must be pending before resolve");
+    assert!(
+        before.decision.is_none(),
+        "approval must be pending before resolve"
+    );
 
     // Resolve the approval.
     store
@@ -384,7 +420,10 @@ async fn approval_version_increments_on_resolve() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(after.version, 2, "version must increment to 2 after ApprovalResolved");
+    assert_eq!(
+        after.version, 2,
+        "version must increment to 2 after ApprovalResolved"
+    );
     assert_eq!(after.decision, Some(ApprovalDecision::Approved));
 
     // Resolved approval must no longer appear in list_pending.
@@ -422,11 +461,17 @@ async fn rejected_approval_increments_version_and_leaves_pending() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(rec.version, 2, "rejected approval must also increment version to 2");
+    assert_eq!(
+        rec.version, 2,
+        "rejected approval must also increment version to 2"
+    );
     assert_eq!(rec.decision, Some(ApprovalDecision::Rejected));
 
     let pending = ApprovalReadModel::list_pending(store.as_ref(), &project_a(), 10, 0)
         .await
         .unwrap();
-    assert!(pending.is_empty(), "rejected approval must not appear in pending list");
+    assert!(
+        pending.is_empty(),
+        "rejected approval must not appear in pending list"
+    );
 }

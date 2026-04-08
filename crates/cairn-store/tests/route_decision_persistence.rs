@@ -18,15 +18,12 @@
 //!   - NoViableRoute decisions are stored (selected_provider_binding_id = None)
 //!   - list_by_project is scoped by project_id, not full ProjectKey
 
-use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, ProviderBindingId,
-    RouteDecisionId, RouteDecisionMade, RuntimeEvent, TenantId, WorkspaceId,
-};
 use cairn_domain::providers::{OperationKind, RouteDecisionStatus};
-use cairn_store::{
-    projections::RouteDecisionReadModel,
-    EventLog, InMemoryStore,
+use cairn_domain::{
+    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, ProviderBindingId, RouteDecisionId,
+    RouteDecisionMade, RuntimeEvent, TenantId, WorkspaceId,
 };
+use cairn_store::{projections::RouteDecisionReadModel, EventLog, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -107,7 +104,12 @@ async fn route_decision_made_is_persisted() {
 
     store
         .append(&[decision_selected(
-            "e1", "rd_001", "binding_openai", 1, false, OperationKind::Generate,
+            "e1",
+            "rd_001",
+            "binding_openai",
+            1,
+            false,
+            OperationKind::Generate,
         )])
         .await
         .unwrap();
@@ -176,7 +178,12 @@ async fn fallback_used_flag_persists_correctly() {
     // Decision 1: no fallback needed.
     store
         .append(&[decision_selected(
-            "e1", "rd_no_fallback", "binding_primary", 1, false, OperationKind::Generate,
+            "e1",
+            "rd_no_fallback",
+            "binding_primary",
+            1,
+            false,
+            OperationKind::Generate,
         )])
         .await
         .unwrap();
@@ -184,7 +191,12 @@ async fn fallback_used_flag_persists_correctly() {
     // Decision 2: fallback was needed (primary rejected, secondary selected).
     store
         .append(&[decision_selected(
-            "e2", "rd_with_fallback", "binding_secondary", 2, true, OperationKind::Generate,
+            "e2",
+            "rd_with_fallback",
+            "binding_secondary",
+            2,
+            true,
+            OperationKind::Generate,
         )])
         .await
         .unwrap();
@@ -193,14 +205,20 @@ async fn fallback_used_flag_persists_correctly() {
         .await
         .unwrap()
         .unwrap();
-    assert!(!no_fb.fallback_used, "decision without fallback must have fallback_used=false");
+    assert!(
+        !no_fb.fallback_used,
+        "decision without fallback must have fallback_used=false"
+    );
     assert_eq!(no_fb.attempt_count, 1);
 
     let with_fb = RouteDecisionReadModel::get(&store, &RouteDecisionId::new("rd_with_fallback"))
         .await
         .unwrap()
         .unwrap();
-    assert!(with_fb.fallback_used, "decision with fallback must have fallback_used=true");
+    assert!(
+        with_fb.fallback_used,
+        "decision with fallback must have fallback_used=true"
+    );
     assert_eq!(with_fb.attempt_count, 2);
     assert_eq!(
         with_fb.selected_provider_binding_id,
@@ -218,21 +236,37 @@ async fn multiple_decisions_for_same_project_tracked_in_order() {
     // Use IDs that sort lexicographically: rd_001 < rd_002 < rd_003.
     store
         .append(&[
-            decision_selected("e1", "rd_seq_001", "binding_a", 1, false, OperationKind::Generate),
-            decision_selected("e2", "rd_seq_002", "binding_b", 2, true,  OperationKind::Generate),
-            decision_selected("e3", "rd_seq_003", "binding_a", 1, false, OperationKind::Embed),
+            decision_selected(
+                "e1",
+                "rd_seq_001",
+                "binding_a",
+                1,
+                false,
+                OperationKind::Generate,
+            ),
+            decision_selected(
+                "e2",
+                "rd_seq_002",
+                "binding_b",
+                2,
+                true,
+                OperationKind::Generate,
+            ),
+            decision_selected(
+                "e3",
+                "rd_seq_003",
+                "binding_a",
+                1,
+                false,
+                OperationKind::Embed,
+            ),
         ])
         .await
         .unwrap();
 
-    let decisions = RouteDecisionReadModel::list_by_project(
-        &store,
-        &default_project(),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let decisions = RouteDecisionReadModel::list_by_project(&store, &default_project(), 10, 0)
+        .await
+        .unwrap();
 
     assert_eq!(decisions.len(), 3, "all three decisions persisted");
 
@@ -270,7 +304,10 @@ async fn no_viable_route_decision_stored_with_none_binding() {
         record.selected_provider_binding_id.is_none(),
         "NoViableRoute has no selected binding"
     );
-    assert_eq!(record.attempt_count, 3, "all 3 attempts tried before giving up");
+    assert_eq!(
+        record.attempt_count, 3,
+        "all 3 attempts tried before giving up"
+    );
     assert!(!record.fallback_used);
 }
 
@@ -282,10 +319,18 @@ async fn all_final_status_variants_persist_correctly() {
     let ts = now_ms();
 
     let variants = [
-        ("rd_selected",        RouteDecisionStatus::Selected,           Some("binding_x")),
-        ("rd_failed_dispatch", RouteDecisionStatus::FailedAfterDispatch, Some("binding_y")),
-        ("rd_no_route",        RouteDecisionStatus::NoViableRoute,       None),
-        ("rd_cancelled",       RouteDecisionStatus::Cancelled,           None),
+        (
+            "rd_selected",
+            RouteDecisionStatus::Selected,
+            Some("binding_x"),
+        ),
+        (
+            "rd_failed_dispatch",
+            RouteDecisionStatus::FailedAfterDispatch,
+            Some("binding_y"),
+        ),
+        ("rd_no_route", RouteDecisionStatus::NoViableRoute, None),
+        ("rd_cancelled", RouteDecisionStatus::Cancelled, None),
     ];
 
     for (id, status, binding) in &variants {
@@ -313,7 +358,10 @@ async fn all_final_status_variants_persist_correctly() {
             .unwrap()
             .expect(&format!("{id} must be persisted"));
 
-        assert_eq!(r.final_status, *expected_status, "{id}: final_status mismatch");
+        assert_eq!(
+            r.final_status, *expected_status,
+            "{id}: final_status mismatch"
+        );
         assert_eq!(
             r.selected_provider_binding_id,
             expected_binding.map(ProviderBindingId::new),
@@ -359,7 +407,9 @@ async fn list_by_project_scoped_to_project_id() {
         .await
         .unwrap();
     assert_eq!(decisions_a.len(), 2, "project A has exactly 2 decisions");
-    assert!(decisions_a.iter().all(|d| d.project_id == proj_a.project_id));
+    assert!(decisions_a
+        .iter()
+        .all(|d| d.project_id == proj_a.project_id));
 
     let decisions_b = RouteDecisionReadModel::list_by_project(&store, &proj_b, 10, 0)
         .await
@@ -429,8 +479,8 @@ async fn all_operation_kinds_persist_correctly() {
     let store = InMemoryStore::new();
 
     for (id, op) in [
-        ("rd_gen",    OperationKind::Generate),
-        ("rd_embed",  OperationKind::Embed),
+        ("rd_gen", OperationKind::Generate),
+        ("rd_embed", OperationKind::Embed),
         ("rd_rerank", OperationKind::Rerank),
     ] {
         store
@@ -440,15 +490,18 @@ async fn all_operation_kinds_persist_correctly() {
     }
 
     for (id, expected_op) in [
-        ("rd_gen",    OperationKind::Generate),
-        ("rd_embed",  OperationKind::Embed),
+        ("rd_gen", OperationKind::Generate),
+        ("rd_embed", OperationKind::Embed),
         ("rd_rerank", OperationKind::Rerank),
     ] {
         let r = RouteDecisionReadModel::get(&store, &RouteDecisionId::new(id))
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(r.operation_kind, expected_op, "{id}: operation_kind mismatch");
+        assert_eq!(
+            r.operation_kind, expected_op,
+            "{id}: operation_kind mismatch"
+        );
     }
 }
 
@@ -493,7 +546,13 @@ async fn high_attempt_count_persists() {
         .unwrap();
 
     assert_eq!(r.attempt_count, 5, "all 5 attempts recorded");
-    assert!(r.fallback_used, "fallback was used when trying multiple providers");
-    assert_eq!(r.final_status, RouteDecisionStatus::Selected,
-        "eventual success despite multiple attempts");
+    assert!(
+        r.fallback_used,
+        "fallback was used when trying multiple providers"
+    );
+    assert_eq!(
+        r.final_status,
+        RouteDecisionStatus::Selected,
+        "eventual success despite multiple attempts"
+    );
 }

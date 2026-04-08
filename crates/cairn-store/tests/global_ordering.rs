@@ -11,21 +11,21 @@
 //!   4. Batch appends assign sequential positions within the batch
 //!   5. head_position() always reflects the last appended event
 
+use cairn_domain::policy::ApprovalRequirement;
 use cairn_domain::{
     ApprovalId, ApprovalRequested, EventEnvelope, EventId, EventSource, MailboxMessageAppended,
     MailboxMessageId, ProjectId, ProjectKey, RunCreated, RunId, RuntimeEvent, SessionCreated,
     SessionId, SignalId, SignalIngested, TaskCreated, TaskId, TenantId, WorkspaceId,
 };
-use cairn_domain::policy::ApprovalRequirement;
 use cairn_store::{EventLog, EventPosition, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 fn project() -> ProjectKey {
     ProjectKey {
-        tenant_id:    TenantId::new("t_ord"),
+        tenant_id: TenantId::new("t_ord"),
         workspace_id: WorkspaceId::new("w_ord"),
-        project_id:   ProjectId::new("p_ord"),
+        project_id: ProjectId::new("p_ord"),
     }
 }
 
@@ -34,7 +34,8 @@ fn session_evt(n: u32) -> EventEnvelope<RuntimeEvent> {
         EventId::new(format!("sess_evt_{n:04}")),
         EventSource::Runtime,
         RuntimeEvent::SessionCreated(SessionCreated {
-            project: project(), session_id: SessionId::new(format!("sess_{n:04}")),
+            project: project(),
+            session_id: SessionId::new(format!("sess_{n:04}")),
         }),
     )
 }
@@ -44,12 +45,12 @@ fn run_evt(n: u32) -> EventEnvelope<RuntimeEvent> {
         EventId::new(format!("run_evt_{n:04}")),
         EventSource::Runtime,
         RuntimeEvent::RunCreated(RunCreated {
-            project:           project(),
-            session_id:        SessionId::new(format!("sess_{n:04}")),
-            run_id:            RunId::new(format!("run_{n:04}")),
-            parent_run_id:     None,
+            project: project(),
+            session_id: SessionId::new(format!("sess_{n:04}")),
+            run_id: RunId::new(format!("run_{n:04}")),
+            parent_run_id: None,
             prompt_release_id: None,
-            agent_role_id:     None,
+            agent_role_id: None,
         }),
     )
 }
@@ -59,10 +60,10 @@ fn task_evt(n: u32) -> EventEnvelope<RuntimeEvent> {
         EventId::new(format!("task_evt_{n:04}")),
         EventSource::Runtime,
         RuntimeEvent::TaskCreated(TaskCreated {
-            project:           project(),
-            task_id:           TaskId::new(format!("task_{n:04}")),
-            parent_run_id:     Some(RunId::new(format!("run_{n:04}"))),
-            parent_task_id:    None,
+            project: project(),
+            task_id: TaskId::new(format!("task_{n:04}")),
+            parent_run_id: Some(RunId::new(format!("run_{n:04}"))),
+            parent_task_id: None,
             prompt_release_id: None,
         }),
     )
@@ -73,10 +74,10 @@ fn approval_evt(n: u32) -> EventEnvelope<RuntimeEvent> {
         EventId::new(format!("appr_evt_{n:04}")),
         EventSource::Runtime,
         RuntimeEvent::ApprovalRequested(ApprovalRequested {
-            project:     project(),
+            project: project(),
             approval_id: ApprovalId::new(format!("appr_{n:04}")),
-            run_id:      Some(RunId::new(format!("run_{n:04}"))),
-            task_id:     None,
+            run_id: Some(RunId::new(format!("run_{n:04}"))),
+            task_id: None,
             requirement: ApprovalRequirement::Required,
         }),
     )
@@ -87,10 +88,10 @@ fn signal_evt(n: u32) -> EventEnvelope<RuntimeEvent> {
         EventId::new(format!("sig_evt_{n:04}")),
         EventSource::Runtime,
         RuntimeEvent::SignalIngested(SignalIngested {
-            project:      project(),
-            signal_id:    SignalId::new(format!("sig_{n:04}")),
-            source:       "timer".to_owned(),
-            payload:      serde_json::json!({ "n": n }),
+            project: project(),
+            signal_id: SignalId::new(format!("sig_{n:04}")),
+            source: "timer".to_owned(),
+            payload: serde_json::json!({ "n": n }),
             timestamp_ms: n as u64 * 10,
         }),
     )
@@ -101,19 +102,19 @@ fn mailbox_evt(n: u32) -> EventEnvelope<RuntimeEvent> {
         EventId::new(format!("mbx_evt_{n:04}")),
         EventSource::Runtime,
         RuntimeEvent::MailboxMessageAppended(MailboxMessageAppended {
-            project:    project(),
+            project: project(),
             message_id: MailboxMessageId::new(format!("msg_{n:04}")),
-            run_id:     None,
-            task_id:    None,
-            content:    format!("message {n}"),
-            from_run_id:  None,
+            run_id: None,
+            task_id: None,
+            content: format!("message {n}"),
+            from_run_id: None,
             from_task_id: None,
             deliver_at_ms: 0,
-                          sender: None,
-             recipient: None,
-             body: None,
-             sent_at: None,
-             delivery_status: None,
+            sender: None,
+            recipient: None,
+            body: None,
+            sent_at: None,
+            delivery_status: None,
         }),
     )
 }
@@ -149,7 +150,8 @@ async fn positions_are_strictly_monotonic() {
         assert!(
             window[1].0 > window[0].0,
             "position {} must be > {} (strict monotonicity violated)",
-            window[1].0, window[0].0
+            window[1].0,
+            window[0].0
         );
     }
 }
@@ -212,32 +214,33 @@ async fn interleaved_entity_types_share_global_sequence() {
     let events = store.read_stream(None, 200).await.unwrap();
 
     // Collect which positions are occupied by each entity type.
-    let mut session_positions  = vec![];
-    let mut run_positions      = vec![];
-    let mut task_positions     = vec![];
+    let mut session_positions = vec![];
+    let mut run_positions = vec![];
+    let mut task_positions = vec![];
     let mut approval_positions = vec![];
-    let mut signal_positions   = vec![];
+    let mut signal_positions = vec![];
 
     for e in &events {
         match &e.envelope.payload {
-            RuntimeEvent::SessionCreated(_)  => session_positions.push(e.position.0),
-            RuntimeEvent::RunCreated(_)      => run_positions.push(e.position.0),
-            RuntimeEvent::TaskCreated(_)     => task_positions.push(e.position.0),
+            RuntimeEvent::SessionCreated(_) => session_positions.push(e.position.0),
+            RuntimeEvent::RunCreated(_) => run_positions.push(e.position.0),
+            RuntimeEvent::TaskCreated(_) => task_positions.push(e.position.0),
             RuntimeEvent::ApprovalRequested(_) => approval_positions.push(e.position.0),
-            RuntimeEvent::SignalIngested(_)  => signal_positions.push(e.position.0),
+            RuntimeEvent::SignalIngested(_) => signal_positions.push(e.position.0),
             _ => {}
         }
     }
 
     // Each entity type contributed exactly 20 events.
-    assert_eq!(session_positions.len(),  20, "20 session events");
-    assert_eq!(run_positions.len(),      20, "20 run events");
-    assert_eq!(task_positions.len(),     20, "20 task events");
+    assert_eq!(session_positions.len(), 20, "20 session events");
+    assert_eq!(run_positions.len(), 20, "20 run events");
+    assert_eq!(task_positions.len(), 20, "20 task events");
     assert_eq!(approval_positions.len(), 20, "20 approval events");
-    assert_eq!(signal_positions.len(),   20, "20 signal events");
+    assert_eq!(signal_positions.len(), 20, "20 signal events");
 
     // All 100 positions are represented — no entity type monopolises the sequence.
-    let mut all: Vec<u64> = session_positions.iter()
+    let mut all: Vec<u64> = session_positions
+        .iter()
         .chain(run_positions.iter())
         .chain(task_positions.iter())
         .chain(approval_positions.iter())
@@ -258,9 +261,7 @@ async fn batch_appends_preserve_global_ordering() {
 
     // Append 10 batches of 10 events, one batch at a time.
     for batch in 0u32..10 {
-        let events: Vec<_> = (0u32..10)
-            .map(|i| mailbox_evt(batch * 10 + i))
-            .collect();
+        let events: Vec<_> = (0u32..10).map(|i| mailbox_evt(batch * 10 + i)).collect();
         store.append(&events).await.unwrap();
     }
 
@@ -269,13 +270,19 @@ async fn batch_appends_preserve_global_ordering() {
 
     // All 100 positions are strictly monotonic with no gaps.
     for (i, e) in all_events.iter().enumerate() {
-        assert_eq!(e.position.0, (i + 1) as u64,
-            "batch append: position at index {i} must be {}", i + 1);
+        assert_eq!(
+            e.position.0,
+            (i + 1) as u64,
+            "batch append: position at index {i} must be {}",
+            i + 1
+        );
     }
 
     for window in all_events.windows(2) {
-        assert!(window[1].position.0 == window[0].position.0 + 1,
-            "consecutive positions must differ by exactly 1");
+        assert!(
+            window[1].position.0 == window[0].position.0 + 1,
+            "consecutive positions must differ by exactly 1"
+        );
     }
 }
 
@@ -286,7 +293,10 @@ async fn head_position_equals_100_after_100_appends() {
     let store = InMemoryStore::new();
     store.append(&build_100_interleaved()).await.unwrap();
 
-    let head = store.head_position().await.unwrap()
+    let head = store
+        .head_position()
+        .await
+        .unwrap()
         .expect("head_position must be Some after 100 appends");
 
     assert_eq!(head.0, 100, "head_position must be 100 after 100 events");
@@ -298,7 +308,10 @@ async fn head_position_equals_100_after_100_appends() {
 async fn head_position_tracks_each_append() {
     let store = InMemoryStore::new();
 
-    assert!(store.head_position().await.unwrap().is_none(), "empty log has no head");
+    assert!(
+        store.head_position().await.unwrap().is_none(),
+        "empty log has no head"
+    );
 
     for n in 1u32..=100 {
         store.append(&[session_evt(n)]).await.unwrap();
@@ -342,9 +355,15 @@ async fn read_stream_cursor_skips_and_reads_remainder() {
     store.append(&build_100_interleaved()).await.unwrap();
 
     // Read the last 50 events (after position 50).
-    let tail = store.read_stream(Some(EventPosition(50)), 200).await.unwrap();
+    let tail = store
+        .read_stream(Some(EventPosition(50)), 200)
+        .await
+        .unwrap();
     assert_eq!(tail.len(), 50, "50 events after position 50");
-    assert_eq!(tail[0].position.0,  51, "first event after cursor is position 51");
+    assert_eq!(
+        tail[0].position.0, 51,
+        "first event after cursor is position 51"
+    );
     assert_eq!(tail[49].position.0, 100, "last event is position 100");
 
     // They are still strictly monotonic.
@@ -360,51 +379,52 @@ async fn derived_events_do_not_break_monotonicity() {
     // ProviderCallCompleted triggers derived RunCostUpdated and SessionCostUpdated
     // events in the projection. These get their own positions in the log.
     // The global ordering guarantee must hold even with derived events.
+    use cairn_domain::providers::{OperationKind, ProviderCallStatus, RouteDecisionStatus};
     use cairn_domain::{
         ProviderBindingId, ProviderCallCompleted, ProviderCallId, ProviderConnectionId,
-        ProviderModelId, RouteAttemptId, RouteDecisionId, SessionCreated, SessionId, RunCreated, RunId,
+        ProviderModelId, RouteAttemptId, RouteDecisionId, RunCreated, RunId, SessionCreated,
+        SessionId,
     };
-    use cairn_domain::providers::{OperationKind, ProviderCallStatus, RouteDecisionStatus};
 
     let store = InMemoryStore::new();
 
     // Append a session + run to enable cost derivation.
-    store.append(&[
-        session_evt(0),
-        run_evt(0),
-    ]).await.unwrap();
+    store.append(&[session_evt(0), run_evt(0)]).await.unwrap();
 
     // Append a ProviderCallCompleted that will trigger derived cost events.
-    store.append(&[EventEnvelope::for_runtime_event(
-        EventId::new("pc_1"),
-        EventSource::Runtime,
-        RuntimeEvent::ProviderCallCompleted(ProviderCallCompleted {
-            project:                project(),
-            provider_call_id:       ProviderCallId::new("pc_1"),
-            route_decision_id:      RouteDecisionId::new("rd_1"),
-            route_attempt_id:       RouteAttemptId::new("ra_1"),
-            provider_binding_id:    ProviderBindingId::new("pb_1"),
-            provider_connection_id: ProviderConnectionId::new("conn_1"),
-            provider_model_id:      ProviderModelId::new("gpt-4o"),
-            operation_kind:         OperationKind::Generate,
-            status:                 ProviderCallStatus::Succeeded,
-            latency_ms:             Some(100),
-            input_tokens:           Some(200),
-            output_tokens:          Some(100),
-            cost_micros:            Some(5_000),
-            completed_at:           1_000_000,
-            session_id:             None,
-            run_id:                 Some(RunId::new("run_0000")),
-            error_class:            None,
-            raw_error_message:      None,
-            retry_count:            0,
-            task_id:                None,
-            prompt_release_id:      None,
-            fallback_position:      0,
-            started_at:             999_000,
-            finished_at:            1_000_000,
-        }),
-    )]).await.unwrap();
+    store
+        .append(&[EventEnvelope::for_runtime_event(
+            EventId::new("pc_1"),
+            EventSource::Runtime,
+            RuntimeEvent::ProviderCallCompleted(ProviderCallCompleted {
+                project: project(),
+                provider_call_id: ProviderCallId::new("pc_1"),
+                route_decision_id: RouteDecisionId::new("rd_1"),
+                route_attempt_id: RouteAttemptId::new("ra_1"),
+                provider_binding_id: ProviderBindingId::new("pb_1"),
+                provider_connection_id: ProviderConnectionId::new("conn_1"),
+                provider_model_id: ProviderModelId::new("gpt-4o"),
+                operation_kind: OperationKind::Generate,
+                status: ProviderCallStatus::Succeeded,
+                latency_ms: Some(100),
+                input_tokens: Some(200),
+                output_tokens: Some(100),
+                cost_micros: Some(5_000),
+                completed_at: 1_000_000,
+                session_id: None,
+                run_id: Some(RunId::new("run_0000")),
+                error_class: None,
+                raw_error_message: None,
+                retry_count: 0,
+                task_id: None,
+                prompt_release_id: None,
+                fallback_position: 0,
+                started_at: 999_000,
+                finished_at: 1_000_000,
+            }),
+        )])
+        .await
+        .unwrap();
 
     // Read the full log — positions must be monotonic even if derived events
     // were inserted by the projection.
@@ -415,12 +435,16 @@ async fn derived_events_do_not_break_monotonicity() {
         assert!(
             window[1].position.0 > window[0].position.0,
             "derived events must not break position monotonicity: {} vs {}",
-            window[0].position.0, window[1].position.0
+            window[0].position.0,
+            window[1].position.0
         );
     }
 
     // head_position must equal the last event's position.
     let head = store.head_position().await.unwrap().unwrap();
-    assert_eq!(head.0, events.last().unwrap().position.0,
-        "head_position must equal the last event's position");
+    assert_eq!(
+        head.0,
+        events.last().unwrap().position.0,
+        "head_position must equal the last event's position"
+    );
 }

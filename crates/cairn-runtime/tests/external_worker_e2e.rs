@@ -52,8 +52,7 @@ async fn external_worker_claim_progress_complete_lifecycle() {
 
     // ── Step 1: Register with capability descriptor ────────────────────────
     // capabilities are embedded in display_name as the service has no dedicated field.
-    let display_name =
-        r#"TextEmbedder v2 [capabilities: embed, summarise, classify]"#.to_owned();
+    let display_name = r#"TextEmbedder v2 [capabilities: embed, summarise, classify]"#.to_owned();
 
     let registered = worker_svc
         .register(tenant(), worker_id.clone(), display_name.clone())
@@ -65,7 +64,10 @@ async fn external_worker_claim_progress_complete_lifecycle() {
     assert_eq!(registered.display_name, display_name);
     assert_eq!(registered.status, "active");
     // No heartbeat yet — worker is registered but not alive.
-    assert!(!registered.health.is_alive, "newly registered worker must not be marked alive");
+    assert!(
+        !registered.health.is_alive,
+        "newly registered worker must not be marked alive"
+    );
     assert_eq!(registered.health.last_heartbeat_ms, 0);
     assert_eq!(registered.current_task_id, None);
 
@@ -85,13 +87,20 @@ async fn external_worker_claim_progress_complete_lifecycle() {
         .await
         .unwrap();
 
-    assert_eq!(claimed.state, TaskState::Leased, "task must be Leased after claim");
+    assert_eq!(
+        claimed.state,
+        TaskState::Leased,
+        "task must be Leased after claim"
+    );
     assert_eq!(
         claimed.lease_owner.as_deref(),
         Some(worker_id.as_str()),
         "lease_owner must equal the claiming worker"
     );
-    assert!(claimed.lease_expires_at.is_some(), "lease_expires_at must be set");
+    assert!(
+        claimed.lease_expires_at.is_some(),
+        "lease_expires_at must be set"
+    );
 
     let lease_token = claimed.version; // token is task.version after the claim event
 
@@ -100,7 +109,11 @@ async fn external_worker_claim_progress_complete_lifecycle() {
     // Small sleep not needed — just check the heartbeat event is accepted.
     let after_hb_task = task_svc.heartbeat(&task_id, 60_000).await.unwrap();
 
-    assert_eq!(after_hb_task.state, TaskState::Leased, "heartbeat must not change state");
+    assert_eq!(
+        after_hb_task.state,
+        TaskState::Leased,
+        "heartbeat must not change state"
+    );
     let new_expiry = after_hb_task.lease_expires_at.unwrap();
     // The new expiry must be at least as far out as the original (or equal if
     // clock resolution collapses the delta in tests).
@@ -130,7 +143,10 @@ async fn external_worker_claim_progress_complete_lifecycle() {
 
     // Worker health must reflect the progress report.
     let worker_mid = worker_svc.get(&worker_id).await.unwrap().unwrap();
-    assert!(worker_mid.health.is_alive, "worker must be alive after progress report");
+    assert!(
+        worker_mid.health.is_alive,
+        "worker must be alive after progress report"
+    );
     assert!(
         worker_mid.health.last_heartbeat_ms >= progress_at,
         "last_heartbeat_ms must be >= the report timestamp"
@@ -198,8 +214,7 @@ async fn external_worker_claim_progress_complete_lifecycle() {
         "last_heartbeat_ms must reflect the completion report timestamp"
     );
     assert_eq!(
-        worker_done.current_task_id,
-        None,
+        worker_done.current_task_id, None,
         "current_task_id must be cleared after terminal outcome"
     );
 }
@@ -222,7 +237,10 @@ async fn external_worker_reports_task_failure() {
         .await
         .unwrap();
 
-    task_svc.submit(&project(), task_id.clone(), None, None, 0).await.unwrap();
+    task_svc
+        .submit(&project(), task_id.clone(), None, None, 0)
+        .await
+        .unwrap();
     let claimed = task_svc
         .claim(&task_id, worker_id.as_str().to_owned(), 30_000)
         .await
@@ -284,7 +302,10 @@ async fn reporting_on_terminal_task_returns_error() {
         .await
         .unwrap();
 
-    task_svc.submit(&project(), task_id.clone(), None, None, 0).await.unwrap();
+    task_svc
+        .submit(&project(), task_id.clone(), None, None, 0)
+        .await
+        .unwrap();
     let claimed = task_svc
         .claim(&task_id, worker_id.as_str().to_owned(), 30_000)
         .await
@@ -322,7 +343,10 @@ async fn reporting_on_terminal_task_returns_error() {
         .unwrap_err();
 
     assert!(
-        matches!(err, cairn_runtime::error::RuntimeError::InvalidTransition { .. }),
+        matches!(
+            err,
+            cairn_runtime::error::RuntimeError::InvalidTransition { .. }
+        ),
         "RFC 005: report on terminal task must return InvalidTransition; got: {err:?}"
     );
 }
@@ -403,7 +427,11 @@ async fn list_workers_by_tenant() {
 
     // List all workers for the test tenant.
     let all = worker_svc.list(&tenant(), 10, 0).await.unwrap();
-    assert_eq!(all.len(), 3, "list must return exactly the 3 registered workers");
+    assert_eq!(
+        all.len(),
+        3,
+        "list must return exactly the 3 registered workers"
+    );
 
     let ids: Vec<&WorkerId> = all.iter().map(|w| &w.worker_id).collect();
     assert!(ids.contains(&&worker_a));
@@ -412,7 +440,11 @@ async fn list_workers_by_tenant() {
 
     // Pagination: offset=1, limit=2 must skip the first.
     let page = worker_svc.list(&tenant(), 2, 1).await.unwrap();
-    assert_eq!(page.len(), 2, "paginated list must respect limit and offset");
+    assert_eq!(
+        page.len(),
+        2,
+        "paginated list must respect limit and offset"
+    );
 
     // Pagination: offset=10 must return empty.
     let empty = worker_svc.list(&tenant(), 10, 10).await.unwrap();

@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use cairn_domain::providers::{SpendAlert, SpendThresholdRecord};
-use cairn_domain::{SessionId, SpendAlertTriggered, TenantId};
 use cairn_domain::{ProjectKey, RuntimeEvent};
+use cairn_domain::{SessionId, SpendAlertTriggered, TenantId};
 use cairn_store::projections::SessionCostReadModel;
 use cairn_store::EventLog;
 
@@ -182,7 +182,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(alert.is_some(), "alert must fire when cost (1200) > threshold (1000)");
+        assert!(
+            alert.is_some(),
+            "alert must fire when cost (1200) > threshold (1000)"
+        );
         let alert = alert.unwrap();
         assert_eq!(alert.threshold_micros, 1_000);
         assert_eq!(alert.current_micros, 1_200);
@@ -199,7 +202,10 @@ mod tests {
                         && ev.current_micros == 1_200
             )
         });
-        assert!(triggered, "SpendAlertTriggered event must be in the event log");
+        assert!(
+            triggered,
+            "SpendAlertTriggered event must be in the event log"
+        );
     }
 
     /// Alert must NOT fire when cost is below threshold.
@@ -217,12 +223,15 @@ mod tests {
             .check_session_spend(&session_id, &tenant_id)
             .await
             .unwrap();
-        assert!(alert.is_none(), "alert must not fire when cost (500) < threshold (2000)");
+        assert!(
+            alert.is_none(),
+            "alert must not fire when cost (500) < threshold (2000)"
+        );
 
         let events = store.read_stream(None, 50).await.unwrap();
-        let triggered = events.iter().any(|e| {
-            matches!(&e.envelope.payload, RuntimeEvent::SpendAlertTriggered(_))
-        });
+        let triggered = events
+            .iter()
+            .any(|e| matches!(&e.envelope.payload, RuntimeEvent::SpendAlertTriggered(_)));
         assert!(!triggered, "no SpendAlertTriggered event should be in log");
     }
 
@@ -238,19 +247,31 @@ mod tests {
         accumulate_cost(&store, &session_id, &tenant_id, 600).await;
 
         // First check — fires.
-        let first = svc.check_session_spend(&session_id, &tenant_id).await.unwrap();
+        let first = svc
+            .check_session_spend(&session_id, &tenant_id)
+            .await
+            .unwrap();
         assert!(first.is_some(), "first check must fire");
 
         // Second check — same session, should NOT fire again.
-        let second = svc.check_session_spend(&session_id, &tenant_id).await.unwrap();
-        assert!(second.is_none(), "second check on same session must not fire again");
+        let second = svc
+            .check_session_spend(&session_id, &tenant_id)
+            .await
+            .unwrap();
+        assert!(
+            second.is_none(),
+            "second check on same session must not fire again"
+        );
 
         let events = store.read_stream(None, 50).await.unwrap();
         let trigger_count = events
             .iter()
             .filter(|e| matches!(&e.envelope.payload, RuntimeEvent::SpendAlertTriggered(_)))
             .count();
-        assert_eq!(trigger_count, 1, "exactly one SpendAlertTriggered per session");
+        assert_eq!(
+            trigger_count, 1,
+            "exactly one SpendAlertTriggered per session"
+        );
     }
 
     /// No threshold configured → no alert.
@@ -263,7 +284,10 @@ mod tests {
 
         // No set_threshold call — check should return None immediately.
         accumulate_cost(&store, &session_id, &tenant_id, 9_999_999).await;
-        let alert = svc.check_session_spend(&session_id, &tenant_id).await.unwrap();
+        let alert = svc
+            .check_session_spend(&session_id, &tenant_id)
+            .await
+            .unwrap();
         assert!(alert.is_none(), "no alert when no threshold is configured");
     }
 
@@ -286,7 +310,13 @@ mod tests {
         let alert_a = svc.check_session_spend(&sess_a, &tenant_a).await.unwrap();
         let alert_b = svc.check_session_spend(&sess_b, &tenant_b).await.unwrap();
 
-        assert!(alert_a.is_some(), "tenant_a threshold (1000) exceeded by 1200");
-        assert!(alert_b.is_none(), "tenant_b threshold (5000) not exceeded by 1200");
+        assert!(
+            alert_a.is_some(),
+            "tenant_a threshold (1000) exceeded by 1200"
+        );
+        assert!(
+            alert_b.is_none(),
+            "tenant_b threshold (5000) not exceeded by 1200"
+        );
     }
 }

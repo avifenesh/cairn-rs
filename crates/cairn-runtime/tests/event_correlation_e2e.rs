@@ -12,12 +12,14 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    CommandId, EventEnvelope, EventId, EventSource, ProjectKey,
-    RunCreated, RunId, RuntimeEvent, SessionCreated, SessionId, TenantId,
+    CommandId, EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
+    SessionCreated, SessionId, TenantId,
 };
 use cairn_store::{event_log::EventPosition, EventLog, InMemoryStore};
 
-fn project() -> ProjectKey { ProjectKey::new("t_corr", "ws_corr", "proj_corr") }
+fn project() -> ProjectKey {
+    ProjectKey::new("t_corr", "ws_corr", "proj_corr")
+}
 
 fn session_event(event_id: &str, session_id: &str) -> EventEnvelope<RuntimeEvent> {
     EventEnvelope::for_runtime_event(
@@ -57,14 +59,14 @@ async fn causation_chain_links_three_events_in_sequence() {
     let pos_a = positions_a[0];
 
     // Event B: caused by A.
-    let evt_b = run_event("evt_b", "run_b", "sess_chain_a")
-        .with_causation_id(CommandId::new("evt_a"));
+    let evt_b =
+        run_event("evt_b", "run_b", "sess_chain_a").with_causation_id(CommandId::new("evt_a"));
     let positions_b = store.append(&[evt_b]).await.unwrap();
     let pos_b = positions_b[0];
 
     // Event C: caused by B.
-    let evt_c = run_event("evt_c", "run_c", "sess_chain_a")
-        .with_causation_id(CommandId::new("evt_b"));
+    let evt_c =
+        run_event("evt_c", "run_c", "sess_chain_a").with_causation_id(CommandId::new("evt_b"));
     let positions_c = store.append(&[evt_c]).await.unwrap();
     let pos_c = positions_c[0];
 
@@ -120,11 +122,12 @@ async fn idempotent_append_skips_duplicate_causation_id() {
     let all = store.read_stream(None, 50).await.unwrap();
     let count = all
         .iter()
-        .filter(|s| {
-            s.envelope.causation_id.as_ref().map(|id| id.as_str()) == Some("evt_root")
-        })
+        .filter(|s| s.envelope.causation_id.as_ref().map(|id| id.as_str()) == Some("evt_root"))
         .count();
-    assert_eq!(count, 1, "exactly one event must carry causation_id=evt_root");
+    assert_eq!(
+        count, 1,
+        "exactly one event must carry causation_id=evt_root"
+    );
 }
 
 // ── (4) find_by_causation_id returns correct position ────────────────────
@@ -134,15 +137,24 @@ async fn find_by_causation_id_returns_correct_position() {
     let store = Arc::new(InMemoryStore::new());
 
     // Append several events.
-    store.append(&[session_event("e1", "sess_1")]).await.unwrap();
-    store.append(&[session_event("e2", "sess_2")]).await.unwrap();
+    store
+        .append(&[session_event("e1", "sess_1")])
+        .await
+        .unwrap();
+    store
+        .append(&[session_event("e2", "sess_2")])
+        .await
+        .unwrap();
 
-    let evt_with_causation = session_event("e3", "sess_3")
-        .with_causation_id(CommandId::new("cmd_xyz"));
+    let evt_with_causation =
+        session_event("e3", "sess_3").with_causation_id(CommandId::new("cmd_xyz"));
     let positions = store.append(&[evt_with_causation]).await.unwrap();
     let expected_pos = positions[0];
 
-    store.append(&[session_event("e4", "sess_4")]).await.unwrap();
+    store
+        .append(&[session_event("e4", "sess_4")])
+        .await
+        .unwrap();
 
     let found = store
         .find_by_causation_id("cmd_xyz")
@@ -150,7 +162,10 @@ async fn find_by_causation_id_returns_correct_position() {
         .unwrap()
         .expect("event with causation_id=cmd_xyz must be found");
 
-    assert_eq!(found, expected_pos, "must return the exact position of the event carrying cmd_xyz");
+    assert_eq!(
+        found, expected_pos,
+        "must return the exact position of the event carrying cmd_xyz"
+    );
 
     // Non-existent causation_id returns None.
     let missing = store.find_by_causation_id("cmd_no_such").await.unwrap();
@@ -165,7 +180,10 @@ async fn root_events_have_no_causation_id() {
 
     let root = session_event("root_evt", "sess_root");
     // Confirm no causation_id before append.
-    assert!(root.causation_id.is_none(), "root event must have no causation_id");
+    assert!(
+        root.causation_id.is_none(),
+        "root event must have no causation_id"
+    );
 
     store.append(&[root]).await.unwrap();
 
@@ -204,13 +222,21 @@ async fn correlation_id_groups_events_into_a_session_trace() {
         .filter(|s| s.envelope.correlation_id.as_deref() == Some(trace))
         .collect();
 
-    assert_eq!(in_trace.len(), 3, "exactly 3 events must share the trace correlation_id");
+    assert_eq!(
+        in_trace.len(),
+        3,
+        "exactly 3 events must share the trace correlation_id"
+    );
 
     let other_trace: Vec<_> = all
         .iter()
         .filter(|s| s.envelope.correlation_id.as_deref() == Some("trace_other"))
         .collect();
-    assert_eq!(other_trace.len(), 1, "the unrelated event must have a different correlation_id");
+    assert_eq!(
+        other_trace.len(),
+        1,
+        "the unrelated event must have a different correlation_id"
+    );
 }
 
 // ── (7) Two independent chains don't cross-link ───────────────────────────
@@ -222,31 +248,47 @@ async fn independent_chains_do_not_cross_link() {
     // Chain 1: X→Y
     let x = session_event("chain1_x", "sess_x");
     store.append(&[x]).await.unwrap();
-    let y = run_event("chain1_y", "run_y", "sess_x")
-        .with_causation_id(CommandId::new("chain1_x"));
+    let y = run_event("chain1_y", "run_y", "sess_x").with_causation_id(CommandId::new("chain1_x"));
     store.append(&[y]).await.unwrap();
 
     // Chain 2: P→Q (independent)
     let p = session_event("chain2_p", "sess_p");
     store.append(&[p]).await.unwrap();
-    let q = run_event("chain2_q", "run_q", "sess_p")
-        .with_causation_id(CommandId::new("chain2_p"));
+    let q = run_event("chain2_q", "run_q", "sess_p").with_causation_id(CommandId::new("chain2_p"));
     store.append(&[q]).await.unwrap();
 
     // Chain 1: find Y via X.
-    let y_pos = store.find_by_causation_id("chain1_x").await.unwrap().unwrap();
+    let y_pos = store
+        .find_by_causation_id("chain1_x")
+        .await
+        .unwrap()
+        .unwrap();
     // Chain 2: find Q via P.
-    let q_pos = store.find_by_causation_id("chain2_p").await.unwrap().unwrap();
+    let q_pos = store
+        .find_by_causation_id("chain2_p")
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_ne!(y_pos, q_pos, "Y and Q must be at different positions");
 
     // Cross-link must return None: X does not cause Q, P does not cause Y.
     assert!(
-        store.find_by_causation_id("chain1_x").await.unwrap().unwrap() != q_pos,
+        store
+            .find_by_causation_id("chain1_x")
+            .await
+            .unwrap()
+            .unwrap()
+            != q_pos,
         "chain1_x must not point to Q"
     );
     assert!(
-        store.find_by_causation_id("chain2_p").await.unwrap().unwrap() != y_pos,
+        store
+            .find_by_causation_id("chain2_p")
+            .await
+            .unwrap()
+            .unwrap()
+            != y_pos,
         "chain2_p must not point to Y"
     );
 }
@@ -262,10 +304,16 @@ async fn head_position_advances_monotonically() {
         "empty log must have no head position"
     );
 
-    store.append(&[session_event("h1", "sess_h1")]).await.unwrap();
+    store
+        .append(&[session_event("h1", "sess_h1")])
+        .await
+        .unwrap();
     let head1 = store.head_position().await.unwrap().unwrap();
 
-    store.append(&[session_event("h2", "sess_h2")]).await.unwrap();
+    store
+        .append(&[session_event("h2", "sess_h2")])
+        .await
+        .unwrap();
     let head2 = store.head_position().await.unwrap().unwrap();
 
     assert!(head2 > head1, "head must advance after each append");

@@ -145,5 +145,8 @@ async fn binding_cost_stats_isolated_by_tenant() {
     // In practice, binding IDs are project-scoped so same binding_id won't cross tenants.
     // For this test the binding_id is the same string, but the tenant_id stored should track
     // whichever event was processed last (the second one). Let's just assert list lengths.
-    assert!(t1.len() + t2.len() >= 1, "at least one tenant should have stats");
+    assert!(
+        t1.len() + t2.len() >= 1,
+        "at least one tenant should have stats"
+    );
 }

@@ -16,12 +16,18 @@ use crate::error::RuntimeError;
 #[async_trait]
 pub trait SpeechToTextService: Send + Sync {
     /// Transcribe the audio in `req` and return the transcript.
-    async fn transcribe(&self, req: SpeechToTextRequest) -> Result<SpeechToTextResult, RuntimeError>;
+    async fn transcribe(
+        &self,
+        req: SpeechToTextRequest,
+    ) -> Result<SpeechToTextResult, RuntimeError>;
 }
 
 /// Text-to-speech synthesis service boundary.
 #[async_trait]
 pub trait TextToSpeechService: Send + Sync {
     /// Synthesize speech from the text in `req` and return audio bytes.
-    async fn synthesize(&self, req: TextToSpeechRequest) -> Result<TextToSpeechResult, RuntimeError>;
+    async fn synthesize(
+        &self,
+        req: TextToSpeechRequest,
+    ) -> Result<TextToSpeechResult, RuntimeError>;
 }

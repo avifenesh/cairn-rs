@@ -13,12 +13,6 @@ pub struct GraphQueryRequest {
 #[async_trait]
 pub trait GraphEndpoints: Send + Sync {
     type Error;
-    async fn execution_trace(
-        &self,
-        request: &GraphQueryRequest,
-    ) -> Result<Subgraph, Self::Error>;
-    async fn retrieval_provenance(
-        &self,
-        node_id: &str,
-    ) -> Result<Subgraph, Self::Error>;
+    async fn execution_trace(&self, request: &GraphQueryRequest) -> Result<Subgraph, Self::Error>;
+    async fn retrieval_provenance(&self, node_id: &str) -> Result<Subgraph, Self::Error>;
 }

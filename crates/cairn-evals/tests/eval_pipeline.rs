@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    EvalRunId, PromptAssetId, PromptReleaseId, PromptVersionId, ProjectId, TenantId,
+    EvalRunId, ProjectId, PromptAssetId, PromptReleaseId, PromptVersionId, TenantId,
 };
 use cairn_evals::{
     EvalBaselineServiceImpl, EvalMetrics, EvalRunService, EvalRunStatus, EvalSubjectKind,
@@ -44,7 +44,8 @@ fn full_run(
         None,
     );
     svc.start_run(&EvalRunId::new(id)).unwrap();
-    svc.complete_run(&EvalRunId::new(id), metrics, None).unwrap()
+    svc.complete_run(&EvalRunId::new(id), metrics, None)
+        .unwrap()
 }
 
 // ── 1. Create → start → complete lifecycle ────────────────────────────────────
@@ -114,7 +115,7 @@ fn baseline_comparison_passes_when_metrics_match() {
         "ver_1",
         "rel_1",
         EvalMetrics {
-            task_success_rate: Some(0.90),  // identical → no delta
+            task_success_rate: Some(0.90), // identical → no delta
             latency_p50_ms: Some(200),
             ..Default::default()
         },
@@ -233,7 +234,7 @@ fn latency_regression_detected_when_p50_increases() {
         asset_id.clone(),
         EvalMetrics {
             task_success_rate: Some(0.90),
-            latency_p50_ms: Some(100),  // baseline: 100 ms
+            latency_p50_ms: Some(100), // baseline: 100 ms
             ..Default::default()
         },
     );
@@ -369,20 +370,44 @@ fn scorecard_aggregates_only_completed_runs_for_asset() {
     let asset_b = PromptAssetId::new("asset_sc_b");
 
     // Two completed runs for asset A.
-    full_run(&svc, "sc_a1", "proj_sc", &asset_a, "va1", "ra1", EvalMetrics {
-        task_success_rate: Some(0.80),
-        ..Default::default()
-    });
-    full_run(&svc, "sc_a2", "proj_sc", &asset_a, "va2", "ra2", EvalMetrics {
-        task_success_rate: Some(0.88),
-        ..Default::default()
-    });
+    full_run(
+        &svc,
+        "sc_a1",
+        "proj_sc",
+        &asset_a,
+        "va1",
+        "ra1",
+        EvalMetrics {
+            task_success_rate: Some(0.80),
+            ..Default::default()
+        },
+    );
+    full_run(
+        &svc,
+        "sc_a2",
+        "proj_sc",
+        &asset_a,
+        "va2",
+        "ra2",
+        EvalMetrics {
+            task_success_rate: Some(0.88),
+            ..Default::default()
+        },
+    );
 
     // One completed run for asset B.
-    full_run(&svc, "sc_b1", "proj_sc", &asset_b, "vb1", "rb1", EvalMetrics {
-        task_success_rate: Some(0.60),
-        ..Default::default()
-    });
+    full_run(
+        &svc,
+        "sc_b1",
+        "proj_sc",
+        &asset_b,
+        "vb1",
+        "rb1",
+        EvalMetrics {
+            task_success_rate: Some(0.60),
+            ..Default::default()
+        },
+    );
 
     // A pending run for asset A (not yet completed — must NOT appear).
     svc.create_run(
@@ -397,7 +422,11 @@ fn scorecard_aggregates_only_completed_runs_for_asset() {
     );
 
     let scorecard_a = svc.build_scorecard(&project_id, &asset_a);
-    assert_eq!(scorecard_a.entries.len(), 2, "only completed runs for asset A");
+    assert_eq!(
+        scorecard_a.entries.len(),
+        2,
+        "only completed runs for asset A"
+    );
     let release_ids: Vec<_> = scorecard_a
         .entries
         .iter()
@@ -425,7 +454,7 @@ fn locked_baseline_preferred_over_unlocked() {
         "Unlocked (should be ignored)".to_owned(),
         asset_id.clone(),
         EvalMetrics {
-            task_success_rate: Some(0.99),  // impossibly high — would cause regression
+            task_success_rate: Some(0.99), // impossibly high — would cause regression
             ..Default::default()
         },
     );
@@ -462,7 +491,10 @@ fn locked_baseline_preferred_over_unlocked() {
 
     // If it compared against the unlocked (0.99), this would be a regression.
     // Passing proves the locked baseline was selected.
-    assert!(cmp.passed, "locked baseline (0.85) must be selected, not unlocked (0.99)");
+    assert!(
+        cmp.passed,
+        "locked baseline (0.85) must be selected, not unlocked (0.99)"
+    );
     assert_eq!(cmp.baseline_metrics.task_success_rate, Some(0.85));
 }
 
@@ -499,13 +531,18 @@ fn cannot_start_a_completed_run() {
     let svc = EvalRunService::new();
     let asset_id = PromptAssetId::new("asset_no_restart");
 
-    full_run(&svc, "run_done", "proj_no_restart", &asset_id, "v1", "r1", EvalMetrics::default());
+    full_run(
+        &svc,
+        "run_done",
+        "proj_no_restart",
+        &asset_id,
+        "v1",
+        "r1",
+        EvalMetrics::default(),
+    );
 
     let err = svc.start_run(&EvalRunId::new("run_done"));
-    assert!(
-        err.is_err(),
-        "starting a Completed run must fail"
-    );
+    assert!(err.is_err(), "starting a Completed run must fail");
 }
 
 // ── 11. list_by_project is project-scoped ─────────────────────────────────────
@@ -515,13 +552,39 @@ fn list_by_project_returns_only_matching_project_runs() {
     let svc = EvalRunService::new();
     let asset = PromptAssetId::new("asset_scope");
 
-    full_run(&svc, "run_p1_a", "proj_p1", &asset, "v1", "r1", EvalMetrics::default());
-    full_run(&svc, "run_p1_b", "proj_p1", &asset, "v2", "r2", EvalMetrics::default());
-    full_run(&svc, "run_p2",   "proj_p2", &asset, "v3", "r3", EvalMetrics::default());
+    full_run(
+        &svc,
+        "run_p1_a",
+        "proj_p1",
+        &asset,
+        "v1",
+        "r1",
+        EvalMetrics::default(),
+    );
+    full_run(
+        &svc,
+        "run_p1_b",
+        "proj_p1",
+        &asset,
+        "v2",
+        "r2",
+        EvalMetrics::default(),
+    );
+    full_run(
+        &svc,
+        "run_p2",
+        "proj_p2",
+        &asset,
+        "v3",
+        "r3",
+        EvalMetrics::default(),
+    );
 
     let p1_runs = svc.list_by_project(&ProjectId::new("proj_p1"));
     assert_eq!(p1_runs.len(), 2, "proj_p1 owns 2 runs");
-    assert!(p1_runs.iter().all(|r| r.project_id == ProjectId::new("proj_p1")));
+    assert!(p1_runs
+        .iter()
+        .all(|r| r.project_id == ProjectId::new("proj_p1")));
 
     let p2_runs = svc.list_by_project(&ProjectId::new("proj_p2"));
     assert_eq!(p2_runs.len(), 1);

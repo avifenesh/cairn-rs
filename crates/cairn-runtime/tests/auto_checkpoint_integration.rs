@@ -25,12 +25,9 @@ async fn auto_checkpoint_saves_checkpoint_when_triggered_on_task_complete() {
     runs.start(&project, &session_id, run_id.clone(), None)
         .await
         .unwrap();
-    runs.set_checkpoint_strategy(
-        &run_id,
-        "auto_60s".to_owned(),
-    )
-    .await
-    .unwrap();
+    runs.set_checkpoint_strategy(&run_id, "auto_60s".to_owned())
+        .await
+        .unwrap();
 
     tasks
         .submit(

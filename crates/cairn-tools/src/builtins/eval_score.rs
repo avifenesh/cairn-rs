@@ -24,8 +24,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cairn_domain::{
     events::{ActualOutcome, OutcomeRecorded},
-    EventEnvelope, EventId, EventSource, OutcomeId, ProjectKey, RunId, RuntimeEvent,
     policy::ExecutionClass,
+    EventEnvelope, EventId, EventSource, OutcomeId, ProjectKey, RunId, RuntimeEvent,
 };
 use cairn_store::EventLog;
 use serde_json::Value;
@@ -45,9 +45,13 @@ impl EvalScoreTool {
 
 #[async_trait]
 impl ToolHandler for EvalScoreTool {
-    fn name(&self) -> &str { "eval_score" }
+    fn name(&self) -> &str {
+        "eval_score"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
 
     fn description(&self) -> &str {
         "Record an evaluation metric (score) against a run for quality tracking and confidence calibration."
@@ -86,34 +90,42 @@ impl ToolHandler for EvalScoreTool {
 
     async fn execute(&self, project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
         // ── Validate ──────────────────────────────────────────────────────────
-        let run_id_str = args.get("run_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidArgs {
-                field: "run_id".into(), message: "required".into(),
-            })?;
+        let run_id_str =
+            args.get("run_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidArgs {
+                    field: "run_id".into(),
+                    message: "required".into(),
+                })?;
         if run_id_str.trim().is_empty() {
             return Err(ToolError::InvalidArgs {
-                field: "run_id".into(), message: "must not be empty".into(),
+                field: "run_id".into(),
+                message: "must not be empty".into(),
             });
         }
 
-        let metric_name = args.get("metric_name")
+        let metric_name = args
+            .get("metric_name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs {
-                field: "metric_name".into(), message: "required".into(),
+                field: "metric_name".into(),
+                message: "required".into(),
             })?
             .to_owned();
         if metric_name.trim().is_empty() {
             return Err(ToolError::InvalidArgs {
-                field: "metric_name".into(), message: "must not be empty".into(),
+                field: "metric_name".into(),
+                message: "must not be empty".into(),
             });
         }
 
-        let score = args.get("score")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| ToolError::InvalidArgs {
-                field: "score".into(), message: "required numeric value 0.0–1.0".into(),
-            })?;
+        let score =
+            args.get("score")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| ToolError::InvalidArgs {
+                    field: "score".into(),
+                    message: "required numeric value 0.0–1.0".into(),
+                })?;
         if !(0.0..=1.0).contains(&score) {
             return Err(ToolError::InvalidArgs {
                 field: "score".into(),
@@ -121,7 +133,8 @@ impl ToolHandler for EvalScoreTool {
             });
         }
 
-        let passed = args.get("passed")
+        let passed = args
+            .get("passed")
             .and_then(|v| v.as_bool())
             .unwrap_or(score >= 0.5);
 
@@ -132,17 +145,23 @@ impl ToolHandler for EvalScoreTool {
             EventId::new(format!("evt_eval_{}", now_ms)),
             EventSource::Runtime,
             RuntimeEvent::OutcomeRecorded(OutcomeRecorded {
-                project:              project.clone(),
-                outcome_id:           outcome_id.clone(),
-                run_id:               RunId::new(run_id_str),
-                agent_type:           metric_name.clone(),
+                project: project.clone(),
+                outcome_id: outcome_id.clone(),
+                run_id: RunId::new(run_id_str),
+                agent_type: metric_name.clone(),
                 predicted_confidence: score,
-                actual_outcome:       if passed { ActualOutcome::Success } else { ActualOutcome::Failure },
-                recorded_at:          now_ms,
+                actual_outcome: if passed {
+                    ActualOutcome::Success
+                } else {
+                    ActualOutcome::Failure
+                },
+                recorded_at: now_ms,
             }),
         );
 
-        self.event_log.append(&[event]).await
+        self.event_log
+            .append(&[event])
+            .await
             .map_err(|e| ToolError::Transient(format!("event log write failed: {e}")))?;
 
         Ok(ToolResult::ok(serde_json::json!({
@@ -169,7 +188,9 @@ mod tests {
     use super::*;
     use cairn_store::InMemoryStore;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     fn make_tool() -> EvalScoreTool {
         EvalScoreTool::new(Arc::new(InMemoryStore::new()))
@@ -190,8 +211,12 @@ mod tests {
     #[tokio::test]
     async fn missing_run_id_is_invalid() {
         let err = make_tool()
-            .execute(&project(), serde_json::json!({"metric_name":"q","score":0.8}))
-            .await.unwrap_err();
+            .execute(
+                &project(),
+                serde_json::json!({"metric_name":"q","score":0.8}),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { field, .. } if field == "run_id"));
     }
 
@@ -199,23 +224,32 @@ mod tests {
     async fn missing_metric_name_is_invalid() {
         let err = make_tool()
             .execute(&project(), serde_json::json!({"run_id":"r1","score":0.8}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { field, .. } if field == "metric_name"));
     }
 
     #[tokio::test]
     async fn missing_score_is_invalid() {
         let err = make_tool()
-            .execute(&project(), serde_json::json!({"run_id":"r1","metric_name":"q"}))
-            .await.unwrap_err();
+            .execute(
+                &project(),
+                serde_json::json!({"run_id":"r1","metric_name":"q"}),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { field, .. } if field == "score"));
     }
 
     #[tokio::test]
     async fn score_out_of_range_is_invalid() {
         let err = make_tool()
-            .execute(&project(), serde_json::json!({"run_id":"r1","metric_name":"q","score":1.5}))
-            .await.unwrap_err();
+            .execute(
+                &project(),
+                serde_json::json!({"run_id":"r1","metric_name":"q","score":1.5}),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { field, .. } if field == "score"));
     }
 
@@ -224,33 +258,45 @@ mod tests {
     #[tokio::test]
     async fn records_metric_successfully() {
         let result = make_tool()
-            .execute(&project(), serde_json::json!({
-                "run_id": "run_test_1", "metric_name": "answer_quality", "score": 0.85
-            }))
-            .await.unwrap();
-        assert_eq!(result.output["run_id"],      "run_test_1");
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "run_id": "run_test_1", "metric_name": "answer_quality", "score": 0.85
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.output["run_id"], "run_test_1");
         assert_eq!(result.output["metric_name"], "answer_quality");
-        assert_eq!(result.output["recorded"],    true);
+        assert_eq!(result.output["recorded"], true);
         assert!((result.output["score"].as_f64().unwrap() - 0.85).abs() < 1e-9);
     }
 
     #[tokio::test]
     async fn score_above_half_defaults_to_passed() {
         let result = make_tool()
-            .execute(&project(), serde_json::json!({
-                "run_id": "r1", "metric_name": "m", "score": 0.7
-            }))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "run_id": "r1", "metric_name": "m", "score": 0.7
+                }),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["passed"], true);
     }
 
     #[tokio::test]
     async fn score_below_half_defaults_to_failed() {
         let result = make_tool()
-            .execute(&project(), serde_json::json!({
-                "run_id": "r1", "metric_name": "m", "score": 0.3
-            }))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "run_id": "r1", "metric_name": "m", "score": 0.3
+                }),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["passed"], false);
     }
 
@@ -258,10 +304,14 @@ mod tests {
     async fn explicit_passed_overrides_default() {
         // score 0.3 would default to failed, but explicit passed=true overrides
         let result = make_tool()
-            .execute(&project(), serde_json::json!({
-                "run_id": "r1", "metric_name": "m", "score": 0.3, "passed": true
-            }))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "run_id": "r1", "metric_name": "m", "score": 0.3, "passed": true
+                }),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["passed"], true);
     }
 
@@ -269,9 +319,14 @@ mod tests {
     async fn event_written_to_store() {
         let store = Arc::new(InMemoryStore::new());
         let tool = EvalScoreTool::new(store.clone());
-        tool.execute(&project(), serde_json::json!({
-            "run_id": "r1", "metric_name": "quality", "score": 0.9
-        })).await.unwrap();
+        tool.execute(
+            &project(),
+            serde_json::json!({
+                "run_id": "r1", "metric_name": "quality", "score": 0.9
+            }),
+        )
+        .await
+        .unwrap();
 
         // Verify an OutcomeRecorded event was written.
         use cairn_store::EventLog;
@@ -286,8 +341,12 @@ mod tests {
     #[tokio::test]
     async fn boundary_score_zero_is_valid() {
         let result = make_tool()
-            .execute(&project(), serde_json::json!({"run_id":"r","metric_name":"m","score":0.0}))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({"run_id":"r","metric_name":"m","score":0.0}),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["recorded"], true);
         assert_eq!(result.output["passed"], false); // 0.0 < 0.5
     }
@@ -295,8 +354,12 @@ mod tests {
     #[tokio::test]
     async fn boundary_score_one_is_valid() {
         let result = make_tool()
-            .execute(&project(), serde_json::json!({"run_id":"r","metric_name":"m","score":1.0}))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({"run_id":"r","metric_name":"m","score":1.0}),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.output["recorded"], true);
         assert_eq!(result.output["passed"], true); // 1.0 >= 0.5
     }

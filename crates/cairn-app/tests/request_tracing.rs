@@ -7,11 +7,11 @@ use axum::{
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
-use cairn_domain::{OperatorId, ProjectKey, SessionId, TenantId, WorkspaceId, WorkspaceKey};
 use cairn_domain::tenancy::TenantKey;
 use cairn_domain::tenancy::WorkspaceRole;
-use cairn_runtime::{SessionService, TenantService, WorkspaceMembershipService, WorkspaceService};
+use cairn_domain::{OperatorId, ProjectKey, SessionId, TenantId, WorkspaceId, WorkspaceKey};
 use cairn_runtime::projects::ProjectService;
+use cairn_runtime::{SessionService, TenantService, WorkspaceMembershipService, WorkspaceService};
 use tower::ServiceExt;
 
 const TOKEN: &str = "tracing-test-token";
@@ -35,10 +35,7 @@ async fn setup_project(app: &axum::Router, runtime: &cairn_runtime::InMemoryServ
         .await
         .unwrap();
 
-    let ws_key = WorkspaceKey::new(
-        TenantId::new("trace_tenant"),
-        WorkspaceId::new("trace_ws"),
-    );
+    let ws_key = WorkspaceKey::new(TenantId::new("trace_tenant"), WorkspaceId::new("trace_ws"));
     // Add service_token as a member so create_run_handler passes role check.
     runtime
         .workspace_memberships
@@ -47,7 +44,11 @@ async fn setup_project(app: &axum::Router, runtime: &cairn_runtime::InMemoryServ
         .unwrap();
 
     let project = ProjectKey::new("trace_tenant", "trace_ws", "trace_proj");
-    runtime.projects.create(project.clone(), "Trace Project".to_owned()).await.unwrap();
+    runtime
+        .projects
+        .create(project.clone(), "Trace Project".to_owned())
+        .await
+        .unwrap();
 
     runtime
         .sessions
@@ -64,7 +65,13 @@ async fn request_tracing_run_creation_produces_spans() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("trace_tenant") });
+    tokens.register(
+        TOKEN.to_string(),
+        AuthPrincipal::Operator {
+            operator_id: OperatorId::new("test_op"),
+            tenant: TenantKey::new("trace_tenant"),
+        },
+    );
     setup_project(&app, &runtime).await;
 
     // POST /v1/runs with a custom X-Trace-Id header.
@@ -138,7 +145,10 @@ async fn request_tracing_run_creation_produces_spans() {
     let has_run_created = spans
         .iter()
         .any(|s| s["event_type"].as_str() == Some("run_created"));
-    assert!(has_run_created, "expected a run_created span, got: {spans:?}");
+    assert!(
+        has_run_created,
+        "expected a run_created span, got: {spans:?}"
+    );
 }
 
 #[tokio::test]
@@ -147,7 +157,13 @@ async fn request_tracing_x_trace_id_header_set_on_response() {
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
+    tokens.register(
+        TOKEN.to_string(),
+        AuthPrincipal::Operator {
+            operator_id: OperatorId::new("test_op"),
+            tenant: TenantKey::new("default_tenant"),
+        },
+    );
 
     // Any request should get X-Trace-Id back.
     let resp = app

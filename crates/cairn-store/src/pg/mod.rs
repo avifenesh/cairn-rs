@@ -10,6 +10,6 @@ mod rebuild;
 
 pub use adapter::PgAdapter;
 pub use event_log::PgEventLog;
-pub use migration_runner::{PgMigrationRunner, registered_migrations};
+pub use migration_runner::{registered_migrations, PgMigrationRunner};
 pub use projections::PgSyncProjection;
 pub use rebuild::{ProjectionRebuilder, RebuildReport};

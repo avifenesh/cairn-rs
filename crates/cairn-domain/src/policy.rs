@@ -101,7 +101,6 @@ pub struct ApprovalPolicy {
     pub mode: ApprovalMode,
 }
 
-
 /// The kind of decision made by a guardrail rule evaluation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

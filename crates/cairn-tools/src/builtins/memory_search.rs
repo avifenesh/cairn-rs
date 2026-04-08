@@ -24,18 +24,26 @@ use super::{ToolError, ToolHandler, ToolResult, ToolTier};
 pub struct MemorySearchTool;
 
 impl MemorySearchTool {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl Default for MemorySearchTool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
 impl ToolHandler for MemorySearchTool {
-    fn name(&self) -> &str { "memory_search" }
+    fn name(&self) -> &str {
+        "memory_search"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Core }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Core
+    }
 
     fn description(&self) -> &str {
         "Search the agent's memory for relevant information. \
@@ -82,7 +90,9 @@ impl ToolHandler for MemorySearchTool {
 mod tests {
     use super::*;
 
-    fn project() -> ProjectKey { ProjectKey::new("t","w","p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     #[test]
     fn tier_is_core() {
@@ -99,7 +109,10 @@ mod tests {
     #[tokio::test]
     async fn stub_returns_empty_results() {
         let tool = MemorySearchTool::new();
-        let res = tool.execute(&project(), serde_json::json!({"query":"test"})).await.unwrap();
+        let res = tool
+            .execute(&project(), serde_json::json!({"query":"test"}))
+            .await
+            .unwrap();
         assert!(!res.truncated);
         assert_eq!(res.output["total"], 0);
     }

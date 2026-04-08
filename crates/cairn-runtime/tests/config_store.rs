@@ -3,11 +3,14 @@
 //! Tests cover: set/get/delete/list for InMemoryConfigStore and FileConfigStore,
 //! persistence across FileConfigStore reopen, and prefix-filtered listing.
 
-use std::path::PathBuf;
 use cairn_runtime::config_store::{ConfigStore, FileConfigStore, InMemoryConfigStore};
+use std::path::PathBuf;
 
 fn tmp_path(suffix: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("cairn_cfg_inttest_{suffix}_{}.toml", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "cairn_cfg_inttest_{suffix}_{}.toml",
+        std::process::id()
+    ))
 }
 
 // ── InMemoryConfigStore ───────────────────────────────────────────────────
@@ -15,7 +18,9 @@ fn tmp_path(suffix: &str) -> PathBuf {
 #[test]
 fn config_store_in_memory_set_get() {
     let store = InMemoryConfigStore::new();
-    store.set("agent.model", "claude-sonnet-4-6".to_owned()).unwrap();
+    store
+        .set("agent.model", "claude-sonnet-4-6".to_owned())
+        .unwrap();
     assert_eq!(store.get("agent.model").unwrap(), "claude-sonnet-4-6");
 }
 
@@ -29,9 +34,18 @@ fn config_store_in_memory_get_missing_is_none() {
 fn config_store_in_memory_delete_returns_existed() {
     let store = InMemoryConfigStore::new();
     store.set("key", "value".to_owned()).unwrap();
-    assert!(store.delete("key").unwrap(), "delete existing key must return true");
-    assert!(store.get("key").is_none(), "key must be absent after delete");
-    assert!(!store.delete("key").unwrap(), "delete missing key must return false");
+    assert!(
+        store.delete("key").unwrap(),
+        "delete existing key must return true"
+    );
+    assert!(
+        store.get("key").is_none(),
+        "key must be absent after delete"
+    );
+    assert!(
+        !store.delete("key").unwrap(),
+        "delete missing key must return false"
+    );
 }
 
 #[test]
@@ -80,7 +94,9 @@ fn config_store_file_set_get_delete() {
     let path = tmp_path("set_get_del");
     let store = FileConfigStore::open(&path).unwrap();
 
-    store.set("agent.model", "claude-haiku-4-5".to_owned()).unwrap();
+    store
+        .set("agent.model", "claude-haiku-4-5".to_owned())
+        .unwrap();
     store.set("server.port", "3000".to_owned()).unwrap();
 
     assert_eq!(store.get("agent.model").unwrap(), "claude-haiku-4-5");
@@ -101,7 +117,9 @@ fn config_store_file_list_with_prefix() {
 
     store.set("signal.poll_interval", "300".to_owned()).unwrap();
     store.set("signal.gh_owner", "acme".to_owned()).unwrap();
-    store.set("memory.context_budget", "8000".to_owned()).unwrap();
+    store
+        .set("memory.context_budget", "8000".to_owned())
+        .unwrap();
 
     let signal = store.list_prefix("signal.");
     assert_eq!(signal.len(), 2);
@@ -121,7 +139,9 @@ fn config_store_file_persists_across_reopen() {
     // First instance: write
     {
         let store = FileConfigStore::open(&path).unwrap();
-        store.set("agent.model", "claude-opus-4-6".to_owned()).unwrap();
+        store
+            .set("agent.model", "claude-opus-4-6".to_owned())
+            .unwrap();
         store.set("server.port", "8080".to_owned()).unwrap();
     }
 

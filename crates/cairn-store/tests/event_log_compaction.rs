@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    CommandId, EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId,
-    RuntimeEvent, SessionCreated, SessionId, TaskCreated, TaskId,
+    CommandId, EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
+    SessionCreated, SessionId, TaskCreated, TaskId,
 };
 use cairn_store::{
     event_log::{EntityRef, EventPosition},
@@ -25,20 +25,12 @@ fn project() -> ProjectKey {
 }
 
 fn ev(id: &str, payload: RuntimeEvent) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(
-        EventId::new(id),
-        EventSource::Runtime,
-        payload,
-    )
+    EventEnvelope::for_runtime_event(EventId::new(id), EventSource::Runtime, payload)
 }
 
 fn ev_with_causation(id: &str, cmd: &str, payload: RuntimeEvent) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(
-        EventId::new(id),
-        EventSource::Runtime,
-        payload,
-    )
-    .with_causation_id(CommandId::new(cmd))
+    EventEnvelope::for_runtime_event(EventId::new(id), EventSource::Runtime, payload)
+        .with_causation_id(CommandId::new(cmd))
 }
 
 fn session_event(n: u32) -> EventEnvelope<RuntimeEvent> {
@@ -119,7 +111,10 @@ async fn head_position_equals_event_count() {
 
     // Confirm empty on start.
     assert!(
-        EventLog::head_position(store.as_ref()).await.unwrap().is_none(),
+        EventLog::head_position(store.as_ref())
+            .await
+            .unwrap()
+            .is_none(),
         "empty store must have no head position"
     );
 
@@ -145,28 +140,42 @@ async fn read_stream_pagination_pages_through_50_events() {
     seed_50_events(&store).await;
 
     // Page 1: events 1–10.
-    let page1 = EventLog::read_stream(store.as_ref(), None, 10).await.unwrap();
+    let page1 = EventLog::read_stream(store.as_ref(), None, 10)
+        .await
+        .unwrap();
     assert_eq!(page1.len(), 10, "page 1 must return exactly 10 events");
     assert_eq!(page1[0].position, EventPosition(1));
     assert_eq!(page1[9].position, EventPosition(10));
 
     // Page 2: events 11–20.
     let cursor1 = page1.last().unwrap().position;
-    let page2 = EventLog::read_stream(store.as_ref(), Some(cursor1), 10).await.unwrap();
+    let page2 = EventLog::read_stream(store.as_ref(), Some(cursor1), 10)
+        .await
+        .unwrap();
     assert_eq!(page2.len(), 10, "page 2 must return 10 events after cursor");
     assert_eq!(page2[0].position, EventPosition(11));
 
     // Pages 3, 4, 5 — collect all remaining.
     let cursor2 = page2.last().unwrap().position;
-    let page3 = EventLog::read_stream(store.as_ref(), Some(cursor2), 10).await.unwrap();
+    let page3 = EventLog::read_stream(store.as_ref(), Some(cursor2), 10)
+        .await
+        .unwrap();
     let cursor3 = page3.last().unwrap().position;
-    let page4 = EventLog::read_stream(store.as_ref(), Some(cursor3), 10).await.unwrap();
+    let page4 = EventLog::read_stream(store.as_ref(), Some(cursor3), 10)
+        .await
+        .unwrap();
     let cursor4 = page4.last().unwrap().position;
-    let page5 = EventLog::read_stream(store.as_ref(), Some(cursor4), 10).await.unwrap();
+    let page5 = EventLog::read_stream(store.as_ref(), Some(cursor4), 10)
+        .await
+        .unwrap();
 
     assert_eq!(page3.len(), 10);
     assert_eq!(page4.len(), 10);
-    assert_eq!(page5.len(), 10, "page 5 must cover the final 10 events (41–50)");
+    assert_eq!(
+        page5.len(),
+        10,
+        "page 5 must cover the final 10 events (41–50)"
+    );
     assert_eq!(page5.last().unwrap().position, EventPosition(50));
 
     // No overlap: all cursors are strictly increasing.
@@ -174,7 +183,11 @@ async fn read_stream_pagination_pages_through_50_events() {
         .iter()
         .flat_map(|p| p.iter().map(|e| e.position))
         .collect();
-    assert_eq!(all_positions.len(), 50, "all 5 pages must cover all 50 events exactly once");
+    assert_eq!(
+        all_positions.len(),
+        50,
+        "all 5 pages must cover all 50 events exactly once"
+    );
 
     // Page after the last event must be empty.
     let empty = EventLog::read_stream(store.as_ref(), Some(EventPosition(50)), 10)
@@ -200,7 +213,11 @@ async fn read_by_entity_scoped_pagination() {
     .await
     .unwrap();
 
-    assert_eq!(sess_events.len(), 1, "sess_3 must have exactly 1 entity-scoped event");
+    assert_eq!(
+        sess_events.len(),
+        1,
+        "sess_3 must have exactly 1 entity-scoped event"
+    );
     assert!(
         matches!(
             &sess_events[0].envelope.payload,
@@ -219,7 +236,11 @@ async fn read_by_entity_scoped_pagination() {
     )
     .await
     .unwrap();
-    assert_eq!(run0_events.len(), 1, "run_0 must have exactly 1 entity-scoped event");
+    assert_eq!(
+        run0_events.len(),
+        1,
+        "run_0 must have exactly 1 entity-scoped event"
+    );
 
     // task_1 has 1 TaskCreated event.
     let task1_events = EventLog::read_by_entity(
@@ -230,7 +251,11 @@ async fn read_by_entity_scoped_pagination() {
     )
     .await
     .unwrap();
-    assert_eq!(task1_events.len(), 1, "task_1 must have 1 entity-scoped event");
+    assert_eq!(
+        task1_events.len(),
+        1,
+        "task_1 must have 1 entity-scoped event"
+    );
 
     // limit=5 applied on a session that doesn't exist returns empty.
     let missing = EventLog::read_by_entity(
@@ -270,10 +295,7 @@ async fn find_by_causation_id_across_large_event_set() {
     let found_0 = EventLog::find_by_causation_id(store.as_ref(), "cmd_0")
         .await
         .unwrap();
-    assert!(
-        found_0.is_some(),
-        "cmd_0 must be found among 50 events"
-    );
+    assert!(found_0.is_some(), "cmd_0 must be found among 50 events");
 
     // cmd_5 tags run_5's RunCreated.
     let found_5 = EventLog::find_by_causation_id(store.as_ref(), "cmd_5")
@@ -283,7 +305,9 @@ async fn find_by_causation_id_across_large_event_set() {
 
     // cmd_10, cmd_15 also exist.
     for cmd in ["cmd_10", "cmd_15"] {
-        let found = EventLog::find_by_causation_id(store.as_ref(), cmd).await.unwrap();
+        let found = EventLog::find_by_causation_id(store.as_ref(), cmd)
+            .await
+            .unwrap();
         assert!(found.is_some(), "{cmd} must be found in large event set");
     }
 
@@ -312,7 +336,9 @@ async fn positions_are_strictly_monotonically_increasing() {
     let store = Arc::new(InMemoryStore::new());
     seed_50_events(&store).await;
 
-    let all = EventLog::read_stream(store.as_ref(), None, 100).await.unwrap();
+    let all = EventLog::read_stream(store.as_ref(), None, 100)
+        .await
+        .unwrap();
     assert_eq!(all.len(), 50, "must have exactly 50 events");
 
     // Strict monotonic increase: each position must be exactly prev + 1.
@@ -322,13 +348,16 @@ async fn positions_are_strictly_monotonically_increasing() {
         assert!(
             next > prev,
             "positions must be strictly increasing: {:?} must be < {:?}",
-            prev, next
+            prev,
+            next
         );
         assert_eq!(
             next.0,
             prev.0 + 1,
             "positions must be sequential (no gaps): expected {:?}+1={:?} but got {:?}",
-            prev, prev.0 + 1, next
+            prev,
+            prev.0 + 1,
+            next
         );
     }
 
@@ -338,11 +367,7 @@ async fn positions_are_strictly_monotonically_increasing() {
 
     // No duplicate positions.
     let unique: std::collections::HashSet<_> = all.iter().map(|e| e.position).collect();
-    assert_eq!(
-        unique.len(),
-        50,
-        "all 50 positions must be unique"
-    );
+    assert_eq!(unique.len(), 50, "all 50 positions must be unique");
 }
 
 /// Bulk-append variant: all 50 events in a single append call still get
@@ -372,10 +397,12 @@ async fn bulk_append_preserves_sequential_positions() {
 
     // All returned positions are sequential.
     for (i, pos) in positions.iter().enumerate() {
-        assert_eq!(pos.0, (i + 1) as u64,
-            "position {i} must be {}", i + 1);
+        assert_eq!(pos.0, (i + 1) as u64, "position {i} must be {}", i + 1);
     }
 
-    let head = EventLog::head_position(store.as_ref()).await.unwrap().unwrap();
+    let head = EventLog::head_position(store.as_ref())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(head, EventPosition(50));
 }

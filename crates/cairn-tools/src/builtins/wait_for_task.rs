@@ -18,7 +18,7 @@ use super::{ToolError, ToolHandler, ToolResult, ToolTier};
 /// Maximum wait time (hard cap regardless of what caller requests).
 const MAX_WAIT_SECS: u64 = 300; // 5 minutes
 /// Minimum poll interval.
-const MIN_POLL_MS:   u64 = 500;
+const MIN_POLL_MS: u64 = 500;
 
 /// Poll until a task is terminal.
 pub struct WaitForTaskTool {
@@ -26,13 +26,19 @@ pub struct WaitForTaskTool {
 }
 
 impl WaitForTaskTool {
-    pub fn new(store: Arc<dyn TaskReadModel>) -> Self { Self { store } }
+    pub fn new(store: Arc<dyn TaskReadModel>) -> Self {
+        Self { store }
+    }
 }
 
 #[async_trait]
 impl ToolHandler for WaitForTaskTool {
-    fn name(&self) -> &str { "wait_for_task" }
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn name(&self) -> &str {
+        "wait_for_task"
+    }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
     fn description(&self) -> &str {
         "Wait until a task reaches a terminal state (completed/failed/canceled). \
          Polls at the given interval and returns the final task state, \
@@ -64,25 +70,33 @@ impl ToolHandler for WaitForTaskTool {
             }
         })
     }
-    fn execution_class(&self) -> ExecutionClass { ExecutionClass::SandboxedProcess }
+    fn execution_class(&self) -> ExecutionClass {
+        ExecutionClass::SandboxedProcess
+    }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
-        let task_id_str = args.get("task_id").and_then(|v| v.as_str())
+        let task_id_str = args
+            .get("task_id")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs {
-                field: "task_id".into(), message: "required string".into(),
+                field: "task_id".into(),
+                message: "required string".into(),
             })?;
         let task_id = TaskId::new(task_id_str);
 
-        let timeout_secs = args.get("timeout_secs").and_then(|v| v.as_u64())
+        let timeout_secs = args
+            .get("timeout_secs")
+            .and_then(|v| v.as_u64())
             .map(|n| n.min(MAX_WAIT_SECS))
             .unwrap_or(60);
 
-        let poll_ms = args.get("poll_interval_ms").and_then(|v| v.as_u64())
+        let poll_ms = args
+            .get("poll_interval_ms")
+            .and_then(|v| v.as_u64())
             .map(|n| n.max(MIN_POLL_MS))
             .unwrap_or(1_000);
 
-        let deadline = std::time::Instant::now()
-            + std::time::Duration::from_secs(timeout_secs);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
 
         loop {
             match TaskReadModel::get(self.store.as_ref(), &task_id).await {
@@ -97,7 +111,9 @@ impl ToolHandler for WaitForTaskTool {
                     }
                 }
                 Ok(None) => {
-                    return Err(ToolError::Permanent(format!("task not found: {task_id_str}")));
+                    return Err(ToolError::Permanent(format!(
+                        "task not found: {task_id_str}"
+                    )));
                 }
                 Err(e) => {
                     return Err(ToolError::Transient(format!("store error: {e}")));
@@ -116,27 +132,43 @@ impl ToolHandler for WaitForTaskTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cairn_domain::{FailureClass, ProjectKey, TaskId};
+    use cairn_runtime::{services::TaskServiceImpl, tasks::TaskService, InMemoryServices};
     use std::sync::Arc;
-    use cairn_domain::{ProjectKey, TaskId, FailureClass};
-    use cairn_runtime::{InMemoryServices, tasks::TaskService, services::TaskServiceImpl};
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
-    async fn svc() -> Arc<InMemoryServices> { Arc::new(InMemoryServices::new()) }
+    async fn svc() -> Arc<InMemoryServices> {
+        Arc::new(InMemoryServices::new())
+    }
 
     #[tokio::test]
     async fn returns_immediately_when_already_terminal() {
         let svc = svc().await;
-        svc.tasks.submit(&project(), TaskId::new("task_wt"), None, None, 0).await.unwrap();
-        svc.tasks.claim(&TaskId::new("task_wt"), "worker".into(), 30_000).await.unwrap();
+        svc.tasks
+            .submit(&project(), TaskId::new("task_wt"), None, None, 0)
+            .await
+            .unwrap();
+        svc.tasks
+            .claim(&TaskId::new("task_wt"), "worker".into(), 30_000)
+            .await
+            .unwrap();
         svc.tasks.start(&TaskId::new("task_wt")).await.unwrap();
         svc.tasks.complete(&TaskId::new("task_wt")).await.unwrap();
 
         let tool = WaitForTaskTool::new(svc.store.clone());
-        let res = tool.execute(&project(), serde_json::json!({
-            "task_id": "task_wt",
-            "timeout_secs": 5
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "task_id": "task_wt",
+                    "timeout_secs": 5
+                }),
+            )
+            .await
+            .unwrap();
         assert_eq!(res.output["state"], "completed");
         assert_eq!(res.output["terminal"], true);
     }
@@ -144,15 +176,24 @@ mod tests {
     #[tokio::test]
     async fn times_out_when_task_not_terminal() {
         let svc = svc().await;
-        svc.tasks.submit(&project(), TaskId::new("task_wt2"), None, None, 0).await.unwrap();
+        svc.tasks
+            .submit(&project(), TaskId::new("task_wt2"), None, None, 0)
+            .await
+            .unwrap();
         // Task stays in queued — will never be terminal before timeout.
 
         let tool = WaitForTaskTool::new(svc.store.clone());
-        let err = tool.execute(&project(), serde_json::json!({
-            "task_id": "task_wt2",
-            "timeout_secs": 1,
-            "poll_interval_ms": 500
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "task_id": "task_wt2",
+                    "timeout_secs": 1,
+                    "poll_interval_ms": 500
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::TimedOut));
     }
 
@@ -160,15 +201,24 @@ mod tests {
     async fn not_found_is_permanent_error() {
         let svc = svc().await;
         let tool = WaitForTaskTool::new(svc.store.clone());
-        let err = tool.execute(&project(), serde_json::json!({
-            "task_id": "nope",
-            "timeout_secs": 1
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "task_id": "nope",
+                    "timeout_secs": 1
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::Permanent(_)));
     }
 
     #[test]
     fn tier_is_registered() {
-        assert_eq!(WaitForTaskTool::new(Arc::new(cairn_store::InMemoryStore::new())).tier(), ToolTier::Registered);
+        assert_eq!(
+            WaitForTaskTool::new(Arc::new(cairn_store::InMemoryStore::new())).tier(),
+            ToolTier::Registered
+        );
     }
 }

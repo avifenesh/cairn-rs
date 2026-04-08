@@ -131,7 +131,11 @@ pub trait OperatorApprovalActions: Send + Sync {
         _approval_ids: Vec<String>,
         _reason: Option<String>,
     ) -> Result<BulkApprovalResponse, OperatorError> {
-        Ok(BulkApprovalResponse { processed: 0, skipped: 0, errors: vec![] })
+        Ok(BulkApprovalResponse {
+            processed: 0,
+            skipped: 0,
+            errors: vec![],
+        })
     }
 
     /// Deny multiple approvals in one call.
@@ -142,7 +146,11 @@ pub trait OperatorApprovalActions: Send + Sync {
         _approval_ids: Vec<String>,
         _reason: Option<String>,
     ) -> Result<BulkApprovalResponse, OperatorError> {
-        Ok(BulkApprovalResponse { processed: 0, skipped: 0, errors: vec![] })
+        Ok(BulkApprovalResponse {
+            processed: 0,
+            skipped: 0,
+            errors: vec![],
+        })
     }
 
     /// Defer a single approval until a specified wall-clock time (ms since epoch).
@@ -175,7 +183,7 @@ mod tests {
                 project: ProjectKey::new("t", "w", "p"),
                 state: RunState::Running,
                 prompt_release_id: None,
-            agent_role_id: None,
+                agent_role_id: None,
                 failure_class: None,
                 pause_reason: None,
                 resume_trigger: None,

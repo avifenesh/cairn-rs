@@ -67,8 +67,5 @@ pub trait TaskReadModel: Send + Sync {
 #[async_trait::async_trait]
 pub trait TaskLeaseExpiredReadModel: Send + Sync {
     /// List tasks whose lease has expired as of `now_ms`.
-    async fn list_expired(
-        &self,
-        now_ms: u64,
-    ) -> Result<Vec<TaskRecord>, crate::error::StoreError>;
+    async fn list_expired(&self, now_ms: u64) -> Result<Vec<TaskRecord>, crate::error::StoreError>;
 }

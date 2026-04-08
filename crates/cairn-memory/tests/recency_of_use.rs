@@ -67,7 +67,11 @@ async fn recency_of_use_second_query_has_positive_recency() {
         "second query: recency_of_use must be > 0, got {:?}",
         recency
     );
-    assert_eq!(recency, Some(1.0), "within 1h of last retrieval => recency=1.0");
+    assert_eq!(
+        recency,
+        Some(1.0),
+        "within 1h of last retrieval => recency=1.0"
+    );
 }
 
 /// A recently-retrieved chunk scores strictly higher than a never-retrieved chunk.
@@ -147,8 +151,14 @@ async fn recency_of_use_recently_retrieved_outscores_never_retrieved() {
         .find(|r| r.chunk.document_id == KnowledgeDocumentId::new("doc_cold"))
         .expect("doc_cold missing");
 
-    assert!(hot.breakdown.recency_of_use.is_some(), "doc_hot recency must be Some");
-    assert_eq!(cold.breakdown.recency_of_use, None, "doc_cold recency must be None");
+    assert!(
+        hot.breakdown.recency_of_use.is_some(),
+        "doc_hot recency must be Some"
+    );
+    assert_eq!(
+        cold.breakdown.recency_of_use, None,
+        "doc_cold recency must be None"
+    );
 
     assert!(
         hot.score > cold.score,
@@ -197,8 +207,10 @@ async fn recency_of_use_repeated_queries_maintain_recency() {
     // First query: recency is None (never retrieved).
     let r0 = retrieval.query(q.clone()).await.unwrap();
     assert!(!r0.results.is_empty(), "first query must return results");
-    assert_eq!(r0.results[0].breakdown.recency_of_use, None,
-        "recency must be None before any retrieval is recorded");
+    assert_eq!(
+        r0.results[0].breakdown.recency_of_use, None,
+        "recency must be None before any retrieval is recorded"
+    );
 
     // Subsequent queries: recency_of_use is set (within 1h window → 1.0).
     for _ in 0..3 {

@@ -23,7 +23,9 @@ pub struct GitOperationsTool {
 
 impl GitOperationsTool {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
-        Self { workspace_root: workspace_root.into() }
+        Self {
+            workspace_root: workspace_root.into(),
+        }
     }
 }
 
@@ -36,9 +38,13 @@ const PROTECTED_BRANCHES: &[&str] = &["main", "master", "develop"];
 
 #[async_trait]
 impl ToolHandler for GitOperationsTool {
-    fn name(&self) -> &str { "git_operations" }
+    fn name(&self) -> &str {
+        "git_operations"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
 
     fn description(&self) -> &str {
         "Run git commands (status, diff, log, branch, checkout, commit) within the \
@@ -74,24 +80,33 @@ impl ToolHandler for GitOperationsTool {
     }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
-        let command = args.get("command").and_then(|v| v.as_str())
+        let command = args
+            .get("command")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs {
-                field: "command".into(), message: "required string".into(),
+                field: "command".into(),
+                message: "required string".into(),
             })?;
 
-        let extra_args: Vec<String> = args.get("args")
+        let extra_args: Vec<String> = args
+            .get("args")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Validate command is in our allowed set.
-        let all_allowed: Vec<&str> = READONLY_CMDS.iter()
+        let all_allowed: Vec<&str> = READONLY_CMDS
+            .iter()
             .chain(WRITE_CMDS.iter())
             .copied()
             .collect();
         if !all_allowed.contains(&command) {
             return Err(ToolError::InvalidArgs {
-                field:   "command".into(),
+                field: "command".into(),
                 message: format!(
                     "unsupported command '{command}' — allowed: {}",
                     all_allowed.join(", ")
@@ -119,11 +134,14 @@ impl ToolHandler for GitOperationsTool {
 
         // Shell-injection guard: reject args with shell metacharacters.
         for arg in &extra_args {
-            if arg.contains(';') || arg.contains('&') || arg.contains('|')
-                || arg.contains('`') || arg.contains('$')
+            if arg.contains(';')
+                || arg.contains('&')
+                || arg.contains('|')
+                || arg.contains('`')
+                || arg.contains('$')
             {
                 return Err(ToolError::InvalidArgs {
-                    field:   "args".into(),
+                    field: "args".into(),
                     message: format!("argument contains unsafe characters: {arg}"),
                 });
             }
@@ -137,7 +155,8 @@ impl ToolHandler for GitOperationsTool {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let child = cmd.spawn()
+        let child = cmd
+            .spawn()
             .map_err(|e| ToolError::Transient(format!("failed to spawn git: {e}")))?;
 
         let output = tokio::time::timeout(
@@ -174,7 +193,9 @@ mod tests {
     use super::*;
     use cairn_domain::ProjectKey;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     fn temp_git_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -186,10 +207,14 @@ mod tests {
             .unwrap();
         std::process::Command::new("git")
             .args(["config", "user.email", "test@cairn.test"])
-            .current_dir(dir.path()).output().unwrap();
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
         std::process::Command::new("git")
             .args(["config", "user.name", "Test"])
-            .current_dir(dir.path()).output().unwrap();
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
         dir
     }
 
@@ -199,9 +224,14 @@ mod tests {
     async fn git_status_in_empty_repo() {
         let repo = temp_git_repo();
         let tool = GitOperationsTool::new(repo.path());
-        let res = tool.execute(&project(), serde_json::json!({ "command": "status" }))
-            .await.unwrap();
-        assert!(res.output["command"].as_str().unwrap().contains("git status"));
+        let res = tool
+            .execute(&project(), serde_json::json!({ "command": "status" }))
+            .await
+            .unwrap();
+        assert!(res.output["command"]
+            .as_str()
+            .unwrap()
+            .contains("git status"));
     }
 
     #[tokio::test]
@@ -209,7 +239,9 @@ mod tests {
         let repo = temp_git_repo();
         let tool = GitOperationsTool::new(repo.path());
         // Empty repo has no commits; git log exits non-zero — expect Permanent error.
-        let _ = tool.execute(&project(), serde_json::json!({ "command": "log" })).await;
+        let _ = tool
+            .execute(&project(), serde_json::json!({ "command": "log" }))
+            .await;
         // Either success (some logs) or Permanent (no commits yet) — both are fine.
     }
 
@@ -219,9 +251,15 @@ mod tests {
     async fn rejects_unsupported_command() {
         let repo = temp_git_repo();
         let tool = GitOperationsTool::new(repo.path());
-        let err = tool.execute(&project(), serde_json::json!({
-            "command": "push"
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "command": "push"
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -229,10 +267,16 @@ mod tests {
     async fn rejects_protected_branch_checkout() {
         let repo = temp_git_repo();
         let tool = GitOperationsTool::new(repo.path());
-        let err = tool.execute(&project(), serde_json::json!({
-            "command": "checkout",
-            "args": ["main"]
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "command": "checkout",
+                    "args": ["main"]
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
         assert!(err.to_string().contains("protected branch"));
     }
@@ -241,10 +285,16 @@ mod tests {
     async fn rejects_shell_injection() {
         let repo = temp_git_repo();
         let tool = GitOperationsTool::new(repo.path());
-        let err = tool.execute(&project(), serde_json::json!({
-            "command": "status",
-            "args": ["; rm -rf /"]
-        })).await.unwrap_err();
+        let err = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "command": "status",
+                    "args": ["; rm -rf /"]
+                }),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
         assert!(err.to_string().contains("unsafe characters"));
     }
@@ -253,7 +303,10 @@ mod tests {
     async fn missing_command_is_invalid() {
         let repo = temp_git_repo();
         let tool = GitOperationsTool::new(repo.path());
-        let err = tool.execute(&project(), serde_json::json!({})).await.unwrap_err();
+        let err = tool
+            .execute(&project(), serde_json::json!({}))
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -268,8 +321,12 @@ mod tests {
     fn schema_requires_command() {
         let tool = GitOperationsTool::new("/tmp");
         let schema = tool.parameters_schema();
-        let required: Vec<String> = schema["required"].as_array().unwrap()
-            .iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+        let required: Vec<String> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
         assert!(required.contains(&"command".to_owned()));
     }
 }

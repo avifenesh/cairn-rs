@@ -24,21 +24,25 @@ pub mod transport;
 
 pub use builtin::{ToolDescriptor, ToolHost, ToolInput, ToolOutcome};
 pub use builtins::{
-    BuiltinToolDescriptor, BuiltinToolRegistry,
-    CancelTaskTool, FileReadTool, FileWriteTool, GetRunTool, GetTaskTool,
-    GitOperationsTool, HttpRequestTool, WaitForTaskTool,
-    GraphQueryTool, ListRunsTool, EvalScoreTool, CreateTaskTool, MemorySearchTool, MemoryStoreTool,
-    CalculateTool, GlobFindTool, GrepSearchTool, JsonExtractTool,
-    NotifyOperatorTool, NotificationSink, NoopSink, ResolveApprovalTool,
-    ShellExecTool, SummarizeTextTool, ToolSearchTool, WebFetchTool,
-    UpdateMemoryTool, DeleteMemoryTool, ScheduleTaskTool, SearchEventsTool,
-    GetApprovalsTool, ScratchPadTool,
-    ToolError, ToolHandler, ToolResult, ToolTier,
+    BuiltinToolDescriptor, BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool,
+    DeleteMemoryTool, EvalScoreTool, FileReadTool, FileWriteTool, GetApprovalsTool, GetRunTool,
+    GetTaskTool, GitOperationsTool, GlobFindTool, GraphQueryTool, GrepSearchTool, HttpRequestTool,
+    JsonExtractTool, ListRunsTool, MemorySearchTool, MemoryStoreTool, NoopSink, NotificationSink,
+    NotifyOperatorTool, ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool, SearchEventsTool,
+    ShellExecTool, SummarizeTextTool, ToolError, ToolHandler, ToolResult, ToolSearchTool, ToolTier,
+    UpdateMemoryTool, WaitForTaskTool, WebFetchTool,
 };
 pub use execution_class::{select_execution_config, SelectedConfig};
 pub use executor::{execute_builtin, ExecutionOutcome};
 pub use graph_events::{ToolInvocationNodeData, UsedToolEdgeData};
 pub use invocation::{InvocationRequest, InvocationResult, InvocationService};
+pub use mcp_client::{
+    mcp_endpoint_for_manifest, McpClient, McpEndpoint, McpError, McpTool, MCP_PROTOCOL_VERSION,
+};
+pub use mcp_server::{
+    McpCallRequest, McpCallResponse, McpServer, McpServerError, McpToolInfo, McpToolsResponse,
+    MockMcpProcess,
+};
 pub use permission_events::PermissionDecisionEvent;
 pub use permissions::{
     DeclaredPermissions, InvocationGrants, Permission, PermissionCheckResult, PermissionGate,
@@ -50,14 +54,6 @@ pub use plugin_bridge::{
     build_cancel_request, build_channels_deliver_request, build_eval_score_request,
     build_hooks_post_turn_request, build_initialize_request, build_policy_evaluate_request,
     build_signals_poll_request, build_tools_invoke_request, invoke_result_to_outcome,
-};
-pub use mcp_client::{
-    mcp_endpoint_for_manifest, McpClient, McpEndpoint, McpError, McpTool,
-    MCP_PROTOCOL_VERSION,
-};
-pub use mcp_server::{
-    McpCallRequest, McpCallResponse, McpServer, McpServerError, McpToolInfo, McpToolsResponse,
-    MockMcpProcess,
 };
 pub use plugin_host::{PluginHostError, StdioPluginHost};
 pub use plugins::{PluginCapability, PluginHost, PluginLimits, PluginManifest, PluginState};
@@ -192,5 +188,9 @@ pub async fn execute_eval_score(
     _actual_output: serde_json::Value,
 ) -> Result<EvalScoreResult, String> {
     // Stub implementation — real version would invoke the plugin via JSON-RPC.
-    Ok(EvalScoreResult { score: 0.0, passed: false, reasoning: None })
+    Ok(EvalScoreResult {
+        score: 0.0,
+        passed: false,
+        reasoning: None,
+    })
 }

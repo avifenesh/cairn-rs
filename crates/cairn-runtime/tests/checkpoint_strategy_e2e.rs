@@ -9,12 +9,11 @@
 
 use std::sync::Arc;
 
+use cairn_domain::ids::CheckpointId;
 use cairn_domain::lifecycle::CheckpointDisposition;
 use cairn_domain::{
-    CheckpointStrategySet, EventEnvelope, EventId, EventSource, ProjectKey, RunId,
-    RuntimeEvent,
+    CheckpointStrategySet, EventEnvelope, EventId, EventSource, ProjectKey, RunId, RuntimeEvent,
 };
-use cairn_domain::ids::CheckpointId;
 use cairn_runtime::checkpoints::CheckpointService;
 use cairn_runtime::services::CheckpointServiceImpl;
 use cairn_store::projections::CheckpointStrategyReadModel;
@@ -70,7 +69,11 @@ async fn set_strategy_and_verify_retrievable() {
         .unwrap()
         .expect("strategy must be retrievable after CheckpointStrategySet event");
 
-    assert_eq!(strategy.run_id, run(), "strategy must be scoped to the correct run");
+    assert_eq!(
+        strategy.run_id,
+        run(),
+        "strategy must be scoped to the correct run"
+    );
     assert_eq!(
         strategy.strategy_id, "strat_interval_30s",
         "strategy_id must round-trip"
@@ -82,12 +85,10 @@ async fn set_strategy_and_verify_retrievable() {
     );
 
     // No strategy for an unrelated run.
-    let other = CheckpointStrategyReadModel::get_by_run(
-        store.as_ref(),
-        &RunId::new("run_no_strategy"),
-    )
-    .await
-    .unwrap();
+    let other =
+        CheckpointStrategyReadModel::get_by_run(store.as_ref(), &RunId::new("run_no_strategy"))
+            .await
+            .unwrap();
     assert!(
         other.is_none(),
         "no strategy must exist for a run that was never configured"
@@ -106,7 +107,11 @@ async fn multiple_checkpoints_oldest_superseded_latest_is_most_recent() {
 
     // ── (3) Save five checkpoints in sequence ────────────────────────────
     let checkpoint_ids = [
-        cp("cp_s1"), cp("cp_s2"), cp("cp_s3"), cp("cp_s4"), cp("cp_s5"),
+        cp("cp_s1"),
+        cp("cp_s2"),
+        cp("cp_s3"),
+        cp("cp_s4"),
+        cp("cp_s5"),
     ];
 
     for id in &checkpoint_ids {
@@ -165,7 +170,10 @@ async fn multiple_checkpoints_oldest_superseded_latest_is_most_recent() {
         .iter()
         .filter(|c| c.disposition == CheckpointDisposition::Superseded)
         .count();
-    assert_eq!(superseded_count, 4, "the 4 older checkpoints must be Superseded");
+    assert_eq!(
+        superseded_count, 4,
+        "the 4 older checkpoints must be Superseded"
+    );
 }
 
 // ── Strategy update (second set overwrites) ───────────────────────────────────
@@ -227,7 +235,10 @@ async fn strategy_update_replaces_previous() {
         v2.strategy_id, "strat_v2_updated",
         "strategy must be replaced on second set"
     );
-    assert_ne!(v2.strategy_id, v1.strategy_id, "updated strategy must differ from original");
+    assert_ne!(
+        v2.strategy_id, v1.strategy_id,
+        "updated strategy must differ from original"
+    );
 }
 
 // ── Checkpoints for different runs are independent ────────────────────────────
@@ -245,11 +256,15 @@ async fn checkpoints_scoped_per_run() {
 
     // Save 3 checkpoints for run_a.
     for i in 0u32..3 {
-        svc.save(&proj, &run_a, cp(&format!("cp_a_{i}"))).await.unwrap();
+        svc.save(&proj, &run_a, cp(&format!("cp_a_{i}")))
+            .await
+            .unwrap();
     }
     // Save 2 checkpoints for run_b.
     for i in 0u32..2 {
-        svc.save(&proj, &run_b, cp(&format!("cp_b_{i}"))).await.unwrap();
+        svc.save(&proj, &run_b, cp(&format!("cp_b_{i}")))
+            .await
+            .unwrap();
     }
 
     let a_all = svc.list_by_run(&run_a, 20).await.unwrap();
@@ -262,8 +277,16 @@ async fn checkpoints_scoped_per_run() {
     let a_latest = svc.latest_for_run(&run_a).await.unwrap().unwrap();
     let b_latest = svc.latest_for_run(&run_b).await.unwrap().unwrap();
 
-    assert_eq!(a_latest.checkpoint_id, cp("cp_a_2"), "run_a latest must be cp_a_2");
-    assert_eq!(b_latest.checkpoint_id, cp("cp_b_1"), "run_b latest must be cp_b_1");
+    assert_eq!(
+        a_latest.checkpoint_id,
+        cp("cp_a_2"),
+        "run_a latest must be cp_a_2"
+    );
+    assert_eq!(
+        b_latest.checkpoint_id,
+        cp("cp_b_1"),
+        "run_b latest must be cp_b_1"
+    );
     assert_ne!(
         a_latest.checkpoint_id, b_latest.checkpoint_id,
         "runs must have independent Latest checkpoints"

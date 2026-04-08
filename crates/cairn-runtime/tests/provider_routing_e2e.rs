@@ -15,17 +15,17 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cairn_domain::providers::{
     OperationKind, ProviderBindingRecord, ProviderBindingSettings, ProviderCallStatus,
-    ProviderCapability, ProviderConnectionStatus, ProviderModelCapability,
-    RouteAttemptDecision, RouteDecisionStatus,
+    ProviderCapability, ProviderConnectionStatus, ProviderModelCapability, RouteAttemptDecision,
+    RouteDecisionStatus,
 };
 use cairn_domain::selectors::SelectorContext;
 use cairn_domain::*;
 use cairn_runtime::error::RuntimeError;
+use cairn_runtime::routing::RouteResolverService;
 use cairn_runtime::services::event_helpers::make_envelope;
 use cairn_runtime::services::route_resolver_impl::{
     BindingQuery, FallbackChainResolver, RankedBinding, SimpleRouteResolver,
 };
-use cairn_runtime::routing::RouteResolverService;
 use cairn_store::projections::{
     ProviderBindingReadModel, ProviderCallReadModel, ProviderConnectionReadModel,
     RouteDecisionReadModel,
@@ -115,33 +115,37 @@ async fn seed_store(store: &Arc<InMemoryStore>) {
                     registered_at: 0,
                 },
             )),
-            make_envelope(RuntimeEvent::ProviderBindingCreated(ProviderBindingCreated {
-                project: project(),
-                provider_binding_id: ProviderBindingId::new("binding_primary"),
-                provider_connection_id: ProviderConnectionId::new("conn_openai"),
-                provider_model_id: ProviderModelId::new("gpt-4o"),
-                operation_kind: OperationKind::Generate,
-                settings: ProviderBindingSettings {
-                    required_capabilities: vec![ProviderCapability::Streaming],
-                    ..ProviderBindingSettings::default()
+            make_envelope(RuntimeEvent::ProviderBindingCreated(
+                ProviderBindingCreated {
+                    project: project(),
+                    provider_binding_id: ProviderBindingId::new("binding_primary"),
+                    provider_connection_id: ProviderConnectionId::new("conn_openai"),
+                    provider_model_id: ProviderModelId::new("gpt-4o"),
+                    operation_kind: OperationKind::Generate,
+                    settings: ProviderBindingSettings {
+                        required_capabilities: vec![ProviderCapability::Streaming],
+                        ..ProviderBindingSettings::default()
+                    },
+                    policy_id: None,
+                    active: true,
+                    created_at: 0,
+                    estimated_cost_micros: None,
                 },
-                policy_id: None,
-                active: true,
-                created_at: 0,
-                estimated_cost_micros: None,
-            })),
-            make_envelope(RuntimeEvent::ProviderBindingCreated(ProviderBindingCreated {
-                project: project(),
-                provider_binding_id: ProviderBindingId::new("binding_fallback"),
-                provider_connection_id: ProviderConnectionId::new("conn_bedrock"),
-                provider_model_id: ProviderModelId::new("claude-3-5-sonnet"),
-                operation_kind: OperationKind::Generate,
-                settings: ProviderBindingSettings::default(),
-                policy_id: None,
-                active: true,
-                created_at: 1,
-                estimated_cost_micros: None,
-            })),
+            )),
+            make_envelope(RuntimeEvent::ProviderBindingCreated(
+                ProviderBindingCreated {
+                    project: project(),
+                    provider_binding_id: ProviderBindingId::new("binding_fallback"),
+                    provider_connection_id: ProviderConnectionId::new("conn_bedrock"),
+                    provider_model_id: ProviderModelId::new("claude-3-5-sonnet"),
+                    operation_kind: OperationKind::Generate,
+                    settings: ProviderBindingSettings::default(),
+                    policy_id: None,
+                    active: true,
+                    created_at: 1,
+                    estimated_cost_micros: None,
+                },
+            )),
         ])
         .await
         .unwrap();
@@ -243,18 +247,26 @@ async fn provider_routing_full_lifecycle() {
     );
     // Verify the declared capability struct has the expected properties.
     assert!(
-        capability.operation_kinds.contains(&OperationKind::Generate),
+        capability
+            .operation_kinds
+            .contains(&OperationKind::Generate),
         "declared model capability must include Generate"
     );
     assert!(
-        capability.capabilities.contains(&ProviderCapability::Streaming),
+        capability
+            .capabilities
+            .contains(&ProviderCapability::Streaming),
         "declared model capability must advertise Streaming"
     );
 
     // (4) Resolve a route for Generate — SimpleRouteResolver should pick the binding.
     let resolver = SimpleRouteResolver::new(StoreBindingQuery(store.clone()));
     let decision = resolver
-        .resolve(&project(), OperationKind::Generate, &SelectorContext::default())
+        .resolve(
+            &project(),
+            OperationKind::Generate,
+            &SelectorContext::default(),
+        )
         .await
         .unwrap();
 
@@ -264,7 +276,10 @@ async fn provider_routing_full_lifecycle() {
         "resolver must select the active binding"
     );
     assert_eq!(
-        decision.selected_provider_binding_id.as_ref().map(|id| id.as_str()),
+        decision
+            .selected_provider_binding_id
+            .as_ref()
+            .map(|id| id.as_str()),
         Some("binding_lc_1"),
         "resolver must pick the only active Generate binding"
     );
@@ -315,7 +330,11 @@ async fn provider_routing_full_lifecycle() {
         .expect("provider call must be persisted after ProviderCallCompleted");
     assert_eq!(call.provider_call_id, call_id);
     assert_eq!(call.status, ProviderCallStatus::Succeeded);
-    assert_eq!(call.latency_ms, Some(latency_ms), "latency must be recorded");
+    assert_eq!(
+        call.latency_ms,
+        Some(latency_ms),
+        "latency must be recorded"
+    );
     assert_eq!(call.input_tokens, Some(120));
     assert_eq!(call.output_tokens, Some(45));
 
@@ -344,7 +363,10 @@ async fn provider_routing_full_lifecycle() {
     assert_eq!(persisted.route_decision_id, decision.route_decision_id);
     assert_eq!(persisted.final_status, RouteDecisionStatus::Selected);
     assert_eq!(
-        persisted.selected_provider_binding_id.as_ref().map(|id| id.as_str()),
+        persisted
+            .selected_provider_binding_id
+            .as_ref()
+            .map(|id| id.as_str()),
         Some("binding_lc_1")
     );
     assert!(!persisted.fallback_used);
@@ -377,7 +399,10 @@ async fn primary_selected_when_all_capabilities_available() {
 
     assert_eq!(decision.final_status, RouteDecisionStatus::Selected);
     assert_eq!(
-        decision.selected_provider_binding_id.as_ref().map(|id| id.as_str()),
+        decision
+            .selected_provider_binding_id
+            .as_ref()
+            .map(|id| id.as_str()),
         Some("binding_primary")
     );
     assert!(!decision.fallback_used);
@@ -412,7 +437,10 @@ async fn fallback_used_when_primary_degraded() {
 
     assert_eq!(decision.final_status, RouteDecisionStatus::Selected);
     assert_eq!(
-        decision.selected_provider_binding_id.as_ref().map(|id| id.as_str()),
+        decision
+            .selected_provider_binding_id
+            .as_ref()
+            .map(|id| id.as_str()),
         Some("binding_fallback")
     );
     assert!(decision.fallback_used);
@@ -471,7 +499,10 @@ async fn route_decision_record_is_persisted() {
     assert_eq!(stored.route_decision_id, decision_id);
     assert_eq!(stored.final_status, RouteDecisionStatus::Selected);
     assert_eq!(
-        stored.selected_provider_binding_id.as_ref().map(|id| id.as_str()),
+        stored
+            .selected_provider_binding_id
+            .as_ref()
+            .map(|id| id.as_str()),
         Some("binding_primary")
     );
     assert!(!stored.fallback_used);
@@ -510,7 +541,9 @@ async fn no_viable_route_when_all_candidates_vetoed() {
     assert!(decision.selected_provider_binding_id.is_none());
     assert!(!decision.fallback_used);
     assert_eq!(decision.attempt_count, 2);
-    assert!(attempts.iter().all(|a| a.decision == RouteAttemptDecision::Vetoed));
+    assert!(attempts
+        .iter()
+        .all(|a| a.decision == RouteAttemptDecision::Vetoed));
 }
 
 // ── Provider model capability tests ──────────────────────────────────────
@@ -555,7 +588,9 @@ async fn provider_model_capability_registered_event_accepted() {
     let decoded: ProviderModelCapability = serde_json::from_str(&capabilities_json).unwrap();
     assert_eq!(decoded.model_id, model_id);
     assert!(decoded.operation_kinds.contains(&OperationKind::Generate));
-    assert!(decoded.capabilities.contains(&ProviderCapability::Streaming));
+    assert!(decoded
+        .capabilities
+        .contains(&ProviderCapability::Streaming));
     assert_eq!(decoded.context_window_tokens, Some(200_000));
 }
 
@@ -568,30 +603,34 @@ async fn simple_resolver_filters_by_operation_kind() {
     // Seed one Generate binding and one Embed binding for the same project.
     store
         .append(&[
-            make_envelope(RuntimeEvent::ProviderBindingCreated(ProviderBindingCreated {
-                project: project(),
-                provider_binding_id: ProviderBindingId::new("b_gen"),
-                provider_connection_id: ProviderConnectionId::new("c1"),
-                provider_model_id: ProviderModelId::new("gpt-4o"),
-                operation_kind: OperationKind::Generate,
-                settings: ProviderBindingSettings::default(),
-                policy_id: None,
-                active: true,
-                created_at: 10,
-                estimated_cost_micros: None,
-            })),
-            make_envelope(RuntimeEvent::ProviderBindingCreated(ProviderBindingCreated {
-                project: project(),
-                provider_binding_id: ProviderBindingId::new("b_emb"),
-                provider_connection_id: ProviderConnectionId::new("c1"),
-                provider_model_id: ProviderModelId::new("text-embedding-3-small"),
-                operation_kind: OperationKind::Embed,
-                settings: ProviderBindingSettings::default(),
-                policy_id: None,
-                active: true,
-                created_at: 11,
-                estimated_cost_micros: None,
-            })),
+            make_envelope(RuntimeEvent::ProviderBindingCreated(
+                ProviderBindingCreated {
+                    project: project(),
+                    provider_binding_id: ProviderBindingId::new("b_gen"),
+                    provider_connection_id: ProviderConnectionId::new("c1"),
+                    provider_model_id: ProviderModelId::new("gpt-4o"),
+                    operation_kind: OperationKind::Generate,
+                    settings: ProviderBindingSettings::default(),
+                    policy_id: None,
+                    active: true,
+                    created_at: 10,
+                    estimated_cost_micros: None,
+                },
+            )),
+            make_envelope(RuntimeEvent::ProviderBindingCreated(
+                ProviderBindingCreated {
+                    project: project(),
+                    provider_binding_id: ProviderBindingId::new("b_emb"),
+                    provider_connection_id: ProviderConnectionId::new("c1"),
+                    provider_model_id: ProviderModelId::new("text-embedding-3-small"),
+                    operation_kind: OperationKind::Embed,
+                    settings: ProviderBindingSettings::default(),
+                    policy_id: None,
+                    active: true,
+                    created_at: 11,
+                    estimated_cost_micros: None,
+                },
+            )),
         ])
         .await
         .unwrap();
@@ -600,23 +639,35 @@ async fn simple_resolver_filters_by_operation_kind() {
 
     // Generate resolves to the generate binding.
     let gen = resolver
-        .resolve(&project(), OperationKind::Generate, &SelectorContext::default())
+        .resolve(
+            &project(),
+            OperationKind::Generate,
+            &SelectorContext::default(),
+        )
         .await
         .unwrap();
     assert_eq!(gen.final_status, RouteDecisionStatus::Selected);
     assert_eq!(
-        gen.selected_provider_binding_id.as_ref().map(|id| id.as_str()),
+        gen.selected_provider_binding_id
+            .as_ref()
+            .map(|id| id.as_str()),
         Some("b_gen")
     );
 
     // Embed resolves to the embed binding.
     let emb = resolver
-        .resolve(&project(), OperationKind::Embed, &SelectorContext::default())
+        .resolve(
+            &project(),
+            OperationKind::Embed,
+            &SelectorContext::default(),
+        )
         .await
         .unwrap();
     assert_eq!(emb.final_status, RouteDecisionStatus::Selected);
     assert_eq!(
-        emb.selected_provider_binding_id.as_ref().map(|id| id.as_str()),
+        emb.selected_provider_binding_id
+            .as_ref()
+            .map(|id| id.as_str()),
         Some("b_emb")
     );
 }

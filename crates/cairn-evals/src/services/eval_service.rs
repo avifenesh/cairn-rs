@@ -156,9 +156,15 @@ impl EvalRunService {
     }
 
     /// Link a dataset to an existing eval run.
-    pub fn set_dataset_id(&self, eval_run_id: &EvalRunId, dataset_id: String) -> Result<(), EvalError> {
+    pub fn set_dataset_id(
+        &self,
+        eval_run_id: &EvalRunId,
+        dataset_id: String,
+    ) -> Result<(), EvalError> {
         let mut state = self.state.lock().unwrap();
-        let run = state.runs.get_mut(eval_run_id.as_str())
+        let run = state
+            .runs
+            .get_mut(eval_run_id.as_str())
             .ok_or_else(|| EvalError::NotFound(eval_run_id.to_string()))?;
         run.dataset_id = Some(dataset_id);
         Ok(())
@@ -200,7 +206,9 @@ impl EvalRunService {
         entries.sort_by(|a, b| {
             let a_score = a.metrics.task_success_rate.unwrap_or(0.0);
             let b_score = b.metrics.task_success_rate.unwrap_or(0.0);
-            b_score.partial_cmp(&a_score).unwrap_or(std::cmp::Ordering::Equal)
+            b_score
+                .partial_cmp(&a_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         Scorecard {
@@ -291,11 +299,7 @@ impl EvalRunService {
     }
 
     /// Stub: export runs to a JSON-serialisable list.
-    pub fn export_runs(
-        &self,
-        project_id: &ProjectId,
-        limit: usize,
-    ) -> Vec<EvalRun> {
+    pub fn export_runs(&self, project_id: &ProjectId, limit: usize) -> Vec<EvalRun> {
         self.list_by_project(project_id)
             .into_iter()
             .take(limit)
@@ -529,14 +533,14 @@ impl EvalRunService {
             .runs
             .values()
             .filter(|r| {
-                r.prompt_asset_id.as_ref() == Some(asset_id)
-                    && r.status == EvalRunStatus::Completed
+                r.prompt_asset_id.as_ref() == Some(asset_id) && r.status == EvalRunStatus::Completed
             })
             .collect();
         // Sort by created_at, then by eval_run_id as a stable tiebreaker
         // (HashMap iteration order is non-deterministic).
         runs.sort_by(|a, b| {
-            a.created_at.cmp(&b.created_at)
+            a.created_at
+                .cmp(&b.created_at)
                 .then_with(|| a.eval_run_id.as_str().cmp(b.eval_run_id.as_str()))
         });
         let points = runs
@@ -569,8 +573,7 @@ impl EvalRunService {
             .runs
             .values()
             .filter(|r| {
-                r.prompt_asset_id.as_ref() == Some(asset_id)
-                    && r.status == EvalRunStatus::Completed
+                r.prompt_asset_id.as_ref() == Some(asset_id) && r.status == EvalRunStatus::Completed
             })
             .collect();
         if runs.is_empty() {
@@ -589,20 +592,26 @@ impl EvalRunService {
             let b_s = b.metrics.task_success_rate.unwrap_or(0.0);
             b_s.partial_cmp(&a_s).unwrap_or(std::cmp::Ordering::Equal)
         });
-        let best_run_id = runs.first().map(|r| r.eval_run_id.as_str().to_owned()).unwrap_or_default();
-        let worst_run_id = runs.last().map(|r| r.eval_run_id.as_str().to_owned()).unwrap_or_default();
+        let best_run_id = runs
+            .first()
+            .map(|r| r.eval_run_id.as_str().to_owned())
+            .unwrap_or_default();
+        let worst_run_id = runs
+            .last()
+            .map(|r| r.eval_run_id.as_str().to_owned())
+            .unwrap_or_default();
 
         // Compute trend direction from chronologically sorted scores
         let mut by_time = state
             .runs
             .values()
             .filter(|r| {
-                r.prompt_asset_id.as_ref() == Some(asset_id)
-                    && r.status == EvalRunStatus::Completed
+                r.prompt_asset_id.as_ref() == Some(asset_id) && r.status == EvalRunStatus::Completed
             })
             .collect::<Vec<_>>();
         by_time.sort_by(|a, b| {
-            a.created_at.cmp(&b.created_at)
+            a.created_at
+                .cmp(&b.created_at)
                 .then_with(|| a.eval_run_id.as_str().cmp(b.eval_run_id.as_str()))
         });
         let scores: Vec<f64> = by_time
@@ -612,9 +621,13 @@ impl EvalRunService {
         let trend_direction = if scores.len() >= 2 {
             let first = scores[0];
             let last = *scores.last().unwrap();
-            if last > first { "improving" }
-            else if last < first { "declining" }
-            else { "stable" }
+            if last > first {
+                "improving"
+            } else if last < first {
+                "declining"
+            } else {
+                "stable"
+            }
         } else {
             "stable"
         };
@@ -836,7 +849,10 @@ mod tests {
             ProjectId::new("p1"),
             EvalSubjectKind::PromptRelease,
             "auto".to_owned(),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         svc.start_run(&EvalRunId::new("r1")).unwrap();
         svc.complete_run(
@@ -847,7 +863,8 @@ mod tests {
                 ..Default::default()
             },
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         let rubric = vec![
             crate::matrices::RubricDimensionDef {
@@ -862,7 +879,9 @@ mod tests {
             },
         ];
 
-        let result = svc.score_with_rubric(&EvalRunId::new("r1"), &rubric).unwrap();
+        let result = svc
+            .score_with_rubric(&EvalRunId::new("r1"), &rubric)
+            .unwrap();
         assert_eq!(result.dimensions.len(), 2);
         assert!((result.dimensions[0].score - 0.9).abs() < 0.001);
         assert!((result.dimensions[1].score - 0.8).abs() < 0.001);
@@ -878,10 +897,14 @@ mod tests {
             ProjectId::new("p1"),
             EvalSubjectKind::PromptRelease,
             "auto".to_owned(),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         svc.start_run(&EvalRunId::new("r1")).unwrap();
-        svc.complete_run(&EvalRunId::new("r1"), EvalMetrics::default(), None).unwrap();
+        svc.complete_run(&EvalRunId::new("r1"), EvalMetrics::default(), None)
+            .unwrap();
 
         let rubric = vec![crate::matrices::RubricDimensionDef {
             dimension: "accuracy".into(),
@@ -889,7 +912,9 @@ mod tests {
             criteria: "task_success_rate".into(),
         }];
 
-        let result = svc.score_with_rubric(&EvalRunId::new("r1"), &rubric).unwrap();
+        let result = svc
+            .score_with_rubric(&EvalRunId::new("r1"), &rubric)
+            .unwrap();
         assert!((result.overall_score - 0.0).abs() < 0.001);
     }
 
@@ -901,31 +926,45 @@ mod tests {
             ProjectId::new("p1"),
             EvalSubjectKind::PromptRelease,
             "auto".to_owned(),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         svc.start_run(&EvalRunId::new(id)).unwrap();
-        svc.complete_run(&EvalRunId::new(id), metrics, None).unwrap();
+        svc.complete_run(&EvalRunId::new(id), metrics, None)
+            .unwrap();
     }
 
     #[test]
     fn compare_runs_detects_regression() {
         let svc = EvalRunService::new();
-        create_completed_run(&svc, "baseline", EvalMetrics {
-            task_success_rate: Some(0.9),
-            latency_p50_ms: Some(100),
-            ..Default::default()
-        });
-        create_completed_run(&svc, "candidate", EvalMetrics {
-            task_success_rate: Some(0.7), // regression: -22%
-            latency_p50_ms: Some(150),    // regression: +50% latency
-            ..Default::default()
-        });
+        create_completed_run(
+            &svc,
+            "baseline",
+            EvalMetrics {
+                task_success_rate: Some(0.9),
+                latency_p50_ms: Some(100),
+                ..Default::default()
+            },
+        );
+        create_completed_run(
+            &svc,
+            "candidate",
+            EvalMetrics {
+                task_success_rate: Some(0.7), // regression: -22%
+                latency_p50_ms: Some(150),    // regression: +50% latency
+                ..Default::default()
+            },
+        );
 
-        let cmp = svc.compare_runs(
-            &EvalRunId::new("baseline"),
-            &EvalRunId::new("candidate"),
-            Some(0.05),
-        ).unwrap();
+        let cmp = svc
+            .compare_runs(
+                &EvalRunId::new("baseline"),
+                &EvalRunId::new("candidate"),
+                Some(0.05),
+            )
+            .unwrap();
 
         assert!(!cmp.passed);
         assert!(cmp.regressions.contains(&"task_success_rate".to_owned()));
@@ -935,20 +974,30 @@ mod tests {
     #[test]
     fn compare_runs_detects_improvement() {
         let svc = EvalRunService::new();
-        create_completed_run(&svc, "baseline", EvalMetrics {
-            task_success_rate: Some(0.7),
-            ..Default::default()
-        });
-        create_completed_run(&svc, "candidate", EvalMetrics {
-            task_success_rate: Some(0.9), // improvement: +28%
-            ..Default::default()
-        });
+        create_completed_run(
+            &svc,
+            "baseline",
+            EvalMetrics {
+                task_success_rate: Some(0.7),
+                ..Default::default()
+            },
+        );
+        create_completed_run(
+            &svc,
+            "candidate",
+            EvalMetrics {
+                task_success_rate: Some(0.9), // improvement: +28%
+                ..Default::default()
+            },
+        );
 
-        let cmp = svc.compare_runs(
-            &EvalRunId::new("baseline"),
-            &EvalRunId::new("candidate"),
-            None,
-        ).unwrap();
+        let cmp = svc
+            .compare_runs(
+                &EvalRunId::new("baseline"),
+                &EvalRunId::new("candidate"),
+                None,
+            )
+            .unwrap();
 
         assert!(cmp.passed);
         assert!(cmp.improvements.contains(&"task_success_rate".to_owned()));
@@ -965,11 +1014,9 @@ mod tests {
         create_completed_run(&svc, "a", metrics.clone());
         create_completed_run(&svc, "b", metrics);
 
-        let cmp = svc.compare_runs(
-            &EvalRunId::new("a"),
-            &EvalRunId::new("b"),
-            None,
-        ).unwrap();
+        let cmp = svc
+            .compare_runs(&EvalRunId::new("a"), &EvalRunId::new("b"), None)
+            .unwrap();
         assert!(cmp.passed);
         assert!(cmp.regressions.is_empty());
         assert!(cmp.improvements.is_empty());
@@ -984,36 +1031,69 @@ mod tests {
 
         // Model A evaluated by suite "accuracy"
         svc.create_run(
-            EvalRunId::new("r1"), project.clone(),
-            EvalSubjectKind::PromptRelease, "accuracy".to_owned(),
-            None, Some(PromptVersionId::new("model_a")), None, None,
+            EvalRunId::new("r1"),
+            project.clone(),
+            EvalSubjectKind::PromptRelease,
+            "accuracy".to_owned(),
+            None,
+            Some(PromptVersionId::new("model_a")),
+            None,
+            None,
         );
         svc.start_run(&EvalRunId::new("r1")).unwrap();
-        svc.complete_run(&EvalRunId::new("r1"), EvalMetrics {
-            task_success_rate: Some(0.9), ..Default::default()
-        }, None).unwrap();
+        svc.complete_run(
+            &EvalRunId::new("r1"),
+            EvalMetrics {
+                task_success_rate: Some(0.9),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
 
         // Model B evaluated by suite "accuracy"
         svc.create_run(
-            EvalRunId::new("r2"), project.clone(),
-            EvalSubjectKind::PromptRelease, "accuracy".to_owned(),
-            None, Some(PromptVersionId::new("model_b")), None, None,
+            EvalRunId::new("r2"),
+            project.clone(),
+            EvalSubjectKind::PromptRelease,
+            "accuracy".to_owned(),
+            None,
+            Some(PromptVersionId::new("model_b")),
+            None,
+            None,
         );
         svc.start_run(&EvalRunId::new("r2")).unwrap();
-        svc.complete_run(&EvalRunId::new("r2"), EvalMetrics {
-            task_success_rate: Some(0.75), ..Default::default()
-        }, None).unwrap();
+        svc.complete_run(
+            &EvalRunId::new("r2"),
+            EvalMetrics {
+                task_success_rate: Some(0.75),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
 
         // Model A evaluated by suite "latency"
         svc.create_run(
-            EvalRunId::new("r3"), project.clone(),
-            EvalSubjectKind::PromptRelease, "latency".to_owned(),
-            None, Some(PromptVersionId::new("model_a")), None, None,
+            EvalRunId::new("r3"),
+            project.clone(),
+            EvalSubjectKind::PromptRelease,
+            "latency".to_owned(),
+            None,
+            Some(PromptVersionId::new("model_a")),
+            None,
+            None,
         );
         svc.start_run(&EvalRunId::new("r3")).unwrap();
-        svc.complete_run(&EvalRunId::new("r3"), EvalMetrics {
-            latency_p50_ms: Some(50), ..Default::default()
-        }, None).unwrap();
+        svc.complete_run(
+            &EvalRunId::new("r3"),
+            EvalMetrics {
+                latency_p50_ms: Some(50),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
 
         let matrix = svc.build_model_eval_matrix(&project);
         assert_eq!(matrix.model_ids, vec!["model_a", "model_b"]);

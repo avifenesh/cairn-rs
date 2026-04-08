@@ -351,7 +351,8 @@ impl CorpusEndpoints for CorpusApiImpl {
                     ch.provenance_metadata
                         .as_ref()
                         .and_then(|m| m.get("corpus_id"))
-                        .and_then(|v| v.as_str()) == Some(corpus_id)
+                        .and_then(|v| v.as_str())
+                        == Some(corpus_id)
                 })
                 .map(|ch| ch.document_id.as_str().to_owned())
                 .collect();

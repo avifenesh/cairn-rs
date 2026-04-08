@@ -79,10 +79,13 @@ impl SkillCatalogService for SkillCatalogServiceImpl {
         skill_id: &str,
         args: serde_json::Value,
     ) -> Result<SkillInvocation, RuntimeError> {
-        let skill = self.catalog.get(skill_id).ok_or_else(|| RuntimeError::NotFound {
-            entity: "skill",
-            id: skill_id.to_owned(),
-        })?;
+        let skill = self
+            .catalog
+            .get(skill_id)
+            .ok_or_else(|| RuntimeError::NotFound {
+                entity: "skill",
+                id: skill_id.to_owned(),
+            })?;
 
         if !skill.enabled {
             return Err(RuntimeError::PolicyDenied {
@@ -139,7 +142,10 @@ mod tests {
             .unwrap();
 
         // Assert invocation_id is returned and non-empty.
-        assert!(!inv.invocation_id.is_empty(), "invocation_id must be returned");
+        assert!(
+            !inv.invocation_id.is_empty(),
+            "invocation_id must be returned"
+        );
         assert_eq!(inv.skill_id, "content-pipeline");
         assert_eq!(inv.status, SkillInvocationStatus::Running);
     }
@@ -164,7 +170,9 @@ mod tests {
     #[test]
     fn invoke_unknown_skill_returns_not_found() {
         let svc = SkillCatalogServiceImpl::new();
-        let err = svc.invoke("ghost-skill", serde_json::json!({})).unwrap_err();
+        let err = svc
+            .invoke("ghost-skill", serde_json::json!({}))
+            .unwrap_err();
         assert!(matches!(err, RuntimeError::NotFound { .. }));
     }
 

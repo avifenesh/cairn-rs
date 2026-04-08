@@ -10,18 +10,18 @@
 
 use std::sync::Arc;
 
+use cairn_domain::lifecycle::TaskState;
+use cairn_domain::task_dependencies::TaskDependency;
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
     SessionCreated, SessionId, StateTransition, TaskCreated, TaskDependencyAdded, TaskId,
     TaskStateChanged,
 };
-use cairn_domain::lifecycle::TaskState;
+use cairn_store::projections::TaskDependencyRecord;
 use cairn_store::{
     projections::{TaskDependencyReadModel, TaskReadModel},
     EventLog, InMemoryStore,
 };
-use cairn_store::projections::TaskDependencyRecord;
-use cairn_domain::task_dependencies::TaskDependency;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -42,11 +42,7 @@ fn task_id(n: &str) -> TaskId {
 }
 
 fn ev<P: Into<RuntimeEvent>>(id: &str, payload: P) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(
-        EventId::new(id),
-        EventSource::Runtime,
-        payload.into(),
-    )
+    EventEnvelope::for_runtime_event(EventId::new(id), EventSource::Runtime, payload.into())
 }
 
 fn dep_record(dependent: &str, prerequisite: &str) -> TaskDependencyRecord {
@@ -65,39 +61,54 @@ fn dep_record(dependent: &str, prerequisite: &str) -> TaskDependencyRecord {
 async fn seed_tasks(store: &Arc<InMemoryStore>) {
     store
         .append(&[
-            ev("evt_sess", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: session_id(),
-            })),
-            ev("evt_run", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: session_id(),
-                run_id: run_id(),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            ev("evt_task_a", RuntimeEvent::TaskCreated(TaskCreated {
-                project: project(),
-                task_id: task_id("a"),
-                parent_run_id: Some(run_id()),
-                parent_task_id: None,
-                prompt_release_id: None,
-            })),
-            ev("evt_task_b", RuntimeEvent::TaskCreated(TaskCreated {
-                project: project(),
-                task_id: task_id("b"),
-                parent_run_id: Some(run_id()),
-                parent_task_id: None,
-                prompt_release_id: None,
-            })),
-            ev("evt_task_c", RuntimeEvent::TaskCreated(TaskCreated {
-                project: project(),
-                task_id: task_id("c"),
-                parent_run_id: Some(run_id()),
-                parent_task_id: None,
-                prompt_release_id: None,
-            })),
+            ev(
+                "evt_sess",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: session_id(),
+                }),
+            ),
+            ev(
+                "evt_run",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: session_id(),
+                    run_id: run_id(),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            ev(
+                "evt_task_a",
+                RuntimeEvent::TaskCreated(TaskCreated {
+                    project: project(),
+                    task_id: task_id("a"),
+                    parent_run_id: Some(run_id()),
+                    parent_task_id: None,
+                    prompt_release_id: None,
+                }),
+            ),
+            ev(
+                "evt_task_b",
+                RuntimeEvent::TaskCreated(TaskCreated {
+                    project: project(),
+                    task_id: task_id("b"),
+                    parent_run_id: Some(run_id()),
+                    parent_task_id: None,
+                    prompt_release_id: None,
+                }),
+            ),
+            ev(
+                "evt_task_c",
+                RuntimeEvent::TaskCreated(TaskCreated {
+                    project: project(),
+                    task_id: task_id("c"),
+                    parent_run_id: Some(run_id()),
+                    parent_task_id: None,
+                    prompt_release_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -117,7 +128,8 @@ fn would_create_cycle(
     new_prerequisite: &TaskId,
 ) -> bool {
     // Build adjacency: node → nodes it depends_on.
-    let mut adj: std::collections::HashMap<&TaskId, Vec<&TaskId>> = std::collections::HashMap::new();
+    let mut adj: std::collections::HashMap<&TaskId, Vec<&TaskId>> =
+        std::collections::HashMap::new();
     for r in deps {
         adj.entry(&r.dependency.dependent_task_id)
             .or_default()
@@ -183,19 +195,30 @@ async fn list_blocking_returns_correct_dag_edges() {
     let b_blocked_by = TaskDependencyReadModel::list_blocking(store.as_ref(), &task_id("b"))
         .await
         .unwrap();
-    assert_eq!(b_blocked_by.len(), 1, "task_b must have exactly one blocker");
+    assert_eq!(
+        b_blocked_by.len(),
+        1,
+        "task_b must have exactly one blocker"
+    );
     assert_eq!(
         b_blocked_by[0].dependency.depends_on_task_id,
         task_id("a"),
         "task_b must be blocked by task_a"
     );
-    assert_eq!(b_blocked_by[0].resolved_at_ms, None, "dependency must not yet be resolved");
+    assert_eq!(
+        b_blocked_by[0].resolved_at_ms, None,
+        "dependency must not yet be resolved"
+    );
 
     // list_blocking(task_c) → should return the c→b dependency.
     let c_blocked_by = TaskDependencyReadModel::list_blocking(store.as_ref(), &task_id("c"))
         .await
         .unwrap();
-    assert_eq!(c_blocked_by.len(), 1, "task_c must have exactly one blocker");
+    assert_eq!(
+        c_blocked_by.len(),
+        1,
+        "task_c must have exactly one blocker"
+    );
     assert_eq!(c_blocked_by[0].dependency.depends_on_task_id, task_id("b"));
 
     // list_blocking(task_a) → no dependencies (task_a is the root).
@@ -208,7 +231,11 @@ async fn list_blocking_returns_correct_dag_edges() {
     let unresolved = TaskDependencyReadModel::list_unresolved(store.as_ref(), &project())
         .await
         .unwrap();
-    assert_eq!(unresolved.len(), 2, "both dependencies must be unresolved initially");
+    assert_eq!(
+        unresolved.len(),
+        2,
+        "both dependencies must be unresolved initially"
+    );
 }
 
 /// (6) After task_a completes, task_b's dependency is resolved (unblocked).
@@ -232,7 +259,11 @@ async fn resolve_dependency_unblocks_task_b_when_task_a_completes() {
     let before = TaskDependencyReadModel::list_unresolved(store.as_ref(), &project())
         .await
         .unwrap();
-    assert_eq!(before.len(), 2, "both deps unresolved before task_a completes");
+    assert_eq!(
+        before.len(),
+        2,
+        "both deps unresolved before task_a completes"
+    );
 
     // Append TaskStateChanged: task_a → Completed.
     store
@@ -258,7 +289,11 @@ async fn resolve_dependency_unblocks_task_b_when_task_a_completes() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(task_a.state, TaskState::Completed, "task_a must be Completed");
+    assert_eq!(
+        task_a.state,
+        TaskState::Completed,
+        "task_a must be Completed"
+    );
 
     // Resolve the dependency: mark all deps whose prerequisite is task_a as resolved.
     TaskDependencyReadModel::resolve_dependency(store.as_ref(), &task_id("a"), 50_000)
@@ -280,14 +315,18 @@ async fn resolve_dependency_unblocks_task_b_when_task_a_completes() {
     let c_blocked = TaskDependencyReadModel::list_blocking(store.as_ref(), &task_id("c"))
         .await
         .unwrap();
-    assert_eq!(c_blocked[0].resolved_at_ms, None, "task_c's dep on task_b must still be pending");
+    assert_eq!(
+        c_blocked[0].resolved_at_ms, None,
+        "task_c's dep on task_b must still be pending"
+    );
 
     // Only 1 dependency remains unresolved (b→a is resolved; c→b is not).
     let still_unresolved = TaskDependencyReadModel::list_unresolved(store.as_ref(), &project())
         .await
         .unwrap();
     assert_eq!(
-        still_unresolved.len(), 1,
+        still_unresolved.len(),
+        1,
         "after resolving task_a's dep, only 1 dependency remains unresolved"
     );
     assert_eq!(

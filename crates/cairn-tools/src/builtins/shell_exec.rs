@@ -33,14 +33,20 @@ const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 pub struct ShellExecTool;
 
 impl Default for ShellExecTool {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 
 #[async_trait]
 impl ToolHandler for ShellExecTool {
-    fn name(&self) -> &str { "shell_exec" }
+    fn name(&self) -> &str {
+        "shell_exec"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
 
     fn description(&self) -> &str {
         "Run a shell command in a subprocess. SENSITIVE — requires operator approval."
@@ -68,7 +74,8 @@ impl ToolHandler for ShellExecTool {
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
         // ── Validate ──────────────────────────────────────────────────────────
-        let command = args.get("command")
+        let command = args
+            .get("command")
             .and_then(|c| c.as_str())
             .ok_or_else(|| ToolError::InvalidArgs {
                 field: "command".into(),
@@ -82,7 +89,9 @@ impl ToolHandler for ShellExecTool {
             });
         }
 
-        let timeout_ms = args.get("timeout_ms").and_then(|t| t.as_u64())
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|t| t.as_u64())
             .unwrap_or(DEFAULT_TIMEOUT_MS);
 
         // ── Spawn ─────────────────────────────────────────────────────────────
@@ -136,7 +145,9 @@ fn cap(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     // ── Metadata ──────────────────────────────────────────────────────────────
 
@@ -158,7 +169,9 @@ mod tests {
     #[test]
     fn schema_requires_command() {
         let req = ShellExecTool.parameters_schema()["required"]
-            .as_array().unwrap().clone();
+            .as_array()
+            .unwrap()
+            .clone();
         assert!(req.iter().any(|v| v.as_str() == Some("command")));
     }
 
@@ -168,7 +181,8 @@ mod tests {
     async fn missing_command_is_invalid_args() {
         let err = ShellExecTool
             .execute(&project(), serde_json::json!({}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -176,7 +190,8 @@ mod tests {
     async fn empty_command_is_invalid_args() {
         let err = ShellExecTool
             .execute(&project(), serde_json::json!({"command": "  "}))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -186,9 +201,13 @@ mod tests {
     async fn echo_captures_stdout() {
         let result = ShellExecTool
             .execute(&project(), serde_json::json!({"command": "echo hello"}))
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(result.output["exit_code"], 0);
-        assert!(result.output["stdout"].as_str().unwrap_or("").contains("hello"));
+        assert!(result.output["stdout"]
+            .as_str()
+            .unwrap_or("")
+            .contains("hello"));
         assert!(!result.output["timed_out"].as_bool().unwrap_or(true));
     }
 
@@ -196,7 +215,8 @@ mod tests {
     async fn nonzero_exit_code_captured() {
         let result = ShellExecTool
             .execute(&project(), serde_json::json!({"command": "exit 42"}))
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(result.output["exit_code"], 42);
     }
 
@@ -204,24 +224,39 @@ mod tests {
     async fn stderr_captured() {
         let result = ShellExecTool
             .execute(&project(), serde_json::json!({"command": "echo err >&2"}))
-            .await.unwrap();
-        assert!(result.output["stderr"].as_str().unwrap_or("").contains("err"));
+            .await
+            .unwrap();
+        assert!(result.output["stderr"]
+            .as_str()
+            .unwrap_or("")
+            .contains("err"));
     }
 
     #[tokio::test]
     async fn timeout_returns_timed_out_true() {
         let result = ShellExecTool
-            .execute(&project(), serde_json::json!({"command": "sleep 60", "timeout_ms": 50}))
-            .await.unwrap();
+            .execute(
+                &project(),
+                serde_json::json!({"command": "sleep 60", "timeout_ms": 50}),
+            )
+            .await
+            .unwrap();
         assert!(result.output["timed_out"].as_bool().unwrap_or(false));
     }
 
     #[tokio::test]
     async fn pipeline_operators_work() {
         let result = ShellExecTool
-            .execute(&project(), serde_json::json!({"command": "echo hello | tr a-z A-Z"}))
-            .await.unwrap();
-        assert!(result.output["stdout"].as_str().unwrap_or("").contains("HELLO"));
+            .execute(
+                &project(),
+                serde_json::json!({"command": "echo hello | tr a-z A-Z"}),
+            )
+            .await
+            .unwrap();
+        assert!(result.output["stdout"]
+            .as_str()
+            .unwrap_or("")
+            .contains("HELLO"));
     }
 
     // ── Output capping ────────────────────────────────────────────────────────

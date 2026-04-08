@@ -11,14 +11,13 @@
 use cairn_domain::{
     errors::{EntityDurabilityClass, RuntimeEntityKind, RuntimeEntityRef},
     events::{
-        ApprovalRequested, CheckpointRecorded,
-        RunCreated, RunStateChanged, SessionCreated, TaskCreated, TaskStateChanged,
-        StateTransition,
+        ApprovalRequested, CheckpointRecorded, RunCreated, RunStateChanged, SessionCreated,
+        StateTransition, TaskCreated, TaskStateChanged,
     },
     lifecycle::{CheckpointDisposition, RunState, TaskState},
     policy::ApprovalRequirement,
-    ApprovalId, CheckpointId, EventEnvelope, EventId, EventSource, ProjectKey,
-    RunId, RuntimeEvent, SessionId, TaskId,
+    ApprovalId, CheckpointId, EventEnvelope, EventId, EventSource, ProjectKey, RunId, RuntimeEvent,
+    SessionId, TaskId,
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -43,7 +42,10 @@ fn durability_class_serde_round_trip() {
         let json = serde_json::to_string(&class).expect("must serialize");
         let recovered: EntityDurabilityClass =
             serde_json::from_str(&json).expect("must deserialize");
-        assert_eq!(recovered, class, "serde round-trip must be identity for {class:?}");
+        assert_eq!(
+            recovered, class,
+            "serde round-trip must be identity for {class:?}"
+        );
     }
 }
 
@@ -52,7 +54,7 @@ fn durability_class_serde_round_trip() {
 fn durability_class_serializes_to_snake_case() {
     let fh = serde_json::to_string(&EntityDurabilityClass::FullHistory).unwrap();
     let csa = serde_json::to_string(&EntityDurabilityClass::CurrentStatePlusAudit).unwrap();
-    assert_eq!(fh,  r#""full_history""#);
+    assert_eq!(fh, r#""full_history""#);
     assert_eq!(csa, r#""current_state_plus_audit""#);
 }
 
@@ -92,10 +94,7 @@ fn session_run_task_are_full_history() {
 /// Current state plus an audit trail is sufficient; full replay is not required.
 #[test]
 fn approval_checkpoint_are_current_state_plus_audit() {
-    for kind in [
-        RuntimeEntityKind::Approval,
-        RuntimeEntityKind::Checkpoint,
-    ] {
+    for kind in [RuntimeEntityKind::Approval, RuntimeEntityKind::Checkpoint] {
         assert_eq!(
             kind.durability_class(),
             EntityDurabilityClass::CurrentStatePlusAudit,
@@ -135,19 +134,84 @@ fn entity_ref_kind_mapping_is_correct() {
     use cairn_domain::ids::*;
 
     let cases: &[(RuntimeEntityRef, RuntimeEntityKind)] = &[
-        (RuntimeEntityRef::Session { session_id: SessionId::new("s") }, RuntimeEntityKind::Session),
-        (RuntimeEntityRef::Run { run_id: RunId::new("r") }, RuntimeEntityKind::Run),
-        (RuntimeEntityRef::Task { task_id: TaskId::new("t") }, RuntimeEntityKind::Task),
-        (RuntimeEntityRef::Approval { approval_id: ApprovalId::new("a") }, RuntimeEntityKind::Approval),
-        (RuntimeEntityRef::Checkpoint { checkpoint_id: CheckpointId::new("c") }, RuntimeEntityKind::Checkpoint),
-        (RuntimeEntityRef::MailboxMessage { message_id: MailboxMessageId::new("m") }, RuntimeEntityKind::MailboxMessage),
-        (RuntimeEntityRef::Signal { signal_id: SignalId::new("sig") }, RuntimeEntityKind::Signal),
-        (RuntimeEntityRef::ToolInvocation { invocation_id: ToolInvocationId::new("inv") }, RuntimeEntityKind::ToolInvocation),
-        (RuntimeEntityRef::IngestJob { job_id: IngestJobId::new("job") }, RuntimeEntityKind::IngestJob),
-        (RuntimeEntityRef::EvalRun { eval_run_id: EvalRunId::new("eval") }, RuntimeEntityKind::EvalRun),
-        (RuntimeEntityRef::PromptAsset { prompt_asset_id: PromptAssetId::new("pa") }, RuntimeEntityKind::PromptAsset),
-        (RuntimeEntityRef::PromptVersion { prompt_version_id: PromptVersionId::new("pv") }, RuntimeEntityKind::PromptVersion),
-        (RuntimeEntityRef::PromptRelease { prompt_release_id: PromptReleaseId::new("pr") }, RuntimeEntityKind::PromptRelease),
+        (
+            RuntimeEntityRef::Session {
+                session_id: SessionId::new("s"),
+            },
+            RuntimeEntityKind::Session,
+        ),
+        (
+            RuntimeEntityRef::Run {
+                run_id: RunId::new("r"),
+            },
+            RuntimeEntityKind::Run,
+        ),
+        (
+            RuntimeEntityRef::Task {
+                task_id: TaskId::new("t"),
+            },
+            RuntimeEntityKind::Task,
+        ),
+        (
+            RuntimeEntityRef::Approval {
+                approval_id: ApprovalId::new("a"),
+            },
+            RuntimeEntityKind::Approval,
+        ),
+        (
+            RuntimeEntityRef::Checkpoint {
+                checkpoint_id: CheckpointId::new("c"),
+            },
+            RuntimeEntityKind::Checkpoint,
+        ),
+        (
+            RuntimeEntityRef::MailboxMessage {
+                message_id: MailboxMessageId::new("m"),
+            },
+            RuntimeEntityKind::MailboxMessage,
+        ),
+        (
+            RuntimeEntityRef::Signal {
+                signal_id: SignalId::new("sig"),
+            },
+            RuntimeEntityKind::Signal,
+        ),
+        (
+            RuntimeEntityRef::ToolInvocation {
+                invocation_id: ToolInvocationId::new("inv"),
+            },
+            RuntimeEntityKind::ToolInvocation,
+        ),
+        (
+            RuntimeEntityRef::IngestJob {
+                job_id: IngestJobId::new("job"),
+            },
+            RuntimeEntityKind::IngestJob,
+        ),
+        (
+            RuntimeEntityRef::EvalRun {
+                eval_run_id: EvalRunId::new("eval"),
+            },
+            RuntimeEntityKind::EvalRun,
+        ),
+        (
+            RuntimeEntityRef::PromptAsset {
+                prompt_asset_id: PromptAssetId::new("pa"),
+            },
+            RuntimeEntityKind::PromptAsset,
+        ),
+        (
+            RuntimeEntityRef::PromptVersion {
+                prompt_version_id: PromptVersionId::new("pv"),
+            },
+            RuntimeEntityKind::PromptVersion,
+        ),
+        (
+            RuntimeEntityRef::PromptRelease {
+                prompt_release_id: PromptReleaseId::new("pr"),
+            },
+            RuntimeEntityKind::PromptRelease,
+        ),
     ];
 
     for (entity_ref, expected_kind) in cases {
@@ -166,27 +230,39 @@ fn entity_ref_durability_class_via_kind() {
     use cairn_domain::ids::*;
 
     let full_history_refs = [
-        RuntimeEntityRef::Session { session_id: SessionId::new("s") },
-        RuntimeEntityRef::Run { run_id: RunId::new("r") },
-        RuntimeEntityRef::Task { task_id: TaskId::new("t") },
+        RuntimeEntityRef::Session {
+            session_id: SessionId::new("s"),
+        },
+        RuntimeEntityRef::Run {
+            run_id: RunId::new("r"),
+        },
+        RuntimeEntityRef::Task {
+            task_id: TaskId::new("t"),
+        },
     ];
     for entity_ref in &full_history_refs {
         assert_eq!(
             entity_ref.kind().durability_class(),
             EntityDurabilityClass::FullHistory,
-            "{:?} must have FullHistory durability", entity_ref.kind()
+            "{:?} must have FullHistory durability",
+            entity_ref.kind()
         );
     }
 
     let audit_refs = [
-        RuntimeEntityRef::Approval { approval_id: ApprovalId::new("a") },
-        RuntimeEntityRef::Checkpoint { checkpoint_id: CheckpointId::new("c") },
+        RuntimeEntityRef::Approval {
+            approval_id: ApprovalId::new("a"),
+        },
+        RuntimeEntityRef::Checkpoint {
+            checkpoint_id: CheckpointId::new("c"),
+        },
     ];
     for entity_ref in &audit_refs {
         assert_eq!(
             entity_ref.kind().durability_class(),
             EntityDurabilityClass::CurrentStatePlusAudit,
-            "{:?} must have CurrentStatePlusAudit durability", entity_ref.kind()
+            "{:?} must have CurrentStatePlusAudit durability",
+            entity_ref.kind()
         );
     }
 }
@@ -197,20 +273,82 @@ fn entity_ref_durability_class_via_kind() {
 #[test]
 fn primary_entity_ref_is_some_for_operational_events() {
     let events: &[(RuntimeEvent, &str)] = &[
-        (RuntimeEvent::SessionCreated(SessionCreated { project: project(), session_id: SessionId::new("s1") }),
-         "SessionCreated"),
-        (RuntimeEvent::RunCreated(RunCreated { project: project(), session_id: SessionId::new("s1"), run_id: RunId::new("r1"), parent_run_id: None, prompt_release_id: None, agent_role_id: None }),
-         "RunCreated"),
-        (RuntimeEvent::RunStateChanged(RunStateChanged { project: project(), run_id: RunId::new("r1"), transition: StateTransition { from: Some(RunState::Pending), to: RunState::Running }, failure_class: None, pause_reason: None, resume_trigger: None }),
-         "RunStateChanged"),
-        (RuntimeEvent::TaskCreated(TaskCreated { project: project(), task_id: TaskId::new("t1"), parent_run_id: None, parent_task_id: None, prompt_release_id: None }),
-         "TaskCreated"),
-        (RuntimeEvent::TaskStateChanged(TaskStateChanged { project: project(), task_id: TaskId::new("t1"), transition: StateTransition { from: Some(TaskState::Queued), to: TaskState::Running }, failure_class: None, pause_reason: None, resume_trigger: None }),
-         "TaskStateChanged"),
-        (RuntimeEvent::ApprovalRequested(ApprovalRequested { project: project(), approval_id: ApprovalId::new("a1"), run_id: None, task_id: None, requirement: ApprovalRequirement::Required }),
-         "ApprovalRequested"),
-        (RuntimeEvent::CheckpointRecorded(CheckpointRecorded { project: project(), run_id: RunId::new("r1"), checkpoint_id: CheckpointId::new("c1"), disposition: CheckpointDisposition::Latest, data: None }),
-         "CheckpointRecorded"),
+        (
+            RuntimeEvent::SessionCreated(SessionCreated {
+                project: project(),
+                session_id: SessionId::new("s1"),
+            }),
+            "SessionCreated",
+        ),
+        (
+            RuntimeEvent::RunCreated(RunCreated {
+                project: project(),
+                session_id: SessionId::new("s1"),
+                run_id: RunId::new("r1"),
+                parent_run_id: None,
+                prompt_release_id: None,
+                agent_role_id: None,
+            }),
+            "RunCreated",
+        ),
+        (
+            RuntimeEvent::RunStateChanged(RunStateChanged {
+                project: project(),
+                run_id: RunId::new("r1"),
+                transition: StateTransition {
+                    from: Some(RunState::Pending),
+                    to: RunState::Running,
+                },
+                failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
+            }),
+            "RunStateChanged",
+        ),
+        (
+            RuntimeEvent::TaskCreated(TaskCreated {
+                project: project(),
+                task_id: TaskId::new("t1"),
+                parent_run_id: None,
+                parent_task_id: None,
+                prompt_release_id: None,
+            }),
+            "TaskCreated",
+        ),
+        (
+            RuntimeEvent::TaskStateChanged(TaskStateChanged {
+                project: project(),
+                task_id: TaskId::new("t1"),
+                transition: StateTransition {
+                    from: Some(TaskState::Queued),
+                    to: TaskState::Running,
+                },
+                failure_class: None,
+                pause_reason: None,
+                resume_trigger: None,
+            }),
+            "TaskStateChanged",
+        ),
+        (
+            RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                project: project(),
+                approval_id: ApprovalId::new("a1"),
+                run_id: None,
+                task_id: None,
+                requirement: ApprovalRequirement::Required,
+            }),
+            "ApprovalRequested",
+        ),
+        (
+            RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
+                project: project(),
+                run_id: RunId::new("r1"),
+                checkpoint_id: CheckpointId::new("c1"),
+                disposition: CheckpointDisposition::Latest,
+                data: None,
+            }),
+            "CheckpointRecorded",
+        ),
     ];
 
     for (event, name) in events {
@@ -286,11 +424,54 @@ fn project_extraction_matches_for_all_event_families() {
     let expected = project();
 
     let events: &[(RuntimeEvent, &str)] = &[
-        (RuntimeEvent::SessionCreated(SessionCreated { project: project(), session_id: SessionId::new("s") }), "SessionCreated"),
-        (RuntimeEvent::RunCreated(RunCreated { project: project(), session_id: SessionId::new("s"), run_id: RunId::new("r"), parent_run_id: None, prompt_release_id: None, agent_role_id: None }), "RunCreated"),
-        (RuntimeEvent::TaskCreated(TaskCreated { project: project(), task_id: TaskId::new("t"), parent_run_id: None, parent_task_id: None, prompt_release_id: None }), "TaskCreated"),
-        (RuntimeEvent::ApprovalRequested(ApprovalRequested { project: project(), approval_id: ApprovalId::new("a"), run_id: None, task_id: None, requirement: ApprovalRequirement::Required }), "ApprovalRequested"),
-        (RuntimeEvent::CheckpointRecorded(CheckpointRecorded { project: project(), run_id: RunId::new("r"), checkpoint_id: CheckpointId::new("c"), disposition: CheckpointDisposition::Latest, data: None }), "CheckpointRecorded"),
+        (
+            RuntimeEvent::SessionCreated(SessionCreated {
+                project: project(),
+                session_id: SessionId::new("s"),
+            }),
+            "SessionCreated",
+        ),
+        (
+            RuntimeEvent::RunCreated(RunCreated {
+                project: project(),
+                session_id: SessionId::new("s"),
+                run_id: RunId::new("r"),
+                parent_run_id: None,
+                prompt_release_id: None,
+                agent_role_id: None,
+            }),
+            "RunCreated",
+        ),
+        (
+            RuntimeEvent::TaskCreated(TaskCreated {
+                project: project(),
+                task_id: TaskId::new("t"),
+                parent_run_id: None,
+                parent_task_id: None,
+                prompt_release_id: None,
+            }),
+            "TaskCreated",
+        ),
+        (
+            RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                project: project(),
+                approval_id: ApprovalId::new("a"),
+                run_id: None,
+                task_id: None,
+                requirement: ApprovalRequirement::Required,
+            }),
+            "ApprovalRequested",
+        ),
+        (
+            RuntimeEvent::CheckpointRecorded(CheckpointRecorded {
+                project: project(),
+                run_id: RunId::new("r"),
+                checkpoint_id: CheckpointId::new("c"),
+                disposition: CheckpointDisposition::Latest,
+                data: None,
+            }),
+            "CheckpointRecorded",
+        ),
     ];
 
     for (event, name) in events {
@@ -305,7 +486,8 @@ fn project_extraction_matches_for_all_event_families() {
         // EventEnvelope::project() delegates to the payload.
         let envelope = ev(event.clone());
         assert_eq!(
-            *envelope.payload.project(), expected,
+            *envelope.payload.project(),
+            expected,
             "envelope.payload.project() must match for {name}"
         );
     }
@@ -344,7 +526,8 @@ fn full_history_event_projects_are_accessible() {
         assert_eq!(
             entity_ref.kind().durability_class(),
             EntityDurabilityClass::FullHistory,
-            "{:?} must be a FullHistory entity", entity_ref.kind()
+            "{:?} must be a FullHistory entity",
+            entity_ref.kind()
         );
     }
 }

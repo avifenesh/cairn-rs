@@ -2,8 +2,8 @@
 //! rather than silently entering the canonical corpus.
 
 use cairn_domain::{KnowledgeDocumentId, KnowledgePackId, ProjectKey, SourceId};
-use cairn_memory::ingest::{IngestPackRequest, IngestRequest, IngestService, SourceType};
 use cairn_memory::in_memory::InMemoryDocumentStore;
+use cairn_memory::ingest::{IngestPackRequest, IngestRequest, IngestService, SourceType};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use std::sync::Arc;
 
@@ -33,7 +33,9 @@ async fn test_ingest_malformed_source_fails_explicitly() {
     let err = result.unwrap_err();
     let err_str = err.to_string();
     assert!(
-        err_str.contains("parse failed") || err_str.contains("ParseFailed") || err_str.contains("invalid"),
+        err_str.contains("parse failed")
+            || err_str.contains("ParseFailed")
+            || err_str.contains("invalid"),
         "error must indicate a parse failure, got: {}",
         err_str
     );
@@ -116,7 +118,11 @@ async fn test_ingest_empty_knowledge_pack_content_produces_no_chunks() {
         })
         .await;
 
-    assert!(result.is_ok(), "empty content submission should not panic, got: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "empty content submission should not panic, got: {:?}",
+        result.err()
+    );
     let chunks = store.all_chunks();
     assert!(
         chunks.is_empty(),

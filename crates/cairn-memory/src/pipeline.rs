@@ -165,7 +165,11 @@ pub fn bundle_source_type_to_ingest(
 /// a raw string conversion. Returns `None` if no text content can be extracted.
 pub fn extract_document_content_text(payload: &serde_json::Value) -> Option<String> {
     // Try `content.text` for InlineText variant.
-    if let Some(text) = payload.get("content").and_then(|c| c.get("text")).and_then(|t| t.as_str()) {
+    if let Some(text) = payload
+        .get("content")
+        .and_then(|c| c.get("text"))
+        .and_then(|t| t.as_str())
+    {
         return Some(text.to_owned());
     }
     // Try top-level `text` field.
@@ -255,7 +259,9 @@ fn make_chunk(
 /// owned retrieval documents rather than keeping parser-specific blobs.
 pub fn normalize(content: &str, source_type: SourceType) -> String {
     match source_type {
-        SourceType::PlainText | SourceType::KnowledgePack | SourceType::JsonStructured => content.to_owned(),
+        SourceType::PlainText | SourceType::KnowledgePack | SourceType::JsonStructured => {
+            content.to_owned()
+        }
         SourceType::Html => strip_html(content),
         SourceType::Markdown => strip_markdown(content),
         SourceType::StructuredJson => extract_json_text(content),
@@ -284,7 +290,10 @@ fn strip_html(html: &str) -> String {
                     .split(|c: char| c.is_whitespace() || c == '/')
                     .next()
                     .unwrap_or("");
-                if matches!(tag_name, "br" | "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
+                if matches!(
+                    tag_name,
+                    "br" | "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+                ) {
                     out.push('\n');
                 }
             }
@@ -367,14 +376,18 @@ fn strip_md_inline(line: &str) -> String {
                 chars.next(); // consume '['
                 let mut text = String::new();
                 for c in chars.by_ref() {
-                    if c == ']' { break; }
+                    if c == ']' {
+                        break;
+                    }
                     text.push(c);
                 }
                 // Skip (url) part.
                 if chars.peek() == Some(&'(') {
                     chars.next();
                     for c in chars.by_ref() {
-                        if c == ')' { break; }
+                        if c == ')' {
+                            break;
+                        }
                     }
                 }
                 out.push_str(&text);
@@ -382,14 +395,18 @@ fn strip_md_inline(line: &str) -> String {
             '[' => {
                 let mut text = String::new();
                 for c in chars.by_ref() {
-                    if c == ']' { break; }
+                    if c == ']' {
+                        break;
+                    }
                     text.push(c);
                 }
                 // Skip (url) part.
                 if chars.peek() == Some(&'(') {
                     chars.next();
                     for c in chars.by_ref() {
-                        if c == ')' { break; }
+                        if c == ')' {
+                            break;
+                        }
                     }
                 }
                 out.push_str(&text);
@@ -685,16 +702,14 @@ impl<S: DocumentStore + 'static, C: Chunker + 'static> IngestService for IngestP
             .chunk_hashes_for_project(&request.project)
             .await?;
         let mut batch_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        chunks.retain(|c| {
-            match c.content_hash.as_ref() {
-                None => true,
-                Some(h) => {
-                    if existing_hashes.contains(h) || batch_seen.contains(h) {
-                        false
-                    } else {
-                        batch_seen.insert(h.clone());
-                        true
-                    }
+        chunks.retain(|c| match c.content_hash.as_ref() {
+            None => true,
+            Some(h) => {
+                if existing_hashes.contains(h) || batch_seen.contains(h) {
+                    false
+                } else {
+                    batch_seen.insert(h.clone());
+                    true
                 }
             }
         });
@@ -716,10 +731,7 @@ impl<S: DocumentStore + 'static, C: Chunker + 'static> IngestService for IngestP
         // 5b. Run entity extraction on each chunk when an extractor is configured.
         if let Some(extractor) = &self.extractor {
             for chunk in &mut chunks {
-                let req = EntityExtractionRequest::all(
-                    chunk.text.clone(),
-                    request.project.clone(),
-                );
+                let req = EntityExtractionRequest::all(chunk.text.clone(), request.project.clone());
                 let result = extractor.extract(&req);
                 chunk.entities = result.all_entities();
             }
@@ -766,9 +778,7 @@ impl<S: DocumentStore + 'static, C: Chunker + 'static> IngestService for IngestP
             // Falls back to raw JSON field access for backward compatibility.
             let (content, external_ref_uri) = if let Some(ref kd) = typed {
                 match &kd.content {
-                    crate::bundles::DocumentContent::InlineText { text } => {
-                        (text.clone(), None)
-                    }
+                    crate::bundles::DocumentContent::InlineText { text } => (text.clone(), None),
                     crate::bundles::DocumentContent::InlineJson { value } => {
                         (value.to_string(), None)
                     }
@@ -1004,7 +1014,8 @@ mod tests {
 
     #[test]
     fn normalize_json_extracts_text_values() {
-        let json = r#"{"title": "My Doc", "items": [{"name": "Item A"}, {"name": "Item B"}], "count": 2}"#;
+        let json =
+            r#"{"title": "My Doc", "items": [{"name": "Item A"}, {"name": "Item B"}], "count": 2}"#;
         let result = super::normalize(json, SourceType::StructuredJson);
         assert!(result.contains("My Doc"));
         assert!(result.contains("Item A"));
@@ -1051,7 +1062,9 @@ mod tests {
     #[tokio::test]
     async fn ingest_html_normalizes_before_chunking() {
         let store = MemDocStore::new();
-        let chunker = ParagraphChunker { max_chunk_size: 500 };
+        let chunker = ParagraphChunker {
+            max_chunk_size: 500,
+        };
         let pipeline = IngestPipeline::new(store, chunker);
 
         pipeline

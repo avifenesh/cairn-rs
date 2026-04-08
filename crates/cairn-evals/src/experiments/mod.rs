@@ -348,8 +348,18 @@ mod tests {
             experiment_id: "e1".to_owned(),
             name: "test".to_owned(),
             arms: vec![
-                ExperimentArm { arm_id: "good".to_owned(), label: "good".to_owned(), wins: 100, trials: 100 },
-                ExperimentArm { arm_id: "bad".to_owned(),  label: "bad".to_owned(),  wins: 10,  trials: 100 },
+                ExperimentArm {
+                    arm_id: "good".to_owned(),
+                    label: "good".to_owned(),
+                    wins: 100,
+                    trials: 100,
+                },
+                ExperimentArm {
+                    arm_id: "bad".to_owned(),
+                    label: "bad".to_owned(),
+                    wins: 10,
+                    trials: 100,
+                },
             ],
             strategy: eg(0.0), // pure exploit
             epsilon: 0.0,
@@ -360,7 +370,10 @@ mod tests {
         // Pure exploit → always selects "good".
         for _ in 0..50 {
             let arm = exp.select_arm().unwrap();
-            assert_eq!(arm.arm_id, "good", "pure-exploit must always pick the best arm");
+            assert_eq!(
+                arm.arm_id, "good",
+                "pure-exploit must always pick the best arm"
+            );
         }
 
         // With epsilon=0.1, best arm should still dominate.
@@ -383,8 +396,18 @@ mod tests {
             experiment_id: "e2".to_owned(),
             name: "ucb".to_owned(),
             arms: vec![
-                ExperimentArm { arm_id: "explored".to_owned(), label: "e".to_owned(), wins: 50, trials: 100 },
-                ExperimentArm { arm_id: "unexplored".to_owned(), label: "u".to_owned(), wins: 0, trials: 0 },
+                ExperimentArm {
+                    arm_id: "explored".to_owned(),
+                    label: "e".to_owned(),
+                    wins: 50,
+                    trials: 100,
+                },
+                ExperimentArm {
+                    arm_id: "unexplored".to_owned(),
+                    label: "u".to_owned(),
+                    wins: 0,
+                    trials: 0,
+                },
             ],
             strategy: BanditStrategy::Ucb1,
             epsilon: 0.0,
@@ -392,7 +415,10 @@ mod tests {
             active: true,
         };
         let arm = exp.select_arm().unwrap();
-        assert_eq!(arm.arm_id, "unexplored", "UCB1 must select untried arm first");
+        assert_eq!(
+            arm.arm_id, "unexplored",
+            "UCB1 must select untried arm first"
+        );
     }
 
     // 4. record_outcome_updates_win_rates
@@ -401,9 +427,12 @@ mod tests {
         let mut exp = BanditExperiment {
             experiment_id: "e3".to_owned(),
             name: "rec".to_owned(),
-            arms: vec![
-                ExperimentArm { arm_id: "x".to_owned(), label: "x".to_owned(), wins: 0, trials: 0 },
-            ],
+            arms: vec![ExperimentArm {
+                arm_id: "x".to_owned(),
+                label: "x".to_owned(),
+                wins: 0,
+                trials: 0,
+            }],
             strategy: eg(0.0),
             epsilon: 0.0,
             created_at_ms: 0,
@@ -463,7 +492,10 @@ mod tests {
         exp.arms[1].trials = 100;
 
         let selected = engine.select_arm(&id).unwrap();
-        assert_eq!(selected, "beta", "pure exploit must pick the highest win-rate arm");
+        assert_eq!(
+            selected, "beta",
+            "pure exploit must pick the highest win-rate arm"
+        );
     }
 
     // 8. experiment_engine_record_and_stats
@@ -501,13 +533,19 @@ mod tests {
         );
 
         // Prime the strong arm.
-        for _ in 0..90 { engine.record_win(&id, "strong"); }
-        for _ in 0..10 { engine.record_loss(&id, "strong"); }
+        for _ in 0..90 {
+            engine.record_win(&id, "strong");
+        }
+        for _ in 0..10 {
+            engine.record_loss(&id, "strong");
+        }
 
         // Give "weak" enough trials to shrink its UCB1 confidence interval.
         // With only 3 trials, weak's CI is huge (sqrt(2*ln(103)/3) ≈ 1.76)
         // and would beat strong's score. After 40 losses, it shrinks enough.
-        for _ in 0..40 { engine.record_loss(&id, "weak"); }
+        for _ in 0..40 {
+            engine.record_loss(&id, "weak");
+        }
 
         // Now strong (90% win rate, 100 trials) should dominate over
         // weak (0% win rate, 43 trials): UCB1_strong ≈ 1.21 > UCB1_weak ≈ 0.52.
@@ -527,19 +565,29 @@ mod tests {
         let mut engine = ExperimentEngine::new();
         let id = engine.create_experiment(
             "pure-exploit".to_owned(),
-            vec!["mediocre".to_owned(), "champion".to_owned(), "poor".to_owned()],
+            vec![
+                "mediocre".to_owned(),
+                "champion".to_owned(),
+                "poor".to_owned(),
+            ],
             eg(0.0),
         );
 
         let exp = engine.store.get_mut(&id).unwrap();
-        exp.arms[0].wins = 5;  exp.arms[0].trials = 10; // 50%
-        exp.arms[1].wins = 9;  exp.arms[1].trials = 10; // 90%
-        exp.arms[2].wins = 1;  exp.arms[2].trials = 10; // 10%
+        exp.arms[0].wins = 5;
+        exp.arms[0].trials = 10; // 50%
+        exp.arms[1].wins = 9;
+        exp.arms[1].trials = 10; // 90%
+        exp.arms[2].wins = 1;
+        exp.arms[2].trials = 10; // 10%
 
         // With epsilon=0, every selection must return "champion".
         for _ in 0..100 {
             let selected = engine.select_arm(&id).unwrap();
-            assert_eq!(selected, "champion", "epsilon=0 must always exploit the best arm");
+            assert_eq!(
+                selected, "champion",
+                "epsilon=0 must always exploit the best arm"
+            );
         }
     }
 

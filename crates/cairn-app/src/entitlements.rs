@@ -47,10 +47,7 @@ impl PlanLimits {
             max_sessions: 10,
             max_runs_per_day: 50,
             max_tokens_per_month: 100_000,
-            features_enabled: vec![
-                "runtime_core".into(),
-                "eval_matrices".into(),
-            ],
+            features_enabled: vec!["runtime_core".into(), "eval_matrices".into()],
         }
     }
 
@@ -585,9 +582,7 @@ mod tests {
     fn check_entitlement_fails_for_excluded_feature() {
         let svc = EntitlementService::new();
         svc.set_plan("t1", PlanTier::Free);
-        let err = svc
-            .check_entitlement("t1", "advanced_admin")
-            .unwrap_err();
+        let err = svc.check_entitlement("t1", "advanced_admin").unwrap_err();
         assert_eq!(err.status_code(), 402);
         assert!(matches!(
             err,
@@ -619,7 +614,9 @@ mod tests {
     fn enterprise_can_access_everything() {
         let svc = EntitlementService::new();
         svc.set_plan("t1", PlanTier::Enterprise);
-        assert!(svc.check_entitlement("t1", "compliance_policy_packs").is_ok());
+        assert!(svc
+            .check_entitlement("t1", "compliance_policy_packs")
+            .is_ok());
         assert!(svc.check_entitlement("t1", "approval_hardening").is_ok());
         assert!(svc.check_entitlement("t1", "runtime_core").is_ok());
     }
@@ -718,7 +715,9 @@ mod tests {
         assert_eq!(report.max_sessions, 100);
         assert_eq!(report.runs_today, 1);
         assert_eq!(report.tokens_this_month, 500);
-        assert!(report.features_enabled.contains(&"advanced_admin".to_owned()));
+        assert!(report
+            .features_enabled
+            .contains(&"advanced_admin".to_owned()));
     }
 
     #[test]

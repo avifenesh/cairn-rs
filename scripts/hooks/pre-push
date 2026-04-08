@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# =============================================================================
+# pre-push hook — runs relevant checks based on what changed.
+#
+# Detects whether Rust or frontend files changed since the remote HEAD
+# and only runs the checks that matter.
+#
+# Checks:
+#   Rust:     cargo fmt --check, cargo clippy
+#   Frontend: npx tsc --noEmit, npm run build
+#
+# Skip with: git push --no-verify
+# =============================================================================
+
+set -euo pipefail
+
+RED='\033[0;31m'; GRN='\033[0;32m'; YLW='\033[0;33m'; BLD='\033[1m'; RST='\033[0m'
+
+# Determine what files changed between local HEAD and remote HEAD.
+remote="$1"
+url="$2"
+
+# Read the ref info from stdin (provided by git).
+while read local_ref local_oid remote_ref remote_oid; do
+  # For new branches, diff against main/HEAD.
+  if [ "$remote_oid" = "0000000000000000000000000000000000000000" ]; then
+    range="HEAD~10..HEAD"
+  else
+    range="${remote_oid}..${local_oid}"
+  fi
+
+  changed_files=$(git diff --name-only "$range" 2>/dev/null || git diff --name-only HEAD~5..HEAD)
+
+  has_rust=false
+  has_fe=false
+
+  for f in $changed_files; do
+    case "$f" in
+      crates/*|Cargo.toml|Cargo.lock) has_rust=true ;;
+      ui/*) has_fe=true ;;
+    esac
+  done
+
+  # ── Rust checks ──────────────────────────────────────────────────────────
+  if $has_rust; then
+    echo -e "${BLD}pre-push: Rust files changed — running checks${RST}"
+
+    echo -e "  ${YLW}cargo fmt --check${RST}"
+    if ! cargo fmt --check 2>/dev/null; then
+      echo -e "  ${RED}✗ cargo fmt failed — run 'cargo fmt' and commit${RST}"
+      exit 1
+    fi
+    echo -e "  ${GRN}✓ formatted${RST}"
+
+    echo -e "  ${YLW}cargo clippy${RST}"
+    if ! cargo clippy --workspace --lib -- -D warnings 2>/dev/null; then
+      echo -e "  ${RED}✗ clippy found issues${RST}"
+      exit 1
+    fi
+    echo -e "  ${GRN}✓ clippy clean${RST}"
+  fi
+
+  # ── Frontend checks ────────────────────────────────────────────────────
+  if $has_fe; then
+    echo -e "${BLD}pre-push: Frontend files changed — running checks${RST}"
+
+    pushd ui > /dev/null
+
+    echo -e "  ${YLW}npx tsc --noEmit${RST}"
+    if ! npx tsc --noEmit 2>/dev/null; then
+      echo -e "  ${RED}✗ TypeScript type errors${RST}"
+      popd > /dev/null
+      exit 1
+    fi
+    echo -e "  ${GRN}✓ types clean${RST}"
+
+    echo -e "  ${YLW}npm run build${RST}"
+    if ! npm run build > /dev/null 2>&1; then
+      echo -e "  ${RED}✗ UI build failed${RST}"
+      popd > /dev/null
+      exit 1
+    fi
+    echo -e "  ${GRN}✓ build succeeded${RST}"
+
+    popd > /dev/null
+  fi
+
+  if ! $has_rust && ! $has_fe; then
+    echo -e "${BLD}pre-push: no Rust or frontend changes — skipping checks${RST}"
+  fi
+done
+
+echo -e "${GRN}${BLD}pre-push: all checks passed${RST}"

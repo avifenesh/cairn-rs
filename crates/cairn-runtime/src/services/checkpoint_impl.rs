@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{CheckpointReadModel, CheckpointRecord, CheckpointStrategyReadModel};
+use cairn_store::projections::{
+    CheckpointReadModel, CheckpointRecord, CheckpointStrategyReadModel,
+};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -81,17 +83,15 @@ where
             .unwrap()
             .as_millis() as u64;
 
-        let event = make_envelope(RuntimeEvent::CheckpointStrategySet(
-            CheckpointStrategySet {
-                strategy_id: strategy_id.clone(),
-                description: description.clone(),
-                set_at_ms: now_ms,
-                run_id: Some(run_id.clone()),
-                interval_ms,
-                max_checkpoints,
-                trigger_on_task_complete,
-            },
-        ));
+        let event = make_envelope(RuntimeEvent::CheckpointStrategySet(CheckpointStrategySet {
+            strategy_id: strategy_id.clone(),
+            description: description.clone(),
+            set_at_ms: now_ms,
+            run_id: Some(run_id.clone()),
+            interval_ms,
+            max_checkpoints,
+            trigger_on_task_complete,
+        }));
 
         self.store.append(&[event]).await?;
 
@@ -99,9 +99,7 @@ where
         CheckpointStrategyReadModel::get_by_run(self.store.as_ref(), run_id)
             .await
             .map_err(RuntimeError::Store)?
-            .ok_or_else(|| {
-                RuntimeError::Internal("checkpoint strategy not found after set".into())
-            })
+            .ok_or_else(|| RuntimeError::Internal("checkpoint strategy not found after set".into()))
     }
 
     async fn get_strategy(

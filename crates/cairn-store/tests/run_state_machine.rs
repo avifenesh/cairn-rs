@@ -13,14 +13,11 @@
 //!   RunStateChanged  → state updated, version bumped, failure_class/pause_reason set
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, FailureClass, ProjectId, ProjectKey, RunCreated,
-    RunId, RunState, RunStateChanged, RuntimeEvent, SessionCreated, SessionId,
-    StateTransition, TenantId, WorkspaceId,
+    EventEnvelope, EventId, EventSource, FailureClass, ProjectId, ProjectKey, RunCreated, RunId,
+    RunState, RunStateChanged, RuntimeEvent, SessionCreated, SessionId, StateTransition, TenantId,
+    WorkspaceId,
 };
-use cairn_store::{
-    projections::RunReadModel,
-    EventLog, InMemoryStore,
-};
+use cairn_store::{projections::RunReadModel, EventLog, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -96,7 +93,10 @@ async fn run_created_has_pending_state() {
         .unwrap_or_default()
         .as_millis() as u64;
 
-    store.append(&setup("e_s", "sess_p", "e_r", "run_pending")).await.unwrap();
+    store
+        .append(&setup("e_s", "sess_p", "e_r", "run_pending"))
+        .await
+        .unwrap();
 
     let record = RunReadModel::get(&store, &RunId::new("run_pending"))
         .await
@@ -120,15 +120,25 @@ async fn run_created_has_pending_state() {
 async fn run_transitions_pending_to_running() {
     let store = InMemoryStore::new();
 
-    store.append(&setup("e_s", "sess_r", "e_r", "run_run")).await.unwrap();
+    store
+        .append(&setup("e_s", "sess_r", "e_r", "run_run"))
+        .await
+        .unwrap();
     store
         .append(&[run_transition(
-            "e_t", "run_run", Some(RunState::Pending), RunState::Running, None,
+            "e_t",
+            "run_run",
+            Some(RunState::Pending),
+            RunState::Running,
+            None,
         )])
         .await
         .unwrap();
 
-    let record = RunReadModel::get(&store, &RunId::new("run_run")).await.unwrap().unwrap();
+    let record = RunReadModel::get(&store, &RunId::new("run_run"))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.state, RunState::Running);
     assert_eq!(record.version, 2, "version bumped by transition");
@@ -142,19 +152,40 @@ async fn run_transitions_pending_to_running() {
 async fn run_transitions_running_to_waiting_approval() {
     let store = InMemoryStore::new();
 
-    store.append(&setup("e_s", "sess_wa", "e_r", "run_wa")).await.unwrap();
+    store
+        .append(&setup("e_s", "sess_wa", "e_r", "run_wa"))
+        .await
+        .unwrap();
     store
         .append(&[
-            run_transition("e_t1", "run_wa", Some(RunState::Pending),  RunState::Running,         None),
-            run_transition("e_t2", "run_wa", Some(RunState::Running),  RunState::WaitingApproval, None),
+            run_transition(
+                "e_t1",
+                "run_wa",
+                Some(RunState::Pending),
+                RunState::Running,
+                None,
+            ),
+            run_transition(
+                "e_t2",
+                "run_wa",
+                Some(RunState::Running),
+                RunState::WaitingApproval,
+                None,
+            ),
         ])
         .await
         .unwrap();
 
-    let record = RunReadModel::get(&store, &RunId::new("run_wa")).await.unwrap().unwrap();
+    let record = RunReadModel::get(&store, &RunId::new("run_wa"))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.state, RunState::WaitingApproval);
-    assert!(!record.state.is_terminal(), "WaitingApproval is non-terminal");
+    assert!(
+        !record.state.is_terminal(),
+        "WaitingApproval is non-terminal"
+    );
     assert_eq!(record.version, 3);
 }
 
@@ -164,23 +195,56 @@ async fn run_transitions_running_to_waiting_approval() {
 async fn run_completes_after_approval() {
     let store = InMemoryStore::new();
 
-    store.append(&setup("e_s", "sess_done", "e_r", "run_done")).await.unwrap();
+    store
+        .append(&setup("e_s", "sess_done", "e_r", "run_done"))
+        .await
+        .unwrap();
     store
         .append(&[
-            run_transition("e1", "run_done", Some(RunState::Pending),         RunState::Running,         None),
-            run_transition("e2", "run_done", Some(RunState::Running),         RunState::WaitingApproval, None),
-            run_transition("e3", "run_done", Some(RunState::WaitingApproval), RunState::Running,         None),
-            run_transition("e4", "run_done", Some(RunState::Running),         RunState::Completed,       None),
+            run_transition(
+                "e1",
+                "run_done",
+                Some(RunState::Pending),
+                RunState::Running,
+                None,
+            ),
+            run_transition(
+                "e2",
+                "run_done",
+                Some(RunState::Running),
+                RunState::WaitingApproval,
+                None,
+            ),
+            run_transition(
+                "e3",
+                "run_done",
+                Some(RunState::WaitingApproval),
+                RunState::Running,
+                None,
+            ),
+            run_transition(
+                "e4",
+                "run_done",
+                Some(RunState::Running),
+                RunState::Completed,
+                None,
+            ),
         ])
         .await
         .unwrap();
 
-    let record = RunReadModel::get(&store, &RunId::new("run_done")).await.unwrap().unwrap();
+    let record = RunReadModel::get(&store, &RunId::new("run_done"))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.state, RunState::Completed);
     assert!(record.state.is_terminal(), "Completed is terminal");
     assert_eq!(record.version, 5, "4 transitions + initial = version 5");
-    assert!(record.failure_class.is_none(), "successful run has no failure class");
+    assert!(
+        record.failure_class.is_none(),
+        "successful run has no failure class"
+    );
 }
 
 // ── 5. is_terminal() contracts ────────────────────────────────────────────────
@@ -203,10 +267,19 @@ fn terminal_states_are_completed_failed_canceled() {
 async fn run_fails_with_execution_error_class() {
     let store = InMemoryStore::new();
 
-    store.append(&setup("e_s", "sess_fail", "e_r", "run_fail")).await.unwrap();
+    store
+        .append(&setup("e_s", "sess_fail", "e_r", "run_fail"))
+        .await
+        .unwrap();
     store
         .append(&[
-            run_transition("e1", "run_fail", Some(RunState::Pending), RunState::Running, None),
+            run_transition(
+                "e1",
+                "run_fail",
+                Some(RunState::Pending),
+                RunState::Running,
+                None,
+            ),
             evt(
                 "e2",
                 RuntimeEvent::RunStateChanged(RunStateChanged {
@@ -214,7 +287,7 @@ async fn run_fails_with_execution_error_class() {
                     run_id: RunId::new("run_fail"),
                     transition: StateTransition {
                         from: Some(RunState::Running),
-                        to:   RunState::Failed,
+                        to: RunState::Failed,
                     },
                     failure_class: Some(FailureClass::ExecutionError),
                     pause_reason: None,
@@ -225,7 +298,10 @@ async fn run_fails_with_execution_error_class() {
         .await
         .unwrap();
 
-    let record = RunReadModel::get(&store, &RunId::new("run_fail")).await.unwrap().unwrap();
+    let record = RunReadModel::get(&store, &RunId::new("run_fail"))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.state, RunState::Failed);
     assert!(record.state.is_terminal());
@@ -239,11 +315,26 @@ async fn run_fails_with_execution_error_class() {
 async fn run_fails_with_approval_rejected_class() {
     let store = InMemoryStore::new();
 
-    store.append(&setup("e_s", "sess_rej", "e_r", "run_rej")).await.unwrap();
+    store
+        .append(&setup("e_s", "sess_rej", "e_r", "run_rej"))
+        .await
+        .unwrap();
     store
         .append(&[
-            run_transition("e1", "run_rej", Some(RunState::Pending), RunState::Running,         None),
-            run_transition("e2", "run_rej", Some(RunState::Running), RunState::WaitingApproval, None),
+            run_transition(
+                "e1",
+                "run_rej",
+                Some(RunState::Pending),
+                RunState::Running,
+                None,
+            ),
+            run_transition(
+                "e2",
+                "run_rej",
+                Some(RunState::Running),
+                RunState::WaitingApproval,
+                None,
+            ),
             evt(
                 "e3",
                 RuntimeEvent::RunStateChanged(RunStateChanged {
@@ -251,7 +342,7 @@ async fn run_fails_with_approval_rejected_class() {
                     run_id: RunId::new("run_rej"),
                     transition: StateTransition {
                         from: Some(RunState::WaitingApproval),
-                        to:   RunState::Failed,
+                        to: RunState::Failed,
                     },
                     failure_class: Some(FailureClass::ApprovalRejected),
                     pause_reason: None,
@@ -262,7 +353,10 @@ async fn run_fails_with_approval_rejected_class() {
         .await
         .unwrap();
 
-    let record = RunReadModel::get(&store, &RunId::new("run_rej")).await.unwrap().unwrap();
+    let record = RunReadModel::get(&store, &RunId::new("run_rej"))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.state, RunState::Failed);
     assert_eq!(record.failure_class, Some(FailureClass::ApprovalRejected));
@@ -274,10 +368,19 @@ async fn run_fails_with_approval_rejected_class() {
 async fn run_can_be_canceled_by_operator() {
     let store = InMemoryStore::new();
 
-    store.append(&setup("e_s", "sess_cancel", "e_r", "run_cancel")).await.unwrap();
+    store
+        .append(&setup("e_s", "sess_cancel", "e_r", "run_cancel"))
+        .await
+        .unwrap();
     store
         .append(&[
-            run_transition("e1", "run_cancel", Some(RunState::Pending), RunState::Running, None),
+            run_transition(
+                "e1",
+                "run_cancel",
+                Some(RunState::Pending),
+                RunState::Running,
+                None,
+            ),
             evt(
                 "e2",
                 RuntimeEvent::RunStateChanged(RunStateChanged {
@@ -285,7 +388,7 @@ async fn run_can_be_canceled_by_operator() {
                     run_id: RunId::new("run_cancel"),
                     transition: StateTransition {
                         from: Some(RunState::Running),
-                        to:   RunState::Canceled,
+                        to: RunState::Canceled,
                     },
                     failure_class: Some(FailureClass::CanceledByOperator),
                     pause_reason: None,
@@ -296,7 +399,10 @@ async fn run_can_be_canceled_by_operator() {
         .await
         .unwrap();
 
-    let record = RunReadModel::get(&store, &RunId::new("run_cancel")).await.unwrap().unwrap();
+    let record = RunReadModel::get(&store, &RunId::new("run_cancel"))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.state, RunState::Canceled);
     assert!(record.state.is_terminal());
@@ -311,39 +417,58 @@ async fn child_run_carries_parent_run_id() {
 
     store
         .append(&[
-            evt("e_s", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: SessionId::new("sess_tree"),
-            })),
+            evt(
+                "e_s",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_tree"),
+                }),
+            ),
             // Root run (orchestrator).
-            evt("e_root", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_tree"),
-                run_id: RunId::new("run_root"),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: Some("orchestrator".to_owned()),
-            })),
+            evt(
+                "e_root",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_tree"),
+                    run_id: RunId::new("run_root"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: Some("orchestrator".to_owned()),
+                }),
+            ),
             // Child run (subagent) spawned by root.
-            evt("e_child", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_tree"),
-                run_id: RunId::new("run_child"),
-                parent_run_id: Some(RunId::new("run_root")),
-                prompt_release_id: None,
-                agent_role_id: Some("researcher".to_owned()),
-            })),
+            evt(
+                "e_child",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_tree"),
+                    run_id: RunId::new("run_child"),
+                    parent_run_id: Some(RunId::new("run_root")),
+                    prompt_release_id: None,
+                    agent_role_id: Some("researcher".to_owned()),
+                }),
+            ),
         ])
         .await
         .unwrap();
 
-    let root = RunReadModel::get(&store, &RunId::new("run_root")).await.unwrap().unwrap();
+    let root = RunReadModel::get(&store, &RunId::new("run_root"))
+        .await
+        .unwrap()
+        .unwrap();
     assert!(root.parent_run_id.is_none(), "root run has no parent");
     assert_eq!(root.agent_role_id.as_deref(), Some("orchestrator"));
 
-    let child = RunReadModel::get(&store, &RunId::new("run_child")).await.unwrap().unwrap();
+    let child = RunReadModel::get(&store, &RunId::new("run_child"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(child.parent_run_id, Some(RunId::new("run_root")));
-    assert_eq!(child.session_id.as_str(), "sess_tree", "child shares session with root");
+    assert_eq!(
+        child.session_id.as_str(),
+        "sess_tree",
+        "child shares session with root"
+    );
     assert_eq!(child.agent_role_id.as_deref(), Some("researcher"));
 }
 
@@ -355,34 +480,46 @@ async fn list_by_session_returns_all_session_runs() {
 
     store
         .append(&[
-            evt("e_s", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(),
-                session_id: SessionId::new("sess_list"),
-            })),
-            evt("e_r1", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_list"),
-                run_id: RunId::new("run_list_1"),
-                parent_run_id: None,
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            evt("e_r2", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_list"),
-                run_id: RunId::new("run_list_2"),
-                parent_run_id: Some(RunId::new("run_list_1")),
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
-            evt("e_r3", RuntimeEvent::RunCreated(RunCreated {
-                project: project(),
-                session_id: SessionId::new("sess_list"),
-                run_id: RunId::new("run_list_3"),
-                parent_run_id: Some(RunId::new("run_list_1")),
-                prompt_release_id: None,
-                agent_role_id: None,
-            })),
+            evt(
+                "e_s",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_list"),
+                }),
+            ),
+            evt(
+                "e_r1",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_list"),
+                    run_id: RunId::new("run_list_1"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e_r2",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_list"),
+                    run_id: RunId::new("run_list_2"),
+                    parent_run_id: Some(RunId::new("run_list_1")),
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e_r3",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_list"),
+                    run_id: RunId::new("run_list_3"),
+                    parent_run_id: Some(RunId::new("run_list_1")),
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -396,7 +533,9 @@ async fn list_by_session_returns_all_session_runs() {
 
     // list_by_session returns root run first (sorted by created_at).
     assert_eq!(runs[0].run_id.as_str(), "run_list_1");
-    assert!(runs[1..].iter().all(|r| r.parent_run_id == Some(RunId::new("run_list_1"))));
+    assert!(runs[1..]
+        .iter()
+        .all(|r| r.parent_run_id == Some(RunId::new("run_list_1"))));
 }
 
 // ── 11. list_by_session is scoped — cross-session isolation ───────────────────
@@ -407,22 +546,42 @@ async fn list_by_session_excludes_other_sessions() {
 
     store
         .append(&[
-            evt("e_s1", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(), session_id: SessionId::new("sess_iso_a"),
-            })),
-            evt("e_s2", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(), session_id: SessionId::new("sess_iso_b"),
-            })),
-            evt("e_ra", RuntimeEvent::RunCreated(RunCreated {
-                project: project(), session_id: SessionId::new("sess_iso_a"),
-                run_id: RunId::new("run_iso_a"), parent_run_id: None,
-                prompt_release_id: None, agent_role_id: None,
-            })),
-            evt("e_rb", RuntimeEvent::RunCreated(RunCreated {
-                project: project(), session_id: SessionId::new("sess_iso_b"),
-                run_id: RunId::new("run_iso_b"), parent_run_id: None,
-                prompt_release_id: None, agent_role_id: None,
-            })),
+            evt(
+                "e_s1",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_iso_a"),
+                }),
+            ),
+            evt(
+                "e_s2",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_iso_b"),
+                }),
+            ),
+            evt(
+                "e_ra",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_iso_a"),
+                    run_id: RunId::new("run_iso_a"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e_rb",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_iso_b"),
+                    run_id: RunId::new("run_iso_b"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -446,7 +605,10 @@ async fn list_by_session_excludes_other_sessions() {
 async fn any_non_terminal_reflects_active_runs() {
     let store = InMemoryStore::new();
 
-    store.append(&setup("e_s", "sess_nt", "e_r", "run_nt")).await.unwrap();
+    store
+        .append(&setup("e_s", "sess_nt", "e_r", "run_nt"))
+        .await
+        .unwrap();
 
     // One active run → any_non_terminal = true.
     assert!(
@@ -458,8 +620,20 @@ async fn any_non_terminal_reflects_active_runs() {
 
     store
         .append(&[
-            run_transition("e1", "run_nt", Some(RunState::Pending),  RunState::Running,   None),
-            run_transition("e2", "run_nt", Some(RunState::Running),  RunState::Completed, None),
+            run_transition(
+                "e1",
+                "run_nt",
+                Some(RunState::Pending),
+                RunState::Running,
+                None,
+            ),
+            run_transition(
+                "e2",
+                "run_nt",
+                Some(RunState::Running),
+                RunState::Completed,
+                None,
+            ),
         ])
         .await
         .unwrap();
@@ -481,37 +655,58 @@ async fn latest_root_run_returns_most_recent_root() {
 
     store
         .append(&[
-            evt("e_s", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(), session_id: SessionId::new("sess_root"),
-            })),
+            evt(
+                "e_s",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_root"),
+                }),
+            ),
             // First root run.
-            evt("e_r1", RuntimeEvent::RunCreated(RunCreated {
-                project: project(), session_id: SessionId::new("sess_root"),
-                run_id: RunId::new("root_1"), parent_run_id: None,
-                prompt_release_id: None, agent_role_id: None,
-            })),
+            evt(
+                "e_r1",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_root"),
+                    run_id: RunId::new("root_1"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
 
     // Second root run in a separate append (gets a later created_at).
     store
-        .append(&[evt("e_r2", RuntimeEvent::RunCreated(RunCreated {
-            project: project(), session_id: SessionId::new("sess_root"),
-            run_id: RunId::new("root_2"), parent_run_id: None,
-            prompt_release_id: None, agent_role_id: None,
-        }))])
+        .append(&[evt(
+            "e_r2",
+            RuntimeEvent::RunCreated(RunCreated {
+                project: project(),
+                session_id: SessionId::new("sess_root"),
+                run_id: RunId::new("root_2"),
+                parent_run_id: None,
+                prompt_release_id: None,
+                agent_role_id: None,
+            }),
+        )])
         .await
         .unwrap();
 
     // Child of root_1 — must not be returned as a root run.
     store
-        .append(&[evt("e_r3", RuntimeEvent::RunCreated(RunCreated {
-            project: project(), session_id: SessionId::new("sess_root"),
-            run_id: RunId::new("child_of_root_1"),
-            parent_run_id: Some(RunId::new("root_1")),
-            prompt_release_id: None, agent_role_id: None,
-        }))])
+        .append(&[evt(
+            "e_r3",
+            RuntimeEvent::RunCreated(RunCreated {
+                project: project(),
+                session_id: SessionId::new("sess_root"),
+                run_id: RunId::new("child_of_root_1"),
+                parent_run_id: Some(RunId::new("root_1")),
+                prompt_release_id: None,
+                agent_role_id: None,
+            }),
+        )])
         .await
         .unwrap();
 
@@ -520,7 +715,11 @@ async fn latest_root_run_returns_most_recent_root() {
         .unwrap()
         .expect("at least one root run must exist");
 
-    assert_eq!(latest.run_id.as_str(), "root_2", "most recently created root run is root_2");
+    assert_eq!(
+        latest.run_id.as_str(),
+        "root_2",
+        "most recently created root run is root_2"
+    );
     assert!(latest.parent_run_id.is_none());
 }
 
@@ -532,19 +731,35 @@ async fn list_active_by_project_excludes_terminal_runs() {
 
     store
         .append(&[
-            evt("e_s", RuntimeEvent::SessionCreated(SessionCreated {
-                project: project(), session_id: SessionId::new("sess_active"),
-            })),
-            evt("e_r1", RuntimeEvent::RunCreated(RunCreated {
-                project: project(), session_id: SessionId::new("sess_active"),
-                run_id: RunId::new("run_active"),   parent_run_id: None,
-                prompt_release_id: None, agent_role_id: None,
-            })),
-            evt("e_r2", RuntimeEvent::RunCreated(RunCreated {
-                project: project(), session_id: SessionId::new("sess_active"),
-                run_id: RunId::new("run_terminal"), parent_run_id: None,
-                prompt_release_id: None, agent_role_id: None,
-            })),
+            evt(
+                "e_s",
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_active"),
+                }),
+            ),
+            evt(
+                "e_r1",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_active"),
+                    run_id: RunId::new("run_active"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+            evt(
+                "e_r2",
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project(),
+                    session_id: SessionId::new("sess_active"),
+                    run_id: RunId::new("run_terminal"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
         ])
         .await
         .unwrap();
@@ -552,13 +767,27 @@ async fn list_active_by_project_excludes_terminal_runs() {
     // Complete run_terminal.
     store
         .append(&[
-            run_transition("e1", "run_terminal", Some(RunState::Pending), RunState::Running,   None),
-            run_transition("e2", "run_terminal", Some(RunState::Running), RunState::Completed, None),
+            run_transition(
+                "e1",
+                "run_terminal",
+                Some(RunState::Pending),
+                RunState::Running,
+                None,
+            ),
+            run_transition(
+                "e2",
+                "run_terminal",
+                Some(RunState::Running),
+                RunState::Completed,
+                None,
+            ),
         ])
         .await
         .unwrap();
 
-    let active = RunReadModel::list_active_by_project(&store, &project(), 10).await.unwrap();
+    let active = RunReadModel::list_active_by_project(&store, &project(), 10)
+        .await
+        .unwrap();
 
     assert_eq!(active.len(), 1, "only one non-terminal run");
     assert_eq!(active[0].run_id.as_str(), "run_active");

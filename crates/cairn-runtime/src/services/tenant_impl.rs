@@ -51,11 +51,7 @@ where
             .as_millis() as u64;
 
         // Use a synthetic ProjectKey scoped to the tenant.
-        let project = ProjectKey::new(
-            tenant_id.clone(),
-            "__system__",
-            "__system__",
-        );
+        let project = ProjectKey::new(tenant_id.clone(), "__system__", "__system__");
 
         let event = make_envelope(RuntimeEvent::TenantCreated(TenantCreated {
             project,
@@ -75,11 +71,7 @@ where
         Ok(TenantReadModel::get(self.store.as_ref(), tenant_id).await?)
     }
 
-    async fn list(
-        &self,
-        limit: usize,
-        offset: usize,
-    ) -> Result<Vec<TenantRecord>, RuntimeError> {
+    async fn list(&self, limit: usize, offset: usize) -> Result<Vec<TenantRecord>, RuntimeError> {
         Ok(TenantReadModel::list(self.store.as_ref(), limit, offset).await?)
     }
 }

@@ -137,7 +137,10 @@ mod tests {
     #[tokio::test]
     async fn run_query_returns_result_with_echoed_summary() {
         let svc = InMemoryResearchService::new();
-        let result = svc.run_query(query("q1", "latest Rust news")).await.unwrap();
+        let result = svc
+            .run_query(query("q1", "latest Rust news"))
+            .await
+            .unwrap();
 
         assert_eq!(result.query_id, "q1");
         assert!(
@@ -186,7 +189,10 @@ mod tests {
 
         assert_eq!(report.title, "Weekly Tech Digest");
         assert!(!report.report_id.is_empty());
-        assert!(report.is_valid_period(), "period_end must be > period_start");
+        assert!(
+            report.is_valid_period(),
+            "period_end must be > period_start"
+        );
         assert_eq!(
             report.period_end_ms - report.period_start_ms,
             period_7d_ms,
@@ -200,8 +206,12 @@ mod tests {
     #[tokio::test]
     async fn list_digests_returns_stored_reports() {
         let svc = InMemoryDigestService::new();
-        svc.generate_digest("Digest A".to_owned(), 86_400_000).await.unwrap();
-        svc.generate_digest("Digest B".to_owned(), 86_400_000).await.unwrap();
+        svc.generate_digest("Digest A".to_owned(), 86_400_000)
+            .await
+            .unwrap();
+        svc.generate_digest("Digest B".to_owned(), 86_400_000)
+            .await
+            .unwrap();
 
         let all = svc.list_digests(10).await.unwrap();
         assert_eq!(all.len(), 2);

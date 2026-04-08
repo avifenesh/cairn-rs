@@ -56,16 +56,25 @@ async fn ingest_job_start_and_complete_success() {
         Some(source_id.clone()),
         "source_id must be preserved"
     );
-    assert_eq!(started.document_count, 12, "document_count must be recorded");
+    assert_eq!(
+        started.document_count, 12,
+        "document_count must be recorded"
+    );
     assert!(
         started.error_message.is_none(),
         "no error on a freshly started job"
     );
-    assert!(started.created_at > 0, "created_at must be a positive timestamp");
+    assert!(
+        started.created_at > 0,
+        "created_at must be a positive timestamp"
+    );
 
     // get() must return the same record.
     let fetched = svc.get(&job_id).await.unwrap().unwrap();
-    assert_eq!(fetched, started, "get() must return the same record as start()");
+    assert_eq!(
+        fetched, started,
+        "get() must return the same record as start()"
+    );
 
     // ── (3) Complete the job with success ─────────────────────────────────
     let completed = svc
@@ -83,8 +92,14 @@ async fn ingest_job_start_and_complete_success() {
         completed.error_message.is_none(),
         "successful completion must not carry an error_message"
     );
-    assert_eq!(completed.id, job_id, "job ID must be stable across transitions");
-    assert_eq!(completed.document_count, 12, "document_count must be unchanged");
+    assert_eq!(
+        completed.id, job_id,
+        "job ID must be stable across transitions"
+    );
+    assert_eq!(
+        completed.document_count, 12,
+        "document_count must be unchanged"
+    );
 
     // get() after completion must reflect the final state.
     let final_record = svc.get(&job_id).await.unwrap().unwrap();
@@ -104,7 +119,12 @@ async fn ingest_job_start_and_fail_with_error_message() {
 
     // ── (5) Start another job ─────────────────────────────────────────────
     let started = svc
-        .start(&project(), job_id.clone(), Some(SourceId::new("src_rss")), 3)
+        .start(
+            &project(),
+            job_id.clone(),
+            Some(SourceId::new("src_rss")),
+            3,
+        )
         .await
         .unwrap();
 
@@ -113,12 +133,7 @@ async fn ingest_job_start_and_fail_with_error_message() {
     // Fail with a descriptive error message.
     let error_msg = "connection timeout while fetching source feed".to_owned();
     let failed = svc
-        .complete(
-            &project(),
-            job_id.clone(),
-            false,
-            Some(error_msg.clone()),
-        )
+        .complete(&project(), job_id.clone(), false, Some(error_msg.clone()))
         .await
         .unwrap();
 
@@ -186,7 +201,10 @@ async fn ingest_job_emits_started_and_completed_events() {
     });
     let completed_ev = completed_ev.expect("IngestJobCompleted event must be emitted");
     assert_eq!(completed_ev.project, project());
-    assert!(completed_ev.success, "success flag must be true in the event");
+    assert!(
+        completed_ev.success,
+        "success flag must be true in the event"
+    );
     assert!(completed_ev.error_message.is_none());
     assert!(completed_ev.completed_at > 0);
     assert!(
@@ -207,7 +225,9 @@ async fn failed_job_event_carries_error_message() {
     let job_id = IngestJobId::new("job_fail_event");
     let error = "parse error: unexpected token at line 42".to_owned();
 
-    svc.start(&project(), job_id.clone(), None, 1).await.unwrap();
+    svc.start(&project(), job_id.clone(), None, 1)
+        .await
+        .unwrap();
     svc.complete(&project(), job_id.clone(), false, Some(error.clone()))
         .await
         .unwrap();
@@ -222,7 +242,10 @@ async fn failed_job_event_carries_error_message() {
         None
     });
     let fail_ev = fail_ev.expect("IngestJobCompleted event must exist for failed job");
-    assert!(!fail_ev.success, "success must be false in the failure event");
+    assert!(
+        !fail_ev.success,
+        "success must be false in the failure event"
+    );
     assert_eq!(
         fail_ev.error_message.as_deref(),
         Some(error.as_str()),
@@ -254,9 +277,14 @@ async fn list_by_project_scopes_and_paginates() {
 
     // 3 jobs for the main project, 1 for another.
     for (i, doc_count) in [(1u32, 5u32), (2, 10), (3, 15)] {
-        svc.start(&project(), IngestJobId::new(format!("job_list_{i}")), None, doc_count)
-            .await
-            .unwrap();
+        svc.start(
+            &project(),
+            IngestJobId::new(format!("job_list_{i}")),
+            None,
+            doc_count,
+        )
+        .await
+        .unwrap();
     }
     svc.start(&other, IngestJobId::new("job_other"), None, 2)
         .await
@@ -266,7 +294,11 @@ async fn list_by_project_scopes_and_paginates() {
     let all = svc.list_by_project(&project(), 10, 0).await.unwrap();
     assert_eq!(all.len(), 3, "must return all 3 jobs for the project");
     for job in &all {
-        assert_eq!(job.project, project(), "every result must belong to the queried project");
+        assert_eq!(
+            job.project,
+            project(),
+            "every result must belong to the queried project"
+        );
     }
 
     // Pagination: limit=2, offset=0 → first 2.
@@ -297,7 +329,11 @@ async fn multiple_jobs_tracked_independently() {
     let svc = IngestJobServiceImpl::new(store);
 
     let jobs = [
-        (IngestJobId::new("mjob_a"), Some(SourceId::new("src_a")), 10u32),
+        (
+            IngestJobId::new("mjob_a"),
+            Some(SourceId::new("src_a")),
+            10u32,
+        ),
         (IngestJobId::new("mjob_b"), Some(SourceId::new("src_b")), 20),
         (IngestJobId::new("mjob_c"), None, 5),
     ];

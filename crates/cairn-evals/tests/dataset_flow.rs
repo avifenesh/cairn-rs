@@ -37,6 +37,9 @@ fn dataset_create_entries_and_run_link_round_trip() {
     );
 
     // Verify the run was created (dataset linking happens at application layer).
-    assert_eq!(run.subject_kind, EvalSubjectKind::PromptRelease,
-        "run must be created with PromptRelease subject kind");
+    assert_eq!(
+        run.subject_kind,
+        EvalSubjectKind::PromptRelease,
+        "run must be created with PromptRelease subject kind"
+    );
 }

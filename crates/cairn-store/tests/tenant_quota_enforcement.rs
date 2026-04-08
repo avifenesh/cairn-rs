@@ -13,15 +13,12 @@
 //!   `max_tasks_per_run`) coexist on the same tenant and all persist.
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, TenantId, WorkspaceId,
-    RuntimeEvent,
     events::{TenantCreated, TenantQuotaSet, TenantQuotaViolated},
     tenancy::OwnershipKey,
+    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, RuntimeEvent, TenantId,
+    WorkspaceId,
 };
-use cairn_store::{
-    projections::QuotaReadModel,
-    EventLog, InMemoryStore,
-};
+use cairn_store::{projections::QuotaReadModel, EventLog, InMemoryStore};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -37,7 +34,9 @@ async fn create_tenant(store: &InMemoryStore, event_id: &str, tenant_id: &str) {
     let env = EventEnvelope::new(
         EventId::new(event_id),
         EventSource::Runtime,
-        OwnershipKey::Tenant(cairn_domain::tenancy::TenantKey::new(TenantId::new(tenant_id))),
+        OwnershipKey::Tenant(cairn_domain::tenancy::TenantKey::new(TenantId::new(
+            tenant_id,
+        ))),
         RuntimeEvent::TenantCreated(TenantCreated {
             project: project_for(tenant_id),
             tenant_id: TenantId::new(tenant_id),
@@ -59,7 +58,9 @@ async fn set_quota(
     let env = EventEnvelope::new(
         EventId::new(event_id),
         EventSource::Runtime,
-        OwnershipKey::Tenant(cairn_domain::tenancy::TenantKey::new(TenantId::new(tenant_id))),
+        OwnershipKey::Tenant(cairn_domain::tenancy::TenantKey::new(TenantId::new(
+            tenant_id,
+        ))),
         RuntimeEvent::TenantQuotaSet(TenantQuotaSet {
             tenant_id: TenantId::new(tenant_id),
             max_concurrent_runs,
@@ -82,7 +83,9 @@ async fn record_violation(
     let env = EventEnvelope::new(
         EventId::new(event_id),
         EventSource::Runtime,
-        OwnershipKey::Tenant(cairn_domain::tenancy::TenantKey::new(TenantId::new(tenant_id))),
+        OwnershipKey::Tenant(cairn_domain::tenancy::TenantKey::new(TenantId::new(
+            tenant_id,
+        ))),
         RuntimeEvent::TenantQuotaViolated(TenantQuotaViolated {
             tenant_id: TenantId::new(tenant_id),
             quota_type: quota_type.to_owned(),
@@ -102,15 +105,20 @@ async fn tenant_without_quota_returns_none() {
     create_tenant(&store, "e1", "tenant_no_quota").await;
 
     let quota = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_no_quota"))
-        .await.unwrap();
-    assert!(quota.is_none(), "tenant without TenantQuotaSet must have no quota record");
+        .await
+        .unwrap();
+    assert!(
+        quota.is_none(),
+        "tenant without TenantQuotaSet must have no quota record"
+    );
 }
 
 #[tokio::test]
 async fn completely_unknown_tenant_returns_none() {
     let store = InMemoryStore::new();
     let quota = QuotaReadModel::get_quota(&store, &TenantId::new("ghost_tenant"))
-        .await.unwrap();
+        .await
+        .unwrap();
     assert!(quota.is_none());
 }
 
@@ -123,10 +131,14 @@ async fn quota_set_stores_max_concurrent_runs() {
     set_quota(&store, "e2", "tenant_q1", 5, 20, 10).await;
 
     let quota = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_q1"))
-        .await.unwrap()
+        .await
+        .unwrap()
         .expect("quota must exist after TenantQuotaSet");
 
-    assert_eq!(quota.max_concurrent_runs, 5, "max_concurrent_runs must be 5");
+    assert_eq!(
+        quota.max_concurrent_runs, 5,
+        "max_concurrent_runs must be 5"
+    );
     assert_eq!(quota.tenant_id.as_str(), "tenant_q1");
 }
 
@@ -137,11 +149,19 @@ async fn quota_set_stores_all_three_limit_types() {
     set_quota(&store, "e2", "tenant_limits", 5, 30, 50).await;
 
     let quota = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_limits"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
-    assert_eq!(quota.max_concurrent_runs, 5,    "max_concurrent_runs must be 5");
-    assert_eq!(quota.max_sessions_per_hour, 30, "max_sessions_per_hour must be 30");
-    assert_eq!(quota.max_tasks_per_run, 50,     "max_tasks_per_run must be 50");
+    assert_eq!(
+        quota.max_concurrent_runs, 5,
+        "max_concurrent_runs must be 5"
+    );
+    assert_eq!(
+        quota.max_sessions_per_hour, 30,
+        "max_sessions_per_hour must be 30"
+    );
+    assert_eq!(quota.max_tasks_per_run, 50, "max_tasks_per_run must be 50");
 }
 
 #[tokio::test]
@@ -151,7 +171,9 @@ async fn quota_set_without_prior_tenant_event_still_stores() {
     set_quota(&store, "e1", "tenant_direct", 3, 10, 5).await;
 
     let quota = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_direct"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(quota.max_concurrent_runs, 3);
 }
 
@@ -164,11 +186,22 @@ async fn second_quota_set_overwrites_limits() {
     set_quota(&store, "e2", "tenant_ow", 10, 40, 20).await;
 
     let quota = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_ow"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
-    assert_eq!(quota.max_concurrent_runs, 10,   "second set must override first");
-    assert_eq!(quota.max_sessions_per_hour, 40, "second set must override first");
-    assert_eq!(quota.max_tasks_per_run, 20,     "second set must override first");
+    assert_eq!(
+        quota.max_concurrent_runs, 10,
+        "second set must override first"
+    );
+    assert_eq!(
+        quota.max_sessions_per_hour, 40,
+        "second set must override first"
+    );
+    assert_eq!(
+        quota.max_tasks_per_run, 20,
+        "second set must override first"
+    );
 }
 
 // ── 4. TenantQuotaViolated is recorded in the event log ──────────────────────
@@ -177,7 +210,16 @@ async fn second_quota_set_overwrites_limits() {
 async fn quota_violated_event_appears_in_event_log() {
     let store = InMemoryStore::new();
     set_quota(&store, "e1", "tenant_viol", 2, 10, 5).await;
-    record_violation(&store, "e2", "tenant_viol", "max_concurrent_runs", 3, 2, 5_000).await;
+    record_violation(
+        &store,
+        "e2",
+        "tenant_viol",
+        "max_concurrent_runs",
+        3,
+        2,
+        5_000,
+    )
+    .await;
 
     let all = store.read_stream(None, 100).await.unwrap();
     let has_violation = all.iter().any(|e| {
@@ -187,19 +229,32 @@ async fn quota_violated_event_appears_in_event_log() {
                 && ev.current == 3
                 && ev.limit == 2)
     });
-    assert!(has_violation, "TenantQuotaViolated must be persisted in the event log");
+    assert!(
+        has_violation,
+        "TenantQuotaViolated must be persisted in the event log"
+    );
 }
 
 #[tokio::test]
 async fn quota_violated_fields_are_preserved_verbatim() {
     let store = InMemoryStore::new();
     set_quota(&store, "e1", "tenant_fields", 5, 10, 20).await;
-    record_violation(&store, "e2", "tenant_fields", "max_sessions_per_hour", 11, 10, 9_999).await;
+    record_violation(
+        &store,
+        "e2",
+        "tenant_fields",
+        "max_sessions_per_hour",
+        11,
+        10,
+        9_999,
+    )
+    .await;
 
     let all = store.read_stream(None, 100).await.unwrap();
-    let violation = all.iter().find(|e| {
-        matches!(&e.envelope.payload, RuntimeEvent::TenantQuotaViolated(_))
-    }).expect("violation event must exist");
+    let violation = all
+        .iter()
+        .find(|e| matches!(&e.envelope.payload, RuntimeEvent::TenantQuotaViolated(_)))
+        .expect("violation event must exist");
 
     if let RuntimeEvent::TenantQuotaViolated(ev) = &violation.envelope.payload {
         assert_eq!(ev.quota_type, "max_sessions_per_hour");
@@ -225,15 +280,22 @@ async fn multiple_violations_are_all_recorded() {
             2,
             1,
             1_000 + i as u64,
-        ).await;
+        )
+        .await;
     }
 
     let all = store.read_stream(None, 100).await.unwrap();
-    let violation_count = all.iter()
-        .filter(|e| matches!(&e.envelope.payload, RuntimeEvent::TenantQuotaViolated(ev)
-            if ev.tenant_id.as_str() == "tenant_multi_viol"))
+    let violation_count = all
+        .iter()
+        .filter(|e| {
+            matches!(&e.envelope.payload, RuntimeEvent::TenantQuotaViolated(ev)
+            if ev.tenant_id.as_str() == "tenant_multi_viol")
+        })
         .count();
-    assert_eq!(violation_count, 3, "all 3 violations must be in the event log");
+    assert_eq!(
+        violation_count, 3,
+        "all 3 violations must be in the event log"
+    );
 }
 
 // ── 5. Quota scoping by tenant ────────────────────────────────────────────────
@@ -241,16 +303,26 @@ async fn multiple_violations_are_all_recorded() {
 #[tokio::test]
 async fn quota_is_scoped_to_individual_tenant() {
     let store = InMemoryStore::new();
-    set_quota(&store, "e1", "tenant_a", 5,  20, 10).await;
+    set_quota(&store, "e1", "tenant_a", 5, 20, 10).await;
     set_quota(&store, "e2", "tenant_b", 10, 50, 25).await;
 
     let qa = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_a"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     let qb = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_b"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
-    assert_eq!(qa.max_concurrent_runs, 5,  "tenant_a must have its own limit");
-    assert_eq!(qb.max_concurrent_runs, 10, "tenant_b must have its own limit");
+    assert_eq!(
+        qa.max_concurrent_runs, 5,
+        "tenant_a must have its own limit"
+    );
+    assert_eq!(
+        qb.max_concurrent_runs, 10,
+        "tenant_b must have its own limit"
+    );
     assert_eq!(qa.max_sessions_per_hour, 20);
     assert_eq!(qb.max_sessions_per_hour, 50);
 }
@@ -265,12 +337,22 @@ async fn updating_one_tenants_quota_does_not_affect_another() {
     set_quota(&store, "e3", "tenant_x", 100, 200, 300).await;
 
     let qx = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_x"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     let qy = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_y"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
-    assert_eq!(qx.max_concurrent_runs, 100, "tenant_x limit must be updated");
-    assert_eq!(qy.max_concurrent_runs, 3,   "tenant_y limit must be unchanged");
+    assert_eq!(
+        qx.max_concurrent_runs, 100,
+        "tenant_x limit must be updated"
+    );
+    assert_eq!(
+        qy.max_concurrent_runs, 3,
+        "tenant_y limit must be unchanged"
+    );
 }
 
 #[tokio::test]
@@ -279,13 +361,25 @@ async fn violation_for_one_tenant_does_not_appear_for_another() {
     set_quota(&store, "e1", "tenant_iso_a", 1, 1, 1).await;
     set_quota(&store, "e2", "tenant_iso_b", 1, 1, 1).await;
 
-    record_violation(&store, "e3", "tenant_iso_a", "max_concurrent_runs", 2, 1, 1_000).await;
+    record_violation(
+        &store,
+        "e3",
+        "tenant_iso_a",
+        "max_concurrent_runs",
+        2,
+        1,
+        1_000,
+    )
+    .await;
 
     let all = store.read_stream(None, 100).await.unwrap();
-    let b_violations = all.iter().filter(|e| {
-        matches!(&e.envelope.payload, RuntimeEvent::TenantQuotaViolated(ev)
+    let b_violations = all
+        .iter()
+        .filter(|e| {
+            matches!(&e.envelope.payload, RuntimeEvent::TenantQuotaViolated(ev)
             if ev.tenant_id.as_str() == "tenant_iso_b")
-    }).count();
+        })
+        .count();
     assert_eq!(b_violations, 0, "tenant_b must have no violations");
 }
 
@@ -297,7 +391,9 @@ async fn all_three_quota_types_coexist_on_same_tenant() {
     set_quota(&store, "e1", "tenant_3q", 7, 42, 99).await;
 
     let quota = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_3q"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     // All three limits independently stored.
     assert_eq!(quota.max_concurrent_runs, 7);
@@ -310,12 +406,40 @@ async fn violations_for_different_quota_types_on_same_tenant_are_independent() {
     let store = InMemoryStore::new();
     set_quota(&store, "e1", "tenant_qtypes", 2, 3, 4).await;
 
-    record_violation(&store, "e2", "tenant_qtypes", "max_concurrent_runs", 3, 2, 1_000).await;
-    record_violation(&store, "e3", "tenant_qtypes", "max_sessions_per_hour", 4, 3, 2_000).await;
-    record_violation(&store, "e4", "tenant_qtypes", "max_tasks_per_run", 5, 4, 3_000).await;
+    record_violation(
+        &store,
+        "e2",
+        "tenant_qtypes",
+        "max_concurrent_runs",
+        3,
+        2,
+        1_000,
+    )
+    .await;
+    record_violation(
+        &store,
+        "e3",
+        "tenant_qtypes",
+        "max_sessions_per_hour",
+        4,
+        3,
+        2_000,
+    )
+    .await;
+    record_violation(
+        &store,
+        "e4",
+        "tenant_qtypes",
+        "max_tasks_per_run",
+        5,
+        4,
+        3_000,
+    )
+    .await;
 
     let all = store.read_stream(None, 100).await.unwrap();
-    let violations: Vec<_> = all.iter()
+    let violations: Vec<_> = all
+        .iter()
         .filter_map(|e| {
             if let RuntimeEvent::TenantQuotaViolated(ev) = &e.envelope.payload {
                 Some(ev)
@@ -325,7 +449,11 @@ async fn violations_for_different_quota_types_on_same_tenant_are_independent() {
         })
         .collect();
 
-    assert_eq!(violations.len(), 3, "all three quota type violations must be in the log");
+    assert_eq!(
+        violations.len(),
+        3,
+        "all three quota type violations must be in the log"
+    );
 
     let types: Vec<&str> = violations.iter().map(|v| v.quota_type.as_str()).collect();
     assert!(types.contains(&"max_concurrent_runs"));
@@ -340,7 +468,9 @@ async fn zero_limits_are_stored_correctly() {
     set_quota(&store, "e1", "tenant_zero", 0, 0, 0).await;
 
     let quota = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_zero"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(quota.max_concurrent_runs, 0);
     assert_eq!(quota.max_sessions_per_hour, 0);
@@ -355,10 +485,12 @@ async fn current_active_runs_starts_at_zero() {
     set_quota(&store, "e1", "tenant_fresh", 5, 10, 20).await;
 
     let quota = QuotaReadModel::get_quota(&store, &TenantId::new("tenant_fresh"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(quota.current_active_runs, 0, "no runs created yet");
-    assert_eq!(quota.sessions_this_hour, 0,  "no sessions created yet");
+    assert_eq!(quota.sessions_this_hour, 0, "no sessions created yet");
 }
 
 // ── 8. Event log completeness ─────────────────────────────────────────────────
@@ -368,13 +500,25 @@ async fn quota_set_and_violation_events_are_sequential_in_log() {
     let store = InMemoryStore::new();
     create_tenant(&store, "e1", "tenant_seq").await;
     set_quota(&store, "e2", "tenant_seq", 2, 5, 10).await;
-    record_violation(&store, "e3", "tenant_seq", "max_concurrent_runs", 3, 2, 1_000).await;
+    record_violation(
+        &store,
+        "e3",
+        "tenant_seq",
+        "max_concurrent_runs",
+        3,
+        2,
+        1_000,
+    )
+    .await;
 
     let all = store.read_stream(None, 100).await.unwrap();
     assert_eq!(all.len(), 3, "all three events must be in the log");
 
     for w in all.windows(2) {
-        assert!(w[0].position < w[1].position, "positions must be strictly increasing");
+        assert!(
+            w[0].position < w[1].position,
+            "positions must be strictly increasing"
+        );
     }
 }
 
@@ -384,10 +528,13 @@ async fn quota_set_event_has_correct_payload_in_log() {
     set_quota(&store, "e1", "tenant_payload", 8, 16, 32).await;
 
     let all = store.read_stream(None, 100).await.unwrap();
-    let set_event = all.iter().find(|e| {
-        matches!(&e.envelope.payload, RuntimeEvent::TenantQuotaSet(ev)
+    let set_event = all
+        .iter()
+        .find(|e| {
+            matches!(&e.envelope.payload, RuntimeEvent::TenantQuotaSet(ev)
             if ev.tenant_id.as_str() == "tenant_payload")
-    }).expect("TenantQuotaSet must be in the log");
+        })
+        .expect("TenantQuotaSet must be in the log");
 
     if let RuntimeEvent::TenantQuotaSet(ev) = &set_event.envelope.payload {
         assert_eq!(ev.max_concurrent_runs, 8);

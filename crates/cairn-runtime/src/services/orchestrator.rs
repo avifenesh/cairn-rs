@@ -29,13 +29,13 @@ use serde::{Deserialize, Serialize};
 /// fed to the brain LLM so it can reason about progress.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TaskSummary {
-    pub task_id:     String,
+    pub task_id: String,
     /// Optional short description of what the task was supposed to do.
     pub description: Option<String>,
     /// Terminal or current state string (e.g. "completed", "failed", "leased").
-    pub state:       String,
+    pub state: String,
     /// Free-form result text returned by the worker, if any.
-    pub result:      Option<String>,
+    pub result: Option<String>,
 }
 
 /// All context the orchestrator needs to decide its next move.
@@ -99,7 +99,7 @@ impl PromptBuilder {
     /// `[{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]`
     pub fn build(ctx: &ContextBundle) -> Vec<serde_json::Value> {
         let system = Self::system_prompt(ctx);
-        let user   = Self::user_message(ctx);
+        let user = Self::user_message(ctx);
         vec![
             serde_json::json!({ "role": "system", "content": system }),
             serde_json::json!({ "role": "user",   "content": user   }),
@@ -149,20 +149,32 @@ impl PromptBuilder {
         ));
 
         if !ctx.task_history.is_empty() {
-            let lines: Vec<String> = ctx.task_history.iter().map(|t| {
-                let result = t.result.as_deref().unwrap_or("—");
-                let desc   = t.description.as_deref().unwrap_or("(no description)");
-                format!("- [{}] {} | {} | result: {}", t.state, t.task_id, desc, result)
-            }).collect();
+            let lines: Vec<String> = ctx
+                .task_history
+                .iter()
+                .map(|t| {
+                    let result = t.result.as_deref().unwrap_or("—");
+                    let desc = t.description.as_deref().unwrap_or("(no description)");
+                    format!(
+                        "- [{}] {} | {} | result: {}",
+                        t.state, t.task_id, desc, result
+                    )
+                })
+                .collect();
             parts.push(format!("## Task history\n{}", lines.join("\n")));
         }
 
         if !ctx.available_tools.is_empty() {
-            parts.push(format!("## Available tools\n{}", ctx.available_tools.join(", ")));
+            parts.push(format!(
+                "## Available tools\n{}",
+                ctx.available_tools.join(", ")
+            ));
         }
 
         if !ctx.memory_snippets.is_empty() {
-            let snippets = ctx.memory_snippets.iter()
+            let snippets = ctx
+                .memory_snippets
+                .iter()
                 .enumerate()
                 .map(|(i, s)| format!("[{}] {}", i + 1, s))
                 .collect::<Vec<_>>()
@@ -223,7 +235,10 @@ impl ResponseParser {
 
         // Fallback: completely unparsable → escalate so the operator can intervene
         vec![ActionProposal::escalate(
-            format!("LLM returned a non-JSON response: {}", &raw[..raw.len().min(200)]),
+            format!(
+                "LLM returned a non-JSON response: {}",
+                &raw[..raw.len().min(200)]
+            ),
             0.0,
         )]
     }
@@ -247,11 +262,25 @@ impl ResponseParser {
 
         let action_type = Self::parse_action_type(type_str)?;
 
-        let description    = obj.get("description").and_then(|d| d.as_str()).unwrap_or("").to_owned();
-        let confidence     = obj.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.5).clamp(0.0, 1.0);
-        let requires_approval = obj.get("requires_approval").and_then(|r| r.as_bool()).unwrap_or(false);
-        let tool_name      = obj.get("tool_name").and_then(|n| n.as_str()).map(str::to_owned);
-        let tool_args      = obj.get("tool_args").cloned();
+        let description = obj
+            .get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or("")
+            .to_owned();
+        let confidence = obj
+            .get("confidence")
+            .and_then(|c| c.as_f64())
+            .unwrap_or(0.5)
+            .clamp(0.0, 1.0);
+        let requires_approval = obj
+            .get("requires_approval")
+            .and_then(|r| r.as_bool())
+            .unwrap_or(false);
+        let tool_name = obj
+            .get("tool_name")
+            .and_then(|n| n.as_str())
+            .map(str::to_owned);
+        let tool_args = obj.get("tool_args").cloned();
 
         Some(ActionProposal {
             action_type,
@@ -265,11 +294,11 @@ impl ResponseParser {
 
     fn parse_action_type(s: &str) -> Option<ActionType> {
         match s {
-            "spawn_subagent"       => Some(ActionType::SpawnSubagent),
-            "invoke_tool"          => Some(ActionType::InvokeTool),
-            "create_memory"        => Some(ActionType::CreateMemory),
-            "send_notification"    => Some(ActionType::SendNotification),
-            "complete_run"         => Some(ActionType::CompleteRun),
+            "spawn_subagent" => Some(ActionType::SpawnSubagent),
+            "invoke_tool" => Some(ActionType::InvokeTool),
+            "create_memory" => Some(ActionType::CreateMemory),
+            "send_notification" => Some(ActionType::SendNotification),
+            "complete_run" => Some(ActionType::CompleteRun),
             "escalate_to_operator" => Some(ActionType::EscalateToOperator),
             _ => {
                 // Unknown type — caller will filter None → escalate at call site
@@ -321,7 +350,8 @@ impl BrainLlmClient {
         ctx: &ContextBundle,
     ) -> Result<Vec<ActionProposal>, OrchestratorError> {
         let messages = PromptBuilder::build(ctx);
-        let response = self.provider
+        let response = self
+            .provider
             .generate(&self.model_id, messages, &self.settings)
             .await
             .map_err(OrchestratorError::ProviderError)?;
@@ -340,17 +370,19 @@ mod tests {
 
     fn base_ctx() -> ContextBundle {
         ContextBundle {
-            run_id:          "run_orch_1".to_owned(),
-            session_id:      "sess_1".to_owned(),
-            goal:            "Research and summarise the cairn-rs architecture.".to_owned(),
-            iteration:       1,
-            agent_role:      Some("orchestrator".to_owned()),
+            run_id: "run_orch_1".to_owned(),
+            session_id: "sess_1".to_owned(),
+            goal: "Research and summarise the cairn-rs architecture.".to_owned(),
+            iteration: 1,
+            agent_role: Some("orchestrator".to_owned()),
             available_tools: vec!["cairn.search".to_owned(), "cairn.retrieve".to_owned()],
             ..Default::default()
         }
     }
 
-    struct MockProvider { response: String }
+    struct MockProvider {
+        response: String,
+    }
 
     #[async_trait::async_trait]
     impl GenerationProvider for MockProvider {
@@ -361,11 +393,11 @@ mod tests {
             _settings: &ProviderBindingSettings,
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Ok(GenerationResponse {
-                text:          self.response.clone(),
-                input_tokens:  Some(120),
+                text: self.response.clone(),
+                input_tokens: Some(120),
                 output_tokens: Some(80),
-                model_id:      "test-model".to_owned(),
-                tool_calls:    vec![],
+                model_id: "test-model".to_owned(),
+                tool_calls: vec![],
             })
         }
     }
@@ -380,7 +412,9 @@ mod tests {
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
         ) -> Result<GenerationResponse, ProviderAdapterError> {
-            Err(ProviderAdapterError::TransportFailure("mock failure".to_owned()))
+            Err(ProviderAdapterError::TransportFailure(
+                "mock failure".to_owned(),
+            ))
         }
     }
 
@@ -398,50 +432,74 @@ mod tests {
     fn prompt_builder_system_lists_all_action_types() {
         let msgs = PromptBuilder::build(&base_ctx());
         let sys = msgs[0]["content"].as_str().unwrap();
-        assert!(sys.contains("spawn_subagent"),    "missing spawn_subagent");
-        assert!(sys.contains("invoke_tool"),       "missing invoke_tool");
-        assert!(sys.contains("create_memory"),     "missing create_memory");
-        assert!(sys.contains("complete_run"),      "missing complete_run");
-        assert!(sys.contains("escalate_to_operator"), "missing escalate_to_operator");
-        assert!(sys.contains("JSON array"),        "must instruct JSON array return");
+        assert!(sys.contains("spawn_subagent"), "missing spawn_subagent");
+        assert!(sys.contains("invoke_tool"), "missing invoke_tool");
+        assert!(sys.contains("create_memory"), "missing create_memory");
+        assert!(sys.contains("complete_run"), "missing complete_run");
+        assert!(
+            sys.contains("escalate_to_operator"),
+            "missing escalate_to_operator"
+        );
+        assert!(
+            sys.contains("JSON array"),
+            "must instruct JSON array return"
+        );
     }
 
     #[test]
     fn prompt_builder_user_contains_goal_and_run_id() {
         let msgs = PromptBuilder::build(&base_ctx());
         let user = msgs[1]["content"].as_str().unwrap();
-        assert!(user.contains("cairn-rs architecture"), "goal must be embedded");
-        assert!(user.contains("run_orch_1"),             "run_id must be embedded");
-        assert!(user.contains("cairn.search"),           "tools must be embedded");
+        assert!(
+            user.contains("cairn-rs architecture"),
+            "goal must be embedded"
+        );
+        assert!(user.contains("run_orch_1"), "run_id must be embedded");
+        assert!(user.contains("cairn.search"), "tools must be embedded");
     }
 
     #[test]
     fn prompt_builder_embeds_task_history() {
         let mut ctx = base_ctx();
         ctx.task_history = vec![TaskSummary {
-            task_id:     "task_1".to_owned(),
+            task_id: "task_1".to_owned(),
             description: Some("fetch RFC docs".to_owned()),
-            state:       "completed".to_owned(),
-            result:      Some("found 12 RFC files".to_owned()),
+            state: "completed".to_owned(),
+            result: Some("found 12 RFC files".to_owned()),
         }];
-        let user = PromptBuilder::build(&ctx)[1]["content"].as_str().unwrap().to_owned();
-        assert!(user.contains("task_1"),            "task_id must appear");
-        assert!(user.contains("found 12 RFC files"), "task result must appear");
+        let user = PromptBuilder::build(&ctx)[1]["content"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(user.contains("task_1"), "task_id must appear");
+        assert!(
+            user.contains("found 12 RFC files"),
+            "task result must appear"
+        );
     }
 
     #[test]
     fn prompt_builder_embeds_memory_snippets() {
         let mut ctx = base_ctx();
         ctx.memory_snippets = vec!["cairn-rs uses event sourcing".to_owned()];
-        let user = PromptBuilder::build(&ctx)[1]["content"].as_str().unwrap().to_owned();
-        assert!(user.contains("event sourcing"), "memory snippet must appear");
+        let user = PromptBuilder::build(&ctx)[1]["content"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            user.contains("event sourcing"),
+            "memory snippet must appear"
+        );
     }
 
     #[test]
     fn prompt_builder_embeds_pending_approvals() {
         let mut ctx = base_ctx();
         ctx.pending_approvals = vec!["appr_abc".to_owned()];
-        let user = PromptBuilder::build(&ctx)[1]["content"].as_str().unwrap().to_owned();
+        let user = PromptBuilder::build(&ctx)[1]["content"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         assert!(user.contains("appr_abc"), "approval id must appear");
     }
 
@@ -509,7 +567,10 @@ mod tests {
     fn parser_confidence_clamped_to_0_1() {
         let raw = r#"[{"action_type":"complete_run","description":"ok","confidence":99.0,"requires_approval":false}]"#;
         let ps = ResponseParser::parse(raw);
-        assert!(ps[0].confidence <= 1.0, "confidence must be clamped to [0,1]");
+        assert!(
+            ps[0].confidence <= 1.0,
+            "confidence must be clamped to [0,1]"
+        );
     }
 
     #[test]
@@ -519,7 +580,10 @@ mod tests {
         assert_eq!(ps.len(), 1);
         assert_eq!(ps[0].action_type, ActionType::CompleteRun);
         assert_eq!(ps[0].description, "");
-        assert!((ps[0].confidence - 0.5).abs() < 1e-9, "missing confidence defaults to 0.5");
+        assert!(
+            (ps[0].confidence - 0.5).abs() < 1e-9,
+            "missing confidence defaults to 0.5"
+        );
         assert!(!ps[0].requires_approval);
         assert!(ps[0].tool_name.is_none());
         assert!(ps[0].tool_args.is_none());

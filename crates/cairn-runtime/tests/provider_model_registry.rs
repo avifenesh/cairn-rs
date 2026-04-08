@@ -5,13 +5,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use async_trait::async_trait;
-use cairn_domain::providers::{
-    OperationKind, ProviderBindingSettings, ProviderModelCapability,
-};
+use cairn_domain::providers::{OperationKind, ProviderBindingSettings, ProviderModelCapability};
 use cairn_domain::*;
+use cairn_runtime::routing::RouteResolverService;
 use cairn_runtime::services::provider_model_impl::ProviderModelServiceImpl;
 use cairn_runtime::services::route_resolver_impl::{BindingQuery, SimpleRouteResolver};
-use cairn_runtime::routing::RouteResolverService;
 use cairn_store::projections::{ProviderBindingReadModel, ProviderModelReadModel};
 use cairn_store::{EventLog, InMemoryStore};
 
@@ -252,16 +250,9 @@ async fn provider_model_registry_embed_only_not_selected_for_generate() {
             &self,
             project: &ProjectKey,
             operation: OperationKind,
-        ) -> Result<
-            Vec<cairn_domain::providers::ProviderBindingRecord>,
-            cairn_runtime::RuntimeError,
-        > {
-            Ok(ProviderBindingReadModel::list_active(
-                self.0.as_ref(),
-                project,
-                operation,
-            )
-            .await?)
+        ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, cairn_runtime::RuntimeError>
+        {
+            Ok(ProviderBindingReadModel::list_active(self.0.as_ref(), project, operation).await?)
         }
     }
 
@@ -297,7 +288,10 @@ async fn provider_model_registry_list_by_connection() {
     let svc = ProviderModelServiceImpl::new(store.clone());
     let conn_id = ProviderConnectionId::new("conn_list");
 
-    for (model_id, op) in [("m1", OperationKind::Generate), ("m2", OperationKind::Embed)] {
+    for (model_id, op) in [
+        ("m1", OperationKind::Generate),
+        ("m2", OperationKind::Embed),
+    ] {
         svc.register(
             tenant(),
             conn_id.clone(),

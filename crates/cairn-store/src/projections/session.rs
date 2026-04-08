@@ -31,8 +31,5 @@ pub trait SessionReadModel: Send + Sync {
     ///
     /// Returns at most `limit` sessions sorted by `updated_at` descending.
     /// Used by `GET /v1/fleet` to enumerate active agent sessions.
-    async fn list_active(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<SessionRecord>, StoreError>;
+    async fn list_active(&self, limit: usize) -> Result<Vec<SessionRecord>, StoreError>;
 }

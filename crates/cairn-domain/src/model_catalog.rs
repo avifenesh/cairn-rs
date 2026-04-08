@@ -461,7 +461,9 @@ mod tests {
     fn high_context_window_flag() {
         let mut e = entry("big", "openai", ModelTier::Brain);
         e.context_len = 200_000;
-        assert!(e.capabilities().contains(&ProviderCapability::HighContextWindow));
+        assert!(e
+            .capabilities()
+            .contains(&ProviderCapability::HighContextWindow));
     }
 
     #[test]
@@ -496,7 +498,11 @@ mod tests {
         for e in builtin_catalog() {
             assert!(!e.id.is_empty(), "id empty for {:?}", e.display_name);
             assert!(!e.provider.is_empty(), "provider empty for {}", e.id);
-            assert!(!e.display_name.is_empty(), "display_name empty for {}", e.id);
+            assert!(
+                !e.display_name.is_empty(),
+                "display_name empty for {}",
+                e.id
+            );
             assert!(e.context_len > 0, "context_len = 0 for {}", e.id);
             assert!(e.max_tokens > 0, "max_tokens = 0 for {}", e.id);
         }

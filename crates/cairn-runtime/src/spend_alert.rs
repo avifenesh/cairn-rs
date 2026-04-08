@@ -7,7 +7,7 @@
 //! Mirrors `cairn/internal/agent/spend_alert.go` at the service boundary.
 
 use async_trait::async_trait;
-use cairn_domain::{providers::SpendAlert, TenantId, SessionId};
+use cairn_domain::{providers::SpendAlert, SessionId, TenantId};
 
 use crate::error::RuntimeError;
 

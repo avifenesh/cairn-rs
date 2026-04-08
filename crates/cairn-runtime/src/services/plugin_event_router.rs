@@ -150,11 +150,7 @@ fn runtime_event_type_name(event: &RuntimeEvent) -> String {
     }
     // Fallback: use Debug formatting to extract variant name.
     let debug = format!("{event:?}");
-    debug
-        .split('(')
-        .next()
-        .unwrap_or("unknown")
-        .to_owned()
+    debug.split('(').next().unwrap_or("unknown").to_owned()
 }
 
 #[cfg(test)]
@@ -238,10 +234,7 @@ mod tests {
     fn merges_registry_and_explicit_subscriptions() {
         let caps = Arc::new(CapabilityRegistry::new());
         // Register via capability registry.
-        caps.register_event_subscriptions(
-            "registry-plugin",
-            vec!["session_created".into()],
-        );
+        caps.register_event_subscriptions("registry-plugin", vec!["session_created".into()]);
 
         let router = PluginEventRouter::new(caps);
         // Also add an explicit subscription.

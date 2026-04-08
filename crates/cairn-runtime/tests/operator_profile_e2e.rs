@@ -11,13 +11,18 @@
 
 use std::sync::Arc;
 
-use std::time::Duration;
 use cairn_domain::{TenantId, WorkspaceRole};
-use cairn_runtime::{OperatorProfileService, TenantService};
 use cairn_runtime::services::{OperatorProfileServiceImpl, TenantServiceImpl};
+use cairn_runtime::{OperatorProfileService, TenantService};
 use cairn_store::InMemoryStore;
+use std::time::Duration;
 
-async fn setup(tenant_name: &str) -> (Arc<InMemoryStore>, OperatorProfileServiceImpl<InMemoryStore>) {
+async fn setup(
+    tenant_name: &str,
+) -> (
+    Arc<InMemoryStore>,
+    OperatorProfileServiceImpl<InMemoryStore>,
+) {
     let store = Arc::new(InMemoryStore::new());
     TenantServiceImpl::new(store.clone())
         .create(TenantId::new(tenant_name), format!("{tenant_name} Corp"))
@@ -43,7 +48,10 @@ async fn create_and_retrieve_operator_profile() {
         .await
         .unwrap();
 
-    assert!(!created.operator_id.as_str().is_empty(), "operator_id must be generated");
+    assert!(
+        !created.operator_id.as_str().is_empty(),
+        "operator_id must be generated"
+    );
     assert_eq!(created.tenant_id, TenantId::new("t_create"));
     assert_eq!(created.display_name, "Alice Operator");
     assert_eq!(created.email, "alice@example.com");
@@ -129,9 +137,14 @@ async fn list_profiles_returns_all_for_tenant() {
         ids.push(p.operator_id);
     }
 
-    let listed = profiles.list(&TenantId::new("t_list"), 10, 0).await.unwrap();
+    let listed = profiles
+        .list(&TenantId::new("t_list"), 10, 0)
+        .await
+        .unwrap();
     assert_eq!(listed.len(), 3, "all 3 profiles must appear in list");
-    assert!(listed.iter().all(|p| p.tenant_id == TenantId::new("t_list")));
+    assert!(listed
+        .iter()
+        .all(|p| p.tenant_id == TenantId::new("t_list")));
 
     let display_names: Vec<&str> = listed.iter().map(|p| p.display_name.as_str()).collect();
     for name in &names {
@@ -143,7 +156,10 @@ async fn list_profiles_returns_all_for_tenant() {
     assert_eq!(page.len(), 2, "limit must be respected");
 
     // Offset 2: returns the remaining 1.
-    let rest = profiles.list(&TenantId::new("t_list"), 10, 2).await.unwrap();
+    let rest = profiles
+        .list(&TenantId::new("t_list"), 10, 2)
+        .await
+        .unwrap();
     assert_eq!(rest.len(), 1);
 }
 
@@ -155,27 +171,78 @@ async fn profiles_are_isolated_by_tenant() {
     let tenants = TenantServiceImpl::new(store.clone());
     let profiles = OperatorProfileServiceImpl::new(store.clone());
 
-    tenants.create(TenantId::new("tenant_x"), "Tenant X".to_owned()).await.unwrap();
-    tenants.create(TenantId::new("tenant_y"), "Tenant Y".to_owned()).await.unwrap();
+    tenants
+        .create(TenantId::new("tenant_x"), "Tenant X".to_owned())
+        .await
+        .unwrap();
+    tenants
+        .create(TenantId::new("tenant_y"), "Tenant Y".to_owned())
+        .await
+        .unwrap();
 
-    profiles.create(TenantId::new("tenant_x"), "X-Alice".to_owned(), "x@x.com".to_owned(), WorkspaceRole::Admin).await.unwrap();
+    profiles
+        .create(
+            TenantId::new("tenant_x"),
+            "X-Alice".to_owned(),
+            "x@x.com".to_owned(),
+            WorkspaceRole::Admin,
+        )
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(2)).await;
-    profiles.create(TenantId::new("tenant_x"), "X-Bob".to_owned(),   "xb@x.com".to_owned(), WorkspaceRole::Member).await.unwrap();
+    profiles
+        .create(
+            TenantId::new("tenant_x"),
+            "X-Bob".to_owned(),
+            "xb@x.com".to_owned(),
+            WorkspaceRole::Member,
+        )
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(2)).await;
-    profiles.create(TenantId::new("tenant_y"), "Y-Carol".to_owned(), "y@y.com".to_owned(), WorkspaceRole::Viewer).await.unwrap();
+    profiles
+        .create(
+            TenantId::new("tenant_y"),
+            "Y-Carol".to_owned(),
+            "y@y.com".to_owned(),
+            WorkspaceRole::Viewer,
+        )
+        .await
+        .unwrap();
 
-    let x_profiles = profiles.list(&TenantId::new("tenant_x"), 10, 0).await.unwrap();
-    let y_profiles = profiles.list(&TenantId::new("tenant_y"), 10, 0).await.unwrap();
+    let x_profiles = profiles
+        .list(&TenantId::new("tenant_x"), 10, 0)
+        .await
+        .unwrap();
+    let y_profiles = profiles
+        .list(&TenantId::new("tenant_y"), 10, 0)
+        .await
+        .unwrap();
 
-    assert_eq!(x_profiles.len(), 2, "tenant_x must only see its own 2 profiles");
-    assert_eq!(y_profiles.len(), 1, "tenant_y must only see its own 1 profile");
+    assert_eq!(
+        x_profiles.len(),
+        2,
+        "tenant_x must only see its own 2 profiles"
+    );
+    assert_eq!(
+        y_profiles.len(),
+        1,
+        "tenant_y must only see its own 1 profile"
+    );
 
-    assert!(x_profiles.iter().all(|p| p.tenant_id == TenantId::new("tenant_x")));
-    assert!(y_profiles.iter().all(|p| p.tenant_id == TenantId::new("tenant_y")));
+    assert!(x_profiles
+        .iter()
+        .all(|p| p.tenant_id == TenantId::new("tenant_x")));
+    assert!(y_profiles
+        .iter()
+        .all(|p| p.tenant_id == TenantId::new("tenant_y")));
 
     // Names don't bleed across tenants.
     let x_names: Vec<&str> = x_profiles.iter().map(|p| p.display_name.as_str()).collect();
-    assert!(!x_names.contains(&"Y-Carol"), "tenant_x must not see tenant_y profiles");
+    assert!(
+        !x_names.contains(&"Y-Carol"),
+        "tenant_x must not see tenant_y profiles"
+    );
 }
 
 // ── (6) Create requires existing tenant ───────────────────────────────────
@@ -194,9 +261,18 @@ async fn create_fails_if_tenant_does_not_exist() {
         )
         .await;
 
-    assert!(result.is_err(), "create must fail when tenant does not exist");
     assert!(
-        matches!(result.unwrap_err(), cairn_runtime::error::RuntimeError::NotFound { entity: "tenant", .. }),
+        result.is_err(),
+        "create must fail when tenant does not exist"
+    );
+    assert!(
+        matches!(
+            result.unwrap_err(),
+            cairn_runtime::error::RuntimeError::NotFound {
+                entity: "tenant",
+                ..
+            }
+        ),
         "error must be NotFound for tenant"
     );
 }
@@ -255,7 +331,11 @@ async fn update_nonexistent_profile_returns_not_found() {
         .await;
 
     assert!(result.is_err());
-    assert!(
-        matches!(result.unwrap_err(), cairn_runtime::error::RuntimeError::NotFound { entity: "operator_profile", .. })
-    );
+    assert!(matches!(
+        result.unwrap_err(),
+        cairn_runtime::error::RuntimeError::NotFound {
+            entity: "operator_profile",
+            ..
+        }
+    ));
 }

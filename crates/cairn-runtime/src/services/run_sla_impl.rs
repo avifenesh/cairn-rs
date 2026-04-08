@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::sla::{SlaConfig, SlaBreach, SlaStatus};
+use cairn_domain::sla::{SlaBreach, SlaConfig, SlaStatus};
 use cairn_domain::*;
 use cairn_store::projections::{RunReadModel, RunSlaReadModel};
 use cairn_store::EventLog;
@@ -155,7 +155,7 @@ mod tests {
                 run_id: run_id.clone(),
                 parent_run_id: None,
                 prompt_release_id: None,
-            agent_role_id: None,
+                agent_role_id: None,
             }))])
             .await
             .unwrap();
@@ -191,10 +191,7 @@ mod tests {
         assert!(sla_breached, "RunSlaBreached event must be in event log");
 
         // list_breached_by_tenant returns the run
-        let breaches = service
-            .list_breached_by_tenant(&tenant_id)
-            .await
-            .unwrap();
+        let breaches = service.list_breached_by_tenant(&tenant_id).await.unwrap();
         assert_eq!(breaches.len(), 1);
         assert_eq!(breaches[0].run_id, run_id);
 

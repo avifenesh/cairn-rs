@@ -72,8 +72,7 @@ impl MemoryProposalHook for SseMemoryProposalHook {
         let mut frame = build_memory_proposed_frame(item.clone(), None);
 
         // Assign sequence ID and broadcast if wired to the SSE channel.
-        if let (Some(tx), Some(buffer), Some(seq)) =
-            (&self.sse_tx, &self.sse_buffer, &self.sse_seq)
+        if let (Some(tx), Some(buffer), Some(seq)) = (&self.sse_tx, &self.sse_buffer, &self.sse_seq)
         {
             let id = seq.fetch_add(1, Ordering::SeqCst);
             frame.id = Some(id.to_string());
@@ -171,29 +170,35 @@ mod tests {
 /// Wire into `OrchestratorLoop::with_emitter(Arc::new(emitter))` inside
 /// `orchestrate_run_handler`.
 pub struct SseOrchestratorEmitter {
-    sse_tx:     broadcast::Sender<SseFrame>,
+    sse_tx: broadcast::Sender<SseFrame>,
     sse_buffer: Arc<RwLock<VecDeque<(u64, SseFrame)>>>,
-    sse_seq:    Arc<AtomicU64>,
+    sse_seq: Arc<AtomicU64>,
 }
 
 impl SseOrchestratorEmitter {
     pub fn new(
-        sse_tx:     broadcast::Sender<SseFrame>,
+        sse_tx: broadcast::Sender<SseFrame>,
         sse_buffer: Arc<RwLock<VecDeque<(u64, SseFrame)>>>,
-        sse_seq:    Arc<AtomicU64>,
+        sse_seq: Arc<AtomicU64>,
     ) -> Self {
-        Self { sse_tx, sse_buffer, sse_seq }
+        Self {
+            sse_tx,
+            sse_buffer,
+            sse_seq,
+        }
     }
 
     fn emit(&self, data: serde_json::Value) {
-        let id  = self.sse_seq.fetch_add(1, Ordering::SeqCst);
+        let id = self.sse_seq.fetch_add(1, Ordering::SeqCst);
         let frame = SseFrame {
             event: cairn_api::sse::SseEventName::AgentProgress,
             data,
             id: Some(id.to_string()),
         };
         if let Ok(mut buf) = self.sse_buffer.write() {
-            if buf.len() >= SSE_BUFFER_CAPACITY { buf.pop_front(); }
+            if buf.len() >= SSE_BUFFER_CAPACITY {
+                buf.pop_front();
+            }
             buf.push_back((id, frame.clone()));
         }
         let _ = self.sse_tx.send(frame);
@@ -214,7 +219,7 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
 
     async fn on_gather_completed(
         &self,
-        ctx:    &cairn_orchestrator::OrchestrationContext,
+        ctx: &cairn_orchestrator::OrchestrationContext,
         gather: &cairn_orchestrator::GatherOutput,
     ) {
         self.emit(serde_json::json!({
@@ -228,7 +233,7 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
 
     async fn on_decide_completed(
         &self,
-        ctx:    &cairn_orchestrator::OrchestrationContext,
+        ctx: &cairn_orchestrator::OrchestrationContext,
         decide: &cairn_orchestrator::DecideOutput,
     ) {
         self.emit(serde_json::json!({
@@ -243,9 +248,9 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
 
     async fn on_tool_called(
         &self,
-        ctx:       &cairn_orchestrator::OrchestrationContext,
+        ctx: &cairn_orchestrator::OrchestrationContext,
         tool_name: &str,
-        args:      Option<&serde_json::Value>,
+        args: Option<&serde_json::Value>,
     ) {
         self.emit(serde_json::json!({
             "event":     "tool_called",
@@ -258,11 +263,11 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
 
     async fn on_tool_result(
         &self,
-        ctx:       &cairn_orchestrator::OrchestrationContext,
+        ctx: &cairn_orchestrator::OrchestrationContext,
         tool_name: &str,
         succeeded: bool,
-        output:    Option<&serde_json::Value>,
-        error:     Option<&str>,
+        output: Option<&serde_json::Value>,
+        error: Option<&str>,
     ) {
         self.emit(serde_json::json!({
             "event":     "tool_result",
@@ -277,15 +282,19 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
 
     async fn on_step_completed(
         &self,
-        ctx:     &cairn_orchestrator::OrchestrationContext,
-        decide:  &cairn_orchestrator::DecideOutput,
+        ctx: &cairn_orchestrator::OrchestrationContext,
+        decide: &cairn_orchestrator::DecideOutput,
         execute: &cairn_orchestrator::ExecuteOutcome,
     ) {
         use cairn_orchestrator::ActionStatus;
-        let succeeded = execute.results.iter()
+        let succeeded = execute
+            .results
+            .iter()
             .filter(|r| r.status == ActionStatus::Succeeded)
             .count();
-        let failed = execute.results.iter()
+        let failed = execute
+            .results
+            .iter()
             .filter(|r| matches!(r.status, ActionStatus::Failed { .. }))
             .count();
         self.emit(serde_json::json!({
@@ -300,22 +309,26 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
 
     async fn on_finished(
         &self,
-        ctx:         &cairn_orchestrator::OrchestrationContext,
+        ctx: &cairn_orchestrator::OrchestrationContext,
         termination: &cairn_orchestrator::LoopTermination,
     ) {
         let (term_str, detail) = match termination {
-            cairn_orchestrator::LoopTermination::Completed { summary } =>
-                ("completed", Some(summary.as_str())),
-            cairn_orchestrator::LoopTermination::Failed { reason } =>
-                ("failed", Some(reason.as_str())),
-            cairn_orchestrator::LoopTermination::MaxIterationsReached =>
-                ("max_iterations_reached", None),
-            cairn_orchestrator::LoopTermination::TimedOut =>
-                ("timed_out", None),
-            cairn_orchestrator::LoopTermination::WaitingApproval { .. } =>
-                ("waiting_approval", None),
-            cairn_orchestrator::LoopTermination::WaitingSubagent { .. } =>
-                ("waiting_subagent", None),
+            cairn_orchestrator::LoopTermination::Completed { summary } => {
+                ("completed", Some(summary.as_str()))
+            }
+            cairn_orchestrator::LoopTermination::Failed { reason } => {
+                ("failed", Some(reason.as_str()))
+            }
+            cairn_orchestrator::LoopTermination::MaxIterationsReached => {
+                ("max_iterations_reached", None)
+            }
+            cairn_orchestrator::LoopTermination::TimedOut => ("timed_out", None),
+            cairn_orchestrator::LoopTermination::WaitingApproval { .. } => {
+                ("waiting_approval", None)
+            }
+            cairn_orchestrator::LoopTermination::WaitingSubagent { .. } => {
+                ("waiting_subagent", None)
+            }
         };
         self.emit(serde_json::json!({
             "event":       "orchestrate_finished",
@@ -341,14 +354,14 @@ mod sse_orchestrator_tests {
     fn ctx() -> cairn_orchestrator::OrchestrationContext {
         use cairn_domain::{ProjectKey, RunId, SessionId};
         cairn_orchestrator::OrchestrationContext {
-            project:               ProjectKey::new("t", "w", "p"),
-            session_id:            SessionId::new("s1"),
-            run_id:                RunId::new("run_1"),
-            task_id:               None,
-            iteration:             0,
-            goal:                  "do the thing".to_owned(),
-            agent_type:            "orchestrator".to_owned(),
-            run_started_at_ms:     0,
+            project: ProjectKey::new("t", "w", "p"),
+            session_id: SessionId::new("s1"),
+            run_id: RunId::new("run_1"),
+            task_id: None,
+            iteration: 0,
+            goal: "do the thing".to_owned(),
+            agent_type: "orchestrator".to_owned(),
+            run_started_at_ms: 0,
             discovered_tool_names: vec![],
         }
     }
@@ -370,8 +383,22 @@ mod sse_orchestrator_tests {
         use cairn_orchestrator::OrchestratorEventEmitter;
         let (emitter, mut rx) = make_emitter();
         let c = ctx();
-        emitter.on_tool_called(&c, "web_fetch", Some(&serde_json::json!({"url":"https://example.com"}))).await;
-        emitter.on_tool_result(&c, "web_fetch", true, Some(&serde_json::json!({"body":"ok"})), None).await;
+        emitter
+            .on_tool_called(
+                &c,
+                "web_fetch",
+                Some(&serde_json::json!({"url":"https://example.com"})),
+            )
+            .await;
+        emitter
+            .on_tool_result(
+                &c,
+                "web_fetch",
+                true,
+                Some(&serde_json::json!({"body":"ok"})),
+                None,
+            )
+            .await;
 
         let f1 = rx.try_recv().unwrap();
         assert_eq!(f1.data["event"], "tool_called");
@@ -386,9 +413,14 @@ mod sse_orchestrator_tests {
     async fn emits_orchestrate_finished_on_completion() {
         use cairn_orchestrator::{LoopTermination, OrchestratorEventEmitter};
         let (emitter, mut rx) = make_emitter();
-        emitter.on_finished(&ctx(), &LoopTermination::Completed {
-            summary: "all done".to_owned(),
-        }).await;
+        emitter
+            .on_finished(
+                &ctx(),
+                &LoopTermination::Completed {
+                    summary: "all done".to_owned(),
+                },
+            )
+            .await;
         let frame = rx.try_recv().unwrap();
         assert_eq!(frame.data["event"], "orchestrate_finished");
         assert_eq!(frame.data["termination"], "completed");

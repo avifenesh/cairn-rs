@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{PromptAssetReadModel, PromptVersionReadModel, PromptVersionRecord};
 use cairn_store::projections::ResourceSharingReadModel;
+use cairn_store::projections::{PromptAssetReadModel, PromptVersionReadModel, PromptVersionRecord};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -30,7 +30,11 @@ fn now_millis() -> u64 {
 #[async_trait]
 impl<S> PromptVersionService for PromptVersionServiceImpl<S>
 where
-    S: EventLog + PromptVersionReadModel + PromptAssetReadModel + ResourceSharingReadModel + 'static,
+    S: EventLog
+        + PromptVersionReadModel
+        + PromptAssetReadModel
+        + ResourceSharingReadModel
+        + 'static,
 {
     async fn create(
         &self,
@@ -58,14 +62,14 @@ where
 
         // Cross-workspace access check: if the asset exists but belongs to a different
         // workspace, require a valid resource share granting "version" permission.
-        if let Some(asset) = PromptAssetReadModel::get(self.store.as_ref(), &prompt_asset_id).await? {
+        if let Some(asset) =
+            PromptAssetReadModel::get(self.store.as_ref(), &prompt_asset_id).await?
+        {
             let asset_workspace = &asset.project.workspace_id;
             let caller_workspace = &project.workspace_id;
             // Treat "default" and "default_workspace" as the same logical workspace so
             // same-workspace operations never need a resource share grant.
-            let canon = |ws: &WorkspaceId| {
-                matches!(ws.as_str(), "default" | "default_workspace")
-            };
+            let canon = |ws: &WorkspaceId| matches!(ws.as_str(), "default" | "default_workspace");
             let same_workspace = asset_workspace == caller_workspace
                 || (canon(asset_workspace) && canon(caller_workspace));
             if !same_workspace {
@@ -116,9 +120,7 @@ where
 
         PromptVersionReadModel::get(self.store.as_ref(), &prompt_version_id)
             .await?
-            .ok_or_else(|| {
-                RuntimeError::Internal("prompt_version not found after create".into())
-            })
+            .ok_or_else(|| RuntimeError::Internal("prompt_version not found after create".into()))
     }
 
     async fn get(

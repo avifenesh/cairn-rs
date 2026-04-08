@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::{EvalRunId, EvalSubjectKind as DomainSubjectKind, ProjectId, RubricDimension, RubricScoringFn, TenantId};
+use cairn_domain::{
+    EvalRunId, EvalSubjectKind as DomainSubjectKind, ProjectId, RubricDimension, RubricScoringFn,
+    TenantId,
+};
 use cairn_evals::{
     EvalDatasetServiceImpl, EvalRubricServiceImpl, EvalRunService, EvalSubjectKind,
     PluginDimensionScore, PluginRubricScorer,
@@ -47,7 +50,8 @@ async fn rubric_exact_match_scores_eval_run() {
         None,
         None,
     );
-    runs.set_dataset_id(&run.eval_run_id, dataset.dataset_id.clone()).unwrap();
+    runs.set_dataset_id(&run.eval_run_id, dataset.dataset_id.clone())
+        .unwrap();
 
     let rubric = rubrics.create(
         TenantId::new("tenant_rubric"),
@@ -140,7 +144,8 @@ async fn rubric_plugin_scoring_scores_exact_match() {
         None,
         None,
     );
-    runs.set_dataset_id(&run.eval_run_id, dataset.dataset_id.clone()).unwrap();
+    runs.set_dataset_id(&run.eval_run_id, dataset.dataset_id.clone())
+        .unwrap();
 
     let rubric = rubrics.create(
         TenantId::new("tenant_rubric_plugin"),

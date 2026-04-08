@@ -69,13 +69,16 @@ impl<Q: BindingQuery + Clone> SimpleRouteResolver<Q> {
 // Implement BindingQuery for Arc<InMemoryStore> so tests can pass the store directly.
 #[cfg(test)]
 mod inmemory_binding_query {
-    use std::sync::Arc;
-    use async_trait::async_trait;
-    use cairn_domain::{ProjectKey, providers::{OperationKind, ProviderBindingRecord}};
-    use cairn_store::InMemoryStore;
-    use cairn_store::projections::{ProviderBindingReadModel, ProviderBudgetReadModel};
-    use crate::error::RuntimeError;
     use super::BindingQuery;
+    use crate::error::RuntimeError;
+    use async_trait::async_trait;
+    use cairn_domain::{
+        providers::{OperationKind, ProviderBindingRecord},
+        ProjectKey,
+    };
+    use cairn_store::projections::{ProviderBindingReadModel, ProviderBudgetReadModel};
+    use cairn_store::InMemoryStore;
+    use std::sync::Arc;
 
     #[async_trait]
     impl BindingQuery for Arc<InMemoryStore> {
@@ -92,15 +95,19 @@ mod inmemory_binding_query {
             for budget in &budgets {
                 if budget.current_spend_micros > budget.limit_micros {
                     // Also emit ProviderBudgetExceeded event.
-                    use cairn_domain::{EventEnvelope, EventId, EventSource, RuntimeEvent,
-                        ProviderBudgetExceeded, ProviderBudgetAlertTriggered};
+                    use cairn_domain::{
+                        EventEnvelope, EventId, EventSource, ProviderBudgetAlertTriggered,
+                        ProviderBudgetExceeded, RuntimeEvent,
+                    };
                     use cairn_store::EventLog;
                     let exceeded_event = EventEnvelope::for_runtime_event(
                         EventId::new(format!("derived_pbe_{}", tenant_id.as_str())),
                         EventSource::System,
                         RuntimeEvent::ProviderBudgetExceeded(ProviderBudgetExceeded {
                             budget_id: format!("{}:{:?}", tenant_id.as_str(), budget.period),
-                            exceeded_by_micros: budget.current_spend_micros.saturating_sub(budget.limit_micros),
+                            exceeded_by_micros: budget
+                                .current_spend_micros
+                                .saturating_sub(budget.limit_micros),
                             exceeded_at_ms: std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
@@ -127,8 +134,10 @@ mod inmemory_binding_query {
                 }
             }
 
-            let mut bindings = ProviderBindingReadModel::list_active(self.as_ref(), project, operation).await
-                .map_err(|e| RuntimeError::Internal(e.to_string()))?;
+            let mut bindings =
+                ProviderBindingReadModel::list_active(self.as_ref(), project, operation)
+                    .await
+                    .map_err(|e| RuntimeError::Internal(e.to_string()))?;
             // Sort by creation time so the earliest-created binding is preferred (deterministic selection).
             bindings.sort_by_key(|b| b.created_at);
             Ok(bindings)
@@ -151,7 +160,10 @@ impl<Q: BindingQuery + 'static> RouteResolverService for SimpleRouteResolver<Q> 
         operation: OperationKind,
         context: &SelectorContext,
     ) -> Result<RouteDecisionRecord, RuntimeError> {
-        let bindings = self.bindings.list_active_bindings(project, operation).await?;
+        let bindings = self
+            .bindings
+            .list_active_bindings(project, operation)
+            .await?;
 
         if bindings.is_empty() {
             return Ok(RouteDecisionRecord {
@@ -231,10 +243,9 @@ impl FallbackChainResolver {
         for (index, ranked) in self.ranked.iter().enumerate() {
             let attempt_id = RouteAttemptId::new(format!("ra_{ts}_{index}"));
 
-            if let Some(missing) = check_required_capabilities(
-                &ranked.binding,
-                &ranked.available_capabilities,
-            ) {
+            if let Some(missing) =
+                check_required_capabilities(&ranked.binding, &ranked.available_capabilities)
+            {
                 attempts.push(RouteAttemptRecord {
                     route_attempt_id: attempt_id,
                     route_decision_id: decision_id.clone(),
@@ -271,9 +282,7 @@ impl FallbackChainResolver {
                 project_id: project.project_id.clone(),
                 operation_kind: operation,
                 terminal_route_attempt_id: Some(attempt_id.clone()),
-                selected_provider_binding_id: Some(
-                    ranked.binding.provider_binding_id.clone(),
-                ),
+                selected_provider_binding_id: Some(ranked.binding.provider_binding_id.clone()),
                 selected_route_attempt_id: Some(attempt_id),
                 selector_context: context.clone(),
                 attempt_count: attempts.len() as u16,
@@ -457,7 +466,11 @@ mod tests {
 
     // ── GAP-002: Multi-Provider Routing / Fallback Chain ─────────────────────
 
-    fn ranked(id: &str, op: OperationKind, caps: Vec<cairn_domain::providers::ProviderCapability>) -> RankedBinding {
+    fn ranked(
+        id: &str,
+        op: OperationKind,
+        caps: Vec<cairn_domain::providers::ProviderCapability>,
+    ) -> RankedBinding {
         RankedBinding {
             binding: test_binding(id, op),
             available_capabilities: caps,
@@ -469,16 +482,25 @@ mod tests {
     fn fallback_chain_selects_primary_when_capable() {
         use cairn_domain::providers::ProviderCapability;
         let resolver = FallbackChainResolver::new(vec![
-            ranked("primary", OperationKind::Generate, vec![ProviderCapability::ToolUse]),
-            ranked("fallback", OperationKind::Generate, vec![ProviderCapability::ToolUse]),
+            ranked(
+                "primary",
+                OperationKind::Generate,
+                vec![ProviderCapability::ToolUse],
+            ),
+            ranked(
+                "fallback",
+                OperationKind::Generate,
+                vec![ProviderCapability::ToolUse],
+            ),
         ]);
         let mut binding_with_req = test_binding("primary", OperationKind::Generate);
         binding_with_req.settings.required_capabilities = vec![ProviderCapability::ToolUse];
 
         // Use resolver with the pre-built ranked list (capabilities already set).
-        let resolver2 = FallbackChainResolver::new(vec![
-            RankedBinding { binding: binding_with_req, available_capabilities: vec![ProviderCapability::ToolUse] },
-        ]);
+        let resolver2 = FallbackChainResolver::new(vec![RankedBinding {
+            binding: binding_with_req,
+            available_capabilities: vec![ProviderCapability::ToolUse],
+        }]);
         let (decision, attempts) = resolver2.resolve_with_attempts(
             &ProjectKey::new("t", "w", "p"),
             OperationKind::Generate,
@@ -514,11 +536,20 @@ mod tests {
             &SelectorContext::default(),
         );
         assert_eq!(decision.final_status, RouteDecisionStatus::Selected);
-        assert!(decision.fallback_used, "fallback_used must be true when primary was vetoed");
-        assert_eq!(decision.selected_provider_binding_id, Some(ProviderBindingId::new("fallback")));
+        assert!(
+            decision.fallback_used,
+            "fallback_used must be true when primary was vetoed"
+        );
+        assert_eq!(
+            decision.selected_provider_binding_id,
+            Some(ProviderBindingId::new("fallback"))
+        );
         assert_eq!(attempts.len(), 2);
         assert_eq!(attempts[0].decision, RouteAttemptDecision::Vetoed);
-        assert_eq!(attempts[0].decision_reason, RouteDecisionReason::MissingRequiredCapability);
+        assert_eq!(
+            attempts[0].decision_reason,
+            RouteDecisionReason::MissingRequiredCapability
+        );
         assert_eq!(attempts[1].decision, RouteAttemptDecision::Selected);
     }
 
@@ -532,8 +563,14 @@ mod tests {
         b2.settings.required_capabilities = vec![ProviderCapability::ReasoningTrace];
 
         let resolver = FallbackChainResolver::new(vec![
-            RankedBinding { binding: b1, available_capabilities: vec![] },
-            RankedBinding { binding: b2, available_capabilities: vec![] },
+            RankedBinding {
+                binding: b1,
+                available_capabilities: vec![],
+            },
+            RankedBinding {
+                binding: b2,
+                available_capabilities: vec![],
+            },
         ]);
         let (decision, attempts) = resolver.resolve_with_attempts(
             &ProjectKey::new("t", "w", "p"),
@@ -543,7 +580,9 @@ mod tests {
         assert_eq!(decision.final_status, RouteDecisionStatus::NoViableRoute);
         assert!(decision.selected_provider_binding_id.is_none());
         assert_eq!(attempts.len(), 2);
-        assert!(attempts.iter().all(|a| a.decision == RouteAttemptDecision::Vetoed));
+        assert!(attempts
+            .iter()
+            .all(|a| a.decision == RouteAttemptDecision::Vetoed));
     }
 
     /// Empty ranked list → NoViableRoute with 0 attempts.

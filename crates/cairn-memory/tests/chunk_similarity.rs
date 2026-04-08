@@ -9,9 +9,7 @@ use cairn_domain::{ChunkId, KnowledgeDocumentId, ProjectKey, SourceId};
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::{ChunkRecord, SourceType};
 use cairn_memory::pipeline::DocumentStore;
-use cairn_memory::retrieval::{
-    RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService,
-};
+use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
 
 fn project() -> ProjectKey {
     ProjectKey::new("t", "w", "p")
@@ -89,7 +87,11 @@ async fn chunk_similarity_similar_chunk_ranks_above_dissimilar() {
     let results = &response.results;
 
     // All three chunks should appear (or at least the two similar ones).
-    assert!(results.len() >= 2, "should return at least 2 results, got {}", results.len());
+    assert!(
+        results.len() >= 2,
+        "should return at least 2 results, got {}",
+        results.len()
+    );
 
     // The query chunk itself (c_similar_a) will match best since it's identical text.
     // The similar chunk (c_similar_b) must rank above the dissimilar one (c_dissimilar),
@@ -267,7 +269,11 @@ async fn chunk_similarity_api_search_delegates() {
     let store = Arc::new(InMemoryDocumentStore::new());
     store
         .insert_chunks(&[
-            make_chunk("api_q", "doc_api", "API test chunk Rust safety ownership unique"),
+            make_chunk(
+                "api_q",
+                "doc_api",
+                "API test chunk Rust safety ownership unique",
+            ),
             make_chunk(
                 "api_a",
                 "doc_api2",

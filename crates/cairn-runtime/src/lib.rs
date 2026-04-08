@@ -7,106 +7,106 @@
 pub mod agent_roles;
 pub mod aggregate;
 pub mod approval_policies;
-pub mod bandit;
-pub mod config_store;
-pub mod fleet;
-pub mod soul_guard;
-pub mod model_registry;
-pub mod observability;
 pub mod approvals;
+pub mod audits;
+pub mod bandit;
+pub mod budgets;
+pub mod channels;
 pub mod checkpoints;
+pub mod config_store;
+pub mod context_builder;
+pub mod credentials;
+pub mod defaults;
 pub mod enrichment;
 pub mod error;
 pub mod eval_runs;
+pub mod fleet;
+pub mod guardrails;
 pub mod ingest_jobs;
+pub mod licenses;
 pub mod mailbox;
 pub mod mailbox_delivery;
-pub mod skill_catalog;
-pub mod spend_alert;
-pub mod worktree;
-pub mod research;
+pub mod model_registry;
+pub mod notification_prefs;
+pub mod observability;
+pub mod operator_profiles;
 pub mod projects;
 pub mod prompt_assets;
 pub mod prompt_releases;
 pub mod prompt_versions;
-pub mod recovery;
-pub mod routing;
-pub mod runs;
-pub mod services;
-pub mod sessions;
-pub mod signals;
-pub mod tasks;
-pub mod tenants;
-pub mod voice;
-pub mod audits;
-pub mod budgets;
-pub mod channels;
-pub mod credentials;
-pub mod defaults;
-pub mod guardrails;
-pub mod licenses;
-pub mod notification_prefs;
-pub mod operator_profiles;
 pub mod provider_bindings;
 pub mod provider_connections;
 pub mod provider_health;
 pub mod provider_pools;
 pub mod quotas;
+pub mod recovery;
+pub mod research;
 pub mod resource_sharing;
 pub mod retention;
 pub mod route_policies;
+pub mod routing;
 pub mod run_cost_alerts;
 pub mod run_sla;
+pub mod runs;
+pub mod runtime_config;
+pub mod services;
+pub mod sessions;
 pub mod signal_routing;
+pub mod signals;
+pub mod skill_catalog;
+pub mod soul_guard;
+pub mod spend_alert;
+pub mod tasks;
+pub mod tenants;
+pub mod voice;
 pub mod workspace_memberships;
 pub mod workspaces;
-pub mod runtime_config;
-pub mod context_builder;
+pub mod worktree;
 
+pub use agent_roles::AgentRoleRegistry;
 pub use approval_policies::ApprovalPolicyService;
 pub use approvals::ApprovalService;
+pub use bandit::{BanditError, BanditServiceImpl, CreateExperimentRequest, SelectedArm};
 pub use checkpoints::CheckpointService;
+pub use config_store::{ConfigStore, ConfigStoreError, FileConfigStore, InMemoryConfigStore};
+pub use context_builder::{
+    ContextBuildError, ContextBuilder, ContextBuilderInput, DefaultContextBuilder,
+};
 pub use enrichment::{
     ApprovalEnrichment, CheckpointEnrichment, RunEnrichment, RuntimeEnrichment, SessionEnrichment,
     StoreBackedEnrichment, TaskEnrichment,
 };
 pub use error::RuntimeError;
+pub use eval_runs::EvalRunService;
+pub use fleet::{FleetReport, FleetService, FleetServiceImpl, WorkerState};
+pub use ingest_jobs::IngestJobService;
 pub use mailbox::MailboxService;
 pub use mailbox_delivery::{MailboxDeliveryService, MailboxWatcher};
-pub use recovery::{RecoveryAction, RecoveryService, RecoverySummary};
-pub use runs::RunService;
-pub use eval_runs::EvalRunService;
-pub use ingest_jobs::IngestJobService;
+pub use model_registry::ModelRegistry;
+pub use observability::{LatencyStats, LlmObservabilityService};
+pub use projects::ProjectService;
 pub use prompt_assets::PromptAssetService;
 pub use prompt_releases::PromptReleaseService;
 pub use prompt_versions::PromptVersionService;
-pub use observability::{LatencyStats, LlmObservabilityService};
-pub use services::{
-    ApprovalPolicyServiceImpl, ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl, ExternalWorkerService,
-    ExternalWorkerServiceImpl, IngestJobServiceImpl, LlmObservabilityServiceImpl, MailboxServiceImpl,
-    ProjectServiceImpl, PromptAssetServiceImpl, PromptReleaseServiceImpl,
-    PromptVersionServiceImpl, RecoveryServiceImpl,
-    RunServiceImpl, SessionServiceImpl, SignalServiceImpl, TaskServiceImpl,
-    TenantServiceImpl, ToolInvocationService, ToolInvocationServiceImpl,
-    SimpleRouteResolver, WorkspaceServiceImpl,
-};
-pub use config_store::{ConfigStore, ConfigStoreError, FileConfigStore, InMemoryConfigStore};
-pub use agent_roles::AgentRoleRegistry;
-pub use bandit::{BanditError, BanditServiceImpl, CreateExperimentRequest, SelectedArm};
-pub use fleet::{FleetReport, FleetService, FleetServiceImpl, WorkerState};
-pub use soul_guard::SoulGuard;
-pub use projects::ProjectService;
-pub use model_registry::ModelRegistry;
+pub use recovery::{RecoveryAction, RecoveryService, RecoverySummary};
 pub use routing::RouteResolverService;
-pub use context_builder::{ContextBuilder, ContextBuildError, ContextBuilderInput, DefaultContextBuilder};
+pub use runs::RunService;
 pub use runtime_config::{
-    RuntimeConfig,
-    KEY_GENERATE_MODEL, KEY_BRAIN_MODEL, KEY_STREAM_MODEL, KEY_EMBED_MODEL,
-    KEY_OLLAMA_EMBED_MODEL, KEY_MAX_TOKENS, KEY_THINKING_MODEL_PREFIXES,
-    KEY_BRAIN_URL, KEY_WORKER_URL,
+    RuntimeConfig, KEY_BRAIN_MODEL, KEY_BRAIN_URL, KEY_EMBED_MODEL, KEY_GENERATE_MODEL,
+    KEY_MAX_TOKENS, KEY_OLLAMA_EMBED_MODEL, KEY_STREAM_MODEL, KEY_THINKING_MODEL_PREFIXES,
+    KEY_WORKER_URL,
+};
+pub use services::{
+    ApprovalPolicyServiceImpl, ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl,
+    ExternalWorkerService, ExternalWorkerServiceImpl, IngestJobServiceImpl,
+    LlmObservabilityServiceImpl, MailboxServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
+    PromptReleaseServiceImpl, PromptVersionServiceImpl, RecoveryServiceImpl, RunServiceImpl,
+    SessionServiceImpl, SignalServiceImpl, SimpleRouteResolver, TaskServiceImpl, TenantServiceImpl,
+    ToolInvocationService, ToolInvocationServiceImpl, WorkspaceServiceImpl,
 };
 pub use sessions::SessionService;
 pub use signals::SignalService;
+pub use soul_guard::SoulGuard;
 pub use tasks::TaskService;
 pub use tenants::TenantService;
 pub use workspaces::WorkspaceService;
@@ -130,12 +130,10 @@ pub use retention::RetentionService;
 pub use route_policies::RoutePolicyService;
 pub use run_cost_alerts::RunCostAlertService;
 pub use run_sla::RunSlaService;
+pub use services::{InMemoryVoiceService, ProviderModelServiceImpl};
 pub use signal_routing::SignalRouterService;
 pub use voice::{SpeechToTextService, TextToSpeechService};
 pub use workspace_memberships::WorkspaceMembershipService;
-pub use services::{
-    InMemoryVoiceService, ProviderModelServiceImpl,
-};
 
 pub use aggregate::InMemoryServices;
 pub use services::confidence_calibrator::{CalibrationAdjustment, ConfidenceCalibrator};
@@ -174,8 +172,7 @@ pub use services::{
 /// Orchestrator LLM integration — PromptBuilder, ResponseParser, BrainLlmClient.
 /// ActionProposal and ActionType come from cairn_domain::orchestrator directly.
 pub use services::orchestrator::{
-    BrainLlmClient, ContextBundle, OrchestratorError,
-    PromptBuilder, ResponseParser, TaskSummary,
+    BrainLlmClient, ContextBundle, OrchestratorError, PromptBuilder, ResponseParser, TaskSummary,
 };
 
 std::thread_local! {
@@ -196,8 +193,6 @@ pub fn set_current_trace_id(trace_id: &str) {
 pub fn get_current_trace_id() -> String {
     CURRENT_TRACE_ID.with(|cell| cell.borrow().clone())
 }
-
-
 
 #[cfg(test)]
 mod tests {

@@ -61,7 +61,10 @@ pub enum BanditError {
     /// No experiment with this ID.
     ExperimentNotFound(String),
     /// No arm with this ID in the experiment.
-    ArmNotFound { experiment_id: String, arm_id: String },
+    ArmNotFound {
+        experiment_id: String,
+        arm_id: String,
+    },
     /// Experiment has no arms.
     NoArms(String),
     /// Invalid configuration (e.g. epsilon out of range).
@@ -72,8 +75,14 @@ impl std::fmt::Display for BanditError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BanditError::ExperimentNotFound(id) => write!(f, "bandit experiment '{id}' not found"),
-            BanditError::ArmNotFound { experiment_id, arm_id } => {
-                write!(f, "arm '{arm_id}' not found in experiment '{experiment_id}'")
+            BanditError::ArmNotFound {
+                experiment_id,
+                arm_id,
+            } => {
+                write!(
+                    f,
+                    "arm '{arm_id}' not found in experiment '{experiment_id}'"
+                )
             }
             BanditError::NoArms(id) => write!(f, "experiment '{id}' has no arms"),
             BanditError::InvalidConfig(msg) => write!(f, "invalid bandit config: {msg}"),
@@ -233,10 +242,12 @@ impl BanditServiceImpl {
         let exp = lock
             .get_mut(experiment_id)
             .ok_or_else(|| BanditError::ExperimentNotFound(experiment_id.to_owned()))?;
-        let arm = exp.arm_mut(arm_id).ok_or_else(|| BanditError::ArmNotFound {
-            experiment_id: experiment_id.to_owned(),
-            arm_id: arm_id.to_owned(),
-        })?;
+        let arm = exp
+            .arm_mut(arm_id)
+            .ok_or_else(|| BanditError::ArmNotFound {
+                experiment_id: experiment_id.to_owned(),
+                arm_id: arm_id.to_owned(),
+            })?;
         arm.pulls += 1;
         arm.reward_sum += reward;
         Ok(())
@@ -422,7 +433,10 @@ mod tests {
         svc.record_reward("exp_1", "arm_b", 1.0).unwrap();
         let selected = svc.select_arm("exp_1").unwrap();
         // rng_scaled = 0.001/1.0 = 0.001 → idx = 0 → arm_a
-        assert_eq!(selected.arm_id, "arm_a", "forced explore with rng near 0 selects index 0");
+        assert_eq!(
+            selected.arm_id, "arm_a",
+            "forced explore with rng near 0 selects index 0"
+        );
     }
 
     // ── UCB1 selection ────────────────────────────────────────────────────
@@ -448,10 +462,7 @@ mod tests {
 
         // arm_y has 0 pulls → UCB1 score = MAX → must be selected.
         let selected = svc.select_arm("ucb_exp").unwrap();
-        assert_eq!(
-            selected.arm_id, "arm_y",
-            "UCB1 must prefer unpulled arm"
-        );
+        assert_eq!(selected.arm_id, "arm_y", "UCB1 must prefer unpulled arm");
     }
 
     #[test]
@@ -479,7 +490,10 @@ mod tests {
         }
 
         let selected = svc.select_arm("ucb2").unwrap();
-        assert_eq!(selected.arm_id, "best", "UCB1 must prefer high-reward arm with many pulls");
+        assert_eq!(
+            selected.arm_id, "best",
+            "UCB1 must prefer high-reward arm with many pulls"
+        );
     }
 
     // ── List / get ────────────────────────────────────────────────────────
@@ -516,8 +530,18 @@ mod tests {
     #[test]
     fn epsilon_greedy_selector_exploit_picks_best_mean() {
         let arms = vec![
-            { let mut a = BanditArm::new("low", release("pr_1")); a.pulls = 10; a.reward_sum = 2.0; a },
-            { let mut a = BanditArm::new("high", release("pr_2")); a.pulls = 10; a.reward_sum = 8.0; a },
+            {
+                let mut a = BanditArm::new("low", release("pr_1"));
+                a.pulls = 10;
+                a.reward_sum = 2.0;
+                a
+            },
+            {
+                let mut a = BanditArm::new("high", release("pr_2"));
+                a.pulls = 10;
+                a.reward_sum = 8.0;
+                a
+            },
         ];
         // rng = 0.5, epsilon = 0.1 → 0.5 >= 0.1 → exploit → picks "high"
         let selected = epsilon_greedy_select(&arms, 0.1, 0.5);
@@ -538,7 +562,12 @@ mod tests {
     #[test]
     fn ucb1_selector_picks_unpulled() {
         let arms = vec![
-            { let mut a = BanditArm::new("pulled", release("pr_1")); a.pulls = 5; a.reward_sum = 4.5; a },
+            {
+                let mut a = BanditArm::new("pulled", release("pr_1"));
+                a.pulls = 5;
+                a.reward_sum = 4.5;
+                a
+            },
             BanditArm::new("fresh", release("pr_2")),
         ];
         let selected = ucb1_select(&arms, 5);

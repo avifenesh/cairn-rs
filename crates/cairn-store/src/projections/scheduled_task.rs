@@ -6,10 +6,7 @@ use crate::error::StoreError;
 /// Read-model for scheduled task current state.
 #[async_trait]
 pub trait ScheduledTaskReadModel: Send + Sync {
-    async fn get(
-        &self,
-        id: &ScheduledTaskId,
-    ) -> Result<Option<ScheduledTaskRecord>, StoreError>;
+    async fn get(&self, id: &ScheduledTaskId) -> Result<Option<ScheduledTaskRecord>, StoreError>;
 
     /// List all scheduled tasks for a tenant, enabled or not.
     async fn list_by_tenant(

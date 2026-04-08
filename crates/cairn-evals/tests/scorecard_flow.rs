@@ -13,8 +13,7 @@ use cairn_domain::{
     EvalRunId, ProjectId, PromptAssetId, PromptReleaseId, PromptVersionId, TenantId,
 };
 use cairn_evals::{
-    EvalBaselineServiceImpl, EvalMetrics, EvalRunService,
-    scorecards::EvalSubjectKind,
+    scorecards::EvalSubjectKind, EvalBaselineServiceImpl, EvalMetrics, EvalRunService,
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -32,13 +31,7 @@ fn asset_id() -> PromptAssetId {
 }
 
 /// Run lifecycle helper: create → start → complete in one call.
-fn run_full(
-    svc: &EvalRunService,
-    id: &str,
-    version: &str,
-    release: &str,
-    metrics: EvalMetrics,
-) {
+fn run_full(svc: &EvalRunService, id: &str, version: &str, release: &str, metrics: EvalMetrics) {
     svc.create_run(
         EvalRunId::new(id),
         project_id(),
@@ -50,7 +43,8 @@ fn run_full(
         None, // created_by
     );
     svc.start_run(&EvalRunId::new(id)).unwrap();
-    svc.complete_run(&EvalRunId::new(id), metrics, None).unwrap();
+    svc.complete_run(&EvalRunId::new(id), metrics, None)
+        .unwrap();
 }
 
 // ── baseline metrics ──────────────────────────────────────────────────────────
@@ -77,9 +71,9 @@ fn run_full(
 
 fn best_metrics() -> EvalMetrics {
     EvalMetrics {
-        task_success_rate: Some(0.97),  // +5.4% vs baseline 0.92 → improvement
-        latency_p50_ms: Some(140),      // -6.7% vs baseline 150ms → improvement
-        cost_per_run: Some(0.0018),     // -10%  vs baseline 0.002 → improvement
+        task_success_rate: Some(0.97), // +5.4% vs baseline 0.92 → improvement
+        latency_p50_ms: Some(140),     // -6.7% vs baseline 150ms → improvement
+        cost_per_run: Some(0.0018),    // -10%  vs baseline 0.002 → improvement
         ..Default::default()
     }
 }
@@ -119,9 +113,21 @@ fn baseline_metrics() -> EvalMetrics {
 fn three_runs_complete_successfully() {
     let eval_runs = Arc::new(EvalRunService::new());
 
-    run_full(&eval_runs, "run_best",   "pv_1", "rel_best",   best_metrics());
-    run_full(&eval_runs, "run_middle", "pv_2", "rel_middle",  middle_metrics());
-    run_full(&eval_runs, "run_worst",  "pv_3", "rel_worst",   worst_metrics());
+    run_full(&eval_runs, "run_best", "pv_1", "rel_best", best_metrics());
+    run_full(
+        &eval_runs,
+        "run_middle",
+        "pv_2",
+        "rel_middle",
+        middle_metrics(),
+    );
+    run_full(
+        &eval_runs,
+        "run_worst",
+        "pv_3",
+        "rel_worst",
+        worst_metrics(),
+    );
 
     let runs = eval_runs.list_by_project(&project_id());
     assert_eq!(runs.len(), 3, "all three runs must be listed");
@@ -148,14 +154,19 @@ fn set_baseline_from_best_run() {
         baseline_metrics(), // set explicit known-good values as the baseline
     );
 
-    assert!(!baseline.baseline_id.is_empty(), "baseline ID must be assigned");
+    assert!(
+        !baseline.baseline_id.is_empty(),
+        "baseline ID must be assigned"
+    );
     assert_eq!(baseline.prompt_asset_id, asset_id());
     assert_eq!(baseline.metrics.task_success_rate, Some(0.92));
     assert_eq!(baseline.metrics.latency_p50_ms, Some(150));
     assert_eq!(baseline.metrics.cost_per_run, Some(0.002));
 
     // Must be retrievable.
-    let stored = baselines.get(&baseline.baseline_id).expect("baseline must be stored");
+    let stored = baselines
+        .get(&baseline.baseline_id)
+        .expect("baseline must be stored");
     assert_eq!(stored.baseline_id, baseline.baseline_id);
 
     // Listed for the tenant.
@@ -169,7 +180,13 @@ fn worst_run_regressions_flagged() {
     let eval_runs = Arc::new(EvalRunService::new());
     let baselines = EvalBaselineServiceImpl::new(eval_runs.clone());
 
-    run_full(&eval_runs, "run_worst", "pv_3", "rel_worst", worst_metrics());
+    run_full(
+        &eval_runs,
+        "run_worst",
+        "pv_3",
+        "rel_worst",
+        worst_metrics(),
+    );
 
     baselines.set_baseline(
         tenant_id(),
@@ -193,11 +210,15 @@ fn worst_run_regressions_flagged() {
 
     // All three manager-specified dimensions must appear in regressions.
     assert!(
-        comparison.regressions.contains(&"task_success_rate".to_owned()),
+        comparison
+            .regressions
+            .contains(&"task_success_rate".to_owned()),
         "task_success_rate regression must be flagged (0.75 vs baseline 0.92, -18.5%)"
     );
     assert!(
-        comparison.regressions.contains(&"latency_p50_ms".to_owned()),
+        comparison
+            .regressions
+            .contains(&"latency_p50_ms".to_owned()),
         "latency_p50_ms regression must be flagged (300ms vs baseline 150ms, +100%)"
     );
     assert!(
@@ -237,11 +258,15 @@ fn best_run_no_regressions() {
 
     // Best run improves on all three dimensions relative to baseline.
     assert!(
-        comparison.improvements.contains(&"task_success_rate".to_owned()),
+        comparison
+            .improvements
+            .contains(&"task_success_rate".to_owned()),
         "task_success_rate improvement expected (0.97 vs baseline 0.92, +5.4%)"
     );
     assert!(
-        comparison.improvements.contains(&"latency_p50_ms".to_owned()),
+        comparison
+            .improvements
+            .contains(&"latency_p50_ms".to_owned()),
         "latency_p50_ms improvement expected (140ms vs baseline 150ms, -6.7%)"
     );
     assert!(
@@ -255,13 +280,29 @@ fn best_run_no_regressions() {
 fn scorecard_tracks_multiple_metric_dimensions() {
     let eval_runs = Arc::new(EvalRunService::new());
 
-    run_full(&eval_runs, "run_best",   "pv_1", "rel_best",   best_metrics());
-    run_full(&eval_runs, "run_middle", "pv_2", "rel_middle",  middle_metrics());
-    run_full(&eval_runs, "run_worst",  "pv_3", "rel_worst",   worst_metrics());
+    run_full(&eval_runs, "run_best", "pv_1", "rel_best", best_metrics());
+    run_full(
+        &eval_runs,
+        "run_middle",
+        "pv_2",
+        "rel_middle",
+        middle_metrics(),
+    );
+    run_full(
+        &eval_runs,
+        "run_worst",
+        "pv_3",
+        "rel_worst",
+        worst_metrics(),
+    );
 
     let scorecard = eval_runs.build_scorecard(&project_id(), &asset_id());
 
-    assert_eq!(scorecard.entries.len(), 3, "scorecard must contain all 3 completed runs");
+    assert_eq!(
+        scorecard.entries.len(),
+        3,
+        "scorecard must contain all 3 completed runs"
+    );
     assert_eq!(scorecard.prompt_asset_id, asset_id());
     assert_eq!(scorecard.project_id, project_id());
 

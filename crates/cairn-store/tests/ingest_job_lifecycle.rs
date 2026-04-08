@@ -16,10 +16,7 @@ use cairn_domain::{
     EventEnvelope, EventId, EventSource, IngestJobCompleted, IngestJobId, IngestJobStarted,
     IngestJobState, ProjectId, ProjectKey, RuntimeEvent, SourceId, TenantId, WorkspaceId,
 };
-use cairn_store::{
-    projections::IngestJobReadModel,
-    EventLog, InMemoryStore,
-};
+use cairn_store::{projections::IngestJobReadModel, EventLog, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -108,7 +105,10 @@ async fn ingest_job_completed_successfully_updates_state() {
         .unwrap();
 
     // Verify Processing state before completion.
-    let before = IngestJobReadModel::get(&store, &job_id).await.unwrap().unwrap();
+    let before = IngestJobReadModel::get(&store, &job_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(before.state, IngestJobState::Processing);
 
     store
@@ -125,13 +125,26 @@ async fn ingest_job_completed_successfully_updates_state() {
         .await
         .unwrap();
 
-    let after = IngestJobReadModel::get(&store, &job_id).await.unwrap().unwrap();
+    let after = IngestJobReadModel::get(&store, &job_id)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(after.state, IngestJobState::Completed);
-    assert!(after.error_message.is_none(), "successful job has no error message");
-    assert_eq!(after.updated_at, ts + 5_000, "updated_at reflects completion time");
+    assert!(
+        after.error_message.is_none(),
+        "successful job has no error message"
+    );
+    assert_eq!(
+        after.updated_at,
+        ts + 5_000,
+        "updated_at reflects completion time"
+    );
     assert_eq!(after.created_at, ts, "created_at must not change");
-    assert_eq!(after.document_count, 100, "document_count is preserved from start event");
+    assert_eq!(
+        after.document_count, 100,
+        "document_count is preserved from start event"
+    );
 }
 
 // ── 3. IngestJobCompleted (failure) → state = Failed with error ───────────────
@@ -168,7 +181,10 @@ async fn ingest_job_completed_with_failure_sets_failed_state() {
         .await
         .unwrap();
 
-    let record = IngestJobReadModel::get(&store, &job_id).await.unwrap().unwrap();
+    let record = IngestJobReadModel::get(&store, &job_id)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.state, IngestJobState::Failed);
     assert_eq!(
@@ -232,7 +248,10 @@ async fn list_by_project_returns_only_matching_project_jobs() {
     let ids_a: Vec<_> = jobs_a.iter().map(|j| j.id.as_str()).collect();
     assert!(ids_a.contains(&"job_a1"));
     assert!(ids_a.contains(&"job_a2"));
-    assert!(!ids_a.contains(&"job_b1"), "project B job must not appear in A's list");
+    assert!(
+        !ids_a.contains(&"job_b1"),
+        "project B job must not appear in A's list"
+    );
 
     let jobs_b = IngestJobReadModel::list_by_project(&store, &proj_b, 10, 0)
         .await
@@ -241,14 +260,9 @@ async fn list_by_project_returns_only_matching_project_jobs() {
     assert_eq!(jobs_b[0].id.as_str(), "job_b1");
 
     // Project with no jobs returns empty.
-    let jobs_c = IngestJobReadModel::list_by_project(
-        &store,
-        &project("tc", "wc", "pc"),
-        10,
-        0,
-    )
-    .await
-    .unwrap();
+    let jobs_c = IngestJobReadModel::list_by_project(&store, &project("tc", "wc", "pc"), 10, 0)
+        .await
+        .unwrap();
     assert!(jobs_c.is_empty());
 }
 
@@ -269,7 +283,7 @@ async fn list_by_project_ordered_by_created_at_ascending() {
                     job_id: IngestJobId::new("job_newest"),
                     source_id: None,
                     document_count: 1,
-                    started_at: ts + 200,   // latest
+                    started_at: ts + 200, // latest
                 }),
             ),
             evt(
@@ -279,7 +293,7 @@ async fn list_by_project_ordered_by_created_at_ascending() {
                     job_id: IngestJobId::new("job_oldest"),
                     source_id: None,
                     document_count: 1,
-                    started_at: ts,         // earliest
+                    started_at: ts, // earliest
                 }),
             ),
             evt(
@@ -289,7 +303,7 @@ async fn list_by_project_ordered_by_created_at_ascending() {
                     job_id: IngestJobId::new("job_middle"),
                     source_id: None,
                     document_count: 1,
-                    started_at: ts + 100,   // middle
+                    started_at: ts + 100, // middle
                 }),
             ),
         ])
@@ -301,9 +315,17 @@ async fn list_by_project_ordered_by_created_at_ascending() {
         .unwrap();
 
     assert_eq!(jobs.len(), 3);
-    assert_eq!(jobs[0].id.as_str(), "job_oldest",  "earliest created_at first");
-    assert_eq!(jobs[1].id.as_str(), "job_middle",  "middle created_at second");
-    assert_eq!(jobs[2].id.as_str(), "job_newest",  "latest created_at last");
+    assert_eq!(
+        jobs[0].id.as_str(),
+        "job_oldest",
+        "earliest created_at first"
+    );
+    assert_eq!(
+        jobs[1].id.as_str(),
+        "job_middle",
+        "middle created_at second"
+    );
+    assert_eq!(jobs[2].id.as_str(), "job_newest", "latest created_at last");
 }
 
 // ── 6. list_by_project pagination ────────────────────────────────────────────
@@ -384,11 +406,16 @@ async fn document_count_preserved_through_completion() {
         .await
         .unwrap();
 
-    let record = IngestJobReadModel::get(&store, &job_id).await.unwrap().unwrap();
+    let record = IngestJobReadModel::get(&store, &job_id)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.state, IngestJobState::Completed);
-    assert_eq!(record.document_count, 1_234,
-        "document_count from the start event must survive completion");
+    assert_eq!(
+        record.document_count, 1_234,
+        "document_count from the start event must survive completion"
+    );
     assert_eq!(record.source_id, Some(SourceId::new("src_corpus")));
 }
 
@@ -406,7 +433,7 @@ async fn ingest_job_without_source_id_is_valid() {
             RuntimeEvent::IngestJobStarted(IngestJobStarted {
                 project: default_project(),
                 job_id: job_id.clone(),
-                source_id: None,           // manual / ad-hoc ingest
+                source_id: None, // manual / ad-hoc ingest
                 document_count: 3,
                 started_at: ts,
             }),
@@ -414,9 +441,15 @@ async fn ingest_job_without_source_id_is_valid() {
         .await
         .unwrap();
 
-    let record = IngestJobReadModel::get(&store, &job_id).await.unwrap().unwrap();
+    let record = IngestJobReadModel::get(&store, &job_id)
+        .await
+        .unwrap()
+        .unwrap();
 
-    assert!(record.source_id.is_none(), "source_id=None is valid for ad-hoc ingests");
+    assert!(
+        record.source_id.is_none(),
+        "source_id=None is valid for ad-hoc ingests"
+    );
     assert_eq!(record.document_count, 3);
     assert_eq!(record.state, IngestJobState::Processing);
 }
@@ -433,48 +466,72 @@ async fn mixed_state_jobs_tracked_independently() {
     // Job C: still processing (no completion event).
     store
         .append(&[
-            evt("e1", RuntimeEvent::IngestJobStarted(IngestJobStarted {
-                project: default_project(),
-                job_id: IngestJobId::new("job_mix_a"),
-                source_id: None,
-                document_count: 50,
-                started_at: ts,
-            })),
-            evt("e2", RuntimeEvent::IngestJobStarted(IngestJobStarted {
-                project: default_project(),
-                job_id: IngestJobId::new("job_mix_b"),
-                source_id: None,
-                document_count: 10,
-                started_at: ts + 1,
-            })),
-            evt("e3", RuntimeEvent::IngestJobStarted(IngestJobStarted {
-                project: default_project(),
-                job_id: IngestJobId::new("job_mix_c"),
-                source_id: None,
-                document_count: 20,
-                started_at: ts + 2,
-            })),
-            evt("e4", RuntimeEvent::IngestJobCompleted(IngestJobCompleted {
-                project: default_project(),
-                job_id: IngestJobId::new("job_mix_a"),
-                success: true,
-                error_message: None,
-                completed_at: ts + 100,
-            })),
-            evt("e5", RuntimeEvent::IngestJobCompleted(IngestJobCompleted {
-                project: default_project(),
-                job_id: IngestJobId::new("job_mix_b"),
-                success: false,
-                error_message: Some("timeout".to_owned()),
-                completed_at: ts + 200,
-            })),
+            evt(
+                "e1",
+                RuntimeEvent::IngestJobStarted(IngestJobStarted {
+                    project: default_project(),
+                    job_id: IngestJobId::new("job_mix_a"),
+                    source_id: None,
+                    document_count: 50,
+                    started_at: ts,
+                }),
+            ),
+            evt(
+                "e2",
+                RuntimeEvent::IngestJobStarted(IngestJobStarted {
+                    project: default_project(),
+                    job_id: IngestJobId::new("job_mix_b"),
+                    source_id: None,
+                    document_count: 10,
+                    started_at: ts + 1,
+                }),
+            ),
+            evt(
+                "e3",
+                RuntimeEvent::IngestJobStarted(IngestJobStarted {
+                    project: default_project(),
+                    job_id: IngestJobId::new("job_mix_c"),
+                    source_id: None,
+                    document_count: 20,
+                    started_at: ts + 2,
+                }),
+            ),
+            evt(
+                "e4",
+                RuntimeEvent::IngestJobCompleted(IngestJobCompleted {
+                    project: default_project(),
+                    job_id: IngestJobId::new("job_mix_a"),
+                    success: true,
+                    error_message: None,
+                    completed_at: ts + 100,
+                }),
+            ),
+            evt(
+                "e5",
+                RuntimeEvent::IngestJobCompleted(IngestJobCompleted {
+                    project: default_project(),
+                    job_id: IngestJobId::new("job_mix_b"),
+                    success: false,
+                    error_message: Some("timeout".to_owned()),
+                    completed_at: ts + 200,
+                }),
+            ),
         ])
         .await
         .unwrap();
 
-    let a = IngestJobReadModel::get(&store, &IngestJobId::new("job_mix_a")).await.unwrap().unwrap();
-    let b = IngestJobReadModel::get(&store, &IngestJobId::new("job_mix_b")).await.unwrap().unwrap();
-    let c = IngestJobReadModel::get(&store, &IngestJobId::new("job_mix_c")).await.unwrap().unwrap();
+    let a = IngestJobReadModel::get(&store, &IngestJobId::new("job_mix_a"))
+        .await
+        .unwrap()
+        .unwrap();
+    let b = IngestJobReadModel::get(&store, &IngestJobId::new("job_mix_b"))
+        .await
+        .unwrap()
+        .unwrap();
+    let c = IngestJobReadModel::get(&store, &IngestJobId::new("job_mix_c"))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(a.state, IngestJobState::Completed);
     assert!(a.error_message.is_none());
@@ -482,7 +539,11 @@ async fn mixed_state_jobs_tracked_independently() {
     assert_eq!(b.state, IngestJobState::Failed);
     assert_eq!(b.error_message.as_deref(), Some("timeout"));
 
-    assert_eq!(c.state, IngestJobState::Processing, "job_mix_c has no completion event");
+    assert_eq!(
+        c.state,
+        IngestJobState::Processing,
+        "job_mix_c has no completion event"
+    );
 
     // list_by_project sees all three, ordered by created_at.
     let all = IngestJobReadModel::list_by_project(&store, &default_project(), 10, 0)

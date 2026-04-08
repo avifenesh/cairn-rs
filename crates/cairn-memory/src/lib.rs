@@ -9,14 +9,14 @@
 
 pub mod api_impl;
 pub mod bundles;
-pub mod entity_extraction;
-pub mod format_parsers;
 pub mod deep_search;
 pub mod deep_search_impl;
 pub mod diagnostics;
 pub mod diagnostics_impl;
+pub mod entity_extraction;
 pub mod export_service_impl;
 pub mod feed_impl;
+pub mod format_parsers;
 pub mod graph_expansion;
 pub mod graph_ingest;
 pub mod import_service_impl;

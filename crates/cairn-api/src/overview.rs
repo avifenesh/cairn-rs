@@ -151,8 +151,8 @@ mod tests {
     #[test]
     fn active_runs_aggregates_across_sessions() {
         use cairn_domain::lifecycle::RunState;
-        use cairn_domain::{RunId, SessionId};
         use cairn_domain::tenancy::ProjectKey;
+        use cairn_domain::{RunId, SessionId};
         use cairn_store::projections::RunRecord;
 
         let project = ProjectKey::new("t1", "w1", "p1");
@@ -227,8 +227,10 @@ mod tests {
             eval_runs_today: 0,
         };
 
-        assert_eq!(overview.active_runs, 2,
-            "active_runs must count runs from all sessions");
+        assert_eq!(
+            overview.active_runs, 2,
+            "active_runs must count runs from all sessions"
+        );
     }
 
     #[test]

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cairn_domain::tool_invocation::ToolInvocationTarget;
 use cairn_domain::workers::{ExternalWorkerOutcome, ExternalWorkerReport};
+use cairn_domain::TenantId;
 use cairn_domain::*;
 use cairn_runtime::{
     ExternalWorkerService, ExternalWorkerServiceImpl, RecoveryService, RecoveryServiceImpl,
@@ -16,7 +17,6 @@ use cairn_store::event_log::{EntityRef, EventLog, EventPosition, StoredEvent};
 use cairn_store::projections::*;
 use cairn_store::sqlite::{SqliteAdapter, SqliteEventLog, SqliteSyncProjection};
 use cairn_store::StoreError;
-use cairn_domain::TenantId;
 
 /// Combined SQLite store implementing EventLog + all ReadModel traits.
 struct SqliteStore {
@@ -225,7 +225,11 @@ impl MailboxReadModel for SqliteStore {
     ) -> Result<Vec<MailboxRecord>, StoreError> {
         MailboxReadModel::list_by_task(&self.adapter, t, l, o).await
     }
-    async fn list_pending(&self, now_ms: u64, limit: usize) -> Result<Vec<MailboxRecord>, StoreError> {
+    async fn list_pending(
+        &self,
+        now_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<MailboxRecord>, StoreError> {
         MailboxReadModel::list_pending(&self.adapter, now_ms, limit).await
     }
 }
@@ -244,10 +248,7 @@ impl TaskDependencyReadModel for SqliteStore {
     ) -> Result<Vec<TaskDependencyRecord>, StoreError> {
         Ok(vec![])
     }
-    async fn insert_dependency(
-        &self,
-        _record: TaskDependencyRecord,
-    ) -> Result<(), StoreError> {
+    async fn insert_dependency(&self, _record: TaskDependencyRecord) -> Result<(), StoreError> {
         Ok(())
     }
     async fn resolve_dependency(
@@ -261,7 +262,10 @@ impl TaskDependencyReadModel for SqliteStore {
 
 #[async_trait]
 impl CheckpointStrategyReadModel for SqliteStore {
-    async fn get_by_run(&self, run_id: &RunId) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
+    async fn get_by_run(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
         CheckpointStrategyReadModel::get_by_run(&self.adapter, run_id).await
     }
 }
@@ -427,7 +431,13 @@ async fn sqlite_resolve_stale_dependencies_e2e() {
         .unwrap();
 
     task_svc
-        .submit(&p, TaskId::new("child"), Some(RunId::new("parent")), None, 0)
+        .submit(
+            &p,
+            TaskId::new("child"),
+            Some(RunId::new("parent")),
+            None,
+            0,
+        )
         .await
         .unwrap();
 

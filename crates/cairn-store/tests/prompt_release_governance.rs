@@ -20,14 +20,13 @@
 //!   Sets rollout_percent on the release AND forces state="active".
 //!   Used for gradual traffic ramp-up (partial rollout).
 
-use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, PromptAssetCreated,
-    PromptAssetId, PromptReleaseCreated, PromptReleaseId, PromptReleaseTransitioned,
-    PromptRolloutStarted, PromptVersionCreated, PromptVersionId, RuntimeEvent, TenantId,
-    WorkspaceId,
-};
 use cairn_domain::prompts::{
     can_transition_prompt_release, PromptGovernancePreset, PromptReleaseState,
+};
+use cairn_domain::{
+    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, PromptAssetCreated, PromptAssetId,
+    PromptReleaseCreated, PromptReleaseId, PromptReleaseTransitioned, PromptRolloutStarted,
+    PromptVersionCreated, PromptVersionId, RuntimeEvent, TenantId, WorkspaceId,
 };
 use cairn_store::{
     projections::{PromptAssetReadModel, PromptReleaseReadModel, PromptVersionReadModel},
@@ -95,8 +94,8 @@ async fn create_release_stack(
                     prompt_asset_id: PromptAssetId::new(asset_id),
                     prompt_version_id: PromptVersionId::new(version_id),
                     created_at: ts + 2,
-            release_tag: None,
-            created_by: None,
+                    release_tag: None,
+                    created_by: None,
                 }),
             ),
         ])
@@ -173,16 +172,29 @@ async fn full_governance_lifecycle_draft_to_active() {
         .await
         .unwrap();
     let r = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_full"))
-        .await.unwrap().unwrap();
-    assert_eq!(r.state, "proposed", "after review submission: state=proposed");
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        r.state, "proposed",
+        "after review submission: state=proposed"
+    );
 
     // Step 2: reviewer approves (Proposed → Approved).
     store
-        .append(&[transition("t2", "rel_full", "proposed", "approved", ts + 20)])
+        .append(&[transition(
+            "t2",
+            "rel_full",
+            "proposed",
+            "approved",
+            ts + 20,
+        )])
         .await
         .unwrap();
     let r = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_full"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(r.state, "approved");
 
     // Step 3: operator activates (Approved → Active).
@@ -191,9 +203,15 @@ async fn full_governance_lifecycle_draft_to_active() {
         .await
         .unwrap();
     let r = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_full"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(r.state, "active");
-    assert_eq!(r.updated_at, ts + 30, "updated_at tracks the latest transition");
+    assert_eq!(
+        r.updated_at,
+        ts + 30,
+        "updated_at tracks the latest transition"
+    );
 }
 
 // ── 3. Full lifecycle: Active → Archived ─────────────────────────────────────
@@ -206,15 +224,17 @@ async fn active_release_can_be_archived() {
     create_release_stack(&store, "asset_arch", "ver_arch", "rel_arch", ts).await;
     store
         .append(&[
-            transition("t1", "rel_arch", "draft",    "approved", ts + 10),
-            transition("t2", "rel_arch", "approved", "active",   ts + 20),
-            transition("t3", "rel_arch", "active",   "archived", ts + 30),
+            transition("t1", "rel_arch", "draft", "approved", ts + 10),
+            transition("t2", "rel_arch", "approved", "active", ts + 20),
+            transition("t3", "rel_arch", "active", "archived", ts + 30),
         ])
         .await
         .unwrap();
 
     let r = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_arch"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(r.state, "archived");
     assert_eq!(r.updated_at, ts + 30);
 }
@@ -227,14 +247,38 @@ fn valid_transitions_standard_governance() {
     use PromptReleaseState::*;
 
     // Standard shortcuts.
-    assert!(can_transition_prompt_release(Draft,    Approved, Standard), "Draft→Approved allowed in Standard");
-    assert!(can_transition_prompt_release(Draft,    Proposed, Standard), "Draft→Proposed");
-    assert!(can_transition_prompt_release(Proposed, Approved, Standard), "Proposed→Approved");
-    assert!(can_transition_prompt_release(Proposed, Rejected, Standard), "Proposed→Rejected");
-    assert!(can_transition_prompt_release(Approved, Active,   Standard), "Approved→Active");
-    assert!(can_transition_prompt_release(Active,   Approved, Standard), "Active→Approved (rollback)");
-    assert!(can_transition_prompt_release(Active,   Archived, Standard), "Active→Archived");
-    assert!(can_transition_prompt_release(Rejected, Archived, Standard), "Rejected→Archived");
+    assert!(
+        can_transition_prompt_release(Draft, Approved, Standard),
+        "Draft→Approved allowed in Standard"
+    );
+    assert!(
+        can_transition_prompt_release(Draft, Proposed, Standard),
+        "Draft→Proposed"
+    );
+    assert!(
+        can_transition_prompt_release(Proposed, Approved, Standard),
+        "Proposed→Approved"
+    );
+    assert!(
+        can_transition_prompt_release(Proposed, Rejected, Standard),
+        "Proposed→Rejected"
+    );
+    assert!(
+        can_transition_prompt_release(Approved, Active, Standard),
+        "Approved→Active"
+    );
+    assert!(
+        can_transition_prompt_release(Active, Approved, Standard),
+        "Active→Approved (rollback)"
+    );
+    assert!(
+        can_transition_prompt_release(Active, Archived, Standard),
+        "Active→Archived"
+    );
+    assert!(
+        can_transition_prompt_release(Rejected, Archived, Standard),
+        "Rejected→Archived"
+    );
 }
 
 #[test]
@@ -243,16 +287,33 @@ fn invalid_transitions_are_blocked_by_domain() {
     use PromptReleaseState::*;
 
     // Can never jump straight from Draft to Active.
-    assert!(!can_transition_prompt_release(Draft,    Active,  Standard), "Draft→Active is invalid");
-    assert!(!can_transition_prompt_release(Draft,    Active,  Regulated), "Draft→Active is invalid");
+    assert!(
+        !can_transition_prompt_release(Draft, Active, Standard),
+        "Draft→Active is invalid"
+    );
+    assert!(
+        !can_transition_prompt_release(Draft, Active, Regulated),
+        "Draft→Active is invalid"
+    );
     // Archived is terminal.
-    assert!(!can_transition_prompt_release(Archived, Active,  Standard), "Archived→Active is invalid");
-    assert!(!can_transition_prompt_release(Archived, Draft,   Standard), "Archived→Draft is invalid");
+    assert!(
+        !can_transition_prompt_release(Archived, Active, Standard),
+        "Archived→Active is invalid"
+    );
+    assert!(
+        !can_transition_prompt_release(Archived, Draft, Standard),
+        "Archived→Draft is invalid"
+    );
     // Regulated blocks the Draft→Approved shortcut.
-    assert!(!can_transition_prompt_release(Draft, Approved, Regulated),
-        "Draft→Approved shortcut forbidden under Regulated governance");
+    assert!(
+        !can_transition_prompt_release(Draft, Approved, Regulated),
+        "Draft→Approved shortcut forbidden under Regulated governance"
+    );
     // Completed release cannot loop back to Draft.
-    assert!(!can_transition_prompt_release(Active, Draft, Standard), "Active→Draft is invalid");
+    assert!(
+        !can_transition_prompt_release(Active, Draft, Standard),
+        "Active→Draft is invalid"
+    );
 }
 
 // ── 5. Regulated governance requires the full review path ────────────────────
@@ -266,9 +327,9 @@ fn regulated_governance_requires_review_step() {
     assert!(can_transition_prompt_release(Draft, Approved, Standard));
     // Regulated requires Draft → Proposed first.
     assert!(!can_transition_prompt_release(Draft, Approved, Regulated));
-    assert!(can_transition_prompt_release(Draft,    Proposed, Regulated));
+    assert!(can_transition_prompt_release(Draft, Proposed, Regulated));
     assert!(can_transition_prompt_release(Proposed, Approved, Regulated));
-    assert!(can_transition_prompt_release(Approved, Active,   Regulated));
+    assert!(can_transition_prompt_release(Approved, Active, Regulated));
 }
 
 // ── 6. Rejection path: Proposed → Rejected → Archived ────────────────────────
@@ -281,7 +342,7 @@ async fn rejection_path_proposed_to_rejected_to_archived() {
     create_release_stack(&store, "asset_rej", "ver_rej", "rel_rej", ts).await;
     store
         .append(&[
-            transition("t1", "rel_rej", "draft",    "proposed", ts + 10),
+            transition("t1", "rel_rej", "draft", "proposed", ts + 10),
             transition("t2", "rel_rej", "proposed", "rejected", ts + 20),
             transition("t3", "rel_rej", "rejected", "archived", ts + 30),
         ])
@@ -289,9 +350,13 @@ async fn rejection_path_proposed_to_rejected_to_archived() {
         .unwrap();
 
     let r = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_rej"))
-        .await.unwrap().unwrap();
-    assert_eq!(r.state, "archived",
-        "rejected releases must ultimately be archived");
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        r.state, "archived",
+        "rejected releases must ultimately be archived"
+    );
 }
 
 // ── 7. PromptRolloutStarted: sets rollout_percent + forces state=active ────────
@@ -304,9 +369,7 @@ async fn rollout_started_sets_percent_and_activates_release() {
     create_release_stack(&store, "asset_roll", "ver_roll", "rel_roll", ts).await;
     // Get to Approved first (prerequisite for activation).
     store
-        .append(&[
-            transition("t1", "rel_roll", "draft",    "approved", ts + 10),
-        ])
+        .append(&[transition("t1", "rel_roll", "draft", "approved", ts + 10)])
         .await
         .unwrap();
 
@@ -326,12 +389,19 @@ async fn rollout_started_sets_percent_and_activates_release() {
         .unwrap();
 
     let r = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_roll"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
-    assert_eq!(r.state, "active",
-        "PromptRolloutStarted must force state=active");
-    assert_eq!(r.rollout_percent, Some(25),
-        "rollout_percent must be set to 25");
+    assert_eq!(
+        r.state, "active",
+        "PromptRolloutStarted must force state=active"
+    );
+    assert_eq!(
+        r.rollout_percent,
+        Some(25),
+        "rollout_percent must be set to 25"
+    );
     assert_eq!(r.updated_at, ts + 20);
 }
 
@@ -341,8 +411,10 @@ async fn rollout_can_ramp_to_100_percent() {
     let ts = now_ms();
 
     create_release_stack(&store, "asset_ramp", "ver_ramp", "rel_ramp", ts).await;
-    store.append(&[transition("t1", "rel_ramp", "draft", "approved", ts + 10)])
-        .await.unwrap();
+    store
+        .append(&[transition("t1", "rel_ramp", "draft", "approved", ts + 10)])
+        .await
+        .unwrap();
 
     // Ramp: 10% → 50% → 100%.
     for (i, pct) in [(1u64, 10u8), (2, 50), (3, 100)] {
@@ -362,7 +434,9 @@ async fn rollout_can_ramp_to_100_percent() {
     }
 
     let r = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_ramp"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(r.rollout_percent, Some(100), "final rollout_percent is 100");
     assert_eq!(r.state, "active");
@@ -393,9 +467,17 @@ async fn list_by_project_returns_releases_in_created_at_order() {
 
     assert_eq!(releases.len(), 3);
     // Sorted by created_at ascending.
-    assert_eq!(releases[0].prompt_release_id.as_str(), "rel_o3", "earliest first");
+    assert_eq!(
+        releases[0].prompt_release_id.as_str(),
+        "rel_o3",
+        "earliest first"
+    );
     assert_eq!(releases[1].prompt_release_id.as_str(), "rel_o1");
-    assert_eq!(releases[2].prompt_release_id.as_str(), "rel_o2", "latest last");
+    assert_eq!(
+        releases[2].prompt_release_id.as_str(),
+        "rel_o2",
+        "latest last"
+    );
 }
 
 // ── 9. Active release is queryable via active_for_selector ────────────────────
@@ -408,8 +490,8 @@ async fn active_release_is_returned_by_active_for_selector() {
     create_release_stack(&store, "asset_sel", "ver_sel", "rel_sel", ts).await;
     store
         .append(&[
-            transition("t1", "rel_sel", "draft",    "approved", ts + 10),
-            transition("t2", "rel_sel", "approved", "active",   ts + 20),
+            transition("t1", "rel_sel", "draft", "approved", ts + 10),
+            transition("t2", "rel_sel", "approved", "active", ts + 20),
         ])
         .await
         .unwrap();
@@ -445,7 +527,10 @@ async fn draft_release_not_returned_by_active_for_selector() {
     .await
     .unwrap();
 
-    assert!(none.is_none(), "draft release must not be returned as active");
+    assert!(
+        none.is_none(),
+        "draft release must not be returned as active"
+    );
 }
 
 // ── 10. Rollout-activated release found by active_for_selector ────────────────
@@ -456,8 +541,10 @@ async fn rollout_activated_release_is_found_by_selector() {
     let ts = now_ms();
 
     create_release_stack(&store, "asset_rsel", "ver_rsel", "rel_rsel", ts).await;
-    store.append(&[transition("t1", "rel_rsel", "draft", "approved", ts + 10)])
-        .await.unwrap();
+    store
+        .append(&[transition("t1", "rel_rsel", "draft", "approved", ts + 10)])
+        .await
+        .unwrap();
 
     store
         .append(&[evt(
@@ -506,13 +593,15 @@ async fn list_by_project_respects_limit_and_offset() {
     }
 
     let page1 = PromptReleaseReadModel::list_by_project(&store, &project(), 2, 0)
-        .await.unwrap();
+        .await
+        .unwrap();
     assert_eq!(page1.len(), 2);
     assert_eq!(page1[0].prompt_release_id.as_str(), "r_pg_00");
     assert_eq!(page1[1].prompt_release_id.as_str(), "r_pg_01");
 
     let page2 = PromptReleaseReadModel::list_by_project(&store, &project(), 2, 2)
-        .await.unwrap();
+        .await
+        .unwrap();
     assert_eq!(page2.len(), 2);
     assert_eq!(page2[0].prompt_release_id.as_str(), "r_pg_02");
     assert_eq!(page2[1].prompt_release_id.as_str(), "r_pg_03");
@@ -528,15 +617,17 @@ async fn active_release_can_roll_back_to_approved() {
     create_release_stack(&store, "asset_rb", "ver_rb", "rel_rb", ts).await;
     store
         .append(&[
-            transition("t1", "rel_rb", "draft",    "approved", ts + 10),
-            transition("t2", "rel_rb", "approved", "active",   ts + 20),
+            transition("t1", "rel_rb", "draft", "approved", ts + 10),
+            transition("t2", "rel_rb", "approved", "active", ts + 20),
         ])
         .await
         .unwrap();
 
     // Verify active.
     let active = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_rb"))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(active.state, "active");
 
     // Operator rolls back.
@@ -546,9 +637,13 @@ async fn active_release_can_roll_back_to_approved() {
         .unwrap();
 
     let rolled_back = PromptReleaseReadModel::get(&store, &PromptReleaseId::new("rel_rb"))
-        .await.unwrap().unwrap();
-    assert_eq!(rolled_back.state, "approved",
-        "after rollback: state=approved (not active)");
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        rolled_back.state, "approved",
+        "after rollback: state=approved (not active)"
+    );
 
     // No longer returned by active_for_selector.
     let none = PromptReleaseReadModel::active_for_selector(
@@ -559,5 +654,8 @@ async fn active_release_can_roll_back_to_approved() {
     )
     .await
     .unwrap();
-    assert!(none.is_none(), "rolled-back release must not appear as active");
+    assert!(
+        none.is_none(),
+        "rolled-back release must not appear as active"
+    );
 }

@@ -16,10 +16,10 @@ use cairn_domain::*;
 use cairn_runtime::checkpoints::CheckpointService;
 use cairn_runtime::recovery::RecoveryService;
 use cairn_runtime::runs::RunService;
-use cairn_runtime::sessions::SessionService;
 use cairn_runtime::services::{
     CheckpointServiceImpl, RecoveryServiceImpl, RunServiceImpl, SessionServiceImpl,
 };
+use cairn_runtime::sessions::SessionService;
 use cairn_store::projections::RunReadModel;
 use cairn_store::{EventLog, InMemoryStore};
 
@@ -59,8 +59,15 @@ async fn checkpoint_save_fail_recover_lifecycle() {
         .await
         .unwrap();
 
-    let run = RunReadModel::get(store.as_ref(), &run_id).await.unwrap().unwrap();
-    assert_eq!(run.state, RunState::Pending, "run must start in Pending state");
+    let run = RunReadModel::get(store.as_ref(), &run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        run.state,
+        RunState::Pending,
+        "run must start in Pending state"
+    );
 
     // ── Phase 2: save checkpoint with structured data payload ───────────────
     //
@@ -226,8 +233,7 @@ async fn checkpoint_save_fail_recover_lifecycle() {
                 );
             }
             RuntimeEvent::RunStateChanged(e)
-                if e.run_id == run_id
-                    && e.transition.to == RunState::Failed =>
+                if e.run_id == run_id && e.transition.to == RunState::Failed =>
             {
                 saw_run_failed = true;
                 assert_eq!(
@@ -244,8 +250,7 @@ async fn checkpoint_save_fail_recover_lifecycle() {
                 );
             }
             RuntimeEvent::RunStateChanged(e)
-                if e.run_id == run_id
-                    && e.transition.to == RunState::Running =>
+                if e.run_id == run_id && e.transition.to == RunState::Running =>
             {
                 saw_run_recovered_to_running = true;
                 assert_eq!(
@@ -259,9 +264,7 @@ async fn checkpoint_save_fail_recover_lifecycle() {
                     "recovery resume trigger must be RuntimeSignal"
                 );
             }
-            RuntimeEvent::RecoveryCompleted(e)
-                if e.run_id == Some(run_id.clone()) =>
-            {
+            RuntimeEvent::RecoveryCompleted(e) if e.run_id == Some(run_id.clone()) => {
                 saw_recovery_completed = true;
                 assert!(e.recovered, "RecoveryCompleted must report recovered=true");
             }
@@ -451,10 +454,7 @@ async fn recover_interrupted_runs_with_checkpoint_returns_action() {
     assert_eq!(run_before.state, RunState::Running);
 
     // Trigger recovery sweep.
-    let summary = recovery_svc
-        .recover_interrupted_runs(100)
-        .await
-        .unwrap();
+    let summary = recovery_svc.recover_interrupted_runs(100).await.unwrap();
 
     assert_eq!(summary.scanned, 1, "recovery must scan the one Running run");
     assert_eq!(
@@ -472,9 +472,7 @@ async fn recover_interrupted_runs_with_checkpoint_returns_action() {
                 "RFC 005: recovery action must reference the interrupted run"
             );
         }
-        other => panic!(
-            "RFC 005: expected RunResumedFromCheckpoint action, got: {other:?}"
-        ),
+        other => panic!("RFC 005: expected RunResumedFromCheckpoint action, got: {other:?}"),
     }
 
     // RecoveryAttempted event must have been emitted.
@@ -537,10 +535,7 @@ async fn recover_interrupted_run_without_checkpoint_fails_it() {
         .unwrap();
 
     // No checkpoint saved — recovery must fail the run.
-    let summary = recovery_svc
-        .recover_interrupted_runs(100)
-        .await
-        .unwrap();
+    let summary = recovery_svc.recover_interrupted_runs(100).await.unwrap();
 
     assert_eq!(summary.scanned, 1);
     match &summary.actions[0] {

@@ -7,18 +7,27 @@ use axum::{
 use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
-use cairn_domain::OperatorId;
 use cairn_domain::tenancy::TenantKey;
+use cairn_domain::OperatorId;
 use tower::ServiceExt;
 
 const TOKEN: &str = "system-status-token";
 
-async fn app_with_token() -> (axum::Router, std::sync::Arc<cairn_runtime::InMemoryServices>) {
+async fn app_with_token() -> (
+    axum::Router,
+    std::sync::Arc<cairn_runtime::InMemoryServices>,
+) {
     let (app, runtime, tokens) =
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
             .unwrap();
-    tokens.register(TOKEN.to_string(), AuthPrincipal::Operator { operator_id: OperatorId::new("test_op"), tenant: TenantKey::new("default_tenant") });
+    tokens.register(
+        TOKEN.to_string(),
+        AuthPrincipal::Operator {
+            operator_id: OperatorId::new("test_op"),
+            tenant: TenantKey::new("default_tenant"),
+        },
+    );
     (app, runtime)
 }
 
@@ -43,7 +52,10 @@ async fn system_status_ok_when_all_healthy() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(status["status"], "ok", "all components healthy → overall ok, got: {status}");
+    assert_eq!(
+        status["status"], "ok",
+        "all components healthy → overall ok, got: {status}"
+    );
     assert!(
         status["components"].as_array().unwrap().len() >= 3,
         "expected at least 3 components"

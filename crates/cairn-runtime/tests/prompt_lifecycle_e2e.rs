@@ -9,8 +9,7 @@ use std::sync::Arc;
 
 use cairn_domain::{ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId};
 use cairn_runtime::{
-    PromptAssetService, PromptAssetServiceImpl,
-    PromptReleaseService, PromptReleaseServiceImpl,
+    PromptAssetService, PromptAssetServiceImpl, PromptReleaseService, PromptReleaseServiceImpl,
     PromptVersionService, PromptVersionServiceImpl,
 };
 use cairn_store::InMemoryStore;
@@ -44,7 +43,12 @@ async fn step1_create_prompt_asset() {
 
     let record = svc
         .assets
-        .create(&project(), asset_id.clone(), "Greeting prompt".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "Greeting prompt".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
 
@@ -61,13 +65,23 @@ async fn step2_create_prompt_version() {
     let version_id = PromptVersionId::new("ver_lc_2");
 
     svc.assets
-        .create(&project(), asset_id.clone(), "Asset".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "Asset".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
 
     let version = svc
         .versions
-        .create(&project(), version_id.clone(), asset_id.clone(), "sha256:abc".to_owned())
+        .create(
+            &project(),
+            version_id.clone(),
+            asset_id.clone(),
+            "sha256:abc".to_owned(),
+        )
         .await
         .unwrap();
 
@@ -84,11 +98,21 @@ async fn step3_create_release_in_draft_state() {
     let release_id = PromptReleaseId::new("rel_lc_3");
 
     svc.assets
-        .create(&project(), asset_id.clone(), "A".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "A".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
     svc.versions
-        .create(&project(), version_id.clone(), asset_id.clone(), "hash3".to_owned())
+        .create(
+            &project(),
+            version_id.clone(),
+            asset_id.clone(),
+            "hash3".to_owned(),
+        )
         .await
         .unwrap();
 
@@ -99,7 +123,10 @@ async fn step3_create_release_in_draft_state() {
         .unwrap();
 
     assert_eq!(release.prompt_release_id, release_id);
-    assert_eq!(release.state, "draft", "newly created release must be in draft state");
+    assert_eq!(
+        release.state, "draft",
+        "newly created release must be in draft state"
+    );
 }
 
 /// (4) Transition a release from draft to approved.
@@ -110,15 +137,29 @@ async fn step4_transition_draft_to_approved() {
     let release_id = PromptReleaseId::new("rel_lc_4");
 
     svc.assets
-        .create(&project(), asset_id.clone(), "A".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "A".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
     svc.releases
-        .create(&project(), release_id.clone(), asset_id, PromptVersionId::new("v4"))
+        .create(
+            &project(),
+            release_id.clone(),
+            asset_id,
+            PromptVersionId::new("v4"),
+        )
         .await
         .unwrap();
 
-    let approved = svc.releases.transition(&release_id, "approved").await.unwrap();
+    let approved = svc
+        .releases
+        .transition(&release_id, "approved")
+        .await
+        .unwrap();
     assert_eq!(approved.state, "approved");
 }
 
@@ -130,23 +171,44 @@ async fn step5_activate_approved_release() {
     let release_id = PromptReleaseId::new("rel_lc_5");
 
     svc.assets
-        .create(&project(), asset_id.clone(), "A".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "A".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
     svc.releases
-        .create(&project(), release_id.clone(), asset_id, PromptVersionId::new("v5"))
+        .create(
+            &project(),
+            release_id.clone(),
+            asset_id,
+            PromptVersionId::new("v5"),
+        )
         .await
         .unwrap();
-    svc.releases.transition(&release_id, "approved").await.unwrap();
+    svc.releases
+        .transition(&release_id, "approved")
+        .await
+        .unwrap();
 
     // Direct activation from draft must fail (must go through approved first).
     let draft_release_id = PromptReleaseId::new("rel_lc_5_draft");
     svc.releases
-        .create(&project(), draft_release_id.clone(), PromptAssetId::new("asset_lc_5b"), PromptVersionId::new("v5b"))
+        .create(
+            &project(),
+            draft_release_id.clone(),
+            PromptAssetId::new("asset_lc_5b"),
+            PromptVersionId::new("v5b"),
+        )
         .await
         .unwrap();
     let draft_activate = svc.releases.activate(&draft_release_id).await;
-    assert!(draft_activate.is_err(), "activating a draft release must fail");
+    assert!(
+        draft_activate.is_err(),
+        "activating a draft release must fail"
+    );
 
     // Approved release activates successfully.
     let active = svc.releases.activate(&release_id).await.unwrap();
@@ -161,14 +223,27 @@ async fn step6_active_release_resolves_via_selector() {
     let release_id = PromptReleaseId::new("rel_lc_6");
 
     svc.assets
-        .create(&project(), asset_id.clone(), "A".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "A".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
     svc.releases
-        .create(&project(), release_id.clone(), asset_id.clone(), PromptVersionId::new("v6"))
+        .create(
+            &project(),
+            release_id.clone(),
+            asset_id.clone(),
+            PromptVersionId::new("v6"),
+        )
         .await
         .unwrap();
-    svc.releases.transition(&release_id, "approved").await.unwrap();
+    svc.releases
+        .transition(&release_id, "approved")
+        .await
+        .unwrap();
     svc.releases.activate(&release_id).await.unwrap();
 
     // resolve() returns the active release for this asset + selector.
@@ -178,7 +253,10 @@ async fn step6_active_release_resolves_via_selector() {
         .await
         .unwrap();
 
-    assert!(resolved.is_some(), "active release must be resolvable via selector");
+    assert!(
+        resolved.is_some(),
+        "active release must be resolvable via selector"
+    );
     let resolved = resolved.unwrap();
     assert_eq!(resolved.prompt_release_id, release_id);
     assert_eq!(resolved.state, "active");
@@ -201,13 +279,23 @@ async fn step7_second_release_activation_deactivates_first() {
     let rel2 = PromptReleaseId::new("rel_lc_7b");
 
     svc.assets
-        .create(&project(), asset_id.clone(), "A".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "A".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
 
     // Create, approve, and activate the first release.
     svc.releases
-        .create(&project(), rel1.clone(), asset_id.clone(), PromptVersionId::new("v7a"))
+        .create(
+            &project(),
+            rel1.clone(),
+            asset_id.clone(),
+            PromptVersionId::new("v7a"),
+        )
         .await
         .unwrap();
     svc.releases.transition(&rel1, "approved").await.unwrap();
@@ -216,7 +304,12 @@ async fn step7_second_release_activation_deactivates_first() {
 
     // Create, approve, and activate the second release.
     svc.releases
-        .create(&project(), rel2.clone(), asset_id.clone(), PromptVersionId::new("v7b"))
+        .create(
+            &project(),
+            rel2.clone(),
+            asset_id.clone(),
+            PromptVersionId::new("v7b"),
+        )
         .await
         .unwrap();
     svc.releases.transition(&rel2, "approved").await.unwrap();
@@ -255,7 +348,12 @@ async fn full_prompt_lifecycle_happy_path() {
     // (1) Create asset.
     let asset = svc
         .assets
-        .create(&project(), asset_id.clone(), "Full lifecycle asset".to_owned(), "system".to_owned())
+        .create(
+            &project(),
+            asset_id.clone(),
+            "Full lifecycle asset".to_owned(),
+            "system".to_owned(),
+        )
         .await
         .unwrap();
     assert_eq!(asset.prompt_asset_id, asset_id);
@@ -263,7 +361,12 @@ async fn full_prompt_lifecycle_happy_path() {
     // (2) Create version.
     let version = svc
         .versions
-        .create(&project(), version_id.clone(), asset_id.clone(), "sha256:full".to_owned())
+        .create(
+            &project(),
+            version_id.clone(),
+            asset_id.clone(),
+            "sha256:full".to_owned(),
+        )
         .await
         .unwrap();
     assert_eq!(version.prompt_asset_id, asset_id);
@@ -271,7 +374,12 @@ async fn full_prompt_lifecycle_happy_path() {
     // (3) Create release — starts in draft.
     let release = svc
         .releases
-        .create(&project(), rel1_id.clone(), asset_id.clone(), version_id.clone())
+        .create(
+            &project(),
+            rel1_id.clone(),
+            asset_id.clone(),
+            version_id.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(release.state, "draft");
@@ -296,7 +404,12 @@ async fn full_prompt_lifecycle_happy_path() {
 
     // (7) Second release: create, approve, activate — first is deactivated.
     svc.releases
-        .create(&project(), rel2_id.clone(), asset_id.clone(), version_id.clone())
+        .create(
+            &project(),
+            rel2_id.clone(),
+            asset_id.clone(),
+            version_id.clone(),
+        )
         .await
         .unwrap();
     svc.releases.transition(&rel2_id, "approved").await.unwrap();
@@ -304,7 +417,10 @@ async fn full_prompt_lifecycle_happy_path() {
     assert_eq!(active2.state, "active");
 
     let rel1_after = svc.releases.get(&rel1_id).await.unwrap().unwrap();
-    assert_ne!(rel1_after.state, "active", "first release deactivated by second activation");
+    assert_ne!(
+        rel1_after.state, "active",
+        "first release deactivated by second activation"
+    );
 
     let resolved2 = svc
         .releases

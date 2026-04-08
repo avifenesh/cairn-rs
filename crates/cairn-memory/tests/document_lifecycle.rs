@@ -11,11 +11,11 @@ use std::sync::Arc;
 
 use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
 use cairn_memory::diagnostics::DiagnosticsService;
+use cairn_memory::diagnostics_impl::InMemoryDiagnostics;
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::ingest::{IngestRequest, IngestService, IngestStatus, SourceType};
 use cairn_memory::pipeline::{DocumentStore, IngestPipeline, ParagraphChunker};
 use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
-use cairn_memory::diagnostics_impl::InMemoryDiagnostics;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,11 +35,7 @@ fn source_id() -> SourceId {
     SourceId::new("src_docs")
 }
 
-fn ingest_req(
-    id: &str,
-    project: ProjectKey,
-    content: &str,
-) -> IngestRequest {
+fn ingest_req(id: &str, project: ProjectKey, content: &str) -> IngestRequest {
     IngestRequest {
         document_id: doc_id(id),
         source_id: source_id(),
@@ -88,7 +84,9 @@ async fn ingest_and_retrieve_document() {
         .unwrap();
 
     // Verify status is Completed.
-    let status = DocumentStore::get_status(store.as_ref(), &doc_id("doc_intro")).await.unwrap();
+    let status = DocumentStore::get_status(store.as_ref(), &doc_id("doc_intro"))
+        .await
+        .unwrap();
     assert_eq!(
         status,
         Some(IngestStatus::Completed),
@@ -102,7 +100,10 @@ async fn ingest_and_retrieve_document() {
         .iter()
         .filter(|c| c.document_id == doc_id("doc_intro"))
         .collect();
-    assert!(!doc_chunks.is_empty(), "chunks must be associated with the document ID");
+    assert!(
+        !doc_chunks.is_empty(),
+        "chunks must be associated with the document ID"
+    );
     assert!(
         doc_chunks.iter().all(|c| c.project == project_a()),
         "all chunks must carry the correct project key"
@@ -123,7 +124,10 @@ async fn ingest_and_retrieve_document() {
         .results
         .iter()
         .any(|r| r.chunk.document_id == doc_id("doc_intro"));
-    assert!(has_doc, "retrieval results must include the ingested document");
+    assert!(
+        has_doc,
+        "retrieval results must include the ingested document"
+    );
 
     // Diagnostics must be present.
     assert!(
@@ -180,7 +184,9 @@ async fn update_document_adds_new_chunks() {
     );
 
     // Document status remains Completed after update.
-    let status = DocumentStore::get_status(store.as_ref(), &doc_id("doc_versioned")).await.unwrap();
+    let status = DocumentStore::get_status(store.as_ref(), &doc_id("doc_versioned"))
+        .await
+        .unwrap();
     assert_eq!(status, Some(IngestStatus::Completed));
 
     // The new content hash differs from the old one.
@@ -248,19 +254,21 @@ async fn source_quality_tracking_via_diagnostics() {
         .await
         .unwrap()
         .expect("source quality must exist after record_ingest");
-    assert_eq!(quality.total_chunks, 5, "chunk count must match ingested count");
+    assert_eq!(
+        quality.total_chunks, 5,
+        "chunk count must match ingested count"
+    );
     assert_eq!(quality.total_retrievals, 0, "no retrievals yet");
 
     // Record retrieval hits.
     diag.record_retrieval_hit(&source_id(), 0.9);
     diag.record_retrieval_hit(&source_id(), 0.7);
 
-    let quality_after = diag
-        .source_quality(&source_id())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(quality_after.total_retrievals, 2, "retrieval count must update");
+    let quality_after = diag.source_quality(&source_id()).await.unwrap().unwrap();
+    assert_eq!(
+        quality_after.total_retrievals, 2,
+        "retrieval count must update"
+    );
     assert!(
         (quality_after.avg_relevance_score - 0.8).abs() < 0.01,
         "avg_relevance_score must be mean of 0.9 and 0.7 = 0.8 (got {})",
@@ -270,11 +278,18 @@ async fn source_quality_tracking_via_diagnostics() {
     // Index status must aggregate across both sources for the project.
     let idx = diag.index_status(&project_a()).await.unwrap();
     assert_eq!(idx.total_documents, 2, "index must track 2 documents");
-    assert_eq!(idx.total_chunks, 8, "index must sum chunks across sources (5+3)");
+    assert_eq!(
+        idx.total_chunks, 8,
+        "index must sum chunks across sources (5+3)"
+    );
 
     // list_source_quality returns both sources.
     let all_quality = diag.list_source_quality(&project_a(), 10).await.unwrap();
-    assert_eq!(all_quality.len(), 2, "both sources must appear in quality list");
+    assert_eq!(
+        all_quality.len(),
+        2,
+        "both sources must appear in quality list"
+    );
 }
 
 /// (7) Search by project returns only project-scoped documents — queries must

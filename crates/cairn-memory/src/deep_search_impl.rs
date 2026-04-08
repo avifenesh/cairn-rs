@@ -89,7 +89,11 @@ impl QueryDecomposer for KeywordDecomposer {
 }
 
 /// Iterative deep search that chains retrieval hops.
-pub struct IterativeDeepSearch<R: RetrievalService, D: QueryDecomposer, G: GraphExpansionHook = NoOpGraphExpansion> {
+pub struct IterativeDeepSearch<
+    R: RetrievalService,
+    D: QueryDecomposer,
+    G: GraphExpansionHook = NoOpGraphExpansion,
+> {
     retrieval: R,
     decomposer: D,
     quality_gate: QualityGateConfig,
@@ -114,7 +118,10 @@ impl<R: RetrievalService, D: QueryDecomposer, G: GraphExpansionHook> IterativeDe
     }
 
     /// Set a graph expansion hook for graph-assisted retrieval.
-    pub fn with_graph_hook<G2: GraphExpansionHook>(self, hook: G2) -> IterativeDeepSearch<R, D, G2> {
+    pub fn with_graph_hook<G2: GraphExpansionHook>(
+        self,
+        hook: G2,
+    ) -> IterativeDeepSearch<R, D, G2> {
         IterativeDeepSearch {
             retrieval: self.retrieval,
             decomposer: self.decomposer,
@@ -142,8 +149,11 @@ impl<R: RetrievalService, D: QueryDecomposer, G: GraphExpansionHook> IterativeDe
 }
 
 #[async_trait]
-impl<R: RetrievalService + 'static, D: QueryDecomposer + 'static, G: GraphExpansionHook + 'static>
-    DeepSearchService for IterativeDeepSearch<R, D, G>
+impl<
+        R: RetrievalService + 'static,
+        D: QueryDecomposer + 'static,
+        G: GraphExpansionHook + 'static,
+    > DeepSearchService for IterativeDeepSearch<R, D, G>
 {
     async fn search(
         &self,

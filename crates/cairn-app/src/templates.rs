@@ -425,7 +425,10 @@ mod tests {
         assert_eq!(t.category, TemplateCategory::CodeAssistant);
         assert!(t.files.len() >= 4);
         assert!(t.files.iter().any(|f| f.path == "prompts/review_format.md"));
-        assert!(t.files.iter().any(|f| f.path == "evals/review_quality.json"));
+        assert!(t
+            .files
+            .iter()
+            .any(|f| f.path == "evals/review_quality.json"));
     }
 
     #[test]
@@ -434,7 +437,11 @@ mod tests {
         let t = reg.get("data-analyst").unwrap();
         assert_eq!(t.category, TemplateCategory::DataPipeline);
         assert!(t.files.iter().any(|f| f.path == "config/tools.json"));
-        let tools_file = t.files.iter().find(|f| f.path == "config/tools.json").unwrap();
+        let tools_file = t
+            .files
+            .iter()
+            .find(|f| f.path == "config/tools.json")
+            .unwrap();
         assert!(tools_file.content.contains("sql.execute"));
         assert!(tools_file.content.contains("chart.create"));
         assert!(tools_file.content.contains("data.summarize"));

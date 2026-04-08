@@ -59,8 +59,14 @@ impl SoulDocument {
         }
     }
 
-    pub fn with_locked_fields(mut self, fields: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.locked_fields = fields.into_iter().map(|f| f.into().to_lowercase()).collect();
+    pub fn with_locked_fields(
+        mut self,
+        fields: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.locked_fields = fields
+            .into_iter()
+            .map(|f| f.into().to_lowercase())
+            .collect();
         self
     }
 }
@@ -78,15 +84,27 @@ pub struct SoulPatchResult {
 
 impl SoulPatchResult {
     pub fn allowed(reason: impl Into<String>) -> Self {
-        Self { allowed: true, reason: reason.into(), requires_approval: false }
+        Self {
+            allowed: true,
+            reason: reason.into(),
+            requires_approval: false,
+        }
     }
 
     pub fn requires_approval(reason: impl Into<String>) -> Self {
-        Self { allowed: true, reason: reason.into(), requires_approval: true }
+        Self {
+            allowed: true,
+            reason: reason.into(),
+            requires_approval: true,
+        }
     }
 
     pub fn denied(reason: impl Into<String>) -> Self {
-        Self { allowed: false, reason: reason.into(), requires_approval: false }
+        Self {
+            allowed: false,
+            reason: reason.into(),
+            requires_approval: false,
+        }
     }
 }
 

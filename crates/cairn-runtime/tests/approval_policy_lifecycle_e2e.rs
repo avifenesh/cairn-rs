@@ -12,16 +12,20 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    ApprovalDecision, ApprovalId, ApprovalRequirement, ProjectKey,
-    PromptReleaseId, TenantId, WorkspaceRole,
+    ApprovalDecision, ApprovalId, ApprovalRequirement, ProjectKey, PromptReleaseId, TenantId,
+    WorkspaceRole,
 };
-use cairn_runtime::{ApprovalPolicyService, ApprovalService};
 use cairn_runtime::services::{ApprovalPolicyServiceImpl, ApprovalServiceImpl};
+use cairn_runtime::{ApprovalPolicyService, ApprovalService};
 use cairn_store::{EventLog, InMemoryStore};
 use tokio::time::{sleep, Duration};
 
-fn project() -> ProjectKey { ProjectKey::new("t_pol", "ws_pol", "proj_pol") }
-fn tenant()  -> TenantId   { TenantId::new("t_pol") }
+fn project() -> ProjectKey {
+    ProjectKey::new("t_pol", "ws_pol", "proj_pol")
+}
+fn tenant() -> TenantId {
+    TenantId::new("t_pol")
+}
 
 fn setup() -> (
     Arc<InMemoryStore>,
@@ -64,7 +68,10 @@ async fn create_policy_stores_all_fields() {
     );
     assert_eq!(policy.auto_approve_after_ms, Some(3_600_000));
     assert!(policy.auto_reject_after_ms.is_none());
-    assert!(policy.attached_release_ids.is_empty(), "no releases attached yet");
+    assert!(
+        policy.attached_release_ids.is_empty(),
+        "no releases attached yet"
+    );
 
     // get() round-trips all fields.
     let fetched = policies.get(&policy.policy_id).await.unwrap().unwrap();
@@ -142,20 +149,47 @@ async fn policy_governs_approval_through_attached_release() {
 
     let release_a = PromptReleaseId::new("rel_a");
     let release_b = PromptReleaseId::new("rel_b");
-    policies.attach_to_release(&policy.policy_id, release_a.clone()).await.unwrap();
-    policies.attach_to_release(&policy.policy_id, release_b.clone()).await.unwrap();
+    policies
+        .attach_to_release(&policy.policy_id, release_a.clone())
+        .await
+        .unwrap();
+    policies
+        .attach_to_release(&policy.policy_id, release_b.clone())
+        .await
+        .unwrap();
 
     // Approval for release_a.
-    approvals.request(&project(), ApprovalId::new("appr_a"), None, None, ApprovalRequirement::Required).await.unwrap();
+    approvals
+        .request(
+            &project(),
+            ApprovalId::new("appr_a"),
+            None,
+            None,
+            ApprovalRequirement::Required,
+        )
+        .await
+        .unwrap();
     // Approval for release_b.
-    approvals.request(&project(), ApprovalId::new("appr_b"), None, None, ApprovalRequirement::Required).await.unwrap();
+    approvals
+        .request(
+            &project(),
+            ApprovalId::new("appr_b"),
+            None,
+            None,
+            ApprovalRequirement::Required,
+        )
+        .await
+        .unwrap();
 
     // Policy now governs both releases.
     let fetched = policies.get(&policy.policy_id).await.unwrap().unwrap();
     assert_eq!(fetched.attached_release_ids.len(), 2);
     assert!(fetched.attached_release_ids.contains(&release_a));
     assert!(fetched.attached_release_ids.contains(&release_b));
-    assert_eq!(fetched.required_approvers, 2, "policy enforces 2 required approvers");
+    assert_eq!(
+        fetched.required_approvers, 2,
+        "policy enforces 2 required approvers"
+    );
     assert_eq!(fetched.auto_reject_after_ms, Some(86_400_000));
 }
 
@@ -179,14 +213,27 @@ async fn auto_approve_after_ms_field_enables_caller_driven_auto_resolution() {
         .await
         .unwrap();
 
-    assert_eq!(policy.auto_approve_after_ms, Some(50), "policy must carry auto_approve_after_ms=50");
+    assert_eq!(
+        policy.auto_approve_after_ms,
+        Some(50),
+        "policy must carry auto_approve_after_ms=50"
+    );
 
     // Request an approval.
     let approval = approvals
-        .request(&project(), approval_id.clone(), None, None, ApprovalRequirement::Required)
+        .request(
+            &project(),
+            approval_id.clone(),
+            None,
+            None,
+            ApprovalRequirement::Required,
+        )
         .await
         .unwrap();
-    assert!(approval.decision.is_none(), "approval must start as pending");
+    assert!(
+        approval.decision.is_none(),
+        "approval must start as pending"
+    );
 
     // Simulate waiting past auto_approve_after_ms.
     sleep(Duration::from_millis(100)).await;
@@ -214,7 +261,10 @@ async fn auto_approve_after_ms_field_enables_caller_driven_auto_resolution() {
                     && ev.decision == ApprovalDecision::Approved
         )
     });
-    assert!(resolved, "ApprovalResolved(Approved) must be in the event log");
+    assert!(
+        resolved,
+        "ApprovalResolved(Approved) must be in the event log"
+    );
 }
 
 // ── (6) List by tenant; pagination; idempotent attach ────────────────────
@@ -246,20 +296,31 @@ async fn attach_to_release_is_idempotent() {
     let (_, policies, _) = setup();
 
     let policy = policies
-        .create(tenant(), "Idempotent Gate".to_owned(), 1, vec![], None, None)
+        .create(
+            tenant(),
+            "Idempotent Gate".to_owned(),
+            1,
+            vec![],
+            None,
+            None,
+        )
         .await
         .unwrap();
 
     let release_id = PromptReleaseId::new("rel_idem");
 
-    policies.attach_to_release(&policy.policy_id, release_id.clone()).await.unwrap();
+    policies
+        .attach_to_release(&policy.policy_id, release_id.clone())
+        .await
+        .unwrap();
     let after_second = policies
         .attach_to_release(&policy.policy_id, release_id.clone())
         .await
         .unwrap();
 
     assert_eq!(
-        after_second.attached_release_ids.len(), 1,
+        after_second.attached_release_ids.len(),
+        1,
         "double attach must not add a duplicate entry"
     );
 }
@@ -271,8 +332,20 @@ async fn resolve_approval_with_approved_decision() {
     let (_, _, approvals) = setup();
     let approval_id = ApprovalId::new("appr_resolve_ok");
 
-    approvals.request(&project(), approval_id.clone(), None, None, ApprovalRequirement::Required).await.unwrap();
-    let resolved = approvals.resolve(&approval_id, ApprovalDecision::Approved).await.unwrap();
+    approvals
+        .request(
+            &project(),
+            approval_id.clone(),
+            None,
+            None,
+            ApprovalRequirement::Required,
+        )
+        .await
+        .unwrap();
+    let resolved = approvals
+        .resolve(&approval_id, ApprovalDecision::Approved)
+        .await
+        .unwrap();
 
     assert_eq!(resolved.decision, Some(ApprovalDecision::Approved));
 }
@@ -282,8 +355,20 @@ async fn resolve_approval_with_rejected_decision() {
     let (_, _, approvals) = setup();
     let approval_id = ApprovalId::new("appr_resolve_rej");
 
-    approvals.request(&project(), approval_id.clone(), None, None, ApprovalRequirement::Required).await.unwrap();
-    let resolved = approvals.resolve(&approval_id, ApprovalDecision::Rejected).await.unwrap();
+    approvals
+        .request(
+            &project(),
+            approval_id.clone(),
+            None,
+            None,
+            ApprovalRequirement::Required,
+        )
+        .await
+        .unwrap();
+    let resolved = approvals
+        .resolve(&approval_id, ApprovalDecision::Rejected)
+        .await
+        .unwrap();
 
     assert_eq!(resolved.decision, Some(ApprovalDecision::Rejected));
 }
@@ -293,9 +378,23 @@ async fn double_resolve_returns_error() {
     let (_, _, approvals) = setup();
     let approval_id = ApprovalId::new("appr_double");
 
-    approvals.request(&project(), approval_id.clone(), None, None, ApprovalRequirement::Required).await.unwrap();
-    approvals.resolve(&approval_id, ApprovalDecision::Approved).await.unwrap();
+    approvals
+        .request(
+            &project(),
+            approval_id.clone(),
+            None,
+            None,
+            ApprovalRequirement::Required,
+        )
+        .await
+        .unwrap();
+    approvals
+        .resolve(&approval_id, ApprovalDecision::Approved)
+        .await
+        .unwrap();
 
-    let second = approvals.resolve(&approval_id, ApprovalDecision::Approved).await;
+    let second = approvals
+        .resolve(&approval_id, ApprovalDecision::Approved)
+        .await;
     assert!(second.is_err(), "double-resolve must return an error");
 }

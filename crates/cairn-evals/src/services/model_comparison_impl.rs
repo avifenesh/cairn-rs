@@ -91,7 +91,9 @@ impl ModelComparisonServiceImpl {
             .ok_or_else(|| ModelComparisonError::NotFound(comparison_id.to_owned()))?;
 
         if run.status == ModelComparisonStatus::Completed {
-            return Err(ModelComparisonError::AlreadyCompleted(comparison_id.to_owned()));
+            return Err(ModelComparisonError::AlreadyCompleted(
+                comparison_id.to_owned(),
+            ));
         }
 
         if binding_id == run.model_a_binding_id {
@@ -213,9 +215,7 @@ mod tests {
         assert_eq!(after_b.winner, Some("binding_b".to_owned()));
 
         // determine_winner returns binding_b
-        let winner = svc
-            .determine_winner(&comparison.comparison_id)
-            .unwrap();
+        let winner = svc.determine_winner(&comparison.comparison_id).unwrap();
         assert_eq!(winner, Some("binding_b".to_owned()));
 
         // GET returns correct comparison

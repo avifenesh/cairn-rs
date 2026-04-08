@@ -8,12 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId, TenantId, WorkspaceId};
 use cairn_memory::{
-    entity_extraction::{
-        EntityExtractionRequest, EntityExtractor, RegexEntityExtractor,
-    },
-    ingest::{
-        ChunkRecord, IngestError, IngestRequest, IngestService, IngestStatus, SourceType,
-    },
+    entity_extraction::{EntityExtractionRequest, EntityExtractor, RegexEntityExtractor},
+    ingest::{ChunkRecord, IngestError, IngestRequest, IngestService, IngestStatus, SourceType},
     pipeline::{DocumentStore, IngestPipeline, ParagraphChunker},
 };
 
@@ -87,7 +83,10 @@ impl DocumentStore for MemStore {
         _project: &ProjectKey,
     ) -> Result<HashSet<String>, IngestError> {
         let chunks = self.chunks.lock().unwrap();
-        Ok(chunks.iter().filter_map(|c| c.content_hash.clone()).collect())
+        Ok(chunks
+            .iter()
+            .filter_map(|c| c.content_hash.clone())
+            .collect())
     }
 }
 
@@ -109,11 +108,13 @@ fn entity_extraction_persons_detected() {
     let persons_text = result.persons.join(" ");
     assert!(
         persons_text.contains("Alan") || persons_text.contains("Turing"),
-        "expected Alan Turing in persons, got: {:?}", result.persons
+        "expected Alan Turing in persons, got: {:?}",
+        result.persons
     );
     assert!(
         persons_text.contains("Grace") || persons_text.contains("Hopper"),
-        "expected Grace Hopper in persons, got: {:?}", result.persons
+        "expected Grace Hopper in persons, got: {:?}",
+        result.persons
     );
 }
 
@@ -133,7 +134,8 @@ fn entity_extraction_orgs_with_known_suffix() {
     let orgs_text = result.orgs.join(" ");
     assert!(
         orgs_text.contains("Anthropic"),
-        "expected Anthropic in orgs, got: {:?}", result.orgs
+        "expected Anthropic in orgs, got: {:?}",
+        result.orgs
     );
 }
 
@@ -141,8 +143,7 @@ fn entity_extraction_orgs_with_known_suffix() {
 fn entity_extraction_known_orgs_detected() {
     let extractor = RegexEntityExtractor::new();
     let req = EntityExtractionRequest {
-        text: "OpenAI released GPT-4. Microsoft invested heavily in AI research."
-            .to_owned(),
+        text: "OpenAI released GPT-4. Microsoft invested heavily in AI research.".to_owned(),
         project: project(),
         extract_persons: false,
         extract_orgs: true,
@@ -153,7 +154,8 @@ fn entity_extraction_known_orgs_detected() {
     let orgs_text = result.orgs.join(" ");
     assert!(
         orgs_text.contains("OpenAI") || orgs_text.contains("Microsoft"),
-        "expected OpenAI or Microsoft in orgs, got: {:?}", result.orgs
+        "expected OpenAI or Microsoft in orgs, got: {:?}",
+        result.orgs
     );
 }
 
@@ -173,7 +175,8 @@ fn entity_extraction_locations_via_prepositions() {
     let loc_text = result.locations.join(" ");
     assert!(
         loc_text.contains("San") || loc_text.contains("London") || loc_text.contains("Tokyo"),
-        "expected at least one location, got: {:?}", result.locations
+        "expected at least one location, got: {:?}",
+        result.locations
     );
 }
 
@@ -194,7 +197,8 @@ fn entity_extraction_facts_from_statements() {
     let result = extractor.extract(&req);
     assert!(
         result.facts.len() >= 2,
-        "expected at least 2 facts, got: {:?}", result.facts
+        "expected at least 2 facts, got: {:?}",
+        result.facts
     );
 }
 
@@ -210,7 +214,9 @@ fn entity_extraction_all_entities_deduplicates() {
     let all = result.all_entities();
     // OpenAI should appear only once even if extracted multiple times
     assert_eq!(
-        all.iter().filter(|e| e.to_lowercase().contains("openai")).count(),
+        all.iter()
+            .filter(|e| e.to_lowercase().contains("openai"))
+            .count(),
         1,
         "OpenAI should be deduplicated in all_entities"
     );
@@ -222,7 +228,10 @@ fn entity_extraction_empty_text_is_empty() {
     let req = EntityExtractionRequest::all(String::new(), project());
     let result = extractor.extract(&req);
     assert!(result.is_empty());
-    assert!(!result.source_text_hash.is_empty(), "hash must always be set");
+    assert!(
+        !result.source_text_hash.is_empty(),
+        "hash must always be set"
+    );
 }
 
 #[test]
@@ -248,11 +257,12 @@ fn entity_extraction_disabled_flags_return_empty_lists() {
 #[tokio::test]
 async fn entity_extraction_ingest_pipeline_populates_entities_field() {
     let store = Arc::new(MemStore::new());
-    let chunker = ParagraphChunker { max_chunk_size: 500 };
+    let chunker = ParagraphChunker {
+        max_chunk_size: 500,
+    };
     let extractor: Arc<dyn EntityExtractor> = Arc::new(RegexEntityExtractor::new());
 
-    let pipeline = IngestPipeline::new(store.clone(), chunker)
-        .with_extractor(extractor);
+    let pipeline = IngestPipeline::new(store.clone(), chunker).with_extractor(extractor);
 
     pipeline
         .submit(IngestRequest {
@@ -281,14 +291,19 @@ async fn entity_extraction_ingest_pipeline_populates_entities_field() {
         any_entities,
         "at least one chunk must have entities after ingest with extractor, \
          got chunks: {:?}",
-        chunks.iter().map(|c| (&c.text[..c.text.len().min(50)], &c.entities)).collect::<Vec<_>>()
+        chunks
+            .iter()
+            .map(|c| (&c.text[..c.text.len().min(50)], &c.entities))
+            .collect::<Vec<_>>()
     );
 }
 
 #[tokio::test]
 async fn entity_extraction_without_extractor_leaves_entities_empty() {
     let store = Arc::new(MemStore::new());
-    let chunker = ParagraphChunker { max_chunk_size: 500 };
+    let chunker = ParagraphChunker {
+        max_chunk_size: 500,
+    };
 
     // No extractor wired — entities must remain empty
     let pipeline = IngestPipeline::new(store.clone(), chunker);
@@ -322,11 +337,12 @@ async fn entity_extraction_without_extractor_leaves_entities_empty() {
 #[tokio::test]
 async fn entity_extraction_ingest_known_names_in_entities() {
     let store = Arc::new(MemStore::new());
-    let chunker = ParagraphChunker { max_chunk_size: 1000 };
+    let chunker = ParagraphChunker {
+        max_chunk_size: 1000,
+    };
     let extractor: Arc<dyn EntityExtractor> = Arc::new(RegexEntityExtractor::new());
 
-    let pipeline = IngestPipeline::new(store.clone(), chunker)
-        .with_extractor(extractor);
+    let pipeline = IngestPipeline::new(store.clone(), chunker).with_extractor(extractor);
 
     pipeline
         .submit(IngestRequest {
@@ -350,8 +366,10 @@ async fn entity_extraction_ingest_known_names_in_entities() {
     let entities_text = all_entities.join(" ");
 
     assert!(
-        entities_text.contains("Google") || entities_text.contains("Microsoft")
+        entities_text.contains("Google")
+            || entities_text.contains("Microsoft")
             || entities_text.contains("San"),
-        "expected known org or location in entities, got: {:?}", all_entities
+        "expected known org or location in entities, got: {:?}",
+        all_entities
     );
 }

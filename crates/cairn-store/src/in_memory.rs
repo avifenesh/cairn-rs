@@ -521,9 +521,10 @@ impl InMemoryStore {
                         let alert_event = StoredEvent {
                             position: alert_pos,
                             envelope: EventEnvelope {
-                                event_id: cairn_domain::EventId::new(
-                                    format!("derived_rcat_{}", e.run_id.as_str())
-                                ),
+                                event_id: cairn_domain::EventId::new(format!(
+                                    "derived_rcat_{}",
+                                    e.run_id.as_str()
+                                )),
                                 source: cairn_domain::EventSource::System,
                                 ownership: cairn_domain::OwnershipKey::Project(e.project.clone()),
                                 causation_id: None,
@@ -535,7 +536,7 @@ impl InMemoryStore {
                                         threshold_micros: threshold,
                                         actual_cost_micros: total,
                                         triggered_at_ms,
-                                    }
+                                    },
                                 ),
                             },
                             stored_at: now,
@@ -783,7 +784,10 @@ impl InMemoryStore {
                         tenant_id: e.tenant_id.clone(),
                         display_name: e.display_name.clone(),
                         email: Some(e.email.clone()),
-                        role: serde_json::to_string(&e.role).unwrap_or_default().trim_matches('"').to_owned(),
+                        role: serde_json::to_string(&e.role)
+                            .unwrap_or_default()
+                            .trim_matches('"')
+                            .to_owned(),
                         created_at: now,
                     },
                 );
@@ -832,8 +836,12 @@ impl InMemoryStore {
                 );
             }
             RuntimeEvent::ProviderHealthChecked(e) => {
-                let healthy = matches!(e.status, cairn_domain::providers::ProviderHealthStatus::Healthy);
-                let prev_failures = state.provider_health_records
+                let healthy = matches!(
+                    e.status,
+                    cairn_domain::providers::ProviderHealthStatus::Healthy
+                );
+                let prev_failures = state
+                    .provider_health_records
                     .get(e.connection_id.as_str())
                     .map(|r| r.consecutive_failures)
                     .unwrap_or(0);
@@ -845,7 +853,9 @@ impl InMemoryStore {
                 state.provider_health_records.insert(
                     e.connection_id.as_str().to_owned(),
                     cairn_domain::providers::ProviderHealthRecord {
-                        binding_id: cairn_domain::ids::ProviderBindingId::new(e.connection_id.as_str()),
+                        binding_id: cairn_domain::ids::ProviderBindingId::new(
+                            e.connection_id.as_str(),
+                        ),
                         healthy,
                         last_checked_ms: e.checked_at_ms,
                         error_message: None,
@@ -859,7 +869,9 @@ impl InMemoryStore {
                     .provider_health_records
                     .entry(e.connection_id.as_str().to_owned())
                     .or_insert_with(|| cairn_domain::providers::ProviderHealthRecord {
-                        binding_id: cairn_domain::ids::ProviderBindingId::new(e.connection_id.as_str()),
+                        binding_id: cairn_domain::ids::ProviderBindingId::new(
+                            e.connection_id.as_str(),
+                        ),
                         healthy: false,
                         last_checked_ms: e.marked_at_ms,
                         error_message: None,
@@ -872,7 +884,10 @@ impl InMemoryStore {
                 rec.last_checked_ms = e.marked_at_ms;
             }
             RuntimeEvent::ProviderRecovered(e) => {
-                if let Some(rec) = state.provider_health_records.get_mut(e.connection_id.as_str()) {
+                if let Some(rec) = state
+                    .provider_health_records
+                    .get_mut(e.connection_id.as_str())
+                {
                     rec.healthy = true;
                     rec.status = cairn_domain::providers::ProviderHealthStatus::Healthy;
                     rec.error_message = None;
@@ -885,12 +900,14 @@ impl InMemoryStore {
                     !(m.workspace_id == e.workspace_key.workspace_id.as_str()
                         && m.operator_id == e.member_id.as_str())
                 });
-                state.workspace_members.push(crate::projections::WorkspaceMemberRecord {
-                    workspace_id: e.workspace_key.workspace_id.as_str().to_owned(),
-                    operator_id: e.member_id.as_str().to_owned(),
-                    role: e.role,
-                    added_at_ms: e.added_at_ms,
-                });
+                state
+                    .workspace_members
+                    .push(crate::projections::WorkspaceMemberRecord {
+                        workspace_id: e.workspace_key.workspace_id.as_str().to_owned(),
+                        operator_id: e.member_id.as_str().to_owned(),
+                        role: e.role,
+                        added_at_ms: e.added_at_ms,
+                    });
             }
             RuntimeEvent::WorkspaceMemberRemoved(e) => {
                 state.workspace_members.retain(|m| {
@@ -899,10 +916,16 @@ impl InMemoryStore {
                 });
             }
             RuntimeEvent::RunCostAlertSet(e) => {
-                state.run_cost_alerts.insert(e.run_id.as_str().to_owned(), cairn_domain::providers::RunCostAlert {
-                    run_id: e.run_id.clone(), threshold_micros: e.threshold_micros,
-                    triggered_at_ms: 0, tenant_id: e.tenant_id.clone(), actual_cost_micros: 0,
-                });
+                state.run_cost_alerts.insert(
+                    e.run_id.as_str().to_owned(),
+                    cairn_domain::providers::RunCostAlert {
+                        run_id: e.run_id.clone(),
+                        threshold_micros: e.threshold_micros,
+                        triggered_at_ms: 0,
+                        tenant_id: e.tenant_id.clone(),
+                        actual_cost_micros: 0,
+                    },
+                );
             }
             RuntimeEvent::RunCostAlertTriggered(e) => {
                 if let Some(a) = state.run_cost_alerts.get_mut(e.run_id.as_str()) {
@@ -911,23 +934,39 @@ impl InMemoryStore {
                 }
             }
             RuntimeEvent::RunSlaSet(e) => {
-                state.run_sla_configs.insert(e.run_id.as_str().to_owned(), cairn_domain::sla::SlaConfig {
-                    run_id: e.run_id.clone(), tenant_id: e.tenant_id.clone(),
-                    target_completion_ms: e.target_completion_ms,
-                    alert_at_percent: e.alert_at_percent, configured_at_ms: e.set_at_ms,
-                });
+                state.run_sla_configs.insert(
+                    e.run_id.as_str().to_owned(),
+                    cairn_domain::sla::SlaConfig {
+                        run_id: e.run_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        target_completion_ms: e.target_completion_ms,
+                        alert_at_percent: e.alert_at_percent,
+                        configured_at_ms: e.set_at_ms,
+                    },
+                );
             }
             RuntimeEvent::RunSlaBreached(e) => {
-                state.run_sla_breaches.insert(e.run_id.as_str().to_owned(), cairn_domain::sla::SlaBreach {
-                    run_id: e.run_id.clone(), tenant_id: e.tenant_id.clone(),
-                    elapsed_ms: e.elapsed_ms, target_ms: e.target_ms, breached_at_ms: e.breached_at_ms,
-                });
+                state.run_sla_breaches.insert(
+                    e.run_id.as_str().to_owned(),
+                    cairn_domain::sla::SlaBreach {
+                        run_id: e.run_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        elapsed_ms: e.elapsed_ms,
+                        target_ms: e.target_ms,
+                        breached_at_ms: e.breached_at_ms,
+                    },
+                );
             }
             RuntimeEvent::ProviderBindingCreated(e) => {
                 // Use the event position as created_at when the event's timestamp is 0,
                 // ensuring stable creation-order sorting in list_active.
-                let effective_created_at = if e.created_at > 0 { e.created_at } else { event.position.0 };
-                state.provider_bindings.insert(e.provider_binding_id.as_str().to_owned(),
+                let effective_created_at = if e.created_at > 0 {
+                    e.created_at
+                } else {
+                    event.position.0
+                };
+                state.provider_bindings.insert(
+                    e.provider_binding_id.as_str().to_owned(),
                     cairn_domain::providers::ProviderBindingRecord {
                         provider_binding_id: e.provider_binding_id.clone(),
                         project: e.project.clone(),
@@ -937,16 +976,20 @@ impl InMemoryStore {
                         settings: e.settings.clone(),
                         active: e.active,
                         created_at: effective_created_at,
-                    }
+                    },
                 );
             }
             RuntimeEvent::ProviderBindingStateChanged(e) => {
-                if let Some(b) = state.provider_bindings.get_mut(e.provider_binding_id.as_str()) {
+                if let Some(b) = state
+                    .provider_bindings
+                    .get_mut(e.provider_binding_id.as_str())
+                {
                     b.active = e.active;
                 }
             }
             RuntimeEvent::ProviderHealthScheduleSet(e) => {
-                state.provider_health_schedules.insert(e.schedule_id.clone(),
+                state.provider_health_schedules.insert(
+                    e.schedule_id.clone(),
                     cairn_domain::providers::ProviderHealthSchedule {
                         schedule_id: e.schedule_id.clone(),
                         binding_id: cairn_domain::ProviderBindingId::new(""),
@@ -955,7 +998,7 @@ impl InMemoryStore {
                         connection_id: e.connection_id.clone(),
                         tenant_id: e.tenant_id.clone(),
                         last_run_ms: None,
-                    }
+                    },
                 );
             }
             RuntimeEvent::ProviderHealthScheduleTriggered(e) => {
@@ -964,11 +1007,16 @@ impl InMemoryStore {
                 }
             }
             RuntimeEvent::SignalSubscriptionCreated(e) => {
-                state.signal_subscriptions.insert(e.subscription_id.clone(),
+                state.signal_subscriptions.insert(
+                    e.subscription_id.clone(),
                     crate::projections::SignalSubscriptionRecord {
                         subscription_id: e.subscription_id.clone(),
                         signal_type: e.signal_kind.clone(),
-                        target: e.target_run_id.as_ref().map(|r| r.as_str().to_owned()).unwrap_or_default(),
+                        target: e
+                            .target_run_id
+                            .as_ref()
+                            .map(|r| r.as_str().to_owned())
+                            .unwrap_or_default(),
                         created_at_ms: e.created_at_ms,
                         project: Some(e.project.clone()),
                         project_tenant: e.project.tenant_id.as_str().to_owned(),
@@ -977,45 +1025,52 @@ impl InMemoryStore {
                         target_run_id: e.target_run_id.clone(),
                         target_mailbox_id: e.target_mailbox_id.clone(),
                         filter_expression: e.filter_expression.clone(),
-                    }
+                    },
                 );
             }
             RuntimeEvent::RetentionPolicySet(e) => {
-                state.retention_policies.insert(e.tenant_id.as_str().to_owned(), cairn_domain::RetentionPolicy {
-                    policy_id: e.policy_id.clone(),
-                    tenant_id: e.tenant_id.clone(),
-                    full_history_days: e.full_history_days,
-                    current_state_days: e.current_state_days,
-                    max_events_per_entity: e.max_events_per_entity.unwrap_or(0) as u32,
-                });
+                state.retention_policies.insert(
+                    e.tenant_id.as_str().to_owned(),
+                    cairn_domain::RetentionPolicy {
+                        policy_id: e.policy_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        full_history_days: e.full_history_days,
+                        current_state_days: e.current_state_days,
+                        max_events_per_entity: e.max_events_per_entity.unwrap_or(0) as u32,
+                    },
+                );
             }
             RuntimeEvent::TenantQuotaViolated(_)
             | RuntimeEvent::ApprovalDelegated(_)
             | RuntimeEvent::AuditLogEntryRecorded(_)
-                        | RuntimeEvent::EventLogCompacted(_)
+            | RuntimeEvent::EventLogCompacted(_)
             | RuntimeEvent::GuardrailPolicyEvaluated(_)
             | RuntimeEvent::OperatorIntervention(_)
             | RuntimeEvent::PauseScheduled(_)
             | RuntimeEvent::PermissionDecisionRecorded(_)
-                        | RuntimeEvent::ProviderModelRegistered(_)
+            | RuntimeEvent::ProviderModelRegistered(_)
             | RuntimeEvent::ProviderRetryPolicySet(_) => {}
             RuntimeEvent::ResourceShared(e) => {
-                state.resource_shares.insert(e.share_id.clone(), cairn_domain::resource_sharing::SharedResource {
-                    share_id: e.share_id.clone(),
-                    tenant_id: e.tenant_id.clone(),
-                    source_workspace_id: e.source_workspace_id.clone(),
-                    target_workspace_id: e.target_workspace_id.clone(),
-                    resource_type: e.resource_type.clone(),
-                    resource_id: e.resource_id.clone(),
-                    permissions: e.permissions.clone(),
-                    shared_at_ms: e.shared_at_ms,
-                });
+                state.resource_shares.insert(
+                    e.share_id.clone(),
+                    cairn_domain::resource_sharing::SharedResource {
+                        share_id: e.share_id.clone(),
+                        tenant_id: e.tenant_id.clone(),
+                        source_workspace_id: e.source_workspace_id.clone(),
+                        target_workspace_id: e.target_workspace_id.clone(),
+                        resource_type: e.resource_type.clone(),
+                        resource_id: e.resource_id.clone(),
+                        permissions: e.permissions.clone(),
+                        shared_at_ms: e.shared_at_ms,
+                    },
+                );
             }
             RuntimeEvent::ResourceShareRevoked(e) => {
                 state.resource_shares.remove(&e.share_id);
             }
             RuntimeEvent::RoutePolicyCreated(e) => {
-                state.route_policies.insert(e.policy_id.clone(),
+                state.route_policies.insert(
+                    e.policy_id.clone(),
                     cairn_domain::providers::RoutePolicy {
                         policy_id: e.policy_id.clone(),
                         name: e.name.clone(),
@@ -1023,7 +1078,7 @@ impl InMemoryStore {
                         tenant_id: e.tenant_id.as_str().to_owned(),
                         rules: e.rules.clone(),
                         updated_at_ms: now,
-                    }
+                    },
                 );
             }
             RuntimeEvent::RoutePolicyUpdated(e) => {
@@ -1031,8 +1086,7 @@ impl InMemoryStore {
                     p.updated_at_ms = e.updated_at_ms;
                 }
             }
-            RuntimeEvent::RecoveryEscalated(_)
-            | RuntimeEvent::SignalRouted(_) => {}
+            RuntimeEvent::RecoveryEscalated(_) | RuntimeEvent::SignalRouted(_) => {}
             RuntimeEvent::SnapshotCreated(e) => {
                 state.snapshots.push(cairn_domain::Snapshot {
                     snapshot_id: e.snapshot_id.clone(),
@@ -1043,7 +1097,7 @@ impl InMemoryStore {
                     compressed_state: vec![],
                 });
             }
-            | RuntimeEvent::TaskDependencyAdded(_)
+            RuntimeEvent::TaskDependencyAdded(_)
             | RuntimeEvent::TaskDependencyResolved(_)
             | RuntimeEvent::TaskLeaseExpired(_)
             | RuntimeEvent::TaskPriorityChanged(_)
@@ -1073,7 +1127,9 @@ impl InMemoryStore {
                 // Also accumulate into provider budget spend for the tenant.
                 for budget in state.provider_budgets.values_mut() {
                     if budget.tenant_id == e.tenant_id {
-                        budget.current_spend_micros = budget.current_spend_micros.saturating_add(e.delta_cost_micros);
+                        budget.current_spend_micros = budget
+                            .current_spend_micros
+                            .saturating_add(e.delta_cost_micros);
                         budget.updated_at = now;
                     }
                 }
@@ -1199,9 +1255,10 @@ impl InMemoryStore {
                     let derived = StoredEvent {
                         position: derived_pos,
                         envelope: EventEnvelope {
-                            event_id: cairn_domain::EventId::new(
-                                format!("derived_rcu_{}", e.provider_call_id.as_str())
-                            ),
+                            event_id: cairn_domain::EventId::new(format!(
+                                "derived_rcu_{}",
+                                e.provider_call_id.as_str()
+                            )),
                             source: cairn_domain::EventSource::System,
                             ownership: cairn_domain::OwnershipKey::Project(e.project.clone()),
                             causation_id: None,
@@ -1225,9 +1282,9 @@ impl InMemoryStore {
                 // Accumulate session-level costs.
                 // Derive session_id from run record if not provided on the event.
                 let effective_session_id = e.session_id.clone().or_else(|| {
-                    e.run_id.as_ref().and_then(|rid| {
-                        state.runs.get(rid.as_str()).map(|r| r.session_id.clone())
-                    })
+                    e.run_id
+                        .as_ref()
+                        .and_then(|rid| state.runs.get(rid.as_str()).map(|r| r.session_id.clone()))
                 });
                 if let Some(session_id) = effective_session_id {
                     let delta_cost = e.cost_micros.unwrap_or(0);
@@ -1238,9 +1295,7 @@ impl InMemoryStore {
                         .entry(session_id.as_str().to_owned())
                         .or_insert_with(|| cairn_domain::providers::SessionCostRecord {
                             session_id: session_id.clone(),
-                            tenant_id: cairn_domain::TenantId::new(
-                                e.project.tenant_id.as_str()
-                            ),
+                            tenant_id: cairn_domain::TenantId::new(e.project.tenant_id.as_str()),
                             total_cost_micros: 0,
                             total_tokens_in: 0,
                             total_tokens_out: 0,
@@ -1262,9 +1317,10 @@ impl InMemoryStore {
                     let sc_derived = StoredEvent {
                         position: sc_pos,
                         envelope: EventEnvelope {
-                            event_id: cairn_domain::EventId::new(
-                                format!("derived_scu_{}", e.provider_call_id.as_str())
-                            ),
+                            event_id: cairn_domain::EventId::new(format!(
+                                "derived_scu_{}",
+                                e.provider_call_id.as_str()
+                            )),
                             source: cairn_domain::EventSource::System,
                             ownership: cairn_domain::OwnershipKey::Project(e.project.clone()),
                             causation_id: None,
@@ -1272,7 +1328,9 @@ impl InMemoryStore {
                             payload: RuntimeEvent::SessionCostUpdated(SessionCostUpdated {
                                 project: e.project.clone(),
                                 session_id: session_id.clone(),
-                                tenant_id: cairn_domain::TenantId::new(e.project.tenant_id.as_str()),
+                                tenant_id: cairn_domain::TenantId::new(
+                                    e.project.tenant_id.as_str(),
+                                ),
                                 delta_cost_micros: delta_cost,
                                 delta_tokens_in: delta_in,
                                 delta_tokens_out: delta_out,
@@ -1473,16 +1531,17 @@ impl InMemoryStore {
             RuntimeEvent::EvalDatasetCreated(e) => {
                 // tenant_id is not carried by this event; stored with empty sentinel.
                 // Use EvalSubjectKind::PromptRelease as default subject kind.
-                state.eval_datasets.entry(e.dataset_id.clone()).or_insert_with(|| {
-                    cairn_domain::EvalDataset {
+                state
+                    .eval_datasets
+                    .entry(e.dataset_id.clone())
+                    .or_insert_with(|| cairn_domain::EvalDataset {
                         dataset_id: e.dataset_id.clone(),
                         tenant_id: cairn_domain::TenantId::new(""),
                         name: e.name.clone(),
                         subject_kind: cairn_domain::EvalSubjectKind::PromptRelease,
                         entries: Vec::new(),
                         created_at_ms: e.created_at_ms,
-                    }
-                });
+                    });
             }
             RuntimeEvent::EvalDatasetEntryAdded(e) => {
                 if let Some(ds) = state.eval_datasets.get_mut(e.dataset_id.as_str()) {
@@ -1505,10 +1564,18 @@ impl InMemoryStore {
                         run_id.as_str().to_owned(),
                         cairn_domain::CheckpointStrategy {
                             strategy_id: e.strategy_id.clone(),
-                            project: cairn_domain::ProjectKey::new("_strategy", "_strategy", "_strategy"),
+                            project: cairn_domain::ProjectKey::new(
+                                "_strategy",
+                                "_strategy",
+                                "_strategy",
+                            ),
                             run_id: run_id.clone(),
                             interval_ms: e.interval_ms,
-                            max_checkpoints: if e.max_checkpoints > 0 { e.max_checkpoints } else { 10 },
+                            max_checkpoints: if e.max_checkpoints > 0 {
+                                e.max_checkpoints
+                            } else {
+                                10
+                            },
                             trigger_on_task_complete: e.trigger_on_task_complete,
                         },
                     );
@@ -1516,30 +1583,32 @@ impl InMemoryStore {
             }
             RuntimeEvent::EvalRubricCreated(e) => {
                 // tenant_id not in event; stored with sentinel "".
-                state.eval_rubrics.entry(e.rubric_id.clone()).or_insert_with(|| {
-                    cairn_domain::EvalRubric {
-                        rubric_id:     e.rubric_id.clone(),
-                        tenant_id:     cairn_domain::TenantId::new(""),
-                        name:          e.name.clone(),
-                        dimensions:    vec![],
+                state
+                    .eval_rubrics
+                    .entry(e.rubric_id.clone())
+                    .or_insert_with(|| cairn_domain::EvalRubric {
+                        rubric_id: e.rubric_id.clone(),
+                        tenant_id: cairn_domain::TenantId::new(""),
+                        name: e.name.clone(),
+                        dimensions: vec![],
                         created_at_ms: e.created_at_ms,
-                    }
-                });
+                    });
             }
             RuntimeEvent::EvalBaselineSet(e) => {
                 // EvalBaselineSet carries one metric key=value; upsert the baseline record.
                 // Fields like tenant_id, name, prompt_asset_id not in event → sentinels.
-                let entry = state.eval_baselines.entry(e.baseline_id.clone()).or_insert_with(|| {
-                    cairn_domain::EvalBaseline {
-                        baseline_id:     e.baseline_id.clone(),
-                        tenant_id:       cairn_domain::TenantId::new(""),
-                        name:            e.baseline_id.clone(),
+                let entry = state
+                    .eval_baselines
+                    .entry(e.baseline_id.clone())
+                    .or_insert_with(|| cairn_domain::EvalBaseline {
+                        baseline_id: e.baseline_id.clone(),
+                        tenant_id: cairn_domain::TenantId::new(""),
+                        name: e.baseline_id.clone(),
                         prompt_asset_id: cairn_domain::PromptAssetId::new(""),
-                        metrics:         cairn_domain::EvalMetrics::default(),
-                        created_at_ms:   e.set_at_ms,
-                        locked:          false,
-                    }
-                });
+                        metrics: cairn_domain::EvalMetrics::default(),
+                        created_at_ms: e.set_at_ms,
+                        locked: false,
+                    });
                 // Only update if not locked — locked baselines are immutable.
                 if !entry.locked {
                     // Store metric as a tag in the name for auditability.
@@ -2078,7 +2147,11 @@ impl MailboxReadModel for InMemoryStore {
         Ok(results)
     }
 
-    async fn list_pending(&self, now_ms: u64, limit: usize) -> Result<Vec<MailboxRecord>, StoreError> {
+    async fn list_pending(
+        &self,
+        now_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<MailboxRecord>, StoreError> {
         let state = self.state.lock().unwrap();
         let mut results: Vec<MailboxRecord> = state
             .mailbox_messages
@@ -2343,16 +2416,31 @@ impl crate::projections::EvalDatasetReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::EvalRubricReadModel for InMemoryStore {
-    async fn get_rubric(&self, rubric_id: &str) -> Result<Option<cairn_domain::EvalRubric>, crate::error::StoreError> {
-        Ok(self.state.lock().unwrap().eval_rubrics.get(rubric_id).cloned())
+    async fn get_rubric(
+        &self,
+        rubric_id: &str,
+    ) -> Result<Option<cairn_domain::EvalRubric>, crate::error::StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .eval_rubrics
+            .get(rubric_id)
+            .cloned())
     }
-    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize)
-        -> Result<Vec<cairn_domain::EvalRubric>, crate::error::StoreError>
-    {
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::EvalRubric>, crate::error::StoreError> {
         let state = self.state.lock().unwrap();
-        let mut results: Vec<_> = state.eval_rubrics.values()
+        let mut results: Vec<_> = state
+            .eval_rubrics
+            .values()
             .filter(|r| r.tenant_id == *tenant_id || tenant_id.as_str().is_empty())
-            .cloned().collect();
+            .cloned()
+            .collect();
         results.sort_by(|a, b| a.rubric_id.cmp(&b.rubric_id));
         Ok(results.into_iter().skip(offset).take(limit).collect())
     }
@@ -2362,16 +2450,31 @@ impl crate::projections::EvalRubricReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::EvalBaselineReadModel for InMemoryStore {
-    async fn get_baseline(&self, baseline_id: &str) -> Result<Option<cairn_domain::EvalBaseline>, crate::error::StoreError> {
-        Ok(self.state.lock().unwrap().eval_baselines.get(baseline_id).cloned())
+    async fn get_baseline(
+        &self,
+        baseline_id: &str,
+    ) -> Result<Option<cairn_domain::EvalBaseline>, crate::error::StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .eval_baselines
+            .get(baseline_id)
+            .cloned())
     }
-    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize)
-        -> Result<Vec<cairn_domain::EvalBaseline>, crate::error::StoreError>
-    {
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::EvalBaseline>, crate::error::StoreError> {
         let state = self.state.lock().unwrap();
-        let mut results: Vec<_> = state.eval_baselines.values()
+        let mut results: Vec<_> = state
+            .eval_baselines
+            .values()
             .filter(|b| b.tenant_id == *tenant_id || tenant_id.as_str().is_empty())
-            .cloned().collect();
+            .cloned()
+            .collect();
         results.sort_by(|a, b| a.baseline_id.cmp(&b.baseline_id));
         Ok(results.into_iter().skip(offset).take(limit).collect())
     }
@@ -2439,11 +2542,10 @@ impl PromptVersionReadModel for InMemoryStore {
 
 // -- PromptReleaseReadModel --
 
-
 /// RFC 001: deterministic hash-based selector bucket for traffic routing (0-100).
 fn selector_bucket(selector: &str) -> u8 {
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     let mut h = DefaultHasher::new();
     selector.hash(&mut h);
     (h.finish() % 100) as u8
@@ -2813,7 +2915,7 @@ mod tests {
                 session_id: session_id.clone(),
                 run_id: run_id.clone(),
                 parent_run_id: None,
-            agent_role_id: None,
+                agent_role_id: None,
                 prompt_release_id: None,
             }))])
             .await
@@ -3134,7 +3236,7 @@ mod tests {
                 session_id: session_id.clone(),
                 run_id: run_id.clone(),
                 parent_run_id: None,
-            agent_role_id: None,
+                agent_role_id: None,
                 prompt_release_id: None,
             }))])
             .await
@@ -3554,7 +3656,9 @@ mod tests {
         ) -> Result<Vec<EventPosition>, crate::StoreError> {
             self.count.fetch_add(events.len(), Ordering::SeqCst);
             self.events.lock().unwrap().extend(events.iter().cloned());
-            Ok(events.iter().enumerate()
+            Ok(events
+                .iter()
+                .enumerate()
                 .map(|(i, _)| EventPosition(i as u64))
                 .collect())
         }
@@ -3598,26 +3702,42 @@ mod tests {
         let project = test_project();
 
         // Append a session created event.
-        store.append(&[make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
-            project: project.clone(),
-            session_id: SessionId::new("sess_sec_1"),
-        }))]).await.unwrap();
+        store
+            .append(&[make_envelope(RuntimeEvent::SessionCreated(
+                SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("sess_sec_1"),
+                },
+            ))])
+            .await
+            .unwrap();
 
-        assert_eq!(count.load(Ordering::SeqCst), 1, "secondary must receive 1 event");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "secondary must receive 1 event"
+        );
 
         // Append two more events in a single batch.
-        store.append(&[
-            make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
-                project: project.clone(),
-                session_id: SessionId::new("sess_sec_2"),
-            })),
-            make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
-                project: project.clone(),
-                session_id: SessionId::new("sess_sec_3"),
-            })),
-        ]).await.unwrap();
+        store
+            .append(&[
+                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("sess_sec_2"),
+                })),
+                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("sess_sec_3"),
+                })),
+            ])
+            .await
+            .unwrap();
 
-        assert_eq!(count.load(Ordering::SeqCst), 3, "secondary must receive all 3 events total");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            3,
+            "secondary must receive all 3 events total"
+        );
     }
 
     /// Primary store is not affected when secondary log is absent.
@@ -3625,12 +3745,15 @@ mod tests {
     async fn no_secondary_log_works_normally() {
         let store = InMemoryStore::new();
         // No secondary log set — append must succeed normally.
-        let positions = store.append(&[make_envelope(RuntimeEvent::SessionCreated(
-            SessionCreated {
-                project: test_project(),
-                session_id: SessionId::new("sess_no_sec"),
-            },
-        ))]).await.unwrap();
+        let positions = store
+            .append(&[make_envelope(RuntimeEvent::SessionCreated(
+                SessionCreated {
+                    project: test_project(),
+                    session_id: SessionId::new("sess_no_sec"),
+                },
+            ))])
+            .await
+            .unwrap();
 
         assert_eq!(positions.len(), 1);
         let sessions = SessionReadModel::list_active(&store, 10).await.unwrap();
@@ -3650,32 +3773,57 @@ mod tests {
             ) -> Result<Vec<EventPosition>, crate::StoreError> {
                 Err(crate::StoreError::Internal("secondary down".to_owned()))
             }
-            async fn read_stream(&self, _: Option<EventPosition>, _: usize)
-                -> Result<Vec<StoredEvent>, crate::StoreError> { Ok(vec![]) }
-            async fn head_position(&self) -> Result<Option<EventPosition>, crate::StoreError> { Ok(None) }
-            async fn read_by_entity(&self, _: &EntityRef, _: Option<EventPosition>, _: usize)
-                -> Result<Vec<StoredEvent>, crate::StoreError> { Ok(vec![]) }
-            async fn find_by_causation_id(&self, _: &str)
-                -> Result<Option<EventPosition>, crate::StoreError> { Ok(None) }
+            async fn read_stream(
+                &self,
+                _: Option<EventPosition>,
+                _: usize,
+            ) -> Result<Vec<StoredEvent>, crate::StoreError> {
+                Ok(vec![])
+            }
+            async fn head_position(&self) -> Result<Option<EventPosition>, crate::StoreError> {
+                Ok(None)
+            }
+            async fn read_by_entity(
+                &self,
+                _: &EntityRef,
+                _: Option<EventPosition>,
+                _: usize,
+            ) -> Result<Vec<StoredEvent>, crate::StoreError> {
+                Ok(vec![])
+            }
+            async fn find_by_causation_id(
+                &self,
+                _: &str,
+            ) -> Result<Option<EventPosition>, crate::StoreError> {
+                Ok(None)
+            }
         }
 
         let store = Arc::new(InMemoryStore::new());
         store.set_secondary_log(Arc::new(FailingLog));
 
         // The primary append must succeed despite secondary failure.
-        let positions = store.append(&[make_envelope(RuntimeEvent::SessionCreated(
-            SessionCreated {
-                project: test_project(),
-                session_id: SessionId::new("sess_resilient"),
-            },
-        ))]).await.unwrap();
+        let positions = store
+            .append(&[make_envelope(RuntimeEvent::SessionCreated(
+                SessionCreated {
+                    project: test_project(),
+                    session_id: SessionId::new("sess_resilient"),
+                },
+            ))])
+            .await
+            .unwrap();
 
-        assert_eq!(positions.len(), 1, "primary must succeed even when secondary fails");
-        let sessions = SessionReadModel::list_active(store.as_ref(), 10).await.unwrap();
+        assert_eq!(
+            positions.len(),
+            1,
+            "primary must succeed even when secondary fails"
+        );
+        let sessions = SessionReadModel::list_active(store.as_ref(), 10)
+            .await
+            .unwrap();
         assert_eq!(sessions.len(), 1, "primary projection must be updated");
     }
 }
-
 
 #[async_trait]
 impl ApprovalPolicyReadModel for InMemoryStore {
@@ -3751,7 +3899,12 @@ impl crate::projections::LlmCallTraceReadModel for InMemoryStore {
         let mut results: Vec<cairn_domain::LlmCallTrace> = state
             .llm_traces
             .iter()
-            .filter(|t| t.session_id.as_ref().map(|s| s == session_id).unwrap_or(false))
+            .filter(|t| {
+                t.session_id
+                    .as_ref()
+                    .map(|s| s == session_id)
+                    .unwrap_or(false)
+            })
             .cloned()
             .collect();
         // Most-recent first.
@@ -3760,7 +3913,10 @@ impl crate::projections::LlmCallTraceReadModel for InMemoryStore {
         Ok(results)
     }
 
-    async fn list_all_traces(&self, limit: usize) -> Result<Vec<cairn_domain::LlmCallTrace>, StoreError> {
+    async fn list_all_traces(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<cairn_domain::LlmCallTrace>, StoreError> {
         let state = self.state.lock().unwrap();
         let mut results = state.llm_traces.clone();
         results.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
@@ -3885,7 +4041,9 @@ impl crate::projections::WorkspaceMembershipReadModel for InMemoryStore {
         workspace_id: &str,
     ) -> Result<Vec<crate::projections::WorkspaceMemberRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.workspace_members.iter()
+        Ok(state
+            .workspace_members
+            .iter()
             .filter(|m| m.workspace_id == workspace_id)
             .cloned()
             .collect())
@@ -3897,9 +4055,13 @@ impl crate::projections::WorkspaceMembershipReadModel for InMemoryStore {
         operator_id: &str,
     ) -> Result<Option<crate::projections::WorkspaceMemberRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.workspace_members.iter()
-            .find(|m| m.workspace_id == workspace_key.workspace_id.as_str()
-                   && m.operator_id == operator_id)
+        Ok(state
+            .workspace_members
+            .iter()
+            .find(|m| {
+                m.workspace_id == workspace_key.workspace_id.as_str()
+                    && m.operator_id == operator_id
+            })
             .cloned())
     }
 
@@ -3917,7 +4079,9 @@ impl crate::projections::WorkspaceMembershipReadModel for InMemoryStore {
         operator_id: &str,
     ) -> Result<(), StoreError> {
         let mut state = self.state.lock().unwrap();
-        state.workspace_members.retain(|m| !(m.workspace_id == workspace_id && m.operator_id == operator_id));
+        state
+            .workspace_members
+            .retain(|m| !(m.workspace_id == workspace_id && m.operator_id == operator_id));
         Ok(())
     }
 }
@@ -3930,7 +4094,13 @@ impl crate::projections::SignalSubscriptionReadModel for InMemoryStore {
         &self,
         subscription_id: &str,
     ) -> Result<Option<crate::projections::SignalSubscriptionRecord>, StoreError> {
-        Ok(self.state.lock().unwrap().signal_subscriptions.get(subscription_id).cloned())
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .signal_subscriptions
+            .get(subscription_id)
+            .cloned())
     }
 
     async fn list_by_signal_type(
@@ -3938,7 +4108,9 @@ impl crate::projections::SignalSubscriptionReadModel for InMemoryStore {
         signal_type: &str,
     ) -> Result<Vec<crate::projections::SignalSubscriptionRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.signal_subscriptions.values()
+        Ok(state
+            .signal_subscriptions
+            .values()
             .filter(|s| s.signal_type == signal_type)
             .cloned()
             .collect())
@@ -3951,7 +4123,9 @@ impl crate::projections::SignalSubscriptionReadModel for InMemoryStore {
         _offset: usize,
     ) -> Result<Vec<crate::projections::SignalSubscriptionRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.signal_subscriptions.values()
+        Ok(state
+            .signal_subscriptions
+            .values()
             .filter(|s| s.signal_type == signal_kind)
             .cloned()
             .collect())
@@ -3967,8 +4141,12 @@ impl crate::projections::SignalSubscriptionReadModel for InMemoryStore {
         let tid = project.tenant_id.as_str();
         let wid = project.workspace_id.as_str();
         let pid = project.project_id.as_str();
-        Ok(state.signal_subscriptions.values()
-            .filter(|s| s.project_tenant == tid && s.project_workspace == wid && s.project_id == pid)
+        Ok(state
+            .signal_subscriptions
+            .values()
+            .filter(|s| {
+                s.project_tenant == tid && s.project_workspace == wid && s.project_id == pid
+            })
             .cloned()
             .collect())
     }
@@ -3977,7 +4155,11 @@ impl crate::projections::SignalSubscriptionReadModel for InMemoryStore {
         &self,
         record: crate::projections::SignalSubscriptionRecord,
     ) -> Result<(), StoreError> {
-        self.state.lock().unwrap().signal_subscriptions.insert(record.subscription_id.clone(), record);
+        self.state
+            .lock()
+            .unwrap()
+            .signal_subscriptions
+            .insert(record.subscription_id.clone(), record);
         Ok(())
     }
 }
@@ -3989,7 +4171,9 @@ impl crate::projections::CredentialRotationReadModel for InMemoryStore {
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::credentials::CredentialRotationRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        let results: Vec<_> = state.credential_rotations.iter()
+        let results: Vec<_> = state
+            .credential_rotations
+            .iter()
             .filter(|r| &r.tenant_id == tenant_id)
             .cloned()
             .collect();
@@ -4005,7 +4189,13 @@ impl crate::projections::ProviderBindingReadModel for InMemoryStore {
         &self,
         id: &cairn_domain::ProviderBindingId,
     ) -> Result<Option<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
-        Ok(self.state.lock().unwrap().provider_bindings.get(id.as_str()).cloned())
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .provider_bindings
+            .get(id.as_str())
+            .cloned())
     }
 
     async fn list_by_project(
@@ -4015,9 +4205,14 @@ impl crate::projections::ProviderBindingReadModel for InMemoryStore {
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.provider_bindings.values()
+        Ok(state
+            .provider_bindings
+            .values()
             .filter(|b| &b.project == project)
-            .skip(offset).take(limit).cloned().collect())
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     async fn list_by_tenant(
@@ -4027,9 +4222,14 @@ impl crate::projections::ProviderBindingReadModel for InMemoryStore {
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.provider_bindings.values()
+        Ok(state
+            .provider_bindings
+            .values()
             .filter(|b| b.project.tenant_id == *tenant_id)
-            .skip(offset).take(limit).cloned().collect())
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     async fn list_active(
@@ -4038,14 +4238,19 @@ impl crate::projections::ProviderBindingReadModel for InMemoryStore {
         operation: cairn_domain::providers::OperationKind,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        let mut results: Vec<_> = state.provider_bindings.values()
+        let mut results: Vec<_> = state
+            .provider_bindings
+            .values()
             .filter(|b| &b.project == project && b.active && b.operation_kind == operation)
             .cloned()
             .collect();
         // Stable creation-order: sort by created_at, then by binding ID for determinism.
         results.sort_by(|a, b| {
-            a.created_at.cmp(&b.created_at)
-                .then_with(|| a.provider_binding_id.as_str().cmp(b.provider_binding_id.as_str()))
+            a.created_at.cmp(&b.created_at).then_with(|| {
+                a.provider_binding_id
+                    .as_str()
+                    .cmp(b.provider_binding_id.as_str())
+            })
         });
         Ok(results)
     }
@@ -4059,7 +4264,13 @@ impl crate::projections::ProviderHealthReadModel for InMemoryStore {
         &self,
         connection_id: &cairn_domain::ProviderConnectionId,
     ) -> Result<Option<cairn_domain::providers::ProviderHealthRecord>, StoreError> {
-        Ok(self.state.lock().unwrap().provider_health_records.get(connection_id.as_str()).cloned())
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .provider_health_records
+            .get(connection_id.as_str())
+            .cloned())
     }
 
     async fn list_by_tenant(
@@ -4069,9 +4280,7 @@ impl crate::projections::ProviderHealthReadModel for InMemoryStore {
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderHealthRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        let results: Vec<_> = state.provider_health_records.values()
-            .cloned()
-            .collect();
+        let results: Vec<_> = state.provider_health_records.values().cloned().collect();
         Ok(results.into_iter().skip(offset).take(limit).collect())
     }
 }
@@ -4084,7 +4293,13 @@ impl crate::projections::ProviderHealthScheduleReadModel for InMemoryStore {
         &self,
         schedule_id: &str,
     ) -> Result<Option<cairn_domain::providers::ProviderHealthSchedule>, StoreError> {
-        Ok(self.state.lock().unwrap().provider_health_schedules.get(schedule_id).cloned())
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .provider_health_schedules
+            .get(schedule_id)
+            .cloned())
     }
 
     async fn list_schedules_by_tenant(
@@ -4092,45 +4307,96 @@ impl crate::projections::ProviderHealthScheduleReadModel for InMemoryStore {
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::providers::ProviderHealthSchedule>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.provider_health_schedules.values()
+        Ok(state
+            .provider_health_schedules
+            .values()
             .filter(|s| &s.tenant_id == tenant_id)
-            .cloned().collect())
+            .cloned()
+            .collect())
     }
 
     async fn list_enabled_schedules(
         &self,
     ) -> Result<Vec<cairn_domain::providers::ProviderHealthSchedule>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.provider_health_schedules.values()
+        Ok(state
+            .provider_health_schedules
+            .values()
             .filter(|s| s.enabled)
-            .cloned().collect())
+            .cloned()
+            .collect())
     }
 }
-
 
 // ── Stub read-model implementations (linter-added service impl tests) ─────────
 
 #[async_trait]
 impl crate::projections::ChannelReadModel for InMemoryStore {
-    async fn get_channel(&self, id: &cairn_domain::ChannelId) -> Result<Option<cairn_domain::ChannelRecord>, StoreError> {
-        Ok(self.state.lock().unwrap().channels.get(id.as_str()).cloned())
+    async fn get_channel(
+        &self,
+        id: &cairn_domain::ChannelId,
+    ) -> Result<Option<cairn_domain::ChannelRecord>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .channels
+            .get(id.as_str())
+            .cloned())
     }
-    async fn list_channels(&self, project: &cairn_domain::ProjectKey, limit: usize, offset: usize) -> Result<Vec<cairn_domain::ChannelRecord>, StoreError> {
+    async fn list_channels(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::ChannelRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.channels.values().filter(|c| &c.project == project).skip(offset).take(limit).cloned().collect())
+        Ok(state
+            .channels
+            .values()
+            .filter(|c| &c.project == project)
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
-    async fn list_messages(&self, channel_id: &cairn_domain::ChannelId, limit: usize) -> Result<Vec<cairn_domain::ChannelMessage>, StoreError> {
+    async fn list_messages(
+        &self,
+        channel_id: &cairn_domain::ChannelId,
+        limit: usize,
+    ) -> Result<Vec<cairn_domain::ChannelMessage>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.channel_messages.get(channel_id.as_str()).cloned().unwrap_or_default().into_iter().take(limit).collect())
+        Ok(state
+            .channel_messages
+            .get(channel_id.as_str())
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .take(limit)
+            .collect())
     }
 }
 
 #[async_trait]
 impl crate::projections::GuardrailReadModel for InMemoryStore {
-    async fn get_policy(&self, policy_id: &str) -> Result<Option<cairn_domain::policy::GuardrailPolicy>, StoreError> {
-        Ok(self.state.lock().unwrap().guardrail_policies.get(policy_id).cloned())
+    async fn get_policy(
+        &self,
+        policy_id: &str,
+    ) -> Result<Option<cairn_domain::policy::GuardrailPolicy>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .guardrail_policies
+            .get(policy_id)
+            .cloned())
     }
-    async fn list_policies(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize) -> Result<Vec<cairn_domain::policy::GuardrailPolicy>, StoreError> {
+    async fn list_policies(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::policy::GuardrailPolicy>, StoreError> {
         let _ = tenant_id;
         let state = self.state.lock().unwrap();
         let mut policies: Vec<_> = state.guardrail_policies.values().cloned().collect();
@@ -4142,46 +4408,97 @@ impl crate::projections::GuardrailReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::LicenseReadModel for InMemoryStore {
-    async fn get_active(&self, tenant_id: &cairn_domain::TenantId) -> Result<Option<cairn_domain::LicenseRecord>, StoreError> {
-        Ok(self.state.lock().unwrap().licenses.get(tenant_id.as_str()).cloned())
+    async fn get_active(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Option<cairn_domain::LicenseRecord>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .licenses
+            .get(tenant_id.as_str())
+            .cloned())
     }
-    async fn list_overrides(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::EntitlementOverrideRecord>, StoreError> {
+    async fn list_overrides(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::EntitlementOverrideRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.entitlement_overrides.values().filter(|r| &r.tenant_id == tenant_id).cloned().collect())
+        Ok(state
+            .entitlement_overrides
+            .values()
+            .filter(|r| &r.tenant_id == tenant_id)
+            .cloned()
+            .collect())
     }
 }
 
 #[async_trait]
 impl crate::projections::DefaultsReadModel for InMemoryStore {
-    async fn get(&self, scope: cairn_domain::Scope, scope_id: &str, key: &str) -> Result<Option<cairn_domain::DefaultSetting>, StoreError> {
+    async fn get(
+        &self,
+        scope: cairn_domain::Scope,
+        scope_id: &str,
+        key: &str,
+    ) -> Result<Option<cairn_domain::DefaultSetting>, StoreError> {
         let k = format!("{scope:?}:{scope_id}:{key}");
         Ok(self.state.lock().unwrap().default_settings.get(&k).cloned())
     }
-    async fn list_by_scope(&self, scope: cairn_domain::Scope, scope_id: &str) -> Result<Vec<cairn_domain::DefaultSetting>, StoreError> {
+    async fn list_by_scope(
+        &self,
+        scope: cairn_domain::Scope,
+        scope_id: &str,
+    ) -> Result<Vec<cairn_domain::DefaultSetting>, StoreError> {
         let prefix = format!("{scope:?}:{scope_id}:");
         let state = self.state.lock().unwrap();
-        Ok(state.default_settings.iter().filter(|(k, _)| k.starts_with(&prefix)).map(|(_, v)| v.clone()).collect())
+        Ok(state
+            .default_settings
+            .iter()
+            .filter(|(k, _)| k.starts_with(&prefix))
+            .map(|(_, v)| v.clone())
+            .collect())
     }
 }
 
 #[async_trait]
 impl crate::projections::RetentionPolicyReadModel for InMemoryStore {
-    async fn get_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Option<cairn_domain::RetentionPolicy>, StoreError> {
-        Ok(self.state.lock().unwrap().retention_policies.get(tenant_id.as_str()).cloned())
+    async fn get_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Option<cairn_domain::RetentionPolicy>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .retention_policies
+            .get(tenant_id.as_str())
+            .cloned())
     }
 }
 
 #[async_trait]
 impl crate::projections::RetentionMaintenance for InMemoryStore {
-    async fn apply_retention(&self, tenant_id: &cairn_domain::TenantId) -> Result<cairn_domain::RetentionResult, StoreError> {
+    async fn apply_retention(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<cairn_domain::RetentionResult, StoreError> {
         let mut state = self.state.lock().unwrap();
         let policy = match state.retention_policies.get(tenant_id.as_str()).cloned() {
             Some(p) => p,
-            None => return Ok(cairn_domain::RetentionResult { events_pruned: 0, entities_affected: 0 }),
+            None => {
+                return Ok(cairn_domain::RetentionResult {
+                    events_pruned: 0,
+                    entities_affected: 0,
+                })
+            }
         };
         let max_per_entity = policy.max_events_per_entity as usize;
         if max_per_entity == 0 {
-            return Ok(cairn_domain::RetentionResult { events_pruned: 0, entities_affected: 0 });
+            return Ok(cairn_domain::RetentionResult {
+                events_pruned: 0,
+                entities_affected: 0,
+            });
         }
 
         // Group events by entity (using primary_entity_ref).
@@ -4217,85 +4534,225 @@ impl crate::projections::RetentionMaintenance for InMemoryStore {
             state.events.remove(idx);
         }
 
-        Ok(cairn_domain::RetentionResult { events_pruned, entities_affected })
+        Ok(cairn_domain::RetentionResult {
+            events_pruned,
+            entities_affected,
+        })
     }
 }
 
 #[async_trait]
 impl crate::projections::RunSlaReadModel for InMemoryStore {
-    async fn get_sla(&self, run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::sla::SlaConfig>, StoreError> {
-        Ok(self.state.lock().unwrap().run_sla_configs.get(run_id.as_str()).cloned())
+    async fn get_sla(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Result<Option<cairn_domain::sla::SlaConfig>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .run_sla_configs
+            .get(run_id.as_str())
+            .cloned())
     }
-    async fn get_breach(&self, run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::sla::SlaBreach>, StoreError> {
-        Ok(self.state.lock().unwrap().run_sla_breaches.get(run_id.as_str()).cloned())
+    async fn get_breach(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Result<Option<cairn_domain::sla::SlaBreach>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .run_sla_breaches
+            .get(run_id.as_str())
+            .cloned())
     }
-    async fn list_breached_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::sla::SlaBreach>, StoreError> {
+    async fn list_breached_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::sla::SlaBreach>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.run_sla_breaches.values().filter(|b| &b.tenant_id == tenant_id).cloned().collect())
+        Ok(state
+            .run_sla_breaches
+            .values()
+            .filter(|b| &b.tenant_id == tenant_id)
+            .cloned()
+            .collect())
     }
 }
 
 #[async_trait]
 impl crate::projections::NotificationReadModel for InMemoryStore {
-    async fn get_preferences(&self, tenant_id: &cairn_domain::TenantId, operator_id: &str) -> Result<Option<cairn_domain::notification_prefs::NotificationPreference>, StoreError> {
+    async fn get_preferences(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        operator_id: &str,
+    ) -> Result<Option<cairn_domain::notification_prefs::NotificationPreference>, StoreError> {
         let key = format!("{}:{}", tenant_id.as_str(), operator_id);
-        Ok(self.state.lock().unwrap().notification_prefs.get(&key).cloned())
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .notification_prefs
+            .get(&key)
+            .cloned())
     }
-    async fn list_preferences_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::notification_prefs::NotificationPreference>, StoreError> {
+    async fn list_preferences_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::notification_prefs::NotificationPreference>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.notification_prefs.values().filter(|p| &p.tenant_id == tenant_id).cloned().collect())
+        Ok(state
+            .notification_prefs
+            .values()
+            .filter(|p| &p.tenant_id == tenant_id)
+            .cloned()
+            .collect())
     }
-    async fn list_sent_notifications(&self, tenant_id: &cairn_domain::TenantId, since_ms: u64) -> Result<Vec<cairn_domain::notification_prefs::NotificationRecord>, StoreError> {
+    async fn list_sent_notifications(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        since_ms: u64,
+    ) -> Result<Vec<cairn_domain::notification_prefs::NotificationRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.notification_records.iter().filter(|r| &r.tenant_id == tenant_id && r.sent_at_ms >= since_ms).cloned().collect())
+        Ok(state
+            .notification_records
+            .iter()
+            .filter(|r| &r.tenant_id == tenant_id && r.sent_at_ms >= since_ms)
+            .cloned()
+            .collect())
     }
-    async fn list_failed_notifications(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::notification_prefs::NotificationRecord>, StoreError> {
+    async fn list_failed_notifications(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::notification_prefs::NotificationRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.notification_records.iter().filter(|r| &r.tenant_id == tenant_id && !r.delivered).cloned().collect())
+        Ok(state
+            .notification_records
+            .iter()
+            .filter(|r| &r.tenant_id == tenant_id && !r.delivered)
+            .cloned()
+            .collect())
     }
 }
 
 #[async_trait]
 impl crate::projections::ProviderConnectionReadModel for InMemoryStore {
-    async fn get(&self, id: &cairn_domain::ProviderConnectionId) -> Result<Option<cairn_domain::providers::ProviderConnectionRecord>, StoreError> {
-        Ok(self.state.lock().unwrap().provider_connections.get(id.as_str()).cloned())
+    async fn get(
+        &self,
+        id: &cairn_domain::ProviderConnectionId,
+    ) -> Result<Option<cairn_domain::providers::ProviderConnectionRecord>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .provider_connections
+            .get(id.as_str())
+            .cloned())
     }
-    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize) -> Result<Vec<cairn_domain::providers::ProviderConnectionRecord>, StoreError> {
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::providers::ProviderConnectionRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.provider_connections.values().filter(|r| &r.tenant_id == tenant_id).skip(offset).take(limit).cloned().collect())
+        Ok(state
+            .provider_connections
+            .values()
+            .filter(|r| &r.tenant_id == tenant_id)
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 }
 
 #[async_trait]
 impl crate::projections::ProviderPoolReadModel for InMemoryStore {
-    async fn get_pool(&self, pool_id: &str) -> Result<Option<cairn_domain::providers::ProviderConnectionPool>, StoreError> {
-        Ok(self.state.lock().unwrap().provider_pools.get(pool_id).cloned())
+    async fn get_pool(
+        &self,
+        pool_id: &str,
+    ) -> Result<Option<cairn_domain::providers::ProviderConnectionPool>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .provider_pools
+            .get(pool_id)
+            .cloned())
     }
-    async fn list_pools_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::providers::ProviderConnectionPool>, StoreError> {
+    async fn list_pools_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::providers::ProviderConnectionPool>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.provider_pools.values().filter(|p| &p.tenant_id == tenant_id).cloned().collect())
+        Ok(state
+            .provider_pools
+            .values()
+            .filter(|p| &p.tenant_id == tenant_id)
+            .cloned()
+            .collect())
     }
 }
 
 #[async_trait]
 impl crate::projections::CredentialReadModel for InMemoryStore {
-    async fn get(&self, id: &cairn_domain::CredentialId) -> Result<Option<cairn_domain::credentials::CredentialRecord>, StoreError> {
-        Ok(self.state.lock().unwrap().credentials.get(id.as_str()).cloned())
+    async fn get(
+        &self,
+        id: &cairn_domain::CredentialId,
+    ) -> Result<Option<cairn_domain::credentials::CredentialRecord>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .credentials
+            .get(id.as_str())
+            .cloned())
     }
-    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId, limit: usize, offset: usize) -> Result<Vec<cairn_domain::credentials::CredentialRecord>, StoreError> {
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<cairn_domain::credentials::CredentialRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.credentials.values().filter(|r| &r.tenant_id == tenant_id).skip(offset).take(limit).cloned().collect())
+        Ok(state
+            .credentials
+            .values()
+            .filter(|r| &r.tenant_id == tenant_id)
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 }
 
 #[async_trait]
 impl crate::projections::RunCostAlertReadModel for InMemoryStore {
-    async fn get_alert(&self, run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::providers::RunCostAlert>, StoreError> {
-        Ok(self.state.lock().unwrap().run_cost_alerts.get(run_id.as_str()).cloned())
+    async fn get_alert(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Result<Option<cairn_domain::providers::RunCostAlert>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .run_cost_alerts
+            .get(run_id.as_str())
+            .cloned())
     }
-    async fn list_triggered_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::providers::RunCostAlert>, StoreError> {
+    async fn list_triggered_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::providers::RunCostAlert>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.run_cost_alerts.values().filter(|a| &a.tenant_id == tenant_id && a.triggered_at_ms > 0).cloned().collect())
+        Ok(state
+            .run_cost_alerts
+            .values()
+            .filter(|a| &a.tenant_id == tenant_id && a.triggered_at_ms > 0)
+            .cloned()
+            .collect())
     }
 }
 
@@ -4315,7 +4772,9 @@ impl crate::projections::AuditLogReadModel for InMemoryStore {
                 if let RuntimeEvent::AuditLogEntryRecorded(a) = &e.envelope.payload {
                     if &a.tenant_id == tenant_id {
                         if let Some(since) = since_ms {
-                            if a.occurred_at_ms < since { return None; }
+                            if a.occurred_at_ms < since {
+                                return None;
+                            }
                         }
                         return Some(cairn_domain::AuditLogEntry {
                             entry_id: a.entry_id.clone(),
@@ -4375,21 +4834,28 @@ impl crate::projections::AuditLogReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::QuotaReadModel for InMemoryStore {
-    async fn get_quota(&self, tenant_id: &cairn_domain::TenantId) -> Result<Option<cairn_domain::TenantQuota>, StoreError> {
+    async fn get_quota(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Option<cairn_domain::TenantQuota>, StoreError> {
         let state = self.state.lock().unwrap();
         let Some(mut quota) = state.quotas.get(tenant_id.as_str()).cloned() else {
             return Ok(None);
         };
         // Dynamically compute current_active_runs from run state.
         // An active run is one that belongs to this tenant and is not in a terminal state.
-        let active_runs = state.runs.values()
+        let active_runs = state
+            .runs
+            .values()
             .filter(|r| r.project.tenant_id == *tenant_id && !r.state.is_terminal())
             .count() as u32;
         quota.current_active_runs = active_runs;
         // Dynamically compute sessions_this_hour from session state.
         // Count sessions that have been created (all sessions for this tenant).
         // For simplicity in tests, count all sessions (the test creates sessions and checks the limit).
-        let sessions_count = state.sessions.values()
+        let sessions_count = state
+            .sessions
+            .values()
             .filter(|s| s.project.tenant_id == *tenant_id)
             .count() as u32;
         quota.sessions_this_hour = sessions_count;
@@ -4399,13 +4865,31 @@ impl crate::projections::QuotaReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::ProviderBudgetReadModel for InMemoryStore {
-    async fn get_by_tenant_period(&self, tenant_id: &cairn_domain::TenantId, period: cairn_domain::providers::ProviderBudgetPeriod) -> Result<Option<cairn_domain::providers::ProviderBudget>, StoreError> {
+    async fn get_by_tenant_period(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        period: cairn_domain::providers::ProviderBudgetPeriod,
+    ) -> Result<Option<cairn_domain::providers::ProviderBudget>, StoreError> {
         let key = format!("{}:{period:?}", tenant_id.as_str());
-        Ok(self.state.lock().unwrap().provider_budgets.get(&key).cloned())
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .provider_budgets
+            .get(&key)
+            .cloned())
     }
-    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::providers::ProviderBudget>, StoreError> {
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::providers::ProviderBudget>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.provider_budgets.values().filter(|b| &b.tenant_id == tenant_id).cloned().collect())
+        Ok(state
+            .provider_budgets
+            .values()
+            .filter(|b| &b.tenant_id == tenant_id)
+            .cloned()
+            .collect())
     }
 }
 
@@ -4413,12 +4897,19 @@ impl crate::projections::ProviderBudgetReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::TaskLeaseExpiredReadModel for InMemoryStore {
-    async fn list_expired(&self, now_ms: u64) -> Result<Vec<crate::projections::TaskRecord>, StoreError> {
+    async fn list_expired(
+        &self,
+        now_ms: u64,
+    ) -> Result<Vec<crate::projections::TaskRecord>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.tasks.values()
+        Ok(state
+            .tasks
+            .values()
             .filter(|t| {
-                matches!(t.state, cairn_domain::TaskState::Leased | cairn_domain::TaskState::Running)
-                    && t.lease_expires_at.is_some_and(|exp| exp <= now_ms)
+                matches!(
+                    t.state,
+                    cairn_domain::TaskState::Leased | cairn_domain::TaskState::Running
+                ) && t.lease_expires_at.is_some_and(|exp| exp <= now_ms)
             })
             .cloned()
             .collect())
@@ -4429,7 +4920,10 @@ impl crate::projections::TaskLeaseExpiredReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::CheckpointStrategyReadModel for InMemoryStore {
-    async fn get_by_run(&self, run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
+    async fn get_by_run(
+        &self,
+        run_id: &cairn_domain::RunId,
+    ) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
         let state = self.state.lock().unwrap();
         Ok(state.checkpoint_strategies.get(run_id.as_str()).cloned())
     }
@@ -4474,33 +4968,49 @@ impl crate::projections::OperatorInterventionReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::PauseScheduleReadModel for InMemoryStore {
-    async fn list_due(&self, before_ms: u64) -> Result<Vec<crate::projections::PauseScheduledRecord>, StoreError> {
+    async fn list_due(
+        &self,
+        before_ms: u64,
+    ) -> Result<Vec<crate::projections::PauseScheduledRecord>, StoreError> {
         let state = self.state.lock().unwrap();
         // Find all RunStateChanged(to=Paused) events with resume_after_ms set.
         // Use a map to keep only the latest pause event per run.
-        let mut paused: std::collections::HashMap<String, crate::projections::PauseScheduledRecord> =
-            std::collections::HashMap::new();
+        let mut paused: std::collections::HashMap<
+            String,
+            crate::projections::PauseScheduledRecord,
+        > = std::collections::HashMap::new();
         for stored in &state.events {
             if let RuntimeEvent::RunStateChanged(e) = &stored.envelope.payload {
                 if e.transition.to == cairn_domain::RunState::Paused {
                     if let Some(reason) = &e.pause_reason {
                         if let Some(resume_after_ms) = reason.resume_after_ms {
                             let resume_at_ms = stored.stored_at + resume_after_ms;
-                            paused.insert(e.run_id.as_str().to_owned(), crate::projections::PauseScheduledRecord {
-                                run_id: e.run_id.clone(),
-                                project: e.project.clone(),
-                                resume_at_ms,
-                                created_at_ms: stored.stored_at,
-                            });
+                            paused.insert(
+                                e.run_id.as_str().to_owned(),
+                                crate::projections::PauseScheduledRecord {
+                                    run_id: e.run_id.clone(),
+                                    project: e.project.clone(),
+                                    resume_at_ms,
+                                    created_at_ms: stored.stored_at,
+                                },
+                            );
                         }
                     }
-                } else if matches!(e.transition.to, cairn_domain::RunState::Running | cairn_domain::RunState::Completed | cairn_domain::RunState::Failed) {
+                } else if matches!(
+                    e.transition.to,
+                    cairn_domain::RunState::Running
+                        | cairn_domain::RunState::Completed
+                        | cairn_domain::RunState::Failed
+                ) {
                     // Run resumed/completed — remove from paused map.
                     paused.remove(e.run_id.as_str());
                 }
             }
         }
-        let due: Vec<_> = paused.into_values().filter(|r| r.resume_at_ms <= before_ms).collect();
+        let due: Vec<_> = paused
+            .into_values()
+            .filter(|r| r.resume_at_ms <= before_ms)
+            .collect();
         Ok(due)
     }
 }
@@ -4509,10 +5019,16 @@ impl crate::projections::PauseScheduleReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::RecoveryEscalationReadModel for InMemoryStore {
-    async fn get_by_run(&self, _run_id: &cairn_domain::RunId) -> Result<Option<cairn_domain::RecoveryEscalation>, StoreError> {
+    async fn get_by_run(
+        &self,
+        _run_id: &cairn_domain::RunId,
+    ) -> Result<Option<cairn_domain::RecoveryEscalation>, StoreError> {
         Ok(None)
     }
-    async fn list_by_tenant(&self, _tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::RecoveryEscalation>, StoreError> {
+    async fn list_by_tenant(
+        &self,
+        _tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::RecoveryEscalation>, StoreError> {
         Ok(vec![])
     }
 }
@@ -4521,18 +5037,29 @@ impl crate::projections::RecoveryEscalationReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::SnapshotReadModel for InMemoryStore {
-    async fn get_latest(&self, tenant_id: &cairn_domain::TenantId) -> Result<Option<cairn_domain::Snapshot>, StoreError> {
+    async fn get_latest(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Option<cairn_domain::Snapshot>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.snapshots.iter()
+        Ok(state
+            .snapshots
+            .iter()
             .filter(|s| s.tenant_id == *tenant_id)
             .max_by_key(|s| s.created_at_ms)
             .cloned())
     }
-    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::Snapshot>, StoreError> {
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::Snapshot>, StoreError> {
         let state = self.state.lock().unwrap();
-        let mut results: Vec<_> = state.snapshots.iter()
+        let mut results: Vec<_> = state
+            .snapshots
+            .iter()
             .filter(|s| s.tenant_id == *tenant_id)
-            .cloned().collect();
+            .cloned()
+            .collect();
         results.sort_by_key(|s| s.created_at_ms);
         Ok(results)
     }
@@ -4542,7 +5069,10 @@ impl crate::projections::SnapshotReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::RoutePolicyReadModel for InMemoryStore {
-    async fn get(&self, policy_id: &str) -> Result<Option<cairn_domain::providers::RoutePolicy>, StoreError> {
+    async fn get(
+        &self,
+        policy_id: &str,
+    ) -> Result<Option<cairn_domain::providers::RoutePolicy>, StoreError> {
         let state = self.state.lock().unwrap();
         Ok(state.route_policies.get(policy_id).cloned())
     }
@@ -4569,9 +5099,14 @@ impl crate::projections::RoutePolicyReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::ProviderBindingCostStatsReadModel for InMemoryStore {
-    async fn get(&self, binding_id: &cairn_domain::ProviderBindingId) -> Result<Option<cairn_domain::providers::ProviderBindingCostStats>, StoreError> {
+    async fn get(
+        &self,
+        binding_id: &cairn_domain::ProviderBindingId,
+    ) -> Result<Option<cairn_domain::providers::ProviderBindingCostStats>, StoreError> {
         let state = self.state.lock().unwrap();
-        let calls: Vec<_> = state.provider_calls.values()
+        let calls: Vec<_> = state
+            .provider_calls
+            .values()
             .filter(|c| c.provider_binding_id == *binding_id)
             .cloned()
             .collect();
@@ -4586,22 +5121,31 @@ impl crate::projections::ProviderBindingCostStatsReadModel for InMemoryStore {
             call_count,
         }))
     }
-    async fn list_by_tenant(&self, tenant_id: &cairn_domain::TenantId) -> Result<Vec<cairn_domain::providers::ProviderBindingCostStats>, StoreError> {
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> Result<Vec<cairn_domain::providers::ProviderBindingCostStats>, StoreError> {
         let state = self.state.lock().unwrap();
         // Scan raw events for ProviderCallCompleted to access the full project key (tenant_id).
-        let mut stats: std::collections::HashMap<String, cairn_domain::providers::ProviderBindingCostStats> = std::collections::HashMap::new();
+        let mut stats: std::collections::HashMap<
+            String,
+            cairn_domain::providers::ProviderBindingCostStats,
+        > = std::collections::HashMap::new();
         for stored in &state.events {
             if let cairn_domain::RuntimeEvent::ProviderCallCompleted(e) = &stored.envelope.payload {
                 if e.project.tenant_id != *tenant_id {
                     continue;
                 }
-                let entry = stats.entry(e.provider_binding_id.as_str().to_owned())
+                let entry = stats
+                    .entry(e.provider_binding_id.as_str().to_owned())
                     .or_insert_with(|| cairn_domain::providers::ProviderBindingCostStats {
                         binding_id: e.provider_binding_id.clone(),
                         total_cost_micros: 0,
                         call_count: 0,
                     });
-                entry.total_cost_micros = entry.total_cost_micros.saturating_add(e.cost_micros.unwrap_or(0));
+                entry.total_cost_micros = entry
+                    .total_cost_micros
+                    .saturating_add(e.cost_micros.unwrap_or(0));
                 entry.call_count = entry.call_count.saturating_add(1);
             }
         }
@@ -4613,8 +5157,17 @@ impl crate::projections::ProviderBindingCostStatsReadModel for InMemoryStore {
 
 #[async_trait]
 impl crate::projections::ResourceSharingReadModel for InMemoryStore {
-    async fn get_share(&self, share_id: &str) -> Result<Option<cairn_domain::resource_sharing::SharedResource>, StoreError> {
-        Ok(self.state.lock().unwrap().resource_shares.get(share_id).cloned())
+    async fn get_share(
+        &self,
+        share_id: &str,
+    ) -> Result<Option<cairn_domain::resource_sharing::SharedResource>, StoreError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .resource_shares
+            .get(share_id)
+            .cloned())
     }
     async fn list_shares_for_workspace(
         &self,
@@ -4622,9 +5175,12 @@ impl crate::projections::ResourceSharingReadModel for InMemoryStore {
         target_workspace_id: &cairn_domain::WorkspaceId,
     ) -> Result<Vec<cairn_domain::resource_sharing::SharedResource>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.resource_shares.values()
+        Ok(state
+            .resource_shares
+            .values()
             .filter(|s| &s.tenant_id == tenant_id && &s.target_workspace_id == target_workspace_id)
-            .cloned().collect())
+            .cloned()
+            .collect())
     }
     async fn get_share_for_resource(
         &self,
@@ -4634,11 +5190,15 @@ impl crate::projections::ResourceSharingReadModel for InMemoryStore {
         resource_id: &str,
     ) -> Result<Option<cairn_domain::resource_sharing::SharedResource>, StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.resource_shares.values()
-            .find(|s| &s.tenant_id == tenant_id
-                   && &s.target_workspace_id == target_workspace_id
-                   && s.resource_type == resource_type
-                   && s.resource_id == resource_id)
+        Ok(state
+            .resource_shares
+            .values()
+            .find(|s| {
+                &s.tenant_id == tenant_id
+                    && &s.target_workspace_id == target_workspace_id
+                    && s.resource_type == resource_type
+                    && s.resource_id == resource_id
+            })
             .cloned())
     }
 }
@@ -4649,51 +5209,95 @@ impl InMemoryStore {
     /// Count runs currently in active states (Running or Leased).
     pub async fn count_active_runs(&self) -> u64 {
         let state = self.state.lock().unwrap();
-        state.runs.values().filter(|r| matches!(r.state,
-            cairn_domain::RunState::Running | cairn_domain::RunState::Pending)).count() as u64
+        state
+            .runs
+            .values()
+            .filter(|r| {
+                matches!(
+                    r.state,
+                    cairn_domain::RunState::Running | cairn_domain::RunState::Pending
+                )
+            })
+            .count() as u64
     }
 
     /// Count tasks currently active (Running or Leased).
     pub async fn count_active_tasks(&self) -> u64 {
         let state = self.state.lock().unwrap();
-        state.tasks.values().filter(|t| matches!(t.state,
-            cairn_domain::TaskState::Running | cairn_domain::TaskState::Leased)).count() as u64
+        state
+            .tasks
+            .values()
+            .filter(|t| {
+                matches!(
+                    t.state,
+                    cairn_domain::TaskState::Running | cairn_domain::TaskState::Leased
+                )
+            })
+            .count() as u64
     }
 
     /// Count active runs for a specific tenant.
     pub async fn count_active_runs_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u64 {
         let state = self.state.lock().unwrap();
-        state.runs.values().filter(|r|
-            r.project.tenant_id == *tenant_id &&
-            matches!(r.state, cairn_domain::RunState::Running | cairn_domain::RunState::Pending)
-        ).count() as u64
+        state
+            .runs
+            .values()
+            .filter(|r| {
+                r.project.tenant_id == *tenant_id
+                    && matches!(
+                        r.state,
+                        cairn_domain::RunState::Running | cairn_domain::RunState::Pending
+                    )
+            })
+            .count() as u64
     }
 
     /// Count active tasks for a specific tenant.
     pub async fn count_active_tasks_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u64 {
         let state = self.state.lock().unwrap();
-        state.tasks.values().filter(|t|
-            t.project.tenant_id == *tenant_id &&
-            matches!(t.state, cairn_domain::TaskState::Running | cairn_domain::TaskState::Leased)
-        ).count() as u64
+        state
+            .tasks
+            .values()
+            .filter(|t| {
+                t.project.tenant_id == *tenant_id
+                    && matches!(
+                        t.state,
+                        cairn_domain::TaskState::Running | cairn_domain::TaskState::Leased
+                    )
+            })
+            .count() as u64
     }
 
     /// Count active runs for a workspace.
-    pub async fn count_active_runs_for_workspace(&self, workspace_key: &cairn_domain::tenancy::WorkspaceKey) -> u64 {
+    pub async fn count_active_runs_for_workspace(
+        &self,
+        workspace_key: &cairn_domain::tenancy::WorkspaceKey,
+    ) -> u64 {
         let state = self.state.lock().unwrap();
-        state.runs.values().filter(|r|
-            r.project.workspace_id == workspace_key.workspace_id &&
-            matches!(r.state, cairn_domain::RunState::Running | cairn_domain::RunState::Pending)
-        ).count() as u64
+        state
+            .runs
+            .values()
+            .filter(|r| {
+                r.project.workspace_id == workspace_key.workspace_id
+                    && matches!(
+                        r.state,
+                        cairn_domain::RunState::Running | cairn_domain::RunState::Pending
+                    )
+            })
+            .count() as u64
     }
 
     /// Count pending approvals for a tenant.
-    pub async fn count_pending_approvals_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u64 {
+    pub async fn count_pending_approvals_for_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> u64 {
         let state = self.state.lock().unwrap();
-        state.approvals.values().filter(|a|
-            a.project.tenant_id == *tenant_id &&
-            a.decision.is_none()
-        ).count() as u64
+        state
+            .approvals
+            .values()
+            .filter(|a| a.project.tenant_id == *tenant_id && a.decision.is_none())
+            .count() as u64
     }
 
     /// List all pending (undecided) approvals across every project.
@@ -4714,19 +5318,28 @@ impl InMemoryStore {
     }
 
     /// Count eval runs since a timestamp for a tenant.
-    pub async fn count_eval_runs_since_for_tenant(&self, tenant_id: &cairn_domain::TenantId, since_ms: u64) -> u64 {
+    pub async fn count_eval_runs_since_for_tenant(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        since_ms: u64,
+    ) -> u64 {
         let state = self.state.lock().unwrap();
-        state.eval_runs.values().filter(|e|
-            e.project.tenant_id == *tenant_id && e.started_at >= since_ms
-        ).count() as u64
+        state
+            .eval_runs
+            .values()
+            .filter(|e| e.project.tenant_id == *tenant_id && e.started_at >= since_ms)
+            .count() as u64
     }
 
     /// Check if any provider connection is in degraded health.
     pub async fn any_provider_degraded(&self) -> bool {
         let state = self.state.lock().unwrap();
-        state.provider_health_records.values().any(|r|
-            matches!(r.status, cairn_domain::providers::ProviderHealthStatus::Degraded)
-        )
+        state.provider_health_records.values().any(|r| {
+            matches!(
+                r.status,
+                cairn_domain::providers::ProviderHealthStatus::Degraded
+            )
+        })
     }
 
     /// Probe write capability (always succeeds for in-memory store).
@@ -4735,7 +5348,11 @@ impl InMemoryStore {
     }
 
     /// Compact event log stub — returns a basic report.
-    pub fn compact_event_log(&self, tenant_id: &cairn_domain::TenantId, retain_last_n: Option<u64>) -> serde_json::Value {
+    pub fn compact_event_log(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+        retain_last_n: Option<u64>,
+    ) -> serde_json::Value {
         let retain = retain_last_n.unwrap_or(100) as usize;
         let mut state = self.state.lock().unwrap();
         let events_before = state.events.len() as u64;
@@ -4849,7 +5466,10 @@ impl InMemoryStore {
     }
 
     /// Create a snapshot capturing all events up to the current position.
-    pub fn create_snapshot(&self, tenant_id: &cairn_domain::TenantId) -> cairn_domain::compaction::Snapshot {
+    pub fn create_snapshot(
+        &self,
+        tenant_id: &cairn_domain::TenantId,
+    ) -> cairn_domain::compaction::Snapshot {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -4858,8 +5478,7 @@ impl InMemoryStore {
         let event_position = state.next_position.saturating_sub(1);
 
         // Serialize events as compressed_state so restore can replay them.
-        let compressed_state =
-            serde_json::to_vec(&state.events).unwrap_or_default();
+        let compressed_state = serde_json::to_vec(&state.events).unwrap_or_default();
 
         // Simple hash of the compressed state for integrity check.
         let state_hash = format!("{:016x}", {
@@ -4882,7 +5501,10 @@ impl InMemoryStore {
     }
 
     /// Restore from a snapshot: replace events and rebuild projections.
-    pub fn restore_from_snapshot(&self, snapshot: &cairn_domain::compaction::Snapshot) -> serde_json::Value {
+    pub fn restore_from_snapshot(
+        &self,
+        snapshot: &cairn_domain::compaction::Snapshot,
+    ) -> serde_json::Value {
         let restored_events: Vec<StoredEvent> =
             serde_json::from_slice(&snapshot.compressed_state).unwrap_or_default();
         let events_before;
@@ -4897,11 +5519,7 @@ impl InMemoryStore {
             events_after = state.events.len() as u64;
 
             // Reset position to after last snapshot event.
-            state.next_position = state
-                .events
-                .last()
-                .map(|e| e.position.0 + 1)
-                .unwrap_or(1);
+            state.next_position = state.events.last().map(|e| e.position.0 + 1).unwrap_or(1);
 
             // Clear all projections and rebuild.
             state.sessions.clear();
@@ -4976,8 +5594,15 @@ impl InMemoryStore {
     }
 
     /// Delete a signal subscription.
-    pub async fn delete_signal_subscription(&self, subscription_id: &str) -> Result<(), crate::StoreError> {
-        self.state.lock().unwrap().signal_subscriptions.remove(subscription_id);
+    pub async fn delete_signal_subscription(
+        &self,
+        subscription_id: &str,
+    ) -> Result<(), crate::StoreError> {
+        self.state
+            .lock()
+            .unwrap()
+            .signal_subscriptions
+            .remove(subscription_id);
         Ok(())
     }
 
@@ -5013,7 +5638,13 @@ impl InMemoryStore {
         offset: usize,
     ) -> Result<Vec<crate::projections::TaskRecord>, crate::StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.tasks.values().skip(offset).take(limit).cloned().collect())
+        Ok(state
+            .tasks
+            .values()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     /// Scan all prompt assets across every project (RFC 010 operator view).
@@ -5026,7 +5657,11 @@ impl InMemoryStore {
         let state = self.state.lock().unwrap();
         let mut tasks: Vec<TaskRecord> = state.tasks.values().cloned().collect();
         // Most-recent first.
-        tasks.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.task_id.as_str().cmp(b.task_id.as_str())));
+        tasks.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| a.task_id.as_str().cmp(b.task_id.as_str()))
+        });
         Ok(tasks.into_iter().skip(offset).take(limit).collect())
     }
 
@@ -5036,7 +5671,13 @@ impl InMemoryStore {
         offset: usize,
     ) -> Result<Vec<crate::projections::PromptAssetRecord>, crate::StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.prompt_assets.values().skip(offset).take(limit).cloned().collect())
+        Ok(state
+            .prompt_assets
+            .values()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     /// Scan all prompt releases across every project (RFC 010 operator view).
@@ -5046,7 +5687,13 @@ impl InMemoryStore {
         offset: usize,
     ) -> Result<Vec<crate::projections::PromptReleaseRecord>, crate::StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.prompt_releases.values().skip(offset).take(limit).cloned().collect())
+        Ok(state
+            .prompt_releases
+            .values()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     /// Scan all provider bindings across every tenant (RFC 010 operator view).
@@ -5056,7 +5703,13 @@ impl InMemoryStore {
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, crate::StoreError> {
         let state = self.state.lock().unwrap();
-        Ok(state.provider_bindings.values().skip(offset).take(limit).cloned().collect())
+        Ok(state
+            .provider_bindings
+            .values()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     /// Aggregate cost summary across all runs in the store (RFC 010 / RFC 009).

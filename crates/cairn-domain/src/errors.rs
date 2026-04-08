@@ -51,9 +51,9 @@ impl RuntimeEntityKind {
     ///   an audit trail is sufficient.
     pub fn durability_class(self) -> EntityDurabilityClass {
         match self {
-            RuntimeEntityKind::Session
-            | RuntimeEntityKind::Run
-            | RuntimeEntityKind::Task => EntityDurabilityClass::FullHistory,
+            RuntimeEntityKind::Session | RuntimeEntityKind::Run | RuntimeEntityKind::Task => {
+                EntityDurabilityClass::FullHistory
+            }
             _ => EntityDurabilityClass::CurrentStatePlusAudit,
         }
     }
@@ -63,22 +63,51 @@ impl RuntimeEntityKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "entity", rename_all = "snake_case")]
 pub enum RuntimeEntityRef {
-    Session { session_id: SessionId },
-    Run { run_id: RunId },
-    Task { task_id: TaskId },
-    Approval { approval_id: ApprovalId },
-    Checkpoint { checkpoint_id: CheckpointId },
-    MailboxMessage { message_id: MailboxMessageId },
-    Signal { signal_id: SignalId },
-    ToolInvocation { invocation_id: ToolInvocationId },
+    Session {
+        session_id: SessionId,
+    },
+    Run {
+        run_id: RunId,
+    },
+    Task {
+        task_id: TaskId,
+    },
+    Approval {
+        approval_id: ApprovalId,
+    },
+    Checkpoint {
+        checkpoint_id: CheckpointId,
+    },
+    MailboxMessage {
+        message_id: MailboxMessageId,
+    },
+    Signal {
+        signal_id: SignalId,
+    },
+    ToolInvocation {
+        invocation_id: ToolInvocationId,
+    },
     /// RFC 002: tool result reference — enables tool results to be cited in
     /// error contexts and event correlation chains.
-    ToolResult { invocation_id: ToolInvocationId, tool_name: String },
-    IngestJob { job_id: IngestJobId },
-    EvalRun { eval_run_id: EvalRunId },
-    PromptAsset { prompt_asset_id: PromptAssetId },
-    PromptVersion { prompt_version_id: PromptVersionId },
-    PromptRelease { prompt_release_id: PromptReleaseId },
+    ToolResult {
+        invocation_id: ToolInvocationId,
+        tool_name: String,
+    },
+    IngestJob {
+        job_id: IngestJobId,
+    },
+    EvalRun {
+        eval_run_id: EvalRunId,
+    },
+    PromptAsset {
+        prompt_asset_id: PromptAssetId,
+    },
+    PromptVersion {
+        prompt_version_id: PromptVersionId,
+    },
+    PromptRelease {
+        prompt_release_id: PromptReleaseId,
+    },
 }
 
 impl RuntimeEntityRef {

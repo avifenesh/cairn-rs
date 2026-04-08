@@ -33,7 +33,10 @@ async fn no_license_denies_all_features() {
 
     // No license has been activated — get_active must return None.
     let active = svc.get_active(&tid).await.unwrap();
-    assert!(active.is_none(), "no license must be present before activation");
+    assert!(
+        active.is_none(),
+        "no license must be present before activation"
+    );
 
     // GA features denied without a license.
     let result = svc.check_feature(&tid, "runtime_core").await.unwrap();
@@ -43,14 +46,19 @@ async fn no_license_denies_all_features() {
     );
 
     // Entitlement-gated features also denied.
-    let result = svc.check_feature(&tid, "advanced_audit_export").await.unwrap();
+    let result = svc
+        .check_feature(&tid, "advanced_audit_export")
+        .await
+        .unwrap();
     assert!(
         matches!(result, FeatureGateResult::Denied { .. }),
         "RFC 014: advanced_audit_export must be Denied when no license is active"
     );
 
     // Reason string must mention the tenant.
-    if let FeatureGateResult::Denied { reason } = svc.check_feature(&tid, "runtime_core").await.unwrap() {
+    if let FeatureGateResult::Denied { reason } =
+        svc.check_feature(&tid, "runtime_core").await.unwrap()
+    {
         assert!(
             reason.contains("t_no_license"),
             "denial reason must reference the tenant ID; got: '{reason}'"
@@ -89,13 +97,19 @@ async fn local_eval_license_allows_ga_features_only() {
     );
 
     // Governance-gated feature → Denied (LocalEval has no GovernanceCompliance entitlement).
-    let result = svc.check_feature(&tid, "advanced_audit_export").await.unwrap();
+    let result = svc
+        .check_feature(&tid, "advanced_audit_export")
+        .await
+        .unwrap();
     assert!(
         matches!(result, FeatureGateResult::Denied { .. }),
         "RFC 014: advanced_audit_export must be Denied on LocalEval (no GovernanceCompliance)"
     );
 
-    let result = svc.check_feature(&tid, "compliance_policy_packs").await.unwrap();
+    let result = svc
+        .check_feature(&tid, "compliance_policy_packs")
+        .await
+        .unwrap();
     assert!(
         matches!(result, FeatureGateResult::Denied { .. }),
         "RFC 014: compliance_policy_packs must be Denied on LocalEval"
@@ -126,7 +140,10 @@ async fn unknown_feature_always_denied_fail_closed() {
     let tid = tenant("t_unknown_feature");
 
     // Without any license.
-    let result = svc.check_feature(&tid, "totally_made_up_feature").await.unwrap();
+    let result = svc
+        .check_feature(&tid, "totally_made_up_feature")
+        .await
+        .unwrap();
     assert!(
         matches!(result, FeatureGateResult::Denied { .. }),
         "RFC 014: unknown feature must be Denied with no license"
@@ -137,7 +154,10 @@ async fn unknown_feature_always_denied_fail_closed() {
         .await
         .unwrap();
 
-    let result = svc.check_feature(&tid, "totally_made_up_feature").await.unwrap();
+    let result = svc
+        .check_feature(&tid, "totally_made_up_feature")
+        .await
+        .unwrap();
     assert!(
         matches!(result, FeatureGateResult::Denied { .. }),
         "RFC 014: unknown feature must be Denied even with an active license"
@@ -150,7 +170,9 @@ async fn unknown_feature_always_denied_fail_closed() {
     );
 
     // Denial reason must mention the feature name (not a generic error).
-    if let FeatureGateResult::Denied { reason } = svc.check_feature(&tid, "ghost_capability").await.unwrap() {
+    if let FeatureGateResult::Denied { reason } =
+        svc.check_feature(&tid, "ghost_capability").await.unwrap()
+    {
         assert!(
             reason.contains("ghost_capability"),
             "denial reason must name the unrecognized feature; got: '{reason}'"
@@ -173,7 +195,10 @@ async fn operator_override_unblocks_entitlement_gated_feature() {
         .unwrap();
 
     // Baseline: feature is Denied.
-    let before = svc.check_feature(&tid, "advanced_audit_export").await.unwrap();
+    let before = svc
+        .check_feature(&tid, "advanced_audit_export")
+        .await
+        .unwrap();
     assert!(
         matches!(before, FeatureGateResult::Denied { .. }),
         "baseline must be Denied before override"
@@ -193,7 +218,10 @@ async fn operator_override_unblocks_entitlement_gated_feature() {
     assert!(record.allowed);
 
     // Feature must now be Allowed.
-    let after = svc.check_feature(&tid, "advanced_audit_export").await.unwrap();
+    let after = svc
+        .check_feature(&tid, "advanced_audit_export")
+        .await
+        .unwrap();
     assert_eq!(
         after,
         FeatureGateResult::Allowed,
@@ -205,7 +233,10 @@ async fn operator_override_unblocks_entitlement_gated_feature() {
     svc.activate(tid2.clone(), ProductTier::LocalEval, None)
         .await
         .unwrap();
-    let isolated = svc.check_feature(&tid2, "advanced_audit_export").await.unwrap();
+    let isolated = svc
+        .check_feature(&tid2, "advanced_audit_export")
+        .await
+        .unwrap();
     assert!(
         matches!(isolated, FeatureGateResult::Denied { .. }),
         "RFC 014: override must be scoped to the tenant; other tenants must remain Denied"
@@ -229,7 +260,11 @@ async fn operator_override_blocks_ga_feature() {
 
     // Baseline: GA feature is Allowed.
     let before = svc.check_feature(&tid, "runtime_core").await.unwrap();
-    assert_eq!(before, FeatureGateResult::Allowed, "baseline must be Allowed");
+    assert_eq!(
+        before,
+        FeatureGateResult::Allowed,
+        "baseline must be Allowed"
+    );
 
     // Apply deny override with a reason.
     svc.set_override(
@@ -271,11 +306,17 @@ async fn tenant_license_isolation() {
         .unwrap();
 
     // t_licensed: GA feature Allowed.
-    let r1 = svc.check_feature(&t_licensed, "runtime_core").await.unwrap();
+    let r1 = svc
+        .check_feature(&t_licensed, "runtime_core")
+        .await
+        .unwrap();
     assert_eq!(r1, FeatureGateResult::Allowed);
 
     // t_unlicensed: same feature Denied — no license activated.
-    let r2 = svc.check_feature(&t_unlicensed, "runtime_core").await.unwrap();
+    let r2 = svc
+        .check_feature(&t_unlicensed, "runtime_core")
+        .await
+        .unwrap();
     assert!(
         matches!(r2, FeatureGateResult::Denied { .. }),
         "RFC 014: t_unlicensed must not inherit t_licensed's license"

@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use crate::error::RuntimeError;
+use crate::observability::{LatencyStats, LlmObservabilityService};
 use async_trait::async_trait;
 use cairn_domain::{LlmCallTrace, SessionId};
 use cairn_store::projections::LlmCallTraceReadModel;
-use crate::error::RuntimeError;
-use crate::observability::{LatencyStats, LlmObservabilityService};
+use std::sync::Arc;
 
 pub struct LlmObservabilityServiceImpl<S> {
     store: Arc<S>,
@@ -28,7 +28,10 @@ where
     S: LlmCallTraceReadModel + 'static,
 {
     async fn record(&self, trace: LlmCallTrace) -> Result<(), RuntimeError> {
-        self.store.insert_trace(trace).await.map_err(RuntimeError::Store)
+        self.store
+            .insert_trace(trace)
+            .await
+            .map_err(RuntimeError::Store)
     }
 
     async fn list_by_session(
@@ -50,7 +53,11 @@ where
     }
 
     async fn latency_percentiles(&self, window_ms: u64) -> Result<LatencyStats, RuntimeError> {
-        let traces = self.store.list_all_traces(1000).await.map_err(RuntimeError::Store)?;
+        let traces = self
+            .store
+            .list_all_traces(1000)
+            .await
+            .map_err(RuntimeError::Store)?;
         let cutoff = now_ms().saturating_sub(window_ms);
 
         let mut latencies: Vec<u64> = traces
@@ -61,7 +68,11 @@ where
 
         let sample_count = latencies.len() as u64;
         if sample_count == 0 {
-            return Ok(LatencyStats { p50_ms: 0, p95_ms: 0, sample_count: 0 });
+            return Ok(LatencyStats {
+                p50_ms: 0,
+                p95_ms: 0,
+                sample_count: 0,
+            });
         }
 
         latencies.sort_unstable();
@@ -76,7 +87,11 @@ where
     }
 
     async fn error_rate(&self, window_ms: u64) -> Result<f32, RuntimeError> {
-        let traces = self.store.list_all_traces(1000).await.map_err(RuntimeError::Store)?;
+        let traces = self
+            .store
+            .list_all_traces(1000)
+            .await
+            .map_err(RuntimeError::Store)?;
         let cutoff = now_ms().saturating_sub(window_ms);
 
         let window_traces: Vec<&LlmCallTrace> = traces
@@ -96,11 +111,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use cairn_domain::LlmCallTrace;
     use cairn_store::InMemoryStore;
+    use std::sync::Arc;
 
-    fn make_trace(trace_id: &str, latency_ms: u64, is_error: bool, created_at_ms: u64) -> LlmCallTrace {
+    fn make_trace(
+        trace_id: &str,
+        latency_ms: u64,
+        is_error: bool,
+        created_at_ms: u64,
+    ) -> LlmCallTrace {
         LlmCallTrace {
             trace_id: trace_id.to_owned(),
             model_id: "test-model".to_owned(),
@@ -131,10 +151,12 @@ mod tests {
         for i in 1..=10u64 {
             svc.record(make_trace(
                 &format!("t{i}"),
-                i * 10,      // 10, 20, ..., 100 ms
+                i * 10, // 10, 20, ..., 100 ms
                 false,
                 far_future + i,
-            )).await.unwrap();
+            ))
+            .await
+            .unwrap();
         }
 
         // Use a huge window to include all traces.
@@ -165,10 +187,19 @@ mod tests {
 
         // 7 successes, 3 errors → 0.3
         for i in 0u64..7 {
-            svc.record(make_trace(&format!("ok_{i}"), 50, false, far_future + i)).await.unwrap();
+            svc.record(make_trace(&format!("ok_{i}"), 50, false, far_future + i))
+                .await
+                .unwrap();
         }
         for i in 0u64..3 {
-            svc.record(make_trace(&format!("err_{i}"), 50, true, far_future + 7 + i)).await.unwrap();
+            svc.record(make_trace(
+                &format!("err_{i}"),
+                50,
+                true,
+                far_future + 7 + i,
+            ))
+            .await
+            .unwrap();
         }
 
         let rate = svc.error_rate(u64::MAX / 2).await.unwrap();
@@ -192,7 +223,9 @@ mod tests {
         let svc = LlmObservabilityServiceImpl::new(store);
         let far_future = u64::MAX / 2;
 
-        svc.record(make_trace("only", 42, false, far_future)).await.unwrap();
+        svc.record(make_trace("only", 42, false, far_future))
+            .await
+            .unwrap();
         let stats = svc.latency_percentiles(u64::MAX / 2).await.unwrap();
         assert_eq!(stats.sample_count, 1);
         assert_eq!(stats.p50_ms, 42);

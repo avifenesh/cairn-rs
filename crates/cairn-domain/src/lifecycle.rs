@@ -252,7 +252,9 @@ impl AgentStatus {
     pub fn from_run_state(run_state: Option<RunState>) -> Self {
         match run_state {
             Some(RunState::Running) => AgentStatus::Busy,
-            Some(RunState::Pending | RunState::WaitingApproval | RunState::Paused) => AgentStatus::Idle,
+            Some(RunState::Pending | RunState::WaitingApproval | RunState::Paused) => {
+                AgentStatus::Idle
+            }
             Some(RunState::Completed | RunState::Failed | RunState::Canceled) | None => {
                 AgentStatus::Offline
             }

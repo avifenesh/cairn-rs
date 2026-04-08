@@ -11,10 +11,9 @@
 use std::collections::HashMap;
 
 use cairn_memory::bundles::{
-    ArtifactEntry, ArtifactKind, ArtifactPayload, ArtifactProvenance,
-    BundleEnvelope, BundleProvenance, BundleType,
-    ConflictResolutionStrategy, ImportOutcome, ImportPlan, ImportPlanEntry, SourceScope,
-    validate_bundle_schema_version,
+    validate_bundle_schema_version, ArtifactEntry, ArtifactKind, ArtifactPayload,
+    ArtifactProvenance, BundleEnvelope, BundleProvenance, BundleType, ConflictResolutionStrategy,
+    ImportOutcome, ImportPlan, ImportPlanEntry, SourceScope,
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -56,7 +55,11 @@ fn prompt_asset_artifact(logical_id: &str, name: &str, content_hash: &str) -> Ar
             "library_scope_hint": "workspace",
             "metadata": {}
         })),
-        provenance: ArtifactProvenance { origin: None, production_method: None, created_at: None },
+        provenance: ArtifactProvenance {
+            origin: None,
+            production_method: None,
+            created_at: None,
+        },
         lineage: Some(format!("origin::{logical_id}")),
         tags: vec!["prompt".to_owned(), "assistant".to_owned()],
     }
@@ -64,8 +67,8 @@ fn prompt_asset_artifact(logical_id: &str, name: &str, content_hash: &str) -> Ar
 
 fn two_artifact_prompt_bundle(bundle_type: BundleType) -> BundleEnvelope {
     let artifacts = vec![
-        prompt_asset_artifact("prompt_asset_system",  "System Prompt",      "hash_abc123"),
-        prompt_asset_artifact("prompt_asset_retrieval","Retrieval Prompt",   "hash_def456"),
+        prompt_asset_artifact("prompt_asset_system", "System Prompt", "hash_abc123"),
+        prompt_asset_artifact("prompt_asset_retrieval", "Retrieval Prompt", "hash_def456"),
     ];
     BundleEnvelope {
         bundle_schema_version: "1".to_owned(),
@@ -117,8 +120,15 @@ fn import_plan_from_bundle(bundle: &BundleEnvelope) -> ImportPlan {
 fn bundle_with_two_prompt_assets_is_valid() {
     let bundle = two_artifact_prompt_bundle(BundleType::PromptLibraryBundle);
 
-    assert_eq!(bundle.artifacts.len(), 2, "bundle must carry exactly 2 artifacts");
-    assert_eq!(bundle.artifact_count, 2, "artifact_count must match actual artifact count");
+    assert_eq!(
+        bundle.artifacts.len(),
+        2,
+        "bundle must carry exactly 2 artifacts"
+    );
+    assert_eq!(
+        bundle.artifact_count, 2,
+        "artifact_count must match actual artifact count"
+    );
 
     // Step 2: validate schema version.
     validate_bundle_schema_version(&bundle)
@@ -159,12 +169,25 @@ fn import_plan_has_two_create_outcomes() {
     let bundle = two_artifact_prompt_bundle(BundleType::PromptLibraryBundle);
     let plan = import_plan_from_bundle(&bundle);
 
-    assert_eq!(plan.bundle_id, bundle.bundle_id, "plan must reference the bundle ID");
-    assert_eq!(plan.entries.len(), 2, "plan must have one entry per artifact");
-    assert_eq!(plan.create_count, 2, "both artifacts must be Create outcomes");
+    assert_eq!(
+        plan.bundle_id, bundle.bundle_id,
+        "plan must reference the bundle ID"
+    );
+    assert_eq!(
+        plan.entries.len(),
+        2,
+        "plan must have one entry per artifact"
+    );
+    assert_eq!(
+        plan.create_count, 2,
+        "both artifacts must be Create outcomes"
+    );
     assert_eq!(plan.reuse_count, 0);
     assert_eq!(plan.conflict_count, 0);
-    assert!(!plan.has_conflicts(), "plan with no conflicts must report has_conflicts=false");
+    assert!(
+        !plan.has_conflicts(),
+        "plan with no conflicts must report has_conflicts=false"
+    );
 
     // All entries must be Create.
     for entry in &plan.entries {
@@ -196,11 +219,13 @@ fn bundle_type_discriminator_works_for_both_types() {
         let bundle = two_artifact_prompt_bundle(bundle_type);
 
         // Type is preserved.
-        assert_eq!(bundle.bundle_type, bundle_type, "bundle_type must be set correctly");
+        assert_eq!(
+            bundle.bundle_type, bundle_type,
+            "bundle_type must be set correctly"
+        );
 
         // Validate that schema version is accepted for both bundle types.
-        validate_bundle_schema_version(&bundle)
-            .unwrap_or_else(|e| panic!("{bundle_type:?}: {e}"));
+        validate_bundle_schema_version(&bundle).unwrap_or_else(|e| panic!("{bundle_type:?}: {e}"));
 
         // Discriminator round-trips through JSON.
         let json = serde_json::to_string(&bundle).expect("bundle must serialize to JSON");
@@ -248,8 +273,7 @@ fn artifact_entry_carries_content_hash_and_logical_id() {
 
     // Both hashes are distinct.
     assert_ne!(
-        system_artifact.content_hash,
-        retrieval_artifact.content_hash,
+        system_artifact.content_hash, retrieval_artifact.content_hash,
         "distinct artifacts must have distinct content hashes"
     );
 
@@ -335,7 +359,10 @@ fn import_plan_summarize_counts_mixed_outcomes() {
         conflict_resolution: ConflictResolutionStrategy::Skip,
     };
 
-    assert!(plan.has_conflicts(), "plan with 1 conflict must report has_conflicts=true");
+    assert!(
+        plan.has_conflicts(),
+        "plan with 1 conflict must report has_conflicts=true"
+    );
 }
 
 /// Full round-trip: serialize BundleEnvelope to JSON and back, preserving all fields.
@@ -347,12 +374,18 @@ fn bundle_full_json_round_trip() {
     let recovered: BundleEnvelope =
         serde_json::from_str(&json).expect("bundle must deserialize from JSON");
 
-    assert_eq!(recovered.bundle_schema_version, original.bundle_schema_version);
+    assert_eq!(
+        recovered.bundle_schema_version,
+        original.bundle_schema_version
+    );
     assert_eq!(recovered.bundle_type, original.bundle_type);
     assert_eq!(recovered.bundle_id, original.bundle_id);
     assert_eq!(recovered.bundle_name, original.bundle_name);
     assert_eq!(recovered.artifact_count, original.artifact_count);
     assert_eq!(recovered.artifacts.len(), original.artifacts.len());
     assert_eq!(recovered.created_by, original.created_by);
-    assert_eq!(recovered.source_deployment_id, original.source_deployment_id);
+    assert_eq!(
+        recovered.source_deployment_id,
+        original.source_deployment_id
+    );
 }

@@ -25,11 +25,7 @@ fn tenant_id() -> TenantId {
 }
 
 fn ev<P: Into<RuntimeEvent>>(id: &str, payload: P) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(
-        EventId::new(id),
-        EventSource::System,
-        payload.into(),
-    )
+    EventEnvelope::for_runtime_event(EventId::new(id), EventSource::System, payload.into())
 }
 
 fn override_event(feature: &str, allowed: bool) -> EventEnvelope<RuntimeEvent> {
@@ -66,9 +62,9 @@ fn build_entitlement_set_from_overrides(
         }
         // Map feature name → required entitlement (per RFC 014 CapabilityMapping).
         let entitlement = match rec.feature.as_str() {
-            "advanced_audit_export"
-            | "compliance_policy_packs"
-            | "approval_hardening" => Some(Entitlement::GovernanceCompliance),
+            "advanced_audit_export" | "compliance_policy_packs" | "approval_hardening" => {
+                Some(Entitlement::GovernanceCompliance)
+            }
             "advanced_admin" => Some(Entitlement::AdvancedAdmin),
             _ => None,
         };
@@ -161,9 +157,9 @@ fn unknown_features_denied_fail_closed() {
     // Unknown feature must be Denied even when all entitlements are present.
     let unknown_cases = [
         "definitely_unknown_feature",
-        "runtime_core_v2",          // near-miss: not a registered feature
-        "",                          // empty string
-        "RUNTIME_CORE",             // wrong case (exact match required)
+        "runtime_core_v2", // near-miss: not a registered feature
+        "",                // empty string
+        "RUNTIME_CORE",    // wrong case (exact match required)
     ];
 
     for feature in &unknown_cases {
@@ -186,17 +182,18 @@ async fn entitlement_override_event_unlocks_gated_feature() {
     let gate = DefaultFeatureGate::v1_defaults();
 
     // Before any overrides: gated feature must be Denied.
-    let no_overrides = build_entitlement_set_from_overrides(
-        ProductTier::TeamSelfHosted,
-        &[],
-    );
+    let no_overrides = build_entitlement_set_from_overrides(ProductTier::TeamSelfHosted, &[]);
     assert!(
-        matches!(gate.check(&no_overrides, "advanced_audit_export"), FeatureGateResult::Denied { .. }),
+        matches!(
+            gate.check(&no_overrides, "advanced_audit_export"),
+            FeatureGateResult::Denied { .. }
+        ),
         "advanced_audit_export must be Denied before override"
     );
 
     // Append an EntitlementOverrideSet that grants advanced_audit_export.
-    store.append(&[override_event("advanced_audit_export", true)])
+    store
+        .append(&[override_event("advanced_audit_export", true)])
         .await
         .unwrap();
 
@@ -209,10 +206,8 @@ async fn entitlement_override_event_unlocks_gated_feature() {
     assert!(overrides[0].allowed, "override must be granted");
 
     // Build EntitlementSet from the persisted overrides.
-    let with_override = build_entitlement_set_from_overrides(
-        ProductTier::TeamSelfHosted,
-        &overrides,
-    );
+    let with_override =
+        build_entitlement_set_from_overrides(ProductTier::TeamSelfHosted, &overrides);
 
     // Gate must now allow the feature.
     assert_eq!(
@@ -223,7 +218,10 @@ async fn entitlement_override_event_unlocks_gated_feature() {
 
     // Other gated features NOT in the override must still be Denied.
     assert!(
-        matches!(gate.check(&with_override, "advanced_admin"), FeatureGateResult::Denied { .. }),
+        matches!(
+            gate.check(&with_override, "advanced_admin"),
+            FeatureGateResult::Denied { .. }
+        ),
         "advanced_admin must remain Denied — no override was set for it"
     );
 
@@ -242,10 +240,13 @@ async fn multiple_overrides_grant_and_deny_independently() {
     let gate = DefaultFeatureGate::v1_defaults();
 
     // Grant advanced_audit_export, deny advanced_admin.
-    store.append(&[
-        override_event("advanced_audit_export", true),
-        override_event("advanced_admin", false),
-    ]).await.unwrap();
+    store
+        .append(&[
+            override_event("advanced_audit_export", true),
+            override_event("advanced_admin", false),
+        ])
+        .await
+        .unwrap();
 
     let overrides = LicenseReadModel::list_overrides(store.as_ref(), &tenant_id())
         .await
@@ -260,7 +261,10 @@ async fn multiple_overrides_grant_and_deny_independently() {
         "granted override must unlock advanced_audit_export"
     );
     assert!(
-        matches!(gate.check(&set, "advanced_admin"), FeatureGateResult::Denied { .. }),
+        matches!(
+            gate.check(&set, "advanced_admin"),
+            FeatureGateResult::Denied { .. }
+        ),
         "denied override means advanced_admin stays locked"
     );
 }
@@ -282,12 +286,28 @@ fn capability_mapping_links_features_to_entitlements() {
 
     // Define known mappings and expected behaviour.
     let mappings: &[(&str, FeatureFlag, Option<Entitlement>)] = &[
-        ("runtime_core",             FeatureFlag::GeneralAvailability, None),
-        ("retrieval_core",           FeatureFlag::GeneralAvailability, None),
-        ("advanced_audit_export",    FeatureFlag::EntitlementGated,    Some(Entitlement::GovernanceCompliance)),
-        ("compliance_policy_packs",  FeatureFlag::EntitlementGated,    Some(Entitlement::GovernanceCompliance)),
-        ("approval_hardening",       FeatureFlag::EntitlementGated,    Some(Entitlement::GovernanceCompliance)),
-        ("advanced_admin",           FeatureFlag::EntitlementGated,    Some(Entitlement::AdvancedAdmin)),
+        ("runtime_core", FeatureFlag::GeneralAvailability, None),
+        ("retrieval_core", FeatureFlag::GeneralAvailability, None),
+        (
+            "advanced_audit_export",
+            FeatureFlag::EntitlementGated,
+            Some(Entitlement::GovernanceCompliance),
+        ),
+        (
+            "compliance_policy_packs",
+            FeatureFlag::EntitlementGated,
+            Some(Entitlement::GovernanceCompliance),
+        ),
+        (
+            "approval_hardening",
+            FeatureFlag::EntitlementGated,
+            Some(Entitlement::GovernanceCompliance),
+        ),
+        (
+            "advanced_admin",
+            FeatureFlag::EntitlementGated,
+            Some(Entitlement::AdvancedAdmin),
+        ),
     ];
 
     for (feature, flag, required) in mappings {
@@ -314,8 +334,9 @@ fn capability_mapping_links_features_to_entitlements() {
 
                 // With the correct entitlement, must be Allowed.
                 if let Some(required_ent) = required {
-                    let set_with_ent = EntitlementSet::new(tenant_id(), ProductTier::EnterpriseSelfHosted)
-                        .with_entitlement(*required_ent);
+                    let set_with_ent =
+                        EntitlementSet::new(tenant_id(), ProductTier::EnterpriseSelfHosted)
+                            .with_entitlement(*required_ent);
                     assert_eq!(
                         gate.check(&set_with_ent, feature),
                         FeatureGateResult::Allowed,
@@ -349,7 +370,10 @@ fn custom_capability_mapping_works_as_gate() {
         .with_entitlement(Entitlement::ManagedServiceRights);
 
     // GA custom feature always allowed.
-    assert_eq!(gate.check(&bare, "custom_feature_a"), FeatureGateResult::Allowed);
+    assert_eq!(
+        gate.check(&bare, "custom_feature_a"),
+        FeatureGateResult::Allowed
+    );
 
     // Gated custom feature denied without entitlement.
     assert!(matches!(
@@ -364,8 +388,11 @@ fn custom_capability_mapping_works_as_gate() {
     );
 
     // Features from v1_defaults must be unknown to this custom gate (fail-closed).
-    assert!(matches!(
-        gate.check(&bare, "runtime_core"),
-        FeatureGateResult::Denied { .. }
-    ), "features not in custom registry must be denied");
+    assert!(
+        matches!(
+            gate.check(&bare, "runtime_core"),
+            FeatureGateResult::Denied { .. }
+        ),
+        "features not in custom registry must be denied"
+    );
 }

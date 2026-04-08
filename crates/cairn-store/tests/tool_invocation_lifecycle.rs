@@ -16,18 +16,15 @@
 //!   - list_by_run scopes correctly to the run
 //!   - Different failure outcomes (RetryableFailure, PermanentFailure, Timeout)
 
-use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ExecutionClass, ProjectId, ProjectKey, RunCreated,
-    RunId, RuntimeEvent, SessionCreated, SessionId, TenantId, ToolInvocationCompleted,
-    ToolInvocationFailed, ToolInvocationId, ToolInvocationStarted, WorkspaceId,
-};
 use cairn_domain::tool_invocation::{
     ToolInvocationOutcomeKind, ToolInvocationState, ToolInvocationTarget,
 };
-use cairn_store::{
-    projections::ToolInvocationReadModel,
-    EventLog, InMemoryStore,
+use cairn_domain::{
+    EventEnvelope, EventId, EventSource, ExecutionClass, ProjectId, ProjectKey, RunCreated, RunId,
+    RuntimeEvent, SessionCreated, SessionId, TenantId, ToolInvocationCompleted,
+    ToolInvocationFailed, ToolInvocationId, ToolInvocationStarted, WorkspaceId,
 };
+use cairn_store::{projections::ToolInvocationReadModel, EventLog, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -159,7 +156,10 @@ async fn tool_invocation_completed_transitions_to_success() {
         .unwrap();
 
     // Verify started state before completion.
-    let started = ToolInvocationReadModel::get(&store, &inv_id).await.unwrap().unwrap();
+    let started = ToolInvocationReadModel::get(&store, &inv_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(started.state, ToolInvocationState::Started);
 
     store
@@ -185,7 +185,10 @@ async fn tool_invocation_completed_transitions_to_success() {
     assert_eq!(completed.state, ToolInvocationState::Completed);
     assert_eq!(completed.outcome, Some(ToolInvocationOutcomeKind::Success));
     assert_eq!(completed.finished_at_ms, Some(ts + 50));
-    assert!(completed.error_message.is_none(), "success has no error message");
+    assert!(
+        completed.error_message.is_none(),
+        "success has no error message"
+    );
     assert_eq!(completed.version, 3, "Requested(1)→Started(2)→Completed(3)");
 }
 
@@ -239,7 +242,10 @@ async fn tool_invocation_failed_with_retryable_error() {
         .unwrap();
 
     assert_eq!(record.state, ToolInvocationState::Failed);
-    assert_eq!(record.outcome, Some(ToolInvocationOutcomeKind::RetryableFailure));
+    assert_eq!(
+        record.outcome,
+        Some(ToolInvocationOutcomeKind::RetryableFailure)
+    );
     assert_eq!(
         record.error_message.as_deref(),
         Some("upstream returned 503, retry eligible")
@@ -293,17 +299,25 @@ async fn tool_invocation_failed_with_permanent_error() {
         .await
         .unwrap();
 
-    let record = ToolInvocationReadModel::get(&store, &inv_id).await.unwrap().unwrap();
+    let record = ToolInvocationReadModel::get(&store, &inv_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(record.state, ToolInvocationState::Failed);
-    assert_eq!(record.outcome, Some(ToolInvocationOutcomeKind::PermanentFailure));
-    assert!(record.error_message.as_deref().unwrap().contains("permission denied"));
-    // Plugin target is preserved through the projection.
-    assert!(
-        matches!(&record.target,
-            ToolInvocationTarget::Plugin { plugin_id, tool_name }
-            if plugin_id == "com.example.db" && tool_name == "db.execute"
-        )
+    assert_eq!(
+        record.outcome,
+        Some(ToolInvocationOutcomeKind::PermanentFailure)
     );
+    assert!(record
+        .error_message
+        .as_deref()
+        .unwrap()
+        .contains("permission denied"));
+    // Plugin target is preserved through the projection.
+    assert!(matches!(&record.target,
+        ToolInvocationTarget::Plugin { plugin_id, tool_name }
+        if plugin_id == "com.example.db" && tool_name == "db.execute"
+    ));
 }
 
 // ── 5. ToolInvocationFailed with timeout ─────────────────────────────────────
@@ -350,7 +364,10 @@ async fn tool_invocation_failed_with_timeout() {
         .await
         .unwrap();
 
-    let record = ToolInvocationReadModel::get(&store, &inv_id).await.unwrap().unwrap();
+    let record = ToolInvocationReadModel::get(&store, &inv_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(record.state, ToolInvocationState::Failed);
     assert_eq!(record.outcome, Some(ToolInvocationOutcomeKind::Timeout));
     assert_eq!(record.finished_at_ms, Some(ts + 30_000));
@@ -436,10 +453,16 @@ async fn list_by_run_returns_all_invocations_for_run() {
         .await
         .unwrap();
     assert_eq!(run_a_invocations.len(), 2, "run_a has 2 invocations");
-    let ids: Vec<_> = run_a_invocations.iter().map(|r| r.invocation_id.as_str()).collect();
+    let ids: Vec<_> = run_a_invocations
+        .iter()
+        .map(|r| r.invocation_id.as_str())
+        .collect();
     assert!(ids.contains(&"inv_6a1"));
     assert!(ids.contains(&"inv_6a2"));
-    assert!(!ids.contains(&"inv_6b1"), "run_b invocation must not appear in run_a list");
+    assert!(
+        !ids.contains(&"inv_6b1"),
+        "run_b invocation must not appear in run_a list"
+    );
 
     let run_b_invocations = ToolInvocationReadModel::list_by_run(&store, &run_b, 10, 0)
         .await
@@ -479,9 +502,15 @@ async fn plugin_tool_target_preserved_through_projection() {
         .await
         .unwrap();
 
-    let record = ToolInvocationReadModel::get(&store, &inv_id).await.unwrap().unwrap();
+    let record = ToolInvocationReadModel::get(&store, &inv_id)
+        .await
+        .unwrap()
+        .unwrap();
     match &record.target {
-        ToolInvocationTarget::Plugin { plugin_id, tool_name } => {
+        ToolInvocationTarget::Plugin {
+            plugin_id,
+            tool_name,
+        } => {
             assert_eq!(plugin_id, "com.acme.git");
             assert_eq!(tool_name, "git.commit");
         }
@@ -572,13 +601,26 @@ async fn run_audit_trail_captures_mixed_outcomes() {
         .unwrap();
     assert_eq!(trail.len(), 2);
 
-    let ok = ToolInvocationReadModel::get(&store, &inv_ok).await.unwrap().unwrap();
+    let ok = ToolInvocationReadModel::get(&store, &inv_ok)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(ok.state, ToolInvocationState::Completed);
     assert_eq!(ok.outcome, Some(ToolInvocationOutcomeKind::Success));
     assert!(ok.error_message.is_none());
 
-    let fail = ToolInvocationReadModel::get(&store, &inv_fail).await.unwrap().unwrap();
+    let fail = ToolInvocationReadModel::get(&store, &inv_fail)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(fail.state, ToolInvocationState::Failed);
-    assert_eq!(fail.outcome, Some(ToolInvocationOutcomeKind::ProtocolViolation));
-    assert!(fail.error_message.as_deref().unwrap().contains("malformed JSON"));
+    assert_eq!(
+        fail.outcome,
+        Some(ToolInvocationOutcomeKind::ProtocolViolation)
+    );
+    assert!(fail
+        .error_message
+        .as_deref()
+        .unwrap()
+        .contains("malformed JSON"));
 }

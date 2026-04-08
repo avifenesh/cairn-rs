@@ -148,7 +148,10 @@ mod tests {
     fn agent_roles_list_by_tier_research() {
         let reg = AgentRoleRegistry::with_defaults();
         let research = reg.list_by_tier(AgentRoleTier::Research);
-        assert!(!research.is_empty(), "must have at least one Research-tier role");
+        assert!(
+            !research.is_empty(),
+            "must have at least one Research-tier role"
+        );
         assert!(research.iter().all(|r| r.tier == AgentRoleTier::Research));
         assert!(research.iter().any(|r| r.role_id == "researcher"));
     }
@@ -173,11 +176,18 @@ mod tests {
     #[test]
     fn agent_roles_register_override_wins() {
         let reg = AgentRoleRegistry::with_defaults();
-        let custom = AgentRole::new("orchestrator", "Custom Orchestrator", AgentRoleTier::Orchestrator)
-            .with_max_context_tokens(999_999);
+        let custom = AgentRole::new(
+            "orchestrator",
+            "Custom Orchestrator",
+            AgentRoleTier::Orchestrator,
+        )
+        .with_max_context_tokens(999_999);
         reg.register(custom);
         assert_eq!(reg.len(), 4, "override must not add a new entry");
-        assert_eq!(reg.get("orchestrator").unwrap().max_context_tokens, Some(999_999));
+        assert_eq!(
+            reg.get("orchestrator").unwrap().max_context_tokens,
+            Some(999_999)
+        );
     }
 
     #[test]
@@ -205,12 +215,15 @@ mod tests {
         assert_eq!(role.tier, AgentRoleTier::Research);
 
         // Emit RunCreated with agent_role_id = "researcher".
-        store.append(&[mk_run_created(
-            project.clone(),
-            session_id.clone(),
-            run_id.clone(),
-            Some("researcher".to_owned()),
-        )]).await.unwrap();
+        store
+            .append(&[mk_run_created(
+                project.clone(),
+                session_id.clone(),
+                run_id.clone(),
+                Some("researcher".to_owned()),
+            )])
+            .await
+            .unwrap();
 
         // Verify the projection carries the role.
         let run = RunReadModel::get(store.as_ref(), &run_id)
@@ -233,12 +246,15 @@ mod tests {
         let project = ProjectKey::new("t1", "w1", "p1");
         let run_id = RunId::new("run-2");
 
-        store.append(&[mk_run_created(
-            project,
-            SessionId::new("sess-2"),
-            run_id.clone(),
-            None,
-        )]).await.unwrap();
+        store
+            .append(&[mk_run_created(
+                project,
+                SessionId::new("sess-2"),
+                run_id.clone(),
+                None,
+            )])
+            .await
+            .unwrap();
 
         let run = RunReadModel::get(store.as_ref(), &run_id)
             .await
@@ -261,21 +277,27 @@ mod tests {
         ];
 
         for (rid, role) in &runs {
-            store.append(&[mk_run_created(
-                project.clone(),
-                SessionId::new("sess-3"),
-                RunId::new(*rid),
-                role.map(|r| r.to_owned()),
-            )]).await.unwrap();
+            store
+                .append(&[mk_run_created(
+                    project.clone(),
+                    SessionId::new("sess-3"),
+                    RunId::new(*rid),
+                    role.map(|r| r.to_owned()),
+                )])
+                .await
+                .unwrap();
         }
 
         for (rid, expected_role) in &runs {
             let run = RunReadModel::get(store.as_ref(), &RunId::new(*rid))
-                .await.unwrap().unwrap();
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(
                 run.agent_role_id.as_deref(),
                 *expected_role,
-                "run {rid} must have role {:?}", expected_role
+                "run {rid} must have role {:?}",
+                expected_role
             );
         }
     }

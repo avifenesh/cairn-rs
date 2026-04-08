@@ -13,8 +13,7 @@ use std::sync::Arc;
 
 use cairn_domain::providers::{
     GenerationProvider, GenerationResponse, OperationKind, ProviderAdapterError,
-    ProviderBindingRecord, ProviderBindingSettings,
-    RouteDecisionStatus,
+    ProviderBindingRecord, ProviderBindingSettings, RouteDecisionStatus,
 };
 use cairn_domain::selectors::SelectorContext;
 use cairn_domain::*;
@@ -58,9 +57,10 @@ impl GenerationProvider for IdentifiableProvider {
         _settings: &ProviderBindingSettings,
     ) -> Result<GenerationResponse, ProviderAdapterError> {
         if self.should_fail {
-            return Err(ProviderAdapterError::TransportFailure(
-                format!("{} is down", self.name),
-            ));
+            return Err(ProviderAdapterError::TransportFailure(format!(
+                "{} is down",
+                self.name
+            )));
         }
         Ok(GenerationResponse {
             text: format!("response_from_{}", self.name),
@@ -91,14 +91,11 @@ fn binding(id: &str, conn: &str, op: OperationKind) -> ProviderBindingRecord {
     }
 }
 
-fn make_router_with_two_providers(
-    ollama_ok: bool,
-    openai_ok: bool,
-) -> ProviderRouter {
+fn make_router_with_two_providers(ollama_ok: bool, openai_ok: bool) -> ProviderRouter {
     let health = Arc::new(ProviderHealthTracker::new());
     let mut router = ProviderRouter::new(
         RoutingConfig {
-            cost_weight: 0.0,               // pure priority order
+            cost_weight: 0.0, // pure priority order
             allow_unhealthy_fallback: true,
         },
         health,
@@ -140,8 +137,14 @@ async fn primary_provider_selected_not_fallback() {
     let router = make_router_with_two_providers(true, true);
 
     let candidates = vec![
-        RoutableProvider::new(binding("b_ollama", "conn_ollama", OperationKind::Generate), vec![]),
-        RoutableProvider::new(binding("b_openai", "conn_openai_compat", OperationKind::Generate), vec![]),
+        RoutableProvider::new(
+            binding("b_ollama", "conn_ollama", OperationKind::Generate),
+            vec![],
+        ),
+        RoutableProvider::new(
+            binding("b_openai", "conn_openai_compat", OperationKind::Generate),
+            vec![],
+        ),
     ];
 
     let outcome = router
@@ -162,10 +165,16 @@ async fn primary_provider_selected_not_fallback() {
         Some(ProviderBindingId::new("b_ollama")),
         "must select ollama (primary), not openai_compat (fallback)"
     );
-    assert!(!outcome.decision.fallback_used, "fallback must not be used when primary succeeds");
+    assert!(
+        !outcome.decision.fallback_used,
+        "fallback must not be used when primary succeeds"
+    );
 
     let resp = outcome.response.expect("response must be present");
-    assert_eq!(resp.text, "response_from_ollama", "response must come from ollama, not openai_compat");
+    assert_eq!(
+        resp.text, "response_from_ollama",
+        "response must come from ollama, not openai_compat"
+    );
 }
 
 // ── Safety test 2: Fallback dispatches to correct NEXT provider ────────────
@@ -177,8 +186,14 @@ async fn fallback_dispatches_to_correct_next_provider() {
     let router = make_router_with_two_providers(false, true); // ollama fails
 
     let candidates = vec![
-        RoutableProvider::new(binding("b_ollama", "conn_ollama", OperationKind::Generate), vec![]),
-        RoutableProvider::new(binding("b_openai", "conn_openai_compat", OperationKind::Generate), vec![]),
+        RoutableProvider::new(
+            binding("b_ollama", "conn_ollama", OperationKind::Generate),
+            vec![],
+        ),
+        RoutableProvider::new(
+            binding("b_openai", "conn_openai_compat", OperationKind::Generate),
+            vec![],
+        ),
     ];
 
     let outcome = router
@@ -194,7 +209,10 @@ async fn fallback_dispatches_to_correct_next_provider() {
         .await;
 
     assert_eq!(outcome.decision.final_status, RouteDecisionStatus::Selected);
-    assert!(outcome.decision.fallback_used, "fallback must be used when primary fails");
+    assert!(
+        outcome.decision.fallback_used,
+        "fallback must be used when primary fails"
+    );
     assert_eq!(
         outcome.decision.selected_provider_binding_id,
         Some(ProviderBindingId::new("b_openai")),
@@ -202,14 +220,29 @@ async fn fallback_dispatches_to_correct_next_provider() {
     );
 
     let resp = outcome.response.expect("response must be present");
-    assert_eq!(resp.text, "response_from_openai_compat", "response must come from the fallback provider");
+    assert_eq!(
+        resp.text, "response_from_openai_compat",
+        "response must come from the fallback provider"
+    );
 
     // Verify dispatch log records both attempts correctly
     assert_eq!(outcome.dispatch_log.len(), 2);
-    assert_eq!(outcome.dispatch_log[0].connection_id, ProviderConnectionId::new("conn_ollama"));
-    assert!(!outcome.dispatch_log[0].succeeded, "ollama must be recorded as failed");
-    assert_eq!(outcome.dispatch_log[1].connection_id, ProviderConnectionId::new("conn_openai_compat"));
-    assert!(outcome.dispatch_log[1].succeeded, "openai_compat must be recorded as succeeded");
+    assert_eq!(
+        outcome.dispatch_log[0].connection_id,
+        ProviderConnectionId::new("conn_ollama")
+    );
+    assert!(
+        !outcome.dispatch_log[0].succeeded,
+        "ollama must be recorded as failed"
+    );
+    assert_eq!(
+        outcome.dispatch_log[1].connection_id,
+        ProviderConnectionId::new("conn_openai_compat")
+    );
+    assert!(
+        outcome.dispatch_log[1].succeeded,
+        "openai_compat must be recorded as succeeded"
+    );
 }
 
 // ── Safety test 3: Direct binding ID routes to exact provider ──────────────
@@ -221,12 +254,14 @@ async fn single_candidate_routes_directly_no_chain() {
     let router = make_router_with_two_providers(true, true);
 
     // Only pass openai_compat as candidate — ollama must NOT be called.
-    let candidates = vec![
-        RoutableProvider::new(
-            binding("b_openai_only", "conn_openai_compat", OperationKind::Generate),
-            vec![],
+    let candidates = vec![RoutableProvider::new(
+        binding(
+            "b_openai_only",
+            "conn_openai_compat",
+            OperationKind::Generate,
         ),
-    ];
+        vec![],
+    )];
 
     let outcome = router
         .route(
@@ -249,9 +284,15 @@ async fn single_candidate_routes_directly_no_chain() {
     assert!(!outcome.decision.fallback_used);
 
     let resp = outcome.response.expect("response must be present");
-    assert_eq!(resp.text, "response_from_openai_compat",
-        "response must come from openai_compat — ollama must not be involved");
-    assert_eq!(outcome.dispatch_log.len(), 1, "only one provider must be dispatched");
+    assert_eq!(
+        resp.text, "response_from_openai_compat",
+        "response must come from openai_compat — ollama must not be involved"
+    );
+    assert_eq!(
+        outcome.dispatch_log.len(),
+        1,
+        "only one provider must be dispatched"
+    );
 }
 
 // ── Safety test 4: Operation-kind isolation ─────────────────────────────────
@@ -264,7 +305,10 @@ async fn operation_kind_isolation_prevents_cross_routing() {
     let health = Arc::new(ProviderHealthTracker::new());
     let mut router = ProviderRouter::new(RoutingConfig::default(), health);
 
-    router.register(ProviderConnectionId::new("conn_ollama"), IdentifiableProvider::ok("ollama"));
+    router.register(
+        ProviderConnectionId::new("conn_ollama"),
+        IdentifiableProvider::ok("ollama"),
+    );
 
     // Create candidates: one for Embed, one for Generate — from the same connection.
     let embed_binding = binding("b_embed", "conn_ollama", OperationKind::Embed);
@@ -303,7 +347,10 @@ async fn operation_kind_isolation_prevents_cross_routing() {
         )
         .await;
 
-    assert_eq!(outcome_embed.decision.final_status, RouteDecisionStatus::Selected);
+    assert_eq!(
+        outcome_embed.decision.final_status,
+        RouteDecisionStatus::Selected
+    );
     assert_eq!(
         outcome_embed.decision.selected_provider_binding_id,
         Some(ProviderBindingId::new("b_embed")),
@@ -321,8 +368,14 @@ async fn candidate_order_respected_not_silently_reordered() {
 
     // Deliberately list openai first, ollama second.
     let candidates = vec![
-        RoutableProvider::new(binding("b_openai", "conn_openai_compat", OperationKind::Generate), vec![]),
-        RoutableProvider::new(binding("b_ollama", "conn_ollama", OperationKind::Generate), vec![]),
+        RoutableProvider::new(
+            binding("b_openai", "conn_openai_compat", OperationKind::Generate),
+            vec![],
+        ),
+        RoutableProvider::new(
+            binding("b_ollama", "conn_ollama", OperationKind::Generate),
+            vec![],
+        ),
     ];
 
     let outcome = router

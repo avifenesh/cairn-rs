@@ -14,20 +14,17 @@
 //!   the correct access boundaries.
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, OperatorId, ProjectId, ProjectKey, TenantId,
-    WorkspaceId, WorkspaceKey, WorkspaceRole, RuntimeEvent,
     events::{WorkspaceMemberAdded, WorkspaceMemberRemoved},
     tenancy::OwnershipKey,
+    EventEnvelope, EventId, EventSource, OperatorId, ProjectId, ProjectKey, RuntimeEvent, TenantId,
+    WorkspaceId, WorkspaceKey, WorkspaceRole,
 };
-use cairn_store::{
-    projections::WorkspaceMembershipReadModel,
-    EventLog, InMemoryStore,
-};
+use cairn_store::{projections::WorkspaceMembershipReadModel, EventLog, InMemoryStore};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const TENANT_ID: &str  = "tenant_rfc008";
-const WS_ID: &str      = "ws_rfc008";
+const TENANT_ID: &str = "tenant_rfc008";
+const WS_ID: &str = "ws_rfc008";
 
 fn workspace_key() -> WorkspaceKey {
     WorkspaceKey::new(TENANT_ID, WS_ID)
@@ -83,8 +80,8 @@ async fn role_of(store: &InMemoryStore, member: &str) -> WorkspaceRole {
 fn privilege_levels_are_strictly_ordered() {
     use WorkspaceRole::*;
     assert!(Viewer.level() < Member.level(), "Viewer < Member");
-    assert!(Member.level() < Admin.level(),  "Member < Admin");
-    assert!(Admin.level()  < Owner.level(),  "Admin  < Owner");
+    assert!(Member.level() < Admin.level(), "Member < Admin");
+    assert!(Admin.level() < Owner.level(), "Admin  < Owner");
 }
 
 #[test]
@@ -92,8 +89,8 @@ fn privilege_levels_match_rfc_contract_values() {
     // RFC 008 specifies numeric levels; these must not drift silently.
     assert_eq!(WorkspaceRole::Viewer.level(), 1);
     assert_eq!(WorkspaceRole::Member.level(), 2);
-    assert_eq!(WorkspaceRole::Admin.level(),  3);
-    assert_eq!(WorkspaceRole::Owner.level(),  4);
+    assert_eq!(WorkspaceRole::Admin.level(), 3);
+    assert_eq!(WorkspaceRole::Owner.level(), 4);
 }
 
 // ── 2. has_at_least boundary conditions ──────────────────────────────────────
@@ -102,35 +99,56 @@ fn privilege_levels_match_rfc_contract_values() {
 fn has_at_least_viewer_is_true_for_all_roles() {
     use WorkspaceRole::*;
     for role in [Viewer, Member, Admin, Owner] {
-        assert!(role.has_at_least(Viewer), "{role:?} should satisfy ≥ Viewer");
+        assert!(
+            role.has_at_least(Viewer),
+            "{role:?} should satisfy ≥ Viewer"
+        );
     }
 }
 
 #[test]
 fn has_at_least_member_passes_for_member_admin_owner_only() {
     use WorkspaceRole::*;
-    assert!(!Viewer.has_at_least(Member), "Viewer must NOT satisfy ≥ Member");
-    assert!( Member.has_at_least(Member), "Member must satisfy ≥ Member");
-    assert!( Admin.has_at_least(Member),  "Admin must satisfy ≥ Member");
-    assert!( Owner.has_at_least(Member),  "Owner must satisfy ≥ Member");
+    assert!(
+        !Viewer.has_at_least(Member),
+        "Viewer must NOT satisfy ≥ Member"
+    );
+    assert!(Member.has_at_least(Member), "Member must satisfy ≥ Member");
+    assert!(Admin.has_at_least(Member), "Admin must satisfy ≥ Member");
+    assert!(Owner.has_at_least(Member), "Owner must satisfy ≥ Member");
 }
 
 #[test]
 fn has_at_least_admin_returns_true_for_owner_and_admin_only() {
     use WorkspaceRole::*;
-    assert!(!Viewer.has_at_least(Admin), "Viewer must NOT satisfy ≥ Admin");
-    assert!(!Member.has_at_least(Admin), "Member must NOT satisfy ≥ Admin");
-    assert!( Admin.has_at_least(Admin),  "Admin  must satisfy ≥ Admin");
-    assert!( Owner.has_at_least(Admin),  "Owner  must satisfy ≥ Admin");
+    assert!(
+        !Viewer.has_at_least(Admin),
+        "Viewer must NOT satisfy ≥ Admin"
+    );
+    assert!(
+        !Member.has_at_least(Admin),
+        "Member must NOT satisfy ≥ Admin"
+    );
+    assert!(Admin.has_at_least(Admin), "Admin  must satisfy ≥ Admin");
+    assert!(Owner.has_at_least(Admin), "Owner  must satisfy ≥ Admin");
 }
 
 #[test]
 fn has_at_least_owner_is_true_only_for_owner() {
     use WorkspaceRole::*;
-    assert!(!Viewer.has_at_least(Owner), "Viewer must NOT satisfy ≥ Owner");
-    assert!(!Member.has_at_least(Owner), "Member must NOT satisfy ≥ Owner");
-    assert!(!Admin.has_at_least(Owner),  "Admin  must NOT satisfy ≥ Owner");
-    assert!( Owner.has_at_least(Owner),  "Owner  must satisfy ≥ Owner");
+    assert!(
+        !Viewer.has_at_least(Owner),
+        "Viewer must NOT satisfy ≥ Owner"
+    );
+    assert!(
+        !Member.has_at_least(Owner),
+        "Member must NOT satisfy ≥ Owner"
+    );
+    assert!(
+        !Admin.has_at_least(Owner),
+        "Admin  must NOT satisfy ≥ Owner"
+    );
+    assert!(Owner.has_at_least(Owner), "Owner  must satisfy ≥ Owner");
 }
 
 #[test]
@@ -162,10 +180,22 @@ fn workspace_role_serde_round_trips_all_variants() {
 
 #[test]
 fn workspace_role_serialises_to_snake_case_strings() {
-    assert_eq!(serde_json::to_string(&WorkspaceRole::Viewer).unwrap(), r#""viewer""#);
-    assert_eq!(serde_json::to_string(&WorkspaceRole::Member).unwrap(), r#""member""#);
-    assert_eq!(serde_json::to_string(&WorkspaceRole::Admin).unwrap(),  r#""admin""#);
-    assert_eq!(serde_json::to_string(&WorkspaceRole::Owner).unwrap(),  r#""owner""#);
+    assert_eq!(
+        serde_json::to_string(&WorkspaceRole::Viewer).unwrap(),
+        r#""viewer""#
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkspaceRole::Member).unwrap(),
+        r#""member""#
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkspaceRole::Admin).unwrap(),
+        r#""admin""#
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkspaceRole::Owner).unwrap(),
+        r#""owner""#
+    );
 }
 
 #[test]
@@ -186,16 +216,14 @@ fn workspace_role_deserialises_from_snake_case_strings() {
 async fn four_members_with_owner_admin_member_viewer_all_stored() {
     let store = InMemoryStore::new();
 
-    add_member(&store, "e1", "op_owner",  WorkspaceRole::Owner).await;
-    add_member(&store, "e2", "op_admin",  WorkspaceRole::Admin).await;
+    add_member(&store, "e1", "op_owner", WorkspaceRole::Owner).await;
+    add_member(&store, "e2", "op_admin", WorkspaceRole::Admin).await;
     add_member(&store, "e3", "op_member", WorkspaceRole::Member).await;
     add_member(&store, "e4", "op_viewer", WorkspaceRole::Viewer).await;
 
-    let members = WorkspaceMembershipReadModel::list_workspace_members(
-        &store, WS_ID,
-    )
-    .await
-    .unwrap();
+    let members = WorkspaceMembershipReadModel::list_workspace_members(&store, WS_ID)
+        .await
+        .unwrap();
 
     assert_eq!(members.len(), 4, "all 4 members must be in the read model");
     let roles: Vec<WorkspaceRole> = members.iter().map(|m| m.role).collect();
@@ -209,13 +237,13 @@ async fn four_members_with_owner_admin_member_viewer_all_stored() {
 async fn get_member_returns_correct_role_per_operator() {
     let store = InMemoryStore::new();
 
-    add_member(&store, "e1", "op_owner",  WorkspaceRole::Owner).await;
-    add_member(&store, "e2", "op_admin",  WorkspaceRole::Admin).await;
+    add_member(&store, "e1", "op_owner", WorkspaceRole::Owner).await;
+    add_member(&store, "e2", "op_admin", WorkspaceRole::Admin).await;
     add_member(&store, "e3", "op_member", WorkspaceRole::Member).await;
     add_member(&store, "e4", "op_viewer", WorkspaceRole::Viewer).await;
 
-    assert_eq!(role_of(&store, "op_owner").await,  WorkspaceRole::Owner);
-    assert_eq!(role_of(&store, "op_admin").await,  WorkspaceRole::Admin);
+    assert_eq!(role_of(&store, "op_owner").await, WorkspaceRole::Owner);
+    assert_eq!(role_of(&store, "op_admin").await, WorkspaceRole::Admin);
     assert_eq!(role_of(&store, "op_member").await, WorkspaceRole::Member);
     assert_eq!(role_of(&store, "op_viewer").await, WorkspaceRole::Viewer);
 }
@@ -226,45 +254,69 @@ async fn get_member_returns_correct_role_per_operator() {
 async fn owner_and_admin_satisfy_admin_minimum_from_read_model() {
     let store = InMemoryStore::new();
 
-    add_member(&store, "e1", "op_owner",  WorkspaceRole::Owner).await;
-    add_member(&store, "e2", "op_admin",  WorkspaceRole::Admin).await;
+    add_member(&store, "e1", "op_owner", WorkspaceRole::Owner).await;
+    add_member(&store, "e2", "op_admin", WorkspaceRole::Admin).await;
     add_member(&store, "e3", "op_member", WorkspaceRole::Member).await;
     add_member(&store, "e4", "op_viewer", WorkspaceRole::Viewer).await;
 
     // Owner and Admin pass the Admin gate.
-    assert!(role_of(&store, "op_owner").await.has_at_least(WorkspaceRole::Admin),
-            "Owner ≥ Admin");
-    assert!(role_of(&store, "op_admin").await.has_at_least(WorkspaceRole::Admin),
-            "Admin ≥ Admin");
+    assert!(
+        role_of(&store, "op_owner")
+            .await
+            .has_at_least(WorkspaceRole::Admin),
+        "Owner ≥ Admin"
+    );
+    assert!(
+        role_of(&store, "op_admin")
+            .await
+            .has_at_least(WorkspaceRole::Admin),
+        "Admin ≥ Admin"
+    );
 
     // Member and Viewer do not.
-    assert!(!role_of(&store, "op_member").await.has_at_least(WorkspaceRole::Admin),
-            "Member < Admin");
-    assert!(!role_of(&store, "op_viewer").await.has_at_least(WorkspaceRole::Admin),
-            "Viewer < Admin");
+    assert!(
+        !role_of(&store, "op_member")
+            .await
+            .has_at_least(WorkspaceRole::Admin),
+        "Member < Admin"
+    );
+    assert!(
+        !role_of(&store, "op_viewer")
+            .await
+            .has_at_least(WorkspaceRole::Admin),
+        "Viewer < Admin"
+    );
 }
 
 #[tokio::test]
 async fn only_owner_satisfies_owner_minimum_from_read_model() {
     let store = InMemoryStore::new();
 
-    add_member(&store, "e1", "op_owner",  WorkspaceRole::Owner).await;
-    add_member(&store, "e2", "op_admin",  WorkspaceRole::Admin).await;
+    add_member(&store, "e1", "op_owner", WorkspaceRole::Owner).await;
+    add_member(&store, "e2", "op_admin", WorkspaceRole::Admin).await;
     add_member(&store, "e3", "op_member", WorkspaceRole::Member).await;
     add_member(&store, "e4", "op_viewer", WorkspaceRole::Viewer).await;
 
-    assert!( role_of(&store, "op_owner").await.has_at_least(WorkspaceRole::Owner));
-    assert!(!role_of(&store, "op_admin").await.has_at_least(WorkspaceRole::Owner));
-    assert!(!role_of(&store, "op_member").await.has_at_least(WorkspaceRole::Owner));
-    assert!(!role_of(&store, "op_viewer").await.has_at_least(WorkspaceRole::Owner));
+    assert!(role_of(&store, "op_owner")
+        .await
+        .has_at_least(WorkspaceRole::Owner));
+    assert!(!role_of(&store, "op_admin")
+        .await
+        .has_at_least(WorkspaceRole::Owner));
+    assert!(!role_of(&store, "op_member")
+        .await
+        .has_at_least(WorkspaceRole::Owner));
+    assert!(!role_of(&store, "op_viewer")
+        .await
+        .has_at_least(WorkspaceRole::Owner));
 }
 
 #[tokio::test]
 async fn all_four_members_satisfy_viewer_minimum() {
     let store = InMemoryStore::new();
 
-    add_member(&store, "e1", "op_owner",  WorkspaceRole::Owner).await;
-    add_member(&store, "e2", "op_admin",  WorkspaceRole::Admin).await;
+    add_member(&store, "e1", "op_owner", WorkspaceRole::Owner).await;
+    add_member(&store, "e2", "op_admin", WorkspaceRole::Admin).await;
     add_member(&store, "e3", "op_member", WorkspaceRole::Member).await;
     add_member(&store, "e4", "op_viewer", WorkspaceRole::Viewer).await;
 
@@ -286,19 +338,21 @@ async fn all_four_members_satisfy_viewer_minimum() {
 async fn removing_member_returns_none_from_read_model() {
     let store = InMemoryStore::new();
 
-    add_member(&store, "e1", "op_owner",  WorkspaceRole::Owner).await;
+    add_member(&store, "e1", "op_owner", WorkspaceRole::Owner).await;
     add_member(&store, "e2", "op_member", WorkspaceRole::Member).await;
 
     // Confirm the member exists before removal.
     let before = WorkspaceMembershipReadModel::get_member(&store, &workspace_key(), "op_member")
-        .await.unwrap();
+        .await
+        .unwrap();
     assert!(before.is_some(), "op_member should exist before removal");
 
     remove_member(&store, "e3", "op_member").await;
 
     // Read-model must reflect the removal.
     let after = WorkspaceMembershipReadModel::get_member(&store, &workspace_key(), "op_member")
-        .await.unwrap();
+        .await
+        .unwrap();
     assert!(after.is_none(), "op_member must be absent after removal");
 }
 
@@ -306,22 +360,23 @@ async fn removing_member_returns_none_from_read_model() {
 async fn removing_one_member_does_not_affect_others() {
     let store = InMemoryStore::new();
 
-    add_member(&store, "e1", "op_owner",  WorkspaceRole::Owner).await;
-    add_member(&store, "e2", "op_admin",  WorkspaceRole::Admin).await;
+    add_member(&store, "e1", "op_owner", WorkspaceRole::Owner).await;
+    add_member(&store, "e2", "op_admin", WorkspaceRole::Admin).await;
     add_member(&store, "e3", "op_member", WorkspaceRole::Member).await;
     add_member(&store, "e4", "op_viewer", WorkspaceRole::Viewer).await;
 
     remove_member(&store, "e5", "op_member").await;
 
     let remaining = WorkspaceMembershipReadModel::list_workspace_members(&store, WS_ID)
-        .await.unwrap();
+        .await
+        .unwrap();
     assert_eq!(remaining.len(), 3, "3 members should remain");
 
     let ids: Vec<&str> = remaining.iter().map(|m| m.operator_id.as_str()).collect();
     assert!(!ids.contains(&"op_member"), "op_member must be gone");
-    assert!(ids.contains(&"op_owner"),   "op_owner must remain");
-    assert!(ids.contains(&"op_admin"),   "op_admin must remain");
-    assert!(ids.contains(&"op_viewer"),  "op_viewer must remain");
+    assert!(ids.contains(&"op_owner"), "op_owner must remain");
+    assert!(ids.contains(&"op_admin"), "op_admin must remain");
+    assert!(ids.contains(&"op_viewer"), "op_viewer must remain");
 }
 
 #[tokio::test]
@@ -332,16 +387,22 @@ async fn removed_admin_fails_admin_gate() {
 
     // Confirm access before removal.
     let role_before = role_of(&store, "op_admin").await;
-    assert!(role_before.has_at_least(WorkspaceRole::Admin), "should pass gate before removal");
+    assert!(
+        role_before.has_at_least(WorkspaceRole::Admin),
+        "should pass gate before removal"
+    );
 
     remove_member(&store, "e2", "op_admin").await;
 
     // After removal: no record → RFC 008 gate must deny.
     let record = WorkspaceMembershipReadModel::get_member(&store, &workspace_key(), "op_admin")
-        .await.unwrap();
+        .await
+        .unwrap();
     assert!(record.is_none(), "removed member must have no record");
 
-    let passes = record.map(|m| m.role.has_at_least(WorkspaceRole::Admin)).unwrap_or(false);
+    let passes = record
+        .map(|m| m.role.has_at_least(WorkspaceRole::Admin))
+        .unwrap_or(false);
     assert!(!passes, "removed member must not pass the admin gate");
 }
 
@@ -351,17 +412,17 @@ async fn removed_admin_fails_admin_gate() {
 async fn workspace_with_no_events_has_empty_member_list() {
     let store = InMemoryStore::new();
     let members = WorkspaceMembershipReadModel::list_workspace_members(&store, WS_ID)
-        .await.unwrap();
+        .await
+        .unwrap();
     assert!(members.is_empty());
 }
 
 #[tokio::test]
 async fn get_member_returns_none_for_unknown_operator() {
     let store = InMemoryStore::new();
-    let record = WorkspaceMembershipReadModel::get_member(
-        &store, &workspace_key(), "no_such_op",
-    )
-    .await.unwrap();
+    let record = WorkspaceMembershipReadModel::get_member(&store, &workspace_key(), "no_such_op")
+        .await
+        .unwrap();
     assert!(record.is_none());
 }
 
@@ -391,17 +452,20 @@ async fn remove_member_persists_workspace_member_removed_event() {
         matches!(&e.envelope.payload, RuntimeEvent::WorkspaceMemberRemoved(ev)
             if ev.member_id.as_str() == "op_rem")
     });
-    assert!(has_removed, "WorkspaceMemberRemoved event must be in the log");
+    assert!(
+        has_removed,
+        "WorkspaceMemberRemoved event must be in the log"
+    );
 }
 
 #[tokio::test]
 async fn event_log_positions_increase_monotonically_across_membership_ops() {
     let store = InMemoryStore::new();
 
-    add_member(&store,    "e1", "op_a", WorkspaceRole::Owner).await;
-    add_member(&store,    "e2", "op_b", WorkspaceRole::Member).await;
+    add_member(&store, "e1", "op_a", WorkspaceRole::Owner).await;
+    add_member(&store, "e2", "op_b", WorkspaceRole::Member).await;
     remove_member(&store, "e3", "op_b").await;
-    add_member(&store,    "e4", "op_c", WorkspaceRole::Admin).await;
+    add_member(&store, "e4", "op_c", WorkspaceRole::Admin).await;
 
     let all = store.read_stream(None, 100).await.unwrap();
     assert_eq!(all.len(), 4);

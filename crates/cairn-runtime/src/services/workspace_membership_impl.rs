@@ -94,17 +94,18 @@ where
             });
         }
 
-        Ok(
-            WorkspaceMembershipReadModel::list_workspace_members(self.store.as_ref(), workspace_key.workspace_id.as_str())
-                .await?
-                .into_iter()
-                .map(|rec| WorkspaceMembership {
-                    workspace_id: workspace_key.workspace_id.clone(),
-                    operator_id: cairn_domain::OperatorId::new(rec.operator_id),
-                    role: rec.role,
-                })
-                .collect(),
+        Ok(WorkspaceMembershipReadModel::list_workspace_members(
+            self.store.as_ref(),
+            workspace_key.workspace_id.as_str(),
         )
+        .await?
+        .into_iter()
+        .map(|rec| WorkspaceMembership {
+            workspace_id: workspace_key.workspace_id.clone(),
+            operator_id: cairn_domain::OperatorId::new(rec.operator_id),
+            role: rec.role,
+        })
+        .collect())
     }
 
     async fn remove_member(

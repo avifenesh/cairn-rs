@@ -2,11 +2,14 @@
 
 use std::sync::Arc;
 
-use cairn_domain::{ApprovalDecision, ApprovalId, ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId, TenantId, WorkspaceRole};
-use cairn_runtime::{PromptReleaseService, PromptReleaseServiceImpl};
+use cairn_domain::{
+    ApprovalDecision, ApprovalId, ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId,
+    TenantId, WorkspaceRole,
+};
 use cairn_runtime::approval_policies::ApprovalPolicyService;
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::services::{ApprovalPolicyServiceImpl, ApprovalServiceImpl};
+use cairn_runtime::{PromptReleaseService, PromptReleaseServiceImpl};
 use cairn_store::InMemoryStore;
 
 fn project() -> ProjectKey {
@@ -58,7 +61,12 @@ async fn prompt_approval_flow_full_happy_path() {
     // Create and advance a release to approved state.
     let release_id = PromptReleaseId::new("rel_approval_test");
     releases
-        .create(&project(), release_id.clone(), asset(), PromptVersionId::new("v1"))
+        .create(
+            &project(),
+            release_id.clone(),
+            asset(),
+            PromptVersionId::new("v1"),
+        )
         .await
         .unwrap();
     releases.transition(&release_id, "approved").await.unwrap();
@@ -83,18 +91,21 @@ async fn prompt_approval_flow_full_happy_path() {
 
     // Request approval.
     let approval_record = releases.request_approval(&release_id).await.unwrap();
-    assert!(approval_record.decision.is_none(), "new approval must be pending");
+    assert!(
+        approval_record.decision.is_none(),
+        "new approval must be pending"
+    );
 
     // Try activate again — still blocked (approval is still pending).
     let still_blocked = releases.activate(&release_id).await;
-    assert!(still_blocked.is_err(), "activate must be blocked while approval is pending");
+    assert!(
+        still_blocked.is_err(),
+        "activate must be blocked while approval is pending"
+    );
 
     // Resolve the approval as Approved.
     approvals
-        .resolve(
-            &approval_record.approval_id,
-            ApprovalDecision::Approved,
-        )
+        .resolve(&approval_record.approval_id, ApprovalDecision::Approved)
         .await
         .unwrap();
 
@@ -109,17 +120,32 @@ async fn prompt_approval_flow_activation_blocked_until_approved() {
     let (_store, releases, policies, approvals) = setup().await;
 
     let policy = policies
-        .create(tenant(), "RequireApproval".to_owned(), 1, vec![], None, None)
+        .create(
+            tenant(),
+            "RequireApproval".to_owned(),
+            1,
+            vec![],
+            None,
+            None,
+        )
         .await
         .unwrap();
 
     let release_id = PromptReleaseId::new("rel_block_test");
     releases
-        .create(&project(), release_id.clone(), PromptAssetId::new("asset_block"), PromptVersionId::new("v1"))
+        .create(
+            &project(),
+            release_id.clone(),
+            PromptAssetId::new("asset_block"),
+            PromptVersionId::new("v1"),
+        )
         .await
         .unwrap();
     releases.transition(&release_id, "approved").await.unwrap();
-    releases.attach_approval_policy(&release_id, &policy.policy_id).await.unwrap();
+    releases
+        .attach_approval_policy(&release_id, &policy.policy_id)
+        .await
+        .unwrap();
 
     // Request approval — get approval_id back.
     let approval = releases.request_approval(&release_id).await.unwrap();
@@ -128,7 +154,10 @@ async fn prompt_approval_flow_activation_blocked_until_approved() {
     assert!(releases.activate(&release_id).await.is_err());
 
     // Approve → unblocked.
-    approvals.resolve(&approval.approval_id, ApprovalDecision::Approved).await.unwrap();
+    approvals
+        .resolve(&approval.approval_id, ApprovalDecision::Approved)
+        .await
+        .unwrap();
     let record = releases.activate(&release_id).await.unwrap();
     assert_eq!(record.state, "active");
 }
@@ -145,14 +174,25 @@ async fn prompt_approval_flow_rejected_approval_prevents_activation() {
 
     let release_id = PromptReleaseId::new("rel_reject_test");
     releases
-        .create(&project(), release_id.clone(), PromptAssetId::new("asset_reject"), PromptVersionId::new("v1"))
+        .create(
+            &project(),
+            release_id.clone(),
+            PromptAssetId::new("asset_reject"),
+            PromptVersionId::new("v1"),
+        )
         .await
         .unwrap();
     releases.transition(&release_id, "approved").await.unwrap();
-    releases.attach_approval_policy(&release_id, &policy.policy_id).await.unwrap();
+    releases
+        .attach_approval_policy(&release_id, &policy.policy_id)
+        .await
+        .unwrap();
 
     let approval = releases.request_approval(&release_id).await.unwrap();
-    approvals.resolve(&approval.approval_id, ApprovalDecision::Rejected).await.unwrap();
+    approvals
+        .resolve(&approval.approval_id, ApprovalDecision::Rejected)
+        .await
+        .unwrap();
 
     let result = releases.activate(&release_id).await;
     assert!(result.is_err(), "rejected approval must block activation");
@@ -169,7 +209,12 @@ async fn prompt_approval_flow_no_policy_activates_without_approval() {
 
     let release_id = PromptReleaseId::new("rel_no_policy");
     releases
-        .create(&project(), release_id.clone(), PromptAssetId::new("asset_nopol"), PromptVersionId::new("v1"))
+        .create(
+            &project(),
+            release_id.clone(),
+            PromptAssetId::new("asset_nopol"),
+            PromptVersionId::new("v1"),
+        )
         .await
         .unwrap();
     releases.transition(&release_id, "approved").await.unwrap();
@@ -191,13 +236,27 @@ async fn prompt_approval_flow_request_returns_pending_approval() {
 
     let release_id = PromptReleaseId::new("rel_pending_test");
     releases
-        .create(&project(), release_id.clone(), PromptAssetId::new("asset_pending"), PromptVersionId::new("v1"))
+        .create(
+            &project(),
+            release_id.clone(),
+            PromptAssetId::new("asset_pending"),
+            PromptVersionId::new("v1"),
+        )
         .await
         .unwrap();
-    releases.attach_approval_policy(&release_id, &policy.policy_id).await.unwrap();
+    releases
+        .attach_approval_policy(&release_id, &policy.policy_id)
+        .await
+        .unwrap();
 
     let approval = releases.request_approval(&release_id).await.unwrap();
 
-    assert!(approval.decision.is_none(), "new approval must be pending (no decision)");
-    assert!(!approval.approval_id.as_str().is_empty(), "approval_id must be set");
+    assert!(
+        approval.decision.is_none(),
+        "new approval must be pending (no decision)"
+    );
+    assert!(
+        !approval.approval_id.as_str().is_empty(),
+        "approval_id must be set"
+    );
 }

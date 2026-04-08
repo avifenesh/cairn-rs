@@ -39,58 +39,58 @@ use crate::context::{
 pub enum OrchestratorEvent {
     /// The orchestrator loop has started for a run.
     Started {
-        run_id:     RunId,
-        goal:       String,
+        run_id: RunId,
+        goal: String,
         agent_type: String,
-        iteration:  u32,
+        iteration: u32,
     },
     /// The GATHER phase completed successfully.
     GatherCompleted {
-        run_id:         RunId,
-        iteration:      u32,
-        memory_chunks:  usize,
-        recent_events:  usize,
+        run_id: RunId,
+        iteration: u32,
+        memory_chunks: usize,
+        recent_events: usize,
     },
     /// The DECIDE phase completed — proposals are known.
     DecideCompleted {
-        run_id:           RunId,
-        iteration:        u32,
-        proposal_count:   usize,
-        first_action:     String,
-        confidence:       f64,
-        latency_ms:       u64,
+        run_id: RunId,
+        iteration: u32,
+        proposal_count: usize,
+        first_action: String,
+        confidence: f64,
+        latency_ms: u64,
     },
     /// A tool call is about to be dispatched.
     ToolCalled {
-        run_id:    RunId,
+        run_id: RunId,
         iteration: u32,
         tool_name: String,
-        args:      Option<serde_json::Value>,
+        args: Option<serde_json::Value>,
     },
     /// A tool call returned (success or failure).
     ToolResult {
-        run_id:    RunId,
+        run_id: RunId,
         iteration: u32,
         tool_name: String,
         succeeded: bool,
-        output:    Option<serde_json::Value>,
-        error:     Option<String>,
+        output: Option<serde_json::Value>,
+        error: Option<String>,
     },
     /// One full iteration (gather + decide + execute) completed.
     StepCompleted {
-        run_id:     RunId,
-        iteration:  u32,
+        run_id: RunId,
+        iteration: u32,
         /// Signal from the execute phase: "continue", "done", "wait_approval", …
-        signal:     String,
-        succeeded:  usize,
-        failed:     usize,
+        signal: String,
+        succeeded: usize,
+        failed: usize,
     },
     /// The loop has finished (terminal or suspended).
     Finished {
-        run_id:      RunId,
+        run_id: RunId,
         termination: String,
         /// Human-readable summary (from `LoopTermination::Completed` or error reason).
-        detail:      Option<String>,
+        detail: Option<String>,
     },
 }
 
@@ -116,28 +116,31 @@ pub trait OrchestratorEventEmitter: Send + Sync {
     /// `tool_name` and `args` are taken from the `ActionProposal`.
     async fn on_tool_called(
         &self,
-        _ctx:       &OrchestrationContext,
+        _ctx: &OrchestrationContext,
         _tool_name: &str,
-        _args:      Option<&serde_json::Value>,
-    ) {}
+        _args: Option<&serde_json::Value>,
+    ) {
+    }
 
     /// Called after a tool invocation returns (success or failure).
     async fn on_tool_result(
         &self,
-        _ctx:       &OrchestrationContext,
+        _ctx: &OrchestrationContext,
         _tool_name: &str,
         _succeeded: bool,
-        _output:    Option<&serde_json::Value>,
-        _error:     Option<&str>,
-    ) {}
+        _output: Option<&serde_json::Value>,
+        _error: Option<&str>,
+    ) {
+    }
 
     /// Called after EXECUTE completes each iteration (loop signal known).
     async fn on_step_completed(
         &self,
-        _ctx:     &OrchestrationContext,
-        _decide:  &DecideOutput,
+        _ctx: &OrchestrationContext,
+        _decide: &DecideOutput,
         _execute: &ExecuteOutcome,
-    ) {}
+    ) {
+    }
 
     /// Called once after the loop terminates (terminal or suspended).
     async fn on_finished(&self, _ctx: &OrchestrationContext, _termination: &LoopTermination) {}
@@ -185,17 +188,17 @@ impl ChannelEmitter {
 impl OrchestratorEventEmitter for ChannelEmitter {
     async fn on_started(&self, ctx: &OrchestrationContext) {
         self.send(OrchestratorEvent::Started {
-            run_id:     ctx.run_id.clone(),
-            goal:       ctx.goal.clone(),
+            run_id: ctx.run_id.clone(),
+            goal: ctx.goal.clone(),
             agent_type: ctx.agent_type.clone(),
-            iteration:  ctx.iteration,
+            iteration: ctx.iteration,
         });
     }
 
     async fn on_gather_completed(&self, ctx: &OrchestrationContext, gather: &GatherOutput) {
         self.send(OrchestratorEvent::GatherCompleted {
-            run_id:        ctx.run_id.clone(),
-            iteration:     ctx.iteration,
+            run_id: ctx.run_id.clone(),
+            iteration: ctx.iteration,
             memory_chunks: gather.memory_chunks.len(),
             recent_events: gather.recent_events.len(),
         });
@@ -203,65 +206,71 @@ impl OrchestratorEventEmitter for ChannelEmitter {
 
     async fn on_decide_completed(&self, ctx: &OrchestrationContext, decide: &DecideOutput) {
         self.send(OrchestratorEvent::DecideCompleted {
-            run_id:         ctx.run_id.clone(),
-            iteration:      ctx.iteration,
+            run_id: ctx.run_id.clone(),
+            iteration: ctx.iteration,
             proposal_count: decide.proposals.len(),
-            first_action:   decide.proposals.first()
+            first_action: decide
+                .proposals
+                .first()
                 .map(|p| format!("{:?}", p.action_type).to_lowercase())
                 .unwrap_or_else(|| "none".to_owned()),
-            confidence:     decide.calibrated_confidence,
-            latency_ms:     decide.latency_ms,
+            confidence: decide.calibrated_confidence,
+            latency_ms: decide.latency_ms,
         });
     }
 
     async fn on_tool_called(
         &self,
-        ctx:       &OrchestrationContext,
+        ctx: &OrchestrationContext,
         tool_name: &str,
-        args:      Option<&serde_json::Value>,
+        args: Option<&serde_json::Value>,
     ) {
         self.send(OrchestratorEvent::ToolCalled {
-            run_id:    ctx.run_id.clone(),
+            run_id: ctx.run_id.clone(),
             iteration: ctx.iteration,
             tool_name: tool_name.to_owned(),
-            args:      args.cloned(),
+            args: args.cloned(),
         });
     }
 
     async fn on_tool_result(
         &self,
-        ctx:       &OrchestrationContext,
+        ctx: &OrchestrationContext,
         tool_name: &str,
         succeeded: bool,
-        output:    Option<&serde_json::Value>,
-        error:     Option<&str>,
+        output: Option<&serde_json::Value>,
+        error: Option<&str>,
     ) {
         self.send(OrchestratorEvent::ToolResult {
-            run_id:    ctx.run_id.clone(),
+            run_id: ctx.run_id.clone(),
             iteration: ctx.iteration,
             tool_name: tool_name.to_owned(),
             succeeded,
-            output:    output.cloned(),
-            error:     error.map(str::to_owned),
+            output: output.cloned(),
+            error: error.map(str::to_owned),
         });
     }
 
     async fn on_step_completed(
         &self,
-        ctx:     &OrchestrationContext,
+        ctx: &OrchestrationContext,
         _decide: &DecideOutput,
         execute: &ExecuteOutcome,
     ) {
         use crate::context::ActionStatus;
-        let succeeded = execute.results.iter()
+        let succeeded = execute
+            .results
+            .iter()
             .filter(|r| r.status == ActionStatus::Succeeded)
             .count();
-        let failed = execute.results.iter()
+        let failed = execute
+            .results
+            .iter()
             .filter(|r| matches!(r.status, ActionStatus::Failed { .. }))
             .count();
         let signal = format!("{:?}", execute.loop_signal).to_lowercase();
         self.send(OrchestratorEvent::StepCompleted {
-            run_id:    ctx.run_id.clone(),
+            run_id: ctx.run_id.clone(),
             iteration: ctx.iteration,
             signal,
             succeeded,
@@ -271,21 +280,22 @@ impl OrchestratorEventEmitter for ChannelEmitter {
 
     async fn on_finished(&self, ctx: &OrchestrationContext, termination: &LoopTermination) {
         let (term_str, detail) = match termination {
-            LoopTermination::Completed { summary } =>
-                ("completed".to_owned(), Some(summary.clone())),
-            LoopTermination::Failed { reason } =>
-                ("failed".to_owned(), Some(reason.clone())),
-            LoopTermination::MaxIterationsReached =>
-                ("max_iterations_reached".to_owned(), None),
-            LoopTermination::TimedOut =>
-                ("timed_out".to_owned(), None),
-            LoopTermination::WaitingApproval { approval_id } =>
-                ("waiting_approval".to_owned(), Some(approval_id.to_string())),
-            LoopTermination::WaitingSubagent { child_task_id } =>
-                ("waiting_subagent".to_owned(), Some(child_task_id.to_string())),
+            LoopTermination::Completed { summary } => {
+                ("completed".to_owned(), Some(summary.clone()))
+            }
+            LoopTermination::Failed { reason } => ("failed".to_owned(), Some(reason.clone())),
+            LoopTermination::MaxIterationsReached => ("max_iterations_reached".to_owned(), None),
+            LoopTermination::TimedOut => ("timed_out".to_owned(), None),
+            LoopTermination::WaitingApproval { approval_id } => {
+                ("waiting_approval".to_owned(), Some(approval_id.to_string()))
+            }
+            LoopTermination::WaitingSubagent { child_task_id } => (
+                "waiting_subagent".to_owned(),
+                Some(child_task_id.to_string()),
+            ),
         };
         self.send(OrchestratorEvent::Finished {
-            run_id:      ctx.run_id.clone(),
+            run_id: ctx.run_id.clone(),
             termination: term_str,
             detail,
         });
@@ -297,42 +307,45 @@ impl OrchestratorEventEmitter for ChannelEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
-    use cairn_domain::{ProjectKey, RunId, SessionId};
     use crate::context::{
         DecideOutput, ExecuteOutcome, GatherOutput, LoopSignal, LoopTermination,
         OrchestrationContext,
     };
+    use cairn_domain::{ProjectKey, RunId, SessionId};
+    use std::sync::{Arc, Mutex};
 
     fn ctx() -> OrchestrationContext {
         OrchestrationContext {
-            project:               ProjectKey::new("t", "w", "p"),
-            session_id:            SessionId::new("sess"),
-            run_id:                RunId::new("run"),
-            task_id:               None,
-            iteration:             0,
-            goal:                  "test".to_owned(),
-            agent_type:            "test_agent".to_owned(),
-            run_started_at_ms:     0,
+            project: ProjectKey::new("t", "w", "p"),
+            session_id: SessionId::new("sess"),
+            run_id: RunId::new("run"),
+            task_id: None,
+            iteration: 0,
+            goal: "test".to_owned(),
+            agent_type: "test_agent".to_owned(),
+            run_started_at_ms: 0,
             discovered_tool_names: vec![],
         }
     }
 
     fn empty_decide() -> DecideOutput {
         DecideOutput {
-            raw_response:          "{}".into(),
-            proposals:             vec![],
+            raw_response: "{}".into(),
+            proposals: vec![],
             calibrated_confidence: 0.9,
-            requires_approval:     false,
-            model_id:              "stub".into(),
-            latency_ms:            0,
-            input_tokens:          None,
-            output_tokens:         None,
+            requires_approval: false,
+            model_id: "stub".into(),
+            latency_ms: 0,
+            input_tokens: None,
+            output_tokens: None,
         }
     }
 
     fn empty_execute() -> ExecuteOutcome {
-        ExecuteOutcome { results: vec![], loop_signal: LoopSignal::Continue }
+        ExecuteOutcome {
+            results: vec![],
+            loop_signal: LoopSignal::Continue,
+        }
     }
 
     // ── NoOpEmitter compiles and does nothing ─────────────────────────────────
@@ -348,9 +361,16 @@ mod tests {
         e.on_gather_completed(&ctx, &g).await;
         e.on_decide_completed(&ctx, &d).await;
         e.on_tool_called(&ctx, "memory_search", None).await;
-        e.on_tool_result(&ctx, "memory_search", true, None, None).await;
+        e.on_tool_result(&ctx, "memory_search", true, None, None)
+            .await;
         e.on_step_completed(&ctx, &d, &x).await;
-        e.on_finished(&ctx, &LoopTermination::Completed { summary: "done".into() }).await;
+        e.on_finished(
+            &ctx,
+            &LoopTermination::Completed {
+                summary: "done".into(),
+            },
+        )
+        .await;
     }
 
     // ── ChannelEmitter serialises events correctly ────────────────────────────
@@ -387,10 +407,14 @@ mod tests {
         let (tx, mut rx) = tokio::sync::broadcast::channel::<String>(16);
         let emitter = ChannelEmitter::new(tx);
 
-        emitter.on_finished(
-            &ctx(),
-            &LoopTermination::Completed { summary: "all done".into() },
-        ).await;
+        emitter
+            .on_finished(
+                &ctx(),
+                &LoopTermination::Completed {
+                    summary: "all done".into(),
+                },
+            )
+            .await;
 
         let msg = rx.try_recv().unwrap();
         let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
@@ -419,8 +443,12 @@ mod tests {
     struct CollectingEmitter(Mutex<Vec<String>>);
 
     impl CollectingEmitter {
-        fn new() -> Arc<Self> { Arc::new(Self(Mutex::new(vec![]))) }
-        fn events(&self) -> Vec<String> { self.0.lock().unwrap().clone() }
+        fn new() -> Arc<Self> {
+            Arc::new(Self(Mutex::new(vec![])))
+        }
+        fn events(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
     }
 
     #[async_trait]
@@ -434,7 +462,12 @@ mod tests {
         async fn on_decide_completed(&self, _: &OrchestrationContext, _: &DecideOutput) {
             self.0.lock().unwrap().push("decide_completed".into());
         }
-        async fn on_step_completed(&self, _: &OrchestrationContext, _: &DecideOutput, _: &ExecuteOutcome) {
+        async fn on_step_completed(
+            &self,
+            _: &OrchestrationContext,
+            _: &DecideOutput,
+            _: &ExecuteOutcome,
+        ) {
             self.0.lock().unwrap().push("step_completed".into());
         }
         async fn on_finished(&self, _: &OrchestrationContext, _: &LoopTermination) {
@@ -448,11 +481,31 @@ mod tests {
         let dyn_e: Arc<dyn OrchestratorEventEmitter> = e.clone();
         let ctx = ctx();
         dyn_e.on_started(&ctx).await;
-        dyn_e.on_gather_completed(&ctx, &GatherOutput::default()).await;
+        dyn_e
+            .on_gather_completed(&ctx, &GatherOutput::default())
+            .await;
         dyn_e.on_decide_completed(&ctx, &empty_decide()).await;
-        dyn_e.on_step_completed(&ctx, &empty_decide(), &empty_execute()).await;
-        dyn_e.on_finished(&ctx, &LoopTermination::Completed { summary: "done".into() }).await;
+        dyn_e
+            .on_step_completed(&ctx, &empty_decide(), &empty_execute())
+            .await;
+        dyn_e
+            .on_finished(
+                &ctx,
+                &LoopTermination::Completed {
+                    summary: "done".into(),
+                },
+            )
+            .await;
         let events = e.events();
-        assert_eq!(events, vec!["started", "gather_completed", "decide_completed", "step_completed", "finished"]);
+        assert_eq!(
+            events,
+            vec![
+                "started",
+                "gather_completed",
+                "decide_completed",
+                "step_completed",
+                "finished"
+            ]
+        );
     }
 }

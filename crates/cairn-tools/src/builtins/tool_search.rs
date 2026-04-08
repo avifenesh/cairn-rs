@@ -60,9 +60,13 @@ impl ToolSearchTool {
 
 #[async_trait]
 impl ToolHandler for ToolSearchTool {
-    fn name(&self) -> &str { "tool_search" }
+    fn name(&self) -> &str {
+        "tool_search"
+    }
 
-    fn tier(&self) -> ToolTier { ToolTier::Core }
+    fn tier(&self) -> ToolTier {
+        ToolTier::Core
+    }
 
     fn description(&self) -> &str {
         "Discover available tools by capability. \
@@ -93,14 +97,14 @@ impl ToolHandler for ToolSearchTool {
         let query = args["query"]
             .as_str()
             .ok_or_else(|| ToolError::InvalidArgs {
-                field:   "query".into(),
+                field: "query".into(),
                 message: "must be a non-empty string".into(),
             })?
             .trim();
 
         if query.is_empty() {
             return Err(ToolError::InvalidArgs {
-                field:   "query".into(),
+                field: "query".into(),
                 message: "query must not be empty".into(),
             });
         }
@@ -118,11 +122,13 @@ impl ToolHandler for ToolSearchTool {
         let total = matches.len();
         let result_json: Vec<Value> = matches
             .into_iter()
-            .map(|d| serde_json::json!({
-                "name":              d.name,
-                "description":       d.description,
-                "parameters_schema": d.parameters_schema,
-            }))
+            .map(|d| {
+                serde_json::json!({
+                    "name":              d.name,
+                    "description":       d.description,
+                    "parameters_schema": d.parameters_schema,
+                })
+            })
             .collect();
 
         Ok(ToolResult::ok(serde_json::json!({
@@ -146,16 +152,24 @@ mod tests {
     use super::*;
     use crate::builtins::{ToolError, ToolHandler, ToolResult, ToolTier};
 
-    fn project() -> ProjectKey { ProjectKey::new("t", "w", "p") }
+    fn project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     // ── Deferred test tool ────────────────────────────────────────────────────
 
     struct ShellExecStub;
     #[async_trait]
     impl ToolHandler for ShellExecStub {
-        fn name(&self)        -> &str      { "shell_exec" }
-        fn tier(&self)        -> ToolTier  { ToolTier::Deferred }
-        fn description(&self) -> &str      { "Execute a shell command on the host system." }
+        fn name(&self) -> &str {
+            "shell_exec"
+        }
+        fn tier(&self) -> ToolTier {
+            ToolTier::Deferred
+        }
+        fn description(&self) -> &str {
+            "Execute a shell command on the host system."
+        }
         fn parameters_schema(&self) -> Value {
             serde_json::json!({"type":"object","required":["cmd"],"properties":{"cmd":{"type":"string"}}})
         }
@@ -167,9 +181,15 @@ mod tests {
     struct WebFetchStub;
     #[async_trait]
     impl ToolHandler for WebFetchStub {
-        fn name(&self)        -> &str      { "web_fetch" }
-        fn tier(&self)        -> ToolTier  { ToolTier::Deferred }
-        fn description(&self) -> &str      { "Fetch a URL and return its contents." }
+        fn name(&self) -> &str {
+            "web_fetch"
+        }
+        fn tier(&self) -> ToolTier {
+            ToolTier::Deferred
+        }
+        fn description(&self) -> &str {
+            "Fetch a URL and return its contents."
+        }
         fn parameters_schema(&self) -> Value {
             serde_json::json!({"type":"object","required":["url"],"properties":{"url":{"type":"string"}}})
         }
@@ -202,7 +222,10 @@ mod tests {
         let schema = make_tool().parameters_schema();
         let required = schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v.as_str() == Some("query")));
-        assert!(schema["properties"]["namespace"].is_object(), "namespace must be optional");
+        assert!(
+            schema["properties"]["namespace"].is_object(),
+            "namespace must be optional"
+        );
     }
 
     // ── Successful search ─────────────────────────────────────────────────────
@@ -210,27 +233,44 @@ mod tests {
     #[tokio::test]
     async fn finds_deferred_tool_by_description() {
         let tool = make_tool();
-        let res = tool.execute(&project(), serde_json::json!({
-            "query": "execute shell commands"
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "query": "execute shell commands"
+                }),
+            )
+            .await
+            .unwrap();
 
         let matches = res.output["matches"].as_array().unwrap();
         assert!(!matches.is_empty(), "should find shell_exec");
-        let names: Vec<&str> = matches.iter()
+        let names: Vec<&str> = matches
+            .iter()
             .map(|m| m["name"].as_str().unwrap())
             .collect();
-        assert!(names.contains(&"shell_exec"), "shell_exec must be in results");
+        assert!(
+            names.contains(&"shell_exec"),
+            "shell_exec must be in results"
+        );
     }
 
     #[tokio::test]
     async fn finds_deferred_tool_by_name() {
         let tool = make_tool();
-        let res = tool.execute(&project(), serde_json::json!({
-            "query": "web_fetch"
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "query": "web_fetch"
+                }),
+            )
+            .await
+            .unwrap();
 
         let matches = res.output["matches"].as_array().unwrap();
-        let names: Vec<&str> = matches.iter()
+        let names: Vec<&str> = matches
+            .iter()
             .map(|m| m["name"].as_str().unwrap())
             .collect();
         assert!(names.contains(&"web_fetch"));
@@ -239,9 +279,15 @@ mod tests {
     #[tokio::test]
     async fn result_includes_parameters_schema() {
         let tool = make_tool();
-        let res = tool.execute(&project(), serde_json::json!({
-            "query": "shell"
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "query": "shell"
+                }),
+            )
+            .await
+            .unwrap();
 
         let matches = res.output["matches"].as_array().unwrap();
         assert!(!matches.is_empty());
@@ -253,9 +299,15 @@ mod tests {
     #[tokio::test]
     async fn no_match_returns_empty_list() {
         let tool = make_tool();
-        let res = tool.execute(&project(), serde_json::json!({
-            "query": "quantum_teleportation_xyz_nonexistent"
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "query": "quantum_teleportation_xyz_nonexistent"
+                }),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(res.output["total"], 0);
         assert!(res.output["matches"].as_array().unwrap().is_empty());
@@ -269,29 +321,54 @@ mod tests {
 
         // Both tools match "fetch" broadly, but namespace=shell narrows to none
         // because neither starts with "shell_" — shell_exec starts with "shell"
-        let res = tool.execute(&project(), serde_json::json!({
-            "query": "execute",
-            "namespace": "shell"
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "query": "execute",
+                    "namespace": "shell"
+                }),
+            )
+            .await
+            .unwrap();
 
-        let names: Vec<&str> = res.output["matches"].as_array().unwrap()
-            .iter().map(|m| m["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = res.output["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["name"].as_str().unwrap())
+            .collect();
         // "shell_exec" starts with "shell" so should be included
-        assert!(names.iter().all(|n| n.starts_with("shell")),
-            "namespace filter must only return tools starting with 'shell'");
+        assert!(
+            names.iter().all(|n| n.starts_with("shell")),
+            "namespace filter must only return tools starting with 'shell'"
+        );
     }
 
     #[tokio::test]
     async fn namespace_filter_excludes_non_matching() {
         let tool = make_tool();
-        let res = tool.execute(&project(), serde_json::json!({
-            "query": "fetch",
-            "namespace": "shell"   // web_fetch does not start with "shell"
-        })).await.unwrap();
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "query": "fetch",
+                    "namespace": "shell"   // web_fetch does not start with "shell"
+                }),
+            )
+            .await
+            .unwrap();
 
-        let names: Vec<&str> = res.output["matches"].as_array().unwrap()
-            .iter().map(|m| m["name"].as_str().unwrap()).collect();
-        assert!(!names.contains(&"web_fetch"), "web_fetch must be excluded by namespace=shell");
+        let names: Vec<&str> = res.output["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            !names.contains(&"web_fetch"),
+            "web_fetch must be excluded by namespace=shell"
+        );
     }
 
     // ── Error cases ───────────────────────────────────────────────────────────
@@ -299,14 +376,20 @@ mod tests {
     #[tokio::test]
     async fn missing_query_returns_err() {
         let tool = make_tool();
-        let err = tool.execute(&project(), serde_json::json!({})).await.unwrap_err();
+        let err = tool
+            .execute(&project(), serde_json::json!({}))
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
     #[tokio::test]
     async fn empty_query_returns_err() {
         let tool = make_tool();
-        let err = tool.execute(&project(), serde_json::json!({"query": "  "})).await.unwrap_err();
+        let err = tool
+            .execute(&project(), serde_json::json!({"query": "  "}))
+            .await
+            .unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 
@@ -315,11 +398,19 @@ mod tests {
     #[tokio::test]
     async fn response_has_tip_field() {
         let tool = make_tool();
-        let res = tool.execute(&project(), serde_json::json!({
-            "query": "shell"
-        })).await.unwrap();
-        assert!(res.output["tip"].as_str().unwrap().contains("invoke_tool"),
-            "tip must guide LLM on how to call discovered tools");
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "query": "shell"
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(
+            res.output["tip"].as_str().unwrap().contains("invoke_tool"),
+            "tip must guide LLM on how to call discovered tools"
+        );
     }
 
     #[tokio::test]
@@ -328,17 +419,29 @@ mod tests {
         use crate::builtins::MemorySearchTool;
         let registry = Arc::new(
             BuiltinToolRegistry::new()
-                .register(Arc::new(ShellExecStub))          // Deferred
+                .register(Arc::new(ShellExecStub)) // Deferred
                 .register(Arc::new(MemorySearchTool::new())), // Core
         );
         let tool = ToolSearchTool::new(registry);
         // "memory" could match MemorySearchTool's description — but it's Core
-        let res = tool.execute(&project(), serde_json::json!({
-            "query": "memory"
-        })).await.unwrap();
-        let names: Vec<&str> = res.output["matches"].as_array().unwrap()
-            .iter().map(|m| m["name"].as_str().unwrap()).collect();
-        assert!(!names.contains(&"memory_search"),
-            "Core/Registered tools must never appear in tool_search results");
+        let res = tool
+            .execute(
+                &project(),
+                serde_json::json!({
+                    "query": "memory"
+                }),
+            )
+            .await
+            .unwrap();
+        let names: Vec<&str> = res.output["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            !names.contains(&"memory_search"),
+            "Core/Registered tools must never appear in tool_search results"
+        );
     }
 }

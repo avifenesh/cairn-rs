@@ -26,9 +26,9 @@ impl VoiceFormat {
     /// Canonical MIME type for this format.
     pub fn mime_type(self) -> &'static str {
         match self {
-            VoiceFormat::Wav  => "audio/wav",
-            VoiceFormat::Mp3  => "audio/mpeg",
-            VoiceFormat::Ogg  => "audio/ogg",
+            VoiceFormat::Wav => "audio/wav",
+            VoiceFormat::Mp3 => "audio/mpeg",
+            VoiceFormat::Ogg => "audio/ogg",
             VoiceFormat::Webm => "audio/webm",
         }
     }
@@ -36,9 +36,9 @@ impl VoiceFormat {
     /// Conventional file extension (without leading dot).
     pub fn extension(self) -> &'static str {
         match self {
-            VoiceFormat::Wav  => "wav",
-            VoiceFormat::Mp3  => "mp3",
-            VoiceFormat::Ogg  => "ogg",
+            VoiceFormat::Wav => "wav",
+            VoiceFormat::Mp3 => "mp3",
+            VoiceFormat::Ogg => "ogg",
             VoiceFormat::Webm => "webm",
         }
     }
@@ -59,7 +59,11 @@ pub struct SpeechToTextRequest {
 
 impl SpeechToTextRequest {
     pub fn new(audio_bytes: Vec<u8>, format: VoiceFormat) -> Self {
-        Self { audio_bytes, format, language: None }
+        Self {
+            audio_bytes,
+            format,
+            language: None,
+        }
     }
 
     pub fn with_language(mut self, lang: impl Into<String>) -> Self {
@@ -161,23 +165,28 @@ mod tests {
 
     #[test]
     fn voice_format_mime_types() {
-        assert_eq!(VoiceFormat::Wav.mime_type(),  "audio/wav");
-        assert_eq!(VoiceFormat::Mp3.mime_type(),  "audio/mpeg");
-        assert_eq!(VoiceFormat::Ogg.mime_type(),  "audio/ogg");
+        assert_eq!(VoiceFormat::Wav.mime_type(), "audio/wav");
+        assert_eq!(VoiceFormat::Mp3.mime_type(), "audio/mpeg");
+        assert_eq!(VoiceFormat::Ogg.mime_type(), "audio/ogg");
         assert_eq!(VoiceFormat::Webm.mime_type(), "audio/webm");
     }
 
     #[test]
     fn voice_format_extensions() {
-        assert_eq!(VoiceFormat::Wav.extension(),  "wav");
-        assert_eq!(VoiceFormat::Mp3.extension(),  "mp3");
-        assert_eq!(VoiceFormat::Ogg.extension(),  "ogg");
+        assert_eq!(VoiceFormat::Wav.extension(), "wav");
+        assert_eq!(VoiceFormat::Mp3.extension(), "mp3");
+        assert_eq!(VoiceFormat::Ogg.extension(), "ogg");
         assert_eq!(VoiceFormat::Webm.extension(), "webm");
     }
 
     #[test]
     fn voice_format_serde_roundtrip() {
-        for fmt in [VoiceFormat::Wav, VoiceFormat::Mp3, VoiceFormat::Ogg, VoiceFormat::Webm] {
+        for fmt in [
+            VoiceFormat::Wav,
+            VoiceFormat::Mp3,
+            VoiceFormat::Ogg,
+            VoiceFormat::Webm,
+        ] {
             let json = serde_json::to_string(&fmt).unwrap();
             let back: VoiceFormat = serde_json::from_str(&json).unwrap();
             assert_eq!(back, fmt);
@@ -186,8 +195,7 @@ mod tests {
 
     #[test]
     fn stt_request_builder() {
-        let req = SpeechToTextRequest::new(vec![1, 2, 3], VoiceFormat::Wav)
-            .with_language("en");
+        let req = SpeechToTextRequest::new(vec![1, 2, 3], VoiceFormat::Wav).with_language("en");
         assert_eq!(req.format, VoiceFormat::Wav);
         assert_eq!(req.language.as_deref(), Some("en"));
         assert_eq!(req.audio_bytes.len(), 3);
@@ -228,15 +236,27 @@ mod tests {
 
     #[test]
     fn tts_result_has_audio() {
-        let empty = TextToSpeechResult { audio_bytes: vec![], duration_ms: 0, format: VoiceFormat::Mp3 };
+        let empty = TextToSpeechResult {
+            audio_bytes: vec![],
+            duration_ms: 0,
+            format: VoiceFormat::Mp3,
+        };
         assert!(!empty.has_audio());
-        let filled = TextToSpeechResult { audio_bytes: vec![0u8; 64], duration_ms: 500, format: VoiceFormat::Mp3 };
+        let filled = TextToSpeechResult {
+            audio_bytes: vec![0u8; 64],
+            duration_ms: 500,
+            format: VoiceFormat::Mp3,
+        };
         assert!(filled.has_audio());
     }
 
     #[test]
     fn transcript_segment_fields() {
-        let seg = TranscriptSegment { start_ms: 0, end_ms: 1500, text: "hi there".to_owned() };
+        let seg = TranscriptSegment {
+            start_ms: 0,
+            end_ms: 1500,
+            text: "hi there".to_owned(),
+        };
         assert_eq!(seg.end_ms - seg.start_ms, 1500);
         assert_eq!(seg.text, "hi there");
     }

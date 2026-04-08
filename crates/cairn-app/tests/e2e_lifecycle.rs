@@ -6,13 +6,13 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    ApprovalDecision, ApprovalId, ApprovalRequirement, ProjectKey,
-    RunId, RunState, RuntimeEvent, RunStateChanged, SessionId, StateTransition,
-    TaskId, TaskState, TenantId, WorkspaceId, EventEnvelope, EventSource,
+    ApprovalDecision, ApprovalId, ApprovalRequirement, EventEnvelope, EventSource, ProjectKey,
+    RunId, RunState, RunStateChanged, RuntimeEvent, SessionId, StateTransition, TaskId, TaskState,
+    TenantId, WorkspaceId,
 };
 use cairn_runtime::{
-    ApprovalService, InMemoryServices, ProjectService, QuotaService, RunService,
-    SessionService, TaskService, TenantService, WorkspaceService,
+    ApprovalService, InMemoryServices, ProjectService, QuotaService, RunService, SessionService,
+    TaskService, TenantService, WorkspaceService,
 };
 use cairn_store::projections::{RunReadModel, SessionReadModel, TaskReadModel};
 use cairn_store::EventLog;
@@ -229,11 +229,7 @@ async fn e2e_approval_workflow() {
     assert!(approval.decision.is_none(), "approval should be pending");
 
     // ── 2. Verify pending ────────────────────────────────────────────────
-    let pending = svc
-        .approvals
-        .list_pending(&project, 10, 0)
-        .await
-        .unwrap();
+    let pending = svc.approvals.list_pending(&project, 10, 0).await.unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].approval_id.as_str(), "apr_e2e_1");
 
@@ -246,11 +242,7 @@ async fn e2e_approval_workflow() {
     assert_eq!(resolved.decision, Some(ApprovalDecision::Approved));
 
     // ── 4. Verify resolved ───────────────────────────────────────────────
-    let pending_after = svc
-        .approvals
-        .list_pending(&project, 10, 0)
-        .await
-        .unwrap();
+    let pending_after = svc.approvals.list_pending(&project, 10, 0).await.unwrap();
     assert!(
         pending_after.is_empty(),
         "no pending approvals after resolution"
@@ -275,9 +267,7 @@ async fn e2e_provider_fallback() {
         ProviderBindingSettings,
     };
     use cairn_domain::ProviderModelId;
-    use cairn_runtime::{
-        ProviderHealthTracker, ProviderRouter, RoutableProvider, RoutingConfig,
-    };
+    use cairn_runtime::{ProviderHealthTracker, ProviderRouter, RoutableProvider, RoutingConfig};
 
     /// Mock provider that always fails.
     struct FailingProvider;
@@ -289,7 +279,9 @@ async fn e2e_provider_fallback() {
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
         ) -> Result<GenerationResponse, ProviderAdapterError> {
-            Err(ProviderAdapterError::TransportFailure("primary down".into()))
+            Err(ProviderAdapterError::TransportFailure(
+                "primary down".into(),
+            ))
         }
     }
 
@@ -363,7 +355,10 @@ async fn e2e_provider_fallback() {
         outcome.decision.final_status,
         cairn_domain::providers::RouteDecisionStatus::Selected
     );
-    assert!(outcome.decision.fallback_used, "fallback must have been used");
+    assert!(
+        outcome.decision.fallback_used,
+        "fallback must have been used"
+    );
     assert_eq!(
         outcome.decision.selected_provider_binding_id,
         Some(cairn_domain::ProviderBindingId::new("bind_fallback"))
@@ -391,8 +386,8 @@ async fn e2e_provider_fallback() {
 
 #[tokio::test]
 async fn e2e_entitlement_enforcement() {
-    use cairn_runtime::WorkspaceQuotaManager;
     use cairn_domain::WorkspaceId;
+    use cairn_runtime::WorkspaceQuotaManager;
 
     let (svc, project) = setup().await;
 
@@ -417,7 +412,10 @@ async fn e2e_entitlement_enforcement() {
     for i in 1..=2 {
         let sess_id = SessionId::new(format!("sess_ent_{i}"));
         let run_id = RunId::new(format!("run_ent_{i}"));
-        svc.sessions.create(&project, sess_id.clone()).await.unwrap();
+        svc.sessions
+            .create(&project, sess_id.clone())
+            .await
+            .unwrap();
         svc.runs
             .start(&project, &sess_id, run_id.clone(), None)
             .await
@@ -471,8 +469,8 @@ async fn e2e_template_application() {
     use cairn_api::auth::AuthPrincipal;
     use cairn_api::bootstrap::BootstrapConfig;
     use cairn_app::AppBootstrap;
-    use cairn_domain::OperatorId;
     use cairn_domain::tenancy::TenantKey;
+    use cairn_domain::OperatorId;
     use tower::ServiceExt;
 
     const TOKEN: &str = "e2e-template-token";

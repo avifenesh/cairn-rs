@@ -29,25 +29,44 @@ fn stt_request_wav_format_fields() {
     let req = SpeechToTextRequest::new(fake_wav.clone(), VoiceFormat::Wav);
 
     assert_eq!(req.format, VoiceFormat::Wav, "format must be Wav");
-    assert_eq!(req.audio_bytes.len(), fake_wav.len(), "audio_bytes must be preserved");
-    assert_eq!(req.audio_bytes[0..4], [b'R', b'I', b'F', b'F'], "audio bytes content preserved");
-    assert!(req.language.is_none(), "language must default to None (auto-detect)");
+    assert_eq!(
+        req.audio_bytes.len(),
+        fake_wav.len(),
+        "audio_bytes must be preserved"
+    );
+    assert_eq!(
+        req.audio_bytes[0..4],
+        [b'R', b'I', b'F', b'F'],
+        "audio bytes content preserved"
+    );
+    assert!(
+        req.language.is_none(),
+        "language must default to None (auto-detect)"
+    );
 }
 
 /// SpeechToTextRequest with explicit language hint.
 #[test]
 fn stt_request_with_language_hint() {
-    let req = SpeechToTextRequest::new(vec![1, 2, 3, 4], VoiceFormat::Wav)
-        .with_language("en-US");
+    let req = SpeechToTextRequest::new(vec![1, 2, 3, 4], VoiceFormat::Wav).with_language("en-US");
 
-    assert_eq!(req.language.as_deref(), Some("en-US"), "language must be set");
+    assert_eq!(
+        req.language.as_deref(),
+        Some("en-US"),
+        "language must be set"
+    );
     assert_eq!(req.format, VoiceFormat::Wav);
 }
 
 /// SpeechToTextRequest supports all four VoiceFormat variants.
 #[test]
 fn stt_request_accepts_any_format() {
-    for fmt in [VoiceFormat::Wav, VoiceFormat::Mp3, VoiceFormat::Ogg, VoiceFormat::Webm] {
+    for fmt in [
+        VoiceFormat::Wav,
+        VoiceFormat::Mp3,
+        VoiceFormat::Ogg,
+        VoiceFormat::Webm,
+    ] {
         let req = SpeechToTextRequest::new(vec![0u8; 8], fmt);
         assert_eq!(req.format, fmt, "format must match for {:?}", fmt);
     }
@@ -66,8 +85,16 @@ fn stt_result_serializes_all_fields() {
         confidence: 0.93,
         duration_ms: 2_500,
         segments: vec![
-            TranscriptSegment { start_ms: 0,     end_ms: 1_200, text: "hello world".to_owned() },
-            TranscriptSegment { start_ms: 1_200, end_ms: 2_500, text: "from Wav audio".to_owned() },
+            TranscriptSegment {
+                start_ms: 0,
+                end_ms: 1_200,
+                text: "hello world".to_owned(),
+            },
+            TranscriptSegment {
+                start_ms: 1_200,
+                end_ms: 2_500,
+                text: "from Wav audio".to_owned(),
+            },
         ],
     };
 
@@ -124,9 +151,9 @@ fn tts_request_speed_variants() {
 #[test]
 fn voice_format_serde_round_trip_all_variants() {
     let cases: &[(VoiceFormat, &str)] = &[
-        (VoiceFormat::Wav,  "\"wav\""),
-        (VoiceFormat::Mp3,  "\"mp3\""),
-        (VoiceFormat::Ogg,  "\"ogg\""),
+        (VoiceFormat::Wav, "\"wav\""),
+        (VoiceFormat::Mp3, "\"mp3\""),
+        (VoiceFormat::Ogg, "\"ogg\""),
         (VoiceFormat::Webm, "\"webm\""),
     ];
 
@@ -157,7 +184,11 @@ fn voice_format_survives_nested_json_round_trip() {
     let json = serde_json::to_string(&result).unwrap();
     let recovered: TextToSpeechResult = serde_json::from_str(&json).unwrap();
 
-    assert_eq!(recovered.format, VoiceFormat::Ogg, "format must survive round-trip");
+    assert_eq!(
+        recovered.format,
+        VoiceFormat::Ogg,
+        "format must survive round-trip"
+    );
     assert_eq!(recovered.audio_bytes, vec![1, 2, 3]);
     assert_eq!(recovered.duration_ms, 1_000);
 }
@@ -168,9 +199,21 @@ fn voice_format_survives_nested_json_round_trip() {
 #[test]
 fn transcript_segment_timing_data() {
     let segments = vec![
-        TranscriptSegment { start_ms: 0,     end_ms: 850,   text: "Hello,".to_owned() },
-        TranscriptSegment { start_ms: 850,   end_ms: 1_600, text: "how are".to_owned() },
-        TranscriptSegment { start_ms: 1_600, end_ms: 2_400, text: "you today?".to_owned() },
+        TranscriptSegment {
+            start_ms: 0,
+            end_ms: 850,
+            text: "Hello,".to_owned(),
+        },
+        TranscriptSegment {
+            start_ms: 850,
+            end_ms: 1_600,
+            text: "how are".to_owned(),
+        },
+        TranscriptSegment {
+            start_ms: 1_600,
+            end_ms: 2_400,
+            text: "you today?".to_owned(),
+        },
     ];
 
     // Segments are contiguous (no gaps).
@@ -241,13 +284,28 @@ fn stt_result_confidence_scoring() {
     };
 
     // High confidence above various thresholds.
-    assert!(high_conf.is_reliable(0.80), "0.96 confidence must be reliable at 0.80 threshold");
-    assert!(high_conf.is_reliable(0.95), "0.96 confidence must be reliable at 0.95 threshold");
-    assert!(!high_conf.is_reliable(0.97), "0.96 confidence must fail 0.97 threshold");
+    assert!(
+        high_conf.is_reliable(0.80),
+        "0.96 confidence must be reliable at 0.80 threshold"
+    );
+    assert!(
+        high_conf.is_reliable(0.95),
+        "0.96 confidence must be reliable at 0.95 threshold"
+    );
+    assert!(
+        !high_conf.is_reliable(0.97),
+        "0.96 confidence must fail 0.97 threshold"
+    );
 
     // Low confidence below 0.80 threshold.
-    assert!(!low_conf.is_reliable(0.80), "0.45 confidence must not be reliable at 0.80 threshold");
-    assert!(low_conf.is_reliable(0.40), "0.45 confidence is reliable at 0.40 threshold");
+    assert!(
+        !low_conf.is_reliable(0.80),
+        "0.45 confidence must not be reliable at 0.80 threshold"
+    );
+    assert!(
+        low_conf.is_reliable(0.40),
+        "0.45 confidence is reliable at 0.40 threshold"
+    );
 
     // Empty transcript is never reliable regardless of confidence.
     assert!(
@@ -272,7 +330,8 @@ fn stt_result_confidence_survives_round_trip() {
     assert!(
         (recovered.confidence - original.confidence).abs() < 0.001,
         "confidence must survive serde round-trip: expected {} got {}",
-        original.confidence, recovered.confidence
+        original.confidence,
+        recovered.confidence
     );
 }
 
@@ -301,7 +360,12 @@ fn voice_format_all_variants_wav_mp3_ogg_webm() {
 /// All VoiceFormat MIME types start with "audio/".
 #[test]
 fn voice_format_mime_types_all_start_with_audio() {
-    for fmt in [VoiceFormat::Wav, VoiceFormat::Mp3, VoiceFormat::Ogg, VoiceFormat::Webm] {
+    for fmt in [
+        VoiceFormat::Wav,
+        VoiceFormat::Mp3,
+        VoiceFormat::Ogg,
+        VoiceFormat::Webm,
+    ] {
         assert!(
             fmt.mime_type().starts_with("audio/"),
             "{fmt:?} MIME type must start with 'audio/', got '{}'",
@@ -313,18 +377,34 @@ fn voice_format_mime_types_all_start_with_audio() {
 /// All VoiceFormat extensions are non-empty and contain no dots.
 #[test]
 fn voice_format_extensions_are_clean() {
-    for fmt in [VoiceFormat::Wav, VoiceFormat::Mp3, VoiceFormat::Ogg, VoiceFormat::Webm] {
+    for fmt in [
+        VoiceFormat::Wav,
+        VoiceFormat::Mp3,
+        VoiceFormat::Ogg,
+        VoiceFormat::Webm,
+    ] {
         let ext = fmt.extension();
         assert!(!ext.is_empty(), "{fmt:?} extension must be non-empty");
-        assert!(!ext.contains('.'), "{fmt:?} extension must not contain a dot, got '{ext}'");
-        assert!(ext.chars().all(|c| c.is_ascii_alphanumeric()), "extension must be alphanumeric");
+        assert!(
+            !ext.contains('.'),
+            "{fmt:?} extension must not contain a dot, got '{ext}'"
+        );
+        assert!(
+            ext.chars().all(|c| c.is_ascii_alphanumeric()),
+            "extension must be alphanumeric"
+        );
     }
 }
 
 /// All four VoiceFormat variants are distinct (no duplicate MIME types or extensions).
 #[test]
 fn voice_format_variants_are_distinct() {
-    let variants = [VoiceFormat::Wav, VoiceFormat::Mp3, VoiceFormat::Ogg, VoiceFormat::Webm];
+    let variants = [
+        VoiceFormat::Wav,
+        VoiceFormat::Mp3,
+        VoiceFormat::Ogg,
+        VoiceFormat::Webm,
+    ];
 
     let mime_types: Vec<_> = variants.iter().map(|f| f.mime_type()).collect();
     let extensions: Vec<_> = variants.iter().map(|f| f.extension()).collect();

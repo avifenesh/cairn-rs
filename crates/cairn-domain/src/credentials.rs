@@ -25,7 +25,9 @@ pub struct CredentialRecord {
     pub revoked_at_ms: Option<u64>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 /// Audit record for a credential rotation event.
 #[derive(Clone, Debug, Serialize, Deserialize)]

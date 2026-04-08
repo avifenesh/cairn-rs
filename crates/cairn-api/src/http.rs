@@ -406,66 +406,290 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
             classification: Preserve,
         },
         // ── Static GET routes missing from the catalog (fold match arms never fired).
-        RouteEntry { method: Get,  path: "/v1/admin/audit-log".into(),                      classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/admin/notifications/failed".into(),           classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/approval-policies".into(),                    classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/checkpoints".into(),                          classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/evals/matrices/guardrail".into(),             classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/evals/matrices/memory-quality".into(),        classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/evals/matrices/permissions".into(),           classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/evals/matrices/prompt-comparison".into(),     classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/evals/matrices/skill-health".into(),          classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/ingest/jobs".into(),                          classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/memory/diagnostics".into(),                   classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/memory/search".into(),                        classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/onboarding/status".into(),                    classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/onboarding/templates".into(),                 classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/plugins".into(),                              classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/providers/bindings".into(),                   classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/providers/bindings/cost-ranking".into(),      classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/providers/budget".into(),                     classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/providers/connections".into(),                classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/providers/policies".into(),                   classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/providers/pools".into(),                      classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/runs/cost-alerts".into(),                     classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/runs/escalated".into(),                       classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/runs/resume-due".into(),                      classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/runs/sla-breached".into(),                    classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/runs/stalled".into(),                         classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/settings/tls".into(),                         classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/streams/runtime".into(),                      classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/tasks/expired".into(),                        classification: Preserve },
-        RouteEntry { method: Get,  path: "/v1/tool-invocations".into(),                     classification: Preserve },
+        RouteEntry {
+            method: Get,
+            path: "/v1/admin/audit-log".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/admin/notifications/failed".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/approval-policies".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/checkpoints".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/evals/matrices/guardrail".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/evals/matrices/memory-quality".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/evals/matrices/permissions".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/evals/matrices/prompt-comparison".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/evals/matrices/skill-health".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/ingest/jobs".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/memory/diagnostics".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/memory/search".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/onboarding/status".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/onboarding/templates".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/plugins".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/providers/bindings".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/providers/bindings/cost-ranking".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/providers/budget".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/providers/connections".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/providers/policies".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/providers/pools".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/runs/cost-alerts".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/runs/escalated".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/runs/resume-due".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/runs/sla-breached".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/runs/stalled".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/settings/tls".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/streams/runtime".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/tasks/expired".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/tool-invocations".into(),
+            classification: Preserve,
+        },
         // ── Static POST/PUT/DELETE routes added to catalog so their fold match arms fire.
         //    Dynamic-path routes (:id, etc.) are NOT added here — catalog_path_to_axum()
         //    converts :id to {id} which matchit 0.7 treats as a static literal.
         //    Dynamic routes are registered as explicit .route() calls in build_router.
-        RouteEntry { method: Post,   path: "/v1/admin/tenants".into(),                  classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/admin/license/override".into(),         classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/onboarding/template".into(),            classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/prompts/assets".into(),                 classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/prompts/releases".into(),               classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/approval-policies".into(),              classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/runs/process-scheduled-resumes".into(), classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/tool-invocations".into(),               classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/plugins".into(),                        classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/tasks/expire-leases".into(),            classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/evals/datasets".into(),                 classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/evals/baselines".into(),                classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/evals/rubrics".into(),                  classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/evals/runs".into(),                     classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/sources".into(),                        classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/sources/process-refresh".into(),        classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/ingest/jobs".into(),                    classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/channels".into(),                       classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/memory/ingest".into(),                  classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/memory/deep-search".into(),             classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/providers/budget".into(),               classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/providers/pools".into(),                classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/providers/connections".into(),          classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/providers/run-health-checks".into(),    classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/providers/bindings".into(),             classification: Preserve },
-        RouteEntry { method: Post,   path: "/v1/providers/policies".into(),             classification: Preserve },
+        RouteEntry {
+            method: Post,
+            path: "/v1/admin/tenants".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/admin/license/override".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/onboarding/template".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/prompts/assets".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/prompts/releases".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/approval-policies".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/runs/process-scheduled-resumes".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/tool-invocations".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/plugins".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/tasks/expire-leases".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/evals/datasets".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/evals/baselines".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/evals/rubrics".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/evals/runs".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/sources".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/sources/process-refresh".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/ingest/jobs".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/channels".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/memory/ingest".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/memory/deep-search".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/providers/budget".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/providers/pools".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/providers/connections".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/providers/run-health-checks".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/providers/bindings".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/providers/policies".into(),
+            classification: Preserve,
+        },
     ]
 }
 
@@ -515,16 +739,16 @@ mod tests {
         let paths: Vec<&str> = catalog.iter().map(|r| r.path.as_str()).collect();
 
         let required_surfaces = [
-            ("/v1/overview",   "overview"),
-            ("/v1/runs",       "runs"),
-            ("/v1/approvals",  "approvals"),
-            ("/v1/memories",   "memory"),
-            ("/v1/graph/",     "graph"),
-            ("/v1/prompts/",   "prompts"),
-            ("/v1/evals/",     "evals"),
-            ("/v1/policies/",  "policies"),
-            ("/v1/sources",    "sources/channels"),
-            ("/v1/settings",   "settings"),
+            ("/v1/overview", "overview"),
+            ("/v1/runs", "runs"),
+            ("/v1/approvals", "approvals"),
+            ("/v1/memories", "memory"),
+            ("/v1/graph/", "graph"),
+            ("/v1/prompts/", "prompts"),
+            ("/v1/evals/", "evals"),
+            ("/v1/policies/", "policies"),
+            ("/v1/sources", "sources/channels"),
+            ("/v1/settings", "settings"),
         ];
 
         for (prefix, surface) in &required_surfaces {
@@ -545,8 +769,10 @@ mod tests {
         // RFC 010 requires graph to include a genuinely visual relationship view.
         // At minimum it must expose execution trace or graph query routes.
         let has_graph_route = paths.iter().any(|p| p.starts_with("/v1/graph/"));
-        assert!(has_graph_route,
-            "RFC 010: graph surface must expose relationship/trace routes");
+        assert!(
+            has_graph_route,
+            "RFC 010: graph surface must expose relationship/trace routes"
+        );
     }
 
     /// RFC 010: tenant-level roll-up views must be read-only for operational actions.
@@ -554,10 +780,13 @@ mod tests {
     #[test]
     fn rfc010_admin_tenant_routes_support_read_operations() {
         let catalog = preserved_route_catalog();
-        let admin_gets: Vec<_> = catalog.iter()
+        let admin_gets: Vec<_> = catalog
+            .iter()
             .filter(|r| r.path.starts_with("/v1/admin/tenants") && r.method == HttpMethod::Get)
             .collect();
-        assert!(!admin_gets.is_empty(),
-            "RFC 010: admin tenant GET routes must exist for tenant-level roll-up views");
+        assert!(
+            !admin_gets.is_empty(),
+            "RFC 010: admin tenant GET routes must exist for tenant-level roll-up views"
+        );
     }
 }

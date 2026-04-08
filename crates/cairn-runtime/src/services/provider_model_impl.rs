@@ -41,17 +41,22 @@ where
         model_id: String,
         capabilities: ProviderModelCapability,
     ) -> Result<ProviderModelCapability, RuntimeError> {
-        let event = make_envelope(RuntimeEvent::ProviderModelRegistered(ProviderModelRegistered {
-            tenant_id,
-            connection_id,
-            model_id: model_id.clone(),
-            capabilities_json: serde_json::to_string(&capabilities).unwrap_or_default(),
-        }));
+        let event = make_envelope(RuntimeEvent::ProviderModelRegistered(
+            ProviderModelRegistered {
+                tenant_id,
+                connection_id,
+                model_id: model_id.clone(),
+                capabilities_json: serde_json::to_string(&capabilities).unwrap_or_default(),
+            },
+        ));
         self.store.append(&[event]).await?;
         Ok(capabilities)
     }
 
-    pub async fn get(&self, model_id: &str) -> Result<Option<ProviderModelCapability>, RuntimeError> {
+    pub async fn get(
+        &self,
+        model_id: &str,
+    ) -> Result<Option<ProviderModelCapability>, RuntimeError> {
         Ok(ProviderModelReadModel::get_model(self.store.as_ref(), model_id).await?)
     }
 
@@ -59,9 +64,6 @@ where
         &self,
         connection_id: &ProviderConnectionId,
     ) -> Result<Vec<ProviderModelCapability>, RuntimeError> {
-        Ok(
-            ProviderModelReadModel::list_by_connection(self.store.as_ref(), connection_id)
-                .await?,
-        )
+        Ok(ProviderModelReadModel::list_by_connection(self.store.as_ref(), connection_id).await?)
     }
 }

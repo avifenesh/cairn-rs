@@ -83,7 +83,10 @@ async fn export_filtering_by_source_ids() {
         .export_documents("all_docs", &project, &DocumentExportFilters::default())
         .await
         .unwrap();
-    assert_eq!(all_bundle.artifact_count, 3, "unfiltered export should return all 3 docs");
+    assert_eq!(
+        all_bundle.artifact_count, 3,
+        "unfiltered export should return all 3 docs"
+    );
 
     // Export with source_ids filter for src_alpha only
     let filtered = export
@@ -166,7 +169,10 @@ async fn export_filtering_by_min_credibility_score() {
         .export_documents("all_cred", &project, &DocumentExportFilters::default())
         .await
         .unwrap();
-    assert_eq!(all_bundle.artifact_count, 3, "unfiltered export returns all 3 docs");
+    assert_eq!(
+        all_bundle.artifact_count, 3,
+        "unfiltered export returns all 3 docs"
+    );
 
     // Export with min_credibility_score > 0: docs with credibility_score=None are
     // treated as 0.0 by the filter, so all are excluded.

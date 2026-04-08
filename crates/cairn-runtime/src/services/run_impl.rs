@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::*;
-use cairn_store::projections::{ApprovalReadModel, QuotaReadModel, RunReadModel, RunRecord, SessionReadModel};
+use cairn_store::projections::{
+    ApprovalReadModel, QuotaReadModel, RunReadModel, RunRecord, SessionReadModel,
+};
 use cairn_store::EventLog;
 
 use super::event_helpers::make_envelope;
@@ -119,7 +121,9 @@ where
     }
 
     async fn complete(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        let run = self.transition_run(run_id, RunState::Completed, None).await?;
+        let run = self
+            .transition_run(run_id, RunState::Completed, None)
+            .await?;
         derive_and_update_session(self.store.as_ref(), &run.session_id).await?;
         Ok(run)
     }
@@ -129,13 +133,17 @@ where
         run_id: &RunId,
         failure_class: FailureClass,
     ) -> Result<RunRecord, RuntimeError> {
-        let run = self.transition_run(run_id, RunState::Failed, Some(failure_class)).await?;
+        let run = self
+            .transition_run(run_id, RunState::Failed, Some(failure_class))
+            .await?;
         derive_and_update_session(self.store.as_ref(), &run.session_id).await?;
         Ok(run)
     }
 
     async fn cancel(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        let run = self.transition_run(run_id, RunState::Canceled, None).await?;
+        let run = self
+            .transition_run(run_id, RunState::Canceled, None)
+            .await?;
         derive_and_update_session(self.store.as_ref(), &run.session_id).await?;
         Ok(run)
     }
@@ -210,11 +218,9 @@ where
         self.get_run(run_id).await
     }
 
-    async fn enter_waiting_approval(
-        &self,
-        run_id: &RunId,
-    ) -> Result<RunRecord, RuntimeError> {
-        self.transition_run(run_id, RunState::WaitingApproval, None).await
+    async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+        self.transition_run(run_id, RunState::WaitingApproval, None)
+            .await
     }
 
     async fn resolve_approval(
@@ -230,7 +236,11 @@ where
             }
             ApprovalDecision::Rejected => {
                 let run = self
-                    .transition_run(run_id, RunState::Failed, Some(FailureClass::ApprovalRejected))
+                    .transition_run(
+                        run_id,
+                        RunState::Failed,
+                        Some(FailureClass::ApprovalRejected),
+                    )
                     .await?;
                 derive_and_update_session(self.store.as_ref(), &run.session_id).await?;
                 Ok(run)
@@ -268,7 +278,12 @@ mod tests {
             .unwrap();
 
         run_svc
-            .start(&project(), &SessionId::new("sess_1"), RunId::new("run_1"), None)
+            .start(
+                &project(),
+                &SessionId::new("sess_1"),
+                RunId::new("run_1"),
+                None,
+            )
             .await
             .unwrap();
 
@@ -298,7 +313,12 @@ mod tests {
             .unwrap();
 
         run_svc
-            .start(&project(), &SessionId::new("sess_2"), RunId::new("run_2"), None)
+            .start(
+                &project(),
+                &SessionId::new("sess_2"),
+                RunId::new("run_2"),
+                None,
+            )
             .await
             .unwrap();
 
@@ -326,11 +346,21 @@ mod tests {
             .unwrap();
 
         run_svc
-            .start(&project(), &SessionId::new("sess_3"), RunId::new("run_a"), None)
+            .start(
+                &project(),
+                &SessionId::new("sess_3"),
+                RunId::new("run_a"),
+                None,
+            )
             .await
             .unwrap();
         run_svc
-            .start(&project(), &SessionId::new("sess_3"), RunId::new("run_b"), None)
+            .start(
+                &project(),
+                &SessionId::new("sess_3"),
+                RunId::new("run_b"),
+                None,
+            )
             .await
             .unwrap();
 
@@ -359,12 +389,22 @@ mod tests {
             .unwrap();
 
         run_svc
-            .start(&project(), &SessionId::new("sess_4"), RunId::new("dup"), None)
+            .start(
+                &project(),
+                &SessionId::new("sess_4"),
+                RunId::new("dup"),
+                None,
+            )
             .await
             .unwrap();
 
         let result = run_svc
-            .start(&project(), &SessionId::new("sess_4"), RunId::new("dup"), None)
+            .start(
+                &project(),
+                &SessionId::new("sess_4"),
+                RunId::new("dup"),
+                None,
+            )
             .await;
 
         assert!(result.is_err());
@@ -375,7 +415,10 @@ mod tests {
 
 impl<S> RunServiceImpl<S>
 where
-    S: cairn_store::EventLog + cairn_store::projections::RunReadModel + cairn_store::projections::SessionReadModel + 'static,
+    S: cairn_store::EventLog
+        + cairn_store::projections::RunReadModel
+        + cairn_store::projections::SessionReadModel
+        + 'static,
 {
     /// List child runs for a parent run.
     pub async fn list_child_runs(
@@ -401,10 +444,9 @@ where
 
         let mut records = Vec::new();
         for run_id in child_run_ids {
-            if let Some(record) = cairn_store::projections::RunReadModel::get(
-                self.store.as_ref(),
-                &run_id,
-            ).await? {
+            if let Some(record) =
+                cairn_store::projections::RunReadModel::get(self.store.as_ref(), &run_id).await?
+            {
                 records.push(record);
             }
         }
@@ -419,8 +461,9 @@ where
         session_id: &cairn_domain::SessionId,
         child_run_id: Option<cairn_domain::RunId>,
     ) -> Result<cairn_store::projections::RunRecord, crate::error::RuntimeError> {
-        let child_run_id = child_run_id
-            .unwrap_or_else(|| cairn_domain::RunId::new(format!("subagent_{}", parent_run_id.as_str())));
+        let child_run_id = child_run_id.unwrap_or_else(|| {
+            cairn_domain::RunId::new(format!("subagent_{}", parent_run_id.as_str()))
+        });
         let event = super::event_helpers::make_envelope(cairn_domain::RuntimeEvent::RunCreated(
             cairn_domain::RunCreated {
                 project: project.clone(),
@@ -434,7 +477,9 @@ where
         self.store.append(&[event]).await?;
         cairn_store::projections::RunReadModel::get(self.store.as_ref(), &child_run_id)
             .await?
-            .ok_or_else(|| crate::error::RuntimeError::Internal("subagent run not found after create".into()))
+            .ok_or_else(|| {
+                crate::error::RuntimeError::Internal("subagent run not found after create".into())
+            })
     }
 
     /// Set a checkpoint strategy for a run.
@@ -458,8 +503,8 @@ where
         let trigger_on_task_complete =
             strategy.contains("auto") || strategy.contains("on_task_complete");
 
-        let event = super::event_helpers::make_envelope(
-            cairn_domain::RuntimeEvent::CheckpointStrategySet(
+        let event =
+            super::event_helpers::make_envelope(cairn_domain::RuntimeEvent::CheckpointStrategySet(
                 cairn_domain::CheckpointStrategySet {
                     strategy_id: format!("strat_{}_{}", run_id.as_str(), now_ms),
                     description: strategy,
@@ -469,8 +514,7 @@ where
                     max_checkpoints: 0,
                     trigger_on_task_complete,
                 },
-            ),
-        );
+            ));
 
         self.store.append(&[event]).await?;
         Ok(())

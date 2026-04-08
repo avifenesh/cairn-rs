@@ -3,9 +3,12 @@
 use std::sync::Arc;
 
 use cairn_domain::*;
-use cairn_runtime::services::{RunServiceImpl, SessionServiceImpl, TaskServiceImpl, TenantServiceImpl, WorkspaceServiceImpl, ProjectServiceImpl};
-use cairn_runtime::{RunService, SessionService, TaskService, TenantService, WorkspaceService};
 use cairn_runtime::projects::ProjectService;
+use cairn_runtime::services::{
+    ProjectServiceImpl, RunServiceImpl, SessionServiceImpl, TaskServiceImpl, TenantServiceImpl,
+    WorkspaceServiceImpl,
+};
+use cairn_runtime::{RunService, SessionService, TaskService, TenantService, WorkspaceService};
 use cairn_store::projections::{RunReadModel, TaskReadModel};
 use cairn_store::{EventLog, InMemoryStore};
 
@@ -26,19 +29,46 @@ async fn event_log_compaction_retains_state() {
     let project = ProjectKey::new("tenant_compact", "ws_compact", "proj_compact");
     let session_id = SessionId::new("sess_compact");
 
-    tenant_svc.create(tenant_id.clone(), "Compact Tenant".to_owned()).await.unwrap();
-    workspace_svc.create(tenant_id.clone(), workspace_id.clone(), "WS".to_owned()).await.unwrap();
-    project_svc.create(project.clone(), "Project".to_owned()).await.unwrap();
-    session_svc.create(&project, session_id.clone()).await.unwrap();
+    tenant_svc
+        .create(tenant_id.clone(), "Compact Tenant".to_owned())
+        .await
+        .unwrap();
+    workspace_svc
+        .create(tenant_id.clone(), workspace_id.clone(), "WS".to_owned())
+        .await
+        .unwrap();
+    project_svc
+        .create(project.clone(), "Project".to_owned())
+        .await
+        .unwrap();
+    session_svc
+        .create(&project, session_id.clone())
+        .await
+        .unwrap();
 
     // Create a run that will be in its final (Running) state — this will be event ~5
     let final_run_id = RunId::new("run_final");
-    run_svc.start(&project, &session_id, final_run_id.clone(), None).await.unwrap();
+    run_svc
+        .start(&project, &session_id, final_run_id.clone(), None)
+        .await
+        .unwrap();
 
     // Create a task for the final run — put it in Leased state (events ~6-7)
     let final_task_id = TaskId::new("task_final");
-    task_svc.submit(&project, final_task_id.clone(), Some(final_run_id.clone()), None, 0).await.unwrap();
-    task_svc.claim(&final_task_id, "worker_compact".to_owned(), 60_000).await.unwrap();
+    task_svc
+        .submit(
+            &project,
+            final_task_id.clone(),
+            Some(final_run_id.clone()),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    task_svc
+        .claim(&final_task_id, "worker_compact".to_owned(), 60_000)
+        .await
+        .unwrap();
 
     // Verify we have some events before flooding
     let before_flood = store.read_stream(None, 1000).await.unwrap().len();
@@ -48,17 +78,29 @@ async fn event_log_compaction_retains_state() {
     // Each run_svc.start() produces 1 RunCreated event
     for i in 0..43u32 {
         let run_id = RunId::new(format!("run_filler_{i}"));
-        run_svc.start(&project, &session_id, run_id, None).await.unwrap();
+        run_svc
+            .start(&project, &session_id, run_id, None)
+            .await
+            .unwrap();
     }
 
     let total_before = store.read_stream(None, 10_000).await.unwrap().len() as u64;
-    assert!(total_before >= 50, "expected at least 50 events, got {total_before}");
+    assert!(
+        total_before >= 50,
+        "expected at least 50 events, got {total_before}"
+    );
 
     // Verify final_run and final_task are in their expected states BEFORE compaction
-    let run_before = RunReadModel::get(store.as_ref(), &final_run_id).await.unwrap().unwrap();
+    let run_before = RunReadModel::get(store.as_ref(), &final_run_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(run_before.state, RunState::Pending);
 
-    let task_before = TaskReadModel::get(store.as_ref(), &final_task_id).await.unwrap().unwrap();
+    let task_before = TaskReadModel::get(store.as_ref(), &final_task_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(task_before.state, TaskState::Leased);
 
     // Compact: retain last 10 events
@@ -91,7 +133,9 @@ async fn event_log_compaction_retains_state() {
     // The 10 retained events are the last 10 filler RunCreated events.
     // Each creates a run entry — verify those runs exist in the projection.
     let last_filler_run = RunId::new("run_filler_42");
-    let retained_run = RunReadModel::get(store.as_ref(), &last_filler_run).await.unwrap();
+    let retained_run = RunReadModel::get(store.as_ref(), &last_filler_run)
+        .await
+        .unwrap();
     assert!(
         retained_run.is_some(),
         "last filler run (in retained window) should exist in projection after compaction"
@@ -99,7 +143,9 @@ async fn event_log_compaction_retains_state() {
 
     // Runs created BEFORE the retained window should no longer be in projection
     let early_filler_run = RunId::new("run_filler_0");
-    let pruned_run = RunReadModel::get(store.as_ref(), &early_filler_run).await.unwrap();
+    let pruned_run = RunReadModel::get(store.as_ref(), &early_filler_run)
+        .await
+        .unwrap();
     assert!(
         pruned_run.is_none(),
         "early filler run (outside retained window) should NOT be in projection after compaction"

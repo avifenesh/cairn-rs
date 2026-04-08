@@ -120,11 +120,7 @@ pub fn execute_plugin_tool<G: PermissionGate, R: PluginRegistry>(
         .ok_or_else(|| PluginExecutionError::PluginNotFound(plugin_id.to_owned()))?;
 
     // 2. Check permissions.
-    let check = gate.check(
-        project,
-        &manifest.permissions,
-        manifest.execution_class,
-    );
+    let check = gate.check(project, &manifest.permissions, manifest.execution_class);
     match check {
         PermissionCheckResult::Granted(_) => {}
         PermissionCheckResult::Denied(verdict) => {
@@ -175,8 +171,8 @@ fn execute_with_transport(
         working_dir: None,
     };
 
-    let mut process =
-        PluginProcess::spawn(&config).map_err(|e| PluginExecutionError::SpawnFailed(e.to_string()))?;
+    let mut process = PluginProcess::spawn(&config)
+        .map_err(|e| PluginExecutionError::SpawnFailed(e.to_string()))?;
 
     // Send tools.invoke request.
     let request = build_tools_invoke_request(
@@ -272,14 +268,16 @@ pub fn handle_notification(
         PluginNotification::Log { level, message, .. } => {
             eprintln!("[plugin:{plugin_name}] {level}: {message}");
         }
-        PluginNotification::Progress { invocation_id, percent, message } => {
+        PluginNotification::Progress {
+            invocation_id,
+            percent,
+            message,
+        } => {
             if let Some(pct) = percent {
                 progress.set(invocation_id.clone(), *pct);
             }
             // Also surface as a stderr line so operators see real-time progress.
-            let pct_str = percent
-                .map(|p| format!(" ({p}%)"))
-                .unwrap_or_default();
+            let pct_str = percent.map(|p| format!(" ({p}%)")).unwrap_or_default();
             eprintln!("[plugin:{plugin_name}] progress{pct_str}: {message}");
         }
         PluginNotification::Event { .. } => {
@@ -289,10 +287,7 @@ pub fn handle_notification(
 }
 
 /// Parse a JSON-RPC notification into a typed PluginNotification.
-pub fn parse_notification(
-    method: &str,
-    params: &serde_json::Value,
-) -> Option<PluginNotification> {
+pub fn parse_notification(method: &str, params: &serde_json::Value) -> Option<PluginNotification> {
     match method {
         "log.emit" => Some(PluginNotification::Log {
             invocation_id: params["invocationId"].as_str().unwrap_or("").to_owned(),
@@ -377,9 +372,19 @@ mod tests {
         let project = ProjectKey::new("t", "w", "p");
 
         let result = execute_plugin_tool(
-            &registry, &gate, &concurrency, "nonexistent", "inv_1", "tool", serde_json::json!({}), &project,
+            &registry,
+            &gate,
+            &concurrency,
+            "nonexistent",
+            "inv_1",
+            "tool",
+            serde_json::json!({}),
+            &project,
         );
-        assert!(matches!(result, Err(PluginExecutionError::PluginNotFound(_))));
+        assert!(matches!(
+            result,
+            Err(PluginExecutionError::PluginNotFound(_))
+        ));
     }
 
     #[test]
@@ -391,10 +396,19 @@ mod tests {
         let project = ProjectKey::new("t", "w", "p");
 
         let result = execute_plugin_tool(
-            &registry, &gate, &concurrency, "com.test.plugin", "inv_2", "test.tool",
-            serde_json::json!({}), &project,
+            &registry,
+            &gate,
+            &concurrency,
+            "com.test.plugin",
+            "inv_2",
+            "test.tool",
+            serde_json::json!({}),
+            &project,
         );
-        assert!(matches!(result, Err(PluginExecutionError::PermissionDenied(_))));
+        assert!(matches!(
+            result,
+            Err(PluginExecutionError::PermissionDenied(_))
+        ));
     }
 
     #[test]
@@ -411,10 +425,19 @@ mod tests {
 
         let project = ProjectKey::new("t", "w", "p");
         let result = execute_plugin_tool(
-            &registry, &gate, &concurrency, "com.test.plugin", "inv_3", "test.tool",
-            serde_json::json!({}), &project,
+            &registry,
+            &gate,
+            &concurrency,
+            "com.test.plugin",
+            "inv_3",
+            "test.tool",
+            serde_json::json!({}),
+            &project,
         );
-        assert!(matches!(result, Err(PluginExecutionError::ConcurrencyExceeded { .. })));
+        assert!(matches!(
+            result,
+            Err(PluginExecutionError::ConcurrencyExceeded { .. })
+        ));
     }
 
     #[test]
@@ -436,8 +459,14 @@ mod tests {
 
         // Binary doesn't exist — spawn should fail.
         let result = execute_plugin_tool(
-            &registry, &gate, &concurrency, "com.test.plugin", "inv_4", "test.tool",
-            serde_json::json!({}), &project,
+            &registry,
+            &gate,
+            &concurrency,
+            "com.test.plugin",
+            "inv_4",
+            "test.tool",
+            serde_json::json!({}),
+            &project,
         );
         assert!(matches!(result, Err(PluginExecutionError::SpawnFailed(_))));
 
@@ -454,7 +483,11 @@ mod tests {
         });
         let notif = parse_notification("log.emit", &params).unwrap();
         match notif {
-            PluginNotification::Log { invocation_id, level, message } => {
+            PluginNotification::Log {
+                invocation_id,
+                level,
+                message,
+            } => {
                 assert_eq!(invocation_id, "inv_1");
                 assert_eq!(level, "info");
                 assert_eq!(message, "cloned repo");
@@ -488,7 +521,11 @@ mod tests {
         });
         let notif = parse_notification("event.emit", &params).unwrap();
         match notif {
-            PluginNotification::Event { event_type, payload, .. } => {
+            PluginNotification::Event {
+                event_type,
+                payload,
+                ..
+            } => {
                 assert_eq!(event_type, "signal.discovered");
                 assert_eq!(payload["key"], "value");
             }

@@ -73,7 +73,11 @@ async fn set_retrieve_update_preferences() {
         vec!["run.failed", "approval.required"],
         "event_types must round-trip exactly"
     );
-    assert_eq!(prefs.channels.len(), 1, "only email channel should be present");
+    assert_eq!(
+        prefs.channels.len(),
+        1,
+        "only email channel should be present"
+    );
     assert_eq!(prefs.channels[0].kind, "email");
     assert_eq!(prefs.channels[0].target, "alice@example.com");
 
@@ -99,7 +103,11 @@ async fn set_retrieve_update_preferences() {
         .unwrap()
         .expect("preferences must still be retrievable after update");
 
-    assert_eq!(updated.channels.len(), 2, "both email and slack must be present after update");
+    assert_eq!(
+        updated.channels.len(),
+        2,
+        "both email and slack must be present after update"
+    );
 
     let channel_kinds: Vec<&str> = updated.channels.iter().map(|c| c.kind.as_str()).collect();
     assert!(
@@ -114,7 +122,9 @@ async fn set_retrieve_update_preferences() {
     // Event types must be unchanged.
     assert_eq!(updated.event_types.len(), 2);
     assert!(updated.event_types.contains(&"run.failed".to_owned()));
-    assert!(updated.event_types.contains(&"approval.required".to_owned()));
+    assert!(updated
+        .event_types
+        .contains(&"approval.required".to_owned()));
 }
 
 // ── Test 5: preferences are scoped per-operator ───────────────────────────────
@@ -199,7 +209,10 @@ async fn get_preferences_for_unknown_operator_returns_none() {
     let svc = NotificationServiceImpl::new(store);
 
     let result = svc.get_preferences(&tenant(), "op_ghost").await.unwrap();
-    assert!(result.is_none(), "get_preferences must return None for an operator with no preferences");
+    assert!(
+        result.is_none(),
+        "get_preferences must return None for an operator with no preferences"
+    );
 }
 
 // ── notify_if_applicable dispatches only matching event types ─────────────────
@@ -229,7 +242,11 @@ async fn notify_dispatches_only_matching_event_type() {
         )
         .await
         .unwrap();
-    assert_eq!(sent.len(), 1, "matching event must produce one notification");
+    assert_eq!(
+        sent.len(),
+        1,
+        "matching event must produce one notification"
+    );
     assert_eq!(sent[0].event_type, "run.failed");
     assert_eq!(sent[0].operator_id, "op_carol");
     assert_eq!(sent[0].channel_kind, "slack");
@@ -289,13 +306,19 @@ async fn multiple_operators_notified_independently() {
     assert_eq!(sent.len(), 2, "both operators must receive a notification");
 
     let ops: Vec<&str> = sent.iter().map(|r| r.operator_id.as_str()).collect();
-    assert!(ops.contains(&"op_dave"), "op_dave must receive a notification");
-    assert!(ops.contains(&"op_eve"), "op_eve must receive a notification");
+    assert!(
+        ops.contains(&"op_dave"),
+        "op_dave must receive a notification"
+    );
+    assert!(
+        ops.contains(&"op_eve"),
+        "op_eve must receive a notification"
+    );
 
     let dave_rec = sent.iter().find(|r| r.operator_id == "op_dave").unwrap();
-    let eve_rec  = sent.iter().find(|r| r.operator_id == "op_eve").unwrap();
+    let eve_rec = sent.iter().find(|r| r.operator_id == "op_eve").unwrap();
     assert_eq!(dave_rec.channel_kind, "email");
-    assert_eq!(eve_rec.channel_kind,  "slack");
+    assert_eq!(eve_rec.channel_kind, "slack");
 }
 
 // ── list_sent returns records scoped to tenant ────────────────────────────────
@@ -325,14 +348,26 @@ async fn list_sent_returns_tenant_scoped_records() {
     .await
     .unwrap();
 
-    svc.notify_if_applicable(&tenant(),       "run.failed", serde_json::json!({})).await.unwrap();
-    svc.notify_if_applicable(&other_tenant,   "run.failed", serde_json::json!({})).await.unwrap();
+    svc.notify_if_applicable(&tenant(), "run.failed", serde_json::json!({}))
+        .await
+        .unwrap();
+    svc.notify_if_applicable(&other_tenant, "run.failed", serde_json::json!({}))
+        .await
+        .unwrap();
 
-    let main_sent  = svc.list_sent(&tenant(),       0).await.unwrap();
-    let other_sent = svc.list_sent(&other_tenant,   0).await.unwrap();
+    let main_sent = svc.list_sent(&tenant(), 0).await.unwrap();
+    let other_sent = svc.list_sent(&other_tenant, 0).await.unwrap();
 
-    assert_eq!(main_sent.len(),  1, "main tenant must see only its 1 notification");
-    assert_eq!(other_sent.len(), 1, "other tenant must see only its 1 notification");
-    assert_eq!(main_sent[0].channel_kind,  "slack");
+    assert_eq!(
+        main_sent.len(),
+        1,
+        "main tenant must see only its 1 notification"
+    );
+    assert_eq!(
+        other_sent.len(),
+        1,
+        "other tenant must see only its 1 notification"
+    );
+    assert_eq!(main_sent[0].channel_kind, "slack");
     assert_eq!(other_sent[0].channel_kind, "email");
 }

@@ -326,7 +326,13 @@ impl ImportService for InMemoryImportService {
             ));
         }
 
-        if bundle.created_by.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        if bundle
+            .created_by
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
             errors.push("bundle created_by is required".to_owned());
         }
 
@@ -488,15 +494,13 @@ impl ImportService for InMemoryImportService {
                         })
                         .await
                     {
-                        Ok(()) => {
-                            report_entries.push(ImportReportEntry {
-                                artifact_logical_id: entry.artifact_logical_id.clone(),
-                                artifact_kind: entry.artifact_kind,
-                                outcome: ImportOutcome::Create,
-                                reason: entry.reason.clone(),
-                                created_object_id: Some(entry.artifact_logical_id.clone()),
-                            })
-                        }
+                        Ok(()) => report_entries.push(ImportReportEntry {
+                            artifact_logical_id: entry.artifact_logical_id.clone(),
+                            artifact_kind: entry.artifact_kind,
+                            outcome: ImportOutcome::Create,
+                            reason: entry.reason.clone(),
+                            created_object_id: Some(entry.artifact_logical_id.clone()),
+                        }),
                         Err(error) => report_entries.push(ImportReportEntry {
                             artifact_logical_id: entry.artifact_logical_id.clone(),
                             artifact_kind: entry.artifact_kind,
@@ -510,17 +514,15 @@ impl ImportService for InMemoryImportService {
                     if plan.conflict_resolution != ConflictResolutionStrategy::Skip {
                         if let Some(artifact) = artifact {
                             let skip_pv = artifact.payload.as_value();
-                            if let Ok(payload) = serde_json::from_value::<KnowledgeDocumentPayload>(
-                                skip_pv.clone(),
-                            ) {
-                                if let Some(content) =
-                                    extract_document_content_text(&skip_pv)
-                                {
+                            if let Ok(payload) =
+                                serde_json::from_value::<KnowledgeDocumentPayload>(skip_pv.clone())
+                            {
+                                if let Some(content) = extract_document_content_text(&skip_pv) {
                                     let source_type =
                                         bundle_source_type_to_ingest(Some(payload.source_type));
-                                    let existing_ids = self.store.document_ids_by_hash(
-                                        &compute_content_hash(&content),
-                                    );
+                                    let existing_ids = self
+                                        .store
+                                        .document_ids_by_hash(&compute_content_hash(&content));
                                     if !existing_ids.is_empty() {
                                         let (report_entry, counter) = self
                                             .apply_duplicate_strategy(
@@ -601,8 +603,8 @@ impl ImportService for InMemoryImportService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::bundles::{BundleEnvelope, BundleProvenance, BundleType, ImportService};
+    use std::sync::Arc;
 
     fn minimal_bundle(schema_version: &str) -> BundleEnvelope {
         BundleEnvelope {
@@ -643,8 +645,12 @@ mod tests {
             "empty bundle_schema_version must produce errors"
         );
         assert!(
-            report.errors.iter().any(|e| e.contains("bundle_schema_version")),
-            "error must mention bundle_schema_version, got: {:?}", report.errors
+            report
+                .errors
+                .iter()
+                .any(|e| e.contains("bundle_schema_version")),
+            "error must mention bundle_schema_version, got: {:?}",
+            report.errors
         );
     }
 
@@ -660,8 +666,12 @@ mod tests {
             "unsupported bundle_schema_version must produce errors"
         );
         assert!(
-            report.errors.iter().any(|e| e.contains("unsupported") || e.contains("bundle_schema_version")),
-            "error must mention unsupported schema, got: {:?}", report.errors
+            report
+                .errors
+                .iter()
+                .any(|e| e.contains("unsupported") || e.contains("bundle_schema_version")),
+            "error must mention unsupported schema, got: {:?}",
+            report.errors
         );
     }
 
@@ -674,7 +684,8 @@ mod tests {
         let report = svc.validate(&bundle).await.unwrap();
         assert!(
             report.errors.is_empty(),
-            "version-1 bundle must pass schema validation, errors: {:?}", report.errors
+            "version-1 bundle must pass schema validation, errors: {:?}",
+            report.errors
         );
     }
 }

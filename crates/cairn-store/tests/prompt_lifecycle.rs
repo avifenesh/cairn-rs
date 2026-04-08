@@ -12,9 +12,9 @@
 //!           → PromptVersionCreated  (version 2 for the same asset)
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, PromptAssetCreated,
-    PromptAssetId, PromptReleaseCreated, PromptReleaseId, PromptReleaseTransitioned,
-    PromptVersionCreated, PromptVersionId, RuntimeEvent, TenantId, WorkspaceId,
+    EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, PromptAssetCreated, PromptAssetId,
+    PromptReleaseCreated, PromptReleaseId, PromptReleaseTransitioned, PromptVersionCreated,
+    PromptVersionId, RuntimeEvent, TenantId, WorkspaceId,
 };
 use cairn_store::{
     projections::{PromptAssetReadModel, PromptReleaseReadModel, PromptVersionReadModel},
@@ -58,7 +58,7 @@ async fn create_prompt_asset_produces_asset_record() {
                 name: "main-system-prompt".to_owned(),
                 kind: "system".to_owned(),
                 created_at: now_ms(),
-            workspace_id: project().workspace_id,
+                workspace_id: project().workspace_id,
             }),
         )])
         .await
@@ -95,7 +95,7 @@ async fn create_prompt_version_produces_version_record() {
                     name: "search-prompt".to_owned(),
                     kind: "user_template".to_owned(),
                     created_at: ts,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -106,7 +106,7 @@ async fn create_prompt_version_produces_version_record() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:aabbcc".to_owned(),
                     created_at: ts + 1,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
         ])
@@ -144,7 +144,7 @@ async fn create_prompt_release_starts_in_draft() {
                     name: "critic-prompt".to_owned(),
                     kind: "critic".to_owned(),
                     created_at: ts,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -155,7 +155,7 @@ async fn create_prompt_release_starts_in_draft() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:001".to_owned(),
                     created_at: ts + 1,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -166,8 +166,8 @@ async fn create_prompt_release_starts_in_draft() {
                     prompt_asset_id: asset_id.clone(),
                     prompt_version_id: version_id.clone(),
                     created_at: ts + 2,
-            release_tag: None,
-            created_by: None,
+                    release_tag: None,
+                    created_by: None,
                 }),
             ),
         ])
@@ -207,7 +207,7 @@ async fn prompt_release_transitions_draft_to_approved_to_active() {
                     name: "router-prompt".to_owned(),
                     kind: "router".to_owned(),
                     created_at: ts,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -218,7 +218,7 @@ async fn prompt_release_transitions_draft_to_approved_to_active() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:router-v1".to_owned(),
                     created_at: ts + 1,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -229,8 +229,8 @@ async fn prompt_release_transitions_draft_to_approved_to_active() {
                     prompt_asset_id: asset_id.clone(),
                     prompt_version_id: version_id.clone(),
                     created_at: ts + 2,
-            release_tag: None,
-            created_by: None,
+                    release_tag: None,
+                    created_by: None,
                 }),
             ),
         ])
@@ -247,8 +247,8 @@ async fn prompt_release_transitions_draft_to_approved_to_active() {
                 from_state: "draft".to_owned(),
                 to_state: "approved".to_owned(),
                 transitioned_at: ts + 3,
-            actor: None,
-            reason: None,
+                actor: None,
+                reason: None,
             }),
         )])
         .await
@@ -258,7 +258,10 @@ async fn prompt_release_transitions_draft_to_approved_to_active() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(after_approve.state, "approved", "state must be 'approved' after first transition");
+    assert_eq!(
+        after_approve.state, "approved",
+        "state must be 'approved' after first transition"
+    );
 
     // Transition: approved → active.
     store
@@ -270,8 +273,8 @@ async fn prompt_release_transitions_draft_to_approved_to_active() {
                 from_state: "approved".to_owned(),
                 to_state: "active".to_owned(),
                 transitioned_at: ts + 4,
-            actor: None,
-            reason: None,
+                actor: None,
+                reason: None,
             }),
         )])
         .await
@@ -281,8 +284,15 @@ async fn prompt_release_transitions_draft_to_approved_to_active() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(after_activate.state, "active", "state must be 'active' after second transition");
-    assert_eq!(after_activate.updated_at, ts + 4, "updated_at must reflect transition timestamp");
+    assert_eq!(
+        after_activate.state, "active",
+        "state must be 'active' after second transition"
+    );
+    assert_eq!(
+        after_activate.updated_at,
+        ts + 4,
+        "updated_at must reflect transition timestamp"
+    );
 }
 
 // ── 5. active_for_selector finds the active release ──────────────────────────
@@ -305,7 +315,7 @@ async fn active_release_is_returned_by_selector_query() {
                     name: "tool-prompt".to_owned(),
                     kind: "tool_prompt".to_owned(),
                     created_at: ts,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -316,7 +326,7 @@ async fn active_release_is_returned_by_selector_query() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:tool-v1".to_owned(),
                     created_at: ts + 1,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -327,8 +337,8 @@ async fn active_release_is_returned_by_selector_query() {
                     prompt_asset_id: asset_id.clone(),
                     prompt_version_id: version_id.clone(),
                     created_at: ts + 2,
-            release_tag: None,
-            created_by: None,
+                    release_tag: None,
+                    created_by: None,
                 }),
             ),
             evt(
@@ -339,8 +349,8 @@ async fn active_release_is_returned_by_selector_query() {
                     from_state: "draft".to_owned(),
                     to_state: "approved".to_owned(),
                     transitioned_at: ts + 3,
-            actor: None,
-            reason: None,
+                    actor: None,
+                    reason: None,
                 }),
             ),
             evt(
@@ -351,8 +361,8 @@ async fn active_release_is_returned_by_selector_query() {
                     from_state: "approved".to_owned(),
                     to_state: "active".to_owned(),
                     transitioned_at: ts + 4,
-            actor: None,
-            reason: None,
+                    actor: None,
+                    reason: None,
                 }),
             ),
         ])
@@ -371,15 +381,11 @@ async fn active_release_is_returned_by_selector_query() {
     assert!(none.is_none());
 
     // Active release is found for any selector.
-    let found = PromptReleaseReadModel::active_for_selector(
-        &store,
-        &project(),
-        &asset_id,
-        "user_abc",
-    )
-    .await
-    .unwrap()
-    .expect("active release must be found");
+    let found =
+        PromptReleaseReadModel::active_for_selector(&store, &project(), &asset_id, "user_abc")
+            .await
+            .unwrap()
+            .expect("active release must be found");
     assert_eq!(found.prompt_release_id, release_id);
     assert_eq!(found.state, "active");
 }
@@ -404,7 +410,7 @@ async fn second_version_has_incremented_version_number() {
                     name: "iterating-prompt".to_owned(),
                     kind: "system".to_owned(),
                     created_at: ts,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
             evt(
@@ -415,7 +421,7 @@ async fn second_version_has_incremented_version_number() {
                     prompt_asset_id: asset_id.clone(),
                     content_hash: "sha256:v1".to_owned(),
                     created_at: ts + 1,
-            workspace_id: project().workspace_id,
+                    workspace_id: project().workspace_id,
                 }),
             ),
         ])
@@ -438,7 +444,7 @@ async fn second_version_has_incremented_version_number() {
                 prompt_asset_id: asset_id.clone(),
                 content_hash: "sha256:v2".to_owned(),
                 created_at: ts + 2,
-            workspace_id: project().workspace_id,
+                workspace_id: project().workspace_id,
             }),
         )])
         .await
@@ -504,8 +510,8 @@ async fn list_by_project_returns_all_project_releases() {
                         prompt_asset_id: asset_id.clone(),
                         prompt_version_id: version_id.clone(),
                         created_at: ts + n as u64 + 20,
-            release_tag: None,
-            created_by: None,
+                        release_tag: None,
+                        created_by: None,
                     }),
                 ),
             ])
@@ -516,10 +522,18 @@ async fn list_by_project_returns_all_project_releases() {
     let releases = PromptReleaseReadModel::list_by_project(&store, &project(), 10, 0)
         .await
         .unwrap();
-    assert_eq!(releases.len(), 2, "both releases must appear in list_by_project");
+    assert_eq!(
+        releases.len(),
+        2,
+        "both releases must appear in list_by_project"
+    );
 
     let assets = PromptAssetReadModel::list_by_project(&store, &project(), 10, 0)
         .await
         .unwrap();
-    assert_eq!(assets.len(), 2, "both assets must appear in list_by_project");
+    assert_eq!(
+        assets.len(),
+        2,
+        "both assets must appear in list_by_project"
+    );
 }
