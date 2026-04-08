@@ -36,6 +36,7 @@ pub mod signal;
 pub mod skills;
 pub mod sla;
 pub mod soul;
+pub mod stream_accumulator;
 pub mod task_dependencies;
 pub mod tenancy;
 pub mod tool_invocation;
