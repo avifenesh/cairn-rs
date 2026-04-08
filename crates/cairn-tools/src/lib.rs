@@ -29,8 +29,8 @@ pub use builtins::{
     GetTaskTool, GitOperationsTool, GlobFindTool, GraphQueryTool, GrepSearchTool, HttpRequestTool,
     JsonExtractTool, ListRunsTool, MemorySearchTool, MemoryStoreTool, NoopSink, NotificationSink,
     NotifyOperatorTool, ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool, SearchEventsTool,
-    ShellExecTool, SummarizeTextTool, ToolError, ToolHandler, ToolResult, ToolSearchTool, ToolTier,
-    UpdateMemoryTool, WaitForTaskTool, WebFetchTool,
+    ShellExecTool, SummarizeTextTool, ToolContext, ToolError, ToolHandler, ToolResult,
+    ToolSearchTool, ToolTier, UpdateMemoryTool, WaitForTaskTool, WebFetchTool,
 };
 pub use execution_class::{select_execution_config, SelectedConfig};
 pub use executor::{execute_builtin, ExecutionOutcome};

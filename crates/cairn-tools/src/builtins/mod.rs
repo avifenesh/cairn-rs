@@ -127,6 +127,83 @@ impl ToolResult {
     }
 }
 
+// ── ToolContext ──────────────────────────────────────────────────────────────
+
+/// Rich execution context passed to tools alongside the project key.
+///
+/// Provides session awareness, working directory, and a type-safe extension
+/// map so tools can access runtime services without changing the trait.
+///
+/// Adopted from Cersei's ToolContext pattern (MIT, pacifio/cersei).
+#[derive(Clone)]
+pub struct ToolContext {
+    /// Current session (if executing within an agent loop).
+    pub session_id: Option<String>,
+    /// Current run (if executing within an orchestration).
+    pub run_id: Option<String>,
+    /// Working directory for file-system tools.
+    pub working_dir: std::path::PathBuf,
+    /// Type-safe extension map for injecting runtime services.
+    extensions: std::sync::Arc<
+        std::sync::RwLock<
+            std::collections::HashMap<
+                std::any::TypeId,
+                std::sync::Arc<dyn std::any::Any + Send + Sync>,
+            >,
+        >,
+    >,
+}
+
+impl Default for ToolContext {
+    fn default() -> Self {
+        Self {
+            session_id: None,
+            run_id: None,
+            working_dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            extensions: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+        }
+    }
+}
+
+impl ToolContext {
+    /// Create a context for a specific session and run.
+    pub fn for_run(session_id: impl Into<String>, run_id: impl Into<String>) -> Self {
+        Self {
+            session_id: Some(session_id.into()),
+            run_id: Some(run_id.into()),
+            ..Self::default()
+        }
+    }
+
+    /// Insert a typed extension into the context.
+    pub fn insert_extension<T: Send + Sync + 'static>(&self, val: T) {
+        if let Ok(mut map) = self.extensions.write() {
+            map.insert(std::any::TypeId::of::<T>(), std::sync::Arc::new(val));
+        }
+    }
+
+    /// Retrieve a typed extension from the context.
+    pub fn get_extension<T: Send + Sync + 'static>(&self) -> Option<std::sync::Arc<T>> {
+        self.extensions
+            .read()
+            .ok()?
+            .get(&std::any::TypeId::of::<T>())
+            .and_then(|v| std::sync::Arc::clone(v).downcast::<T>().ok())
+    }
+}
+
+impl std::fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
+            .field("working_dir", &self.working_dir)
+            .finish()
+    }
+}
+
 // ── ToolError ─────────────────────────────────────────────────────────────────
 
 /// Why a tool invocation failed.
@@ -231,6 +308,20 @@ pub trait ToolHandler: Send + Sync {
 
     /// Execute the tool with the given project context and parsed arguments.
     async fn execute(&self, project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError>;
+
+    /// Execute with full context — session, run, working directory, extensions.
+    ///
+    /// Default delegates to [`execute`], ignoring the context.
+    /// Override this instead of `execute` for tools that need session
+    /// awareness, working directory, or the extensions type-map.
+    async fn execute_with_context(
+        &self,
+        project: &ProjectKey,
+        args: Value,
+        _ctx: &ToolContext,
+    ) -> Result<ToolResult, ToolError> {
+        self.execute(project, args).await
+    }
 }
 
 // ── BuiltinToolDescriptor ─────────────────────────────────────────────────────
@@ -345,8 +436,20 @@ impl BuiltinToolRegistry {
         project: &ProjectKey,
         args: Value,
     ) -> Result<ToolResult, ToolError> {
+        self.execute_with_context(tool_name, project, args, &ToolContext::default())
+            .await
+    }
+
+    /// Execute a tool with full context (session, run, working dir, extensions).
+    pub async fn execute_with_context(
+        &self,
+        tool_name: &str,
+        project: &ProjectKey,
+        args: Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult, ToolError> {
         match self.tools.get(tool_name) {
-            Some((handler, _)) => handler.execute(project, args).await,
+            Some((handler, _)) => handler.execute_with_context(project, args, ctx).await,
             None => Err(ToolError::Permanent(format!("unknown tool: {tool_name}"))),
         }
     }

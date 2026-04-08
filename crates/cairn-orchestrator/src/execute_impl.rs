@@ -205,18 +205,22 @@ impl RuntimeExecutePhase {
                     .map_err(OrchestratorError::Runtime)?;
 
                 // ── Tool dispatch: registry first, stub fallback ────────────
+                let mut tool_ctx = cairn_tools::builtins::ToolContext::default();
+                tool_ctx.session_id = Some(ctx.session_id.to_string());
+                tool_ctx.run_id = Some(ctx.run_id.to_string());
                 let tool_output_result = if let Some(ref registry) = self.tool_registry {
                     // Look up the tool in the built-in registry.
-                    // `execute()` returns Result<ToolResult, ToolError>; map to
+                    // `execute_with_context()` returns Result<ToolResult, ToolError>; map to
                     // the flat Result<Value, String> expected below.
                     registry
-                        .execute(
+                        .execute_with_context(
                             &tool_name,
                             &ctx.project,
                             proposal
                                 .tool_args
                                 .clone()
                                 .unwrap_or(serde_json::Value::Null),
+                            &tool_ctx,
                         )
                         .await
                         .map(|r| r.output)
