@@ -668,10 +668,8 @@ export function GraphPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-[12px] font-medium text-amber-400">Graph backend not connected</p>
                     <p className="text-[11px] text-amber-700 mt-0.5">
-                      Live node/edge data requires RFC 004 HTTP endpoints (
-                      <code className="text-amber-600">GET /v1/graph/nodes</code>,{" "}
-                      <code className="text-amber-600">POST /v1/graph/query</code>).
-                      The schema below reflects the compiled type system.
+                      Run a workflow to populate live graph data. The visualization above
+                      uses demo data. Ingest documents or run an orchestration to see real nodes.
                     </p>
                   </div>
                   <a href="#memory" onClick={() => { window.location.hash = "memory"; }}

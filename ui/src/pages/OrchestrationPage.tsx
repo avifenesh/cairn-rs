@@ -580,8 +580,7 @@ export function OrchestrationPage() {
                 </div>
                 <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No sessions yet</p>
                 <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
-                  Sessions appear here once created via{" "}
-                  <code className="bg-gray-100 dark:bg-zinc-800 rounded px-1 text-gray-400 dark:text-zinc-500">POST /v1/sessions</code>.
+                  Create a session from the Sessions page to start orchestrating.
                 </p>
               </div>
             ) : (

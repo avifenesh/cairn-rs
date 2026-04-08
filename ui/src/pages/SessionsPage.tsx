@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { ChevronRight, RefreshCw, Plus, Upload } from 'lucide-react';
 import { DataTable } from '../components/DataTable';
 import { ErrorFallback } from '../components/ErrorFallback';
@@ -94,6 +94,18 @@ export function SessionsPage() {
   const qc         = useQueryClient();
   const importRef  = useRef<HTMLInputElement>(null);
 
+  const createSession = useMutation({
+    mutationFn: () => {
+      const id = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      return defaultApi.createSession({ session_id: id });
+    },
+    onSuccess: (s) => {
+      toast.success(`Session ${s.session_id} created`);
+      qc.invalidateQueries({ queryKey: ['sessions'] });
+    },
+    onError: () => toast.error('Failed to create session'),
+  });
+
   const list = sessions ?? [];
   const runCountFor = (id: string) => (allRuns ?? []).filter(r => r.session_id === id).length;
   const activeNow   = list.filter(s => s.state === 'open').length;
@@ -142,8 +154,12 @@ export function SessionsPage() {
           >
             <Upload size={11} /> Import
           </button>
-          <button onClick={() => toast.info("Use POST /v1/sessions to create a session via the API.")} className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1.5 text-[11px] text-white font-medium transition-colors">
-            <Plus size={11} /> New Session
+          <button
+            onClick={() => createSession.mutate()}
+            disabled={createSession.isPending}
+            className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1.5 text-[11px] text-white font-medium transition-colors disabled:opacity-50"
+          >
+            <Plus size={11} /> {createSession.isPending ? 'Creating…' : 'New Session'}
           </button>
         </div>
       </div>
@@ -175,7 +191,7 @@ export function SessionsPage() {
           csvRow={r => [r.session_id, r.project.tenant_id, r.project.workspace_id, r.project.project_id, r.state, r.created_at]}
           csvHeaders={['Session ID', 'Tenant', 'Workspace', 'Project', 'State', 'Created At']}
           filename="sessions"
-          emptyText="No sessions yet — create one with POST /v1/sessions or run the SDK example: python3 examples/basic-agent.py"
+          emptyText="No sessions yet — click New Session above or run: python3 examples/basic-agent.py"
         />
       )}
     </div>

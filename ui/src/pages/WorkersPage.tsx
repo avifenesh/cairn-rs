@@ -489,7 +489,7 @@ export function WorkersPage() {
             </p>
             <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
               {totalWorkers === 0
-                ? "Workers appear here once they claim a task. Use POST /v1/tasks/:id/claim to register a worker."
+                ? "Workers appear here once they claim a task. Run an orchestration to see worker activity."
                 : "Try switching the filter to 'all'."}
             </p>
           </div>

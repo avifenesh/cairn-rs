@@ -867,6 +867,7 @@ impl AppState {
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct ProjectScopedQuery {
     tenant_id: String,
     workspace_id: String,
@@ -1628,6 +1629,7 @@ struct AuditLogQuery {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, ToSchema)]
+#[allow(dead_code)]
 struct CreateProviderConnectionRequest {
     tenant_id: String,
     provider_connection_id: String,

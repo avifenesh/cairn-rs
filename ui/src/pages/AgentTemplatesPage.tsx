@@ -292,8 +292,7 @@ export function AgentTemplatesPage() {
               <div>
                 <p className="text-[12px] font-medium text-gray-500 dark:text-zinc-400">Need a custom configuration?</p>
                 <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
-                  Use the Providers page to configure your tools, then create a run manually
-                  via <code className="font-mono text-gray-400 dark:text-zinc-500">POST /v1/runs</code> with your own agent_role and prompt.
+                  Use the Providers page to configure your tools, then create a run with your own agent_role and prompt.
                 </p>
               </div>
             </div>

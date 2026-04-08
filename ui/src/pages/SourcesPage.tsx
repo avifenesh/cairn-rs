@@ -247,7 +247,7 @@ export function SourcesPage() {
             </div>
             <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No sources registered</p>
             <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
-              Ingest documents via <span className="font-mono text-gray-400 dark:text-zinc-500">POST /v1/memory/ingest</span> to register a source.
+              Sources appear after documents are ingested. Use the Memory page to add documents.
             </p>
           </div>
         ) : (

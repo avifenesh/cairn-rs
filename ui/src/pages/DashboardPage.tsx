@@ -775,8 +775,8 @@ const ONBOARDED_KEY = 'cairn_onboarded';
 
 const STEPS = [
   { n: 1, title: 'Connect an LLM', body: 'Set OLLAMA_HOST to a running Ollama instance, or configure an OpenAI-compatible provider under Providers.' },
-  { n: 2, title: 'Create a Session', body: 'POST /v1/sessions (or click New Session in the Sessions page) to create a conversation context for your agent.' },
-  { n: 3, title: 'Start a Run', body: 'POST /v1/runs with a session_id to kick off an agent execution. Runs, tasks, and costs appear here in real time.' },
+  { n: 2, title: 'Create a Session', body: 'Go to the Sessions page and click New Session to create a conversation context for your agent.' },
+  { n: 3, title: 'Start a Run', body: 'Create a run within a session to kick off agent execution. Runs, tasks, and costs appear here in real time.' },
 ];
 
 function OnboardingBanner() {

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, ProjectKey, TaskId};
-use cairn_runtime::{tasks::TaskService, services::TaskServiceImpl};
+use cairn_runtime::tasks::TaskService;
 use serde_json::Value;
 
 use super::{ToolError, ToolHandler, ToolResult, ToolTier};

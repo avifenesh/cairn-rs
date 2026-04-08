@@ -238,8 +238,8 @@ function EmptyState() {
       <div>
         <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No eval runs yet</p>
         <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-1 max-w-xs">
-          Use <code className="text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 rounded px-1">POST /v1/evals/runs</code> to
-          start evaluating LLM outputs against prompts and rubrics.
+          Eval runs appear here after orchestration completes or when created via the API.
+          Connect a provider and run an orchestration to see results.
         </p>
       </div>
     </div>
@@ -396,7 +396,7 @@ export function EvalsPage() {
         <button
           className="ml-auto flex items-center gap-1.5 rounded bg-indigo-600 hover:bg-indigo-500
                      text-white text-[12px] font-medium px-3 py-1.5 transition-colors"
-          title="POST /v1/evals/runs to create an eval run programmatically"
+          title="Create a new eval run"
         >
           <Plus size={12} />
           New Eval Run

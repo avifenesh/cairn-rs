@@ -21,7 +21,7 @@
 //! ```
 
 use async_trait::async_trait;
-use cairn_domain::{RunId, TaskId};
+use cairn_domain::RunId;
 
 use crate::context::{
     DecideOutput, ExecuteOutcome, GatherOutput, LoopTermination, OrchestrationContext,

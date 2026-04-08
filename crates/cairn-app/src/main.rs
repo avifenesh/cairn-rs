@@ -3656,12 +3656,9 @@ async fn seed_demo_data(state: &AppState) {
     use cairn_runtime::{
         audits::AuditService,
         approvals::ApprovalService,
-        projects::ProjectService,
         runs::RunService,
         sessions::SessionService,
         tasks::TaskService,
-        tenants::TenantService,
-        workspaces::WorkspaceService,
     };
 
     let project = ProjectKey::new("default_tenant", "default_workspace", "demo_project");

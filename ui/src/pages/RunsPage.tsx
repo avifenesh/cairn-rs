@@ -391,7 +391,7 @@ export function RunsPage() {
             csvRow={r => [r.run_id, r.session_id, r.state, r.parent_run_id??'', r.created_at, r.updated_at]}
             csvHeaders={['Run ID','Session ID','State','Parent Run','Created At','Updated At']}
             filename="runs"
-            emptyText="No runs match this filter — try 'All states' or POST /v1/runs to start one"
+            emptyText="No runs match this filter — try 'All states' or create a session first"
           />
         )}
         </div>
