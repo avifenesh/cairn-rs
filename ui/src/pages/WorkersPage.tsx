@@ -139,17 +139,17 @@ function StatCard({ label, value, sub, color = "indigo" }: {
   const valueColor = {
     indigo:  "text-indigo-400",
     emerald: "text-emerald-400",
-    zinc:    "text-zinc-300",
+    zinc:    "text-gray-700 dark:text-zinc-300",
     amber:   "text-amber-400",
   }[color];
 
   return (
-    <div className={clsx("bg-zinc-900 border border-zinc-800 border-l-2 rounded-lg p-4", border)}>
-      <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-2 truncate">
+    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4", border)}>
+      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2 truncate">
         {label}
       </p>
       <p className={clsx("text-xl font-semibold tabular-nums leading-none", valueColor)}>{value}</p>
-      {sub && <p className="mt-1.5 text-[11px] text-zinc-600 truncate">{sub}</p>}
+      {sub && <p className="mt-1.5 text-[11px] text-gray-400 dark:text-zinc-600 truncate">{sub}</p>}
     </div>
   );
 }
@@ -161,12 +161,12 @@ const STATE_PILL: Partial<Record<TaskState, string>> = {
   running:   "text-blue-400 bg-blue-400/10",
   completed: "text-emerald-400 bg-emerald-400/10",
   failed:    "text-red-400 bg-red-400/10",
-  canceled:  "text-zinc-500 bg-zinc-800",
+  canceled:  "text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800",
   paused:    "text-amber-400 bg-amber-400/10",
 };
 
 function StatePill({ state }: { state: TaskState }) {
-  const cls = STATE_PILL[state] ?? "text-zinc-500 bg-zinc-800";
+  const cls = STATE_PILL[state] ?? "text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800";
   return (
     <span className={clsx("text-[10px] font-medium rounded px-1.5 py-0.5 font-mono", cls)}>
       {state}
@@ -179,18 +179,18 @@ function StatePill({ state }: { state: TaskState }) {
 function WorkerHistory({ tasks }: { tasks: TaskRecord[] }) {
   if (tasks.length === 0) {
     return (
-      <p className="text-[12px] text-zinc-600 italic px-4 py-3">
+      <p className="text-[12px] text-gray-400 dark:text-zinc-600 italic px-4 py-3">
         No completed tasks recorded for this worker yet.
       </p>
     );
   }
 
   return (
-    <div className="divide-y divide-zinc-800/50">
+    <div className="divide-y divide-gray-200 dark:divide-zinc-800/50">
       {/* Column headers */}
-      <div className="grid grid-cols-[1fr_80px_80px_96px] gap-2 px-4 py-1.5 bg-zinc-950">
+      <div className="grid grid-cols-[1fr_80px_80px_96px] gap-2 px-4 py-1.5 bg-white dark:bg-zinc-950">
         {["Task ID", "State", "Duration", "Completed"].map(h => (
-          <span key={h} className="text-[10px] text-zinc-600 uppercase tracking-wider">{h}</span>
+          <span key={h} className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">{h}</span>
         ))}
       </div>
       {tasks.map((t, i) => {
@@ -200,20 +200,20 @@ function WorkerHistory({ tasks }: { tasks: TaskRecord[] }) {
             key={t.task_id}
             className={clsx(
               "grid grid-cols-[1fr_80px_80px_96px] gap-2 items-center px-4 py-2",
-              i % 2 === 0 ? "bg-zinc-950/30" : "",
+              i % 2 === 0 ? "bg-white dark:bg-zinc-950/30" : "",
             )}
           >
             <span
-              className="font-mono text-[11px] text-zinc-400 truncate"
+              className="font-mono text-[11px] text-gray-500 dark:text-zinc-400 truncate"
               title={t.task_id}
             >
               {shortId(t.task_id)}
             </span>
             <StatePill state={t.state} />
-            <span className="text-[11px] font-mono text-zinc-500 tabular-nums">
+            <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-500 tabular-nums">
               {dur > 0 ? fmtDuration(dur) : "—"}
             </span>
-            <span className="text-[10px] text-zinc-600 tabular-nums" title={fmtTime(t.updated_at)}>
+            <span className="text-[10px] text-gray-400 dark:text-zinc-600 tabular-nums" title={fmtTime(t.updated_at)}>
               {fmtRelative(t.updated_at)}
             </span>
           </div>
@@ -242,8 +242,8 @@ function WorkerRow({
 
   return (
     <div className={clsx(
-      "border-b border-zinc-800/50 last:border-0",
-      even ? "bg-zinc-900" : "bg-zinc-900/50",
+      "border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0",
+      even ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50",
     )}>
       {/* Main row */}
       <div
@@ -253,8 +253,8 @@ function WorkerRow({
         {/* Expand chevron */}
         <div className="w-9 shrink-0 flex justify-center">
           {expanded
-            ? <ChevronDown  size={12} className="text-zinc-600" />
-            : <ChevronRight size={12} className="text-zinc-600" />
+            ? <ChevronDown  size={12} className="text-gray-400 dark:text-zinc-600" />
+            : <ChevronRight size={12} className="text-gray-400 dark:text-zinc-600" />
           }
         </div>
 
@@ -262,11 +262,11 @@ function WorkerRow({
         <div className="flex-1 min-w-0 flex items-center gap-2 pr-3">
           <div className={clsx(
             "flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
-            isActive ? "bg-emerald-500/15" : "bg-zinc-800",
+            isActive ? "bg-emerald-500/15" : "bg-gray-100 dark:bg-zinc-800",
           )}>
-            <Cpu size={11} className={isActive ? "text-emerald-400" : "text-zinc-600"} />
+            <Cpu size={11} className={isActive ? "text-emerald-400" : "text-gray-400 dark:text-zinc-600"} />
           </div>
-          <span className="text-[12px] font-mono text-zinc-200 truncate" title={worker.worker_id}>
+          <span className="text-[12px] font-mono text-gray-800 dark:text-zinc-200 truncate" title={worker.worker_id}>
             {shortId(worker.worker_id)}
           </span>
         </div>
@@ -278,8 +278,8 @@ function WorkerRow({
             isActive
               ? "text-emerald-400 bg-emerald-400/10"
               : isStale
-              ? "text-zinc-600 bg-zinc-800/60"
-              : "text-zinc-400 bg-zinc-800",
+              ? "text-gray-400 dark:text-zinc-600 bg-gray-100/60 dark:bg-zinc-800/60"
+              : "text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800",
           )}>
             <span className={clsx(
               "w-1.5 h-1.5 rounded-full shrink-0",
@@ -299,18 +299,18 @@ function WorkerRow({
             >
               {shortId(worker.active_tasks[0].task_id)}
               {worker.active_tasks.length > 1 && (
-                <span className="text-zinc-600 ml-1">+{worker.active_tasks.length - 1}</span>
+                <span className="text-gray-400 dark:text-zinc-600 ml-1">+{worker.active_tasks.length - 1}</span>
               )}
             </span>
           ) : (
-            <span className="text-[11px] text-zinc-700">—</span>
+            <span className="text-[11px] text-gray-300 dark:text-zinc-700">—</span>
           )}
         </div>
 
         {/* Completed */}
         <div className="w-24 shrink-0 px-2 flex items-center gap-1">
           <CheckCircle2 size={10} className="text-emerald-600 shrink-0" />
-          <span className="text-[12px] tabular-nums text-zinc-300">
+          <span className="text-[12px] tabular-nums text-gray-700 dark:text-zinc-300">
             {worker.completed_count}
           </span>
           {worker.failed_count > 0 && (
@@ -322,18 +322,18 @@ function WorkerRow({
 
         {/* Avg duration */}
         <div className="w-24 shrink-0 px-2">
-          <span className="text-[11px] font-mono tabular-nums text-zinc-500">
+          <span className="text-[11px] font-mono tabular-nums text-gray-400 dark:text-zinc-500">
             {worker.avg_duration_ms !== null ? fmtDuration(worker.avg_duration_ms) : "—"}
           </span>
         </div>
 
         {/* Last heartbeat */}
         <div className="w-28 shrink-0 px-2 flex items-center gap-1">
-          <Clock size={10} className="text-zinc-700 shrink-0" />
+          <Clock size={10} className="text-gray-300 dark:text-zinc-700 shrink-0" />
           <span
             className={clsx(
               "text-[11px] tabular-nums",
-              isStale ? "text-amber-600" : "text-zinc-500",
+              isStale ? "text-amber-600" : "text-gray-400 dark:text-zinc-500",
             )}
             title={fmtTime(worker.last_seen_ms)}
           >
@@ -344,13 +344,13 @@ function WorkerRow({
 
       {/* Expanded history */}
       {expanded && (
-        <div className="border-t border-zinc-800/60 bg-zinc-950/30">
+        <div className="border-t border-gray-200/60 dark:border-zinc-800/60 bg-white dark:bg-zinc-950/30">
           <div className="px-4 py-2 flex items-center gap-2">
-            <Activity size={11} className="text-zinc-600" />
-            <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+            <Activity size={11} className="text-gray-400 dark:text-zinc-600" />
+            <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
               Task History
             </span>
-            <span className="text-[10px] text-zinc-700">
+            <span className="text-[10px] text-gray-300 dark:text-zinc-700">
               ({worker.history.length} records)
             </span>
           </div>
@@ -399,14 +399,14 @@ export function WorkersPage() {
   );
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
         <Users size={13} className="text-indigo-400 shrink-0" />
-        <span className="text-[13px] font-medium text-zinc-200">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           Workers
           {!isLoading && (
-            <span className="ml-2 text-[12px] text-zinc-500 font-normal">
+            <span className="ml-2 text-[12px] text-gray-400 dark:text-zinc-500 font-normal">
               {visible.length}
               {filter !== "all" && ` / ${totalWorkers} total`}
             </span>
@@ -414,17 +414,17 @@ export function WorkersPage() {
         </span>
 
         {/* Filter */}
-        <div className="flex items-center rounded border border-zinc-700 overflow-hidden ml-2">
+        <div className="flex items-center rounded border border-gray-200 dark:border-zinc-700 overflow-hidden ml-2">
           {(["all", "active", "idle"] as const).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={clsx(
                 "px-2.5 py-1 text-[11px] capitalize transition-colors",
-                f !== "all" && "border-l border-zinc-700",
+                f !== "all" && "border-l border-gray-200 dark:border-zinc-700",
                 filter === f
-                  ? "bg-zinc-700 text-zinc-200"
-                  : "text-zinc-500 hover:text-zinc-300",
+                  ? "bg-zinc-700 text-gray-800 dark:text-zinc-200"
+                  : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
               )}
             >
               {f}
@@ -435,7 +435,7 @@ export function WorkersPage() {
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="ml-auto flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
+          className="ml-auto flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
           Refresh
@@ -444,7 +444,7 @@ export function WorkersPage() {
 
       {/* Stat cards */}
       {!isLoading && totalWorkers > 0 && (
-        <div className="grid grid-cols-2 gap-3 px-4 py-4 border-b border-zinc-800 shrink-0 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 px-4 py-4 border-b border-gray-200 dark:border-zinc-800 shrink-0 lg:grid-cols-4">
           <StatCard
             label="Total Workers"
             value={totalWorkers}
@@ -475,19 +475,19 @@ export function WorkersPage() {
       {/* Table */}
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
-          <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+          <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-[13px]">Aggregating worker data…</span>
           </div>
         ) : visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-64 gap-3 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700">
-              <Users size={24} className="text-zinc-500" />
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700">
+              <Users size={24} className="text-gray-400 dark:text-zinc-500" />
             </div>
-            <p className="text-[13px] font-medium text-zinc-400">
+            <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">
               {totalWorkers === 0 ? "No workers seen yet" : `No ${filter} workers`}
             </p>
-            <p className="text-[12px] text-zinc-600 max-w-xs">
+            <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
               {totalWorkers === 0
                 ? "Workers appear here once they claim a task. Use POST /v1/tasks/:id/claim to register a worker."
                 : "Try switching the filter to 'all'."}
@@ -496,25 +496,25 @@ export function WorkersPage() {
         ) : (
           <div className="min-w-[720px]">
             {/* Column headers */}
-            <div className="flex items-center h-8 border-b border-zinc-800 bg-zinc-950 sticky top-0">
+            <div className="flex items-center h-8 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 sticky top-0">
               <div className="w-9 shrink-0" />
               <div className="flex-1 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Worker ID</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Worker ID</span>
               </div>
               <div className="w-24 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Status</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Status</span>
               </div>
               <div className="w-44 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Current Task</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Current Task</span>
               </div>
               <div className="w-24 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Completed</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Completed</span>
               </div>
               <div className="w-24 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Avg Duration</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Avg Duration</span>
               </div>
               <div className="w-28 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Last Heartbeat</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Last Heartbeat</span>
               </div>
             </div>
 
@@ -533,9 +533,9 @@ export function WorkersPage() {
 
       {/* Data source note */}
       {!isLoading && totalWorkers > 0 && (
-        <div className="flex items-center gap-1.5 px-4 py-2 border-t border-zinc-800 shrink-0">
-          <AlertTriangle size={10} className="text-zinc-700 shrink-0" />
-          <span className="text-[10px] text-zinc-700">
+        <div className="flex items-center gap-1.5 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 shrink-0">
+          <AlertTriangle size={10} className="text-gray-300 dark:text-zinc-700 shrink-0" />
+          <span className="text-[10px] text-gray-300 dark:text-zinc-700">
             Worker data derived from task lease records — refreshes every 10 s.
             Only workers that have claimed at least one task appear here.
           </span>

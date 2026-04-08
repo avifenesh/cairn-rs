@@ -43,10 +43,10 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg bg-zinc-900 border border-zinc-800">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800">
-        <Icon size={14} className="text-zinc-500 shrink-0" />
-        <h2 className="text-[13px] font-medium text-zinc-200">{title}</h2>
+    <div className="rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-zinc-800">
+        <Icon size={14} className="text-gray-400 dark:text-zinc-500 shrink-0" />
+        <h2 className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">{title}</h2>
       </div>
       <div className="px-4 py-4 space-y-4">{children}</div>
     </div>
@@ -57,8 +57,8 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="min-w-0">
-        <p className="text-[13px] text-zinc-300">{label}</p>
-        {hint && <p className="text-[11px] text-zinc-600 mt-0.5">{hint}</p>}
+        <p className="text-[13px] text-gray-700 dark:text-zinc-300">{label}</p>
+        {hint && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{hint}</p>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -101,14 +101,14 @@ function SelectField<T extends string>({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
-        className="appearance-none rounded border border-zinc-800 bg-zinc-900 text-zinc-300 text-[12px]
+        className="appearance-none rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-700 dark:text-zinc-300 text-[12px]
                    px-2.5 py-1.5 pr-7 focus:outline-none focus:border-indigo-500 cursor-pointer"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
-      <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+      <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 pointer-events-none" />
     </div>
   );
 }
@@ -145,12 +145,12 @@ function TokenSection() {
       {/* Current token */}
       <Row label="Current token" hint="Used for all API requests">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[12px] text-zinc-400">
+          <span className="font-mono text-[12px] text-gray-500 dark:text-zinc-400">
             {shown ? current : masked}
           </span>
           <button
             onClick={() => setShown((v) => !v)}
-            className="p-1 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
+            className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors"
             title={shown ? 'Hide' : 'Reveal'}
           >
             {shown ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -168,7 +168,7 @@ function TokenSection() {
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false); }}
             placeholder="Paste new token…"
-            className="flex-1 rounded border border-zinc-700 bg-zinc-800 text-zinc-200 text-[12px]
+            className="flex-1 rounded border border-gray-200 dark:border-zinc-700 bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-zinc-200 text-[12px]
                        px-3 py-1.5 placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
           />
           <button
@@ -181,7 +181,7 @@ function TokenSection() {
           </button>
           <button
             onClick={() => setEditing(false)}
-            className="rounded border border-zinc-700 text-zinc-500 hover:text-zinc-300 text-[12px] px-2.5 py-1.5 transition-colors"
+            className="rounded border border-gray-200 dark:border-zinc-700 text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 text-[12px] px-2.5 py-1.5 transition-colors"
           >
             Cancel
           </button>
@@ -190,7 +190,7 @@ function TokenSection() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setEditing(true)}
-            className="rounded border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-400
+            className="rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400
                        text-[12px] px-3 py-1.5 transition-colors"
           >
             Change token
@@ -234,7 +234,7 @@ function PreferencesSection() {
     <SectionCard title="Display Preferences" icon={AlignJustify}>
       {/* Theme */}
       <Row label="Theme" hint="Overrides the OS preference when set explicitly">
-        <div className="flex items-center gap-1 rounded border border-zinc-800 bg-zinc-950 p-0.5">
+        <div className="flex items-center gap-1 rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-0.5">
           {THEME_OPTIONS.map(({ value, icon: Icon, label }) => (
             <button
               key={value}
@@ -243,8 +243,8 @@ function PreferencesSection() {
               className={clsx(
                 'flex items-center gap-1.5 rounded px-2.5 py-1 text-[12px] font-medium transition-colors',
                 prefs.theme === value
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-500 hover:text-zinc-300',
+                  ? 'bg-gray-100 dark:bg-zinc-800 text-gray-900 dark:text-zinc-100'
+                  : 'text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300',
               )}
             >
               <Icon size={12} />
@@ -286,7 +286,7 @@ function PreferencesSection() {
           value={prefs.timezone}
           onChange={(e) => setPrefs({ timezone: e.target.value })}
           placeholder="e.g. America/New_York"
-          className="w-44 rounded border border-zinc-800 bg-zinc-900 text-zinc-300 text-[12px]
+          className="w-44 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-700 dark:text-zinc-300 text-[12px]
                      px-2.5 py-1.5 placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
         />
       </Row>
@@ -349,19 +349,19 @@ function AboutSection() {
         {[
           { label: 'Version',        value: 'v0.1.0 (cairn-rs)' },
           { label: 'API endpoint',   value: import.meta.env.VITE_API_URL || 'localhost:3000' },
-          { label: 'Runtime',        value: status ? (status.runtime_ok ? 'Healthy' : 'Degraded') : '—',
-            ok: status?.runtime_ok },
-          { label: 'Store',          value: status ? (status.store_ok ? 'Healthy' : 'Degraded') : '—',
-            ok: status?.store_ok },
+          { label: 'Runtime',        value: status ? (status.status === 'ok' ? 'Healthy' : 'Degraded') : '—',
+            ok: status?.status === 'ok' },
+          { label: 'Store',          value: status ? ((status.components?.find(c => c.name === 'event_store')?.status === 'ok') ? 'Healthy' : 'Degraded') : '—',
+            ok: status?.components?.find(c => c.name === 'event_store')?.status === 'ok' },
           { label: 'Uptime',         value: status ? fmtUptime(status.uptime_secs) : '—' },
         ].map(({ label, value, ok }) => (
-          <div key={label} className="flex items-center justify-between py-2 border-b border-zinc-800 last:border-0">
-            <span className="text-[12px] text-zinc-500">{label}</span>
+          <div key={label} className="flex items-center justify-between py-2 border-b border-gray-200 dark:border-zinc-800 last:border-0">
+            <span className="text-[12px] text-gray-400 dark:text-zinc-500">{label}</span>
             <span className={clsx(
               'text-[12px] font-mono',
               ok === true  && 'text-emerald-400',
               ok === false && 'text-red-400',
-              ok === undefined && 'text-zinc-300',
+              ok === undefined && 'text-gray-700 dark:text-zinc-300',
             )}>
               {value}
             </span>
@@ -386,22 +386,22 @@ function ChangelogSection() {
   return (
     <SectionCard title="Changelog" icon={ListOrdered}>
       {isLoading ? (
-        <p className="text-[12px] text-zinc-600">Loading…</p>
+        <p className="text-[12px] text-gray-400 dark:text-zinc-600">Loading…</p>
       ) : list.length === 0 ? (
-        <p className="text-[12px] text-zinc-600">No changelog entries.</p>
+        <p className="text-[12px] text-gray-400 dark:text-zinc-600">No changelog entries.</p>
       ) : (
         <div className="space-y-5">
           {list.map((entry: ChangelogEntry) => (
             <div key={entry.version}>
               <div className="flex items-baseline gap-3 mb-2">
-                <span className="text-[13px] font-semibold text-zinc-100 font-mono">
+                <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100 font-mono">
                   v{entry.version}
                 </span>
-                <span className="text-[11px] text-zinc-600">{entry.date}</span>
+                <span className="text-[11px] text-gray-400 dark:text-zinc-600">{entry.date}</span>
               </div>
               <ul className="space-y-1">
                 {entry.changes.map((change: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-[12px] text-zinc-400">
+                  <li key={i} className="flex items-start gap-2 text-[12px] text-gray-500 dark:text-zinc-400">
                     <span className="mt-1.5 h-1 w-1 rounded-full bg-zinc-600 shrink-0" />
                     {change}
                   </li>
@@ -419,7 +419,7 @@ function ChangelogSection() {
 
 export function ProfilePage() {
   return (
-    <div className="h-full overflow-y-auto bg-zinc-950">
+    <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
       <div className="max-w-2xl mx-auto px-6 py-6 space-y-5">
         {/* Header */}
         <div className="flex items-center gap-3">
@@ -427,8 +427,8 @@ export function ProfilePage() {
             <User size={16} className="text-indigo-400" />
           </div>
           <div>
-            <h1 className="text-[14px] font-semibold text-zinc-100">Account</h1>
-            <p className="text-[11px] text-zinc-600 mt-0.5">Token, display preferences, and system information</p>
+            <h1 className="text-[14px] font-semibold text-gray-900 dark:text-zinc-100">Account</h1>
+            <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">Token, display preferences, and system information</p>
           </div>
         </div>
 

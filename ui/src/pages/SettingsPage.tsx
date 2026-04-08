@@ -20,9 +20,9 @@ const fmtTime = (ms: number | null) =>
 
 function KV({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between py-2.5 border-b border-zinc-800 last:border-0">
-      <span className="text-[12px] text-zinc-500">{label}</span>
-      <span className={clsx("text-[13px] text-zinc-200", mono && "font-mono")}>{value}</span>
+    <div className="flex items-center justify-between py-2.5 border-b border-gray-200 dark:border-zinc-800 last:border-0">
+      <span className="text-[12px] text-gray-400 dark:text-zinc-500">{label}</span>
+      <span className={clsx("text-[13px] text-gray-800 dark:text-zinc-200", mono && "font-mono")}>{value}</span>
     </div>
   );
 }
@@ -35,7 +35,7 @@ function BoolChip({ value, trueLabel = "Yes", falseLabel = "No" }: {
       <Check size={10} strokeWidth={2.5} /> {trueLabel}
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-500 bg-zinc-800/60 border border-zinc-700 rounded px-2 py-0.5">
+    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-400 dark:text-zinc-500 bg-gray-100/60 dark:bg-zinc-800/60 border border-gray-200 dark:border-zinc-700 rounded px-2 py-0.5">
       <X size={10} strokeWidth={2} /> {falseLabel}
     </span>
   );
@@ -48,7 +48,7 @@ function ModeBadge({ mode }: { mode: string }) {
       "text-[11px] font-medium rounded px-2 py-0.5 border",
       isTeam
         ? "text-indigo-300 bg-indigo-950/50 border-indigo-800/40"
-        : "text-zinc-300 bg-zinc-800/60 border-zinc-700",
+        : "text-gray-700 dark:text-zinc-300 bg-gray-100/60 dark:bg-zinc-800/60 border-gray-200 dark:border-zinc-700",
     )}>
       {isTeam ? "Self-hosted Team" : "Local"}
     </span>
@@ -59,7 +59,7 @@ function BackendBadge({ backend }: { backend: string }) {
   const colors: Record<string, string> = {
     postgres: "text-sky-300 bg-sky-950/50 border-sky-800/40",
     sqlite:   "text-amber-300 bg-amber-950/40 border-amber-800/40",
-    memory:   "text-zinc-400 bg-zinc-800/60 border-zinc-700",
+    memory:   "text-gray-500 dark:text-zinc-400 bg-gray-100/60 dark:bg-zinc-800/60 border-gray-200 dark:border-zinc-700",
   };
   return (
     <span className={clsx("text-[11px] font-medium rounded px-2 py-0.5 border font-mono",
@@ -73,11 +73,11 @@ function BackendBadge({ backend }: { backend: string }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-zinc-800 overflow-hidden">
-      <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-zinc-800/40">
-        <p className="text-[12px] font-semibold text-zinc-300 uppercase tracking-wider">{title}</p>
+    <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
+      <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
+        <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">{title}</p>
       </div>
-      <div className="px-4 bg-zinc-900/60">
+      <div className="px-4 bg-gray-50/60 dark:bg-zinc-900/60">
         {children}
       </div>
     </div>
@@ -88,19 +88,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function FeatureRow({ label, value, enabled }: { label: string; value?: string | number; enabled?: boolean }) {
   return (
-    <div className="flex items-center justify-between py-2.5 border-b border-zinc-800 last:border-0">
-      <span className="text-[12px] text-zinc-500">{label}</span>
+    <div className="flex items-center justify-between py-2.5 border-b border-gray-200 dark:border-zinc-800 last:border-0">
+      <span className="text-[12px] text-gray-400 dark:text-zinc-500">{label}</span>
       <span className="flex items-center gap-2">
         {enabled !== undefined && (
           <span className={clsx(
             "inline-flex items-center justify-center w-3.5 h-3.5 rounded-full",
-            enabled ? "bg-emerald-500/20 text-emerald-400" : "bg-zinc-800 text-zinc-600",
+            enabled ? "bg-emerald-500/20 text-emerald-400" : "bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-600",
           )}>
             {enabled ? <Check size={9} strokeWidth={3} /> : <X size={9} strokeWidth={2} />}
           </span>
         )}
         {value !== undefined && (
-          <span className="text-[12px] text-zinc-300 font-mono">{value}</span>
+          <span className="text-[12px] text-gray-700 dark:text-zinc-300 font-mono">{value}</span>
         )}
       </span>
     </div>
@@ -115,13 +115,13 @@ function SystemInfoSections({ info }: { info: SystemInfo }) {
         <KV label="Version"     value={<span className="font-mono text-indigo-300">v{info.version}</span>} />
         <KV label="OS / Arch"   value={`${info.os} / ${info.arch}`} mono />
         <KV label="Git Commit"  value={
-          <span className="font-mono text-[12px] text-zinc-400">
+          <span className="font-mono text-[12px] text-gray-500 dark:text-zinc-400">
             {info.git_commit === 'dev' ? (
               <span className="text-amber-400">dev build</span>
             ) : info.git_commit.slice(0, 12)}
           </span>
         } />
-        <KV label="Build"       value={<span className="text-[12px] text-zinc-500">{info.build_date}</span>} />
+        <KV label="Build"       value={<span className="text-[12px] text-gray-400 dark:text-zinc-500">{info.build_date}</span>} />
       </Section>
 
       {/* Features */}
@@ -158,7 +158,7 @@ function SystemInfoSections({ info }: { info: SystemInfo }) {
         <KV
           label="Ollama host"
           value={
-            <span className="font-mono text-[12px] text-zinc-400 truncate max-w-[200px]" title={info.environment.ollama_host}>
+            <span className="font-mono text-[12px] text-gray-500 dark:text-zinc-400 truncate max-w-[200px]" title={info.environment.ollama_host}>
               {info.environment.ollama_host}
             </span>
           }
@@ -195,16 +195,16 @@ function SecretChip({ status }: { status: EnvSecret }) {
     </span>
   );
   if (status === 'unset') return (
-    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-600 bg-zinc-800/60 border border-zinc-700 rounded px-1.5 py-0.5">
+    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-400 dark:text-zinc-600 bg-gray-100/60 dark:bg-zinc-800/60 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
       not set
     </span>
   );
-  return <span className="text-[11px] text-zinc-700 font-mono">—</span>;
+  return <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>;
 }
 
 function EnvValue({ value }: { value: string }) {
   return (
-    <span className="font-mono text-[11px] text-zinc-300 bg-zinc-800 px-1.5 py-0.5 rounded max-w-[180px] truncate block text-right"
+    <span className="font-mono text-[11px] text-gray-700 dark:text-zinc-300 bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded max-w-[180px] truncate block text-right"
           title={value}>
       {value || '—'}
     </span>
@@ -250,7 +250,7 @@ function EnvVarsSection({
     },
     {
       name: 'CAIRN_BRAIN_URL',
-      current: <span className="text-[11px] text-zinc-700 font-mono italic">not exposed</span>,
+      current: <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono italic">not exposed</span>,
       default_:    '(none)',
       description: 'Base URL for the brain LLM provider (OpenAI-compatible). Used for orchestration and high-capability tasks.',
     },
@@ -258,7 +258,7 @@ function EnvVarsSection({
       name: 'CAIRN_STORAGE',
       current: settings
         ? <EnvValue value={settings.store_backend} />
-        : <span className="text-[11px] text-zinc-700 font-mono">—</span>,
+        : <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>,
       default_:    'in_memory',
       description: 'Persistence backend: in_memory (default), sqlite, or postgres.',
     },
@@ -266,19 +266,19 @@ function EnvVarsSection({
       name: 'CAIRN_MODE',
       current: info?.environment.deployment_mode
         ? <EnvValue value={info.environment.deployment_mode} />
-        : <span className="text-[11px] text-zinc-700 font-mono">—</span>,
+        : <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>,
       default_:    'local',
       description: 'Deployment mode: local (single user) or self_hosted_team (multi-tenant).',
     },
     {
       name: 'CAIRN_LISTEN_ADDR',
-      current: host ? <EnvValue value={host} /> : <span className="text-[11px] text-zinc-700 font-mono">—</span>,
+      current: host ? <EnvValue value={host} /> : <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>,
       default_:    '127.0.0.1',
       description: 'TCP address to bind. Set to 0.0.0.0 to listen on all interfaces.',
     },
     {
       name: 'CAIRN_LISTEN_PORT',
-      current: port ? <EnvValue value={port} /> : <span className="text-[11px] text-zinc-700 font-mono">—</span>,
+      current: port ? <EnvValue value={port} /> : <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>,
       default_:    '3000',
       description: 'TCP port to listen on.',
     },
@@ -286,7 +286,7 @@ function EnvVarsSection({
       name: 'CAIRN_ENCRYPTION_KEY',
       current: <SecretChip status={
         settings
-          ? (settings.key_management.encryption_key_configured ? 'set' : 'unset')
+          ? (settings.key_management?.encryption_key_configured ? 'set' : 'unset')
           : 'unknown'
       } />,
       default_:    '(none)',
@@ -295,13 +295,13 @@ function EnvVarsSection({
     },
     {
       name: 'CAIRN_TLS_CERT',
-      current: <span className="text-[11px] text-zinc-700 font-mono italic">not exposed</span>,
+      current: <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono italic">not exposed</span>,
       default_:    '(none)',
       description: 'Path to PEM certificate file for HTTPS. Requires CAIRN_TLS_KEY.',
     },
     {
       name: 'CAIRN_TLS_KEY',
-      current: <span className="text-[11px] text-zinc-700 font-mono italic">not exposed</span>,
+      current: <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono italic">not exposed</span>,
       default_:    '(none)',
       description: 'Path to PEM private key file for HTTPS. Requires CAIRN_TLS_CERT.',
       secret: true,
@@ -313,32 +313,32 @@ function EnvVarsSection({
       <div className="-mx-4">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="border-b border-zinc-800">
-              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600 w-[220px]">Variable</th>
-              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600 w-[160px] text-right">Current</th>
-              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600 w-[90px]">Default</th>
-              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Description</th>
+            <tr className="border-b border-gray-200 dark:border-zinc-800">
+              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-zinc-600 w-[220px]">Variable</th>
+              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-zinc-600 w-[160px] text-right">Current</th>
+              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-zinc-600 w-[90px]">Default</th>
+              <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-zinc-600">Description</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.name} className="border-b border-zinc-800/60 last:border-0 hover:bg-zinc-800/20 transition-colors">
+              <tr key={row.name} className="border-b border-gray-200/60 dark:border-zinc-800/60 last:border-0 hover:bg-gray-100/20 dark:hover:bg-gray-100/20 dark:bg-zinc-800/20 transition-colors">
                 <td className="px-4 py-2.5 align-top">
                   <code className="text-[11px] font-mono text-indigo-300 select-all">
                     {row.name}
                   </code>
                   {row.secret && (
-                    <span className="ml-1.5 text-[9px] text-zinc-700 uppercase tracking-wide">secret</span>
+                    <span className="ml-1.5 text-[9px] text-gray-300 dark:text-zinc-700 uppercase tracking-wide">secret</span>
                   )}
                 </td>
                 <td className="px-4 py-2.5 align-top text-right">
                   {row.current}
                 </td>
                 <td className="px-4 py-2.5 align-top">
-                  <span className="font-mono text-[11px] text-zinc-600">{row.default_}</span>
+                  <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-600">{row.default_}</span>
                 </td>
                 <td className="px-4 py-2.5 align-top">
-                  <span className="text-[11px] text-zinc-500 leading-relaxed">{row.description}</span>
+                  <span className="text-[11px] text-gray-400 dark:text-zinc-500 leading-relaxed">{row.description}</span>
                 </td>
               </tr>
             ))}
@@ -356,7 +356,7 @@ const WS_STATUS_COLOR: Record<string, string> = {
   connecting:   "text-amber-400",
   reconnecting: "text-amber-400",
   failed:       "text-red-400",
-  idle:         "text-zinc-600",
+  idle:         "text-gray-400 dark:text-zinc-600",
 };
 
 function TransportSection() {
@@ -380,7 +380,7 @@ function TransportSection() {
                 "flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors border",
                 !isWs
                   ? "bg-indigo-600/20 text-indigo-300 border-indigo-700/50"
-                  : "text-zinc-500 border-zinc-700 hover:text-zinc-300",
+                  : "text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-700 hover:text-gray-700 dark:text-zinc-300",
               )}
             >
               <Radio size={11} /> SSE
@@ -392,7 +392,7 @@ function TransportSection() {
                 "flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors border",
                 isWs
                   ? "bg-indigo-600/20 text-indigo-300 border-indigo-700/50"
-                  : "text-zinc-500 border-zinc-700 hover:text-zinc-300",
+                  : "text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-700 hover:text-gray-700 dark:text-zinc-300",
               )}
             >
               <Wifi size={11} /> WebSocket
@@ -406,13 +406,13 @@ function TransportSection() {
           label="WS Status"
           value={
             <div className="flex items-center gap-2">
-              <span className={clsx("text-[12px] font-medium", WS_STATUS_COLOR[wsStatus] ?? "text-zinc-500")}>
+              <span className={clsx("text-[12px] font-medium", WS_STATUS_COLOR[wsStatus] ?? "text-gray-400 dark:text-zinc-500")}>
                 {wsStatus}
               </span>
               {(wsStatus === "failed" || wsStatus === "idle") && (
                 <button
                   onClick={reconnect}
-                  className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
                 >
                   Reconnect
                 </button>
@@ -425,7 +425,7 @@ function TransportSection() {
       <KV
         label="Endpoint"
         value={
-          <code className="text-[11px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
+          <code className="text-[11px] text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
             {isWs ? "GET /v1/ws?token=…" : "GET /v1/stream"}
           </code>
         }
@@ -434,7 +434,7 @@ function TransportSection() {
       <KV
         label="Description"
         value={
-          <span className="text-[11px] text-zinc-600">
+          <span className="text-[11px] text-gray-400 dark:text-zinc-600">
             {isWs
               ? "Bidirectional; supports event-type filtering. Uses ?token= for auth."
               : "Unidirectional push with Last-Event-ID replay. Default."}
@@ -531,28 +531,28 @@ function CorsDiagnosticsSection({ deploymentMode }: { deploymentMode?: string })
       <KV label="Allowed origins" value={
         <div className="flex flex-col items-end gap-1">
           {allowedOrigins.map(o => (
-            <span key={o} className="font-mono text-[11px] text-zinc-400 max-w-[280px] truncate text-right" title={o}>{o}</span>
+            <span key={o} className="font-mono text-[11px] text-gray-500 dark:text-zinc-400 max-w-[280px] truncate text-right" title={o}>{o}</span>
           ))}
         </div>
       } />
       <KV label="Allowed methods" value={
-        <span className="font-mono text-[11px] text-zinc-400">GET POST PUT DELETE PATCH OPTIONS</span>
+        <span className="font-mono text-[11px] text-gray-500 dark:text-zinc-400">GET POST PUT DELETE PATCH OPTIONS</span>
       } />
       <KV label="Allowed headers" value={
-        <span className="font-mono text-[11px] text-zinc-400">Authorization, Content-Type</span>
+        <span className="font-mono text-[11px] text-gray-500 dark:text-zinc-400">Authorization, Content-Type</span>
       } />
       <KV label="Max-Age (cache)" value={
-        <span className="font-mono text-[11px] text-zinc-400">86400s (24 h)</span>
+        <span className="font-mono text-[11px] text-gray-500 dark:text-zinc-400">86400s (24 h)</span>
       } />
 
       {/* Preflight test */}
-      <div className="flex items-center justify-between py-2.5 border-b border-zinc-800">
-        <span className="text-[12px] text-zinc-500">Preflight test</span>
+      <div className="flex items-center justify-between py-2.5 border-b border-gray-200 dark:border-zinc-800">
+        <span className="text-[12px] text-gray-400 dark:text-zinc-500">Preflight test</span>
         <button
           onClick={() => void runPreflight()}
           disabled={testing}
-          className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-800
-                     text-[11px] font-medium text-zinc-300 hover:text-zinc-100 hover:border-zinc-600
+          className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-100 dark:bg-zinc-800
+                     text-[11px] font-medium text-gray-700 dark:text-zinc-300 hover:text-gray-900 dark:text-zinc-100 hover:border-zinc-600
                      disabled:opacity-40 px-2.5 py-1 transition-colors"
         >
           {testing
@@ -566,7 +566,7 @@ function CorsDiagnosticsSection({ deploymentMode }: { deploymentMode?: string })
       {result && (
         <div className="py-3 space-y-2">
           {/* Status line */}
-          <div className="flex items-center gap-2 pb-2 border-b border-zinc-800/60">
+          <div className="flex items-center gap-2 pb-2 border-b border-gray-200/60 dark:border-zinc-800/60">
             <span className={clsx(
               "inline-flex items-center gap-1 text-[11px] font-medium rounded px-2 py-0.5 border",
               result.ok
@@ -576,7 +576,7 @@ function CorsDiagnosticsSection({ deploymentMode }: { deploymentMode?: string })
               {result.ok ? <Check size={10} strokeWidth={2.5} /> : <X size={10} />}
               {result.status > 0 ? `HTTP ${result.status}` : "Network error"}
             </span>
-            <span className="text-[11px] text-zinc-600 font-mono">{result.latency} ms</span>
+            <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">{result.latency} ms</span>
             {result.error && (
               <span className="text-[11px] text-red-400 truncate max-w-xs" title={result.error}>
                 {result.error}
@@ -588,15 +588,15 @@ function CorsDiagnosticsSection({ deploymentMode }: { deploymentMode?: string })
           {CORS_HEADERS_OF_INTEREST.map(h => {
             const raw = result.headers[h];
             const display = h === "access-control-max-age"
-              ? (fmtMaxAge(raw) ?? <span className="text-zinc-700">absent</span>)
-              : raw ?? <span className="text-zinc-700">absent</span>;
+              ? (fmtMaxAge(raw) ?? <span className="text-gray-300 dark:text-zinc-700">absent</span>)
+              : raw ?? <span className="text-gray-300 dark:text-zinc-700">absent</span>;
             const present = raw !== undefined;
             return (
               <div key={h} className="flex items-start justify-between gap-4 text-[11px]">
-                <span className="font-mono text-zinc-600 shrink-0">{fmtHeader(h)}</span>
+                <span className="font-mono text-gray-400 dark:text-zinc-600 shrink-0">{fmtHeader(h)}</span>
                 <span className={clsx(
                   "font-mono truncate text-right max-w-[260px]",
-                  present ? "text-zinc-300" : "text-zinc-700 italic",
+                  present ? "text-gray-700 dark:text-zinc-300" : "text-gray-300 dark:text-zinc-700 italic",
                 )} title={raw}>
                   {display}
                 </span>
@@ -682,19 +682,19 @@ function PreferenceRow({
   const stored = data?.value;
 
   return (
-    <div className="flex items-start justify-between py-4 border-b border-zinc-800 last:border-0 gap-6">
+    <div className="flex items-start justify-between py-4 border-b border-gray-200 dark:border-zinc-800 last:border-0 gap-6">
       {/* Left: label + description + current stored value */}
       <div className="shrink-0 w-56">
-        <p className="text-[13px] font-medium text-zinc-200">{label}</p>
-        <p className="text-[11px] text-zinc-600 mt-0.5 leading-relaxed">{description}</p>
+        <p className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">{label}</p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5 leading-relaxed">{description}</p>
         {isLoading ? (
-          <span className="text-[10px] text-zinc-700 font-mono mt-1 block">loading…</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono mt-1 block">loading…</span>
         ) : stored !== undefined ? (
-          <span className="text-[10px] text-zinc-600 font-mono mt-1 block">
-            stored: <span className="text-zinc-500">{String(stored)}</span>
+          <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono mt-1 block">
+            stored: <span className="text-gray-400 dark:text-zinc-500">{String(stored)}</span>
           </span>
         ) : (
-          <span className="text-[10px] text-zinc-700 italic mt-1 block">not set</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-700 italic mt-1 block">not set</span>
         )}
       </div>
 
@@ -715,7 +715,7 @@ function PreferenceRow({
                 ? "bg-red-900/30 border border-red-700/40 text-red-400"
                 : dirty
                   ? "bg-indigo-600 hover:bg-indigo-500 text-white border border-transparent"
-                  : "bg-zinc-800/60 border border-zinc-700 text-zinc-600 cursor-default",
+                  : "bg-gray-100/60 dark:bg-zinc-800/60 border border-gray-200 dark:border-zinc-700 text-gray-400 dark:text-zinc-600 cursor-default",
           )}
         >
           {saveState === "saving" ? (
@@ -743,7 +743,7 @@ function PrefText({ local, setLocal, placeholder, mono = false }: {
       onChange={e => setLocal(e.target.value)}
       placeholder={placeholder}
       className={clsx(
-        "w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-1.5 text-[13px] text-zinc-200 placeholder-zinc-600",
+        "w-full rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-3 py-1.5 text-[13px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600",
         "focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors",
         mono && "font-mono",
       )}
@@ -763,7 +763,7 @@ function PrefNumber({ local, setLocal, min, max, placeholder }: {
       min={min}
       max={max}
       placeholder={placeholder}
-      className="w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-1.5 text-[13px] text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+      className="w-full rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-3 py-1.5 text-[13px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
     />
   );
 }
@@ -785,7 +785,7 @@ function PrefSlider({ local, setLocal }: { local: string; setLocal: (v: string) 
         min={0} max={2} step={0.05}
         value={local}
         onChange={e => setLocal(e.target.value)}
-        className="w-16 rounded-md bg-zinc-900 border border-zinc-700 px-2 py-1.5 text-[12px] text-zinc-200 font-mono text-center focus:outline-none focus:border-indigo-500 transition-colors"
+        className="w-16 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-2 py-1.5 text-[12px] text-gray-800 dark:text-zinc-200 font-mono text-center focus:outline-none focus:border-indigo-500 transition-colors"
       />
     </div>
   );
@@ -801,7 +801,7 @@ function PrefToggle({ local, setLocal }: { local: string; setLocal: (v: string) 
         onClick={() => setLocal(on ? "false" : "true")}
         className={clsx(
           "relative w-10 h-5 rounded-full border transition-colors",
-          on ? "bg-indigo-600 border-indigo-500" : "bg-zinc-800 border-zinc-700",
+          on ? "bg-indigo-600 border-indigo-500" : "bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700",
         )}
       >
         <div className={clsx(
@@ -809,7 +809,7 @@ function PrefToggle({ local, setLocal }: { local: string; setLocal: (v: string) 
           on ? "translate-x-5" : "translate-x-0.5",
         )} />
       </button>
-      <span className={clsx("text-[12px] font-medium", on ? "text-indigo-300" : "text-zinc-500")}>
+      <span className={clsx("text-[12px] font-medium", on ? "text-indigo-300" : "text-gray-400 dark:text-zinc-500")}>
         {on ? "Enabled" : "Disabled"}
       </span>
     </div>
@@ -820,15 +820,15 @@ function PreferencesTab() {
   return (
     <div className="max-w-3xl space-y-6">
       {/* Section: operator defaults */}
-      <div className="rounded-lg border border-zinc-800 overflow-hidden">
-        <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-zinc-800/40">
-          <p className="text-[12px] font-semibold text-zinc-300 uppercase tracking-wider">Operator Defaults</p>
-          <p className="text-[11px] text-zinc-600 mt-0.5">
+      <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
+        <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
+          <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">Operator Defaults</p>
+          <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
             Tenant-level defaults applied when no project-level or run-level override exists.
-            Saved to <code className="text-zinc-500 font-mono text-[10px]">PUT /v1/settings/defaults/tenant/default/:key</code>
+            Saved to <code className="text-gray-400 dark:text-zinc-500 font-mono text-[10px]">PUT /v1/settings/defaults/tenant/default/:key</code>
           </p>
         </div>
-        <div className="px-5 bg-zinc-900/60">
+        <div className="px-5 bg-gray-50/60 dark:bg-zinc-900/60">
           <PreferenceRow
             label="Default model"
             description="Model ID used when no binding specifies one."
@@ -873,9 +873,9 @@ function PreferencesTab() {
       </div>
 
       {/* Hint about future per-project overrides */}
-      <p className="text-[11px] text-zinc-700 leading-relaxed px-1">
-        These defaults apply at the <code className="font-mono text-zinc-600">tenant/default</code> scope.
-        Project-level overrides can be set via <code className="font-mono text-zinc-600">PUT /v1/settings/defaults/project/:project_id/:key</code> once multi-tenant project isolation is enabled.
+      <p className="text-[11px] text-gray-300 dark:text-zinc-700 leading-relaxed px-1">
+        These defaults apply at the <code className="font-mono text-gray-400 dark:text-zinc-600">tenant/default</code> scope.
+        Project-level overrides can be set via <code className="font-mono text-gray-400 dark:text-zinc-600">PUT /v1/settings/defaults/project/:project_id/:key</code> once multi-tenant project isolation is enabled.
       </p>
     </div>
   );
@@ -906,18 +906,18 @@ export function SettingsPage() {
   if (isError) return <ErrorFallback error={error} resource="settings" onRetry={() => void refetch()} />;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
-        <span className="text-[13px] font-medium text-zinc-200">Settings</span>
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Settings</span>
         {activeTab === "system" && dataUpdatedAt > 0 && (
-          <span className="text-[11px] text-zinc-600 font-mono">
+          <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">
             {new Date(dataUpdatedAt).toLocaleTimeString()}
           </span>
         )}
         {activeTab === "system" && (
           <button onClick={() => refetch()} disabled={isFetching}
-            className="ml-auto flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors">
+            className="ml-auto flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors">
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
             Refresh
           </button>
@@ -925,7 +925,7 @@ export function SettingsPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex items-center gap-1 px-4 h-9 border-b border-zinc-800 shrink-0 bg-zinc-900/80">
+      <div className="flex items-center gap-1 px-4 h-9 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50/80 dark:bg-zinc-900/80">
         {([ ["system", "System", <Server size={12} />], ["preferences", "Preferences", <SlidersHorizontal size={12} />] ] as [SettingsTab, string, React.ReactNode][]).map(([tab, label, icon]) => (
           <button
             key={tab}
@@ -933,8 +933,8 @@ export function SettingsPage() {
             className={clsx(
               "flex items-center gap-1.5 px-3 h-7 rounded text-[12px] font-medium transition-colors",
               activeTab === tab
-                ? "bg-zinc-800 text-zinc-200"
-                : "text-zinc-600 hover:text-zinc-400",
+                ? "bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-zinc-200"
+                : "text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400",
             )}
           >
             {icon}{label}
@@ -951,7 +951,7 @@ export function SettingsPage() {
         {/* ── System tab ── */}
         {activeTab === "system" && (
           isLoading ? (
-            <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+            <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600">
               <Loader2 size={16} className="animate-spin" />
               <span className="text-[13px]">Loading settings…</span>
             </div>
@@ -965,15 +965,15 @@ export function SettingsPage() {
               </Section>
 
               <Section title="System Health">
-                <KV label="Providers"    value={s.system_health.provider_health_count} mono />
-                <KV label="Plugins"      value={s.system_health.plugin_health_count}  mono />
-                <KV label="Credentials"  value={s.system_health.credential_count}     mono />
+                <KV label="Providers"    value={s.system_health?.provider_health_count ?? 0} mono />
+                <KV label="Plugins"      value={s.system_health?.plugin_health_count ?? 0}  mono />
+                <KV label="Credentials"  value={s.system_health?.credential_count ?? 0}     mono />
                 <KV
                   label="Degraded components"
                   value={
-                    s.system_health.degraded_count > 0 ? (
+                    (s.system_health?.degraded_count ?? 0) > 0 ? (
                       <span className="text-[12px] font-semibold text-red-400">
-                        {s.system_health.degraded_count}
+                        {s.system_health?.degraded_count}
                       </span>
                     ) : (
                       <span className="text-[12px] text-emerald-400">None</span>
@@ -985,21 +985,21 @@ export function SettingsPage() {
               <Section title="Encryption">
                 <KV
                   label="Key configured"
-                  value={<BoolChip value={s.key_management.encryption_key_configured} />}
+                  value={<BoolChip value={s.key_management?.encryption_key_configured ?? false} />}
                 />
                 <KV
                   label="Key version"
                   value={
-                    s.key_management.key_version != null
-                      ? <span className="font-mono">v{s.key_management.key_version}</span>
-                      : <span className="text-zinc-600">—</span>
+                    s.key_management?.key_version != null
+                      ? <span className="font-mono">v{s.key_management?.key_version}</span>
+                      : <span className="text-gray-400 dark:text-zinc-600">—</span>
                   }
                 />
                 <KV
                   label="Last rotation"
                   value={
                     <span className="font-mono text-[12px]">
-                      {fmtTime(s.key_management.last_rotation_at)}
+                      {fmtTime(s.key_management?.last_rotation_at ?? null)}
                     </span>
                   }
                 />
@@ -1009,9 +1009,9 @@ export function SettingsPage() {
                 <KV
                   label="Status"
                   value={
-                    <span className="text-[12px] text-zinc-500 italic">
+                    <span className="text-[12px] text-gray-400 dark:text-zinc-500 italic">
                       Managed by the server — see{" "}
-                      <code className="text-zinc-400 bg-zinc-800 px-1 rounded text-[11px]">
+                      <code className="text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 px-1 rounded text-[11px]">
                         GET /v1/settings/tls
                       </code>{" "}
                       for certificate details.
@@ -1025,7 +1025,7 @@ export function SettingsPage() {
               <CorsDiagnosticsSection deploymentMode={s?.deployment_mode} />
 
               {sysLoading ? (
-                <div className="flex items-center gap-2 py-4 text-zinc-600">
+                <div className="flex items-center gap-2 py-4 text-gray-400 dark:text-zinc-600">
                   <Loader2 size={13} className="animate-spin" />
                   <span className="text-[12px]">Loading system info…</span>
                 </div>
@@ -1033,7 +1033,7 @@ export function SettingsPage() {
                 <SystemInfoSections info={sysInfo} />
               ) : (
                 <Section title="Build Information">
-                  <div className="py-3 text-[12px] text-zinc-600 italic">
+                  <div className="py-3 text-[12px] text-gray-400 dark:text-zinc-600 italic">
                     System info unavailable — upgrade cairn-app for this endpoint.
                   </div>
                 </Section>

@@ -52,11 +52,11 @@ function deriveStatus(r: EvalRunRecord): EvalRunStatus {
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<EvalRunStatus, string> = {
-  pending:   "bg-zinc-800/80 text-zinc-400",
+  pending:   "bg-gray-100/80 dark:bg-zinc-800/80 text-gray-500 dark:text-zinc-400",
   running:   "bg-indigo-500/10 text-indigo-400",
   completed: "bg-emerald-500/10 text-emerald-400",
   failed:    "bg-red-500/10 text-red-400",
-  canceled:  "bg-zinc-800/60 text-zinc-500",
+  canceled:  "bg-gray-100/60 dark:bg-zinc-800/60 text-gray-400 dark:text-zinc-500",
 };
 const STATUS_DOT: Record<EvalRunStatus, string> = {
   pending:   "bg-zinc-500",
@@ -84,12 +84,12 @@ function StatCard({ label, value, sub, accent = false }: {
   label: string; value: string | number; sub?: string; accent?: boolean;
 }) {
   return (
-    <div className="bg-zinc-900 border border-zinc-800 border-l-2 border-l-indigo-500 rounded-lg p-4">
-      <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
-      <p className={clsx("text-xl font-semibold tabular-nums", accent ? "text-indigo-400" : "text-zinc-100")}>
+    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-indigo-500 rounded-lg p-4">
+      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
+      <p className={clsx("text-xl font-semibold tabular-nums", accent ? "text-indigo-400" : "text-gray-900 dark:text-zinc-100")}>
         {value}
       </p>
-      {sub && <p className="mt-1 text-[11px] text-zinc-600">{sub}</p>}
+      {sub && <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-600">{sub}</p>}
     </div>
   );
 }
@@ -118,8 +118,8 @@ function ScoreTrends({ runs }: { runs: (EvalRunRecord & { _status: EvalRunStatus
   if (byType.length === 0) return null;
 
   return (
-    <div className="px-4 pb-4 border-b border-zinc-800">
-      <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider pt-3 pb-2">
+    <div className="px-4 pb-4 border-b border-gray-200 dark:border-zinc-800">
+      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider pt-3 pb-2">
         Score Trend by Evaluator
       </p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
@@ -127,9 +127,9 @@ function ScoreTrends({ runs }: { runs: (EvalRunRecord & { _status: EvalRunStatus
           const passRate = scores.filter(Boolean).length / scores.length;
           const color = passRate >= 0.8 ? "#10b981" : passRate >= 0.5 ? "#f59e0b" : "#ef4444";
           return (
-            <div key={type} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+            <div key={type} className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-[11px] font-mono text-zinc-400 truncate max-w-[120px]" title={type}>
+                <p className="text-[11px] font-mono text-gray-500 dark:text-zinc-400 truncate max-w-[120px]" title={type}>
                   {type}
                 </p>
                 <span className={clsx(
@@ -141,7 +141,7 @@ function ScoreTrends({ runs }: { runs: (EvalRunRecord & { _status: EvalRunStatus
                 </span>
               </div>
               <MiniChart data={scores} height={28} color={color} className="w-full" />
-              <p className="text-[10px] text-zinc-700 mt-1">{scores.length} runs</p>
+              <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-1">{scores.length} runs</p>
             </div>
           );
         })}
@@ -175,12 +175,12 @@ function EvaluatorRanking({ runs }: { runs: (EvalRunRecord & { _status: EvalRunS
   if (items.length === 0) return null;
 
   return (
-    <div className="grid grid-cols-1 gap-4 px-4 pb-4 border-b border-zinc-800 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 px-4 pb-4 border-b border-gray-200 dark:border-zinc-800 lg:grid-cols-2">
       {/* Best performers */}
       <div>
         <div className="flex items-center gap-1.5 pt-3 pb-2">
           <Trophy size={12} className="text-amber-400" />
-          <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Evaluator Rankings</p>
+          <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Evaluator Rankings</p>
         </div>
         <BarChart
           items={items.map((i) => ({
@@ -232,13 +232,13 @@ function EvaluatorRanking({ runs }: { runs: (EvalRunRecord & { _status: EvalRunS
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
-      <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-        <FlaskConical size={18} className="text-zinc-600" />
+      <div className="w-10 h-10 rounded-full bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 flex items-center justify-center">
+        <FlaskConical size={18} className="text-gray-400 dark:text-zinc-600" />
       </div>
       <div>
-        <p className="text-[13px] font-medium text-zinc-400">No eval runs yet</p>
-        <p className="text-[11px] text-zinc-600 mt-1 max-w-xs">
-          Use <code className="text-zinc-500 bg-zinc-800 rounded px-1">POST /v1/evals/runs</code> to
+        <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No eval runs yet</p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-1 max-w-xs">
+          Use <code className="text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 rounded px-1">POST /v1/evals/runs</code> to
           start evaluating LLM outputs against prompts and rubrics.
         </p>
       </div>
@@ -248,15 +248,15 @@ function EmptyState() {
 
 function SkeletonRows() {
   return (
-    <div className="divide-y divide-zinc-800/40">
+    <div className="divide-y divide-gray-200 dark:divide-zinc-800/40">
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i} className="flex items-center gap-4 px-4 h-9 animate-pulse">
-          <div className="h-3.5 w-3.5 rounded bg-zinc-800" />
-          <div className="h-2.5 w-32 rounded bg-zinc-800" />
-          <div className="h-2.5 w-28 rounded bg-zinc-800" />
-          <div className="h-2.5 w-24 rounded bg-zinc-800" />
-          <div className="h-4 w-20 rounded bg-zinc-800" />
-          <div className="ml-auto h-2.5 w-20 rounded bg-zinc-800" />
+          <div className="h-3.5 w-3.5 rounded bg-gray-100 dark:bg-zinc-800" />
+          <div className="h-2.5 w-32 rounded bg-gray-100 dark:bg-zinc-800" />
+          <div className="h-2.5 w-28 rounded bg-gray-100 dark:bg-zinc-800" />
+          <div className="h-2.5 w-24 rounded bg-gray-100 dark:bg-zinc-800" />
+          <div className="h-4 w-20 rounded bg-gray-100 dark:bg-zinc-800" />
+          <div className="ml-auto h-2.5 w-20 rounded bg-gray-100 dark:bg-zinc-800" />
         </div>
       ))}
     </div>
@@ -277,11 +277,11 @@ function CompareBanner({
   const ready = selected.length === 2;
   return (
     <div className={clsx(
-      "flex items-center gap-3 px-4 py-2 border-b border-zinc-800 shrink-0 transition-colors",
-      ready ? "bg-indigo-950/30 border-indigo-800/40" : "bg-zinc-900/60",
+      "flex items-center gap-3 px-4 py-2 border-b border-gray-200 dark:border-zinc-800 shrink-0 transition-colors",
+      ready ? "bg-indigo-950/30 border-indigo-800/40" : "bg-gray-50/60 dark:bg-zinc-900/60",
     )}>
-      <span className="text-[12px] text-zinc-400">
-        <span className={clsx("font-semibold", ready ? "text-indigo-300" : "text-zinc-300")}>
+      <span className="text-[12px] text-gray-500 dark:text-zinc-400">
+        <span className={clsx("font-semibold", ready ? "text-indigo-300" : "text-gray-700 dark:text-zinc-300")}>
           {selected.length}
         </span>
         {" / 2 runs selected for comparison"}
@@ -289,7 +289,7 @@ function CompareBanner({
       {selected.length > 0 && (
         <button
           onClick={onClear}
-          className="flex items-center gap-1 text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+          className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
         >
           <X size={10} /> Clear
         </button>
@@ -301,7 +301,7 @@ function CompareBanner({
           "ml-auto flex items-center gap-1.5 rounded px-3 py-1.5 text-[12px] font-medium transition-colors",
           ready
             ? "bg-indigo-600 hover:bg-indigo-500 text-white"
-            : "bg-zinc-800 text-zinc-600 cursor-not-allowed",
+            : "bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-600 cursor-not-allowed",
         )}
       >
         <GitCompare size={12} />
@@ -369,12 +369,12 @@ export function EvalsPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-11 border-b border-zinc-800 shrink-0 bg-zinc-950">
+      <div className="flex items-center gap-3 px-4 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-white dark:bg-zinc-950">
         <FlaskConical size={13} className="text-indigo-400 shrink-0" />
-        <span className="text-[13px] font-medium text-zinc-200">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           Evaluations
           {!isLoading && (
-            <span className="ml-2 text-[11px] text-zinc-600 font-normal">
+            <span className="ml-2 text-[11px] text-gray-400 dark:text-zinc-600 font-normal">
               {filtered.length}{statusFilter !== "all" ? ` / ${total} total` : ""}
             </span>
           )}
@@ -383,7 +383,7 @@ export function EvalsPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as EvalRunStatus | "all")}
-          className="rounded border border-zinc-800 bg-zinc-900 text-zinc-400 text-[12px]
+          className="rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 text-[12px]
                      px-2 py-1 focus:outline-none focus:border-indigo-500"
         >
           <option value="all">All statuses</option>
@@ -405,8 +405,8 @@ export function EvalsPage() {
         <button
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900
-                     text-zinc-500 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:bg-zinc-800
+          className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
+                     text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
                      disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={clsx(isFetching && "animate-spin")} />
@@ -425,7 +425,7 @@ export function EvalsPage() {
 
       {/* Stat cards */}
       {!isLoading && total > 0 && (
-        <div className="grid grid-cols-2 gap-3 px-4 py-4 border-b border-zinc-800 lg:grid-cols-4 shrink-0">
+        <div className="grid grid-cols-2 gap-3 px-4 py-4 border-b border-gray-200 dark:border-zinc-800 lg:grid-cols-4 shrink-0">
           <StatCard label="Total Eval Runs"  value={total}          sub="all time" />
           <StatCard label="Pass Rate"        value={`${passRate}%`} sub={`${completed} passed`} accent />
           <StatCard label="Failed"           value={failed}         sub={failed > 0 ? "needs attention" : "none"} />
@@ -445,9 +445,9 @@ export function EvalsPage() {
 
       {/* Table hint */}
       {!isLoading && filtered.length > 0 && (
-        <div className="px-4 py-1.5 border-b border-zinc-800 shrink-0">
-          <p className="text-[10px] text-zinc-700">
-            Select up to 2 runs using the checkboxes, then click <strong className="text-zinc-600">Compare</strong>.
+        <div className="px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0">
+          <p className="text-[10px] text-gray-300 dark:text-zinc-700">
+            Select up to 2 runs using the checkboxes, then click <strong className="text-gray-400 dark:text-zinc-600">Compare</strong>.
           </p>
         </div>
       )}
@@ -460,8 +460,8 @@ export function EvalsPage() {
           <EmptyState />
         ) : (
           <table className="min-w-full">
-            <thead className="sticky top-0 z-10 bg-zinc-950">
-              <tr className="border-b border-zinc-800">
+            <thead className="sticky top-0 z-10 bg-white dark:bg-zinc-950">
+              <tr className="border-b border-gray-200 dark:border-zinc-800">
                 <th className="px-4 py-2 text-left w-8">
                   {/* checkbox column header — intentionally blank */}
                 </th>
@@ -474,7 +474,7 @@ export function EvalsPage() {
                   { label: "Created",    cls: "text-right" },
                 ].map(({ label, cls }) => (
                   <th key={label} className={clsx(
-                    "px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap",
+                    "px-4 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap",
                     cls,
                   )}>
                     {label}
@@ -490,12 +490,12 @@ export function EvalsPage() {
                   <tr
                     key={run.eval_run_id}
                     className={clsx(
-                      "border-b border-zinc-800/40 h-9 transition-colors",
+                      "border-b border-gray-200/40 dark:border-zinc-800/40 h-9 transition-colors",
                       isSelected
                         ? "bg-indigo-950/30"
                         : idx % 2 !== 0
-                        ? "bg-zinc-900/20 hover:bg-zinc-900/50"
-                        : "hover:bg-zinc-900/50",
+                        ? "bg-gray-50/20 dark:bg-zinc-900/20 hover:bg-gray-50/50 dark:bg-zinc-900/50"
+                        : "hover:bg-gray-50/50 dark:bg-zinc-900/50",
                     )}
                   >
                     {/* Checkbox */}
@@ -509,13 +509,13 @@ export function EvalsPage() {
                         title={isDisabled ? "Deselect another run first" : "Select for comparison"}
                       />
                     </td>
-                    <td className="px-4 py-0 font-mono text-[12px] text-zinc-300 whitespace-nowrap">
+                    <td className="px-4 py-0 font-mono text-[12px] text-gray-700 dark:text-zinc-300 whitespace-nowrap">
                       {shortId(run.eval_run_id)}
                     </td>
-                    <td className="px-4 py-0 text-[12px] text-zinc-400 whitespace-nowrap">
+                    <td className="px-4 py-0 text-[12px] text-gray-500 dark:text-zinc-400 whitespace-nowrap">
                       {run.evaluator_type}
                     </td>
-                    <td className="px-4 py-0 text-[11px] text-zinc-500 whitespace-nowrap">
+                    <td className="px-4 py-0 text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap">
                       {run.subject_kind}
                     </td>
                     <td className="px-4 py-0 whitespace-nowrap">
@@ -533,12 +533,12 @@ export function EvalsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-0 text-right">
-                      <span className="flex items-center justify-end gap-1 text-[11px] text-zinc-500">
-                        <Clock size={10} className="text-zinc-700" />
+                      <span className="flex items-center justify-end gap-1 text-[11px] text-gray-400 dark:text-zinc-500">
+                        <Clock size={10} className="text-gray-300 dark:text-zinc-700" />
                         {fmtDuration(run.started_at, run.completed_at)}
                       </span>
                     </td>
-                    <td className="px-4 py-0 text-[11px] text-zinc-600 whitespace-nowrap text-right font-mono">
+                    <td className="px-4 py-0 text-[11px] text-gray-400 dark:text-zinc-600 whitespace-nowrap text-right font-mono">
                       {fmtTime(run.started_at)}
                     </td>
                   </tr>

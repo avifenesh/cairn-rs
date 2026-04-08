@@ -65,7 +65,7 @@ function typeColors(credType: string): string {
     case 'connection_string': return 'text-sky-400 bg-sky-400/10 border-sky-400/20';
     case 'service_account':   return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
     case 'bearer_token':      return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
-    default:                  return 'text-zinc-400 bg-zinc-800 border-zinc-700';
+    default:                  return 'text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700';
   }
 }
 
@@ -78,9 +78,9 @@ function typeLabel(credType: string): string {
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -102,7 +102,7 @@ function DeleteDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-md mx-4 shadow-2xl"
+        className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg w-full max-w-md mx-4 shadow-2xl"
         ref={trapRef}
         role="dialog"
         aria-modal="true"
@@ -113,20 +113,20 @@ function DeleteDialog({
             <AlertTriangle size={14} className="text-red-400" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[13px] font-semibold text-zinc-100">Revoke credential?</p>
-            <p className="text-[12px] text-zinc-400 mt-1">
-              <span className="font-mono text-zinc-300">{credential.name || credential.provider_id}</span>
+            <p className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">Revoke credential?</p>
+            <p className="text-[12px] text-gray-500 dark:text-zinc-400 mt-1">
+              <span className="font-mono text-gray-700 dark:text-zinc-300">{credential.name || credential.provider_id}</span>
               {' '}will be revoked. The record is retained for audit history but the credential
               will no longer be usable by any provider.
             </p>
-            <p className="text-[11px] text-zinc-600 mt-2">This action cannot be undone.</p>
+            <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-2">This action cannot be undone.</p>
           </div>
         </div>
 
         <div className="flex justify-end gap-2 px-5 pb-4">
           <button
             onClick={onCancel}
-            className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-400 text-[12px] hover:bg-zinc-700 transition-colors"
+            className="px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
           >
             Cancel
           </button>
@@ -216,19 +216,19 @@ function AddCredentialModal({
       onClick={onClose}
     >
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg mx-4 shadow-2xl"
+        className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg w-full max-w-lg mx-4 shadow-2xl"
         ref={trapRef}
         role="dialog"
         aria-modal="true"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 dark:border-zinc-800">
           <div className="flex items-center gap-2">
             <KeyRound size={14} className="text-indigo-400" />
-            <span className="text-[13px] font-semibold text-zinc-100">Add Credential</span>
+            <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">Add Credential</span>
           </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+          <button onClick={onClose} className="text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors">
             <X size={14} />
           </button>
         </div>
@@ -246,7 +246,7 @@ function AddCredentialModal({
         <form id={formId} onSubmit={submit} className="p-5 space-y-4">
           {/* Scope row: tenant_id */}
           <div>
-            <label className="block text-[11px] text-zinc-500 mb-1.5">
+            <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
               Tenant <span className="text-red-400">*</span>
             </label>
             <input
@@ -255,11 +255,11 @@ function AddCredentialModal({
               onChange={e => set('tenant_id', e.target.value)}
               placeholder="default"
               className={clsx(
-                'w-full h-8 bg-zinc-950 border rounded-md px-3 text-[12px] text-zinc-200',
+                'w-full h-8 bg-white dark:bg-zinc-950 border rounded-md px-3 text-[12px] text-gray-800 dark:text-zinc-200',
                 'placeholder-zinc-600 focus:outline-none transition-colors',
                 fieldErr.tenant_id
                   ? 'border-red-500/60 focus:border-red-500'
-                  : 'border-zinc-800 focus:border-indigo-500',
+                  : 'border-gray-200 dark:border-zinc-800 focus:border-indigo-500',
               )}
             />
             {fieldErr.tenant_id && (
@@ -270,7 +270,7 @@ function AddCredentialModal({
           {/* Two-column: Provider ID + Type */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] text-zinc-500 mb-1.5">
+              <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
                 Provider ID <span className="text-red-400">*</span>
               </label>
               <input
@@ -279,11 +279,11 @@ function AddCredentialModal({
                 onChange={e => set('provider_id', e.target.value)}
                 placeholder="openai-production"
                 className={clsx(
-                  'w-full h-8 bg-zinc-950 border rounded-md px-3 text-[12px] text-zinc-200',
+                  'w-full h-8 bg-white dark:bg-zinc-950 border rounded-md px-3 text-[12px] text-gray-800 dark:text-zinc-200',
                   'placeholder-zinc-600 focus:outline-none transition-colors',
                   fieldErr.provider_id
                     ? 'border-red-500/60 focus:border-red-500'
-                    : 'border-zinc-800 focus:border-indigo-500',
+                    : 'border-gray-200 dark:border-zinc-800 focus:border-indigo-500',
                 )}
               />
               {fieldErr.provider_id && (
@@ -292,23 +292,23 @@ function AddCredentialModal({
             </div>
 
             <div>
-              <label className="block text-[11px] text-zinc-500 mb-1.5">Type</label>
+              <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">Type</label>
               <select
                 value={form.cred_type}
                 onChange={e => set('cred_type', e.target.value as CredentialTypeValue)}
-                className="w-full h-8 bg-zinc-950 border border-zinc-800 rounded-md px-2 text-[12px] text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
+                className="w-full h-8 bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-md px-2 text-[12px] text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
               >
                 {CREDENTIAL_TYPES.map(({ value, label }) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
-              <p className="mt-1 text-[10px] text-zinc-700">Informational — backend derives type from provider_id</p>
+              <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-700">Informational — backend derives type from provider_id</p>
             </div>
           </div>
 
           {/* Secret value */}
           <div>
-            <label className="block text-[11px] text-zinc-500 mb-1.5">
+            <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
               Secret Value <span className="text-red-400">*</span>
             </label>
             <div className="relative">
@@ -319,17 +319,17 @@ function AddCredentialModal({
                 placeholder="sk-…"
                 autoComplete="new-password"
                 className={clsx(
-                  'w-full h-8 bg-zinc-950 border rounded-md pl-3 pr-9 text-[12px] text-zinc-200',
+                  'w-full h-8 bg-white dark:bg-zinc-950 border rounded-md pl-3 pr-9 text-[12px] text-gray-800 dark:text-zinc-200',
                   'placeholder-zinc-600 focus:outline-none transition-colors font-mono',
                   fieldErr.plaintext_value
                     ? 'border-red-500/60 focus:border-red-500'
-                    : 'border-zinc-800 focus:border-indigo-500',
+                    : 'border-gray-200 dark:border-zinc-800 focus:border-indigo-500',
                 )}
               />
               <button
                 type="button"
                 onClick={() => setShowValue(v => !v)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
                 tabIndex={-1}
               >
                 {showValue ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -338,24 +338,24 @@ function AddCredentialModal({
             {fieldErr.plaintext_value && (
               <p className="mt-1 text-[11px] text-red-400">{fieldErr.plaintext_value}</p>
             )}
-            <p className="mt-1 text-[10px] text-zinc-700">
+            <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-700">
               Entered once — not retrievable after creation.
             </p>
           </div>
 
           {/* Optional key_id */}
           <div>
-            <label className="block text-[11px] text-zinc-500 mb-1.5">
-              Encryption Key ID <span className="text-zinc-700">(optional)</span>
+            <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
+              Encryption Key ID <span className="text-gray-300 dark:text-zinc-700">(optional)</span>
             </label>
             <input
               type="text"
               value={form.key_id}
               onChange={e => set('key_id', e.target.value)}
               placeholder="key_prod_v2"
-              className="w-full h-8 bg-zinc-950 border border-zinc-800 rounded-md px-3 text-[12px] text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+              className="w-full h-8 bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-md px-3 text-[12px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
             />
-            <p className="mt-1 text-[10px] text-zinc-700">
+            <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-700">
               Leave blank to use the default tenant encryption key.
             </p>
           </div>
@@ -370,7 +370,7 @@ function AddCredentialModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-400 text-[12px] hover:bg-zinc-700 transition-colors"
+            className="px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
           >
             Cancel
           </button>
@@ -405,14 +405,14 @@ function CredentialRow({
   return (
     <div
       className={clsx(
-        'flex items-center gap-0 border-b border-zinc-800/50 last:border-0 h-10',
-        even ? 'bg-zinc-900' : 'bg-zinc-900/50',
+        'flex items-center gap-0 border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0 h-10',
+        even ? 'bg-gray-50 dark:bg-zinc-900' : 'bg-gray-50/50 dark:bg-zinc-900/50',
         !cred.active && 'opacity-50',
       )}
     >
       {/* Name / provider_id */}
       <div className="flex-1 min-w-0 flex items-center gap-2 px-4">
-        <span className="text-[12px] font-medium text-zinc-200 truncate">
+        <span className="text-[12px] font-medium text-gray-800 dark:text-zinc-200 truncate">
           {cred.name || cred.provider_id}
         </span>
         {!cred.active && (
@@ -434,7 +434,7 @@ function CredentialRow({
 
       {/* Scope (tenant) */}
       <div className="w-28 shrink-0 px-2">
-        <span className="text-[11px] font-mono text-zinc-500 truncate" title={cred.tenant_id}>
+        <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-500 truncate" title={cred.tenant_id}>
           {cred.tenant_id}
         </span>
       </div>
@@ -453,14 +453,14 @@ function CredentialRow({
 
       {/* Created at */}
       <div className="w-28 shrink-0 px-2">
-        <span className="text-[11px] text-zinc-500 tabular-nums">
+        <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">
           {fmtDate(cred.created_at)}
         </span>
       </div>
 
       {/* Last rotated */}
       <div className="w-28 shrink-0 px-2">
-        <span className="text-[11px] text-zinc-600 tabular-nums">
+        <span className="text-[11px] text-gray-400 dark:text-zinc-600 tabular-nums">
           {fmtRelative(cred.revoked_at_ms ?? (encrypted ? cred.encrypted_at_ms : null))}
         </span>
       </div>
@@ -512,13 +512,13 @@ export function CredentialsPage() {
   if (isError) return (
     <div className="flex flex-col items-center justify-center min-h-64 gap-3 p-8 text-center">
       <ServerCrash size={32} className="text-red-500" />
-      <p className="text-[13px] text-zinc-300 font-medium">Failed to load credentials</p>
-      <p className="text-[12px] text-zinc-500">
+      <p className="text-[13px] text-gray-700 dark:text-zinc-300 font-medium">Failed to load credentials</p>
+      <p className="text-[12px] text-gray-400 dark:text-zinc-500">
         {error instanceof Error ? error.message : 'Unknown error'}
       </p>
       <button
         onClick={() => refetch()}
-        className="mt-1 px-3 py-1.5 rounded bg-zinc-800 text-zinc-300 text-[12px] hover:bg-zinc-700 transition-colors"
+        className="mt-1 px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
       >
         Retry
       </button>
@@ -526,13 +526,13 @@ export function CredentialsPage() {
   );
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
-        <span className="text-[13px] font-medium text-zinc-200">
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           Credentials
           {!isLoading && (
-            <span className="ml-2 text-[12px] text-zinc-500 font-normal">
+            <span className="ml-2 text-[12px] text-gray-400 dark:text-zinc-500 font-normal">
               {active.length} active
             </span>
           )}
@@ -540,12 +540,12 @@ export function CredentialsPage() {
 
         {/* Tenant selector */}
         <div className="flex items-center gap-1.5 ml-4">
-          <span className="text-[11px] text-zinc-600">Tenant:</span>
+          <span className="text-[11px] text-gray-400 dark:text-zinc-600">Tenant:</span>
           <input
             type="text"
             value={tenantId}
             onChange={e => setTenantId(e.target.value || DEFAULT_TENANT)}
-            className="h-6 w-32 bg-zinc-800 border border-zinc-700 rounded px-2 text-[11px] font-mono text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
+            className="h-6 w-32 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 text-[11px] font-mono text-gray-700 dark:text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
           />
         </div>
 
@@ -558,7 +558,7 @@ export function CredentialsPage() {
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={isFetching ? 'animate-spin' : ''} />
           Refresh
@@ -567,7 +567,7 @@ export function CredentialsPage() {
 
       {/* Stat strip */}
       {!isLoading && (
-        <div className="grid grid-cols-3 gap-x-6 px-5 py-3 border-b border-zinc-800 shrink-0">
+        <div className="grid grid-cols-3 gap-x-6 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 shrink-0">
           <StatCard label="Total"     value={active.length}    sub={`${creds.length - active.length} revoked`} />
           <StatCard label="Encrypted" value={encrypted.length} sub={active.length > 0 ? `${Math.round(encrypted.length / active.length * 100)}% of active` : undefined} />
           <StatCard label="Types"     value={typeSet.size}     sub={Array.from(typeSet).join(', ') || '—'} />
@@ -577,17 +577,17 @@ export function CredentialsPage() {
       {/* Table */}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         {isLoading ? (
-          <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+          <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-[13px]">Loading…</span>
           </div>
         ) : creds.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-64 gap-3 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700">
-              <KeyRound size={24} className="text-zinc-500" />
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700">
+              <KeyRound size={24} className="text-gray-400 dark:text-zinc-500" />
             </div>
-            <p className="text-[13px] font-medium text-zinc-400">No credentials stored</p>
-            <p className="text-[12px] text-zinc-600 max-w-xs">
+            <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No credentials stored</p>
+            <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
               Add a credential to give providers access to external APIs and services.
               Secrets are encrypted at rest (RFC 011).
             </p>
@@ -601,24 +601,24 @@ export function CredentialsPage() {
         ) : (
           <div className="min-w-[700px]">
             {/* Column headers */}
-            <div className="flex items-center gap-0 h-8 border-b border-zinc-800 bg-zinc-950 sticky top-0">
+            <div className="flex items-center gap-0 h-8 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 sticky top-0">
               <div className="flex-1 min-w-0 px-4">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Name</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Name</span>
               </div>
               <div className="w-36 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Type</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Type</span>
               </div>
               <div className="w-28 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Scope</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Scope</span>
               </div>
               <div className="w-24 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Encrypted</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Encrypted</span>
               </div>
               <div className="w-28 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Created</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Created</span>
               </div>
               <div className="w-28 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Last Rotated</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Last Rotated</span>
               </div>
               <div className="w-20 shrink-0 px-2" />
             </div>

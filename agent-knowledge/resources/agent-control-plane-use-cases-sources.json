@@ -1,0 +1,98 @@
+{
+  "topic": "Agent Control Plane Use Cases",
+  "generated": "2026-04-08",
+  "depth": "deep",
+  "sources": [
+    {
+      "url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "title": "Building Effective Agents - Anthropic Engineering",
+      "type": "official_docs",
+      "confidence": 10,
+      "takeaway": "Start simple, prefer raw APIs over frameworks, invest in tool design (ACI), build for human oversight, customer support is the proven production use case"
+    },
+    {
+      "url": "https://huyenchip.com/2025/01/07/agents.html",
+      "title": "AI Agents in Production - Huyen Chip",
+      "type": "technical_analysis",
+      "confidence": 9,
+      "takeaway": "Planning failures are the #1 issue, decouple planning from execution, validate before running, tool quality > model quality, start with 3-5 tools"
+    },
+    {
+      "url": "https://www.latent.space/p/2024-agents",
+      "title": "State of AI Agents 2024 - Latent Space",
+      "type": "industry_analysis",
+      "confidence": 8,
+      "takeaway": "Coding agents have strongest PMF, auth/permissions is a major gap, human-in-the-loop design is unsolved, Claude dominates agentic tasks"
+    },
+    {
+      "url": "https://hamel.dev/blog/posts/evals/",
+      "title": "LLM Evaluation in Practice - Hamel Husain",
+      "type": "practitioner_guide",
+      "confidence": 9,
+      "takeaway": "Three-level eval hierarchy (unit tests > human/model eval > A/B), domain-specific beats generic, start simple with spreadsheets, never stop looking at data"
+    },
+    {
+      "url": "https://blog.langchain.com/langgraph-cloud/",
+      "title": "LangGraph Cloud - LangChain",
+      "type": "vendor_docs",
+      "confidence": 7,
+      "takeaway": "Production features: Postgres checkpointer, double-texting handling, cron jobs, breakpoints for debugging. Used by Klarna, Rippling, Lyft, Harvey, Elastic"
+    },
+    {
+      "url": "https://www.langchain.com/langgraph",
+      "title": "LangGraph - Agent Runtime and Orchestration",
+      "type": "vendor_docs",
+      "confidence": 7,
+      "takeaway": "Positions as 'agent runtime and low-level orchestration framework' balancing control with agency. MIT licensed. Human-in-the-loop, memory, streaming as key features"
+    },
+    {
+      "url": "https://docs.crewai.com/concepts/crews",
+      "title": "CrewAI Crews - Multi-Agent Orchestration",
+      "type": "vendor_docs",
+      "confidence": 7,
+      "takeaway": "Sequential/hierarchical processes, short/long/entity memory, caching, rate limiting, replay from checkpoints. Framework not infrastructure"
+    },
+    {
+      "url": "https://www.microsoft.com/en-us/research/blog/autogen-enabling-next-gen-llm-applications-via-multi-agent-conversation/",
+      "title": "AutoGen - Microsoft Research",
+      "type": "research",
+      "confidence": 8,
+      "takeaway": "Multi-agent conversation framework. Used by Novo Nordisk. Open question: optimal workflow config. Challenges: progress detection, debugging, scaling"
+    },
+    {
+      "url": "https://www.langfuse.com/why",
+      "title": "Why Langfuse - Open Source LLM Observability",
+      "type": "vendor_docs",
+      "confidence": 8,
+      "takeaway": "MIT licensed, self-hostable, no feature gating. Hierarchical traces, cost tracking, prompt versioning, A/B testing. Proves the self-hosted observability market"
+    },
+    {
+      "url": "https://docs.letta.com/introduction",
+      "title": "Letta (MemGPT) - Stateful AI Agents",
+      "type": "vendor_docs",
+      "confidence": 6,
+      "takeaway": "Memory-first platform: Letta Code (terminal), SDK (apps), API (memory management). Narrow focus on stateful memory without runtime/eval/operator infrastructure"
+    },
+    {
+      "url": "https://github.com/e2b-dev/awesome-ai-agents",
+      "title": "Awesome AI Agents - Landscape Overview",
+      "type": "curated_list",
+      "confidence": 7,
+      "takeaway": "Convergence on memory systems, tool integration via function-calling, human-agent loops. Movement toward pluggable model backends and SOP-based task decomposition"
+    },
+    {
+      "url": "https://docs.cairn-rs.dev (internal)",
+      "title": "Cairn-rs RFCs 001-014",
+      "type": "internal",
+      "confidence": 10,
+      "takeaway": "Competitive positioning validated: coherence over breadth, self-hosted-first, integration is the product. 14 RFCs define the full product boundary"
+    }
+  ],
+  "quality": {
+    "coverage": 8,
+    "source_diversity": 7,
+    "example_quality": 7,
+    "confidence": 8,
+    "notes": "Strong coverage of architectural patterns and competitor positioning. Weaker on first-person production failure stories (Reddit/HN blocked). Anthropic and Huyen Chip pieces are gold-standard references."
+  }
+}

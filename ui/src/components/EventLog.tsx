@@ -46,7 +46,7 @@ function typeBadgeClass(type: string): string {
                                    return 'bg-teal-950   text-teal-300  ring-teal-800';
   if (type.includes('eval') || type.includes('score'))
                                    return 'bg-pink-950   text-pink-300  ring-pink-800';
-  return 'bg-zinc-800 text-zinc-400 ring-zinc-700';
+  return 'bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 ring-gray-300 dark:ring-zinc-700';
 }
 
 // ── Unified event row ──────────────────────────────────────────────────────────
@@ -70,9 +70,9 @@ function toDetail(payload: unknown): string {
 
 function EventRow({ ev }: { ev: NormalizedEvent }) {
   return (
-    <div data-event-row className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-zinc-800/40 transition-colors group">
+    <div data-event-row className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-gray-100/40 dark:hover:bg-gray-100/40 dark:bg-zinc-800/40 transition-colors group">
       {/* Time */}
-      <span className="shrink-0 text-[11px] text-zinc-600 font-mono tabular-nums w-[52px]">
+      <span className="shrink-0 text-[11px] text-gray-400 dark:text-zinc-600 font-mono tabular-nums w-[52px]">
         {ev.time}
       </span>
 
@@ -85,7 +85,7 @@ function EventRow({ ev }: { ev: NormalizedEvent }) {
       </span>
 
       {/* Detail */}
-      <span className="flex-1 min-w-0 text-[11px] text-zinc-500 font-mono truncate">
+      <span className="flex-1 min-w-0 text-[11px] text-gray-400 dark:text-zinc-500 font-mono truncate">
         {ev.detail}
       </span>
     </div>
@@ -120,14 +120,19 @@ export function EventLog({
   const seedRows: NormalizedEvent[] = useMemo(() =>
     initialEvents
       .slice(-maxEvents)
-      .map((e, i) => ({
-        key:    `seed-${i}`,
-        time:   new Date(e.timestamp).toLocaleTimeString(undefined, {
-          hour: '2-digit', minute: '2-digit', second: '2-digit',
-        }),
-        type:   e.event_type ?? 'unknown',
-        detail: toDetail(e.data),
-      })),
+      .map((e, i) => {
+        const ts = e.stored_at ?? (e.timestamp ? Date.parse(e.timestamp) : 0);
+        return {
+          key:    `seed-${i}`,
+          time:   ts > 0
+            ? new Date(ts).toLocaleTimeString(undefined, {
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+              })
+            : '—',
+          type:   e.event_type ?? 'unknown',
+          detail: toDetail(e.message ?? e.data),
+        };
+      }),
     [initialEvents, maxEvents],
   );
 
@@ -154,16 +159,16 @@ export function EventLog({
 
   return (
     <div className={clsx(
-      'flex flex-col rounded-lg border border-zinc-800 overflow-hidden bg-zinc-900',
+      'flex flex-col rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden bg-gray-50 dark:bg-zinc-900',
       className,
     )}>
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 shrink-0">
-        <span className="text-[11px] font-semibold text-zinc-400 flex items-center gap-1.5 uppercase tracking-wider">
-          <Activity size={11} className="text-zinc-600" />
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-zinc-800 shrink-0">
+        <span className="text-[11px] font-semibold text-gray-500 dark:text-zinc-400 flex items-center gap-1.5 uppercase tracking-wider">
+          <Activity size={11} className="text-gray-400 dark:text-zinc-600" />
           Event Stream
           {rows.length > 0 && (
-            <span className="text-zinc-600 font-normal ml-0.5">({rows.length})</span>
+            <span className="text-gray-400 dark:text-zinc-600 font-normal ml-0.5">({rows.length})</span>
           )}
         </span>
         <StatusDot status={status} />
@@ -180,7 +185,7 @@ export function EventLog({
         role="log"
       >
         {rows.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 gap-1.5 text-zinc-700">
+          <div className="flex flex-col items-center justify-center py-8 gap-1.5 text-gray-300 dark:text-zinc-700">
             {status === 'connected' ? (
               <><Inbox size={20} /><p className="text-[12px]">Waiting for events…</p></>
             ) : status === 'connecting' ? (
@@ -190,7 +195,7 @@ export function EventLog({
             )}
           </div>
         ) : (
-          <div className="divide-y divide-zinc-800/40">
+          <div className="divide-y divide-gray-200 dark:divide-zinc-800/40">
             {rows.map(ev => <EventRow key={ev.key} ev={ev} />)}
             <div ref={bottomRef} />
           </div>

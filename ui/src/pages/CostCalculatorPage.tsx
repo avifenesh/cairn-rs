@@ -59,7 +59,7 @@ const PROVIDER_COLOR: Record<string, string> = {
   "Google":      "text-blue-400",
   "Meta/Groq":   "text-violet-400",
   "Mistral":     "text-orange-400",
-  "Self-hosted": "text-zinc-500",
+  "Self-hosted": "text-gray-400 dark:text-zinc-500",
 };
 
 const PROVIDER_DOT: Record<string, string> = {
@@ -110,14 +110,14 @@ function TokenInput({ label, value, onChange }: {
 }) {
   return (
     <div>
-      <label className="text-[11px] text-zinc-500 uppercase tracking-wider block mb-2">{label}</label>
+      <label className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider block mb-2">{label}</label>
       <div className="space-y-2">
         <input
           type="number"
           min={0}
           value={value}
           onChange={e => onChange(Math.max(0, parseInt(e.target.value, 10) || 0))}
-          className="w-full rounded border border-zinc-800 bg-zinc-900 text-[14px] text-zinc-100
+          className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[14px] text-gray-900 dark:text-zinc-100
                      font-mono px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors
                      [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none
                      [&::-webkit-inner-spin-button]:appearance-none"
@@ -129,7 +129,7 @@ function TokenInput({ label, value, onChange }: {
                 "rounded px-2 py-0.5 text-[10px] font-mono font-medium transition-colors border",
                 value === p.value
                   ? "bg-indigo-600/20 text-indigo-300 border-indigo-700/50"
-                  : "text-zinc-600 border-zinc-800 hover:text-zinc-300 hover:border-zinc-600",
+                  : "text-gray-400 dark:text-zinc-600 border-gray-200 dark:border-zinc-800 hover:text-gray-700 dark:text-zinc-300 hover:border-zinc-600",
               )}>
               {p.label}
             </button>
@@ -149,7 +149,7 @@ function CostBar({ cost, maxCost }: { cost: number; maxCost: number }) {
     pct > 33 ? "bg-amber-500/60" :
                "bg-emerald-500/60";
   return (
-    <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden w-24">
+    <div className="h-1.5 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden w-24">
       <div className={clsx("h-full rounded-full transition-all", color)} style={{ width: `${pct}%` }} />
     </div>
   );
@@ -199,7 +199,7 @@ export function CostCalculatorPage() {
               <ChevronDown size={10} className="inline ml-0.5" />;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 overflow-y-auto">
+    <div className="flex flex-col h-full bg-white dark:bg-zinc-950 overflow-y-auto">
       <div className="max-w-5xl mx-auto px-5 py-5 space-y-6 w-full">
 
         {/* Header */}
@@ -208,15 +208,15 @@ export function CostCalculatorPage() {
             <Calculator size={16} className="text-indigo-400" />
           </div>
           <div>
-            <h1 className="text-[15px] font-semibold text-zinc-100">Cost Calculator</h1>
-            <p className="text-[11px] text-zinc-600 mt-0.5">
+            <h1 className="text-[15px] font-semibold text-gray-900 dark:text-zinc-100">Cost Calculator</h1>
+            <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
               Estimate LLM API spend before choosing a model. Pricing per 1M tokens, approximate.
             </p>
           </div>
         </div>
 
         {/* Calculator card */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 space-y-5">
+        <div className="rounded-xl border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-5 space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             {/* Token inputs */}
             <TokenInput label="Input tokens" value={tokensIn}  onChange={setTokensIn}  />
@@ -224,9 +224,9 @@ export function CostCalculatorPage() {
 
             {/* Model selector */}
             <div>
-              <label className="text-[11px] text-zinc-500 uppercase tracking-wider block mb-2">Model</label>
+              <label className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider block mb-2">Model</label>
               <select value={selectedId} onChange={e => setSelectedId(e.target.value)}
-                className="w-full rounded border border-zinc-800 bg-zinc-900 text-[13px] text-zinc-200
+                className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[13px] text-gray-800 dark:text-zinc-200
                            px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
                 {PROVIDERS.map(prov => (
                   <optgroup key={prov} label={prov}>
@@ -240,46 +240,46 @@ export function CostCalculatorPage() {
           </div>
 
           {/* Result */}
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950 divide-y divide-zinc-800">
+          <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 divide-y divide-gray-200 dark:divide-zinc-800">
             {/* Main estimate */}
             <div className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-3">
-                <span className={clsx("text-[11px] font-medium", PROVIDER_COLOR[selected.provider] ?? "text-zinc-400")}>
+                <span className={clsx("text-[11px] font-medium", PROVIDER_COLOR[selected.provider] ?? "text-gray-500 dark:text-zinc-400")}>
                   {selected.provider}
                 </span>
-                <span className="text-[14px] font-medium text-zinc-200">{selected.name}</span>
+                <span className="text-[14px] font-medium text-gray-800 dark:text-zinc-200">{selected.name}</span>
                 {selected.note && (
-                  <span className="text-[10px] text-zinc-600 bg-zinc-800 rounded px-1.5 py-0.5">{selected.note}</span>
+                  <span className="text-[10px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1.5 py-0.5">{selected.note}</span>
                 )}
               </div>
               <div className="text-right">
-                <p className="text-[22px] font-semibold text-zinc-100 tabular-nums leading-none">
+                <p className="text-[22px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-none">
                   {fmtUSD(selectedCost)}
                 </p>
-                <p className="text-[10px] text-zinc-600 mt-0.5">estimated total</p>
+                <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-0.5">estimated total</p>
               </div>
             </div>
 
             {/* Breakdown */}
-            <div className="grid grid-cols-2 divide-x divide-zinc-800">
+            <div className="grid grid-cols-2 divide-x divide-gray-200 dark:divide-zinc-800">
               <div className="px-4 py-2.5">
-                <p className="text-[10px] text-zinc-600 mb-1">Input: {fmtTokens(tokensIn)} tokens</p>
-                <p className="text-[13px] font-mono text-zinc-300 tabular-nums">{fmtUSD(inputCost)}</p>
-                <p className="text-[10px] text-zinc-700 mt-0.5">${selected.inputPer1M.toFixed(4)} / 1M</p>
+                <p className="text-[10px] text-gray-400 dark:text-zinc-600 mb-1">Input: {fmtTokens(tokensIn)} tokens</p>
+                <p className="text-[13px] font-mono text-gray-700 dark:text-zinc-300 tabular-nums">{fmtUSD(inputCost)}</p>
+                <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-0.5">${selected.inputPer1M.toFixed(4)} / 1M</p>
               </div>
               <div className="px-4 py-2.5">
-                <p className="text-[10px] text-zinc-600 mb-1">Output: {fmtTokens(tokensOut)} tokens</p>
-                <p className="text-[13px] font-mono text-zinc-300 tabular-nums">{fmtUSD(outputCost)}</p>
-                <p className="text-[10px] text-zinc-700 mt-0.5">${selected.outputPer1M.toFixed(4)} / 1M</p>
+                <p className="text-[10px] text-gray-400 dark:text-zinc-600 mb-1">Output: {fmtTokens(tokensOut)} tokens</p>
+                <p className="text-[13px] font-mono text-gray-700 dark:text-zinc-300 tabular-nums">{fmtUSD(outputCost)}</p>
+                <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-0.5">${selected.outputPer1M.toFixed(4)} / 1M</p>
               </div>
             </div>
 
             {/* Context window note */}
             {selected.contextK > 0 && (
               <div className="px-4 py-2 flex items-center gap-2">
-                <Info size={11} className="text-zinc-600 shrink-0" />
-                <p className="text-[11px] text-zinc-600">
-                  Context window: <span className="text-zinc-500 font-mono">{selected.contextK}K tokens</span>
+                <Info size={11} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+                <p className="text-[11px] text-gray-400 dark:text-zinc-600">
+                  Context window: <span className="text-gray-400 dark:text-zinc-500 font-mono">{selected.contextK}K tokens</span>
                   {selected.contextK * 1000 < tokensIn + tokensOut && (
                     <span className="ml-2 text-amber-500">⚠ exceeds context window</span>
                   )}
@@ -293,43 +293,43 @@ export function CostCalculatorPage() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Coins size={13} className="text-zinc-500" />
-              <span className="text-[12px] font-medium text-zinc-300">All Models — Cost for {fmtTokens(tokensIn)} in / {fmtTokens(tokensOut)} out</span>
+              <Coins size={13} className="text-gray-400 dark:text-zinc-500" />
+              <span className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">All Models — Cost for {fmtTokens(tokensIn)} in / {fmtTokens(tokensOut)} out</span>
             </div>
             <select value={filterProvider} onChange={e => setFilterProvider(e.target.value)}
-              className="rounded border border-zinc-800 bg-zinc-900 text-[11px] text-zinc-400 px-2 py-1
+              className="rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-500 dark:text-zinc-400 px-2 py-1
                          focus:outline-none focus:border-indigo-500 transition-colors">
               <option value="all">All providers</option>
               {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
 
-          <div className="rounded-xl border border-zinc-800 overflow-hidden">
+          <div className="rounded-xl border border-gray-200 dark:border-zinc-800 overflow-hidden">
             <table className="min-w-full text-[12px]">
               <thead>
-                <tr className="bg-zinc-900 border-b border-zinc-800">
+                <tr className="bg-gray-50 dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800">
                   <th onClick={() => toggleSort("name")}
-                    className="px-4 py-2.5 text-left text-[10px] font-medium text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-zinc-300 transition-colors">
+                    className="px-4 py-2.5 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:text-zinc-300 transition-colors">
                     Model <SortIcon col="name" />
                   </th>
                   <th onClick={() => toggleSort("provider")}
-                    className="px-3 py-2.5 text-left text-[10px] font-medium text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-zinc-300 transition-colors hidden sm:table-cell">
+                    className="px-3 py-2.5 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:text-zinc-300 transition-colors hidden sm:table-cell">
                     Provider <SortIcon col="provider" />
                   </th>
-                  <th className="px-3 py-2.5 text-right text-[10px] font-medium text-zinc-500 uppercase tracking-wider hidden md:table-cell">
+                  <th className="px-3 py-2.5 text-right text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider hidden md:table-cell">
                     Input / 1M
                   </th>
-                  <th className="px-3 py-2.5 text-right text-[10px] font-medium text-zinc-500 uppercase tracking-wider hidden md:table-cell">
+                  <th className="px-3 py-2.5 text-right text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider hidden md:table-cell">
                     Output / 1M
                   </th>
                   <th onClick={() => toggleSort("cost")}
-                    className="px-4 py-2.5 text-right text-[10px] font-medium text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-zinc-300 transition-colors">
+                    className="px-4 py-2.5 text-right text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:text-zinc-300 transition-colors">
                     Est. Cost <SortIcon col="cost" />
                   </th>
                   <th className="px-4 py-2.5 w-32 hidden sm:table-cell" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
+              <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
                 {tableRows.map((m, i) => {
                   const isSelected = m.id === selectedId;
                   return (
@@ -339,31 +339,31 @@ export function CostCalculatorPage() {
                         "cursor-pointer transition-colors",
                         isSelected
                           ? "bg-indigo-950/30 ring-1 ring-inset ring-indigo-800/40"
-                          : i % 2 === 0 ? "bg-zinc-900 hover:bg-zinc-800/60" : "bg-zinc-900/50 hover:bg-zinc-800/60",
+                          : i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60" : "bg-gray-50/50 dark:bg-zinc-900/50 hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60",
                       )}>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2">
                           <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0",
                             PROVIDER_DOT[m.provider] ?? "bg-zinc-600")} />
-                          <span className={clsx("font-medium", isSelected ? "text-indigo-300" : "text-zinc-200")}>
+                          <span className={clsx("font-medium", isSelected ? "text-indigo-300" : "text-gray-800 dark:text-zinc-200")}>
                             {m.name}
                           </span>
                           {m.note && (
-                            <span className="text-[9px] text-zinc-600 bg-zinc-800 rounded px-1 py-0.5 hidden sm:inline">
+                            <span className="text-[9px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1 py-0.5 hidden sm:inline">
                               {m.note}
                             </span>
                           )}
                         </div>
                       </td>
                       <td className="px-3 py-2.5 hidden sm:table-cell">
-                        <span className={clsx("text-[11px] font-medium", PROVIDER_COLOR[m.provider] ?? "text-zinc-500")}>
+                        <span className={clsx("text-[11px] font-medium", PROVIDER_COLOR[m.provider] ?? "text-gray-400 dark:text-zinc-500")}>
                           {m.provider}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-zinc-500 hidden md:table-cell">
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-400 dark:text-zinc-500 hidden md:table-cell">
                         {m.inputPer1M === 0 ? <span className="text-emerald-600">free</span> : `$${m.inputPer1M.toFixed(4)}`}
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-zinc-500 hidden md:table-cell">
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-400 dark:text-zinc-500 hidden md:table-cell">
                         {m.outputPer1M === 0 ? <span className="text-emerald-600">free</span> : `$${m.outputPer1M.toFixed(4)}`}
                       </td>
                       <td className="px-4 py-2.5 text-right">
@@ -371,7 +371,7 @@ export function CostCalculatorPage() {
                           "font-mono font-semibold tabular-nums",
                           m.cost === 0   ? "text-emerald-400" :
                           m.cost < 0.01  ? "text-emerald-300" :
-                          m.cost < 1.00  ? "text-zinc-200"    :
+                          m.cost < 1.00  ? "text-gray-800 dark:text-zinc-200"    :
                           m.cost < 10.00 ? "text-amber-300"   : "text-red-300",
                         )}>
                           {fmtUSD(m.cost)}
@@ -387,7 +387,7 @@ export function CostCalculatorPage() {
             </table>
           </div>
 
-          <p className="mt-2 text-[10px] text-zinc-700 text-center">
+          <p className="mt-2 text-[10px] text-gray-300 dark:text-zinc-700 text-center">
             Prices are approximate and subject to change. Always verify with the provider's official pricing page.
           </p>
         </div>

@@ -69,50 +69,50 @@ const STATE_CONFIG: Partial<Record<TaskState, StateConfig>> = {
   queued: {
     label: "Queued", dot: "bg-amber-400",
     badge: "text-amber-400 bg-amber-400/10",
-    cardBorder: "border-amber-800/40", cardBg: "bg-zinc-900",
+    cardBorder: "border-amber-800/40", cardBg: "bg-gray-50 dark:bg-zinc-900",
     headBg: "bg-amber-950/30", headText: "text-amber-400",
   },
   leased: {
     label: "Claimed", dot: "bg-indigo-400",
     badge: "text-indigo-400 bg-indigo-400/10",
-    cardBorder: "border-indigo-800/40", cardBg: "bg-zinc-900",
+    cardBorder: "border-indigo-800/40", cardBg: "bg-gray-50 dark:bg-zinc-900",
     headBg: "bg-indigo-950/30", headText: "text-indigo-400",
   },
   running: {
     label: "Running", dot: "bg-blue-400 animate-pulse",
     badge: "text-blue-400 bg-blue-400/10",
-    cardBorder: "border-blue-800/40", cardBg: "bg-zinc-900",
+    cardBorder: "border-blue-800/40", cardBg: "bg-gray-50 dark:bg-zinc-900",
     headBg: "bg-blue-950/30", headText: "text-blue-400",
   },
   paused: {
     label: "Paused", dot: "bg-zinc-500",
-    badge: "text-zinc-400 bg-zinc-800",
-    cardBorder: "border-zinc-700/40", cardBg: "bg-zinc-900/60",
-    headBg: "bg-zinc-800/50", headText: "text-zinc-400",
+    badge: "text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800",
+    cardBorder: "border-gray-200 dark:border-zinc-700/40", cardBg: "bg-gray-50/60 dark:bg-zinc-900/60",
+    headBg: "bg-gray-100/50 dark:bg-zinc-800/50", headText: "text-gray-500 dark:text-zinc-400",
   },
   waiting_dependency: {
     label: "Waiting", dot: "bg-purple-400",
     badge: "text-purple-400 bg-purple-400/10",
-    cardBorder: "border-purple-800/40", cardBg: "bg-zinc-900",
+    cardBorder: "border-purple-800/40", cardBg: "bg-gray-50 dark:bg-zinc-900",
     headBg: "bg-purple-950/30", headText: "text-purple-400",
   },
   completed: {
     label: "Completed", dot: "bg-emerald-500",
     badge: "text-emerald-400 bg-emerald-400/10",
-    cardBorder: "border-emerald-900/40", cardBg: "bg-zinc-900/60",
+    cardBorder: "border-emerald-900/40", cardBg: "bg-gray-50/60 dark:bg-zinc-900/60",
     headBg: "bg-emerald-950/20", headText: "text-emerald-400",
   },
   failed: {
     label: "Failed", dot: "bg-red-500",
     badge: "text-red-400 bg-red-400/10",
-    cardBorder: "border-red-900/40", cardBg: "bg-zinc-900/60",
+    cardBorder: "border-red-900/40", cardBg: "bg-gray-50/60 dark:bg-zinc-900/60",
     headBg: "bg-red-950/20", headText: "text-red-400",
   },
   canceled: {
     label: "Cancelled", dot: "bg-zinc-600",
-    badge: "text-zinc-500 bg-zinc-800/60",
-    cardBorder: "border-zinc-800/30", cardBg: "bg-zinc-900/40",
-    headBg: "bg-zinc-800/30", headText: "text-zinc-500",
+    badge: "text-gray-400 dark:text-zinc-500 bg-gray-100/60 dark:bg-zinc-800/60",
+    cardBorder: "border-gray-200/30 dark:border-zinc-800/30", cardBg: "bg-gray-50/40 dark:bg-zinc-900/40",
+    headBg: "bg-gray-100/30 dark:bg-zinc-800/30", headText: "text-gray-400 dark:text-zinc-500",
   },
 };
 
@@ -259,29 +259,29 @@ function LifecycleDiagram() {
 function LifecycleBanner() {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border-b border-zinc-800 shrink-0">
+    <div className="border-b border-gray-200 dark:border-zinc-800 shrink-0">
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
         aria-expanded={open}
         aria-controls="lifecycle-diagram"
-        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-zinc-900/40 transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-gray-50/40 dark:bg-zinc-900/40 transition-colors"
       >
         {open
-          ? <ChevronDown  size={11} className="text-zinc-600 shrink-0" />
-          : <ChevronRight size={11} className="text-zinc-600 shrink-0" />
+          ? <ChevronDown  size={11} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+          : <ChevronRight size={11} className="text-gray-400 dark:text-zinc-600 shrink-0" />
         }
-        <span className="text-[11px] font-medium text-zinc-600 uppercase tracking-wider">
+        <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider">
           Task Lifecycle
         </span>
         {!open && (
-          <span className="text-[10px] text-zinc-700 ml-1">
+          <span className="text-[10px] text-gray-300 dark:text-zinc-700 ml-1">
             queued → claimed → running → completed / failed
           </span>
         )}
       </button>
       {open && (
-        <div id="lifecycle-diagram" className="px-4 pb-3 bg-zinc-950/40">
+        <div id="lifecycle-diagram" className="px-4 pb-3 bg-white dark:bg-zinc-950/40">
           <LifecycleDiagram />
         </div>
       )}
@@ -308,27 +308,27 @@ function TaskCard({ task, cfg }: { task: TaskRecord; cfg: StateConfig }) {
       )}
     >
       {/* Task ID */}
-      <p className="text-[11px] font-mono text-zinc-300 truncate" title={task.task_id}>
+      <p className="text-[11px] font-mono text-gray-700 dark:text-zinc-300 truncate" title={task.task_id}>
         {shortId(task.task_id)}
       </p>
 
       {/* Run ID link */}
       {task.parent_run_id && (
-        <p className="text-[10px] font-mono text-zinc-600 truncate" title={task.parent_run_id}>
+        <p className="text-[10px] font-mono text-gray-400 dark:text-zinc-600 truncate" title={task.parent_run_id}>
           run: {shortId(task.parent_run_id)}
         </p>
       )}
 
       {/* Worker */}
       {task.lease_owner && (
-        <p className="text-[10px] font-mono text-zinc-500 truncate" title={task.lease_owner}>
+        <p className="text-[10px] font-mono text-gray-400 dark:text-zinc-500 truncate" title={task.lease_owner}>
           ◎ {shortId(task.lease_owner)}
         </p>
       )}
 
       {/* Age */}
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-zinc-700 tabular-nums">
+        <span className="text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums">
           {fmtAge(task.created_at)} old
         </span>
         {task.failure_class && (
@@ -353,7 +353,7 @@ function KanbanColumn({ state, tasks }: { state: TaskState; tasks: TaskRecord[] 
   const hidden = tasks.length - shown.length;
 
   return (
-    <div className="flex flex-col min-w-[180px] max-w-[200px] shrink-0 rounded-lg border border-zinc-800 overflow-hidden">
+    <div className="flex flex-col min-w-[180px] max-w-[200px] shrink-0 rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
       {/* Column header */}
       <div className={clsx("flex items-center gap-2 px-3 py-2 shrink-0", cfg.headBg)}>
         <span className={clsx("w-2 h-2 rounded-full shrink-0", cfg.dot)} />
@@ -369,7 +369,7 @@ function KanbanColumn({ state, tasks }: { state: TaskState; tasks: TaskRecord[] 
       </div>
 
       {/* Cards */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1.5 bg-zinc-950/30 min-h-[80px]">
+      <div className="flex-1 overflow-y-auto p-2 space-y-1.5 bg-white dark:bg-zinc-950/30 min-h-[80px]">
         {shown.length === 0 ? (
           <div className="flex items-center justify-center h-12">
             <span className="text-[10px] text-zinc-800">empty</span>
@@ -380,7 +380,7 @@ function KanbanColumn({ state, tasks }: { state: TaskState; tasks: TaskRecord[] 
               <TaskCard key={t.task_id} task={t} cfg={cfg} />
             ))}
             {hidden > 0 && (
-              <p className="text-[10px] text-zinc-700 text-center py-1">
+              <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-center py-1">
                 +{hidden} more
               </p>
             )}
@@ -418,9 +418,9 @@ function BoardView({ tasks }: { tasks: TaskRecord[] }) {
     <div className="flex-1 overflow-x-auto overflow-y-hidden p-3">
       {totalVisible === 0 ? (
         <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-6">
-          <ListChecks size={28} className="text-zinc-700" />
-          <p className="text-[13px] text-zinc-600 font-medium">No tasks yet</p>
-          <p className="text-[11px] text-zinc-700 max-w-xs">
+          <ListChecks size={28} className="text-gray-300 dark:text-zinc-700" />
+          <p className="text-[13px] text-gray-400 dark:text-zinc-600 font-medium">No tasks yet</p>
+          <p className="text-[11px] text-gray-300 dark:text-zinc-700 max-w-xs">
             Tasks are created automatically when a run starts executing work.
             Start a run in the <a href="#runs" onClick={() => { window.location.hash = "runs"; }} className="text-indigo-500 hover:text-indigo-400">Runs</a> page to see tasks appear here.
           </p>
@@ -484,8 +484,8 @@ function RowActions({ task }: { task: TaskRecord }) {
           <button
             onClick={e => { e.stopPropagation(); release.mutate(); }}
             disabled={release.isPending}
-            className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-800 text-zinc-400
-                       hover:bg-zinc-700 border border-zinc-700 transition-colors disabled:opacity-40"
+            className="px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400
+                       hover:bg-gray-200 dark:hover:bg-zinc-700 border border-gray-200 dark:border-zinc-700 transition-colors disabled:opacity-40"
           >
             {release.isPending ? <Loader2 size={10} className="animate-spin inline" /> : "Release"}
           </button>
@@ -570,13 +570,13 @@ export function TasksPage() {
   ).length;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
-        <span className="text-[13px] font-medium text-zinc-200">
+      <div className="flex items-center gap-2 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           Tasks
           {!isLoading && (
-            <span className="ml-2 text-[12px] text-zinc-500 font-normal">
+            <span className="ml-2 text-[12px] text-gray-400 dark:text-zinc-500 font-normal">
               {filtered.length}
               {filter !== "all" && ` / ${tasks.length} total`}
               {activeCnt > 0 && filter === "all" && (
@@ -591,15 +591,15 @@ export function TasksPage() {
         )}
 
         {/* View toggle */}
-        <div className="flex items-center rounded border border-zinc-700 overflow-hidden ml-2">
+        <div className="flex items-center rounded border border-gray-200 dark:border-zinc-700 overflow-hidden ml-2">
           <button
             onClick={() => setViewMode("table")}
             title="Table view"
             className={clsx(
               "flex items-center gap-1 px-2.5 py-1 text-[11px] transition-colors",
               viewMode === "table"
-                ? "bg-zinc-700 text-zinc-200"
-                : "text-zinc-500 hover:text-zinc-300",
+                ? "bg-zinc-700 text-gray-800 dark:text-zinc-200"
+                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
             )}
           >
             <LayoutList size={12} /> Table
@@ -608,10 +608,10 @@ export function TasksPage() {
             onClick={() => setViewMode("board")}
             title="Board view"
             className={clsx(
-              "flex items-center gap-1 px-2.5 py-1 text-[11px] border-l border-zinc-700 transition-colors",
+              "flex items-center gap-1 px-2.5 py-1 text-[11px] border-l border-gray-200 dark:border-zinc-700 transition-colors",
               viewMode === "board"
-                ? "bg-zinc-700 text-zinc-200"
-                : "text-zinc-500 hover:text-zinc-300",
+                ? "bg-zinc-700 text-gray-800 dark:text-zinc-200"
+                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
             )}
           >
             <LayoutGrid size={12} /> Board
@@ -623,7 +623,7 @@ export function TasksPage() {
           <select
             value={filter}
             onChange={e => setFilter(e.target.value as TaskState | "all")}
-            className="ml-1 rounded border border-zinc-700 bg-zinc-800 text-[12px] text-zinc-300
+            className="ml-1 rounded border border-gray-200 dark:border-zinc-700 bg-gray-100 dark:bg-zinc-800 text-[12px] text-gray-700 dark:text-zinc-300
                        px-2 py-1 focus:outline-none focus:border-indigo-500 transition-colors"
           >
             {ALL_STATES.map(s => (
@@ -639,8 +639,8 @@ export function TasksPage() {
             <button
               onClick={() => releaseSelected.mutate()}
               disabled={releaseSelected.isPending}
-              className="flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-900
-                         text-zinc-400 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:border-zinc-600
+              className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900
+                         text-gray-500 dark:text-zinc-400 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600
                          disabled:opacity-40 transition-colors"
             >
               <Unlock size={11} />
@@ -676,7 +676,7 @@ export function TasksPage() {
           {selCount > 0 && viewMode === "table" && (
             <button
               onClick={kbd.clearSelection}
-              className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+              className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
             >
               Clear
             </button>
@@ -690,15 +690,15 @@ export function TasksPage() {
         <div className="flex items-center gap-1">
           <div className="relative">
             <select value={refreshInterval.option} onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
-              className="appearance-none rounded border border-zinc-700 bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors">
+              className="appearance-none rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-gray-500 dark:text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors">
               {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
             </select>
             <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none">
-              <RefreshCw size={9} className={isFetching ? "animate-spin text-indigo-400" : "text-zinc-600"} />
+              <RefreshCw size={9} className={isFetching ? "animate-spin text-indigo-400" : "text-gray-400 dark:text-zinc-600"} />
             </span>
           </div>
           <button onClick={() => refetch()} disabled={isFetching}
-            className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors">
+            className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors">
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
             <span className="hidden sm:inline">Refresh</span>
           </button>
@@ -712,14 +712,14 @@ export function TasksPage() {
       {isLoading ? (
         /* Skeleton rows — gives users a sense of the layout while loading */
         <div className="flex-1 overflow-hidden">
-          <div className="divide-y divide-zinc-800/40">
+          <div className="divide-y divide-gray-200 dark:divide-zinc-800/40">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4 px-4 h-9 animate-pulse">
-                <div className="h-2.5 w-28 rounded bg-zinc-800" />
-                <div className="h-2.5 w-20 rounded bg-zinc-800" />
-                <div className="h-4 w-16 rounded bg-zinc-800" />
-                <div className="h-2.5 w-20 rounded bg-zinc-800" />
-                <div className="ml-auto h-2.5 w-16 rounded bg-zinc-800" />
+                <div className="h-2.5 w-28 rounded bg-gray-100 dark:bg-zinc-800" />
+                <div className="h-2.5 w-20 rounded bg-gray-100 dark:bg-zinc-800" />
+                <div className="h-4 w-16 rounded bg-gray-100 dark:bg-zinc-800" />
+                <div className="h-2.5 w-20 rounded bg-gray-100 dark:bg-zinc-800" />
+                <div className="ml-auto h-2.5 w-16 rounded bg-gray-100 dark:bg-zinc-800" />
               </div>
             ))}
           </div>
@@ -737,12 +737,12 @@ export function TasksPage() {
             selectedIds={kbd.selectedKeys}
             getRowId={t => t.task_id}
             columns={[
-              { key: "task_id",    header: "Task ID",    render: r => <span className="flex items-center gap-1 font-mono text-xs text-zinc-300 whitespace-nowrap group/id" title={r.task_id}>{shortId(r.task_id)}<CopyButton text={r.task_id} label="Copy task ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>,                sortValue: r => r.task_id },
-              { key: "run",        header: "Run",         render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-zinc-700">—</span> },
+              { key: "task_id",    header: "Task ID",    render: r => <span className="flex items-center gap-1 font-mono text-xs text-gray-700 dark:text-zinc-300 whitespace-nowrap group/id" title={r.task_id}>{shortId(r.task_id)}<CopyButton text={r.task_id} label="Copy task ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>,                sortValue: r => r.task_id },
+              { key: "run",        header: "Run",         render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span> },
               { key: "state",      header: "Status",      render: r => <StateBadge state={r.state as Parameters<typeof StateBadge>[0]["state"]} compact />, sortValue: r => r.state },
-              { key: "worker",     header: "Worker",      render: r => r.lease_owner ? <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{shortId(r.lease_owner)}</span> : <span className="text-zinc-700">—</span> },
-              { key: "queued_at",  header: "Queued",      render: r => <span className="text-[11px] text-zinc-500 tabular-nums whitespace-nowrap" title={fmtTime(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
-              { key: "started_at", header: "Started At",  render: r => r.lease_expires_at ? <span className="text-[11px] text-zinc-400 tabular-nums whitespace-nowrap">{fmtTime(r.updated_at)}</span> : <span className="text-zinc-700">—</span>, sortValue: r => r.updated_at },
+              { key: "worker",     header: "Worker",      render: r => r.lease_owner ? <span className="font-mono text-[11px] text-gray-500 dark:text-zinc-400 whitespace-nowrap">{shortId(r.lease_owner)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span> },
+              { key: "queued_at",  header: "Queued",      render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums whitespace-nowrap" title={fmtTime(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
+              { key: "started_at", header: "Started At",  render: r => r.lease_expires_at ? <span className="text-[11px] text-gray-500 dark:text-zinc-400 tabular-nums whitespace-nowrap">{fmtTime(r.updated_at)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>, sortValue: r => r.updated_at },
               { key: "actions",    header: "",             render: r => <RowActions task={r} /> },
             ]}
             filterFn={(r, q) => r.task_id.includes(q) || r.state.includes(q) || (r.parent_run_id ?? "").includes(q) || (r.lease_owner ?? "").includes(q)}

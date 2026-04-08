@@ -107,6 +107,10 @@ pub struct DecideOutput {
     pub model_id: String,
     /// Round-trip latency of the LLM call in milliseconds.
     pub latency_ms: u64,
+    /// Input (prompt) token count from the provider response.
+    pub input_tokens: Option<u32>,
+    /// Output (completion) token count from the provider response.
+    pub output_tokens: Option<u32>,
 }
 
 // ── ExecuteOutcome ────────────────────────────────────────────────────────────

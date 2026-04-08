@@ -44,9 +44,10 @@ fn provider_connection_body() -> serde_json::Value {
     })
 }
 
-/// In local_eval tier, POST /v1/providers/connections must return 403.
+/// Provider connections are GA (all tiers). Local mode must allow adding providers
+/// so solo developers can configure their first LLM endpoint.
 #[tokio::test]
-async fn entitlement_gates_provider_connection_denied_in_local_mode() {
+async fn provider_connection_allowed_in_local_mode() {
     let app = local_app().await;
 
     let response = app
@@ -64,15 +65,8 @@ async fn entitlement_gates_provider_connection_denied_in_local_mode() {
 
     assert_eq!(
         response.status(),
-        StatusCode::FORBIDDEN,
-        "local_eval tier should be denied multi_provider"
-    );
-
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(
-        json["code"] == "entitlement_required",
-        "response should carry entitlement_required code, got: {json}"
+        StatusCode::CREATED,
+        "local_eval tier must be allowed to add providers (GA feature)"
     );
 }
 

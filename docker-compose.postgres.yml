@@ -1,0 +1,72 @@
+# cairn-rs — team mode with Postgres persistence
+#
+# Usage:
+#   docker compose -f docker-compose.postgres.yml up --build
+#
+# Override token:
+#   echo 'CAIRN_ADMIN_TOKEN=my-secret' > .env
+#   docker compose -f docker-compose.postgres.yml up -d
+#
+# Connect an LLM provider (any OpenAI-compatible endpoint):
+#   echo 'CAIRN_BRAIN_URL=https://your-provider/v1' >> .env
+#   echo 'OPENAI_COMPAT_API_KEY=your-key' >> .env
+#
+# Wipe everything:
+#   docker compose -f docker-compose.postgres.yml down -v
+
+services:
+
+  # ── Postgres ─────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cairn
+      POSTGRES_USER: cairn
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-cairn-dev-password}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cairn -d cairn"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Cairn control plane (team mode + Postgres) ───────────────────────────────
+  cairn:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      CAIRN_ADMIN_TOKEN: "${CAIRN_ADMIN_TOKEN:-dev-admin-token}"
+      CAIRN_MODE: "team"
+      # Postgres connection — matches the postgres service above.
+      DATABASE_URL: "postgres://cairn:${POSTGRES_PASSWORD:-cairn-dev-password}@postgres:5432/cairn"
+      # LLM provider — connect any OpenAI-compatible endpoint, Ollama, Bedrock, etc.
+      # Configure via the dashboard (Providers page) or set env vars below.
+      CAIRN_BRAIN_URL: "${CAIRN_BRAIN_URL:-}"
+      CAIRN_WORKER_URL: "${CAIRN_WORKER_URL:-}"
+      OPENAI_COMPAT_API_KEY: "${OPENAI_COMPAT_API_KEY:-}"
+      OPENAI_COMPAT_BASE_URL: "${OPENAI_COMPAT_BASE_URL:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OLLAMA_HOST: "${OLLAMA_HOST:-}"
+    command: ["--db", "postgres://cairn:${POSTGRES_PASSWORD:-cairn-dev-password}@postgres:5432/cairn"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pg_data:
+    driver: local

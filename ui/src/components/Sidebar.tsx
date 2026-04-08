@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useQuery } from '@tanstack/react-query';
-import { clearStoredToken } from '../lib/api';
+import { clearStoredToken, defaultApi } from '../lib/api';
 import { usePresence, type PresenceEntry } from '../hooks/usePresence';
 import type { ReactNode } from 'react';
 
@@ -173,6 +173,24 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
 
   const presenceByPage = usePresence(current);
 
+  // Pending approval count for badge display.
+  const { data: pendingApprovals } = useQuery({
+    queryKey: ['sidebar-pending-approvals'],
+    queryFn: () => defaultApi.getPendingApprovals(),
+    refetchInterval: 10_000,
+    retry: false,
+  });
+  const pendingCount = pendingApprovals?.length ?? 0;
+
+  // Failed runs in last 24h for badge on Runs nav.
+  const { data: dashData } = useQuery({
+    queryKey: ['sidebar-dashboard'],
+    queryFn: () => defaultApi.getDashboard(),
+    refetchInterval: 15_000,
+    retry: false,
+  });
+  const failedRuns24h = dashData?.failed_runs_24h ?? 0;
+
   // Fetch server version from X-Cairn-Version header via the health endpoint.
   const { data: serverVersion } = useQuery({
     queryKey: ['server-version'],
@@ -271,6 +289,16 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
                         )}
                       />
                       <span className="truncate">{label}</span>
+                      {id === 'approvals' && pendingCount > 0 && (
+                        <span className="ml-auto mr-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/20 text-amber-500 text-[10px] font-bold tabular-nums shrink-0">
+                          {pendingCount}
+                        </span>
+                      )}
+                      {id === 'runs' && failedRuns24h > 0 && (
+                        <span className="ml-auto mr-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500/20 text-red-500 text-[10px] font-bold tabular-nums shrink-0">
+                          {failedRuns24h}
+                        </span>
+                      )}
                       <PresenceDots entries={visitors} />
                     </button>
                   );

@@ -155,8 +155,8 @@ impl DefaultFeatureGate {
             },
             CapabilityMapping {
                 feature_name: "multi_provider".to_owned(),
-                required_entitlement: Some(Entitlement::DeploymentTier),
-                flag: FeatureFlag::EntitlementGated,
+                required_entitlement: None,
+                flag: FeatureFlag::GeneralAvailability,
             },
             CapabilityMapping {
                 feature_name: "credential_management".to_owned(),

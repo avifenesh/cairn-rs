@@ -44,7 +44,10 @@ export interface ProviderHealthEntry {
 // ── Health ────────────────────────────────────────────────────────────────────
 
 export interface HealthResponse {
-  ok: boolean;
+  ok?: boolean;
+  status?: string;
+  store_ok?: boolean;
+  version?: string;
 }
 
 // ── Detailed health (GET /v1/health/detailed) ─────────────────────────────────
@@ -77,10 +80,30 @@ export interface DetailedHealth {
 // ── System status ─────────────────────────────────────────────────────────────
 
 /** GET /v1/status */
+export interface SystemStatusComponent {
+  name: string;
+  status: string;
+  message: string | null;
+}
+
 export interface SystemStatus {
-  runtime_ok: boolean;
-  store_ok: boolean;
+  status: string;
+  version?: string;
   uptime_secs: number;
+  components: SystemStatusComponent[];
+}
+
+/** Derive overall runtime health from status response. */
+export function isRuntimeHealthy(s: SystemStatus | null | undefined): boolean {
+  if (!s) return false;
+  return s.status === 'ok';
+}
+
+/** Derive store health from status response. */
+export function isStoreHealthy(s: SystemStatus | null | undefined): boolean {
+  if (!s) return false;
+  const store = s.components?.find(c => c.name === 'event_store');
+  return store ? store.status === 'ok' : true;
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -220,13 +243,13 @@ export interface KeyManagementStatus {
   last_rotation_at: number | null; // unix ms
 }
 
-/** GET /v1/settings — full deployment settings */
+/** GET /v1/settings — actual response is sparse; optional fields may be absent */
 export interface DeploymentSettings {
-  deployment_mode: "local" | "self_hosted_team";
-  store_backend: "memory" | "sqlite" | "postgres";
+  deployment_mode: string;
+  store_backend: string;
   plugin_count: number;
-  system_health: SystemHealthSettings;
-  key_management: KeyManagementStatus;
+  system_health?: SystemHealthSettings;
+  key_management?: KeyManagementStatus;
 }
 
 // ── Overview ──────────────────────────────────────────────────────────────────
@@ -236,8 +259,8 @@ export interface OverviewResponse {
   deployment_mode: string;
   store_backend: string;
   uptime_secs: number;
-  runtime_ok: boolean;
-  store_ok: boolean;
+  status?: string;
+  components?: SystemStatusComponent[];
 }
 
 // ── Costs ─────────────────────────────────────────────────────────────────────
@@ -318,12 +341,16 @@ export interface SourceQualityRecord {
 
 // ── Recent events ─────────────────────────────────────────────────────────────
 
-/** One entry from GET /v1/events/recent — includes SSE sequence ID. */
+/** One entry from GET /v1/events/recent. */
 export interface RecentEvent {
-  seq: number;
+  position?: number;
+  seq?: number;
   event_type: string;
-  data: unknown;
-  timestamp: string;
+  message?: string;
+  data?: unknown;
+  timestamp?: string;
+  stored_at?: number;
+  run_id?: string | null;
 }
 
 // ── System stats ──────────────────────────────────────────────────────────────

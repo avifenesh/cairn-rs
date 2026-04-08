@@ -600,6 +600,8 @@ mod tests {
             requires_approval: false,
             model_id: "test-model".to_owned(),
             latency_ms: 10,
+            input_tokens: None,
+            output_tokens: None,
         }
     }
 
@@ -618,6 +620,8 @@ mod tests {
             requires_approval: false,
             model_id: "test-model".to_owned(),
             latency_ms: 20,
+            input_tokens: None,
+            output_tokens: None,
         }
     }
 
@@ -742,6 +746,8 @@ mod tests {
             calibrated_confidence: 0.5,
             model_id: "m".to_owned(),
             latency_ms: 0,
+            input_tokens: None,
+            output_tokens: None,
         };
 
         let lp = OrchestratorLoop::new(
@@ -968,6 +974,8 @@ mod tests {
                     requires_approval: false,
                     model_id: "test".to_owned(),
                     latency_ms: 0,
+                    input_tokens: None,
+                    output_tokens: None,
                 })
             }
         }

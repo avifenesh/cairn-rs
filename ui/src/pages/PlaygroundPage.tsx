@@ -170,7 +170,10 @@ function useChatStream() {
   ) {
     const base = messagesRef.current;
     const history: { role: string; content: string }[] = [];
-    if (systemPrompt.trim()) history.push({ role: "system", content: systemPrompt.trim() });
+    // Some models (e.g. gemma) don't support system/developer instructions.
+    // Only include the system prompt for models that accept it.
+    const skipSystem = model.includes('gemma');
+    if (systemPrompt.trim() && !skipSystem) history.push({ role: "system", content: systemPrompt.trim() });
     [...base, { role: "user" as Role, content: userContent }].forEach((m) =>
       history.push({ role: m.role, content: m.content })
     );
@@ -258,11 +261,11 @@ function parseInline(text: string, depth = 0): React.ReactNode {
     },
     // Bold: **text**
     { re: /\*\*([^*\n]+)\*\*/,
-      render: (m) => <strong className="font-semibold text-zinc-100">{parseInline(m[1], depth + 1)}</strong>,
+      render: (m) => <strong className="font-semibold text-gray-900 dark:text-zinc-100">{parseInline(m[1], depth + 1)}</strong>,
     },
     // Italic: *text* (not ** or ***)
     { re: /(?<!\*)\*(?!\*)([^*\n]+)(?<!\*)\*(?!\*)/,
-      render: (m) => <em className="italic text-zinc-300">{parseInline(m[1], depth + 1)}</em>,
+      render: (m) => <em className="italic text-gray-700 dark:text-zinc-300">{parseInline(m[1], depth + 1)}</em>,
     },
     // Link: [text](url)
     { re: /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/,
@@ -381,7 +384,7 @@ function CopyCodeButton({ code }: { code: string }) {
           setTimeout(() => setCopied(false), 1500);
         });
       }}
-      className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1"
+      className="text-[10px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors flex items-center gap-1"
     >
       {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
     </button>
@@ -397,20 +400,20 @@ function MarkdownContent({ text }: { text: string }) {
       {blocks.map((block, i) => {
         switch (block.type) {
           case "h1":
-            return <h1 key={i} className="text-[17px] font-bold text-zinc-100 mt-2 mb-1 leading-snug">{parseInline(block.content)}</h1>;
+            return <h1 key={i} className="text-[17px] font-bold text-gray-900 dark:text-zinc-100 mt-2 mb-1 leading-snug">{parseInline(block.content)}</h1>;
           case "h2":
-            return <h2 key={i} className="text-[14px] font-semibold text-zinc-200 mt-2 mb-0.5 leading-snug">{parseInline(block.content)}</h2>;
+            return <h2 key={i} className="text-[14px] font-semibold text-gray-800 dark:text-zinc-200 mt-2 mb-0.5 leading-snug">{parseInline(block.content)}</h2>;
           case "h3":
-            return <h3 key={i} className="text-[13px] font-semibold text-zinc-300 mt-1.5 mb-0.5 leading-snug">{parseInline(block.content)}</h3>;
+            return <h3 key={i} className="text-[13px] font-semibold text-gray-700 dark:text-zinc-300 mt-1.5 mb-0.5 leading-snug">{parseInline(block.content)}</h3>;
           case "code":
             return (
-              <div key={i} className="my-1.5 rounded-lg overflow-hidden border border-zinc-700/60">
-                <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-800 border-b border-zinc-700/60">
-                  <span className="text-[10px] font-mono text-zinc-500">{block.lang || "code"}</span>
+              <div key={i} className="my-1.5 rounded-lg overflow-hidden border border-gray-200 dark:border-zinc-700/60">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-gray-100 dark:bg-zinc-800 border-b border-gray-200 dark:border-zinc-700/60">
+                  <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-500">{block.lang || "code"}</span>
                   <CopyCodeButton code={block.content} />
                 </div>
-                <pre className="p-3 bg-zinc-800/50 overflow-x-auto text-[12px] leading-relaxed">
-                  <code className="font-mono text-zinc-200 whitespace-pre">{block.content}</code>
+                <pre className="p-3 bg-gray-100/50 dark:bg-zinc-800/50 overflow-x-auto text-[12px] leading-relaxed">
+                  <code className="font-mono text-gray-800 dark:text-zinc-200 whitespace-pre">{block.content}</code>
                 </pre>
               </div>
             );
@@ -419,7 +422,7 @@ function MarkdownContent({ text }: { text: string }) {
             return (
               <Tag key={i} className={clsx("pl-5 space-y-0.5 my-1", block.ordered ? "list-decimal" : "list-disc")}>
                 {block.items.map((item, j) => (
-                  <li key={j} className="text-[13px] text-zinc-200 leading-relaxed">
+                  <li key={j} className="text-[13px] text-gray-800 dark:text-zinc-200 leading-relaxed">
                     {parseInline(item)}
                   </li>
                 ))}
@@ -427,10 +430,10 @@ function MarkdownContent({ text }: { text: string }) {
             );
           }
           case "hr":
-            return <hr key={i} className="border-zinc-700 my-2" />;
+            return <hr key={i} className="border-gray-200 dark:border-zinc-700 my-2" />;
           case "paragraph":
             return (
-              <p key={i} className="text-[13px] text-zinc-200 leading-relaxed whitespace-pre-wrap break-words">
+              <p key={i} className="text-[13px] text-gray-800 dark:text-zinc-200 leading-relaxed whitespace-pre-wrap break-words">
                 {parseInline(block.content)}
               </p>
             );
@@ -493,15 +496,15 @@ function ModelSelector({ value, onChange, models, disabled }: {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled || models.length === 0}
-        className="appearance-none w-full rounded border border-zinc-800 bg-zinc-900
-                   text-[13px] text-zinc-300 px-2.5 py-1.5 pr-7
+        className="appearance-none w-full rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
+                   text-[13px] text-gray-700 dark:text-zinc-300 px-2.5 py-1.5 pr-7
                    focus:outline-none focus:border-indigo-500
                    disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {models.length === 0 && <option value="">No models</option>}
         {models.map((m) => <option key={m} value={m}>{m}</option>)}
       </select>
-      <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+      <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 pointer-events-none" />
     </div>
   );
 }
@@ -514,31 +517,31 @@ function ModelSettings({ temperature, onTemperature, maxTokens, onMaxTokens, dis
   disabled: boolean;
 }) {
   return (
-    <div className="flex items-center gap-6 px-4 py-2 border-b border-zinc-800 bg-zinc-950 shrink-0">
+    <div className="flex items-center gap-6 px-4 py-2 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shrink-0">
       <div className="flex items-center gap-2.5 min-w-0">
-        <label className="text-[11px] font-medium text-zinc-500 whitespace-nowrap">Temp</label>
+        <label className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 whitespace-nowrap">Temp</label>
         <input type="range" min={0} max={2} step={0.1} value={temperature}
           onChange={(e) => onTemperature(Number(e.target.value))}
           disabled={disabled} className="w-24 accent-indigo-500 disabled:opacity-40 cursor-pointer" />
-        <span className="text-[12px] font-mono text-zinc-300 w-8 text-right tabular-nums">
+        <span className="text-[12px] font-mono text-gray-700 dark:text-zinc-300 w-8 text-right tabular-nums">
           {temperature.toFixed(1)}
         </span>
         {temperature === 0     && <span className="text-[10px] text-sky-500">deterministic</span>}
         {temperature >= 1.5    && <span className="text-[10px] text-amber-500">creative</span>}
       </div>
-      <div className="w-px h-4 bg-zinc-800 shrink-0" />
+      <div className="w-px h-4 bg-gray-100 dark:bg-zinc-800 shrink-0" />
       <div className="flex items-center gap-2.5">
-        <label className="text-[11px] font-medium text-zinc-500 whitespace-nowrap">Max tokens</label>
+        <label className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 whitespace-nowrap">Max tokens</label>
         <input type="number" min={64} max={8192} step={64} value={maxTokens}
           onChange={(e) => onMaxTokens(Math.max(64, Math.min(8192, Number(e.target.value) || 64)))}
           disabled={disabled}
-          className="w-20 rounded border border-zinc-800 bg-zinc-900 text-[12px] font-mono
-                     text-zinc-300 px-2 py-1 text-right focus:outline-none focus:border-indigo-500
+          className="w-20 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[12px] font-mono
+                     text-gray-700 dark:text-zinc-300 px-2 py-1 text-right focus:outline-none focus:border-indigo-500
                      disabled:opacity-40 [appearance:textfield]
                      [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
       </div>
-      <div className="ml-auto text-[10px] text-zinc-700 hidden lg:block">
-        passed to model as <code className="text-zinc-600">temperature</code> · <code className="text-zinc-600">max_tokens</code>
+      <div className="ml-auto text-[10px] text-gray-300 dark:text-zinc-700 hidden lg:block">
+        passed to model as <code className="text-gray-400 dark:text-zinc-600">temperature</code> · <code className="text-gray-400 dark:text-zinc-600">max_tokens</code>
       </div>
     </div>
   );
@@ -553,37 +556,37 @@ function SystemPromptPanel({ value, onChange, open, onToggle, disabled }: {
 }) {
   const isDefault = value === DEFAULT_SYSTEM_PROMPT;
   return (
-    <div className="border-b border-zinc-800 shrink-0">
+    <div className="border-b border-gray-200 dark:border-zinc-800 shrink-0">
       <button type="button" onClick={onToggle}
         aria-expanded={open}
         aria-controls="system-prompt-panel"
-        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-zinc-900/40 transition-colors">
-        {open ? <ChevronDown size={12} className="text-zinc-500 shrink-0" />
-               : <ChevronRight size={12} className="text-zinc-500 shrink-0" />}
-        <Settings2 size={12} className="text-zinc-500 shrink-0" />
-        <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">System Prompt</span>
+        className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-gray-50/40 dark:bg-zinc-900/40 transition-colors">
+        {open ? <ChevronDown size={12} className="text-gray-400 dark:text-zinc-500 shrink-0" />
+               : <ChevronRight size={12} className="text-gray-400 dark:text-zinc-500 shrink-0" />}
+        <Settings2 size={12} className="text-gray-400 dark:text-zinc-500 shrink-0" />
+        <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">System Prompt</span>
         {!isDefault && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />}
         {!open && (
-          <span className="ml-2 text-[11px] text-zinc-600 truncate max-w-xs">{value || <em>empty</em>}</span>
+          <span className="ml-2 text-[11px] text-gray-400 dark:text-zinc-600 truncate max-w-xs">{value || <em>empty</em>}</span>
         )}
       </button>
       {open && (
         <div id="system-prompt-panel" className="px-4 pb-3 space-y-2">
           <textarea value={value} onChange={(e) => onChange(e.target.value)}
             disabled={disabled} rows={3}
-            className="w-full rounded border border-zinc-800 bg-zinc-900 text-[13px] text-zinc-300
+            className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[13px] text-gray-700 dark:text-zinc-300
                        placeholder-zinc-600 px-3 py-2 resize-none
                        focus:outline-none focus:border-indigo-500 disabled:opacity-50 transition-colors"
             placeholder="System instructions for the model…" />
           <div className="flex items-center gap-3">
             {!isDefault && (
               <button type="button" onClick={() => onChange(DEFAULT_SYSTEM_PROMPT)}
-                className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors">
+                className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">
                 Reset to default
               </button>
             )}
-            <span className="ml-auto text-[11px] text-zinc-700">
-              {value.length} chars · prepended as <code className="text-zinc-600">system</code> role
+            <span className="ml-auto text-[11px] text-gray-300 dark:text-zinc-700">
+              {value.length} chars · prepended as <code className="text-gray-400 dark:text-zinc-600">system</code> role
             </span>
           </div>
         </div>
@@ -611,7 +614,7 @@ function ChatBubble({ msg }: { msg: Message }) {
     <div className={clsx("flex gap-2.5 max-w-[85%] group/bubble", isUser ? "ml-auto flex-row-reverse" : "mr-auto")}>
       <div className={clsx(
         "shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5",
-        isUser ? "bg-indigo-900/60 text-indigo-400" : "bg-zinc-800 text-zinc-500",
+        isUser ? "bg-indigo-900/60 text-indigo-400" : "bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500",
       )}>
         {isUser ? <User size={12} /> : <Bot size={12} />}
       </div>
@@ -622,7 +625,7 @@ function ChatBubble({ msg }: { msg: Message }) {
           isUser
             ? "rounded-tr-sm bg-indigo-600 text-white"
             : clsx(
-              "rounded-tl-sm bg-zinc-900 border border-zinc-800 text-zinc-200",
+              "rounded-tl-sm bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 text-gray-800 dark:text-zinc-200",
               msg.error && "bg-red-950/40 border-red-800/40 text-red-300",
             ),
         )}>
@@ -655,7 +658,7 @@ function ChatBubble({ msg }: { msg: Message }) {
                     "opacity-0 group-hover/bubble:opacity-100",
                     copied
                       ? "text-emerald-400 bg-emerald-950/40"
-                      : "text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800",
+                      : "text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800",
                   )}
                 >
                   {copied ? <Check size={11} /> : <Copy size={11} />}
@@ -666,7 +669,7 @@ function ChatBubble({ msg }: { msg: Message }) {
         </div>
 
         {msg.meta && !msg.streaming && (
-          <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 px-1 text-[10px] text-zinc-700">
+          <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 px-1 text-[10px] text-gray-300 dark:text-zinc-700">
             <span className="flex items-center gap-1">
               <Clock size={9} />
               {msg.meta.latency_ms >= 1000
@@ -677,7 +680,7 @@ function ChatBubble({ msg }: { msg: Message }) {
               {msg.meta.model}
             </span>
             {(msg.meta.tokens_in !== undefined || msg.meta.tokens_out !== undefined) && (
-              <span className="text-zinc-700 font-mono">
+              <span className="text-gray-300 dark:text-zinc-700 font-mono">
                 {msg.meta.tokens_in ?? "—"}↑ {msg.meta.tokens_out ?? "—"}↓
               </span>
             )}
@@ -704,19 +707,19 @@ function EmptyChat({ model, ollamaDown }: { model: string; ollamaDown?: boolean 
         </div>
         <div className="space-y-1">
           <p className="text-[13px] font-medium text-amber-500">Ollama is not reachable</p>
-          <p className="text-[11px] text-zinc-600 max-w-xs">
+          <p className="text-[11px] text-gray-400 dark:text-zinc-600 max-w-xs">
             To use the Playground, you need Ollama running locally or a configured provider.
           </p>
         </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-left max-w-xs space-y-1.5">
-          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Quick fix</p>
+        <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-4 py-3 text-left max-w-xs space-y-1.5">
+          <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Quick fix</p>
           {[
             '1. Install Ollama from ollama.ai',
             '2. Run: ollama serve',
             '3. Set OLLAMA_HOST and restart cairn-app',
             '4. Pull a model: ollama pull llama3.2',
           ].map(step => (
-            <p key={step} className="text-[11px] text-zinc-400 font-mono">{step}</p>
+            <p key={step} className="text-[11px] text-gray-500 dark:text-zinc-400 font-mono">{step}</p>
           ))}
         </div>
       </div>
@@ -724,13 +727,13 @@ function EmptyChat({ model, ollamaDown }: { model: string; ollamaDown?: boolean 
   }
   return (
     <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center py-12">
-      <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-        <Bot size={18} className="text-zinc-600" />
+      <div className="w-10 h-10 rounded-full bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 flex items-center justify-center">
+        <Bot size={18} className="text-gray-400 dark:text-zinc-600" />
       </div>
       <div>
-        <p className="text-[13px] font-medium text-zinc-400">Start a conversation</p>
-        <p className="text-[11px] text-zinc-600 mt-1">
-          {model ? <>Model: <span className="font-mono text-zinc-500">{model}</span></> : "Select a model to begin"}
+        <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">Start a conversation</p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-1">
+          {model ? <>Model: <span className="font-mono text-gray-400 dark:text-zinc-500">{model}</span></> : "Select a model to begin"}
         </p>
       </div>
     </div>
@@ -747,15 +750,15 @@ function ConversationSidebar({ conversations, activeId, onNew, onSelect, onDelet
   onDelete: (id: string) => void;
 }) {
   return (
-    <div className="flex flex-col w-[200px] shrink-0 border-r border-zinc-800 bg-zinc-950 h-full overflow-hidden">
-      <div className="flex items-center gap-2 px-3 h-10 border-b border-zinc-800 shrink-0">
-        <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider flex-1 truncate">
+    <div className="flex flex-col w-[200px] shrink-0 border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 h-full overflow-hidden">
+      <div className="flex items-center gap-2 px-3 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0">
+        <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider flex-1 truncate">
           History
         </span>
         <button
           onClick={onNew}
           title="New chat"
-          className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors shrink-0"
+          className="p-1 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors shrink-0"
         >
           <Plus size={13} />
         </button>
@@ -763,7 +766,7 @@ function ConversationSidebar({ conversations, activeId, onNew, onSelect, onDelet
 
       <div className="flex-1 overflow-y-auto py-1">
         {conversations.length === 0 ? (
-          <p className="px-3 py-6 text-[11px] text-zinc-700 text-center italic">No conversations yet</p>
+          <p className="px-3 py-6 text-[11px] text-gray-300 dark:text-zinc-700 text-center italic">No conversations yet</p>
         ) : (
           conversations.map((conv) => (
             <div
@@ -771,24 +774,24 @@ function ConversationSidebar({ conversations, activeId, onNew, onSelect, onDelet
               className={clsx(
                 "group flex items-start gap-1 px-3 py-2 cursor-pointer transition-colors select-none",
                 conv.id === activeId
-                  ? "bg-zinc-800/60"
-                  : "hover:bg-zinc-900/60",
+                  ? "bg-gray-100/60 dark:bg-zinc-800/60"
+                  : "hover:bg-gray-50/60 dark:bg-zinc-900/60",
               )}
               onClick={() => onSelect(conv.id)}
             >
               <div className="flex-1 min-w-0">
                 <p className={clsx(
                   "text-[12px] leading-snug truncate",
-                  conv.id === activeId ? "text-zinc-200" : "text-zinc-400",
+                  conv.id === activeId ? "text-gray-800 dark:text-zinc-200" : "text-gray-500 dark:text-zinc-400",
                 )}>
                   {conv.title || "Untitled"}
                 </p>
-                <p className="text-[10px] text-zinc-700 mt-0.5">{fmtAgo(conv.timestamp)}</p>
+                <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-0.5">{fmtAgo(conv.timestamp)}</p>
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); onDelete(conv.id); }}
                 title="Delete"
-                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-zinc-600 hover:text-red-400
+                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-red-400
                            transition-all shrink-0 mt-0.5"
               >
                 <X size={10} />
@@ -813,8 +816,8 @@ function CompareHeader({ label, model, onModelChange, models, streaming, onStop,
   onClear: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0 bg-zinc-950">
-      <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider w-4 shrink-0">
+    <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-white dark:bg-zinc-950">
+      <span className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider w-4 shrink-0">
         {label}
       </span>
       <div className="flex-1">
@@ -827,7 +830,7 @@ function CompareHeader({ label, model, onModelChange, models, streaming, onStop,
         </button>
       ) : (
         <button onClick={onClear} title="Clear" disabled={streaming}
-          className="shrink-0 p-1 rounded text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors">
+          className="shrink-0 p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">
           <Trash2 size={11} />
         </button>
       )}
@@ -862,7 +865,7 @@ function InputBar({ onSubmit, disabled, placeholder, streaming, onStop }: {
   }
 
   return (
-    <div className="shrink-0 px-4 py-3 border-t border-zinc-800">
+    <div className="shrink-0 px-4 py-3 border-t border-gray-200 dark:border-zinc-800">
       <form onSubmit={handleSubmit} className="flex gap-2 items-end">
         <textarea
           ref={textareaRef}
@@ -873,7 +876,7 @@ function InputBar({ onSubmit, disabled, placeholder, streaming, onStop }: {
           placeholder={placeholder}
           rows={1}
           style={{ maxHeight: "120px" }}
-          className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900 text-[13px] text-zinc-200
+          className="flex-1 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[13px] text-gray-800 dark:text-zinc-200
                      placeholder-zinc-600 px-3 py-2.5 resize-none overflow-y-auto
                      focus:outline-none focus:border-indigo-500
                      disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -892,13 +895,13 @@ function InputBar({ onSubmit, disabled, placeholder, streaming, onStop }: {
         ) : (
           <button type="submit" disabled={!input.trim() || disabled}
             className="shrink-0 w-10 h-10 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white
-                       disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed
+                       disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 disabled:cursor-not-allowed
                        flex items-center justify-center transition-colors">
             <Send size={14} />
           </button>
         )}
       </form>
-      <p className="text-[10px] text-zinc-700 mt-1.5 text-center">
+      <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-1.5 text-center">
         ⌘↵ to send · system prompt + full history sent with each message
       </p>
     </div>
@@ -970,10 +973,27 @@ export function PlaygroundPage() {
   const ollamaModels: string[] = modelsData?.models ?? [];
   const connectionModels: string[] = (connectionsData?.items ?? []).flatMap(c => c.supported_models ?? []);
 
-  // Deduplicate: Ollama models first, then any unique connection models
-  const models: string[] = ollamaModels.length > 0
+  // Deduplicate: Ollama models first, then any unique connection models.
+  // Sort free-tier models first so the default selection works without payment.
+  const rawModels: string[] = ollamaModels.length > 0
     ? ollamaModels
     : [...new Set(connectionModels)];
+  // Sort free-tier models first; prefer models that support system prompts
+  // (llama, qwen, deepseek) over those that don't (gemma).
+  const models = [...rawModels].sort((a, b) => {
+    const aFree = a.includes(':free');
+    const bFree = b.includes(':free');
+    if (aFree && !bFree) return -1;
+    if (!aFree && bFree) return 1;
+    // Among free models, prefer instruction-tuned (llama/qwen/deepseek) over gemma
+    if (aFree && bFree) {
+      const aGemma = a.includes('gemma');
+      const bGemma = b.includes('gemma');
+      if (!aGemma && bGemma) return -1;
+      if (aGemma && !bGemma) return 1;
+    }
+    return 0;
+  });
 
   const ollamaDown  = !!modelsError && connectionModels.length === 0;
   const activeModel = selectedModel || models[0] || "";
@@ -1078,31 +1098,31 @@ export function PlaygroundPage() {
                    "Message… (⌘↵ to send)";
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
+    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 h-11 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-3 px-4 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
         {/* Sidebar toggle */}
         <button
           onClick={toggleSidebar}
           title={sidebarOpen ? "Close history" : "Open history"}
           aria-expanded={sidebarOpen}
           aria-label={sidebarOpen ? "Close conversation history" : "Open conversation history"}
-          className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          className="p-1 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
         >
           {sidebarOpen ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
         </button>
 
         <Terminal size={13} className="text-indigo-400 shrink-0" />
-        <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">LLM Playground</span>
+        <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">LLM Playground</span>
 
         {turnCount > 0 && !compareMode && (
-          <span className="text-[10px] text-zinc-700">{turnCount} turn{turnCount !== 1 ? "s" : ""}</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-700">{turnCount} turn{turnCount !== 1 ? "s" : ""}</span>
         )}
 
         <div className="ml-auto flex items-center gap-3">
           {/* Ollama status */}
           {modelsLoading ? (
-            <span className="text-[11px] text-zinc-600 flex items-center gap-1">
+            <span className="text-[11px] text-gray-400 dark:text-zinc-600 flex items-center gap-1">
               <Loader2 size={10} className="animate-spin" /> Checking…
             </span>
           ) : ollamaDown ? (
@@ -1118,7 +1138,7 @@ export function PlaygroundPage() {
               {models.length} model{models.length !== 1 ? "s" : ""} (provider)
             </span>
           ) : (
-            <span className="text-[11px] text-zinc-600 flex items-center gap-1.5 hidden sm:flex">
+            <span className="text-[11px] text-gray-400 dark:text-zinc-600 flex items-center gap-1.5 hidden sm:flex">
               <Zap size={10} className="text-emerald-500" />
               {models.length} model{models.length !== 1 ? "s" : ""}
             </span>
@@ -1132,7 +1152,7 @@ export function PlaygroundPage() {
               "flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors",
               compareMode
                 ? "bg-indigo-600/20 text-indigo-400 border border-indigo-700/40"
-                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800",
+                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800",
             )}
           >
             <GitCompare size={12} />
@@ -1153,15 +1173,15 @@ export function PlaygroundPage() {
                 onClick={() => exportConversation(primary.messages, activeModel, systemPrompt)}
                 title="Export conversation as Markdown"
                 disabled={primary.streaming}
-                className="flex items-center gap-1.5 text-[11px] text-zinc-600 hover:text-zinc-300
-                           disabled:opacity-30 transition-colors px-1.5 py-1 rounded hover:bg-zinc-900">
+                className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300
+                           disabled:opacity-30 transition-colors px-1.5 py-1 rounded hover:bg-gray-50 dark:bg-zinc-900">
                 <Download size={12} />
                 <span className="hidden sm:inline">Export</span>
               </button>
               <button onClick={() => { primary.stop(); primary.clear(); }} disabled={primary.streaming}
                 title="Clear conversation"
-                className="flex items-center gap-1.5 text-[11px] text-zinc-600 hover:text-red-400
-                           disabled:opacity-30 transition-colors px-1.5 py-1 rounded hover:bg-zinc-900">
+                className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-red-400
+                           disabled:opacity-30 transition-colors px-1.5 py-1 rounded hover:bg-gray-50 dark:bg-zinc-900">
                 <Trash2 size={12} />
                 <span className="hidden sm:inline">Clear</span>
               </button>
@@ -1221,7 +1241,7 @@ export function PlaygroundPage() {
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
             <div className="flex flex-1 min-h-0 overflow-hidden">
               {/* Panel A */}
-              <div className="flex flex-col flex-1 min-w-0 overflow-hidden border-r border-zinc-800">
+              <div className="flex flex-col flex-1 min-w-0 overflow-hidden border-r border-gray-200 dark:border-zinc-800">
                 <CompareHeader
                   label="A"
                   model={activeModel}

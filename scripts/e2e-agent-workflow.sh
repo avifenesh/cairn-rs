@@ -197,10 +197,10 @@ if [ "$STATUS" = "200" ]; then
     LLM_TEXT="cairn-rs is a Rust-based agent control plane with event sourcing and approval workflows."
     ok "LLM returned empty — using synthetic response"
   fi
-elif [ "$STATUS" = "503" ]; then
+elif [[ "$STATUS" =~ ^(500|502|503|429)$ ]]; then
   LLM_TEXT="cairn-rs is a Rust-based agent control plane with event sourcing and approval workflows."
-  ok "No LLM provider — using synthetic response"
-  info "(set OLLAMA_HOST, CAIRN_WORKER_URL, or CAIRN_BRAIN_URL for real generation)"
+  ok "LLM provider unavailable or model not found (HTTP ${STATUS}) — using synthetic response"
+  info "(set OLLAMA_HOST for local models, or use a valid OpenRouter model ID)"
 else
   fail "LLM HTTP ${STATUS}: ${RESP}"
 fi

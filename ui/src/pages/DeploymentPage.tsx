@@ -5,7 +5,7 @@
  *   GET /v1/settings        → deployment mode, store backend, encryption, plugin count
  *   GET /v1/health/detailed → per-subsystem liveness, memory RSS, Ollama models
  *   GET /v1/system/info     → version, OS, build, features, environment
- *   GET /v1/status          → runtime_ok, store_ok, uptime_secs
+ *   GET /v1/status          → status, components[], uptime_secs
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -31,7 +31,10 @@ function fmtUptime(secs: number): string {
 }
 
 function fmtDate(iso: string): string {
-  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+  try {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : d.toLocaleString();
+  } catch { return iso; }
 }
 
 // ── Status indicator ──────────────────────────────────────────────────────────
@@ -49,15 +52,15 @@ const STATUS_RING: Record<HealthStatus, string> = {
   ok:       "ring-emerald-500/20",
   degraded: "ring-amber-500/20",
   error:    "ring-red-500/20",
-  unknown:  "ring-zinc-700/20",
+  unknown:  "ring-gray-300 dark:ring-zinc-700/20",
   off:      "ring-zinc-800/20",
 };
 const STATUS_LABEL: Record<HealthStatus, { text: string; color: string }> = {
   ok:       { text: "Healthy",      color: "text-emerald-400" },
   degraded: { text: "Degraded",     color: "text-amber-400"  },
   error:    { text: "Unhealthy",    color: "text-red-400"    },
-  unknown:  { text: "Unknown",      color: "text-zinc-500"   },
-  off:      { text: "Not configured", color: "text-zinc-600" },
+  unknown:  { text: "Unknown",      color: "text-gray-400 dark:text-zinc-500"   },
+  off:      { text: "Not configured", color: "text-gray-400 dark:text-zinc-600" },
 };
 
 function StatusDot({ status, size = "md" }: { status: HealthStatus; size?: "sm" | "md" }) {
@@ -93,23 +96,23 @@ function Card({
   loading?: boolean;
 }) {
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl overflow-hidden">
       {/* Card header */}
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-zinc-800 bg-zinc-950/40">
+      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40">
         <div className={clsx(
           "flex h-7 w-7 items-center justify-center rounded-lg border",
           status === "ok"       ? "bg-emerald-950/50 border-emerald-800/40" :
           status === "degraded" ? "bg-amber-950/50 border-amber-800/40" :
           status === "error"    ? "bg-red-950/50 border-red-800/40" :
-                                  "bg-zinc-800 border-zinc-700",
+                                  "bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700",
         )}>
           <Icon size={13} className={
             status === "ok"       ? "text-emerald-400" :
             status === "degraded" ? "text-amber-400" :
-            status === "error"    ? "text-red-400" : "text-zinc-500"
+            status === "error"    ? "text-red-400" : "text-gray-400 dark:text-zinc-500"
           } />
         </div>
-        <span className="text-[12px] font-semibold text-zinc-200 flex-1">{title}</span>
+        <span className="text-[12px] font-semibold text-gray-800 dark:text-zinc-200 flex-1">{title}</span>
         {status && <StatusBadge status={status} />}
       </div>
 
@@ -118,7 +121,7 @@ function Card({
         {loading ? (
           <div className="space-y-2 animate-pulse">
             {[1, 2, 3].map(i => (
-              <div key={i} className="h-4 rounded bg-zinc-800" style={{ width: `${60 + i * 12}%` }} />
+              <div key={i} className="h-4 rounded bg-gray-100 dark:bg-zinc-800" style={{ width: `${60 + i * 12}%` }} />
             ))}
           </div>
         ) : children}
@@ -139,11 +142,11 @@ function Row({
   status?: HealthStatus;
 }) {
   return (
-    <div className="flex items-center justify-between py-1.5 border-b border-zinc-800/50 last:border-0">
-      <span className="text-[11px] text-zinc-500 shrink-0 mr-3">{label}</span>
+    <div className="flex items-center justify-between py-1.5 border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0">
+      <span className="text-[11px] text-gray-400 dark:text-zinc-500 shrink-0 mr-3">{label}</span>
       <span className={clsx(
         "text-[11px] text-right break-all",
-        mono ? "font-mono text-zinc-300" : "text-zinc-300",
+        mono ? "font-mono text-gray-700 dark:text-zinc-300" : "text-gray-700 dark:text-zinc-300",
       )}>
         {status && (
           <StatusDot status={status} size="sm" />
@@ -165,21 +168,21 @@ function RoleChip({ label, active, icon: Icon }: {
       "flex items-center gap-2 rounded-lg border px-3 py-2.5 transition-colors",
       active
         ? "border-emerald-800/50 bg-emerald-950/30"
-        : "border-zinc-800 bg-zinc-900/50 opacity-50",
+        : "border-gray-200 dark:border-zinc-800 bg-gray-50/50 dark:bg-zinc-900/50 opacity-50",
     )}>
       <div className={clsx(
         "flex h-6 w-6 items-center justify-center rounded-md border",
         active
           ? "bg-emerald-950/60 border-emerald-800/60"
-          : "bg-zinc-800 border-zinc-700",
+          : "bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700",
       )}>
-        <Icon size={12} className={active ? "text-emerald-400" : "text-zinc-600"} />
+        <Icon size={12} className={active ? "text-emerald-400" : "text-gray-400 dark:text-zinc-600"} />
       </div>
       <div>
-        <p className={clsx("text-[11px] font-medium", active ? "text-zinc-200" : "text-zinc-600")}>
+        <p className={clsx("text-[11px] font-medium", active ? "text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-600")}>
           {label}
         </p>
-        <p className={clsx("text-[10px]", active ? "text-emerald-600" : "text-zinc-700")}>
+        <p className={clsx("text-[10px]", active ? "text-emerald-600" : "text-gray-300 dark:text-zinc-700")}>
           {active ? "active" : "inactive"}
         </p>
       </div>
@@ -277,28 +280,28 @@ export function DeploymentPage() {
   const bufStatus     = checkStatus(health?.checks.event_buffer);
 
   return (
-    <div className="h-full overflow-y-auto bg-zinc-950">
+    <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
       <div className="max-w-4xl mx-auto px-5 py-5 space-y-5">
 
         {/* Toolbar */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-[14px] font-semibold text-zinc-100">Deployment Health</h2>
-            <p className="text-[11px] text-zinc-600 mt-0.5">
+            <h2 className="text-[14px] font-semibold text-gray-900 dark:text-zinc-100">Deployment Health</h2>
+            <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
               Infrastructure topology, runtime status, and configuration snapshot
             </p>
           </div>
           <div className="flex items-center gap-3">
             {health && (
-              <span className="text-[11px] text-zinc-600 font-mono">
+              <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">
                 v{health.version}
               </span>
             )}
             <button
               onClick={() => rHealth()}
               disabled={hFetching}
-              className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900 text-zinc-500
-                         text-[12px] px-2.5 py-1.5 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-400 dark:text-zinc-500
+                         text-[12px] px-2.5 py-1.5 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 disabled:opacity-40 transition-colors"
             >
               <RefreshCw size={11} className={hFetching ? "animate-spin" : ""} />
               Refresh
@@ -311,12 +314,12 @@ export function DeploymentPage() {
 
         {/* Roles topology */}
         <div>
-          <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-3">
+          <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
             Active Roles
           </p>
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-            <RoleChip label="API Server"    active={status?.runtime_ok ?? false}     icon={Globe}    />
-            <RoleChip label="Runtime"       active={status?.runtime_ok ?? false}     icon={Cpu}      />
+            <RoleChip label="API Server"    active={status?.status === 'ok'}         icon={Globe}    />
+            <RoleChip label="Runtime"       active={status?.status === 'ok'}         icon={Cpu}      />
             <RoleChip label="Ollama"        active={ollamaStatus === "ok"}           icon={Zap}      />
             <RoleChip label="Plugin Host"   active={(settings?.plugin_count ?? 0) > 0} icon={Radio}  />
           </div>
@@ -333,8 +336,8 @@ export function DeploymentPage() {
                 mono
               />
               <Row label="Runtime healthy"
-                value={status?.store_ok ? "Yes" : "No"}
-                status={status?.store_ok ? "ok" : "error"}
+                value={status?.components?.find(c => c.name === 'event_store')?.status === 'ok' ? "Yes" : "No"}
+                status={status?.components?.find(c => c.name === 'event_store')?.status === 'ok' ? "ok" : "error"}
               />
               {health?.checks.store.latency_ms !== undefined && (
                 <Row label="Query latency" value={`${health.checks.store.latency_ms}ms`} mono />
@@ -408,29 +411,29 @@ export function DeploymentPage() {
 
           {/* Encryption */}
           <Card
-            icon={settings?.key_management.encryption_key_configured ? Lock : Unlock}
+            icon={settings?.key_management?.encryption_key_configured ? Lock : Unlock}
             title="Encryption"
-            status={settings?.key_management.encryption_key_configured ? "ok" : "off"}
+            status={settings?.key_management?.encryption_key_configured ? "ok" : "off"}
             loading={isLoading}
           >
             <div className="space-y-0">
               <Row
                 label="Key configured"
-                value={settings?.key_management.encryption_key_configured ? "Yes" : "No"}
-                status={settings?.key_management.encryption_key_configured ? "ok" : "off"}
+                value={settings?.key_management?.encryption_key_configured ? "Yes" : "No"}
+                status={settings?.key_management?.encryption_key_configured ? "ok" : "off"}
               />
-              {settings?.key_management.key_version !== null && (
-                <Row label="Key version" value={String(settings?.key_management.key_version ?? "—")} mono />
+              {settings?.key_management?.key_version !== null && (
+                <Row label="Key version" value={String(settings?.key_management?.key_version ?? "—")} mono />
               )}
-              {settings?.key_management.last_rotation_at && (
+              {settings?.key_management?.last_rotation_at && (
                 <Row
                   label="Last rotated"
-                  value={new Date(settings.key_management.last_rotation_at).toLocaleString()}
+                  value={settings?.key_management?.last_rotation_at ? new Date(settings.key_management.last_rotation_at).toLocaleString() : '—'}
                 />
               )}
-              {!settings?.key_management.encryption_key_configured && (
-                <p className="text-[11px] text-zinc-600 italic mt-2">
-                  Set <code className="bg-zinc-800 rounded px-1">CAIRN_ENCRYPTION_KEY</code> to enable at-rest encryption.
+              {!settings?.key_management?.encryption_key_configured && (
+                <p className="text-[11px] text-gray-400 dark:text-zinc-600 italic mt-2">
+                  Set <code className="bg-gray-100 dark:bg-zinc-800 rounded px-1">CAIRN_ENCRYPTION_KEY</code> to enable at-rest encryption.
                 </p>
               )}
             </div>
@@ -508,8 +511,8 @@ export function DeploymentPage() {
                 <Row label="Models loaded" value={String(health.checks.ollama.models)} mono />
               )}
               {info?.features.ollama_connected === false && (
-                <p className="text-[11px] text-zinc-600 italic mt-2">
-                  Set <code className="bg-zinc-800 rounded px-1">OLLAMA_HOST</code> to connect.
+                <p className="text-[11px] text-gray-400 dark:text-zinc-600 italic mt-2">
+                  Set <code className="bg-gray-100 dark:bg-zinc-800 rounded px-1">OLLAMA_HOST</code> to connect.
                 </p>
               )}
             </div>
@@ -538,7 +541,7 @@ export function DeploymentPage() {
         </div>
 
         {/* Last updated footer */}
-        <div className="flex items-center gap-2 text-[10px] text-zinc-700 border-t border-zinc-800 pt-3">
+        <div className="flex items-center gap-2 text-[10px] text-gray-300 dark:text-zinc-700 border-t border-gray-200 dark:border-zinc-800 pt-3">
           <Clock size={10} />
           <span>
             Health refreshes every 30s · Settings and build info every 60s

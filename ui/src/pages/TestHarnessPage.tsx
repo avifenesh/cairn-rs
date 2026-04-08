@@ -72,7 +72,8 @@ const SCENARIOS: ScenarioDef[] = [
         description: "GET /health — server must respond 200 ok:true",
         run: async () => {
           const r = await defaultApi.getHealth();
-          if (!r.ok) throw new Error(`ok=false`);
+          const healthy = r.ok === true || r.status === 'healthy';
+          if (!healthy) throw new Error(`ok=false status=${r.status}`);
           return r;
         },
       },
@@ -173,7 +174,7 @@ const SCENARIOS: ScenarioDef[] = [
         description: "GET /health",
         run: async () => {
           const r = await defaultApi.getHealth();
-          if (!r.ok) throw new Error("ok=false");
+          if (!(r.ok === true || r.status === 'healthy')) throw new Error("ok=false");
           return r;
         },
       },
@@ -183,7 +184,7 @@ const SCENARIOS: ScenarioDef[] = [
         description: "GET /v1/status",
         run: async () => {
           const r = await defaultApi.getStatus();
-          if (!r.runtime_ok) throw new Error("runtime_ok=false");
+          if (r.status !== 'ok') throw new Error(`status=${r.status}`);
           return r;
         },
       },
@@ -316,7 +317,8 @@ const SCENARIOS: ScenarioDef[] = [
         description: "POST /v1/providers/ollama/generate — short prompt",
         run: async (ctx) => {
           const models = ctx["ollama_models"] as string[] | undefined;
-          const model  = models?.[0];
+          // Prefer free-tier models (":free" suffix) to avoid paid-model errors
+          const model  = models?.find(m => m.includes(':free')) ?? models?.[0];
           if (!model) throw new Error("no model available (skipped by prior step failure)");
           const r = await defaultApi.ollamaGenerate({
             model,
@@ -344,11 +346,11 @@ function StepRow({
   const s = result?.status ?? "idle";
 
   const icon = {
-    idle:    <span className="w-4 h-4 rounded-full border-2 border-zinc-700 shrink-0" />,
+    idle:    <span className="w-4 h-4 rounded-full border-2 border-gray-200 dark:border-zinc-700 shrink-0" />,
     running: <Loader2 size={16} className="text-indigo-400 animate-spin shrink-0" />,
     pass:    <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />,
     fail:    <XCircle size={16} className="text-red-400 shrink-0" />,
-    skipped: <AlertTriangle size={16} className="text-zinc-600 shrink-0" />,
+    skipped: <AlertTriangle size={16} className="text-gray-400 dark:text-zinc-600 shrink-0" />,
   }[s];
 
   const rowBg = {
@@ -356,7 +358,7 @@ function StepRow({
     running: "bg-indigo-950/20",
     pass:    "bg-emerald-950/10",
     fail:    "bg-red-950/20",
-    skipped: "bg-zinc-900/30",
+    skipped: "bg-gray-50/30 dark:bg-zinc-900/30",
   }[s];
 
   return (
@@ -364,7 +366,7 @@ function StepRow({
       s === "fail"    ? "border-red-900/50"     :
       s === "pass"    ? "border-emerald-900/40"  :
       s === "running" ? "border-indigo-800/40"   :
-                        "border-zinc-800",
+                        "border-gray-200 dark:border-zinc-800",
       rowBg,
     )}>
       {/* Header */}
@@ -372,15 +374,15 @@ function StepRow({
         className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-white/[0.02] transition-colors select-none"
         onClick={() => result && setExpanded(v => !v)}
       >
-        <span className="text-[10px] font-mono text-zinc-700 w-5 text-right shrink-0">{index + 1}</span>
+        <span className="text-[10px] font-mono text-gray-300 dark:text-zinc-700 w-5 text-right shrink-0">{index + 1}</span>
         {icon}
         <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-medium text-zinc-200">{step.label}</p>
-          <p className="text-[11px] text-zinc-600 truncate">{step.description}</p>
+          <p className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">{step.label}</p>
+          <p className="text-[11px] text-gray-400 dark:text-zinc-600 truncate">{step.description}</p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {result && result.status !== "idle" && result.status !== "running" && (
-            <span className="text-[11px] font-mono text-zinc-600 tabular-nums">
+            <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-600 tabular-nums">
               {fmtMs(result.durationMs)}
             </span>
           )}
@@ -391,24 +393,24 @@ function StepRow({
           )}
           {result && (
             expanded
-              ? <ChevronDown  size={12} className="text-zinc-600" />
-              : <ChevronRight size={12} className="text-zinc-600" />
+              ? <ChevronDown  size={12} className="text-gray-400 dark:text-zinc-600" />
+              : <ChevronRight size={12} className="text-gray-400 dark:text-zinc-600" />
           )}
         </div>
       </div>
 
       {/* Expanded request/response */}
       {expanded && result && (result.request !== undefined || result.response !== undefined) && (
-        <div className="border-t border-zinc-800 grid grid-cols-2 divide-x divide-zinc-800">
+        <div className="border-t border-gray-200 dark:border-zinc-800 grid grid-cols-2 divide-x divide-gray-200 dark:divide-zinc-800">
           {[
             { label: "Request",  data: result.request  },
             { label: "Response", data: result.response },
           ].map(({ label, data }) => (
-            <div key={label} className="p-3 bg-zinc-950/40">
-              <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider mb-2">{label}</p>
-              <pre className="text-[11px] font-mono text-zinc-400 overflow-x-auto max-h-40 leading-relaxed whitespace-pre-wrap break-words">
+            <div key={label} className="p-3 bg-white dark:bg-zinc-950/40">
+              <p className="text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">{label}</p>
+              <pre className="text-[11px] font-mono text-gray-500 dark:text-zinc-400 overflow-x-auto max-h-40 leading-relaxed whitespace-pre-wrap break-words">
                 {data === undefined || data === null
-                  ? <span className="text-zinc-700">—</span>
+                  ? <span className="text-gray-300 dark:text-zinc-700">—</span>
                   : JSON.stringify(data, null, 2)}
               </pre>
             </div>
@@ -499,23 +501,23 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
   }
 
   const statusColor = {
-    idle:    "text-zinc-500",
+    idle:    "text-gray-400 dark:text-zinc-500",
     running: "text-indigo-400",
     pass:    "text-emerald-400",
     fail:    "text-red-400",
-    skipped: "text-zinc-600",
+    skipped: "text-gray-400 dark:text-zinc-600",
   }[overallStatus];
 
   const borderColor = {
-    idle:    "border-zinc-800",
+    idle:    "border-gray-200 dark:border-zinc-800",
     running: "border-indigo-800/60",
     pass:    "border-emerald-800/40",
     fail:    "border-red-800/50",
-    skipped: "border-zinc-800",
+    skipped: "border-gray-200 dark:border-zinc-800",
   }[overallStatus];
 
   return (
-    <div className={clsx("bg-zinc-900 rounded-xl border overflow-hidden", borderColor)}>
+    <div className={clsx("bg-gray-50 dark:bg-zinc-900 rounded-xl border overflow-hidden", borderColor)}>
       {/* Card header */}
       <div className="flex items-start gap-3 px-4 py-3">
         <div className={clsx(
@@ -523,7 +525,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
           overallStatus === "pass"    ? "bg-emerald-950/50 border-emerald-800/40" :
           overallStatus === "fail"    ? "bg-red-950/50 border-red-800/40"         :
           overallStatus === "running" ? "bg-indigo-950/50 border-indigo-800/40"   :
-                                        "bg-zinc-800 border-zinc-700",
+                                        "bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700",
         )}>
           {overallStatus === "running"
             ? <Loader2 size={14} className="text-indigo-400 animate-spin" />
@@ -531,19 +533,19 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
             ? <CheckCircle2 size={14} className="text-emerald-400" />
             : overallStatus === "fail"
             ? <XCircle size={14} className="text-red-400" />
-            : <FlaskConical size={14} className="text-zinc-500" />
+            : <FlaskConical size={14} className="text-gray-400 dark:text-zinc-500" />
           }
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] text-zinc-600 uppercase tracking-wider font-medium">
+            <span className="text-[11px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider font-medium">
               {scenario.group}
             </span>
             <span className="text-[10px] text-zinc-800">·</span>
-            <p className="text-[13px] font-semibold text-zinc-100">{scenario.label}</p>
+            <p className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">{scenario.label}</p>
           </div>
-          <p className="text-[12px] text-zinc-500 mt-0.5">{scenario.description}</p>
+          <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-0.5">{scenario.description}</p>
 
           {/* Progress summary */}
           {results.size > 0 && (
@@ -553,17 +555,17 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
                  overallStatus === "fail" ? `${failCount} failed` :
                  overallStatus === "running" ? "Running…" : ""}
               </span>
-              <span className="text-[11px] text-zinc-600">
+              <span className="text-[11px] text-gray-400 dark:text-zinc-600">
                 {passCount}/{totalSteps} steps
               </span>
               {totalMs > 0 && (
-                <span className="flex items-center gap-1 text-[11px] text-zinc-700">
+                <span className="flex items-center gap-1 text-[11px] text-gray-300 dark:text-zinc-700">
                   <Clock size={10} />
                   {fmtMs(totalMs)}
                 </span>
               )}
               {/* Mini progress bar */}
-              <div className="flex-1 h-1 rounded-full bg-zinc-800 overflow-hidden max-w-32">
+              <div className="flex-1 h-1 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden max-w-32">
                 {totalSteps > 0 && (
                   <div
                     className={clsx(
@@ -585,7 +587,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
             <button
               onClick={resetScenario}
               title="Reset"
-              className="flex items-center gap-1 px-2 py-1 rounded border border-zinc-700 bg-zinc-800 text-zinc-500 text-[11px] hover:text-zinc-200 hover:border-zinc-600 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded border border-gray-200 dark:border-zinc-700 bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 text-[11px] hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 transition-colors"
             >
               <RotateCcw size={11} />
             </button>
@@ -607,7 +609,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
           </button>
           <button
             onClick={() => setExpanded(v => !v)}
-            className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
+            className="p-1.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors"
           >
             {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </button>
@@ -616,7 +618,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
 
       {/* Step list */}
       {expanded && (
-        <div className="border-t border-zinc-800 px-4 py-3 space-y-2 bg-zinc-950/30">
+        <div className="border-t border-gray-200 dark:border-zinc-800 px-4 py-3 space-y-2 bg-white dark:bg-zinc-950/30">
           {scenario.steps.map((step, i) => (
             <StepRow
               key={step.id}
@@ -662,13 +664,13 @@ function SuiteSummary({ results, onClear }: {
         <p className={clsx("text-[13px] font-semibold", allPass ? "text-emerald-300" : "text-red-300")}>
           {allPass ? `All ${passed} scenarios passed` : `${failed} of ${results.length} scenarios failed`}
         </p>
-        <p className="text-[11px] text-zinc-600 mt-0.5">
+        <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
           {fmtMs(totalMs)} total · {results.map(r => `${r.scenario}: ${r.pass ? "✓" : "✗"}`).join(" · ")}
         </p>
       </div>
       <button
         onClick={onClear}
-        className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+        className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
       >
         Clear
       </button>
@@ -723,25 +725,25 @@ export function TestHarnessPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
+    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-11 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-3 px-4 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
         <Code2 size={14} className="text-indigo-400 shrink-0" />
-        <span className="text-[13px] font-medium text-zinc-200">Test Harness</span>
-        <span className="text-[11px] text-zinc-600">{visible.length} scenarios</span>
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Test Harness</span>
+        <span className="text-[11px] text-gray-400 dark:text-zinc-600">{visible.length} scenarios</span>
 
         {/* Group filter */}
-        <div className="flex items-center rounded border border-zinc-700 overflow-hidden ml-2">
+        <div className="flex items-center rounded border border-gray-200 dark:border-zinc-700 overflow-hidden ml-2">
           {groups.map(g => (
             <button
               key={g}
               onClick={() => setGroupFilter(g)}
               className={clsx(
                 "px-2.5 py-1 text-[11px] transition-colors",
-                g !== "All" && "border-l border-zinc-700",
+                g !== "All" && "border-l border-gray-200 dark:border-zinc-700",
                 groupFilter === g
-                  ? "bg-zinc-700 text-zinc-200"
-                  : "text-zinc-500 hover:text-zinc-300",
+                  ? "bg-zinc-700 text-gray-800 dark:text-zinc-200"
+                  : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
               )}
             >
               {g}
@@ -764,7 +766,7 @@ export function TestHarnessPage() {
           {suiteResults.length > 0 && (
             <button
               onClick={() => setSuiteResults([])}
-              className="flex items-center gap-1 text-[12px] text-zinc-600 hover:text-zinc-400 transition-colors"
+              className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
             >
               <RefreshCw size={11} /> Clear
             </button>

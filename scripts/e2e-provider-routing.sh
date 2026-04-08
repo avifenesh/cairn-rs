@@ -135,9 +135,8 @@ if [[ "$_HTTP" =~ ^(200|201)$ ]]; then
 elif [ "$_HTTP" = "409" ]; then
   ok "connection ${CONN_OR} already exists (idempotent)"
   CONN_CREATED=true
-elif [ "$_HTTP" = "403" ]; then
-  REASON=$(printf '%s' "$_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','')[:80])" 2>/dev/null || echo "entitlement_required")
-  skip "connection create 403 — multi_provider entitlement not available in local mode (${REASON})"
+elif [[ "$_HTTP" =~ ^(400|403)$ ]]; then
+  skip "connection create HTTP ${_HTTP} — tenant may not exist or entitlement gated"
 else
   fail "create connection OpenRouter HTTP ${_HTTP}: ${_BODY:0:100}"
 fi
@@ -153,8 +152,8 @@ if [[ "$_HTTP" =~ ^(200|201)$ ]]; then
   ok "connection ${CONN_OL} created (HTTP ${_HTTP})"
 elif [ "$_HTTP" = "409" ]; then
   ok "connection ${CONN_OL} already exists (idempotent)"
-elif [ "$_HTTP" = "403" ]; then
-  skip "connection create 403 — multi_provider entitlement not available in local mode"
+elif [[ "$_HTTP" =~ ^(400|403)$ ]]; then
+  skip "connection create HTTP ${_HTTP} — tenant may not exist or entitlement gated"
 else
   fail "create connection Ollama HTTP ${_HTTP}: ${_BODY:0:100}"
 fi

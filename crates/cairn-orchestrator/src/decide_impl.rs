@@ -266,6 +266,8 @@ impl DecidePhase for LlmDecidePhase {
             requires_approval,
             model_id: self.model_id.clone(),
             latency_ms,
+            input_tokens: resp.input_tokens,
+            output_tokens: resp.output_tokens,
         })
     }
 }

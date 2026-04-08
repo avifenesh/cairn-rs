@@ -24,7 +24,7 @@ const ICON_COLORS: Record<string, string> = {
 };
 
 const POLICY_LABEL: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  none:      { label: "No approval",    color: "text-zinc-400 bg-zinc-800/60 border-zinc-700", icon: <ShieldOff size={10} /> },
+  none:      { label: "No approval",    color: "text-gray-500 dark:text-zinc-400 bg-gray-100/60 dark:bg-zinc-800/60 border-gray-200 dark:border-zinc-700", icon: <ShieldOff size={10} /> },
   sensitive: { label: "Sensitive ops",  color: "text-amber-400 bg-amber-950/40 border-amber-800/40", icon: <Shield size={10} /> },
   all:       { label: "All ops",        color: "text-red-400 bg-red-950/40 border-red-800/40",  icon: <Shield size={10} /> },
 };
@@ -60,22 +60,22 @@ function InstantiateModal({ template, onClose, onDone }: InstantiateModalProps) 
     <>
       <div className="fixed inset-0 z-40 bg-black/70" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl flex flex-col">
+        <div className="w-full max-w-md bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-xl shadow-2xl flex flex-col">
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-zinc-800">
             <div className="flex items-center gap-3">
               <div className={clsx(
                 "w-8 h-8 rounded-lg border flex items-center justify-center shrink-0",
-                ICON_COLORS[template.icon] ?? "text-zinc-400 bg-zinc-800 border-zinc-700",
+                ICON_COLORS[template.icon] ?? "text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700",
               )}>
                 {ICONS[template.icon] ?? <Zap size={16} />}
               </div>
               <div>
-                <p className="text-[13px] font-semibold text-zinc-100">{template.name}</p>
-                <p className="text-[11px] text-zinc-500">Enter a goal to start</p>
+                <p className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">{template.name}</p>
+                <p className="text-[11px] text-gray-400 dark:text-zinc-500">Enter a goal to start</p>
               </div>
             </div>
-            <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 transition-colors">
+            <button onClick={onClose} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">
               <X size={16} />
             </button>
           </div>
@@ -83,7 +83,7 @@ function InstantiateModal({ template, onClose, onDone }: InstantiateModalProps) 
           {/* Body */}
           <div className="px-5 py-4 space-y-4">
             <div>
-              <label className="block text-[11px] text-zinc-500 uppercase tracking-wide mb-2">
+              <label className="block text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide mb-2">
                 Goal / instruction <span className="text-red-400 normal-case">*</span>
               </label>
               <textarea
@@ -91,17 +91,17 @@ function InstantiateModal({ template, onClose, onDone }: InstantiateModalProps) 
                 onChange={e => setGoal(e.target.value)}
                 placeholder={placeholder}
                 rows={3}
-                className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2.5 text-[13px] text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
+                className="w-full rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-3 py-2.5 text-[13px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-colors"
               />
             </div>
 
             {/* Tools preview */}
             <div>
-              <p className="text-[10px] text-zinc-600 uppercase tracking-wide mb-1.5">Pre-loaded tools</p>
+              <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wide mb-1.5">Pre-loaded tools</p>
               <div className="flex flex-wrap gap-1.5">
                 {template.default_tools.map(t => (
-                  <span key={t} className="flex items-center gap-1 text-[10px] font-mono text-zinc-400 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5">
-                    <Wrench size={9} className="text-zinc-600" />{t}
+                  <span key={t} className="flex items-center gap-1 text-[10px] font-mono text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
+                    <Wrench size={9} className="text-gray-400 dark:text-zinc-600" />{t}
                   </span>
                 ))}
               </div>
@@ -109,15 +109,15 @@ function InstantiateModal({ template, onClose, onDone }: InstantiateModalProps) 
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-800 bg-zinc-950 rounded-b-xl">
+          <div className="flex items-center justify-between px-5 py-3 border-t border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 rounded-b-xl">
             <button
               onClick={onClose}
-              className="text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
             >Cancel</button>
             <button
               onClick={() => mutation.mutate()}
               disabled={mutation.isPending || !goal.trim()}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-[12px] font-medium transition-colors"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 text-white text-[12px] font-medium transition-colors"
             >
               {mutation.isPending
                 ? <><Loader2 size={12} className="animate-spin" /> Starting…</>
@@ -143,19 +143,19 @@ function TemplateCard({ template, onInstantiate, recentRunId }: TemplateCardProp
   const policy = POLICY_LABEL[template.approval_policy] ?? POLICY_LABEL.none;
 
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden flex flex-col hover:border-zinc-700 transition-colors">
+    <div className="rounded-xl border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60 overflow-hidden flex flex-col hover:border-gray-200 dark:border-zinc-700 transition-colors">
       {/* Header */}
       <div className="px-5 pt-5 pb-4">
         <div className="flex items-start gap-4">
           <div className={clsx(
             "w-10 h-10 rounded-xl border flex items-center justify-center shrink-0",
-            ICON_COLORS[template.icon] ?? "text-zinc-400 bg-zinc-800 border-zinc-700",
+            ICON_COLORS[template.icon] ?? "text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700",
           )}>
             {ICONS[template.icon] ?? <Zap size={20} />}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[14px] font-semibold text-zinc-100">{template.name}</p>
-            <p className="text-[12px] text-zinc-500 mt-0.5 leading-relaxed">{template.description}</p>
+            <p className="text-[14px] font-semibold text-gray-900 dark:text-zinc-100">{template.name}</p>
+            <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-0.5 leading-relaxed">{template.description}</p>
           </div>
         </div>
 
@@ -167,42 +167,42 @@ function TemplateCard({ template, onInstantiate, recentRunId }: TemplateCardProp
           )}>
             {policy.icon} {policy.label}
           </span>
-          <span className="text-[10px] text-zinc-600 font-mono bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5">
+          <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
             {template.agent_role}
           </span>
         </div>
       </div>
 
       {/* Tools */}
-      <div className="px-5 py-3 border-t border-zinc-800/60">
+      <div className="px-5 py-3 border-t border-gray-200/60 dark:border-zinc-800/60">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] text-zinc-600 uppercase tracking-wide">Tools</p>
+          <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wide">Tools</p>
           <button
             onClick={() => setExpanded(v => !v)}
-            className="text-[10px] text-zinc-600 hover:text-zinc-400 flex items-center gap-0.5 transition-colors"
+            className="text-[10px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 flex items-center gap-0.5 transition-colors"
           >
             {expanded ? "less" : "prompt"} <ChevronRight size={10} className={expanded ? "rotate-90" : ""} />
           </button>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {template.default_tools.map(t => (
-            <span key={t} className="flex items-center gap-1 text-[10px] font-mono text-zinc-400 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5">
-              <Wrench size={9} className="text-zinc-600" />{t}
+            <span key={t} className="flex items-center gap-1 text-[10px] font-mono text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
+              <Wrench size={9} className="text-gray-400 dark:text-zinc-600" />{t}
             </span>
           ))}
         </div>
 
         {/* Expandable prompt preview */}
         {expanded && (
-          <div className="mt-3 rounded-lg bg-zinc-950 border border-zinc-800 p-3">
-            <p className="text-[10px] text-zinc-600 uppercase tracking-wide mb-1.5">Default system prompt</p>
-            <p className="text-[11px] text-zinc-400 leading-relaxed">{template.default_prompt}</p>
+          <div className="mt-3 rounded-lg bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 p-3">
+            <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wide mb-1.5">Default system prompt</p>
+            <p className="text-[11px] text-gray-500 dark:text-zinc-400 leading-relaxed">{template.default_prompt}</p>
           </div>
         )}
       </div>
 
       {/* Footer */}
-      <div className="px-5 py-3 border-t border-zinc-800/60 mt-auto bg-zinc-900/40 flex items-center justify-between">
+      <div className="px-5 py-3 border-t border-gray-200/60 dark:border-zinc-800/60 mt-auto bg-gray-50/40 dark:bg-zinc-900/40 flex items-center justify-between">
         {recentRunId ? (
           <span className="flex items-center gap-1 text-[10px] text-emerald-400">
             <Check size={10} /> Instantiated
@@ -241,11 +241,11 @@ export function AgentTemplatesPage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-5 h-11 border-b border-zinc-800 shrink-0">
-        <span className="text-[13px] font-medium text-zinc-200">Agent Templates</span>
-        <span className="text-[11px] text-zinc-600">
+      <div className="flex items-center gap-3 px-5 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Agent Templates</span>
+        <span className="text-[11px] text-gray-400 dark:text-zinc-600">
           Pre-configured agents ready to instantiate
         </span>
       </div>
@@ -253,7 +253,7 @@ export function AgentTemplatesPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-5">
         {isLoading ? (
-          <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+          <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-[13px]">Loading templates…</span>
           </div>
@@ -268,7 +268,7 @@ export function AgentTemplatesPage() {
               <p className="text-[13px] font-medium text-indigo-300 mb-1">
                 Start in seconds with a pre-built agent
               </p>
-              <p className="text-[12px] text-zinc-500 leading-relaxed">
+              <p className="text-[12px] text-gray-400 dark:text-zinc-500 leading-relaxed">
                 Each template comes with a curated tool set and system prompt. Enter your goal,
                 click Instantiate, and the agent runs immediately using your configured providers.
               </p>
@@ -287,13 +287,13 @@ export function AgentTemplatesPage() {
             </div>
 
             {/* Custom agent hint */}
-            <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 px-5 py-4 flex items-start gap-3">
-              <Zap size={14} className="text-zinc-600 mt-0.5 shrink-0" />
+            <div className="rounded-lg border border-gray-200/60 dark:border-zinc-800/60 bg-gray-50/40 dark:bg-zinc-900/40 px-5 py-4 flex items-start gap-3">
+              <Zap size={14} className="text-gray-400 dark:text-zinc-600 mt-0.5 shrink-0" />
               <div>
-                <p className="text-[12px] font-medium text-zinc-400">Need a custom configuration?</p>
-                <p className="text-[11px] text-zinc-600 mt-0.5">
+                <p className="text-[12px] font-medium text-gray-500 dark:text-zinc-400">Need a custom configuration?</p>
+                <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
                   Use the Providers page to configure your tools, then create a run manually
-                  via <code className="font-mono text-zinc-500">POST /v1/runs</code> with your own agent_role and prompt.
+                  via <code className="font-mono text-gray-400 dark:text-zinc-500">POST /v1/runs</code> with your own agent_role and prompt.
                 </p>
               </div>
             </div>

@@ -30,8 +30,8 @@ function stateColors(state: string): string {
     case 'spawning': case 'handshaking':
     case 'discovered':                   return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
     case 'failed':                       return 'text-red-400 bg-red-400/10 border-red-400/20';
-    case 'stopped': case 'draining':     return 'text-zinc-400 bg-zinc-800 border-zinc-700';
-    default:                             return 'text-zinc-500 bg-zinc-800 border-zinc-700';
+    case 'stopped': case 'draining':     return 'text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700';
+    default:                             return 'text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700';
   }
 }
 
@@ -48,9 +48,9 @@ function fmtUptime(ms: number): string {
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -74,7 +74,7 @@ function PluginDetail({ pluginId }: { pluginId: string }) {
   });
 
   if (isLoading) return (
-    <div className="flex items-center gap-2 px-4 py-3 text-zinc-600 text-[12px]">
+    <div className="flex items-center gap-2 px-4 py-3 text-gray-400 dark:text-zinc-600 text-[12px]">
       <Loader2 size={12} className="animate-spin" /> Loading detail…
     </div>
   );
@@ -82,7 +82,7 @@ function PluginDetail({ pluginId }: { pluginId: string }) {
   const d = data as PluginDetailResponse | undefined;
 
   return (
-    <div className="border-t border-zinc-800">
+    <div className="border-t border-gray-200 dark:border-zinc-800">
       {/* Tab bar */}
       <div className="flex items-center gap-0.5 px-4 pt-2.5 pb-1.5">
         {(['config', 'logs', 'health'] as const).map(t => (
@@ -90,14 +90,14 @@ function PluginDetail({ pluginId }: { pluginId: string }) {
             key={t}
             onClick={() => setTab(t)}
             className={`px-2.5 py-1 rounded text-[11px] font-medium capitalize transition-colors ${
-              tab === t ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+              tab === t ? 'bg-gray-100 dark:bg-zinc-800 text-gray-900 dark:text-zinc-100' : 'text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300'
             }`}
           >
             {t === 'health' ? 'Health' : t === 'logs' ? 'Logs' : 'Config'}
           </button>
         ))}
         {d?.lifecycle && (
-          <span className="ml-auto text-[10px] font-mono text-zinc-600">
+          <span className="ml-auto text-[10px] font-mono text-gray-400 dark:text-zinc-600">
             uptime {fmtUptime(d.lifecycle.uptime_ms)}
           </span>
         )}
@@ -105,7 +105,7 @@ function PluginDetail({ pluginId }: { pluginId: string }) {
 
       <div className="px-4 pb-4">
         {tab === 'config' && (
-          <pre className="text-[11px] font-mono text-zinc-400 bg-zinc-950 rounded-md p-3 overflow-x-auto max-h-56 leading-relaxed">
+          <pre className="text-[11px] font-mono text-gray-500 dark:text-zinc-400 bg-white dark:bg-zinc-950 rounded-md p-3 overflow-x-auto max-h-56 leading-relaxed">
             {d ? JSON.stringify({
               id:              d.manifest.id,
               command:         d.manifest.command,
@@ -117,22 +117,22 @@ function PluginDetail({ pluginId }: { pluginId: string }) {
         )}
 
         {tab === 'logs' && (
-          <div className="bg-zinc-950 rounded-md p-3 max-h-56 overflow-y-auto">
+          <div className="bg-white dark:bg-zinc-950 rounded-md p-3 max-h-56 overflow-y-auto">
             {logsData?.entries && logsData.entries.length > 0 ? (
               logsData.entries.map((entry, i) => (
                 <div key={i} className="flex gap-3 py-0.5">
-                  <span className="text-[10px] font-mono text-zinc-600 shrink-0">
+                  <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-600 shrink-0">
                     {new Date(entry.timestamp_ms).toLocaleTimeString()}
                   </span>
                   <span className={`text-[10px] font-mono shrink-0 ${
                     entry.level === 'error' ? 'text-red-400' :
-                    entry.level === 'warn'  ? 'text-amber-400' : 'text-zinc-500'
+                    entry.level === 'warn'  ? 'text-amber-400' : 'text-gray-400 dark:text-zinc-500'
                   }`}>{entry.level.toUpperCase()}</span>
-                  <span className="text-[11px] font-mono text-zinc-400">{entry.message}</span>
+                  <span className="text-[11px] font-mono text-gray-500 dark:text-zinc-400">{entry.message}</span>
                 </div>
               ))
             ) : (
-              <p className="text-[11px] font-mono text-zinc-600">No recent log entries.</p>
+              <p className="text-[11px] font-mono text-gray-400 dark:text-zinc-600">No recent log entries.</p>
             )}
           </div>
         )}
@@ -146,14 +146,14 @@ function PluginDetail({ pluginId }: { pluginId: string }) {
                   { label: 'Errors',      value: d.metrics.error_count.toLocaleString() },
                   { label: 'Avg Latency', value: `${d.metrics.avg_latency_ms.toFixed(1)}ms` },
                 ].map(({ label, value }) => (
-                  <div key={label} className="bg-zinc-950 rounded-md p-2.5">
-                    <p className="text-[10px] text-zinc-600 uppercase tracking-wider">{label}</p>
-                    <p className="text-[15px] font-semibold text-zinc-200 tabular-nums">{value}</p>
+                  <div key={label} className="bg-white dark:bg-zinc-950 rounded-md p-2.5">
+                    <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">{label}</p>
+                    <p className="text-[15px] font-semibold text-gray-800 dark:text-zinc-200 tabular-nums">{value}</p>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-[11px] text-zinc-600 font-mono">No health data available.</p>
+              <p className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">No health data available.</p>
             )}
           </div>
         )}
@@ -176,33 +176,33 @@ function PluginCard({
   onUnregister: () => void;
 }) {
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
       {/* Header row */}
       <div
         className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-white/[0.02] transition-colors select-none"
         onClick={onToggle}
       >
         {/* Icon */}
-        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-800 border border-zinc-700">
-          <Puzzle size={13} className="text-zinc-400" />
+        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700">
+          <Puzzle size={13} className="text-gray-500 dark:text-zinc-400" />
         </div>
 
         {/* Main info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[13px] font-medium text-zinc-100">{manifest.name}</span>
-            <span className="text-[10px] font-mono text-zinc-500">v{manifest.version}</span>
-            <span className="text-[10px] font-mono text-zinc-600">{manifest.id}</span>
+            <span className="text-[13px] font-medium text-gray-900 dark:text-zinc-100">{manifest.name}</span>
+            <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-500">v{manifest.version}</span>
+            <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-600">{manifest.id}</span>
           </div>
           {manifest.description && (
-            <p className="text-[12px] text-zinc-500 mt-0.5 truncate">{manifest.description}</p>
+            <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-0.5 truncate">{manifest.description}</p>
           )}
 
           {/* Capability tags */}
           {manifest.capabilities.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
               {manifest.capabilities.map((cap, i) => (
-                <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[10px] text-zinc-400">
+                <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-[10px] text-gray-500 dark:text-zinc-400">
                   {capabilityLabel(cap)}
                 </span>
               ))}
@@ -212,8 +212,8 @@ function PluginCard({
           {/* Command preview */}
           {manifest.command.length > 0 && (
             <div className="flex items-center gap-1.5 mt-1.5">
-              <Terminal size={10} className="text-zinc-600 shrink-0" />
-              <span className="text-[10px] font-mono text-zinc-600 truncate">
+              <Terminal size={10} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+              <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-600 truncate">
                 {manifest.command.join(' ')}
               </span>
             </div>
@@ -225,20 +225,20 @@ function PluginCard({
           <button
             onClick={e => { e.stopPropagation(); /* restart — not yet implemented */ }}
             title="Restart plugin"
-            className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-800 text-zinc-400 text-[11px] hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[11px] hover:bg-gray-200 dark:hover:bg-zinc-700 hover:text-gray-800 dark:text-zinc-200 transition-colors"
           >
             <RotateCcw size={10} /> Restart
           </button>
           <button
             onClick={e => { e.stopPropagation(); onUnregister(); }}
             title="Unregister plugin"
-            className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-800 text-red-500/80 text-[11px] hover:bg-red-500/10 hover:text-red-400 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded bg-gray-100 dark:bg-zinc-800 text-red-500/80 text-[11px] hover:bg-red-500/10 hover:text-red-400 transition-colors"
           >
             <Trash2 size={10} /> Unregister
           </button>
           {expanded
-            ? <ChevronDown size={14} className="text-zinc-500" />
-            : <ChevronRight size={14} className="text-zinc-500" />
+            ? <ChevronDown size={14} className="text-gray-400 dark:text-zinc-500" />
+            : <ChevronRight size={14} className="text-gray-400 dark:text-zinc-500" />
           }
         </div>
       </div>
@@ -292,29 +292,29 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg mx-4 shadow-2xl"
+        className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg w-full max-w-lg mx-4 shadow-2xl"
         ref={trapRef}
         role="dialog"
         aria-modal="true"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <span className="text-[13px] font-semibold text-zinc-100">Register Plugin</span>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-zinc-800">
+          <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">Register Plugin</span>
+          <button onClick={onClose} className="text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors">
             <X size={14} />
           </button>
         </div>
 
         <div className="p-4 space-y-3">
-          <p className="text-[11px] text-zinc-500">
+          <p className="text-[11px] text-gray-400 dark:text-zinc-500">
             Paste a plugin manifest as JSON. See the{' '}
-            <span className="text-zinc-400">RFC 007</span> spec for the full schema.
+            <span className="text-gray-500 dark:text-zinc-400">RFC 007</span> spec for the full schema.
           </p>
           <textarea
             value={json}
             onChange={e => setJson(e.target.value)}
-            className="w-full h-56 bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2.5
-                       text-[11px] font-mono text-zinc-300 resize-none leading-relaxed
+            className="w-full h-56 bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-md px-3 py-2.5
+                       text-[11px] font-mono text-gray-700 dark:text-zinc-300 resize-none leading-relaxed
                        focus:outline-none focus:border-indigo-500 transition-colors"
             spellCheck={false}
           />
@@ -324,7 +324,7 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
           <div className="flex justify-end gap-2">
             <button
               onClick={onClose}
-              className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-400 text-[12px] hover:bg-zinc-700 transition-colors"
+              className="px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
             >
               Cancel
             </button>
@@ -366,13 +366,13 @@ export function PluginsPage() {
   if (isError) return <ErrorFallback error={error} resource="plugins" onRetry={() => void refetch()} />;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
-        <span className="text-[13px] font-medium text-zinc-200">
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           Plugins
           {!isLoading && (
-            <span className="ml-2 text-[12px] text-zinc-500 font-normal">{plugins.length}</span>
+            <span className="ml-2 text-[12px] text-gray-400 dark:text-zinc-500 font-normal">{plugins.length}</span>
           )}
         </span>
         <button
@@ -384,7 +384,7 @@ export function PluginsPage() {
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={isFetching ? 'animate-spin' : ''} />
           Refresh
@@ -393,7 +393,7 @@ export function PluginsPage() {
 
       {/* Stat strip */}
       {!isLoading && (
-        <div className="grid grid-cols-3 gap-x-6 px-5 py-3 border-b border-zinc-800 shrink-0">
+        <div className="grid grid-cols-3 gap-x-6 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 shrink-0">
           <StatCard label="Total"     value={plugins.length} />
           <StatCard label="Active"    value="—" sub="expand to check" />
           <StatCard label="Errored"   value="—" sub="expand to check" />
@@ -403,17 +403,17 @@ export function PluginsPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {isLoading ? (
-          <div className="flex items-center justify-center min-h-32 gap-2 text-zinc-600">
+          <div className="flex items-center justify-center min-h-32 gap-2 text-gray-400 dark:text-zinc-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-[13px]">Loading…</span>
           </div>
         ) : plugins.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-64 gap-3 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700">
-              <Puzzle size={24} className="text-zinc-500" />
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700">
+              <Puzzle size={24} className="text-gray-400 dark:text-zinc-500" />
             </div>
-            <p className="text-[13px] font-medium text-zinc-400">No plugins registered</p>
-            <p className="text-[12px] text-zinc-600 max-w-xs">
+            <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No plugins registered</p>
+            <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
               Register a plugin to extend cairn with custom tools, signal sources, eval scorers, and MCP servers.
             </p>
             <button
@@ -438,7 +438,7 @@ export function PluginsPage() {
 
       {/* Badge legend */}
       {plugins.length > 0 && (
-        <div className="flex items-center gap-4 px-5 py-2 border-t border-zinc-800 shrink-0">
+        <div className="flex items-center gap-4 px-5 py-2 border-t border-gray-200 dark:border-zinc-800 shrink-0">
           {(['ready', 'spawning', 'failed', 'stopped'] as const).map(s => (
             <div key={s} className="flex items-center gap-1.5">
               <span className={`inline-flex px-1.5 py-0.5 rounded border text-[10px] font-medium ${stateColors(s)}`}>

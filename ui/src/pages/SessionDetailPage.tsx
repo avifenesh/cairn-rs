@@ -45,7 +45,7 @@ const SESSION_PILL: Record<SessionState, string> = {
   open:      "bg-blue-500/10 text-blue-400 border-blue-500/20",
   completed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   failed:    "bg-red-500/10 text-red-400 border-red-500/20",
-  archived:  "bg-zinc-800 text-zinc-500 border-zinc-700",
+  archived:  "bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-700",
 };
 const SESSION_DOT: Record<SessionState, string> = {
   open:      "bg-blue-400 animate-pulse",
@@ -71,9 +71,9 @@ function SessionPill({ state }: { state: SessionState }) {
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -83,7 +83,7 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+      <p className="text-[11px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">
         {title}
       </p>
       {children}
@@ -93,7 +93,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
   <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-zinc-800",
+    "px-3 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-gray-200 dark:border-zinc-800",
     right ? "text-right" : "text-left",
     hide,
   )}>{ch}</th>
@@ -134,33 +134,33 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
   const traces = tracesData?.traces ?? [];
 
   return (
-    <div className="h-full overflow-y-auto bg-zinc-900">
+    <div className="h-full overflow-y-auto bg-gray-50 dark:bg-zinc-900">
       <div className="max-w-4xl mx-auto px-5 py-5 space-y-6">
 
         {/* Back + header */}
         <div className="space-y-3">
           <button
             onClick={onBack ?? (() => { window.location.hash = "sessions"; })}
-            className="flex items-center gap-1.5 text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="flex items-center gap-1.5 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
           >
             <ArrowLeft size={13} /> Back to Sessions
           </button>
 
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Session</p>
-              <p className="flex items-center gap-2 text-[15px] font-mono font-medium text-zinc-100 break-all">
+              <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Session</p>
+              <p className="flex items-center gap-2 text-[15px] font-mono font-medium text-gray-900 dark:text-zinc-100 break-all">
                 {sessionId}
                 <CopyButton text={sessionId} label="Copy session ID" size={12} />
               </p>
               {session && (
-                <p className="text-[12px] text-zinc-500 mt-1 font-mono">
+                <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-1 font-mono">
                   {session.project.tenant_id}
-                  <span className="text-zinc-700 mx-1">/</span>
+                  <span className="text-gray-300 dark:text-zinc-700 mx-1">/</span>
                   {session.project.workspace_id}
-                  <span className="text-zinc-700 mx-1">/</span>
+                  <span className="text-gray-300 dark:text-zinc-700 mx-1">/</span>
                   {session.project.project_id}
-                  <span className="text-zinc-700 ml-2 mr-1">·</span>
+                  <span className="text-gray-300 dark:text-zinc-700 ml-2 mr-1">·</span>
                   {fmtTime(session.created_at)}
                 </p>
               )}
@@ -181,8 +181,8 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                 }}
                 title="Export session as JSON"
                 className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] font-medium
-                           border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600
-                           bg-zinc-900 transition-colors"
+                           border border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600
+                           bg-gray-50 dark:bg-zinc-900 transition-colors"
               >
                 <Download size={12} /> Export
               </button>
@@ -191,7 +191,7 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
         </div>
 
         {/* Stat cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 py-3 px-4 rounded-lg border border-zinc-800 bg-zinc-900/60">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 py-3 px-4 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60">
           <StatCard
             label="Runs"
             value={runsLoading ? "—" : runs.length}
@@ -220,15 +220,15 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
         {/* Runs table */}
         <Section title="Runs">
           {runsLoading ? (
-            <div className="flex items-center gap-2 text-zinc-600 text-[13px] py-4">
+            <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600 text-[13px] py-4">
               <Loader2 size={14} className="animate-spin" /> Loading runs…
             </div>
           ) : runs.length === 0 ? (
-            <p className="text-[13px] text-zinc-600 italic py-4">No runs in this session.</p>
+            <p className="text-[13px] text-gray-400 dark:text-zinc-600 italic py-4">No runs in this session.</p>
           ) : (
-            <div className="rounded-lg border border-zinc-800 overflow-x-auto">
+            <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-x-auto">
               <table className="min-w-full text-[13px]">
-                <thead className="bg-zinc-900">
+                <thead className="bg-gray-50 dark:bg-zinc-900">
                   <tr>
                     <TH ch="Run ID" />
                     <TH ch="State" />
@@ -238,33 +238,33 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                     <TH ch="Updated" hide="hidden md:table-cell" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800/50">
+                <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
                   {runs.map((run, i) => (
                     <tr
                       key={run.run_id}
                       onClick={() => { window.location.hash = `run/${run.run_id}`; }}
                       className={clsx(
                         "cursor-pointer transition-colors",
-                        i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
-                        "hover:bg-zinc-800/60",
+                        i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]",
+                        "hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60",
                       )}
                     >
-                      <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap text-[12px]" title={run.run_id}>
+                      <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-zinc-300 whitespace-nowrap text-[12px]" title={run.run_id}>
                         {shortId(run.run_id)}
                       </td>
                       <td className="px-3 py-1.5 whitespace-nowrap">
                         <StateBadge state={run.state} compact />
                       </td>
-                      <td className="px-3 py-1.5 font-mono text-zinc-600 text-[11px] whitespace-nowrap hidden sm:table-cell">
-                        {run.parent_run_id ? <span title={run.parent_run_id}>{shortId(run.parent_run_id)}</span> : <span className="text-zinc-700">—</span>}
+                      <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-600 text-[11px] whitespace-nowrap hidden sm:table-cell">
+                        {run.parent_run_id ? <span title={run.parent_run_id}>{shortId(run.parent_run_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
                       </td>
-                      <td className="px-3 py-1.5 font-mono text-zinc-600 text-[11px] whitespace-nowrap hidden md:table-cell">
-                        {run.prompt_release_id ? <span title={run.prompt_release_id}>{shortId(run.prompt_release_id)}</span> : <span className="text-zinc-700">—</span>}
+                      <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-600 text-[11px] whitespace-nowrap hidden md:table-cell">
+                        {run.prompt_release_id ? <span title={run.prompt_release_id}>{shortId(run.prompt_release_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap text-[12px] tabular-nums">
+                      <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-500 whitespace-nowrap text-[12px] tabular-nums">
                         {fmtTime(run.created_at)}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap text-[12px] tabular-nums hidden md:table-cell">
+                      <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-500 whitespace-nowrap text-[12px] tabular-nums hidden md:table-cell">
                         {fmtTime(run.updated_at)}
                       </td>
                     </tr>
@@ -278,18 +278,18 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
         {/* LLM Traces table */}
         <Section title={`LLM Traces${traces.length > 0 ? ` (${traces.length})` : ""}`}>
           {tracesLoading ? (
-            <div className="flex items-center gap-2 text-zinc-600 text-[13px] py-4">
+            <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600 text-[13px] py-4">
               <Loader2 size={14} className="animate-spin" /> Loading traces…
             </div>
           ) : traces.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 gap-2 text-zinc-700">
+            <div className="flex flex-col items-center justify-center py-12 gap-2 text-gray-300 dark:text-zinc-700">
               <Inbox size={22} />
               <p className="text-[13px]">No traces for this session</p>
             </div>
           ) : (
-            <div className="rounded-lg border border-zinc-800 overflow-hidden overflow-x-auto">
+            <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden overflow-x-auto">
               <table className="min-w-full text-[13px]">
-                <thead className="bg-zinc-900">
+                <thead className="bg-gray-50 dark:bg-zinc-900">
                   <tr>
                     <TH ch="Trace ID" hide="hidden sm:table-cell" />
                     <TH ch="Model" />
@@ -302,20 +302,20 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                     <TH ch="Time"          hide="hidden sm:table-cell" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800/50">
+                <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
                   {traces.map((trace, i) => (
                     <tr key={trace.trace_id} className={clsx(
                       "transition-colors",
-                      i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
-                      "hover:bg-zinc-800/60",
+                      i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]",
+                      "hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60",
                     )}>
-                      <td className="px-3 py-1.5 font-mono text-zinc-400 whitespace-nowrap text-[12px] hidden sm:table-cell">
+                      <td className="px-3 py-1.5 font-mono text-gray-500 dark:text-zinc-400 whitespace-nowrap text-[12px] hidden sm:table-cell">
                         {shortId(trace.trace_id)}
                       </td>
-                      <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap text-[12px]">
+                      <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-zinc-300 whitespace-nowrap text-[12px]">
                         {trace.model_id}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap text-[12px] hidden sm:table-cell">
+                      <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-500 whitespace-nowrap text-[12px] hidden sm:table-cell">
                         {inferProvider(trace.model_id)}
                       </td>
                       <td className="px-3 py-1.5 whitespace-nowrap">
@@ -329,22 +329,22 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px] hidden md:table-cell">
+                      <td className="px-3 py-1.5 text-gray-500 dark:text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px] hidden md:table-cell">
                         {fmtTokens(trace.prompt_tokens)}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px] hidden md:table-cell">
+                      <td className="px-3 py-1.5 text-gray-500 dark:text-zinc-400 whitespace-nowrap tabular-nums text-right font-mono text-[12px] hidden md:table-cell">
                         {fmtTokens(trace.completion_tokens)}
                       </td>
                       <td className={clsx(
                         "px-3 py-1.5 whitespace-nowrap tabular-nums text-right font-mono text-[12px]",
-                        trace.latency_ms > 5_000 ? "text-amber-400" : "text-zinc-400",
+                        trace.latency_ms > 5_000 ? "text-amber-400" : "text-gray-500 dark:text-zinc-400",
                       )}>
                         {fmtLatency(trace.latency_ms)}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums text-right font-mono text-[12px] hidden sm:table-cell">
+                      <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-500 whitespace-nowrap tabular-nums text-right font-mono text-[12px] hidden sm:table-cell">
                         {fmtCost(trace.cost_micros)}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums text-[12px] hidden sm:table-cell">
+                      <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-500 whitespace-nowrap tabular-nums text-[12px] hidden sm:table-cell">
                         {fmtTime(trace.created_at_ms)}
                       </td>
                     </tr>

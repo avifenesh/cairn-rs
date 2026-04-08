@@ -42,7 +42,7 @@ function KindBadge({ kind }: { kind: string }) {
   return (
     <span className={clsx(
       "text-[10px] font-mono font-medium rounded px-1.5 py-0.5 border",
-      KIND_STYLE[kind] ?? "bg-zinc-800/60 text-zinc-400 border-zinc-700",
+      KIND_STYLE[kind] ?? "bg-gray-100/60 dark:bg-zinc-800/60 text-gray-500 dark:text-zinc-400 border-gray-200 dark:border-zinc-700",
     )}>
       {kind}
     </span>
@@ -52,12 +52,12 @@ function KindBadge({ kind }: { kind: string }) {
 // ── Release state badge ───────────────────────────────────────────────────────
 
 const RELEASE_STYLE: Record<string, string> = {
-  draft:              "bg-zinc-800/60 text-zinc-400 border-zinc-700",
+  draft:              "bg-gray-100/60 dark:bg-zinc-800/60 text-gray-500 dark:text-zinc-400 border-gray-200 dark:border-zinc-700",
   pending_approval:   "bg-amber-950/60 text-amber-300 border-amber-800/40",
   approved:           "bg-blue-950/60 text-blue-300 border-blue-800/40",
   released:           "bg-emerald-950/60 text-emerald-300 border-emerald-800/40",
   rolling_out:        "bg-indigo-950/60 text-indigo-300 border-indigo-800/40",
-  archived:           "bg-zinc-800/40 text-zinc-600 border-zinc-800",
+  archived:           "bg-gray-100/40 dark:bg-zinc-800/40 text-gray-400 dark:text-zinc-600 border-gray-200 dark:border-zinc-800",
   rolled_back:        "bg-red-950/60 text-red-300 border-red-800/40",
 };
 
@@ -77,11 +77,11 @@ function ReleaseBadge({ state }: { state: string }) {
 function DiffPanel({ diff, onClose }: { diff: PromptVersionDiff; onClose: () => void }) {
   const pct = Math.round(diff.similarity_score * 100);
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950 overflow-hidden mt-2">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+    <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden mt-2">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-zinc-800">
         <div className="flex items-center gap-3">
-          <GitCompare size={12} className="text-zinc-500" />
-          <span className="text-[11px] font-medium text-zinc-400">Version diff</span>
+          <GitCompare size={12} className="text-gray-400 dark:text-zinc-500" />
+          <span className="text-[11px] font-medium text-gray-500 dark:text-zinc-400">Version diff</span>
           <span className={clsx(
             "text-[10px] font-mono rounded px-1.5 py-0.5",
             pct >= 80 ? "bg-emerald-950/60 text-emerald-400" :
@@ -91,17 +91,17 @@ function DiffPanel({ diff, onClose }: { diff: PromptVersionDiff; onClose: () => 
             {pct}% similar
           </span>
         </div>
-        <button onClick={onClose} className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 transition-colors">
+        <button onClick={onClose} className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors">
           <X size={12} />
         </button>
       </div>
-      <div className="grid grid-cols-2 divide-x divide-zinc-800 max-h-48 overflow-y-auto">
+      <div className="grid grid-cols-2 divide-x divide-gray-200 dark:divide-zinc-800 max-h-48 overflow-y-auto">
         <div className="p-2">
           <p className="text-[10px] text-red-500 font-semibold mb-1 uppercase tracking-wider">
             — Removed ({diff.removed_lines.length})
           </p>
           {diff.removed_lines.length === 0
-            ? <p className="text-[11px] text-zinc-700 italic">None</p>
+            ? <p className="text-[11px] text-gray-300 dark:text-zinc-700 italic">None</p>
             : diff.removed_lines.map((l, i) => (
               <div key={i} className="flex items-start gap-1 text-[11px] font-mono text-red-400 bg-red-950/20 rounded px-1 mb-0.5 leading-relaxed">
                 <span className="text-red-700 shrink-0">−</span>
@@ -114,7 +114,7 @@ function DiffPanel({ diff, onClose }: { diff: PromptVersionDiff; onClose: () => 
             + Added ({diff.added_lines.length})
           </p>
           {diff.added_lines.length === 0
-            ? <p className="text-[11px] text-zinc-700 italic">None</p>
+            ? <p className="text-[11px] text-gray-300 dark:text-zinc-700 italic">None</p>
             : diff.added_lines.map((l, i) => (
               <div key={i} className="flex items-start gap-1 text-[11px] font-mono text-emerald-400 bg-emerald-950/20 rounded px-1 mb-0.5 leading-relaxed">
                 <span className="text-emerald-700 shrink-0">+</span>
@@ -153,27 +153,27 @@ function VersionRow({
     <div className="space-y-1">
       <div className={clsx(
         "flex items-center gap-3 px-3 py-2 text-[12px] transition-colors rounded",
-        "hover:bg-zinc-800/40",
+        "hover:bg-gray-100/40 dark:hover:bg-gray-100/40 dark:bg-zinc-800/40",
       )}>
         {/* Version number */}
-        <span className="shrink-0 font-mono text-zinc-500 w-6 text-right">v{vNum}</span>
+        <span className="shrink-0 font-mono text-gray-400 dark:text-zinc-500 w-6 text-right">v{vNum}</span>
 
         {/* Hash */}
-        <code className="shrink-0 font-mono text-zinc-600 text-[10px]">
+        <code className="shrink-0 font-mono text-gray-400 dark:text-zinc-600 text-[10px]">
           {shortHash(version.content_hash)}
         </code>
 
         {/* Content preview */}
         {version.content && (
-          <span className="flex-1 text-zinc-500 truncate text-[11px] font-mono">
+          <span className="flex-1 text-gray-400 dark:text-zinc-500 truncate text-[11px] font-mono">
             {version.content.slice(0, 60)}{version.content.length > 60 ? "…" : ""}
           </span>
         )}
         {!version.content && (
-          <span className="flex-1 text-zinc-700 italic text-[11px]">content not loaded</span>
+          <span className="flex-1 text-gray-300 dark:text-zinc-700 italic text-[11px]">content not loaded</span>
         )}
 
-        <span className="shrink-0 text-zinc-700">{fmtTime(version.created_at)}</span>
+        <span className="shrink-0 text-gray-300 dark:text-zinc-700">{fmtTime(version.created_at)}</span>
 
         {/* Actions */}
         <div className="shrink-0 flex items-center gap-1">
@@ -184,7 +184,7 @@ function VersionRow({
                 "flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
                 diffOpen
                   ? "bg-indigo-600/20 text-indigo-400 border border-indigo-700/40"
-                  : "text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800",
+                  : "text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800",
               )}
             >
               <GitCompare size={10} /> Diff
@@ -193,7 +193,7 @@ function VersionRow({
           <button
             onClick={() => onCreateRelease(version.prompt_version_id)}
             className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
-                       text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                       text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
           >
             <Package size={10} /> Release
           </button>
@@ -217,12 +217,12 @@ function VersionRow({
       {diffOpen && (
         <div className="px-3 pb-2">
           {diffLoading
-            ? <div className="flex items-center gap-1.5 text-[11px] text-zinc-600 py-2">
+            ? <div className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-zinc-600 py-2">
                 <Loader2 size={11} className="animate-spin" /> Loading diff…
               </div>
             : diff
               ? <DiffPanel diff={diff} onClose={() => setDiffOpen(false)} />
-              : <p className="text-[11px] text-zinc-600 italic py-2">Diff unavailable</p>
+              : <p className="text-[11px] text-gray-400 dark:text-zinc-600 italic py-2">Diff unavailable</p>
           }
         </div>
       )}
@@ -264,13 +264,13 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
       <ReleaseBadge state={release.state} />
 
       {release.rollout_percent != null && (
-        <span className="text-[10px] font-mono text-zinc-500">
+        <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-500">
           {release.rollout_percent}% rollout
         </span>
       )}
 
       {release.release_tag && (
-        <span className="text-[10px] font-mono text-zinc-600 bg-zinc-800 rounded px-1.5 py-0.5">
+        <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1.5 py-0.5">
           {release.release_tag}
         </span>
       )}
@@ -312,7 +312,7 @@ function ReleaseControls({ release }: { release: PromptReleaseRecord }) {
             onChange={(e) => setRollout(Number(e.target.value))}
             className="w-24 accent-indigo-500 cursor-pointer"
           />
-          <span className="text-[10px] font-mono text-zinc-400 w-8 text-right tabular-nums">
+          <span className="text-[10px] font-mono text-gray-500 dark:text-zinc-400 w-8 text-right tabular-nums">
             {rollout}%
           </span>
           <button
@@ -377,7 +377,7 @@ function AssetItem({
   return (
     <div className={clsx(
       "rounded-lg border transition-colors",
-      expanded ? "border-zinc-700 bg-zinc-900/60" : "border-zinc-800 bg-zinc-900 hover:border-zinc-700",
+      expanded ? "border-gray-200 dark:border-zinc-700 bg-gray-50/60 dark:bg-zinc-900/60" : "border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 hover:border-gray-200 dark:border-zinc-700",
     )}>
       {/* Collapsed header */}
       <button
@@ -385,12 +385,12 @@ function AssetItem({
         className="w-full flex items-center gap-3 px-4 py-3 text-left"
       >
         {expanded
-          ? <ChevronDown  size={13} className="text-zinc-500 shrink-0" />
-          : <ChevronRight size={13} className="text-zinc-600 shrink-0" />}
+          ? <ChevronDown  size={13} className="text-gray-400 dark:text-zinc-500 shrink-0" />
+          : <ChevronRight size={13} className="text-gray-400 dark:text-zinc-600 shrink-0" />}
 
-        <FileText size={13} className="text-zinc-600 shrink-0" />
+        <FileText size={13} className="text-gray-400 dark:text-zinc-600 shrink-0" />
 
-        <span className="font-medium text-[13px] text-zinc-200 truncate flex-1">
+        <span className="font-medium text-[13px] text-gray-800 dark:text-zinc-200 truncate flex-1">
           {asset.name}
         </span>
 
@@ -398,37 +398,37 @@ function AssetItem({
 
         {latestRelease && <ReleaseBadge state={latestRelease.state} />}
 
-        <span className="text-[10px] text-zinc-600 font-mono shrink-0">
+        <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono shrink-0">
           {assetReleases.length} release{assetReleases.length !== 1 ? "s" : ""}
         </span>
 
-        <span className="text-[11px] text-zinc-700 shrink-0 hidden sm:block">
+        <span className="text-[11px] text-gray-300 dark:text-zinc-700 shrink-0 hidden sm:block">
           {fmtTime(asset.updated_at ?? asset.created_at)}
         </span>
       </button>
 
       {/* Expanded body */}
       {expanded && (
-        <div className="border-t border-zinc-800 divide-y divide-zinc-800/60">
+        <div className="border-t border-gray-200 dark:border-zinc-800 divide-y divide-gray-200 dark:divide-zinc-800/60">
           {/* Asset metadata */}
-          <div className="px-4 py-2 flex items-center gap-4 text-[11px] text-zinc-600">
+          <div className="px-4 py-2 flex items-center gap-4 text-[11px] text-gray-400 dark:text-zinc-600">
             <span className="font-mono">{asset.prompt_asset_id}</span>
-            {asset.scope && <span>scope: <code className="text-zinc-500">{asset.scope}</code></span>}
+            {asset.scope && <span>scope: <code className="text-gray-400 dark:text-zinc-500">{asset.scope}</code></span>}
           </div>
 
           {/* Version history */}
           <div className="px-4 py-3">
-            <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">
+            <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">
               Version History
             </p>
             {versionsLoading ? (
-              <div className="flex items-center gap-1.5 text-[12px] text-zinc-600 py-2">
+              <div className="flex items-center gap-1.5 text-[12px] text-gray-400 dark:text-zinc-600 py-2">
                 <Loader2 size={12} className="animate-spin" /> Loading versions…
               </div>
             ) : versions.length === 0 ? (
-              <p className="text-[12px] text-zinc-700 italic py-2">No versions yet.</p>
+              <p className="text-[12px] text-gray-300 dark:text-zinc-700 italic py-2">No versions yet.</p>
             ) : (
-              <div className="rounded-lg border border-zinc-800 overflow-x-auto divide-y divide-zinc-800/50">
+              <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-x-auto divide-y divide-gray-200 dark:divide-zinc-800/50">
                 {versions.map((v, i) => (
                   <VersionRow
                     key={v.prompt_version_id}
@@ -445,17 +445,17 @@ function AssetItem({
           {/* Releases */}
           {assetReleases.length > 0 && (
             <div className="px-4 py-3">
-              <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">
+              <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">
                 Releases
               </p>
               <div className="space-y-2">
                 {assetReleases.map((rel) => (
-                  <div key={rel.prompt_release_id} className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                  <div key={rel.prompt_release_id} className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-3 py-2">
                     <div className="flex items-center justify-between gap-3 mb-1.5">
-                      <code className="text-[11px] font-mono text-zinc-500">
+                      <code className="text-[11px] font-mono text-gray-400 dark:text-zinc-500">
                         {shortId(rel.prompt_release_id)}
                       </code>
-                      <span className="text-[10px] text-zinc-700">{fmtTime(rel.updated_at)}</span>
+                      <span className="text-[10px] text-gray-300 dark:text-zinc-700">{fmtTime(rel.updated_at)}</span>
                     </div>
                     <ReleaseControls release={rel} />
                   </div>
@@ -498,37 +498,37 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
   const valid = id.trim().length > 0 && name.trim().length > 0;
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 space-y-3">
+    <div className="rounded-lg border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 px-4 py-3 space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-[12px] font-medium text-zinc-300">New Prompt Asset</span>
-        <button onClick={onClose} className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 transition-colors">
+        <span className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">New Prompt Asset</span>
+        <button onClick={onClose} className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors">
           <X size={13} />
         </button>
       </div>
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <label className="text-[10px] text-zinc-500 block mb-1">ID <span className="text-red-500">*</span></label>
+          <label className="text-[10px] text-gray-400 dark:text-zinc-500 block mb-1">ID <span className="text-red-500">*</span></label>
           <input
             value={id} onChange={(e) => setId(e.target.value)}
             placeholder="my-system-prompt"
-            className="w-full rounded border border-zinc-800 bg-zinc-950 text-[12px] text-zinc-200
+            className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-800 dark:text-zinc-200
                        font-mono px-2 py-1.5 focus:outline-none focus:border-indigo-500 transition-colors"
           />
         </div>
         <div>
-          <label className="text-[10px] text-zinc-500 block mb-1">Name <span className="text-red-500">*</span></label>
+          <label className="text-[10px] text-gray-400 dark:text-zinc-500 block mb-1">Name <span className="text-red-500">*</span></label>
           <input
             value={name} onChange={(e) => setName(e.target.value)}
             placeholder="My System Prompt"
-            className="w-full rounded border border-zinc-800 bg-zinc-950 text-[12px] text-zinc-200
+            className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-800 dark:text-zinc-200
                        px-2 py-1.5 focus:outline-none focus:border-indigo-500 transition-colors"
           />
         </div>
         <div>
-          <label className="text-[10px] text-zinc-500 block mb-1">Kind</label>
+          <label className="text-[10px] text-gray-400 dark:text-zinc-500 block mb-1">Kind</label>
           <select
             value={kind} onChange={(e) => setKind(e.target.value)}
-            className="w-full rounded border border-zinc-800 bg-zinc-950 text-[12px] text-zinc-300
+            className="w-full rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-700 dark:text-zinc-300
                        px-2 py-1.5 focus:outline-none focus:border-indigo-500 transition-colors"
           >
             {["system", "user", "assistant", "tool"].map((k) => (
@@ -539,7 +539,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
       </div>
       <div className="flex items-center gap-2 justify-end">
         <button onClick={onClose}
-          className="px-3 py-1.5 rounded text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors">
+          className="px-3 py-1.5 rounded text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors">
           Cancel
         </button>
         <button
@@ -547,7 +547,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
           disabled={!valid || create.isPending}
           className="flex items-center gap-1.5 rounded px-3 py-1.5 text-[12px] font-medium
                      bg-indigo-600 hover:bg-indigo-500 text-white
-                     disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed transition-colors"
+                     disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 disabled:cursor-not-allowed transition-colors"
         >
           {create.isPending ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
           Create
@@ -597,26 +597,26 @@ export function PromptsPage() {
   if (isError) return (
     <div className="flex flex-col items-center justify-center h-full gap-3 p-8 text-center">
       <AlertTriangle size={28} className="text-red-500" />
-      <p className="text-[13px] font-medium text-zinc-300">Failed to load prompts</p>
-      <p className="text-[12px] text-zinc-500">{error instanceof Error ? error.message : "Unknown"}</p>
+      <p className="text-[13px] font-medium text-gray-700 dark:text-zinc-300">Failed to load prompts</p>
+      <p className="text-[12px] text-gray-400 dark:text-zinc-500">{error instanceof Error ? error.message : "Unknown"}</p>
       <button onClick={() => refetch()}
-        className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-300 text-[12px] hover:bg-zinc-700 transition-colors">
+        className="px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors">
         Retry
       </button>
     </div>
   );
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
+    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-5 h-11 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-3 px-5 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
         <FileText size={13} className="text-indigo-400 shrink-0" />
-        <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+        <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
           Prompts
         </span>
 
         {!assetsLoading && (
-          <span className="text-[10px] text-zinc-700">
+          <span className="text-[10px] text-gray-300 dark:text-zinc-700">
             {assets.length} asset{assets.length !== 1 ? "s" : ""} · {releases.length} release{releases.length !== 1 ? "s" : ""}
           </span>
         )}
@@ -630,8 +630,8 @@ export function PromptsPage() {
               className={clsx(
                 "px-3 h-11 text-[11px] font-medium transition-colors border-b-2 capitalize",
                 filter === f
-                  ? "text-zinc-100 border-indigo-500"
-                  : "text-zinc-500 border-transparent hover:text-zinc-300",
+                  ? "text-gray-900 dark:text-zinc-100 border-indigo-500"
+                  : "text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:text-zinc-300",
               )}
             >
               {f}
@@ -641,7 +641,7 @@ export function PromptsPage() {
 
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => refetch()} disabled={isFetching}
-            className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors">
+            className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors">
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
           </button>
           <button
@@ -666,14 +666,14 @@ export function PromptsPage() {
 
         {/* Asset list */}
         {assetsLoading ? (
-          <div className="flex items-center justify-center gap-2 py-16 text-zinc-600">
+          <div className="flex items-center justify-center gap-2 py-16 text-gray-400 dark:text-zinc-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-[13px]">Loading prompts…</span>
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-            <FileText size={28} className="text-zinc-700" />
-            <p className="text-[13px] text-zinc-600">
+            <FileText size={28} className="text-gray-300 dark:text-zinc-700" />
+            <p className="text-[13px] text-gray-400 dark:text-zinc-600">
               {assets.length === 0
                 ? "No prompt assets yet — create one to get started."
                 : `No prompts match the "${filter}" filter.`}

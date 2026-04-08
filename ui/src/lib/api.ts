@@ -91,10 +91,26 @@ async function apiFetch<T>(
   return JSON.parse(text) as T;
 }
 
+// ── List response unwrapper ───────────────────────────────────────────────────
+
+/**
+ * The server may return list endpoints as either a plain `T[]` array or wrapped
+ * in `{ items: T[] }`.  This helper normalises both shapes into a plain array.
+ */
+function unwrapList<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === 'object' && 'items' in data && Array.isArray((data as { items: unknown }).items)) {
+    return (data as { items: T[] }).items;
+  }
+  return [];
+}
+
 // ── API client factory ────────────────────────────────────────────────────────
 
 export function createApiClient(config: ApiClientConfig) {
   const get  = <T>(path: string) => apiFetch<T>(config, path, { method: "GET" });
+  /** GET that unwraps list responses into a plain array. */
+  const getList = <T>(path: string) => apiFetch<unknown>(config, path, { method: "GET" }).then(unwrapList<T>);
   const post = <T>(path: string, body?: unknown) =>
     apiFetch<T>(config, path, {
       method: "POST",
@@ -162,7 +178,7 @@ export function createApiClient(config: ApiClientConfig) {
       if (params?.limit  !== undefined)      qs.set("limit",  String(params.limit));
       if (params?.offset !== undefined)      qs.set("offset", String(params.offset));
       const query = qs.toString() ? `?${qs}` : "";
-      return get(`/v1/sessions${query}`);
+      return getList(`/v1/sessions${query}`);
     },
 
     /** POST /v1/sessions — create a new session. */
@@ -191,7 +207,7 @@ export function createApiClient(config: ApiClientConfig) {
       if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
       if (params?.offset !== undefined) qs.set("offset", String(params.offset));
       const query = qs.toString() ? `?${qs}` : "";
-      return get(`/v1/runs${query}`);
+      return getList(`/v1/runs${query}`);
     },
 
     /** GET /v1/runs/:id — fetch a single run by ID. */
@@ -202,12 +218,16 @@ export function createApiClient(config: ApiClientConfig) {
       get(`/v1/runs/${runId}/events?limit=${limit}`),
 
     /** GET /v1/tasks — all tasks across every project (operator view). */
-    getAllTasks: (params?: { limit?: number; offset?: number }): Promise<import("./types").TaskRecord[]> => {
+    getAllTasks: (params?: { limit?: number; offset?: number; tenant_id?: string; workspace_id?: string; project_id?: string }): Promise<import("./types").TaskRecord[]> => {
+      const merged = withScope(params);
       const qs = new URLSearchParams();
+      if (merged.tenant_id)             qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id)          qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)            qs.set("project_id",   merged.project_id);
       if (params?.limit  !== undefined) qs.set("limit",  String(params.limit));
       if (params?.offset !== undefined) qs.set("offset", String(params.offset));
       const q = qs.toString() ? `?${qs}` : "";
-      return get(`/v1/tasks${q}`);
+      return getList(`/v1/tasks${q}`);
     },
 
     /** POST /v1/tasks/:id/claim — claim a queued task for a worker. */
@@ -224,7 +244,7 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/runs/:id/tasks — tasks belonging to a run. */
     getRunTasks: (runId: string): Promise<import("./types").TaskRecord[]> =>
-      get(`/v1/runs/${runId}/tasks`),
+      getList(`/v1/runs/${runId}/tasks`),
 
     /** GET /v1/runs/:id/cost — accumulated cost for a run. */
     getRunCost: (runId: string): Promise<import("./types").RunCostRecord> =>
@@ -272,7 +292,7 @@ export function createApiClient(config: ApiClientConfig) {
       if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
       if (merged.project_id)   qs.set("project_id",   merged.project_id);
       const query = qs.toString() ? `?${qs}` : "";
-      return get(`/v1/approvals/pending${query}`);
+      return getList(`/v1/approvals/pending${query}`);
     },
 
     /** POST /v1/approvals/:id/resolve — approve or reject. */
@@ -308,7 +328,7 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/events/recent — most recent N runtime events with sequence IDs. */
     getRecentEvents: (limit = 50): Promise<import("./types").RecentEvent[]> =>
-      get(`/v1/events/recent?limit=${limit}`),
+      getList(`/v1/events/recent?limit=${limit}`),
 
     /** GET /v1/stats — real-time system-wide counters. */
     getStats: (): Promise<import("./types").SystemStats> =>

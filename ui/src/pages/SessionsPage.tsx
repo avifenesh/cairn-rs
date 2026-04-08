@@ -35,7 +35,7 @@ const SESSION_PILL: Record<SessionState, string> = {
   open:      'bg-blue-500/10 text-blue-400 border-blue-500/20',
   completed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   failed:    'bg-red-500/10 text-red-400 border-red-500/20',
-  archived:  'bg-zinc-800 text-zinc-500 border-zinc-700',
+  archived:  'bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-700',
 };
 const SESSION_DOT: Record<SessionState, string> = {
   open:      'bg-blue-400 animate-pulse',
@@ -63,12 +63,12 @@ function StatCard({ label, value, sub, accent = 'default' }: {
   accent?: 'default' | 'blue' | 'emerald';
 }) {
   const border = { default: 'border-l-zinc-700', blue: 'border-l-blue-500', emerald: 'border-l-emerald-500' }[accent];
-  const val    = { default: 'text-zinc-100', blue: 'text-blue-400', emerald: 'text-emerald-400' }[accent];
+  const val    = { default: 'text-gray-900 dark:text-zinc-100', blue: 'text-blue-400', emerald: 'text-emerald-400' }[accent];
   return (
-    <div className={clsx('bg-zinc-900 border border-zinc-800 border-l-2 rounded-lg p-4', border)}>
-      <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
+    <div className={clsx('bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4', border)}>
+      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
       <p className={clsx('text-2xl font-semibold tabular-nums', val)}>{value}</p>
-      {sub && <p className="mt-1 text-[11px] text-zinc-600">{sub}</p>}
+      {sub && <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-600">{sub}</p>}
     </div>
   );
 }
@@ -122,9 +122,9 @@ export function SessionsPage() {
     <div className="p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Sessions</p>
+        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Sessions</p>
         <div className="flex items-center gap-2">
-          <button onClick={() => refetch()} className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 transition-colors">
+          <button onClick={() => refetch()} className="flex items-center gap-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:bg-white/5 transition-colors">
             <RefreshCw size={11} className={clsx(isFetching && 'animate-spin')} /> Refresh
           </button>
           {/* Hidden file input for importing a session JSON */}
@@ -138,7 +138,7 @@ export function SessionsPage() {
           <button
             onClick={() => importRef.current?.click()}
             title="Import a previously exported session JSON file"
-            className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:bg-white/5 transition-colors"
           >
             <Upload size={11} /> Import
           </button>
@@ -162,20 +162,20 @@ export function SessionsPage() {
         <DataTable<SessionRecord>
           data={list}
           columns={[
-            { key: 'arrow',      header: '',           render: _r => <ChevronRight size={13} className="text-zinc-700" /> },
-            { key: 'session_id', header: 'Session ID', render: r => <span className="font-mono text-xs text-zinc-200 whitespace-nowrap" title={r.session_id}>{mono(r.session_id, 22)}</span>, sortValue: r => r.session_id },
-            { key: 'tenant',     header: 'Tenant',     render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden md:block">{r.project.tenant_id}</span> },
-            { key: 'workspace',  header: 'Workspace',  render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap hidden lg:block">{r.project.workspace_id}</span> },
-            { key: 'project',    header: 'Project',    render: r => <span className="font-mono text-[11px] text-zinc-400 whitespace-nowrap">{mono(r.project.project_id, 16)}</span> },
+            { key: 'arrow',      header: '',           render: _r => <ChevronRight size={13} className="text-gray-300 dark:text-zinc-700" /> },
+            { key: 'session_id', header: 'Session ID', render: r => <span className="font-mono text-xs text-gray-800 dark:text-zinc-200 whitespace-nowrap" title={r.session_id}>{mono(r.session_id, 22)}</span>, sortValue: r => r.session_id },
+            { key: 'tenant',     header: 'Tenant',     render: r => <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap hidden md:block">{r.project.tenant_id}</span> },
+            { key: 'workspace',  header: 'Workspace',  render: r => <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap hidden lg:block">{r.project.workspace_id}</span> },
+            { key: 'project',    header: 'Project',    render: r => <span className="font-mono text-[11px] text-gray-500 dark:text-zinc-400 whitespace-nowrap">{mono(r.project.project_id, 16)}</span> },
             { key: 'state',      header: 'Status',     render: r => <SessionPill state={r.state} />,                      sortValue: r => r.state },
-            { key: 'runs',       header: 'Runs',       render: r => { const n = runCountFor(r.session_id); return n > 0 ? <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-zinc-800 text-zinc-400 text-[10px] font-medium tabular-nums">{n}</span> : <span className="text-zinc-700 text-[11px]">—</span>; } },
-            { key: 'created',    header: 'Created',    render: r => <span className="font-mono text-[11px] text-zinc-500 whitespace-nowrap" title={fmtTs(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
+            { key: 'runs',       header: 'Runs',       render: r => { const n = runCountFor(r.session_id); return n > 0 ? <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[10px] font-medium tabular-nums">{n}</span> : <span className="text-gray-300 dark:text-zinc-700 text-[11px]">—</span>; } },
+            { key: 'created',    header: 'Created',    render: r => <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap" title={fmtTs(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
           ]}
           filterFn={(r, q) => r.session_id.includes(q) || r.project.project_id.includes(q) || r.project.tenant_id.includes(q) || r.state.includes(q)}
           csvRow={r => [r.session_id, r.project.tenant_id, r.project.workspace_id, r.project.project_id, r.state, r.created_at]}
           csvHeaders={['Session ID', 'Tenant', 'Workspace', 'Project', 'State', 'Created At']}
           filename="sessions"
-          emptyText="No sessions yet"
+          emptyText="No sessions yet — create one with POST /v1/sessions or run the SDK example: python3 examples/basic-agent.py"
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-# cairn-rs + Ollama — one-command local deployment
+# cairn-rs — one-command local deployment
 #
 # Quick start:
 #   docker compose up --build
@@ -6,42 +6,23 @@
 # Background:
 #   docker compose up -d --build
 #
-# Stop (keep model cache):
+# Stop:
 #   docker compose down
-#
-# Wipe everything including downloaded models:
-#   docker compose down -v
-#
-# Pull a model into Ollama after startup (for local-only mode without agntic.garden):
-#   docker compose exec ollama ollama pull qwen3.5:9b   # worker/everyday tasks
-#   docker compose exec ollama ollama pull nomic-embed-text  # embeddings
 #
 # Override the admin token via env file:
 #   echo 'CAIRN_ADMIN_TOKEN=my-secret-token' > .env
 #   docker compose up -d
 #
-# For a production setup with PostgreSQL persistence, see docs/docker-postgres.md
+# Connect an LLM provider (any OpenAI-compatible endpoint):
+#   echo 'CAIRN_BRAIN_URL=https://your-provider/v1' >> .env
+#   echo 'OPENAI_COMPAT_API_KEY=your-key' >> .env
+#
+# Or configure providers at runtime via the dashboard (Providers page)
+# or via POST /v1/providers/connections.
+#
+# For persistent team mode with PostgreSQL, see docker-compose.postgres.yml
 
 services:
-
-  # ── Ollama local LLM runtime ─────────────────────────────────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    ports:
-      - "11434:11434"
-    volumes:
-      # Persist downloaded models across container restarts and rebuilds.
-      - ollama_models:/root/.ollama
-    environment:
-      # Optional: set OLLAMA_NUM_PARALLEL to control concurrent requests.
-      OLLAMA_KEEP_ALIVE: "5m"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:11434/api/tags || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
 
   # ── Cairn control plane ───────────────────────────────────────────────────────
   cairn:
@@ -54,26 +35,16 @@ services:
     environment:
       # Bearer token for the admin account — override in production.
       CAIRN_ADMIN_TOKEN: "${CAIRN_ADMIN_TOKEN:-dev-admin-token}"
-      # Point to the Ollama service in this compose network.
-      OLLAMA_HOST: "http://ollama:11434"
-      # Mode: "local" (default, no auth enforcement) or "team" (requires token).
+      # Mode: "local" (default) or "team" (requires token on every request).
       CAIRN_MODE: "${CAIRN_MODE:-local}"
-      # ── Inference endpoints (agntic.garden split API) ─────────────────────
-      # Brain tier: heavy generation (gemma-4-31B). Set CAIRN_BRAIN_URL to activate.
+      # LLM provider — Cairn is provider-agnostic. Connect any endpoint you prefer:
+      # OpenAI, Anthropic, Bedrock, Vertex AI, OpenRouter, Ollama, Groq, Together, etc.
       CAIRN_BRAIN_URL: "${CAIRN_BRAIN_URL:-}"
-      # Worker tier: everyday generation + embeddings (qwen3.5). Set CAIRN_WORKER_URL to activate.
       CAIRN_WORKER_URL: "${CAIRN_WORKER_URL:-}"
-      # Shared API key for both endpoints.
       OPENAI_COMPAT_API_KEY: "${OPENAI_COMPAT_API_KEY:-}"
-      # Legacy single-endpoint fallback (superseded by CAIRN_WORKER_URL above).
       OPENAI_COMPAT_BASE_URL: "${OPENAI_COMPAT_BASE_URL:-}"
-      # OpenRouter — zero-cost LLM access via https://openrouter.ai (no self-hosted GPU needed).
-      # Brain model: qwen/qwen3-coder:free (262K ctx)  Worker model: google/gemma-3-4b-it:free (32K ctx)
-      # Get a free key at https://openrouter.ai/keys
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
-    depends_on:
-      ollama:
-        condition: service_healthy
+      OLLAMA_HOST: "${OLLAMA_HOST:-}"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health || exit 1"]
       interval: 15s
@@ -85,11 +56,7 @@ services:
     #   - cairn_data:/data
     # command: ["--db", "/data/cairn.db"]
 
-volumes:
-  # Ollama model cache — survives container restarts.
-  ollama_models:
-    driver: local
-
   # Uncomment if you enable SQLite persistence above.
-  # cairn_data:
-  #   driver: local
+  # volumes:
+  #   cairn_data:
+  #     driver: local

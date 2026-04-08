@@ -326,6 +326,8 @@ mod tests {
             requires_approval:     false,
             model_id:              "stub".into(),
             latency_ms:            0,
+            input_tokens:          None,
+            output_tokens:         None,
         }
     }
 

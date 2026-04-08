@@ -96,6 +96,7 @@ jlen() { printf '%s' "$_BODY" | python3 -c \
   "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0; }
 
 # =============================================================================
+SUITE_START=$(date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))")
 echo -e "${BLD}cairn smoke test${RST}" >&2
 echo -e "  Server  : ${CYN}${BASE}${RST}" >&2
 echo -e "  Token   : ${CYN}${TOKEN:0:8}…${RST}" >&2
@@ -151,6 +152,13 @@ chk "POST pause"  200 POST "/v1/runs/${RUN_ID}/pause" \
 
 chk "POST resume" 200 POST "/v1/runs/${RUN_ID}/resume" '{}'
 [ "$(jf state)" = "running" ] && log_ok "  running" || log_fail "  resume state='$(jf state)'"
+
+# Cancel run — create a separate run so we don't break the main lifecycle
+CANCEL_RUN_ID="crun_${RUN_ID}"
+chk "POST run for cancel test" 201 POST /v1/runs \
+  "{\"tenant_id\":\"default\",\"workspace_id\":\"default\",\"project_id\":\"default\",\"session_id\":\"${SESSION_ID}\",\"run_id\":\"${CANCEL_RUN_ID}\"}"
+chk "POST /v1/runs/:id/cancel" 200 POST "/v1/runs/${CANCEL_RUN_ID}/cancel" ""
+[ "$(jf state)" = "canceled" ] && log_ok "  canceled" || log_fail "  cancel state='$(jf state)'"
 
 # =============================================================================
 section "4. Task queue"
@@ -307,6 +315,20 @@ section "16. Evals"
 
 chk "GET /v1/evals/runs" 200 GET "/v1/evals/runs?tenant_id=default&workspace_id=default&project_id=default"
 
+EVAL_RUN_ID="eval_${RUN_ID}"
+chk "POST /v1/evals/runs (create eval run)" 201 POST /v1/evals/runs \
+  "{\"tenant_id\":\"default\",\"workspace_id\":\"default\",\"project_id\":\"default\",\"eval_run_id\":\"${EVAL_RUN_ID}\",\"subject_kind\":\"prompt_release\",\"evaluator_type\":\"accuracy\"}"
+
+chk "GET /v1/evals/runs/:id" 200 GET "/v1/evals/runs/${EVAL_RUN_ID}"
+
+chk "POST /v1/evals/runs/:id/start" 200 POST "/v1/evals/runs/${EVAL_RUN_ID}/start" ""
+
+chk "POST /v1/evals/runs/:id/score" 200 POST "/v1/evals/runs/${EVAL_RUN_ID}/score" \
+  "{\"metrics\":{\"accuracy\":0.85,\"latency_p50_ms\":120.0}}"
+
+chk "POST /v1/evals/runs/:id/complete" 200 POST "/v1/evals/runs/${EVAL_RUN_ID}/complete" \
+  "{\"metrics\":{\"accuracy\":0.85,\"latency_p50_ms\":120.0},\"cost\":0.05}"
+
 # =============================================================================
 section "17. Approval gate flow (via events)"
 
@@ -333,10 +355,26 @@ chk "POST resolve gate" 200 POST \
   || log_fail "  gate decision='$(jf decision)'"
 
 # =============================================================================
-section "18. Bundle export"
+section "18. Bundle export/import round-trip"
 
 chk "GET /v1/bundles/export" 200 GET \
   "/v1/bundles/export?tenant_id=default&workspace_id=default&project_id=default"
+
+# Validate bundle has expected structure
+HAS_EVENTS=$(printf '%s' "$_BODY" | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); print(len(d.get('events',[])))" 2>/dev/null || echo 0)
+[ "${HAS_EVENTS:-0}" -gt 0 ] \
+  && log_ok "  bundle contains ${HAS_EVENTS} events" \
+  || log_fail "  bundle events empty"
+
+# Validate bundle (dry-run import)
+chk2xx "POST /v1/bundles/validate" POST /v1/bundles/validate "$_BODY"
+
+# Import the bundle back (should be idempotent / merge)
+api POST /v1/bundles/import "$_BODY"
+[[ "$_HTTP" =~ ^(200|201|409)$ ]] \
+  && log_ok "POST /v1/bundles/import (HTTP $_HTTP)" \
+  || log_fail "POST /v1/bundles/import (unexpected HTTP $_HTTP)"
 
 # =============================================================================
 section "19. Entitlements & templates"
@@ -402,6 +440,45 @@ else
 fi
 
 # =============================================================================
+section "22. Checkpoint save/restore"
+
+# Save a checkpoint for the primary run
+CHECKPOINT_ID="ckpt_${RUN_ID}"
+api POST "/v1/runs/${RUN_ID}/checkpoint" \
+  "{\"checkpoint_id\":\"${CHECKPOINT_ID}\",\"strategy\":\"manual\",\"state_snapshot\":{\"step\":1,\"notes\":\"smoke test checkpoint\"}}"
+[[ "$_HTTP" =~ ^(200|201)$ ]] \
+  && log_ok "POST /v1/runs/:id/checkpoint (HTTP $_HTTP)" \
+  || log_fail "POST /v1/runs/:id/checkpoint (unexpected HTTP $_HTTP)"
+
+api GET "/v1/runs/${RUN_ID}/checkpoint-strategy"
+[[ "$_HTTP" =~ ^(200|404)$ ]] \
+  && log_ok "GET /v1/runs/:id/checkpoint-strategy (HTTP $_HTTP)" \
+  || log_fail "GET /v1/runs/:id/checkpoint-strategy (unexpected HTTP $_HTTP)"
+
+# =============================================================================
+section "23. Graph endpoints"
+
+chk2xx "GET /v1/graph/nodes"  GET "/v1/graph/nodes?tenant_id=default&workspace_id=default&project_id=default&limit=10"
+chk2xx "GET /v1/graph/edges"  GET "/v1/graph/edges?tenant_id=default&workspace_id=default&project_id=default&limit=10"
+
+api GET "/v1/graph/execution-trace/${RUN_ID}"
+[[ "$_HTTP" =~ ^(200|404)$ ]] \
+  && log_ok "GET /v1/graph/execution-trace/:run_id (HTTP $_HTTP)" \
+  || log_fail "GET /v1/graph/execution-trace/:run_id (unexpected HTTP $_HTTP)"
+
+# =============================================================================
+section "24. System info & notifications"
+
+chk "GET /v1/system/info" 200 GET /v1/system/info
+chk2xx "GET /v1/notifications" GET /v1/notifications
+chk "GET /v1/settings" 200 GET /v1/settings
+chk "GET /v1/overview" 200 GET "/v1/overview?tenant_id=default&workspace_id=default&project_id=default"
+
+# =============================================================================
+SUITE_END=$(date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))")
+ELAPSED_MS=$(( SUITE_END - SUITE_START ))
+ELAPSED_S=$(python3 -c "print(f'{${ELAPSED_MS}/1000:.1f}')" 2>/dev/null || echo "?")
+
 TOTAL=$(( PASS + FAIL + SKIP ))
 echo "" >&2
 echo -e "${BLD}── Results $(printf '─%.0s' {1..36})${RST}" >&2
@@ -409,6 +486,7 @@ printf "  ${GRN}Passed${RST}   %3d\n"  "$PASS" >&2
 printf "  ${RED}Failed${RST}   %3d\n"  "$FAIL" >&2
 printf "  ${YLW}Skipped${RST}  %3d\n" "$SKIP"  >&2
 printf "  Total    %3d\n"              "$TOTAL" >&2
+printf "  Time     %ss\n"             "$ELAPSED_S" >&2
 echo "" >&2
 
 if [ "$FAIL" -eq 0 ]; then

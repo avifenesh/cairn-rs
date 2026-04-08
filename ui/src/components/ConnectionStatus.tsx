@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Wifi, WifiOff, Loader2, ChevronDown, ChevronUp, X, RefreshCw, CloudOff } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
+import { isRuntimeHealthy } from '../lib/types';
 import { useEventStream } from '../hooks/useEventStream';
 import { onNetworkChange, isOnline, hasPendingUpdate, applyUpdate } from '../lib/registerSW';
 
@@ -47,7 +48,7 @@ const TEXT_CLASS: Record<ServiceStatus, string> = {
   ok:       'text-emerald-400',
   degraded: 'text-amber-400',
   down:     'text-red-400',
-  checking: 'text-zinc-500',
+  checking: 'text-gray-400 dark:text-zinc-500',
 };
 
 const STATUS_LABEL: Record<ServiceStatus, string> = {
@@ -66,12 +67,12 @@ function ServiceRow({ svc }: { svc: ServiceState }) {
         'shrink-0 w-1.5 h-1.5 rounded-full',
         svc.status === 'checking' ? 'bg-zinc-600 animate-pulse' : DOT_CLASS[svc.status],
       )} />
-      <span className="flex-1 text-[12px] text-zinc-300">{svc.label}</span>
+      <span className="flex-1 text-[12px] text-gray-700 dark:text-zinc-300">{svc.label}</span>
       <span className={clsx('text-[11px] font-medium', TEXT_CLASS[svc.status])}>
         {svc.detail ?? STATUS_LABEL[svc.status]}
       </span>
       {svc.latencyMs !== undefined && (
-        <span className="text-[10px] text-zinc-600 font-mono tabular-nums w-12 text-right">
+        <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono tabular-nums w-12 text-right">
           {svc.latencyMs}ms
         </span>
       )}
@@ -148,29 +149,31 @@ export function ConnectionStatus() {
   }, [expanded]);
 
   // Build service states.
+  const apiHealthy = apiData ? isRuntimeHealthy(apiData.status) : false;
   const apiService: ServiceState = apiLoading
     ? { status: 'checking', label: 'API' }
     : apiError
       ? { status: 'down',    label: 'API', detail: 'unreachable' }
       : {
-          status:    apiData?.status.runtime_ok && apiData?.status.store_ok ? 'ok' : 'degraded',
+          status:    apiHealthy ? 'ok' : 'degraded',
           label:     'API',
-          detail:    apiData?.status.runtime_ok && apiData?.status.store_ok ? 'healthy' : 'store issue',
+          detail:    apiHealthy ? 'healthy' : 'degraded',
           latencyMs: apiData?.latency,
         };
 
+  // SSE is a nice-to-have for live updates; the dashboard works without it
+  // via polling. Don't let SSE drag overall status to "Disconnected".
   const sseService: ServiceState = {
     status: sseStatus === 'connected'
       ? 'ok'
-      : sseStatus === 'connecting'
-        ? 'degraded'
-        : 'down',
+      : 'degraded',
     label:  'SSE stream',
-    detail: sseStatus,
+    detail: sseStatus === 'connected' ? 'connected' : 'reconnecting',
   };
 
+  // Ollama not being configured is expected in many setups — treat as neutral.
   const ollamaService: ServiceState = ollamaError
-    ? { status: 'down',    label: 'Ollama', detail: 'not configured' }
+    ? { status: 'degraded', label: 'Ollama', detail: 'not configured' }
     : !ollamaData
       ? { status: 'checking', label: 'Ollama' }
       : {
@@ -181,7 +184,9 @@ export function ConnectionStatus() {
         };
 
   const services = [apiService, sseService, ollamaService];
-  const overall  = overallStatus(services);
+  // Overall status is based on API health only. SSE and Ollama are supplementary —
+  // the dashboard works via polling without SSE, and Ollama is optional.
+  const overall  = overallStatus([apiService]);
 
   // Don't render after explicit dismiss (until page refresh).
   if (dismissed) return null;
@@ -245,14 +250,14 @@ export function ConnectionStatus() {
     >
       {/* Expanded panel */}
       {expanded && (
-        <div className="mb-1.5 w-64 rounded-xl bg-zinc-900 border border-zinc-800
+        <div className="mb-1.5 w-64 rounded-xl bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800
                         shadow-2xl shadow-black/50 overflow-hidden
                         animate-[fadeIn_150ms_ease-out]">
           {/* Header */}
-          <div className="flex items-center justify-between px-3 py-2.5 border-b border-zinc-800">
+          <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-200 dark:border-zinc-800">
             <div className="flex items-center gap-2">
               {overall === 'checking'
-                ? <Loader2 size={13} className="text-zinc-500 animate-spin" />
+                ? <Loader2 size={13} className="text-gray-400 dark:text-zinc-500 animate-spin" />
                 : overall === 'ok'
                   ? <Wifi    size={13} className="text-emerald-400" />
                   : <WifiOff size={13} className="text-red-400" />
@@ -264,22 +269,22 @@ export function ConnectionStatus() {
             <button
               onClick={() => setDismissed(true)}
               aria-label="Dismiss connection status"
-              className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
+              className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors"
             >
               <X size={12} />
             </button>
           </div>
 
           {/* Service rows */}
-          <div className="px-3 divide-y divide-zinc-800/60">
+          <div className="px-3 divide-y divide-gray-200 dark:divide-zinc-800/60">
             {services.map(svc => <ServiceRow key={svc.label} svc={svc} />)}
           </div>
 
           {/* Footer */}
           {lastChecked && (
-            <div className="px-3 py-2 border-t border-zinc-800/60 flex items-center justify-between">
-              <span className="text-[10px] text-zinc-700">Last checked {lastChecked}</span>
-              <span className="text-[10px] text-zinc-700">auto every 30s</span>
+            <div className="px-3 py-2 border-t border-gray-200/60 dark:border-zinc-800/60 flex items-center justify-between">
+              <span className="text-[10px] text-gray-300 dark:text-zinc-700">Last checked {lastChecked}</span>
+              <span className="text-[10px] text-gray-300 dark:text-zinc-700">auto every 30s</span>
             </div>
           )}
         </div>
@@ -293,10 +298,10 @@ export function ConnectionStatus() {
         className={clsx(
           'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 transition-all duration-200',
           'border shadow-lg shadow-black/30',
-          'bg-zinc-900/90 backdrop-blur-sm',
+          'bg-gray-50/90 dark:bg-zinc-900/90 backdrop-blur-sm',
           expanded
-            ? 'border-zinc-700 pr-2'
-            : 'border-zinc-800 hover:border-zinc-600',
+            ? 'border-gray-200 dark:border-zinc-700 pr-2'
+            : 'border-gray-200 dark:border-zinc-800 hover:border-zinc-600',
         )}
       >
         {/* Animated status dot */}
@@ -314,8 +319,8 @@ export function ConnectionStatus() {
         </span>
 
         {expanded
-          ? <ChevronDown size={11} className="text-zinc-600" />
-          : <ChevronUp   size={11} className="text-zinc-600" />
+          ? <ChevronDown size={11} className="text-gray-400 dark:text-zinc-600" />
+          : <ChevronUp   size={11} className="text-gray-400 dark:text-zinc-600" />
         }
       </button>
     </div>

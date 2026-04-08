@@ -2,14 +2,14 @@ import { clsx } from "clsx";
 import type { RunState } from "../lib/types";
 
 const STATE_STYLES: Record<RunState, string> = {
-  pending:            "bg-zinc-800/80 text-zinc-400",
+  pending:            "bg-gray-100/80 dark:bg-zinc-800/80 text-gray-500 dark:text-zinc-400",
   running:            "bg-indigo-500/10 text-indigo-400",
   paused:             "bg-amber-500/10  text-amber-400",
   waiting_approval:   "bg-violet-500/10 text-violet-400",
   waiting_dependency: "bg-sky-500/10    text-sky-400",
   completed:          "bg-emerald-500/10 text-emerald-400",
   failed:             "bg-red-500/10    text-red-400",
-  canceled:           "bg-zinc-800/60   text-zinc-500",
+  canceled:           "bg-gray-100/60 dark:bg-zinc-800/60   text-gray-400 dark:text-zinc-500",
 };
 
 const STATE_DOT: Record<RunState, string> = {

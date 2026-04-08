@@ -88,7 +88,7 @@ type ChannelStatus = 'active' | 'inactive' | 'error';
 function statusColors(s: ChannelStatus): string {
   if (s === 'active')   return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
   if (s === 'error')    return 'text-red-400 bg-red-400/10 border-red-400/20';
-  return 'text-zinc-400 bg-zinc-800 border-zinc-700';
+  return 'text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700';
 }
 
 function kindColors(kind: string): string {
@@ -98,7 +98,7 @@ function kindColors(kind: string): string {
     case 'email':     return 'text-sky-400 bg-sky-400/10 border-sky-400/20';
     case 'pagerduty': return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
     case 'telegram':  return 'text-cyan-400 bg-cyan-400/10 border-cyan-400/20';
-    default:          return 'text-zinc-400 bg-zinc-800 border-zinc-700';
+    default:          return 'text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700';
   }
 }
 
@@ -113,9 +113,9 @@ function KindIcon({ kind, size = 12 }: { kind: string; size?: number }) {
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -124,11 +124,11 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
 
 function DeliveryRow({ rec }: { rec: NotificationRecord }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-1.5 border-b border-zinc-800/50 last:border-0 hover:bg-white/[0.02] transition-colors">
-      <span className="text-[11px] font-mono text-zinc-600 shrink-0 tabular-nums w-36">
+    <div className="flex items-center gap-3 px-3 py-1.5 border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0 hover:bg-white/[0.02] transition-colors">
+      <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-600 shrink-0 tabular-nums w-36">
         {fmtTime(rec.sent_at_ms)}
       </span>
-      <span className="flex-1 min-w-0 text-[11px] text-zinc-400 font-mono truncate">
+      <span className="flex-1 min-w-0 text-[11px] text-gray-500 dark:text-zinc-400 font-mono truncate">
         {rec.event_type}
       </span>
       <span className={clsx('shrink-0 flex items-center gap-1 text-[10px]',
@@ -192,12 +192,12 @@ function ChannelDetail({
   }
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950/30">
+    <div className="border-t border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/30">
       <div className="flex items-center justify-between px-4 py-2.5">
-        <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+        <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
           Recent Deliveries
           {myDeliveries.length > 0 && (
-            <span className="ml-1.5 font-normal normal-case text-zinc-700">({myDeliveries.length})</span>
+            <span className="ml-1.5 font-normal normal-case text-gray-300 dark:text-zinc-700">({myDeliveries.length})</span>
           )}
         </span>
 
@@ -206,14 +206,14 @@ function ChannelDetail({
           {testState !== 'idle' && (
             <span className={clsx('text-[11px]',
               testState === 'ok'  ? 'text-emerald-400' :
-              testState === 'err' ? 'text-red-400' : 'text-zinc-500')}>
+              testState === 'err' ? 'text-red-400' : 'text-gray-400 dark:text-zinc-500')}>
               {testState === 'sending' ? 'Sending…' : testMsg}
             </span>
           )}
           <button
             onClick={testConnection}
             disabled={testState === 'sending'}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-800 text-zinc-400 text-[11px] hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[11px] hover:bg-gray-200 dark:hover:bg-zinc-700 hover:text-gray-800 dark:text-zinc-200 disabled:opacity-40 transition-colors"
           >
             {testState === 'sending'
               ? <Loader2 size={10} className="animate-spin" />
@@ -224,17 +224,17 @@ function ChannelDetail({
       </div>
 
       {myDeliveries.length === 0 ? (
-        <div className="px-4 pb-4 text-[12px] text-zinc-600 italic">
+        <div className="px-4 pb-4 text-[12px] text-gray-400 dark:text-zinc-600 italic">
           No delivery records for this channel yet.
         </div>
       ) : (
-        <div className="mx-4 mb-3 rounded-md border border-zinc-800 overflow-hidden bg-zinc-950">
+        <div className="mx-4 mb-3 rounded-md border border-gray-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-950">
           {/* Table header */}
-          <div className="flex items-center gap-3 px-3 h-7 border-b border-zinc-800 bg-zinc-900">
-            <span className="w-36 shrink-0 text-[10px] text-zinc-600 uppercase tracking-wider">Timestamp</span>
-            <span className="flex-1 text-[10px] text-zinc-600 uppercase tracking-wider">Event</span>
-            <span className="shrink-0 text-[10px] text-zinc-600 uppercase tracking-wider">Status</span>
-            <span className="w-44 shrink-0 text-[10px] text-zinc-600 uppercase tracking-wider">Error</span>
+          <div className="flex items-center gap-3 px-3 h-7 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900">
+            <span className="w-36 shrink-0 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Timestamp</span>
+            <span className="flex-1 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Event</span>
+            <span className="shrink-0 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Status</span>
+            <span className="w-44 shrink-0 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Error</span>
           </div>
           {myDeliveries.map(rec => (
             <div key={rec.record_id} className="group relative">
@@ -242,7 +242,7 @@ function ChannelDetail({
               {!rec.delivered && (
                 <button
                   onClick={() => retryRecord(rec.record_id)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 text-[10px] hover:text-zinc-300 transition-all"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 text-[10px] hover:text-gray-700 dark:text-zinc-300 transition-all"
                 >
                   <RotateCcw size={9} /> Retry
                 </button>
@@ -284,8 +284,8 @@ function ChannelRow({
 }) {
   return (
     <div className={clsx(
-      'border-b border-zinc-800/50 last:border-0',
-      even ? 'bg-zinc-900' : 'bg-zinc-900/50',
+      'border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0',
+      even ? 'bg-gray-50 dark:bg-zinc-900' : 'bg-gray-50/50 dark:bg-zinc-900/50',
     )}>
       {/* Main row */}
       <div
@@ -293,14 +293,14 @@ function ChannelRow({
         onClick={onToggle}
       >
         {/* Expand chevron */}
-        <div className="w-8 shrink-0 flex justify-center text-zinc-600">
+        <div className="w-8 shrink-0 flex justify-center text-gray-400 dark:text-zinc-600">
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </div>
 
         {/* Name */}
         <div className="flex-1 min-w-0 flex items-center gap-2 pr-2">
           <KindIcon kind={channel.kind} size={12} />
-          <span className="text-[12px] font-medium text-zinc-200 truncate" title={channel.target}>
+          <span className="text-[12px] font-medium text-gray-800 dark:text-zinc-200 truncate" title={channel.target}>
             {channelDisplayName(channel)}
           </span>
         </div>
@@ -318,7 +318,7 @@ function ChannelRow({
 
         {/* URL/Target */}
         <div className="w-52 shrink-0 px-2">
-          <span className="text-[11px] font-mono text-zinc-500 truncate" title={channel.target}>
+          <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-500 truncate" title={channel.target}>
             {channel.target}
           </span>
         </div>
@@ -337,17 +337,17 @@ function ChannelRow({
         <div className="w-28 shrink-0 px-2 flex items-center gap-1">
           {lastTriggeredMs ? (
             <>
-              <Clock size={10} className="text-zinc-600 shrink-0" />
-              <span className="text-[11px] text-zinc-500 tabular-nums">{fmtRelative(lastTriggeredMs)}</span>
+              <Clock size={10} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+              <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{fmtRelative(lastTriggeredMs)}</span>
             </>
           ) : (
-            <span className="text-[11px] text-zinc-700">—</span>
+            <span className="text-[11px] text-gray-300 dark:text-zinc-700">—</span>
           )}
         </div>
 
         {/* Events subscribed */}
         <div className="w-24 shrink-0 px-2">
-          <span className="text-[11px] tabular-nums text-zinc-400">
+          <span className="text-[11px] tabular-nums text-gray-500 dark:text-zinc-400">
             {eventCount} event{eventCount !== 1 ? 's' : ''}
           </span>
         </div>
@@ -357,7 +357,7 @@ function ChannelRow({
           <button
             onClick={e => { e.stopPropagation(); onDelete(); }}
             title="Remove channel"
-            className="flex items-center gap-1 px-1.5 py-1 rounded text-zinc-600 text-[11px] hover:bg-red-500/10 hover:text-red-400 transition-colors"
+            className="flex items-center gap-1 px-1.5 py-1 rounded text-gray-400 dark:text-zinc-600 text-[11px] hover:bg-red-500/10 hover:text-red-400 transition-colors"
           >
             <Trash2 size={10} />
           </button>
@@ -437,19 +437,19 @@ function AddChannelModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg mx-4 shadow-2xl max-h-[90vh] flex flex-col"
+        className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg w-full max-w-lg mx-4 shadow-2xl max-h-[90vh] flex flex-col"
         ref={trapRef}
         role="dialog"
         aria-modal="true"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800 shrink-0">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 dark:border-zinc-800 shrink-0">
           <div className="flex items-center gap-2">
             <Bell size={14} className="text-indigo-400" />
-            <span className="text-[13px] font-semibold text-zinc-100">Add Channel</span>
+            <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">Add Channel</span>
           </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+          <button onClick={onClose} className="text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors">
             <X size={14} />
           </button>
         </div>
@@ -459,13 +459,13 @@ function AddChannelModal({
           {/* Type + Target side-by-side */}
           <div className="grid grid-cols-5 gap-3">
             <div className="col-span-2">
-              <label className="block text-[11px] text-zinc-500 mb-1.5">
+              <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
                 Type <span className="text-red-400">*</span>
               </label>
               <select
                 value={form.kind}
                 onChange={e => setForm(f => ({ ...f, kind: e.target.value }))}
-                className="w-full h-8 bg-zinc-950 border border-zinc-800 rounded-md px-2 text-[12px] text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
+                className="w-full h-8 bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-md px-2 text-[12px] text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
               >
                 {CHANNEL_TYPES.map(({ value, label }) => (
                   <option key={value} value={value}>{label}</option>
@@ -475,7 +475,7 @@ function AddChannelModal({
             </div>
 
             <div className="col-span-3">
-              <label className="block text-[11px] text-zinc-500 mb-1.5">
+              <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
                 {form.kind === 'email' ? 'Email Address' : 'Target URL'}{' '}
                 <span className="text-red-400">*</span>
               </label>
@@ -485,9 +485,9 @@ function AddChannelModal({
                 onChange={e => { setForm(f => ({ ...f, target: e.target.value })); setFieldErr(v => ({ ...v, target: undefined })); }}
                 placeholder={placeholder}
                 className={clsx(
-                  'w-full h-8 bg-zinc-950 border rounded-md px-3 text-[12px] text-zinc-200 font-mono',
+                  'w-full h-8 bg-white dark:bg-zinc-950 border rounded-md px-3 text-[12px] text-gray-800 dark:text-zinc-200 font-mono',
                   'placeholder-zinc-600 focus:outline-none transition-colors',
-                  fieldErr.target ? 'border-red-500/60 focus:border-red-500' : 'border-zinc-800 focus:border-indigo-500',
+                  fieldErr.target ? 'border-red-500/60 focus:border-red-500' : 'border-gray-200 dark:border-zinc-800 focus:border-indigo-500',
                 )}
               />
               {fieldErr.target && <p className="mt-1 text-[11px] text-red-400">{fieldErr.target}</p>}
@@ -496,11 +496,11 @@ function AddChannelModal({
 
           {/* Event subscriptions */}
           <div>
-            <label className="block text-[11px] text-zinc-500 mb-2">
+            <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-2">
               Event Subscriptions
-              <span className="ml-1.5 text-zinc-700 font-normal">(applies to all channels)</span>
+              <span className="ml-1.5 text-gray-300 dark:text-zinc-700 font-normal">(applies to all channels)</span>
             </label>
-            <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <div className="rounded-md border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
               {ALL_EVENTS.map(({ value, label }) => (
                 <label
                   key={value}
@@ -510,15 +510,15 @@ function AddChannelModal({
                     type="checkbox"
                     checked={form.selectedEvents.has(value)}
                     onChange={() => toggleEvent(value)}
-                    className="w-3.5 h-3.5 rounded bg-zinc-800 border-zinc-700 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 accent-indigo-500"
+                    className="w-3.5 h-3.5 rounded bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 accent-indigo-500"
                   />
-                  <span className="text-[12px] text-zinc-400 group-hover:text-zinc-300 transition-colors">
+                  <span className="text-[12px] text-gray-500 dark:text-zinc-400 group-hover:text-gray-700 dark:text-zinc-300 transition-colors">
                     {label}
                   </span>
                 </label>
               ))}
             </div>
-            <p className="mt-1.5 text-[10px] text-zinc-700">
+            <p className="mt-1.5 text-[10px] text-gray-300 dark:text-zinc-700">
               {form.selectedEvents.size} of {ALL_EVENTS.length} events selected
             </p>
           </div>
@@ -533,7 +533,7 @@ function AddChannelModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-400 text-[12px] hover:bg-zinc-700 transition-colors"
+            className="px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
           >
             Cancel
           </button>
@@ -569,7 +569,7 @@ function DeleteDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-sm mx-4 shadow-2xl"
+        className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg w-full max-w-sm mx-4 shadow-2xl"
         ref={trapRef}
         role="dialog"
         aria-modal="true"
@@ -580,16 +580,16 @@ function DeleteDialog({
             <AlertTriangle size={14} className="text-red-400" />
           </div>
           <div>
-            <p className="text-[13px] font-semibold text-zinc-100">Remove channel?</p>
-            <p className="text-[12px] text-zinc-400 mt-1">
-              <span className="font-mono text-zinc-300">{channelLabel(channel.kind)}</span>
-              {' → '}<span className="font-mono text-zinc-300">{channel.target}</span>{' '}
+            <p className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">Remove channel?</p>
+            <p className="text-[12px] text-gray-500 dark:text-zinc-400 mt-1">
+              <span className="font-mono text-gray-700 dark:text-zinc-300">{channelLabel(channel.kind)}</span>
+              {' → '}<span className="font-mono text-gray-700 dark:text-zinc-300">{channel.target}</span>{' '}
               will stop receiving notifications.
             </p>
           </div>
         </div>
         <div className="flex justify-end gap-2 px-5 pb-4">
-          <button onClick={onCancel} className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-400 text-[12px] hover:bg-zinc-700 transition-colors">Cancel</button>
+          <button onClick={onCancel} className="px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors">Cancel</button>
           <button onClick={onConfirm} disabled={isPending} className="px-3 py-1.5 rounded bg-red-600 text-white text-[12px] hover:bg-red-500 disabled:opacity-50 transition-colors flex items-center gap-1.5">
             {isPending && <Loader2 size={11} className="animate-spin" />}
             {isPending ? 'Removing…' : 'Remove'}
@@ -676,32 +676,32 @@ export function ChannelsPage() {
   if (isError) return <ErrorFallback error={prefsQuery.error} resource="channels" onRetry={() => void prefsQuery.refetch()} />;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
-        <span className="text-[13px] font-medium text-zinc-200">
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           Channels
           {!isLoading && channels.length > 0 && (
-            <span className="ml-2 text-[12px] text-zinc-500 font-normal">{channels.length}</span>
+            <span className="ml-2 text-[12px] text-gray-400 dark:text-zinc-500 font-normal">{channels.length}</span>
           )}
         </span>
 
         {/* Scope selectors */}
         <div className="flex items-center gap-3 ml-4">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-zinc-600">Tenant:</span>
+            <span className="text-[11px] text-gray-400 dark:text-zinc-600">Tenant:</span>
             <input
               value={tenantId}
               onChange={e => setTenantId(e.target.value || 'default')}
-              className="h-6 w-24 bg-zinc-800 border border-zinc-700 rounded px-2 text-[11px] font-mono text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
+              className="h-6 w-24 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 text-[11px] font-mono text-gray-700 dark:text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
             />
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-zinc-600">Operator:</span>
+            <span className="text-[11px] text-gray-400 dark:text-zinc-600">Operator:</span>
             <input
               value={operatorId}
               onChange={e => setOperatorId(e.target.value || 'admin')}
-              className="h-6 w-24 bg-zinc-800 border border-zinc-700 rounded px-2 text-[11px] font-mono text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
+              className="h-6 w-24 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 text-[11px] font-mono text-gray-700 dark:text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors"
             />
           </div>
         </div>
@@ -715,7 +715,7 @@ export function ChannelsPage() {
         <button
           onClick={() => { prefsQuery.refetch(); failedQuery.refetch(); }}
           disabled={prefsQuery.isFetching}
-          className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={prefsQuery.isFetching ? 'animate-spin' : ''} />
           Refresh
@@ -724,7 +724,7 @@ export function ChannelsPage() {
 
       {/* Stat strip */}
       {!isLoading && (
-        <div className="grid grid-cols-4 gap-x-6 px-5 py-3 border-b border-zinc-800 shrink-0">
+        <div className="grid grid-cols-4 gap-x-6 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 shrink-0">
           <StatCard label="Channels"    value={channels.length} />
           <StatCard label="Active"      value={activeCount} />
           <StatCard label="Errors"      value={errorCount} sub={errorCount > 0 ? 'check delivery log' : undefined} />
@@ -735,17 +735,17 @@ export function ChannelsPage() {
       {/* Table */}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         {isLoading ? (
-          <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+          <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-[13px]">Loading…</span>
           </div>
         ) : channels.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-64 gap-3 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700">
-              <Bell size={24} className="text-zinc-500" />
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700">
+              <Bell size={24} className="text-gray-400 dark:text-zinc-500" />
             </div>
-            <p className="text-[13px] font-medium text-zinc-400">No channels configured</p>
-            <p className="text-[12px] text-zinc-600 max-w-xs">
+            <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No channels configured</p>
+            <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
               Add a webhook, Slack, email, or PagerDuty channel to receive real-time notifications
               when runs fail, approvals are required, or providers degrade.
             </p>
@@ -759,25 +759,25 @@ export function ChannelsPage() {
         ) : (
           <div className="min-w-[860px]">
             {/* Column headers */}
-            <div className="flex items-center h-8 border-b border-zinc-800 bg-zinc-950 sticky top-0">
+            <div className="flex items-center h-8 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 sticky top-0">
               <div className="w-8 shrink-0" />
               <div className="flex-1 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Name / Target</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Name / Target</span>
               </div>
               <div className="w-28 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Type</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Type</span>
               </div>
               <div className="w-52 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">URL / Target</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">URL / Target</span>
               </div>
               <div className="w-24 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Status</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Status</span>
               </div>
               <div className="w-28 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Last Triggered</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Last Triggered</span>
               </div>
               <div className="w-24 shrink-0 px-2">
-                <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Events</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Events</span>
               </div>
               <div className="w-16 shrink-0 px-2" />
             </div>
@@ -807,13 +807,13 @@ export function ChannelsPage() {
 
       {/* Event subscriptions footer — shown when channels exist */}
       {channels.length > 0 && eventTypes.length > 0 && (
-        <div className="px-5 py-2.5 border-t border-zinc-800 shrink-0">
-          <p className="text-[11px] text-zinc-600 mb-1">
+        <div className="px-5 py-2.5 border-t border-gray-200 dark:border-zinc-800 shrink-0">
+          <p className="text-[11px] text-gray-400 dark:text-zinc-600 mb-1">
             Subscribed events ({eventTypes.length}):
           </p>
           <div className="flex flex-wrap gap-1">
             {eventTypes.map(ev => (
-              <span key={ev} className="inline-flex px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-zinc-500">
+              <span key={ev} className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-[10px] font-mono text-gray-400 dark:text-zinc-500">
                 {ev}
               </span>
             ))}

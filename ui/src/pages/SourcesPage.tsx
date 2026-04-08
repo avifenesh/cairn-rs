@@ -39,7 +39,7 @@ function inferType(sourceId: string): string {
 /** Freshness status based on last_ingested_at. */
 function sourceStatus(src: SourceRecord): { label: string; color: string } {
   if (!src.last_ingested_at_ms) {
-    return { label: 'Pending', color: 'text-zinc-500 bg-zinc-800 border-zinc-700' };
+    return { label: 'Pending', color: 'text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700' };
   }
   const age = Date.now() - src.last_ingested_at_ms;
   const days = age / 86_400_000;
@@ -55,10 +55,10 @@ function QualityBar({ score }: { score: number }) {
   const color = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-500';
   return (
     <div className="flex items-center gap-2">
-      <div className="w-16 h-1 rounded-full bg-zinc-800">
+      <div className="w-16 h-1 rounded-full bg-gray-100 dark:bg-zinc-800">
         <div className={clsx('h-1 rounded-full', color)} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-[11px] tabular-nums text-zinc-500 w-7 text-right">{pct}%</span>
+      <span className="text-[11px] tabular-nums text-gray-400 dark:text-zinc-500 w-7 text-right">{pct}%</span>
     </div>
   );
 }
@@ -73,12 +73,12 @@ function QualityPanel({ sourceId }: { sourceId: string }) {
   });
 
   if (isLoading) return (
-    <div className="flex items-center gap-2 px-6 py-3 text-zinc-600 text-[12px]">
+    <div className="flex items-center gap-2 px-6 py-3 text-gray-400 dark:text-zinc-600 text-[12px]">
       <Loader2 size={12} className="animate-spin" /> Loading quality metrics…
     </div>
   );
   if (isError || !data) return (
-    <div className="px-6 py-3 text-[12px] text-zinc-600 italic">Quality data unavailable.</div>
+    <div className="px-6 py-3 text-[12px] text-gray-400 dark:text-zinc-600 italic">Quality data unavailable.</div>
   );
 
   const metrics: { label: string; value: string }[] = [
@@ -89,12 +89,12 @@ function QualityPanel({ sourceId }: { sourceId: string }) {
   ];
 
   return (
-    <div className="px-6 py-3 border-t border-zinc-800/60 bg-zinc-950/40">
+    <div className="px-6 py-3 border-t border-gray-200/60 dark:border-zinc-800/60 bg-white dark:bg-zinc-950/40">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-2">
         {metrics.map(({ label, value }) => (
           <div key={label}>
-            <p className="text-[10px] text-zinc-600 uppercase tracking-wider">{label}</p>
-            <p className="text-[13px] font-semibold text-zinc-200 tabular-nums">{value}</p>
+            <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">{label}</p>
+            <p className="text-[13px] font-semibold text-gray-800 dark:text-zinc-200 tabular-nums">{value}</p>
           </div>
         ))}
       </div>
@@ -113,24 +113,24 @@ function SourceRow({ source, even, expanded, onToggle }: {
   const status = sourceStatus(source);
 
   return (
-    <div className={clsx('border-b border-zinc-800/50 last:border-0', even ? 'bg-zinc-900' : 'bg-zinc-900/50')}>
+    <div className={clsx('border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0', even ? 'bg-gray-50 dark:bg-zinc-900' : 'bg-gray-50/50 dark:bg-zinc-900/50')}>
       {/* Main row */}
       <div
         className="flex items-center gap-3 px-4 h-10 cursor-pointer hover:bg-white/[0.02] transition-colors"
         onClick={onToggle}
       >
         {/* Expand icon */}
-        <span className="shrink-0 text-zinc-600">
+        <span className="shrink-0 text-gray-400 dark:text-zinc-600">
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </span>
 
         {/* Source ID */}
-        <span className="flex-1 min-w-0 text-[12px] font-mono text-zinc-300 truncate" title={source.source_id}>
+        <span className="flex-1 min-w-0 text-[12px] font-mono text-gray-700 dark:text-zinc-300 truncate" title={source.source_id}>
           {source.source_id}
         </span>
 
         {/* Type */}
-        <span className="w-20 shrink-0 text-[11px] text-zinc-500">
+        <span className="w-20 shrink-0 text-[11px] text-gray-400 dark:text-zinc-500">
           {inferType(source.source_id)}
         </span>
 
@@ -140,12 +140,12 @@ function SourceRow({ source, even, expanded, onToggle }: {
         </span>
 
         {/* Last sync */}
-        <span className="w-24 shrink-0 text-[11px] text-zinc-500 tabular-nums" title={fmtDate(source.last_ingested_at_ms)}>
+        <span className="w-24 shrink-0 text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums" title={fmtDate(source.last_ingested_at_ms)}>
           {fmtRelative(source.last_ingested_at_ms)}
         </span>
 
         {/* Records */}
-        <span className="w-16 shrink-0 text-right text-[12px] tabular-nums text-zinc-300">
+        <span className="w-16 shrink-0 text-right text-[12px] tabular-nums text-gray-700 dark:text-zinc-300">
           {source.document_count.toLocaleString()}
         </span>
 
@@ -166,9 +166,9 @@ function SourceRow({ source, even, expanded, onToggle }: {
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -194,30 +194,30 @@ export function SourcesPage() {
   if (isError) return (
     <div className="flex flex-col items-center justify-center min-h-64 gap-3 p-8 text-center">
       <ServerCrash size={32} className="text-red-500" />
-      <p className="text-[13px] text-zinc-300 font-medium">Failed to load sources</p>
-      <p className="text-[12px] text-zinc-500">
+      <p className="text-[13px] text-gray-700 dark:text-zinc-300 font-medium">Failed to load sources</p>
+      <p className="text-[12px] text-gray-400 dark:text-zinc-500">
         {error instanceof Error ? error.message : 'Unknown error'}
       </p>
-      <button onClick={() => refetch()} className="mt-1 px-3 py-1.5 rounded bg-zinc-800 text-zinc-300 text-[12px] hover:bg-zinc-700 transition-colors">
+      <button onClick={() => refetch()} className="mt-1 px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors">
         Retry
       </button>
     </div>
   );
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
-        <span className="text-[13px] font-medium text-zinc-200">
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           Sources
           {!isLoading && (
-            <span className="ml-2 text-[12px] text-zinc-500 font-normal">{rows.length}</span>
+            <span className="ml-2 text-[12px] text-gray-400 dark:text-zinc-500 font-normal">{rows.length}</span>
           )}
         </span>
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="ml-auto flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
+          className="ml-auto flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={isFetching ? 'animate-spin' : ''} />
           Refresh
@@ -226,7 +226,7 @@ export function SourcesPage() {
 
       {/* Stat strip */}
       {!isLoading && rows.length > 0 && (
-        <div className="grid grid-cols-3 gap-x-6 px-5 py-3 border-b border-zinc-800 shrink-0">
+        <div className="grid grid-cols-3 gap-x-6 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 shrink-0">
           <StatCard label="Sources"     value={rows.length} />
           <StatCard label="Total Docs"  value={totalDocs.toLocaleString()} />
           <StatCard label="Avg Quality" value={`${(avgQuality * 100).toFixed(0)}%`} />
@@ -236,31 +236,31 @@ export function SourcesPage() {
       {/* Table */}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         {isLoading ? (
-          <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+          <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-[13px]">Loading…</span>
           </div>
         ) : rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-64 gap-3 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700">
-              <Database size={24} className="text-zinc-500" />
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700">
+              <Database size={24} className="text-gray-400 dark:text-zinc-500" />
             </div>
-            <p className="text-[13px] font-medium text-zinc-400">No sources registered</p>
-            <p className="text-[12px] text-zinc-600 max-w-xs">
-              Ingest documents via <span className="font-mono text-zinc-500">POST /v1/memory/ingest</span> to register a source.
+            <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No sources registered</p>
+            <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
+              Ingest documents via <span className="font-mono text-gray-400 dark:text-zinc-500">POST /v1/memory/ingest</span> to register a source.
             </p>
           </div>
         ) : (
           <div>
             {/* Column headers */}
-            <div className="flex items-center gap-3 px-4 h-8 border-b border-zinc-800 bg-zinc-950 sticky top-0">
+            <div className="flex items-center gap-3 px-4 h-8 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 sticky top-0">
               <span className="w-4 shrink-0" />
-              <span className="flex-1 text-[10px] text-zinc-600 uppercase tracking-wider">Source ID</span>
-              <span className="w-20 shrink-0 text-[10px] text-zinc-600 uppercase tracking-wider">Type</span>
-              <span className="w-16 shrink-0 text-[10px] text-zinc-600 uppercase tracking-wider">Status</span>
-              <span className="w-24 shrink-0 text-[10px] text-zinc-600 uppercase tracking-wider">Last Sync</span>
-              <span className="w-16 shrink-0 text-right text-[10px] text-zinc-600 uppercase tracking-wider">Records</span>
-              <span className="w-28 shrink-0 text-right text-[10px] text-zinc-600 uppercase tracking-wider">Quality</span>
+              <span className="flex-1 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Source ID</span>
+              <span className="w-20 shrink-0 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Type</span>
+              <span className="w-16 shrink-0 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Status</span>
+              <span className="w-24 shrink-0 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Last Sync</span>
+              <span className="w-16 shrink-0 text-right text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Records</span>
+              <span className="w-28 shrink-0 text-right text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Quality</span>
             </div>
 
             {rows.map((source, i) => (

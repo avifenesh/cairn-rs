@@ -125,6 +125,8 @@ impl cairn_orchestrator::DecidePhase for StubDecidePhase {
             requires_approval:     false,
             model_id:              "stub".to_owned(),
             latency_ms:            0,
+            input_tokens:          None,
+            output_tokens:         None,
         })
     }
 }
@@ -234,6 +236,8 @@ async fn loop_terminates_at_max_iterations() {
                 requires_approval:     false,
                 model_id:              "stub".into(),
                 latency_ms:            0,
+                input_tokens:          None,
+                output_tokens:         None,
             })
         }
     }
@@ -275,6 +279,8 @@ async fn loop_suspends_on_requires_approval() {
                 requires_approval:     true,
                 model_id:              "stub".into(),
                 latency_ms:            0,
+                input_tokens:          None,
+                output_tokens:         None,
             })
         }
     }

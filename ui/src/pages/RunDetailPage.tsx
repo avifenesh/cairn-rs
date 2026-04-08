@@ -48,9 +48,9 @@ const fmtTokens = (n: number) =>
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -78,9 +78,9 @@ function orchIcon(type: string) {
   if (type === "decide_completed")     return <Brain         size={12} className="text-indigo-400"  />;
   if (type === "tool_called")          return <Wrench        size={12} className="text-amber-400"   />;
   if (type === "tool_result")          return <Zap           size={12} className="text-teal-400"    />;
-  if (type === "step_completed")       return <ChevronRight  size={12} className="text-zinc-400"    />;
+  if (type === "step_completed")       return <ChevronRight  size={12} className="text-gray-500 dark:text-zinc-400"    />;
   if (type === "operator_notification")return <AlertTriangle size={12} className="text-orange-400"  />;
-  return                                      <Hash          size={12} className="text-zinc-600"    />;
+  return                                      <Hash          size={12} className="text-gray-400 dark:text-zinc-600"    />;
 }
 
 function orchColor(type: string): string {
@@ -90,7 +90,7 @@ function orchColor(type: string): string {
   if (type === "decide_completed")     return "border-indigo-700/50 bg-indigo-950/20";
   if (type.startsWith("tool"))         return "border-amber-700/50 bg-amber-950/20";
   if (type === "operator_notification")return "border-orange-700/50 bg-orange-950/20";
-  return "border-zinc-700/50 bg-zinc-800/30";
+  return "border-gray-200 dark:border-zinc-700/50 bg-gray-100/30 dark:bg-zinc-800/30";
 }
 
 function orchSummary(type: string, p: Record<string, unknown>): string {
@@ -189,7 +189,7 @@ function OrchestrationTimeline({ runId }: { runId: string }) {
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
+        <p className="text-[11px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
           Orchestration Timeline
         </p>
         <div className="flex items-center gap-2">
@@ -203,14 +203,14 @@ function OrchestrationTimeline({ runId }: { runId: string }) {
               Live
             </span>
           )}
-          <span className="text-[10px] text-zinc-600">{entries.length} event{entries.length !== 1 ? "s" : ""}</span>
+          <span className="text-[10px] text-gray-400 dark:text-zinc-600">{entries.length} event{entries.length !== 1 ? "s" : ""}</span>
         </div>
       </div>
 
       {/* Timeline */}
       <div className="relative">
         {/* Vertical track */}
-        <div className="absolute left-[18px] top-3 bottom-3 w-px bg-zinc-800" />
+        <div className="absolute left-[18px] top-3 bottom-3 w-px bg-gray-100 dark:bg-zinc-800" />
 
         <div className="space-y-1">
           {entries.map((entry) => {
@@ -239,30 +239,30 @@ function OrchestrationTimeline({ runId }: { runId: string }) {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[11px] font-mono text-zinc-300 shrink-0">
+                      <span className="text-[11px] font-mono text-gray-700 dark:text-zinc-300 shrink-0">
                         {entry.type.replace(/_/g, "\u00A0")}
                       </span>
                       {summary && (
-                        <span className="text-[11px] text-zinc-500 truncate">{summary}</span>
+                        <span className="text-[11px] text-gray-400 dark:text-zinc-500 truncate">{summary}</span>
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="text-[10px] text-zinc-600 font-mono tabular-nums">
+                      <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono tabular-nums">
                         {new Date(entry.ts).toLocaleTimeString(undefined, {
                           hour: "2-digit", minute: "2-digit", second: "2-digit",
                         })}
                       </span>
                       {hasDetail && (
                         entry.expanded
-                          ? <ChevronDown size={11} className="text-zinc-600" />
-                          : <ChevronRight size={11} className="text-zinc-600" />
+                          ? <ChevronDown size={11} className="text-gray-400 dark:text-zinc-600" />
+                          : <ChevronRight size={11} className="text-gray-400 dark:text-zinc-600" />
                       )}
                     </div>
                   </div>
 
                   {/* Expanded payload */}
                   {entry.expanded && (
-                    <pre className="mt-2 text-[10px] text-zinc-400 font-mono bg-zinc-950/60 rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
+                    <pre className="mt-2 text-[10px] text-gray-500 dark:text-zinc-400 font-mono bg-white dark:bg-zinc-950/60 rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
                       {JSON.stringify(entry.payload, null, 2)}
                     </pre>
                   )}
@@ -277,7 +277,7 @@ function OrchestrationTimeline({ runId }: { runId: string }) {
               <div className="w-9 shrink-0 flex justify-center">
                 <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse relative z-10" />
               </div>
-              <span className="text-[11px] text-zinc-600 italic">Waiting for next event…</span>
+              <span className="text-[11px] text-gray-400 dark:text-zinc-600 italic">Waiting for next event…</span>
             </div>
           )}
         </div>
@@ -291,7 +291,7 @@ function OrchestrationTimeline({ runId }: { runId: string }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+      <p className="text-[11px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">
         {title}
       </p>
       {children}
@@ -301,7 +301,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
   <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-zinc-800",
+    "px-3 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-gray-200 dark:border-zinc-800",
     right ? "text-right" : "text-left",
     hide,
   )}>{ch}</th>
@@ -316,7 +316,7 @@ function eventTypeColor(type: string): string {
   if (type.includes("checkpoint")) return "bg-amber-950  text-amber-300 ring-amber-800";
   if (type.includes("tool") || type.includes("provider"))
                                    return "bg-teal-950   text-teal-300  ring-teal-800";
-  return "bg-zinc-800 text-zinc-400 ring-zinc-700";
+  return "bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 ring-gray-300 dark:ring-zinc-700";
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -359,27 +359,27 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
   const duration = run ? fmtDuration(run.created_at, isTerminal ? run.updated_at : undefined) : "—";
 
   return (
-    <div className="h-full overflow-y-auto bg-zinc-900">
+    <div className="h-full overflow-y-auto bg-gray-50 dark:bg-zinc-900">
       <div className="max-w-4xl mx-auto px-5 py-5 space-y-6">
 
         {/* Back + header */}
         <div className="space-y-3">
           <button
             onClick={onBack ?? (() => { window.location.hash = "runs"; })}
-            className="flex items-center gap-1.5 text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="flex items-center gap-1.5 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
           >
             <ArrowLeft size={13} /> Back to Runs
           </button>
 
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Run</p>
-              <p className="flex items-center gap-2 text-[15px] font-mono font-medium text-zinc-100 break-all">
+              <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Run</p>
+              <p className="flex items-center gap-2 text-[15px] font-mono font-medium text-gray-900 dark:text-zinc-100 break-all">
                 {runId}
                 <CopyButton text={runId} label="Copy run ID" size={12} />
               </p>
               {run && (
-                <p className="text-[12px] text-zinc-500 mt-1 font-mono">
+                <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-1 font-mono">
                   {run.project.project_id} · {fmtTime(run.created_at)}
                 </p>
               )}
@@ -400,8 +400,8 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                 }}
                 title="Export run as JSON"
                 className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] font-medium
-                           border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600
-                           bg-zinc-900 transition-colors"
+                           border border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600
+                           bg-gray-50 dark:bg-zinc-900 transition-colors"
               >
                 <Download size={12} /> Export
               </button>
@@ -410,7 +410,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
         </div>
 
         {/* Stat cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 py-3 px-4 rounded-lg border border-zinc-800 bg-zinc-900/60">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 py-3 px-4 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60">
           <StatCard
             label="Duration"
             value={duration}
@@ -449,15 +449,15 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
         {/* Tasks table */}
         <Section title="Tasks">
           {tasksLoading ? (
-            <div className="flex items-center gap-2 text-zinc-600 text-[13px] py-4">
+            <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600 text-[13px] py-4">
               <Loader2 size={14} className="animate-spin" /> Loading tasks…
             </div>
           ) : !tasks || tasks.length === 0 ? (
-            <p className="text-[13px] text-zinc-600 py-4 text-center">No tasks for this run.</p>
+            <p className="text-[13px] text-gray-400 dark:text-zinc-600 py-4 text-center">No tasks for this run.</p>
           ) : (
-            <div className="rounded-lg border border-zinc-800 overflow-x-auto">
+            <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-x-auto">
               <table className="min-w-full text-[13px]">
-                <thead className="bg-zinc-900">
+                <thead className="bg-gray-50 dark:bg-zinc-900">
                   <tr>
                     <TH ch="Task ID" />
                     <TH ch="Status" />
@@ -466,27 +466,27 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                     <TH ch="Updated" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800/50">
+                <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
                   {tasks.map((t, i) => (
                     <tr key={t.task_id} className={clsx(
                       "transition-colors",
-                      i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
-                      "hover:bg-zinc-800/60",
+                      i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]",
+                      "hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60",
                     )}>
-                      <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap" title={t.task_id}>
+                      <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-zinc-300 whitespace-nowrap" title={t.task_id}>
                         {shortId(t.task_id)}
                       </td>
                       <td className="px-3 py-1.5 whitespace-nowrap">
                         <StateBadge state={t.state as Parameters<typeof StateBadge>[0]["state"]} compact />
                       </td>
-                      <td className="px-3 py-1.5 font-mono text-zinc-500 text-[12px] whitespace-nowrap hidden sm:table-cell">
-                        {t.lease_owner ? <span title={t.lease_owner}>{shortId(t.lease_owner)}</span> : <span className="text-zinc-700">—</span>}
+                      <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-500 text-[12px] whitespace-nowrap hidden sm:table-cell">
+                        {t.lease_owner ? <span title={t.lease_owner}>{shortId(t.lease_owner)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums hidden sm:table-cell">
+                      <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-500 whitespace-nowrap tabular-nums hidden sm:table-cell">
                         {fmtTime(t.created_at)}
                       </td>
                       <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">
-                        <span className="text-zinc-400">{fmtDuration(t.created_at, t.updated_at)}</span>
+                        <span className="text-gray-500 dark:text-zinc-400">{fmtDuration(t.created_at, t.updated_at)}</span>
                       </td>
                     </tr>
                   ))}
@@ -499,19 +499,19 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
         {/* Cost breakdown */}
         {cost && (
           <Section title="Cost Breakdown">
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">
-              <div className="grid grid-cols-2 divide-x divide-zinc-800">
+            <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 overflow-hidden">
+              <div className="grid grid-cols-2 divide-x divide-gray-200 dark:divide-zinc-800">
                 {[
                   { icon: Hash,  label: "Tokens in",       value: fmtTokens(cost.total_tokens_in) },
                   { icon: Hash,  label: "Tokens out",      value: fmtTokens(cost.total_tokens_out) },
                   { icon: Cpu,   label: "Provider calls",  value: String(cost.provider_calls) },
                   { icon: Clock, label: "Total cost (USD)", value: fmtMicros(cost.total_cost_micros) },
                 ].map(({ icon: Icon, label, value }) => (
-                  <div key={label} className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800 last:border-0">
-                    <Icon size={13} className="text-zinc-600 shrink-0" />
+                  <div key={label} className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-zinc-800 last:border-0">
+                    <Icon size={13} className="text-gray-400 dark:text-zinc-600 shrink-0" />
                     <div>
-                      <p className="text-[11px] text-zinc-500">{label}</p>
-                      <p className="text-[13px] font-mono text-zinc-200">{value}</p>
+                      <p className="text-[11px] text-gray-400 dark:text-zinc-500">{label}</p>
+                      <p className="text-[13px] font-mono text-gray-800 dark:text-zinc-200">{value}</p>
                     </div>
                   </div>
                 ))}
@@ -523,15 +523,15 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
         {/* Events timeline */}
         <Section title={`Event Timeline${events ? ` (${events.length})` : ""}`}>
           {eventsLoading ? (
-            <div className="flex items-center gap-2 text-zinc-600 text-[13px] py-4">
+            <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600 text-[13px] py-4">
               <Loader2 size={14} className="animate-spin" /> Loading events…
             </div>
           ) : !events || events.length === 0 ? (
-            <p className="text-[13px] text-zinc-600 italic py-4">No events recorded.</p>
+            <p className="text-[13px] text-gray-400 dark:text-zinc-600 italic py-4">No events recorded.</p>
           ) : (
             <div className="relative">
               {/* Vertical line */}
-              <div className="absolute left-[19px] top-2 bottom-2 w-px bg-zinc-800" />
+              <div className="absolute left-[19px] top-2 bottom-2 w-px bg-gray-100 dark:bg-zinc-800" />
 
               <div className="space-y-0">
                 {events.map((ev, i) => (
@@ -549,7 +549,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                     )} />
 
                     {/* Content */}
-                    <div className="flex-1 flex items-center gap-2.5 min-w-0 pb-1 border-b border-zinc-800/40 group-last:border-0">
+                    <div className="flex-1 flex items-center gap-2.5 min-w-0 pb-1 border-b border-gray-200/40 dark:border-zinc-800/40 group-last:border-0">
                       <span className={clsx(
                         "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-mono font-medium ring-1 whitespace-nowrap",
                         eventTypeColor(ev.event_type),
@@ -557,10 +557,10 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                         {ev.event_type.replace(/_/g, "\u202F")}
                       </span>
                       <span className="flex-1" />
-                      <span className="shrink-0 text-[11px] text-zinc-600 font-mono tabular-nums">
+                      <span className="shrink-0 text-[11px] text-gray-400 dark:text-zinc-600 font-mono tabular-nums">
                         {fmtTimeShort(ev.stored_at)}
                       </span>
-                      <span className="shrink-0 text-[10px] text-zinc-700 font-mono tabular-nums">
+                      <span className="shrink-0 text-[10px] text-gray-300 dark:text-zinc-700 font-mono tabular-nums">
                         #{ev.position}
                       </span>
                     </div>

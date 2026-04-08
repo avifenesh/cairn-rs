@@ -55,9 +55,9 @@ function inferProvider(modelId: string): string {
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -66,8 +66,8 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
 
 const TH = ({ ch, right, hide }: { ch: string; right?: boolean; hide?: string }) => (
   <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap",
-    "border-b border-zinc-800 bg-zinc-900 sticky top-0 z-10",
+    "px-3 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap",
+    "border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 sticky top-0 z-10",
     right ? "text-right" : "text-left",
     hide,
   )}>
@@ -83,30 +83,30 @@ function TraceRow({ trace, even }: { trace: LlmCallTrace; even: boolean }) {
       data-virtual-row
       style={{ height: DEFAULT_ROW_HEIGHT }}
       className={clsx(
-        "border-b border-zinc-800/50 transition-colors hover:bg-white/5",
-        even ? "bg-zinc-900" : "bg-zinc-900/50",
+        "border-b border-gray-200/50 dark:border-zinc-800/50 transition-colors hover:bg-white/5",
+        even ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50",
       )}
     >
-      <td className="px-3 font-mono text-zinc-400 whitespace-nowrap text-[11px] hidden sm:table-cell"
+      <td className="px-3 font-mono text-gray-500 dark:text-zinc-400 whitespace-nowrap text-[11px] hidden sm:table-cell"
           title={trace.session_id ?? ''}>
         {shortId(trace.session_id ?? '—')}
       </td>
-      <td className="px-3 text-xs text-zinc-300 whitespace-nowrap">
+      <td className="px-3 text-xs text-gray-700 dark:text-zinc-300 whitespace-nowrap">
         {trace.model_id}
       </td>
-      <td className="px-3 text-[11px] text-zinc-500 whitespace-nowrap hidden sm:table-cell">
+      <td className="px-3 text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap hidden sm:table-cell">
         {inferProvider(trace.model_id)}
       </td>
       <td className={clsx(
         "px-3 text-[11px] whitespace-nowrap tabular-nums text-right",
-        trace.latency_ms > 5_000 ? "text-amber-400" : "text-zinc-400",
+        trace.latency_ms > 5_000 ? "text-amber-400" : "text-gray-500 dark:text-zinc-400",
       )}>
         {fmtLatency(trace.latency_ms)}
       </td>
-      <td className="px-3 text-[11px] text-zinc-400 tabular-nums text-right whitespace-nowrap hidden md:table-cell">
+      <td className="px-3 text-[11px] text-gray-500 dark:text-zinc-400 tabular-nums text-right whitespace-nowrap hidden md:table-cell">
         {fmtTokens(trace.prompt_tokens)} / {fmtTokens(trace.completion_tokens)}
       </td>
-      <td className="px-3 text-[11px] text-zinc-500 tabular-nums text-right whitespace-nowrap hidden sm:table-cell">
+      <td className="px-3 text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums text-right whitespace-nowrap hidden sm:table-cell">
         {fmtCost(trace.cost_micros)}
       </td>
       <td className="px-3 whitespace-nowrap">
@@ -120,7 +120,7 @@ function TraceRow({ trace, even }: { trace: LlmCallTrace; even: boolean }) {
           </span>
         )}
       </td>
-      <td className="px-3 text-[11px] text-zinc-600 tabular-nums whitespace-nowrap hidden sm:table-cell">
+      <td className="px-3 text-[11px] text-gray-400 dark:text-zinc-600 tabular-nums whitespace-nowrap hidden sm:table-cell">
         {fmtTime(trace.created_at_ms)}
       </td>
     </tr>
@@ -200,13 +200,13 @@ export function TracesPage() {
   );
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
-        <span className="text-[13px] font-medium text-zinc-200">
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           LLM Traces
           {!isLoading && (
-            <span className="ml-2 text-[12px] text-zinc-500 font-normal">
+            <span className="ml-2 text-[12px] text-gray-400 dark:text-zinc-500 font-normal">
               {filterQuery ? `${filtered.length} / ${traces.length}` : traces.length}
               {filtered.length > 0 && (
                 <span className="ml-1.5 text-[10px] text-indigo-500">
@@ -219,18 +219,18 @@ export function TracesPage() {
 
         {/* Search filter */}
         <div className="relative flex-1 max-w-xs">
-          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 pointer-events-none" />
           <input
             value={filterQuery}
             onChange={e => setFilterQuery(e.target.value)}
             placeholder="Filter by model, session, provider…"
-            className="w-full h-7 rounded border border-zinc-800 bg-zinc-950 text-[12px] text-zinc-300
+            className="w-full h-7 rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[12px] text-gray-700 dark:text-zinc-300
                        placeholder-zinc-600 pl-7 pr-7 focus:outline-none focus:border-indigo-500 transition-colors"
           />
           {filterQuery && (
             <button
               onClick={() => setFilterQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400"
             >
               <X size={11} />
             </button>
@@ -241,7 +241,7 @@ export function TracesPage() {
           onClick={() => exportCsv(filtered)}
           disabled={filtered.length === 0}
           title="Export filtered traces as CSV"
-          className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-30 transition-colors"
+          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-30 transition-colors"
         >
           <Download size={11} />
         </button>
@@ -252,18 +252,18 @@ export function TracesPage() {
               <select
                 value={refreshInterval.option}
                 onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
-                className="appearance-none rounded border border-zinc-700 bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors hover:border-zinc-600"
+                className="appearance-none rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-gray-500 dark:text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors hover:border-zinc-600"
                 title="Auto-refresh interval"
               >
                 {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
               </select>
               {isFetching
                 ? <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none"><RefreshCw size={9} className="animate-spin text-indigo-400" /></span>
-                : <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-600"><RefreshCw size={9} /></span>
+                : <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 dark:text-zinc-600"><RefreshCw size={9} /></span>
               }
             </div>
             <button onClick={() => refetch()} disabled={isFetching}
-              className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
               title="Refresh now"
             >
               <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
@@ -274,7 +274,7 @@ export function TracesPage() {
 
       {/* Stat strip */}
       {!isLoading && traces.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-6 gap-y-3 px-5 py-3 border-b border-zinc-800 bg-zinc-900 shrink-0">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-6 gap-y-3 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 shrink-0">
           <StatCard label="Calls"        value={traces.length} />
           <StatCard label="Total tokens" value={fmtTokens(totalTokens)} sub="prompt + completion" />
           <StatCard label="Avg latency"  value={fmtLatency(avgLatency)} />
@@ -285,7 +285,7 @@ export function TracesPage() {
 
       {/* Virtualized table */}
       {isLoading ? (
-        <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+        <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600">
           <Loader2 size={16} className="animate-spin" />
           <span className="text-[13px]">Loading…</span>
         </div>
@@ -319,7 +319,7 @@ export function TracesPage() {
 
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-[13px] text-zinc-600">
+                  <td colSpan={8} className="px-4 py-12 text-center text-[13px] text-gray-400 dark:text-zinc-600">
                     No traces match this filter
                   </td>
                 </tr>

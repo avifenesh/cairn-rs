@@ -383,6 +383,7 @@ dependencies = [
  "cairn-store",
  "cairn-tools",
  "chrono",
+ "dotenvy",
  "http-body-util",
  "mime_guess",
  "reqwest",

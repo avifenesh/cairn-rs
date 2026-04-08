@@ -45,16 +45,16 @@ function fmtDur(startMs: number, endMs?: number): string {
 const STATE_PILL: Record<string, { dot: string; text: string; label: string }> = {
   // Sessions
   open:       { dot: "bg-emerald-500",              text: "text-emerald-400", label: "open" },
-  completed:  { dot: "bg-zinc-500",                 text: "text-zinc-500",   label: "done" },
+  completed:  { dot: "bg-zinc-500",                 text: "text-gray-400 dark:text-zinc-500",   label: "done" },
   failed:     { dot: "bg-red-500 animate-pulse",    text: "text-red-400",    label: "failed" },
-  archived:   { dot: "bg-zinc-700",                 text: "text-zinc-600",   label: "archived" },
+  archived:   { dot: "bg-zinc-700",                 text: "text-gray-400 dark:text-zinc-600",   label: "archived" },
   // Runs
   running:    { dot: "bg-blue-400 animate-pulse",   text: "text-blue-400",   label: "running" },
-  pending:    { dot: "bg-zinc-500",                 text: "text-zinc-500",   label: "pending" },
+  pending:    { dot: "bg-zinc-500",                 text: "text-gray-400 dark:text-zinc-500",   label: "pending" },
   paused:     { dot: "bg-amber-400",                text: "text-amber-400",  label: "paused" },
   waiting_approval: { dot: "bg-purple-400", text: "text-purple-400", label: "awaiting approval" },
   waiting_dependency: { dot: "bg-sky-400",  text: "text-sky-400",   label: "waiting" },
-  canceled:   { dot: "bg-zinc-700",                 text: "text-zinc-600",   label: "canceled" },
+  canceled:   { dot: "bg-zinc-700",                 text: "text-gray-400 dark:text-zinc-600",   label: "canceled" },
   // Tasks
   queued:     { dot: "bg-amber-400",                text: "text-amber-400",  label: "queued" },
   leased:     { dot: "bg-indigo-400",               text: "text-indigo-400", label: "claimed" },
@@ -63,7 +63,7 @@ const STATE_PILL: Record<string, { dot: string; text: string; label: string }> =
 };
 
 function StatePill({ state }: { state: string }) {
-  const cfg = STATE_PILL[state] ?? { dot: "bg-zinc-600", text: "text-zinc-500", label: state };
+  const cfg = STATE_PILL[state] ?? { dot: "bg-zinc-600", text: "text-gray-400 dark:text-zinc-500", label: state };
   return (
     <span className={clsx("inline-flex items-center gap-1 text-[10px] font-medium", cfg.text)}>
       <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", cfg.dot)} />
@@ -142,19 +142,19 @@ function TaskRow({ task, fresh }: { task: TaskRecord; fresh: boolean }) {
     )}>
       {/* Tree connector */}
       <div className="flex items-center gap-0 shrink-0 ml-14">
-        <span className="w-px h-4 bg-zinc-800 shrink-0" />
-        <span className="w-3 h-px bg-zinc-800 shrink-0" />
-        <ListChecks size={10} className={isActive ? "text-indigo-400" : "text-zinc-600"} />
+        <span className="w-px h-4 bg-gray-100 dark:bg-zinc-800 shrink-0" />
+        <span className="w-3 h-px bg-gray-100 dark:bg-zinc-800 shrink-0" />
+        <ListChecks size={10} className={isActive ? "text-indigo-400" : "text-gray-400 dark:text-zinc-600"} />
       </div>
 
       {/* Task info */}
       <div className="flex items-center gap-2 flex-1 min-w-0">
-        <span className="font-mono text-[11px] text-zinc-400 truncate" title={task.task_id}>
+        <span className="font-mono text-[11px] text-gray-500 dark:text-zinc-400 truncate" title={task.task_id}>
           {shortId(task.task_id)}
         </span>
         <StatePill state={task.state} />
         {task.lease_owner && (
-          <span className="flex items-center gap-1 text-[10px] font-mono text-zinc-600 truncate">
+          <span className="flex items-center gap-1 text-[10px] font-mono text-gray-400 dark:text-zinc-600 truncate">
             <Cpu size={9} className="shrink-0" />
             {shortId(task.lease_owner)}
           </span>
@@ -162,7 +162,7 @@ function TaskRow({ task, fresh }: { task: TaskRecord; fresh: boolean }) {
       </div>
 
       {/* Duration + age */}
-      <div className="flex items-center gap-3 shrink-0 text-[10px] text-zinc-700 tabular-nums">
+      <div className="flex items-center gap-3 shrink-0 text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums">
         <span>{fmtDur(task.created_at, endMs)}</span>
         <span>{fmtAge(task.created_at)}</span>
       </div>
@@ -203,28 +203,28 @@ function RunRow({
       >
         {/* Tree connector + indent */}
         <div className="flex items-center gap-0 shrink-0 ml-7">
-          <span className="w-px h-4 bg-zinc-800 shrink-0" />
-          <span className="w-3 h-px bg-zinc-800 shrink-0" />
+          <span className="w-px h-4 bg-gray-100 dark:bg-zinc-800 shrink-0" />
+          <span className="w-3 h-px bg-gray-100 dark:bg-zinc-800 shrink-0" />
           {expanded
-            ? <ChevronDown  size={10} className="text-zinc-500 shrink-0" />
-            : <ChevronRight size={10} className="text-zinc-500 shrink-0" />
+            ? <ChevronDown  size={10} className="text-gray-400 dark:text-zinc-500 shrink-0" />
+            : <ChevronRight size={10} className="text-gray-400 dark:text-zinc-500 shrink-0" />
           }
         </div>
-        <Play size={11} className={isActive ? "text-blue-400 shrink-0" : "text-zinc-600 shrink-0"} />
+        <Play size={11} className={isActive ? "text-blue-400 shrink-0" : "text-gray-400 dark:text-zinc-600 shrink-0"} />
 
         {/* Run ID */}
-        <span className="font-mono text-[12px] text-zinc-300 truncate flex-1 min-w-0" title={run.run_id}>
+        <span className="font-mono text-[12px] text-gray-700 dark:text-zinc-300 truncate flex-1 min-w-0" title={run.run_id}>
           {shortId(run.run_id)}
         </span>
 
         {/* State + task count */}
         <div className="flex items-center gap-2 shrink-0">
           <StatePill state={run.state} />
-          <span className="text-[10px] text-zinc-700">{taskSummary}</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-700">{taskSummary}</span>
         </div>
 
         {/* Timing */}
-        <div className="flex items-center gap-3 shrink-0 text-[10px] text-zinc-700 tabular-nums">
+        <div className="flex items-center gap-3 shrink-0 text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums">
           <span>{fmtDur(run.created_at, endMs)}</span>
           <span>{fmtAge(run.created_at)}</span>
         </div>
@@ -234,7 +234,7 @@ function RunRow({
       {expanded && (
         <div className="space-y-0.5 mt-0.5">
           {tasks.length === 0 ? (
-            <div className="ml-20 text-[10px] text-zinc-700 italic py-0.5">No tasks yet</div>
+            <div className="ml-20 text-[10px] text-gray-300 dark:text-zinc-700 italic py-0.5">No tasks yet</div>
           ) : (
             tasks.map(t => (
               <TaskRow key={t.task_id} task={t} fresh={freshTaskIds.has(t.task_id)} />
@@ -267,7 +267,7 @@ function SessionRow({
   return (
     <div className={clsx(
       "rounded-lg border overflow-hidden transition-colors",
-      node.hasActive ? "border-blue-900/50 bg-zinc-900/80" : "border-zinc-800 bg-zinc-900/40",
+      node.hasActive ? "border-blue-900/50 bg-gray-50/80 dark:bg-zinc-900/80" : "border-gray-200 dark:border-zinc-800 bg-gray-50/40 dark:bg-zinc-900/40",
       fresh && "ring-1 ring-emerald-700/40",
     )}>
       {/* Session header */}
@@ -277,30 +277,30 @@ function SessionRow({
       >
         <div className={clsx(
           "flex h-6 w-6 items-center justify-center rounded-md shrink-0",
-          node.hasActive ? "bg-blue-950/60 border border-blue-800/50" : "bg-zinc-800 border border-zinc-700",
+          node.hasActive ? "bg-blue-950/60 border border-blue-800/50" : "bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700",
         )}>
-          <Layers size={11} className={node.hasActive ? "text-blue-400" : "text-zinc-500"} />
+          <Layers size={11} className={node.hasActive ? "text-blue-400" : "text-gray-400 dark:text-zinc-500"} />
         </div>
 
         {expandedSession
-          ? <ChevronDown  size={12} className="text-zinc-500 shrink-0" />
-          : <ChevronRight size={12} className="text-zinc-500 shrink-0" />
+          ? <ChevronDown  size={12} className="text-gray-400 dark:text-zinc-500 shrink-0" />
+          : <ChevronRight size={12} className="text-gray-400 dark:text-zinc-500 shrink-0" />
         }
 
         {/* Session ID */}
-        <span className="font-mono text-[12px] text-zinc-200 truncate flex-1 min-w-0" title={session.session_id}>
+        <span className="font-mono text-[12px] text-gray-800 dark:text-zinc-200 truncate flex-1 min-w-0" title={session.session_id}>
           {shortId(session.session_id)}
         </span>
 
         {/* Project scope */}
-        <span className="text-[10px] font-mono text-zinc-600 hidden sm:block shrink-0">
+        <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-600 hidden sm:block shrink-0">
           {session.project.tenant_id}/{session.project.project_id}
         </span>
 
         {/* State + counts */}
         <div className="flex items-center gap-2 shrink-0">
           <StatePill state={session.state} />
-          <span className="text-[10px] text-zinc-600">
+          <span className="text-[10px] text-gray-400 dark:text-zinc-600">
             {runs.length} run{runs.length !== 1 ? "s" : ""}
             {activeRuns > 0 && (
               <span className="ml-1 text-blue-500">{activeRuns} active</span>
@@ -309,16 +309,16 @@ function SessionRow({
         </div>
 
         {/* Age */}
-        <span className="text-[10px] text-zinc-700 tabular-nums shrink-0">
+        <span className="text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums shrink-0">
           {fmtAge(session.created_at)}
         </span>
       </div>
 
       {/* Run list */}
       {expandedSession && (
-        <div className="border-t border-zinc-800/60 px-3 py-2 space-y-0.5 bg-zinc-950/30">
+        <div className="border-t border-gray-200/60 dark:border-zinc-800/60 px-3 py-2 space-y-0.5 bg-white dark:bg-zinc-950/30">
           {runs.length === 0 ? (
-            <p className="text-[11px] text-zinc-700 italic pl-7 py-1">No runs in this session</p>
+            <p className="text-[11px] text-gray-300 dark:text-zinc-700 italic pl-7 py-1">No runs in this session</p>
           ) : (
             runs.map(item => (
               <RunRow
@@ -360,11 +360,11 @@ function StatsStrip({ nodes }: { nodes: SessionNode[] }) {
   return (
     <div className="grid grid-cols-3 gap-3">
       {items.map(({ label, total, active, icon: Icon }) => (
-        <div key={label} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex items-center gap-3">
-          <Icon size={16} className={active > 0 ? "text-blue-400" : "text-zinc-600"} />
+        <div key={label} className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-3 flex items-center gap-3">
+          <Icon size={16} className={active > 0 ? "text-blue-400" : "text-gray-400 dark:text-zinc-600"} />
           <div>
-            <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-            <p className="text-[18px] font-semibold tabular-nums text-zinc-100 leading-tight">{total}</p>
+            <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+            <p className="text-[18px] font-semibold tabular-nums text-gray-900 dark:text-zinc-100 leading-tight">{total}</p>
             {active > 0 && (
               <p className="text-[10px] text-blue-400">{active} active</p>
             )}
@@ -512,14 +512,14 @@ export function OrchestrationPage() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
+    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0">
         <Layers size={13} className="text-indigo-400 shrink-0" />
-        <span className="text-[13px] font-medium text-zinc-200">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           Orchestration
           {!isLoading && (
-            <span className="ml-2 text-[11px] text-zinc-600 font-normal">
+            <span className="ml-2 text-[11px] text-gray-400 dark:text-zinc-600 font-normal">
               {tree.length} sessions
             </span>
           )}
@@ -529,7 +529,7 @@ export function OrchestrationPage() {
         <span className={clsx(
           "flex items-center gap-1.5 text-[11px] font-medium ml-1",
           sseStatus === "connected"    ? "text-emerald-500" :
-          sseStatus === "connecting"   ? "text-amber-400"   : "text-zinc-600",
+          sseStatus === "connecting"   ? "text-amber-400"   : "text-gray-400 dark:text-zinc-600",
         )}>
           <Radio size={10} className={sseStatus === "connected" ? "text-emerald-500" : ""} />
           {sseStatus === "connected" ? "Live" : sseStatus === "connecting" ? "Connecting…" : "Offline"}
@@ -538,21 +538,21 @@ export function OrchestrationPage() {
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={expandAll}
-            className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+            className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
           >
             Expand all
           </button>
           <span className="text-zinc-800 text-[11px]">·</span>
           <button
             onClick={collapseAll}
-            className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+            className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
           >
             Collapse all
           </button>
           <button
             onClick={() => { void rSessions(); void rRuns(); void rTasks(); }}
             disabled={isFetching}
-            className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors ml-1"
+            className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors ml-1"
           >
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
             Refresh
@@ -563,7 +563,7 @@ export function OrchestrationPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {isLoading ? (
-          <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600">
+          <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-[13px]">Building orchestration tree…</span>
           </div>
@@ -575,13 +575,13 @@ export function OrchestrationPage() {
             {/* Tree */}
             {tree.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-800 border border-zinc-700">
-                  <Layers size={24} className="text-zinc-500" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700">
+                  <Layers size={24} className="text-gray-400 dark:text-zinc-500" />
                 </div>
-                <p className="text-[13px] font-medium text-zinc-400">No sessions yet</p>
-                <p className="text-[12px] text-zinc-600 max-w-xs">
+                <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No sessions yet</p>
+                <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-xs">
                   Sessions appear here once created via{" "}
-                  <code className="bg-zinc-800 rounded px-1 text-zinc-500">POST /v1/sessions</code>.
+                  <code className="bg-gray-100 dark:bg-zinc-800 rounded px-1 text-gray-400 dark:text-zinc-500">POST /v1/sessions</code>.
                 </p>
               </div>
             ) : (
@@ -605,7 +605,7 @@ export function OrchestrationPage() {
             {/* Legend */}
             {tree.length > 0 && (
               <div className="flex items-center gap-4 pt-1 flex-wrap">
-                <span className="text-[10px] text-zinc-700 uppercase tracking-wider">States:</span>
+                <span className="text-[10px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider">States:</span>
                 {[
                   { state: "running",  label: "running"  },
                   { state: "pending",  label: "pending"  },
@@ -617,7 +617,7 @@ export function OrchestrationPage() {
                 ].map(({ state, label }) => {
                   const cfg = STATE_PILL[state];
                   return (
-                    <span key={state} className={clsx("flex items-center gap-1 text-[10px]", cfg?.text ?? "text-zinc-600")}>
+                    <span key={state} className={clsx("flex items-center gap-1 text-[10px]", cfg?.text ?? "text-gray-400 dark:text-zinc-600")}>
                       <span className={clsx("w-1.5 h-1.5 rounded-full", cfg?.dot ?? "bg-zinc-600")} />
                       {label}
                     </span>
@@ -628,7 +628,7 @@ export function OrchestrationPage() {
 
             {/* SSE event count */}
             {streamEvents.length > 0 && (
-              <div className="flex items-center gap-2 text-[10px] text-zinc-700">
+              <div className="flex items-center gap-2 text-[10px] text-gray-300 dark:text-zinc-700">
                 <CheckCircle2 size={10} className="text-emerald-700" />
                 {streamEvents.length} live event{streamEvents.length !== 1 ? "s" : ""} received this session
               </div>
@@ -638,7 +638,7 @@ export function OrchestrationPage() {
       </div>
 
       {/* Footer: update cadence */}
-      <div className="flex items-center gap-2 px-4 py-2 border-t border-zinc-800 shrink-0 text-[10px] text-zinc-700">
+      <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 shrink-0 text-[10px] text-gray-300 dark:text-zinc-700">
         <Clock size={10} />
         Polls every 10 s · SSE triggers immediate refetch on session, run, and task events
         {freshIds.size > 0 && (

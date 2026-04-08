@@ -9,6 +9,7 @@
 | Live Collaboration Between Terminal Agents | live-collaboration-between-terminal-agents.md | 24 | medium | 2026-04-03 |
 | React Frontend for Rust/Axum Backends | react-rust-axum-frontend.md | 25 | deep | 2026-04-05 |
 | AI Observability & LLM Ops UX Patterns | ai-observability-ux-patterns.md | 25 | deep | 2026-04-05 |
+| Agent Control Plane Use Cases | agent-control-plane-use-cases.md | 12 | deep | 2026-04-08 |
 
 ## Trigger Phrases
 
@@ -50,6 +51,14 @@ Use this knowledge when the user asks about:
 - "enterprise vs hobby AI platform" → ai-observability-ux-patterns.md
 - "Langfuse Helicone LangSmith comparison" → ai-observability-ux-patterns.md
 - "operator dashboard trust signals" → ai-observability-ux-patterns.md
+- "agent production use cases" → agent-control-plane-use-cases.md
+- "LangSmith vs Braintrust vs Portkey" → agent-control-plane-use-cases.md
+- "self-hosted agent infrastructure" → agent-control-plane-use-cases.md
+- "agent approval workflow production" → agent-control-plane-use-cases.md
+- "agent stitching problem tool fragmentation" → agent-control-plane-use-cases.md
+- "agent dogfooding scenario" → agent-control-plane-use-cases.md
+- "agent adoption patterns teams" → agent-control-plane-use-cases.md
+- "competitor analysis agent platforms" → agent-control-plane-use-cases.md
 
 ## Quick Lookup
 

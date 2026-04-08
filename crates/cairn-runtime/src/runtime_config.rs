@@ -85,49 +85,46 @@ impl RuntimeConfig {
 
     /// Default model for generation requests (worker/everyday path, openai-compat).
     ///
-    /// Key: `generate_model` · Env: `CAIRN_DEFAULT_GENERATE_MODEL` · Default: `qwen3.5:9b`
+    /// Key: `generate_model` · Env: `CAIRN_DEFAULT_GENERATE_MODEL` · Default: empty (user must configure)
     pub async fn default_generate_model(&self) -> String {
-        self.get_string(KEY_GENERATE_MODEL, "CAIRN_DEFAULT_GENERATE_MODEL", "qwen3.5:9b")
+        self.get_string(KEY_GENERATE_MODEL, "CAIRN_DEFAULT_GENERATE_MODEL", "")
             .await
     }
 
     /// Default model for the brain (compute-heavy / reasoning) path.
     ///
-    /// Key: `brain_model` · Env: `CAIRN_BRAIN_MODEL` · Default: `openrouter/auto`
+    /// Key: `brain_model` · Env: `CAIRN_BRAIN_MODEL` · Default: empty (user must configure)
     ///
-    /// `openrouter/auto` auto-routes to the best available free model, avoiding
-    /// per-model rate limits.  Override via `CAIRN_BRAIN_MODEL` or the settings API.
+    /// Set via `CAIRN_BRAIN_MODEL`, the settings API, or the Providers page in the dashboard.
     pub async fn default_brain_model(&self) -> String {
         self.get_string(
             KEY_BRAIN_MODEL,
             "CAIRN_BRAIN_MODEL",
-            "openrouter/auto",
+            "",
         )
         .await
     }
 
     /// Base URL for the brain inference endpoint.
     ///
-    /// Key: `brain_url` · Env: `CAIRN_BRAIN_URL`
-    /// Default: `https://agntic.garden/inference/brain/v1`
+    /// Key: `brain_url` · Env: `CAIRN_BRAIN_URL` · Default: empty (user must configure)
     pub async fn brain_url(&self) -> String {
         self.get_string(
             KEY_BRAIN_URL,
             "CAIRN_BRAIN_URL",
-            "https://agntic.garden/inference/brain/v1",
+            "",
         )
         .await
     }
 
     /// Base URL for the worker inference endpoint (everyday generation + embeddings).
     ///
-    /// Key: `worker_url` · Env: `CAIRN_WORKER_URL`
-    /// Default: `https://agntic.garden/inference/worker/v1`
+    /// Key: `worker_url` · Env: `CAIRN_WORKER_URL` · Default: empty (user must configure)
     pub async fn worker_url(&self) -> String {
         self.get_string(
             KEY_WORKER_URL,
             "CAIRN_WORKER_URL",
-            "https://agntic.garden/inference/worker/v1",
+            "",
         )
         .await
     }
@@ -144,17 +141,17 @@ impl RuntimeConfig {
 
     /// Default model for SSE token-streaming.
     ///
-    /// Key: `stream_model` · Env: `CAIRN_DEFAULT_STREAM_MODEL` · Default: `qwen3.5:9b`
+    /// Key: `stream_model` · Env: `CAIRN_DEFAULT_STREAM_MODEL` · Default: empty (user must configure)
     pub async fn default_stream_model(&self) -> String {
-        self.get_string(KEY_STREAM_MODEL, "CAIRN_DEFAULT_STREAM_MODEL", "qwen3.5:9b")
+        self.get_string(KEY_STREAM_MODEL, "CAIRN_DEFAULT_STREAM_MODEL", "")
             .await
     }
 
     /// Default embedding model (OpenAI-compat provider path).
     ///
-    /// Key: `embed_model` · Env: `CAIRN_DEFAULT_EMBED_MODEL` · Default: `qwen3-embedding:8b`
+    /// Key: `embed_model` · Env: `CAIRN_DEFAULT_EMBED_MODEL` · Default: empty (user must configure)
     pub async fn default_embed_model(&self) -> String {
-        self.get_string(KEY_EMBED_MODEL, "CAIRN_DEFAULT_EMBED_MODEL", "qwen3-embedding:8b")
+        self.get_string(KEY_EMBED_MODEL, "CAIRN_DEFAULT_EMBED_MODEL", "")
             .await
     }
 
@@ -218,13 +215,19 @@ mod tests {
         RuntimeConfig::new(store)
     }
 
-    /// Without any store value or env var, returns the hardcoded default.
+    /// Without any store value or env var, model defaults are empty (user must configure).
+    /// Non-model settings (max_tokens, thinking prefixes, ollama embed) have sensible defaults.
     #[tokio::test]
     async fn hardcoded_fallback_when_no_store_or_env() {
         let cfg = make_config();
-        assert_eq!(cfg.default_generate_model().await, "qwen3.5:9b");
-        assert_eq!(cfg.default_stream_model().await, "qwen3.5:9b");
-        assert_eq!(cfg.default_embed_model().await, "qwen3-embedding:8b");
+        // Provider-agnostic: model defaults are empty — user brings their own.
+        assert_eq!(cfg.default_generate_model().await, "");
+        assert_eq!(cfg.default_brain_model().await, "");
+        assert_eq!(cfg.default_stream_model().await, "");
+        assert_eq!(cfg.default_embed_model().await, "");
+        assert_eq!(cfg.brain_url().await, "");
+        assert_eq!(cfg.worker_url().await, "");
+        // Non-model settings have sensible defaults.
         assert_eq!(cfg.default_ollama_embed_model().await, "nomic-embed-text");
         assert_eq!(cfg.default_max_tokens().await, 4096);
         assert_eq!(cfg.thinking_model_prefixes().await, vec!["qwen3"]);

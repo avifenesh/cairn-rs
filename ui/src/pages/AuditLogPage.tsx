@@ -31,14 +31,14 @@ function DetailsCell({ metadata }: { metadata: Record<string, unknown> }) {
   const isEmpty = Object.keys(metadata).length === 0;
 
   if (isEmpty) {
-    return <span className="text-zinc-700 text-[11px]">—</span>;
+    return <span className="text-gray-300 dark:text-zinc-700 text-[11px]">—</span>;
   }
 
   return (
     <div>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+        className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
       >
         {open
           ? <ChevronDown size={11} className="shrink-0" />
@@ -47,7 +47,7 @@ function DetailsCell({ metadata }: { metadata: Record<string, unknown> }) {
         {open ? "hide" : "show"}
       </button>
       {open && (
-        <pre className="mt-1.5 text-[10px] font-mono text-zinc-400 bg-zinc-900 border border-zinc-800
+        <pre className="mt-1.5 text-[10px] font-mono text-gray-500 dark:text-zinc-400 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800
                         rounded px-2.5 py-1.5 overflow-x-auto max-w-xs whitespace-pre-wrap break-all">
           {JSON.stringify(metadata, null, 2)}
         </pre>
@@ -79,14 +79,14 @@ function OutcomeBadge({ outcome }: { outcome: AuditOutcome }) {
 
 function SkeletonRows() {
   return (
-    <div className="divide-y divide-zinc-800/40">
+    <div className="divide-y divide-gray-200 dark:divide-zinc-800/40">
       {Array.from({ length: 8 }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 px-4 h-9 animate-pulse">
-          <div className="h-2.5 w-28 rounded bg-zinc-800" />
-          <div className="h-2.5 w-20 rounded bg-zinc-800" />
-          <div className="h-2.5 w-24 rounded bg-zinc-800" />
-          <div className="h-2.5 w-16 rounded bg-zinc-800" />
-          <div className="h-4 w-16 rounded bg-zinc-800 ml-auto" />
+          <div className="h-2.5 w-28 rounded bg-gray-100 dark:bg-zinc-800" />
+          <div className="h-2.5 w-20 rounded bg-gray-100 dark:bg-zinc-800" />
+          <div className="h-2.5 w-24 rounded bg-gray-100 dark:bg-zinc-800" />
+          <div className="h-2.5 w-16 rounded bg-gray-100 dark:bg-zinc-800" />
+          <div className="h-4 w-16 rounded bg-gray-100 dark:bg-zinc-800 ml-auto" />
         </div>
       ))}
     </div>
@@ -97,13 +97,13 @@ function SkeletonRows() {
 
 function EmptyState({ filtered }: { filtered: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 gap-2 text-zinc-700">
+    <div className="flex flex-col items-center justify-center py-20 gap-2 text-gray-300 dark:text-zinc-700">
       <Shield size={28} className="text-zinc-800" />
       <p className="text-[13px]">
         {filtered ? "No entries match this filter" : "No audit log entries yet"}
       </p>
       {!filtered && (
-        <p className="text-[11px] text-zinc-700">
+        <p className="text-[11px] text-gray-300 dark:text-zinc-700">
           Entries appear when actions like approvals, credential changes, or task cancellations occur.
         </p>
       )}
@@ -141,12 +141,12 @@ export function AuditLogPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-11 border-b border-zinc-800 shrink-0 bg-zinc-950">
+      <div className="flex items-center gap-3 px-4 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-white dark:bg-zinc-950">
         <Shield size={13} className="text-indigo-400 shrink-0" />
-        <span className="text-[13px] font-medium text-zinc-200">
+        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
           Audit Log
           {!isLoading && (
-            <span className="ml-2 text-[11px] text-zinc-600 font-normal">
+            <span className="ml-2 text-[11px] text-gray-400 dark:text-zinc-600 font-normal">
               {filtered.length}
               {(actionFilter !== "all" || outcomeFilter !== "all")
                 ? ` / ${entries.length} total`
@@ -159,7 +159,7 @@ export function AuditLogPage() {
         <select
           value={actionFilter}
           onChange={(e) => setActionFilter(e.target.value)}
-          className="rounded border border-zinc-800 bg-zinc-900 text-zinc-400 text-[12px]
+          className="rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 text-[12px]
                      px-2 py-1 focus:outline-none focus:border-indigo-500"
         >
           <option value="all">All actions</option>
@@ -172,7 +172,7 @@ export function AuditLogPage() {
         <select
           value={outcomeFilter}
           onChange={(e) => setOutcomeFilter(e.target.value as AuditOutcome | "all")}
-          className="rounded border border-zinc-800 bg-zinc-900 text-zinc-400 text-[12px]
+          className="rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 text-[12px]
                      px-2 py-1 focus:outline-none focus:border-indigo-500"
         >
           <option value="all">All outcomes</option>
@@ -183,8 +183,8 @@ export function AuditLogPage() {
         <button
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="ml-auto flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900
-                     text-zinc-500 text-[12px] px-2.5 py-1 hover:text-zinc-200 hover:bg-zinc-800
+          className="ml-auto flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
+                     text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
                      disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={clsx(isFetching && "animate-spin")} />
@@ -200,8 +200,8 @@ export function AuditLogPage() {
           <EmptyState filtered={actionFilter !== "all" || outcomeFilter !== "all"} />
         ) : (
           <table className="min-w-full">
-            <thead className="sticky top-0 z-10 bg-zinc-950">
-              <tr className="border-b border-zinc-800">
+            <thead className="sticky top-0 z-10 bg-white dark:bg-zinc-950">
+              <tr className="border-b border-gray-200 dark:border-zinc-800">
                 {[
                   { label: "Timestamp",     cls: "text-left"  },
                   { label: "Actor",         cls: "text-left"  },
@@ -214,7 +214,7 @@ export function AuditLogPage() {
                   <th
                     key={label}
                     className={clsx(
-                      "px-4 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap",
+                      "px-4 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap",
                       cls,
                     )}
                   >
@@ -228,24 +228,24 @@ export function AuditLogPage() {
                 <tr
                   key={entry.entry_id}
                   className={clsx(
-                    "border-b border-zinc-800/40 h-9 transition-colors hover:bg-zinc-900/50",
-                    idx % 2 !== 0 && "bg-zinc-900/20",
+                    "border-b border-gray-200/40 dark:border-zinc-800/40 h-9 transition-colors hover:bg-gray-50/50 dark:bg-zinc-900/50",
+                    idx % 2 !== 0 && "bg-gray-50/20 dark:bg-zinc-900/20",
                   )}
                 >
-                  <td className="px-4 py-0 text-[11px] text-zinc-500 whitespace-nowrap font-mono">
+                  <td className="px-4 py-0 text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap font-mono">
                     {fmtTime(entry.occurred_at_ms)}
                   </td>
-                  <td className="px-4 py-0 font-mono text-[12px] text-zinc-300 whitespace-nowrap">
+                  <td className="px-4 py-0 font-mono text-[12px] text-gray-700 dark:text-zinc-300 whitespace-nowrap">
                     {entry.actor_id}
                   </td>
-                  <td className="px-4 py-0 text-[12px] text-zinc-400 whitespace-nowrap">
+                  <td className="px-4 py-0 text-[12px] text-gray-500 dark:text-zinc-400 whitespace-nowrap">
                     {entry.action}
                   </td>
-                  <td className="px-4 py-0 text-[11px] text-zinc-500 whitespace-nowrap">
-                    {entry.resource_type || <span className="text-zinc-700">—</span>}
+                  <td className="px-4 py-0 text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap">
+                    {entry.resource_type || <span className="text-gray-300 dark:text-zinc-700">—</span>}
                   </td>
-                  <td className="px-4 py-0 font-mono text-[11px] text-zinc-500 whitespace-nowrap">
-                    {entry.resource_id ? shortId(entry.resource_id) : <span className="text-zinc-700">—</span>}
+                  <td className="px-4 py-0 font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap">
+                    {entry.resource_id ? shortId(entry.resource_id) : <span className="text-gray-300 dark:text-zinc-700">—</span>}
                   </td>
                   <td className="px-4 py-0 whitespace-nowrap">
                     <OutcomeBadge outcome={entry.outcome} />

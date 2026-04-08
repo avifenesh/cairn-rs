@@ -92,15 +92,15 @@ function StatCard({
     emerald: "text-emerald-400",
     amber:   "text-amber-400",
     red:     "text-red-400",
-    zinc:    "text-zinc-300",
+    zinc:    "text-gray-700 dark:text-zinc-300",
   }[accent];
 
   return (
     <div className={clsx(
-      "bg-zinc-900 border border-zinc-800 border-l-2 rounded-xl p-4 flex flex-col gap-1.5",
+      "bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-xl p-4 flex flex-col gap-1.5",
       border,
     )}>
-      <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider truncate">
+      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider truncate">
         {label}
       </p>
       <div className="flex items-baseline gap-2">
@@ -109,9 +109,9 @@ function StatCard({
         </p>
         {trend === "up"   && <TrendingUp   size={13} className="text-red-400 shrink-0" />}
         {trend === "down" && <TrendingDown  size={13} className="text-emerald-400 shrink-0" />}
-        {trend === "flat" && <Minus         size={13} className="text-zinc-600 shrink-0" />}
+        {trend === "flat" && <Minus         size={13} className="text-gray-400 dark:text-zinc-600 shrink-0" />}
       </div>
-      {sub && <p className="text-[11px] text-zinc-600 truncate">{sub}</p>}
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 truncate">{sub}</p>}
     </div>
   );
 }
@@ -128,10 +128,10 @@ function LatencyStrip({ data }: { data: MetricsSnapshot }) {
   const max = Math.max(...bars.map(b => b.ms), 1);
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
       <div className="flex items-center gap-2 mb-4">
-        <Clock size={13} className="text-zinc-500" />
-        <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+        <Clock size={13} className="text-gray-400 dark:text-zinc-500" />
+        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
           Latency Percentiles
         </p>
       </div>
@@ -141,13 +141,13 @@ function LatencyStrip({ data }: { data: MetricsSnapshot }) {
           return (
             <div key={label} className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono text-zinc-600 uppercase">{label}</span>
+                <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-600 uppercase">{label}</span>
                 <span className="text-[12px] font-mono tabular-nums" style={{ color }}>
                   {fmtLatency(ms)}
                 </span>
               </div>
               {/* Mini vertical bar */}
-              <div className="h-16 bg-zinc-800 rounded-sm overflow-hidden flex items-end">
+              <div className="h-16 bg-gray-100 dark:bg-zinc-800 rounded-sm overflow-hidden flex items-end">
                 <div
                   className="w-full rounded-sm transition-all duration-500"
                   style={{ height: `${Math.max(pct, 2)}%`, backgroundColor: color + "99" }}
@@ -177,7 +177,7 @@ function ErrorBreakdown({ errors }: { errors: Record<string, number> }) {
           <Activity size={16} className="text-emerald-400" />
         </div>
         <p className="text-[12px] text-emerald-400 font-medium">No errors recorded</p>
-        <p className="text-[11px] text-zinc-700">All requests returned 2xx/3xx</p>
+        <p className="text-[11px] text-gray-300 dark:text-zinc-700">All requests returned 2xx/3xx</p>
       </div>
     );
   }
@@ -191,7 +191,7 @@ function ErrorBreakdown({ errors }: { errors: Record<string, number> }) {
         barHeight={7}
         rowGap={8}
       />
-      <p className="text-[10px] text-zinc-700 text-right">{total.toLocaleString()} total errors</p>
+      <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-right">{total.toLocaleString()} total errors</p>
     </div>
   );
 }
@@ -209,7 +209,7 @@ function TopEndpoints({ byPath }: { byPath: Record<string, number> }) {
     .slice(0, 10);
 
   if (items.length === 0) {
-    return <p className="text-[12px] text-zinc-600 italic py-2">No request data yet.</p>;
+    return <p className="text-[12px] text-gray-400 dark:text-zinc-600 italic py-2">No request data yet.</p>;
   }
 
   return (
@@ -235,11 +235,11 @@ function EndpointTable({ byPath }: { byPath: Record<string, number> }) {
   if (sorted.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-zinc-800 overflow-hidden">
-      <div className="flex items-center h-8 px-4 border-b border-zinc-800 bg-zinc-950">
-        <span className="flex-1 text-[10px] text-zinc-600 uppercase tracking-wider">Endpoint</span>
-        <span className="w-20 text-right text-[10px] text-zinc-600 uppercase tracking-wider">Requests</span>
-        <span className="w-16 text-right text-[10px] text-zinc-600 uppercase tracking-wider">Share</span>
+    <div className="rounded-xl border border-gray-200 dark:border-zinc-800 overflow-hidden">
+      <div className="flex items-center h-8 px-4 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
+        <span className="flex-1 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Endpoint</span>
+        <span className="w-20 text-right text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Requests</span>
+        <span className="w-16 text-right text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Share</span>
       </div>
       {visible.map(([path, count], i) => {
         const share = total > 0 ? (count / total) * 100 : 0;
@@ -247,29 +247,29 @@ function EndpointTable({ byPath }: { byPath: Record<string, number> }) {
           <div
             key={path}
             className={clsx(
-              "flex items-center h-8 px-4 border-b border-zinc-800/50 last:border-0",
-              i % 2 === 0 ? "bg-zinc-900" : "bg-zinc-900/50",
+              "flex items-center h-8 px-4 border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0",
+              i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50",
             )}
           >
             <span
-              className="flex-1 text-[11px] font-mono text-zinc-400 truncate min-w-0 pr-3"
+              className="flex-1 text-[11px] font-mono text-gray-500 dark:text-zinc-400 truncate min-w-0 pr-3"
               title={path}
             >
               <span className="w-1.5 h-1.5 rounded-full inline-block mr-2 shrink-0"
                 style={{ backgroundColor: pathColor(path) }} />
               {path}
             </span>
-            <span className="w-20 text-right text-[11px] tabular-nums text-zinc-300 font-mono">
+            <span className="w-20 text-right text-[11px] tabular-nums text-gray-700 dark:text-zinc-300 font-mono">
               {count.toLocaleString()}
             </span>
-            <span className="w-16 text-right text-[11px] tabular-nums text-zinc-600">
+            <span className="w-16 text-right text-[11px] tabular-nums text-gray-400 dark:text-zinc-600">
               {share.toFixed(1)}%
             </span>
           </div>
         );
       })}
       {!showAll && sorted.length > 15 && (
-        <div className="flex justify-center py-2 border-t border-zinc-800">
+        <div className="flex justify-center py-2 border-t border-gray-200 dark:border-zinc-800">
           <button
             onClick={() => setShowAll(true)}
             className="text-[11px] text-indigo-500 hover:text-indigo-400 transition-colors"
@@ -286,15 +286,15 @@ function EndpointTable({ byPath }: { byPath: Record<string, number> }) {
 
 function MetricsUnavailable() {
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
+    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 space-y-4">
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-950/30 border border-amber-800/40">
           <AlertTriangle size={16} className="text-amber-400" />
         </div>
         <div>
-          <p className="text-[13px] font-semibold text-zinc-200">Metrics endpoint unavailable</p>
-          <p className="text-[12px] text-zinc-500 mt-1">
-            The <code className="bg-zinc-800 rounded px-1 text-zinc-400">GET /v1/metrics</code> endpoint
+          <p className="text-[13px] font-semibold text-gray-800 dark:text-zinc-200">Metrics endpoint unavailable</p>
+          <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-1">
+            The <code className="bg-gray-100 dark:bg-zinc-800 rounded px-1 text-gray-500 dark:text-zinc-400">GET /v1/metrics</code> endpoint
             returned an error. This usually means:
           </p>
         </div>
@@ -305,21 +305,21 @@ function MetricsUnavailable() {
           "The server requires an admin token — check your Authorization header",
           "The metrics middleware has not yet recorded any requests",
         ].map((msg, i) => (
-          <li key={i} className="flex items-start gap-2 text-[12px] text-zinc-500">
+          <li key={i} className="flex items-start gap-2 text-[12px] text-gray-400 dark:text-zinc-500">
             <span className="mt-1.5 h-1 w-1 rounded-full bg-zinc-700 shrink-0" />
             {msg}
           </li>
         ))}
       </ul>
-      <div className="rounded-lg bg-zinc-950 border border-zinc-800 px-4 py-3">
-        <p className="text-[11px] font-mono text-zinc-500 mb-1">
+      <div className="rounded-lg bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-4 py-3">
+        <p className="text-[11px] font-mono text-gray-400 dark:text-zinc-500 mb-1">
           # Verify the endpoint is reachable:
         </p>
         <p className="text-[11px] font-mono text-emerald-400">
           curl -H 'Authorization: Bearer $TOKEN' http://localhost:3000/v1/metrics
         </p>
       </div>
-      <p className="text-[11px] text-zinc-600">
+      <p className="text-[11px] text-gray-400 dark:text-zinc-600">
         Once the server receives requests, this page will automatically populate with live data.
         The metrics ring buffer tracks the last 1 000 requests.
       </p>
@@ -349,28 +349,28 @@ export function MetricsPage() {
     : null;
 
   return (
-    <div className="h-full overflow-y-auto bg-zinc-950">
+    <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
       <div className="max-w-5xl mx-auto px-5 py-5 space-y-5">
 
         {/* Toolbar */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-[14px] font-semibold text-zinc-100">API Metrics</h2>
-            <p className="text-[11px] text-zinc-600 mt-0.5">
-              Rolling 1 000-request window · live from <code className="text-zinc-500">/v1/metrics</code>
+            <h2 className="text-[14px] font-semibold text-gray-900 dark:text-zinc-100">API Metrics</h2>
+            <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
+              Rolling 1 000-request window · live from <code className="text-gray-400 dark:text-zinc-500">/v1/metrics</code>
             </p>
           </div>
           <div className="flex items-center gap-3">
             {updatedAt && (
-              <span className="text-[11px] text-zinc-600 flex items-center gap-1">
+              <span className="text-[11px] text-gray-400 dark:text-zinc-600 flex items-center gap-1">
                 <Clock size={10} /> {updatedAt}
               </span>
             )}
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900
-                         text-zinc-500 text-[12px] px-2.5 py-1.5 hover:text-zinc-200 hover:bg-zinc-800
+              className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
+                         text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1.5 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
                          disabled:opacity-40 transition-colors"
             >
               <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
@@ -380,8 +380,8 @@ export function MetricsPage() {
               href="/v1/metrics/prometheus"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900
-                         text-zinc-500 text-[12px] px-2.5 py-1.5 hover:text-zinc-200 hover:bg-zinc-800
+              className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
+                         text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1.5 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
                          transition-colors"
               title="Open Prometheus exposition format"
             >
@@ -393,7 +393,7 @@ export function MetricsPage() {
 
         {/* Loading */}
         {isLoading && (
-          <div className="flex items-center justify-center py-16 gap-2 text-zinc-600">
+          <div className="flex items-center justify-center py-16 gap-2 text-gray-400 dark:text-zinc-600">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-[13px]">Loading metrics…</span>
           </div>
@@ -442,10 +442,10 @@ export function MetricsPage() {
             {/* Two-column: top endpoints + error breakdown */}
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
               {/* Top endpoints bar chart */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+              <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-4">
-                  <Zap size={13} className="text-zinc-500" />
-                  <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                  <Zap size={13} className="text-gray-400 dark:text-zinc-500" />
+                  <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
                     Top Endpoints by Request Count
                   </p>
                 </div>
@@ -453,10 +453,10 @@ export function MetricsPage() {
               </div>
 
               {/* Error breakdown */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+              <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-4">
-                  <AlertTriangle size={13} className="text-zinc-500" />
-                  <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                  <AlertTriangle size={13} className="text-gray-400 dark:text-zinc-500" />
+                  <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
                     Error Breakdown by Status Code
                   </p>
                 </div>
@@ -466,14 +466,14 @@ export function MetricsPage() {
 
             {/* Full endpoint table */}
             <div>
-              <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-3">
+              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
                 All Endpoints
               </p>
               <EndpointTable byPath={data.requests_by_path} />
             </div>
 
             {/* Footer note */}
-            <p className="text-[10px] text-zinc-700 flex items-center gap-1.5">
+            <p className="text-[10px] text-gray-300 dark:text-zinc-700 flex items-center gap-1.5">
               <Activity size={10} />
               Metrics are stored in a fixed 1 000-entry ring buffer in cairn-app.
               Restarts reset the buffer. Refreshes every 10 s.

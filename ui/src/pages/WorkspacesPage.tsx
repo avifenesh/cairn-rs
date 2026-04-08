@@ -70,7 +70,7 @@ function WorkspaceCard({
         'group w-full text-left rounded-xl border p-4 transition-all',
         isActive
           ? 'border-indigo-500/60 bg-indigo-950/20 ring-1 ring-indigo-500/30'
-          : 'border-zinc-800 bg-zinc-900 hover:border-zinc-700 hover:bg-zinc-800/60',
+          : 'border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 hover:border-gray-200 dark:border-zinc-700 hover:bg-gray-100/60 dark:hover:bg-zinc-800/60',
       )}
     >
       {/* Header */}
@@ -78,18 +78,18 @@ function WorkspaceCard({
         <div className="flex items-center gap-2.5 min-w-0">
           <div className={clsx(
             'shrink-0 w-8 h-8 rounded-lg flex items-center justify-center',
-            isActive ? 'bg-indigo-500/20' : 'bg-zinc-800 group-hover:bg-zinc-700',
+            isActive ? 'bg-indigo-500/20' : 'bg-gray-100 dark:bg-zinc-800 group-hover:bg-gray-200 dark:hover:bg-zinc-700',
           )}>
-            <Layers size={14} className={isActive ? 'text-indigo-400' : 'text-zinc-500'} />
+            <Layers size={14} className={isActive ? 'text-indigo-400' : 'text-gray-400 dark:text-zinc-500'} />
           </div>
           <div className="min-w-0">
             <p className={clsx(
               'text-[13px] font-medium font-mono truncate',
-              isActive ? 'text-indigo-300' : 'text-zinc-200',
+              isActive ? 'text-indigo-300' : 'text-gray-800 dark:text-zinc-200',
             )}>
               {ws.workspace_id}
             </p>
-            <p className="text-[10px] text-zinc-600 font-mono mt-0.5">{ws.tenant_id}</p>
+            <p className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono mt-0.5">{ws.tenant_id}</p>
           </div>
         </div>
 
@@ -98,7 +98,7 @@ function WorkspaceCard({
             <Check size={9} strokeWidth={3} /> Active
           </span>
         ) : (
-          <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-zinc-600 group-hover:text-zinc-400">
+          <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-zinc-600 group-hover:text-gray-500 dark:text-zinc-400">
             <ArrowRight size={13} />
           </span>
         )}
@@ -111,18 +111,18 @@ function WorkspaceCard({
           { icon: MonitorPlay, label: 'Sessions', value: ws.sessions },
           { icon: Play,       label: 'Runs',     value: ws.runs      },
         ].map(({ icon: Icon, label, value }) => (
-          <div key={label} className="rounded-lg bg-zinc-950/60 border border-zinc-800/60 px-2.5 py-2 text-center">
-            <Icon size={11} className="mx-auto mb-1 text-zinc-600" />
-            <p className="text-[16px] font-semibold text-zinc-200 tabular-nums leading-none">{value}</p>
-            <p className="text-[9px] text-zinc-600 uppercase tracking-wider mt-0.5">{label}</p>
+          <div key={label} className="rounded-lg bg-white dark:bg-zinc-950/60 border border-gray-200/60 dark:border-zinc-800/60 px-2.5 py-2 text-center">
+            <Icon size={11} className="mx-auto mb-1 text-gray-400 dark:text-zinc-600" />
+            <p className="text-[16px] font-semibold text-gray-800 dark:text-zinc-200 tabular-nums leading-none">{value}</p>
+            <p className="text-[9px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider mt-0.5">{label}</p>
           </div>
         ))}
       </div>
 
       {/* Footer */}
-      <div className="flex items-center gap-1.5 mt-3 pt-2.5 border-t border-zinc-800/50">
-        <Clock size={10} className="text-zinc-700 shrink-0" />
-        <span className="text-[10px] text-zinc-600">
+      <div className="flex items-center gap-1.5 mt-3 pt-2.5 border-t border-gray-200/50 dark:border-zinc-800/50">
+        <Clock size={10} className="text-gray-300 dark:text-zinc-700 shrink-0" />
+        <span className="text-[10px] text-gray-400 dark:text-zinc-600">
           {fmtRelative(ws.latest_at)}
         </span>
       </div>
@@ -153,15 +153,15 @@ function NewWorkspaceForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-xl border border-indigo-700/40 bg-zinc-900 p-4 space-y-3">
-      <p className="text-[12px] font-medium text-zinc-300">New Workspace</p>
-      <p className="text-[11px] text-zinc-500">
+    <form onSubmit={handleSubmit} className="rounded-xl border border-indigo-700/40 bg-gray-50 dark:bg-zinc-900 p-4 space-y-3">
+      <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">New Workspace</p>
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500">
         Workspace IDs are implicit in cairn — creating a new one just activates that scope.
-        Data will be automatically scoped to tenant <code className="text-zinc-400 font-mono">{tenantId}</code>.
+        Data will be automatically scoped to tenant <code className="text-gray-500 dark:text-zinc-400 font-mono">{tenantId}</code>.
       </p>
 
       <div>
-        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1.5">
+        <label className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider block mb-1.5">
           Workspace ID <span className="text-red-500">*</span>
         </label>
         <input
@@ -171,15 +171,15 @@ function NewWorkspaceForm({
           autoFocus
           spellCheck={false}
           className={clsx(
-            'w-full rounded border bg-zinc-950 text-[13px] text-zinc-200 font-mono px-3 py-2',
+            'w-full rounded border bg-white dark:bg-zinc-950 text-[13px] text-gray-800 dark:text-zinc-200 font-mono px-3 py-2',
             'focus:outline-none transition-colors',
             error
               ? 'border-red-700 focus:border-red-500'
-              : 'border-zinc-800 focus:border-indigo-500',
+              : 'border-gray-200 dark:border-zinc-800 focus:border-indigo-500',
           )}
         />
         {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
-        <p className="text-[10px] text-zinc-700 mt-1">
+        <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-1">
           Lowercase letters, digits, hyphens, underscores · max 63 chars
         </p>
       </div>
@@ -188,7 +188,7 @@ function NewWorkspaceForm({
         <button
           type="button"
           onClick={onCancel}
-          className="px-3 py-1.5 rounded text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="px-3 py-1.5 rounded text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
         >
           Cancel
         </button>
@@ -197,7 +197,7 @@ function NewWorkspaceForm({
           disabled={!wsId.trim()}
           className="flex items-center gap-1.5 rounded px-3 py-1.5 text-[12px] font-medium
                      bg-indigo-600 hover:bg-indigo-500 text-white
-                     disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed
+                     disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 disabled:cursor-not-allowed
                      transition-colors"
         >
           <Check size={11} /> Activate Workspace
@@ -306,7 +306,7 @@ export function WorkspacesPage() {
   const totalRuns      = workspaces.reduce((s, ws) => s + ws.runs, 0);
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 overflow-y-auto">
+    <div className="flex flex-col h-full bg-white dark:bg-zinc-950 overflow-y-auto">
       <div className="max-w-5xl mx-auto px-5 py-5 space-y-6 w-full">
 
         {/* Header */}
@@ -316,9 +316,9 @@ export function WorkspacesPage() {
               <Layers size={16} className="text-indigo-400" />
             </div>
             <div>
-              <h1 className="text-[15px] font-semibold text-zinc-100">Workspaces</h1>
-              <p className="text-[11px] text-zinc-600 mt-0.5">
-                Tenant: <code className="text-zinc-400 font-mono">{scope.tenant_id}</code>
+              <h1 className="text-[15px] font-semibold text-gray-900 dark:text-zinc-100">Workspaces</h1>
+              <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
+                Tenant: <code className="text-gray-500 dark:text-zinc-400 font-mono">{scope.tenant_id}</code>
                 {' · '}Active: <code className="text-indigo-400 font-mono">{scope.workspace_id}</code>
               </p>
             </div>
@@ -328,7 +328,7 @@ export function WorkspacesPage() {
             <button
               onClick={() => { void refetchSess(); void refetchRuns(); }}
               disabled={isFetching}
-              className="p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+              className="p-1.5 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors disabled:opacity-40"
               title="Refresh"
             >
               <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
@@ -356,9 +356,9 @@ export function WorkspacesPage() {
               { label: 'Sessions',   value: totalSessions,      color: 'border-l-blue-500'   },
               { label: 'Runs',       value: totalRuns,          color: 'border-l-emerald-500' },
             ].map(({ label, value, color }) => (
-              <div key={label} className={clsx('rounded-lg border border-zinc-800 border-l-2 bg-zinc-900 px-4 py-3', color)}>
-                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</p>
-                <p className="text-[22px] font-semibold text-zinc-100 tabular-nums leading-tight mt-1">{value}</p>
+              <div key={label} className={clsx('rounded-lg border border-gray-200 dark:border-zinc-800 border-l-2 bg-gray-50 dark:bg-zinc-900 px-4 py-3', color)}>
+                <p className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+                <p className="text-[22px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight mt-1">{value}</p>
               </div>
             ))}
           </div>
@@ -379,13 +379,13 @@ export function WorkspacesPage() {
             value={filter}
             onChange={e => setFilter(e.target.value)}
             placeholder="Filter workspaces…"
-            className="w-full rounded-lg border border-zinc-800 bg-zinc-900 text-[13px] text-zinc-200
+            className="w-full rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[13px] text-gray-800 dark:text-zinc-200
                        placeholder-zinc-600 px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors"
           />
           {filter && (
             <button
               onClick={() => setFilter('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
             >
               ×
             </button>
@@ -396,28 +396,28 @@ export function WorkspacesPage() {
         {isLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map(i => (
-              <div key={i} className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 animate-pulse">
+              <div key={i} className="rounded-xl border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-4 animate-pulse">
                 <div className="flex items-center gap-2.5 mb-3">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-800" />
+                  <div className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-zinc-800" />
                   <div className="space-y-1.5 flex-1">
-                    <div className="h-3 w-32 rounded bg-zinc-800" />
-                    <div className="h-2 w-20 rounded bg-zinc-800" />
+                    <div className="h-3 w-32 rounded bg-gray-100 dark:bg-zinc-800" />
+                    <div className="h-2 w-20 rounded bg-gray-100 dark:bg-zinc-800" />
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {[1, 2, 3].map(j => <div key={j} className="h-14 rounded-lg bg-zinc-800" />)}
+                  {[1, 2, 3].map(j => <div key={j} className="h-14 rounded-lg bg-gray-100 dark:bg-zinc-800" />)}
                 </div>
               </div>
             ))}
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-            <Layers size={28} className="text-zinc-700" />
-            <p className="text-[13px] text-zinc-600">
+            <Layers size={28} className="text-gray-300 dark:text-zinc-700" />
+            <p className="text-[13px] text-gray-400 dark:text-zinc-600">
               {filter ? `No workspaces match "${filter}"` : 'No workspaces discovered yet.'}
             </p>
             {!filter && (
-              <p className="text-[11px] text-zinc-700">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-700">
                 Create sessions or runs to populate workspaces, or create one above.
               </p>
             )}
@@ -437,7 +437,7 @@ export function WorkspacesPage() {
 
         {/* Scope hint */}
         {!isLoading && workspaces.length > 0 && (
-          <p className="text-[11px] text-zinc-700 text-center pb-2">
+          <p className="text-[11px] text-gray-300 dark:text-zinc-700 text-center pb-2">
             Clicking a workspace updates the global scope — all data views filter to that workspace immediately.
           </p>
         )}

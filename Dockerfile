@@ -12,12 +12,9 @@
 # With SQLite persistence:
 #   docker run -p 3000:3000 -v /data:/data cairn-rs --db /data/cairn.db
 #
-# With Ollama:
-#   docker run -p 3000:3000 -e OLLAMA_HOST=http://host.docker.internal:11434 cairn-rs
-#
-# With OpenAI-compatible provider (e.g. agntic.garden):
+# Connect your LLM provider (any OpenAI-compatible endpoint):
 #   docker run -p 3000:3000 \
-#     -e OPENAI_COMPAT_BASE_URL=https://agntic.garden/inference/v1 \
+#     -e CAIRN_BRAIN_URL=https://your-provider/v1 \
 #     -e OPENAI_COMPAT_API_KEY=your-key \
 #     cairn-rs
 
@@ -132,13 +129,14 @@ ENV CAIRN_MODE=local
 # Admin bearer token — always override in production.
 ENV CAIRN_ADMIN_TOKEN=dev-admin-token
 
-# Ollama base URL — override to connect to a local or remote Ollama instance.
-ENV OLLAMA_HOST=
-
-# OpenAI-compatible provider — optional, enables external LLM + embedding.
-# Set both to activate; omit to use Ollama only.
+# LLM provider — Cairn is provider-agnostic. Connect any endpoint you prefer.
+# All are optional; configure via env vars or POST /v1/providers/connections.
+ENV CAIRN_BRAIN_URL=
+ENV CAIRN_WORKER_URL=
 ENV OPENAI_COMPAT_BASE_URL=
 ENV OPENAI_COMPAT_API_KEY=
+ENV OPENROUTER_API_KEY=
+ENV OLLAMA_HOST=
 
 EXPOSE 3000
 

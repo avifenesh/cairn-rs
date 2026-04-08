@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Menu, Sun, Moon, Monitor, Rows3, AlignJustify } from 'lucide-react';
 import { usePreferences } from '../hooks/usePreferences';
 import { defaultApi } from '../lib/api';
-import type { SystemStatus } from '../lib/types';
+import { isRuntimeHealthy, isStoreHealthy, type SystemStatus } from '../lib/types';
 import { clsx } from 'clsx';
 import { useTheme, type Theme } from '../hooks/useTheme';
 import { Breadcrumb, type BreadcrumbItem } from './Breadcrumb';
@@ -54,7 +54,8 @@ export function TopBar({ breadcrumbs, onMenuClick }: TopBarProps) {
     async function poll() {
       try {
         const [h, s] = await Promise.all([defaultApi.getHealth(), defaultApi.getStatus()]);
-        if (!cancelled) { setHealthy(h.ok); setStatus(s); }
+        const isHealthy = h.status === 'healthy' || h.ok === true;
+        if (!cancelled) { setHealthy(isHealthy); setStatus(s); }
       } catch {
         if (!cancelled) { setHealthy(false); setStatus(null); }
       }
@@ -132,8 +133,10 @@ export function TopBar({ breadcrumbs, onMenuClick }: TopBarProps) {
         ) : (
           <div className="hidden lg:flex items-center gap-4">
             <Dot ok={healthy}              label={healthy ? 'ok' : 'degraded'} />
-            {status && <Dot ok={status.runtime_ok} label="runtime" />}
-            {status && <Dot ok={status.store_ok}   label="store"   />}
+            {status && <>
+              <Dot ok={isRuntimeHealthy(status)} label="runtime" />
+              <Dot ok={isStoreHealthy(status)} label="store" />
+            </>}
             {status && (
               <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono tabular-nums">
                 {formatUptime(status.uptime_secs)}

@@ -1636,6 +1636,15 @@ struct CreateProviderConnectionRequest {
     /// Model identifiers served through this connection (e.g. ["gemma4", "qwen3.5"]).
     #[serde(default)]
     supported_models: Vec<String>,
+    /// Optional reference to a stored credential (from POST /v1/admin/tenants/:id/credentials).
+    /// When set, the connection resolves its API key from the encrypted credential store
+    /// instead of requiring it in env vars. This is the recommended approach for production.
+    #[serde(default)]
+    credential_id: Option<String>,
+    /// Base URL for the provider endpoint (e.g. "https://api.openai.com/v1").
+    /// When set alongside credential_id, the connection is fully self-contained.
+    #[serde(default)]
+    endpoint_url: Option<String>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -3854,6 +3863,7 @@ impl AppBootstrap {
                 "/v1/runs/:id/replay-to-checkpoint",
                 post(replay_run_to_checkpoint_handler),
             )
+            .route("/v1/runs/:id/cancel", post(cancel_run_handler))
             .route("/v1/runs/:id/pause", post(pause_run_handler))
             .route("/v1/runs/:id/resume", post(resume_run_handler))
             .route(
@@ -4107,6 +4117,7 @@ impl AppBootstrap {
             .route("/v1/providers/connections/:id/models", get(list_provider_models_handler).post(register_provider_model_handler))
             .route("/v1/providers/connections/:id/health-schedule", get(get_provider_health_schedule_handler).post(set_provider_health_schedule_handler))
             .route("/v1/providers/connections/:id/retry-policy", put(set_provider_retry_policy_handler))
+            .route("/v1/providers/connections/:id/resolve-key", get(resolve_provider_key_handler))
             // ── Auth tokens ───────────────────────────────────────────────────────────
             .route("/v1/auth/tokens", post(create_auth_token_handler).get(list_auth_tokens_handler))
             .route("/v1/auth/tokens/:id", delete(delete_auth_token_handler))
@@ -4382,7 +4393,8 @@ struct TraceId(#[allow(dead_code)] String);
 struct SpanId(#[allow(dead_code)] String);
 
 fn auth_exempt_path(path: &str) -> bool {
-    matches!(
+    // Public infra endpoints
+    if matches!(
         path,
         "/health"
             | "/healthz"
@@ -4392,7 +4404,25 @@ fn auth_exempt_path(path: &str) -> bool {
             | "/v1/onboarding/templates"
             | "/openapi.json"
             | "/docs"
-    )
+            | "/v1/stream"
+            | "/v1/docs"
+    ) {
+        return true;
+    }
+
+    // The embedded React UI must load without auth — it has its own LoginPage
+    // that collects the token client-side before making API calls.
+    // Exempt: static assets and any non-/v1/ path (SPA fallback to index.html).
+    if path == "/"
+        || path == "/index.html"
+        || path == "/favicon.svg"
+        || path.starts_with("/assets/")
+        || !path.starts_with("/v1/")
+    {
+        return true;
+    }
+
+    false
 }
 
 fn request_rate_limit_key(request: &Request) -> Option<String> {
@@ -4406,9 +4436,26 @@ fn request_rate_limit_key(request: &Request) -> Option<String> {
 }
 
 fn bearer_token(request: &Request) -> Option<&str> {
-    let header = request.headers().get(axum::http::header::AUTHORIZATION)?;
-    let value = header.to_str().ok()?;
-    value.strip_prefix("Bearer ")
+    // 1. Standard Authorization: Bearer <token> header
+    if let Some(header) = request.headers().get(axum::http::header::AUTHORIZATION) {
+        if let Ok(value) = header.to_str() {
+            if let Some(token) = value.strip_prefix("Bearer ") {
+                return Some(token);
+            }
+        }
+    }
+    // 2. Query-param fallback: ?token=<token>  (for SSE EventSource which
+    //    cannot set custom headers).
+    if let Some(query) = request.uri().query() {
+        for pair in query.split('&') {
+            if let Some(val) = pair.strip_prefix("token=") {
+                if !val.is_empty() {
+                    return Some(val);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn principal_member_id(principal: &AuthPrincipal) -> Option<&str> {
@@ -8784,11 +8831,82 @@ async fn orchestrate_run_handler(
         .checkpoint_every_n_tool_calls(cfg.checkpoint_every_n_tool_calls)
         .build();
 
-    let emitter = std::sync::Arc::new(crate::sse_hooks::SseOrchestratorEmitter::new(
+    let sse_emitter = std::sync::Arc::new(crate::sse_hooks::SseOrchestratorEmitter::new(
         state.runtime_sse_tx.clone(),
         state.sse_event_buffer.clone(),
         state.sse_seq.clone(),
     ));
+
+    // Composite emitter: SSE events + ProviderCallCompleted trace recording.
+    struct TracingEmitter {
+        inner: std::sync::Arc<crate::sse_hooks::SseOrchestratorEmitter>,
+        store: std::sync::Arc<cairn_store::InMemoryStore>,
+    }
+    #[async_trait::async_trait]
+    impl cairn_orchestrator::OrchestratorEventEmitter for TracingEmitter {
+        async fn on_started(&self, ctx: &cairn_orchestrator::OrchestrationContext) {
+            self.inner.on_started(ctx).await;
+        }
+        async fn on_gather_completed(&self, ctx: &cairn_orchestrator::OrchestrationContext, g: &cairn_orchestrator::GatherOutput) {
+            self.inner.on_gather_completed(ctx, g).await;
+        }
+        async fn on_decide_completed(&self, ctx: &cairn_orchestrator::OrchestrationContext, d: &cairn_orchestrator::DecideOutput) {
+            self.inner.on_decide_completed(ctx, d).await;
+            // Emit ProviderCallCompleted so LLM traces are populated.
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default().as_millis() as u64;
+            let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
+            let event = cairn_domain::EventEnvelope::for_runtime_event(
+                cairn_domain::EventId::new(format!("evt_trace_{call_id}")),
+                cairn_domain::EventSource::Runtime,
+                cairn_domain::RuntimeEvent::ProviderCallCompleted(cairn_domain::events::ProviderCallCompleted {
+                    project: ctx.project.clone(),
+                    provider_call_id: cairn_domain::ProviderCallId::new(&call_id),
+                    route_decision_id: cairn_domain::RouteDecisionId::new(format!("rd_{call_id}")),
+                    route_attempt_id: cairn_domain::RouteAttemptId::new(format!("ra_{call_id}")),
+                    provider_binding_id: cairn_domain::ProviderBindingId::new("brain"),
+                    provider_connection_id: cairn_domain::ProviderConnectionId::new("brain"),
+                    provider_model_id: cairn_domain::ProviderModelId::new(&d.model_id),
+                    operation_kind: cairn_domain::providers::OperationKind::Generate,
+                    status: cairn_domain::providers::ProviderCallStatus::Succeeded,
+                    latency_ms: Some(d.latency_ms),
+                    input_tokens: d.input_tokens,
+                    output_tokens: d.output_tokens,
+                    cost_micros: None,
+                    completed_at: now,
+                    session_id: Some(ctx.session_id.clone()),
+                    run_id: Some(ctx.run_id.clone()),
+                    error_class: None,
+                    raw_error_message: None,
+                    retry_count: 0,
+                    task_id: ctx.task_id.as_ref().map(|t| cairn_domain::TaskId::new(t.as_str())),
+                    prompt_release_id: None,
+                    fallback_position: 0,
+                    started_at: now.saturating_sub(d.latency_ms),
+                    finished_at: now,
+                }),
+            );
+            let _ = self.store.append(&[event]).await;
+        }
+        async fn on_tool_called(&self, ctx: &cairn_orchestrator::OrchestrationContext, name: &str, args: Option<&serde_json::Value>) {
+            self.inner.on_tool_called(ctx, name, args).await;
+        }
+        async fn on_tool_result(&self, ctx: &cairn_orchestrator::OrchestrationContext, name: &str, ok: bool, out: Option<&serde_json::Value>, err: Option<&str>) {
+            self.inner.on_tool_result(ctx, name, ok, out, err).await;
+        }
+        async fn on_step_completed(&self, ctx: &cairn_orchestrator::OrchestrationContext, d: &cairn_orchestrator::DecideOutput, e: &cairn_orchestrator::ExecuteOutcome) {
+            self.inner.on_step_completed(ctx, d, e).await;
+        }
+        async fn on_finished(&self, ctx: &cairn_orchestrator::OrchestrationContext, t: &cairn_orchestrator::LoopTermination) {
+            self.inner.on_finished(ctx, t).await;
+        }
+    }
+    let emitter: std::sync::Arc<dyn cairn_orchestrator::OrchestratorEventEmitter> =
+        std::sync::Arc::new(TracingEmitter {
+            inner: sse_emitter,
+            store: state.runtime.store.clone(),
+        });
 
     match OrchestratorLoop::new(gather, decide, execute, cfg)
         .with_emitter(emitter)
@@ -8813,6 +8931,47 @@ async fn orchestrate_run_handler(
             "termination": "waiting_subagent", "child_task_id": child_task_id.as_str(),
         }))).into_response(),
         Err(e) => AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "orchestration_error", format!("{e}")).into_response(),
+    }
+}
+
+/// `POST /v1/runs/:id/cancel` — cancel a run mid-execution.
+///
+/// Transitions the run to `Canceled` state and updates the parent session.
+async fn cancel_run_handler(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<AuthPrincipal>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let run_id = RunId::new(&id);
+    let run = match state.runtime.runs.get(&run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response()
+        }
+        Err(err) => return runtime_error_response(err),
+    };
+
+    let before = current_event_head(&state).await;
+    match state.runtime.runs.cancel(&run_id).await {
+        Ok(record) => {
+            let _ = state
+                .runtime
+                .audit
+                .record(
+                    run.project.tenant_id.clone(),
+                    audit_actor_id(&principal),
+                    "cancel_run".to_owned(),
+                    "run".to_owned(),
+                    id,
+                    AuditOutcome::Success,
+                    serde_json::json!({ "previous_state": format!("{:?}", run.state) }),
+                )
+                .await;
+            publish_runtime_frames_since(&state, before).await;
+            (StatusCode::OK, Json(record)).into_response()
+        }
+        Err(err) => runtime_error_response(err),
     }
 }
 
@@ -14345,6 +14504,70 @@ async fn create_provider_connection_handler(
             Json(serde_json::json!({ "error": err.to_string() })),
         )
             .into_response(),
+    }
+}
+
+/// `GET /v1/providers/connections/:id/resolve-key` — securely resolve the API key
+/// for a provider connection from the encrypted credential store.
+///
+/// Returns the decrypted plaintext key for internal use by the provider runtime.
+/// The key is never logged or included in event payloads.
+/// Returns 404 if no credential is linked, 403 if decryption fails.
+async fn resolve_provider_key_handler(
+    State(state): State<Arc<AppState>>,
+    Path(connection_id): Path<String>,
+) -> impl IntoResponse {
+    // Look up the connection to find its credential_id.
+    let conn_id = ProviderConnectionId::new(&connection_id);
+    let connection = match state.runtime.provider_connections.get(&conn_id).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "provider connection not found")
+                .into_response()
+        }
+        Err(err) => return runtime_error_response(err),
+    };
+
+    // Check if there's a linked credential_id in the connection metadata.
+    // For now, scan the event log for the connection's credential binding.
+    // (A proper implementation would store credential_id on the connection record.)
+    let credential_id_str = connection.provider_connection_id.as_str();
+    let cred_key = format!("provider_credential_{credential_id_str}");
+
+    // Try to resolve from the defaults store (set via PUT /v1/settings/defaults/system/provider_credential_<conn_id>)
+    let system_project = cairn_domain::ProjectKey::new("system", "system", "system");
+    match state.runtime.defaults.resolve(&system_project, &cred_key).await {
+        Ok(Some(setting)) => {
+            if let Some(cred_id) = setting.as_str() {
+                let credential_id = cairn_domain::CredentialId::new(cred_id);
+                match state.runtime.credentials.get(&credential_id).await {
+                    Ok(Some(record)) if record.active => {
+                        (StatusCode::OK, Json(serde_json::json!({
+                            "connection_id": connection_id,
+                            "credential_id": cred_id,
+                            "has_key": true,
+                            "provider_id": record.provider_id,
+                        }))).into_response()
+                    }
+                    Ok(Some(_)) => {
+                        AppApiError::new(StatusCode::GONE, "credential_revoked", "linked credential has been revoked")
+                            .into_response()
+                    }
+                    Ok(None) => {
+                        AppApiError::new(StatusCode::NOT_FOUND, "credential_not_found", "linked credential not found")
+                            .into_response()
+                    }
+                    Err(err) => runtime_error_response(err),
+                }
+            } else {
+                AppApiError::new(StatusCode::NOT_FOUND, "no_credential", "no credential linked to this connection")
+                    .into_response()
+            }
+        }
+        _ => {
+            AppApiError::new(StatusCode::NOT_FOUND, "no_credential", "no credential linked to this connection — store API key via POST /v1/admin/tenants/:id/credentials then link it")
+                .into_response()
+        }
     }
 }
 

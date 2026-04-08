@@ -29,7 +29,7 @@ import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 import type { StatCardVariant } from "../components/StatCard";
-import type { HealthCheckEntry, RunRecord } from "../lib/types";
+import type { CostSummary, HealthCheckEntry, RunRecord } from "../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -71,7 +71,7 @@ function runStateColors(state: string): string {
     case "paused":            return "text-amber-400  bg-amber-400/10";
     case "waiting_approval":  return "text-purple-400 bg-purple-400/10";
     case "pending":           return "text-sky-400    bg-sky-400/10";
-    default:                  return "text-zinc-500   bg-zinc-800";
+    default:                  return "text-gray-400 dark:text-zinc-500   bg-gray-100 dark:bg-zinc-800";
   }
 }
 
@@ -79,7 +79,7 @@ function runStateColors(state: string): string {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-3">
+    <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
       {children}
     </p>
   );
@@ -87,14 +87,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={clsx("bg-zinc-900 border border-zinc-800 rounded-lg p-4", className)}>
+    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-4", className)}>
       {children}
     </div>
   );
 }
 
 function Skeleton({ className }: { className?: string }) {
-  return <div className={clsx("rounded bg-zinc-800 animate-pulse", className)} />;
+  return <div className={clsx("rounded bg-gray-100 dark:bg-zinc-800 animate-pulse", className)} />;
 }
 
 // ── Widget: Active Runs ───────────────────────────────────────────────────────
@@ -107,27 +107,27 @@ function ActiveRunRow({ run }: { run: RunRecord }) {
   return (
     <button
       onClick={handleClick}
-      className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-zinc-800/60 transition-colors text-left group"
+      className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60 transition-colors text-left group"
     >
       {/* State icon */}
       <span className={clsx(
         "shrink-0 flex h-6 w-6 items-center justify-center rounded-full",
-        run.state === "running" ? "bg-emerald-500/15" : "bg-zinc-800",
+        run.state === "running" ? "bg-emerald-500/15" : "bg-gray-100 dark:bg-zinc-800",
       )}>
         {run.state === "running"
           ? <Play  size={9} className="text-emerald-400 fill-emerald-400" />
           : run.state === "paused"
           ? <Pause size={9} className="text-amber-400" />
-          : <Timer size={9} className="text-zinc-500" />
+          : <Timer size={9} className="text-gray-400 dark:text-zinc-500" />
         }
       </span>
 
       {/* Run id + project */}
       <div className="flex-1 min-w-0">
-        <p className="text-[12px] font-mono text-zinc-200 truncate group-hover:text-zinc-100">
+        <p className="text-[12px] font-mono text-gray-800 dark:text-zinc-200 truncate group-hover:text-gray-900 dark:text-zinc-100">
           {run.run_id}
         </p>
-        <p className="text-[10px] text-zinc-600 truncate font-mono">
+        <p className="text-[10px] text-gray-400 dark:text-zinc-600 truncate font-mono">
           {run.project.tenant_id}/{run.project.project_id}
         </p>
       </div>
@@ -140,7 +140,7 @@ function ActiveRunRow({ run }: { run: RunRecord }) {
         )}>
           {run.state.replace(/_/g, " ")}
         </span>
-        <span className="text-[10px] font-mono text-zinc-600 tabular-nums">
+        <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-600 tabular-nums">
           {fmtElapsed(run.created_at)}
         </span>
       </div>
@@ -162,7 +162,7 @@ function ActiveRunsWidget() {
     <Panel className="flex flex-col min-h-[160px]">
       <div className="flex items-center justify-between mb-2">
         <SectionLabel>Active Runs</SectionLabel>
-        <span className="text-[10px] text-zinc-600 flex items-center gap-1">
+        <span className="text-[10px] text-gray-400 dark:text-zinc-600 flex items-center gap-1">
           <Radio size={9} className="text-emerald-500" />
           5s
         </span>
@@ -184,7 +184,7 @@ function ActiveRunsWidget() {
       ) : !runs || runs.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center py-6 gap-2">
           <CheckCircle2 size={18} className="text-emerald-600/50" />
-          <p className="text-[12px] text-zinc-600">No active runs</p>
+          <p className="text-[12px] text-gray-400 dark:text-zinc-600">No active runs</p>
         </div>
       ) : (
         <div className="space-y-0.5">
@@ -204,7 +204,7 @@ function TokenBar({ inputTokens, outputTokens }: { inputTokens: number; outputTo
     return (
       <div className="flex gap-0.5 h-6 items-end">
         {Array.from({ length: 12 }, (_, i) => (
-          <div key={i} className="flex-1 rounded-sm bg-zinc-800" style={{ height: "30%" }} />
+          <div key={i} className="flex-1 rounded-sm bg-gray-100 dark:bg-zinc-800" style={{ height: "30%" }} />
         ))}
       </div>
     );
@@ -235,20 +235,45 @@ function TokenBar({ inputTokens, outputTokens }: { inputTokens: number; outputTo
   );
 }
 
+/** Aggregate the list-shaped /v1/costs response into a CostSummary. */
+function aggregateCosts(raw: unknown): CostSummary {
+  // If the API already returns CostSummary shape, use it directly.
+  if (raw && typeof raw === 'object' && 'total_cost_micros' in raw) {
+    return raw as CostSummary;
+  }
+  // Otherwise, aggregate from the list response {items: [...], hasMore}.
+  const items: Array<Record<string, number>> =
+    (raw && typeof raw === 'object' && 'items' in raw && Array.isArray((raw as { items: unknown }).items))
+      ? (raw as { items: Array<Record<string, number>> }).items
+      : [];
+  return items.reduce<CostSummary>(
+    (acc, item) => ({
+      total_provider_calls: acc.total_provider_calls + (item.provider_calls ?? item.total_provider_calls ?? 0),
+      total_tokens_in:      acc.total_tokens_in + (item.tokens_in ?? item.total_tokens_in ?? 0),
+      total_tokens_out:     acc.total_tokens_out + (item.tokens_out ?? item.total_tokens_out ?? 0),
+      total_cost_micros:    acc.total_cost_micros + (item.cost_micros ?? item.total_cost_micros ?? 0),
+    }),
+    { total_provider_calls: 0, total_tokens_in: 0, total_tokens_out: 0, total_cost_micros: 0 },
+  );
+}
+
 function CostWidget() {
-  const { data: costs, isLoading, dataUpdatedAt } = useQuery({
+  const { data: rawCosts, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ["costs-widget"],
     queryFn:  () => defaultApi.getCosts(),
     refetchInterval: 30_000,
   });
 
-  const { data: prevCosts } = useQuery({
+  const { data: rawPrevCosts } = useQuery({
     queryKey: ["costs-widget-prev"],
     queryFn:  () => defaultApi.getCosts(),
     staleTime: Infinity,
     gcTime: 30_000,
     enabled: false,        // seeded from cache; we just compare snapshots
   });
+
+  const costs = rawCosts ? aggregateCosts(rawCosts) : undefined;
+  const prevCosts = rawPrevCosts ? aggregateCosts(rawPrevCosts) : undefined;
 
   const trend = costs && prevCosts && prevCosts.total_cost_micros > 0
     ? costs.total_cost_micros > prevCosts.total_cost_micros ? "up" : "down"
@@ -259,7 +284,7 @@ function CostWidget() {
       <div className="flex items-center justify-between mb-2">
         <SectionLabel>Costs</SectionLabel>
         {dataUpdatedAt > 0 && (
-          <span className="text-[10px] text-zinc-700 tabular-nums">
+          <span className="text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums">
             {new Date(dataUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </span>
         )}
@@ -272,12 +297,12 @@ function CostWidget() {
           <Skeleton className="h-3 w-3/4" />
         </div>
       ) : !costs ? (
-        <p className="text-[12px] text-zinc-600 italic">Unavailable</p>
+        <p className="text-[12px] text-gray-400 dark:text-zinc-600 italic">Unavailable</p>
       ) : (
         <div className="space-y-2">
           {/* Total cost headline */}
           <div className="flex items-baseline gap-2">
-            <span className="text-[22px] font-semibold tabular-nums text-zinc-100 leading-none">
+            <span className="text-[22px] font-semibold tabular-nums text-gray-900 dark:text-zinc-100 leading-none">
               {fmtMicros(costs.total_cost_micros)}
             </span>
             {trend === "up" && <TrendingUp  size={13} className="text-red-400" />}
@@ -291,7 +316,7 @@ function CostWidget() {
           />
 
           {/* Legend */}
-          <div className="flex items-center justify-between text-[10px] text-zinc-600">
+          <div className="flex items-center justify-between text-[10px] text-gray-400 dark:text-zinc-600">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-sm bg-indigo-500/60 inline-block" />
               in {fmtTokens(costs.total_tokens_in)}
@@ -382,7 +407,7 @@ function ProviderStatusWidget() {
       <div className="flex items-center justify-between mb-2">
         <SectionLabel>Providers</SectionLabel>
         {ollamaModels && (
-          <span className="text-[10px] text-zinc-600 font-mono truncate max-w-[100px]">
+          <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono truncate max-w-[100px]">
             {ollamaModels.host.replace(/^https?:\/\//, "")}
           </span>
         )}
@@ -399,17 +424,17 @@ function ProviderStatusWidget() {
           ))}
         </div>
       ) : providers.length === 0 ? (
-        <p className="text-[12px] text-zinc-600 italic">Health endpoint unavailable</p>
+        <p className="text-[12px] text-gray-400 dark:text-zinc-600 italic">Health endpoint unavailable</p>
       ) : (
         <div className="space-y-2">
           {providers.map(p => (
             <div key={p.name} className="flex items-center gap-2.5">
               <ProviderDot status={p.status} />
-              <span className="text-[12px] text-zinc-400 flex-1">{p.name}</span>
+              <span className="text-[12px] text-gray-500 dark:text-zinc-400 flex-1">{p.name}</span>
               <span className={clsx(
                 "text-[10px] font-mono tabular-nums",
                 p.status === "healthy"      ? "text-emerald-500" :
-                p.status === "unconfigured" ? "text-zinc-600"    :
+                p.status === "unconfigured" ? "text-gray-400 dark:text-zinc-600"    :
                 p.status === "degraded"     ? "text-amber-400"   : "text-red-400",
               )}>
                 {p.detail}
@@ -419,11 +444,11 @@ function ProviderStatusWidget() {
 
           {/* Ollama model list (compact) */}
           {ollamaModels && ollamaModels.models.length > 0 && (
-            <div className="pt-2 mt-1 border-t border-zinc-800/60">
-              <p className="text-[10px] text-zinc-700 mb-1.5">Local models</p>
+            <div className="pt-2 mt-1 border-t border-gray-200/60 dark:border-zinc-800/60">
+              <p className="text-[10px] text-gray-300 dark:text-zinc-700 mb-1.5">Local models</p>
               <div className="flex flex-wrap gap-1">
                 {ollamaModels.models.map(m => (
-                  <span key={m} className="text-[10px] font-mono text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
+                  <span key={m} className="text-[10px] font-mono text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
                     {m}
                   </span>
                 ))}
@@ -460,21 +485,21 @@ function CheckRow({
   check: HealthCheckEntry;
 }) {
   return (
-    <div className="flex items-center gap-3 py-2 border-b border-zinc-800/60 last:border-0">
-      <Icon size={13} className="text-zinc-600 shrink-0" />
-      <span className="text-[12px] text-zinc-400 flex-1">{label}</span>
+    <div className="flex items-center gap-3 py-2 border-b border-gray-200/60 dark:border-zinc-800/60 last:border-0">
+      <Icon size={13} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+      <span className="text-[12px] text-gray-500 dark:text-zinc-400 flex-1">{label}</span>
       <div className="flex items-center gap-2">
         {check.models !== undefined && (
-          <span className="text-[10px] text-zinc-600 font-mono">{check.models} model{check.models !== 1 ? "s" : ""}</span>
+          <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono">{check.models} model{check.models !== 1 ? "s" : ""}</span>
         )}
         {check.latency_ms !== undefined && (
-          <span className="text-[10px] text-zinc-700 font-mono tabular-nums">{check.latency_ms}ms</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono tabular-nums">{check.latency_ms}ms</span>
         )}
         <span className="flex items-center gap-1.5 text-[11px] font-medium">
           <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", STATUS_DOT[check.status] ?? "bg-zinc-600")} />
           <span className={clsx(
             check.status === "healthy"      ? "text-emerald-400" :
-            check.status === "unconfigured" ? "text-zinc-600"    :
+            check.status === "unconfigured" ? "text-gray-400 dark:text-zinc-600"    :
             check.status === "degraded"     ? "text-amber-400"   : "text-red-400",
           )}>
             {STATUS_LABEL[check.status] ?? check.status}
@@ -489,10 +514,10 @@ function UsageBar({ value, max, color }: { value: number; max: number; color: st
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+      <div className="flex-1 h-1.5 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden">
         <div className={clsx("h-full rounded-full transition-all", color)} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-[10px] text-zinc-600 tabular-nums font-mono w-8 text-right shrink-0">
+      <span className="text-[10px] text-gray-400 dark:text-zinc-600 tabular-nums font-mono w-8 text-right shrink-0">
         {pct.toFixed(0)}%
       </span>
     </div>
@@ -526,10 +551,10 @@ function SystemHealthCard() {
 
       {isLoading ? (
         <div className="space-y-2 animate-pulse">
-          {[1, 2, 3].map(i => <div key={i} className="h-8 rounded bg-zinc-800" />)}
+          {[1, 2, 3].map(i => <div key={i} className="h-8 rounded bg-gray-100 dark:bg-zinc-800" />)}
         </div>
       ) : !data ? (
-        <p className="text-[12px] text-zinc-600 italic py-2">
+        <p className="text-[12px] text-gray-400 dark:text-zinc-600 italic py-2">
           Health endpoint unavailable — upgrade cairn-app to v0.1.1+
         </p>
       ) : (
@@ -539,11 +564,11 @@ function SystemHealthCard() {
           <CheckRow icon={Activity} label="Events" check={data.checks.event_buffer} />
 
           {(data.checks.memory.rss_mb ?? 0) > 0 && (
-            <div className="pt-2 mt-1 border-t border-zinc-800/60 space-y-1.5">
+            <div className="pt-2 mt-1 border-t border-gray-200/60 dark:border-zinc-800/60 space-y-1.5">
               <div className="flex items-center gap-2">
-                <Cpu size={13} className="text-zinc-600 shrink-0" />
-                <span className="text-[12px] text-zinc-400 flex-1">Memory (RSS)</span>
-                <span className="text-[11px] text-zinc-500 font-mono tabular-nums">
+                <Cpu size={13} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+                <span className="text-[12px] text-gray-500 dark:text-zinc-400 flex-1">Memory (RSS)</span>
+                <span className="text-[11px] text-gray-400 dark:text-zinc-500 font-mono tabular-nums">
                   {data.checks.memory.rss_mb} MB
                 </span>
               </div>
@@ -559,9 +584,9 @@ function SystemHealthCard() {
             </div>
           )}
 
-          <div className="flex items-center justify-between pt-2 mt-1 border-t border-zinc-800/60">
-            <span className="text-[10px] text-zinc-700 font-mono">v{data.version}</span>
-            <span className="text-[10px] text-zinc-700 font-mono tabular-nums">
+          <div className="flex items-center justify-between pt-2 mt-1 border-t border-gray-200/60 dark:border-zinc-800/60">
+            <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono">v{data.version}</span>
+            <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono tabular-nums">
               up {fmtUptime(data.uptime_seconds)}
             </span>
           </div>
@@ -578,19 +603,19 @@ function CriticalEvents({ events }: { events: string[] }) {
     <Panel>
       <div className="flex items-center justify-between mb-3">
         <SectionLabel>Critical events</SectionLabel>
-        <span className="text-[11px] text-zinc-600">{events.length}</span>
+        <span className="text-[11px] text-gray-400 dark:text-zinc-600">{events.length}</span>
       </div>
       {events.length === 0 ? (
-        <div className="flex items-center gap-2 py-4 justify-center text-zinc-600">
+        <div className="flex items-center gap-2 py-4 justify-center text-gray-400 dark:text-zinc-600">
           <CheckCircle2 size={14} className="text-emerald-600" />
           <span className="text-[13px]">No critical events</span>
         </div>
       ) : (
         <ul className="space-y-1.5">
           {events.map((evt, i) => (
-            <li key={`evt-${i}`} className="flex items-start gap-2 rounded bg-zinc-800/50 px-3 py-2">
+            <li key={`evt-${i}`} className="flex items-start gap-2 rounded bg-gray-100/50 dark:bg-zinc-800/50 px-3 py-2">
               <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-500" />
-              <span className="text-[13px] text-zinc-300 break-words">{evt}</span>
+              <span className="text-[13px] text-gray-700 dark:text-zinc-300 break-words">{evt}</span>
             </li>
           ))}
         </ul>
@@ -653,11 +678,11 @@ function EventSparklineCard({ totalEvents }: { totalEvents: number }) {
   const hourly = useHourlyEventCounts();
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 flex items-center justify-between gap-4">
+    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-4 flex items-center justify-between gap-4">
       <div>
-        <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Events (12h)</p>
-        <p className="text-[22px] font-semibold tabular-nums text-zinc-100 leading-none">{totalEvents}</p>
-        <p className="text-[10px] text-zinc-600 mt-1">total in log</p>
+        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1.5">Events (12h)</p>
+        <p className="text-[22px] font-semibold tabular-nums text-gray-900 dark:text-zinc-100 leading-none">{totalEvents}</p>
+        <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-1">total in log</p>
       </div>
       <MiniChart
         data={hourly}
@@ -723,10 +748,10 @@ function ModelUsageWidget() {
       <SectionLabel>Top Models · Token Usage</SectionLabel>
       {isLoading ? (
         <div className="space-y-2 animate-pulse">
-          {[0, 1, 2].map((i) => <div key={i} className="h-5 rounded bg-zinc-800" />)}
+          {[0, 1, 2].map((i) => <div key={i} className="h-5 rounded bg-gray-100 dark:bg-zinc-800" />)}
         </div>
       ) : modelItems.length === 0 ? (
-        <p className="text-[12px] text-zinc-600 italic py-1">
+        <p className="text-[12px] text-gray-400 dark:text-zinc-600 italic py-1">
           No traces yet — model usage appears after LLM calls.
         </p>
       ) : (
@@ -767,18 +792,18 @@ function OnboardingBanner() {
   }
 
   return (
-    <div className="rounded-lg border-l-2 border-l-indigo-500 border border-zinc-800 bg-zinc-900 p-4">
+    <div className="rounded-lg border-l-2 border-l-indigo-500 border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-4">
       <div className="flex items-start justify-between gap-4 mb-3">
         <div>
-          <p className="text-[13px] font-semibold text-zinc-100">Welcome to Cairn ✦</p>
-          <p className="text-[11px] text-zinc-500 mt-0.5">
+          <p className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">Welcome to Cairn ✦</p>
+          <p className="text-[11px] text-gray-400 dark:text-zinc-500 mt-0.5">
             A self-hostable control plane for production AI agents. Here's how to get started.
           </p>
         </div>
         <button
           onClick={() => dismiss(false)}
           aria-label="Dismiss onboarding"
-          className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors shrink-0"
+          className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors shrink-0"
         >
           ×
         </button>
@@ -791,17 +816,17 @@ function OnboardingBanner() {
               {n}
             </span>
             <div>
-              <p className="text-[12px] font-medium text-zinc-200">{title}</p>
-              <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug">{body}</p>
+              <p className="text-[12px] font-medium text-gray-800 dark:text-zinc-200">{title}</p>
+              <p className="text-[11px] text-gray-400 dark:text-zinc-500 mt-0.5 leading-snug">{body}</p>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-zinc-800/60">
+      <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-200/60 dark:border-zinc-800/60">
         <button
           onClick={() => dismiss(true)}
-          className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+          className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
         >
           Don&apos;t show again
         </button>
@@ -920,8 +945,8 @@ function ExportMenu({ onJson, onCsv, onPrint }: {
     <div className="relative">
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1.5 h-7 px-2.5 rounded border border-zinc-700 bg-zinc-900
-                   text-[11px] text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors"
+        className="flex items-center gap-1.5 h-7 px-2.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900
+                   text-[11px] text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 transition-colors"
       >
         <Download size={11} />
         Export
@@ -930,21 +955,21 @@ function ExportMenu({ onJson, onCsv, onPrint }: {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-20 min-w-[148px] rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl py-1 overflow-hidden">
+          <div className="absolute right-0 top-full mt-1 z-20 min-w-[148px] rounded-lg border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 shadow-xl py-1 overflow-hidden">
             <button onClick={() => { onJson(); setOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-zinc-300 hover:bg-zinc-800 transition-colors">
-              <Download size={11} className="text-zinc-500 shrink-0" />
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">
+              <Download size={11} className="text-gray-400 dark:text-zinc-500 shrink-0" />
               Export JSON
             </button>
             <button onClick={() => { onCsv(); setOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-zinc-300 hover:bg-zinc-800 transition-colors">
-              <Download size={11} className="text-zinc-500 shrink-0" />
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">
+              <Download size={11} className="text-gray-400 dark:text-zinc-500 shrink-0" />
               Export CSV
             </button>
-            <div className="h-px bg-zinc-800 my-1" />
+            <div className="h-px bg-gray-100 dark:bg-zinc-800 my-1" />
             <button onClick={() => { onPrint(); setOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-zinc-300 hover:bg-zinc-800 transition-colors">
-              <Printer size={11} className="text-zinc-500 shrink-0" />
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">
+              <Printer size={11} className="text-gray-400 dark:text-zinc-500 shrink-0" />
               Print / Save PDF
             </button>
           </div>
@@ -1003,7 +1028,7 @@ export function DashboardPage() {
   const updatedAt = latestUpdate ? new Date(latestUpdate).toLocaleTimeString() : null;
 
   return (
-    <div className="h-full overflow-y-auto bg-zinc-950">
+    <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
 
         {/* Onboarding banner — only on first visit */}
@@ -1012,8 +1037,8 @@ export function DashboardPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-[13px] font-medium text-zinc-200">Overview</h2>
-            <p className="text-[11px] text-zinc-600 mt-0.5">Real-time deployment status</p>
+            <h2 className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Overview</h2>
+            <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">Real-time deployment status</p>
           </div>
           <div className="flex items-center gap-3">
             {data && (
@@ -1029,7 +1054,7 @@ export function DashboardPage() {
               </span>
             )}
             {updatedAt && (
-              <span className="flex items-center gap-1 text-[11px] text-zinc-600">
+              <span className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600">
                 <Clock size={11} />
                 {updatedAt}
               </span>
@@ -1039,20 +1064,20 @@ export function DashboardPage() {
               <div className="relative">
                 <select value={refreshInterval.option}
                   onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
-                  className="appearance-none rounded border border-zinc-700 bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="appearance-none rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-gray-500 dark:text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors"
                 >
                   {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
                 </select>
                 <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none">
                   {(statsFetching || dashFetching)
                     ? <RefreshCw size={9} className="animate-spin text-indigo-400" />
-                    : <RefreshCw size={9} className="text-zinc-600" />
+                    : <RefreshCw size={9} className="text-gray-400 dark:text-zinc-600" />
                   }
                 </span>
               </div>
               <button onClick={() => { void refetchStats(); void refetchDashboard(); }}
                 disabled={statsFetching || dashFetching}
-                className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+                className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
               >
                 <RefreshCw size={11} className={(statsFetching || dashFetching) ? "animate-spin" : ""} />
                 <span className="hidden sm:inline">Refresh</span>
@@ -1116,7 +1141,7 @@ export function DashboardPage() {
         <div
           role="tablist"
           aria-label="Dashboard sections"
-          className="flex items-center gap-0 border-b border-zinc-800 -mb-2"
+          className="flex items-center gap-0 border-b border-gray-200 dark:border-zinc-800 -mb-2"
           onKeyDown={e => {
             const idx = DASH_TABS.indexOf(activeTab);
             if (e.key === 'ArrowRight') setActiveTab(DASH_TABS[(idx + 1) % DASH_TABS.length]);
@@ -1134,8 +1159,8 @@ export function DashboardPage() {
               className={clsx(
                 'px-4 h-9 text-[12px] font-medium transition-colors border-b-2 -mb-px',
                 activeTab === tab
-                  ? 'text-zinc-100 border-indigo-500'
-                  : 'text-zinc-500 border-transparent hover:text-zinc-300',
+                  ? 'text-gray-900 dark:text-zinc-100 border-indigo-500'
+                  : 'text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:text-zinc-300',
               )}
             >
               {tab}
@@ -1183,9 +1208,9 @@ export function DashboardPage() {
               <SectionLabel>Recent Tasks</SectionLabel>
               <div className="space-y-1 pt-1">
                 {(stats?.total_tasks ?? 0) === 0 ? (
-                  <p className="text-[12px] text-zinc-600 py-4 text-center">No tasks yet.</p>
+                  <p className="text-[12px] text-gray-400 dark:text-zinc-600 py-4 text-center">No tasks yet.</p>
                 ) : (
-                  <p className="text-[12px] text-zinc-500">
+                  <p className="text-[12px] text-gray-400 dark:text-zinc-500">
                     {stats?.total_tasks ?? 0} total tasks · {runs} active
                   </p>
                 )}

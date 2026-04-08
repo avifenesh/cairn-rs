@@ -9,7 +9,7 @@
  *  - Exposes { events, status, lastEventId } via useSyncExternalStore
  */
 
-import { useSyncExternalStore, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -53,13 +53,9 @@ function setState(patch: Partial<StreamState>) {
   listeners.forEach((fn) => fn());
 }
 
-function subscribe(listener: Listener) {
+function subscribe(listener: Listener): () => void {
   listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-function getSnapshot(): StreamState {
-  return state;
+  return () => { listeners.delete(listener); };
 }
 
 // ── Connection manager ────────────────────────────────────────────────────────
@@ -207,9 +203,18 @@ export interface UseEventStreamResult {
 
 export function useEventStream({
   url = '/v1/streams/runtime',
-  token = import.meta.env.VITE_API_TOKEN ?? 'dev-admin-token',
+  token = localStorage.getItem('cairn_token') || import.meta.env.VITE_API_TOKEN || 'dev-admin-token',
   enabled = true,
 }: UseEventStreamOptions = {}): UseEventStreamResult {
+  // Local state mirror — guarantees React re-renders on every status change.
+  const [, forceUpdate] = useState(0);
+
+  // Subscribe to the singleton store and force re-render on changes.
+  useEffect(() => {
+    const unsub = subscribe(() => forceUpdate((n: number) => (n + 1) & 0x7fffffff));
+    return unsub;
+  }, []);
+
   // Wire up or tear down the connection when deps change.
   useEffect(() => {
     if (!enabled) {
@@ -235,11 +240,9 @@ export function useEventStream({
     };
   }, [url, token, enabled]);
 
-  const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-
   return {
-    events:      snap.events,
-    status:      snap.status,
-    lastEventId: snap.lastEventId,
+    events:      state.events,
+    status:      state.status,
+    lastEventId: state.lastEventId,
   };
 }

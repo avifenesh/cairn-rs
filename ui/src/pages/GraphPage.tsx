@@ -37,7 +37,7 @@ const NODE_TYPES: NodeTypeDef[] = [
   { kind: "chunk",           label: "Chunk",           description: "Indexed document fragment",         color: "border-green-500/40 text-green-400",     bgColor: "bg-green-950/60 text-green-300",     group: "memory"   },
   { kind: "source",          label: "Source",          description: "Signal / document source",          color: "border-cyan-500/40 text-cyan-400",       bgColor: "bg-cyan-950/60 text-cyan-300",       group: "memory"   },
   { kind: "ingest_job",      label: "Ingest Job",      description: "Document ingest pipeline run",      color: "border-lime-500/40 text-lime-400",       bgColor: "bg-lime-950/60 text-lime-300",       group: "memory"   },
-  { kind: "signal",          label: "Signal",          description: "External signal event",             color: "border-zinc-500/40 text-zinc-400",       bgColor: "bg-zinc-800/60 text-zinc-300",       group: "memory"   },
+  { kind: "signal",          label: "Signal",          description: "External signal event",             color: "border-zinc-500/40 text-gray-500 dark:text-zinc-400",       bgColor: "bg-gray-100/60 dark:bg-zinc-800/60 text-gray-700 dark:text-zinc-300",       group: "memory"   },
   { kind: "prompt_asset",    label: "Prompt Asset",    description: "Prompt template asset",             color: "border-fuchsia-500/40 text-fuchsia-400", bgColor: "bg-fuchsia-950/60 text-fuchsia-300", group: "prompts"  },
   { kind: "prompt_version",  label: "Prompt Version",  description: "Versioned prompt snapshot",         color: "border-pink-500/40 text-pink-400",       bgColor: "bg-pink-950/60 text-pink-300",       group: "prompts"  },
   { kind: "prompt_release",  label: "Prompt Release",  description: "Deployed prompt release",           color: "border-red-500/40 text-red-400",         bgColor: "bg-red-950/60 text-red-300",         group: "prompts"  },
@@ -327,10 +327,10 @@ function ForceGraph({ maxNodes = 100 }: { maxNodes?: number }) {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="rounded-lg border border-zinc-800 overflow-hidden bg-zinc-950 select-none">
+    <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-950 select-none">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-zinc-800 bg-zinc-900/60">
-        <span className="text-[11px] text-zinc-500 font-mono tabular-nums">
+      <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60">
+        <span className="text-[11px] text-gray-400 dark:text-zinc-500 font-mono tabular-nums">
           {snap.length} nodes · {edges.length} edges
         </span>
         {settled
@@ -344,23 +344,23 @@ function ForceGraph({ maxNodes = 100 }: { maxNodes?: number }) {
         <div className="ml-auto flex items-center gap-1">
           <button
             onClick={() => setXf(t => { const k = Math.min(5, t.k * 1.25); return { ...t, k }; })}
-            className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
             title="Zoom in"
           ><ZoomIn size={12} /></button>
           <button
             onClick={() => setXf(t => { const k = Math.max(0.15, t.k * 0.8); return { ...t, k }; })}
-            className="p-1.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
             title="Zoom out"
           ><ZoomOut size={12} /></button>
           <button
             onClick={() => setXf({ tx: 0, ty: 0, k: 1 })}
-            className="px-1.5 py-1 rounded text-[10px] font-mono text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="px-1.5 py-1 rounded text-[10px] font-mono text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
             title="Reset zoom"
           >1:1</button>
-          <div className="w-px h-4 bg-zinc-800 mx-0.5" />
+          <div className="w-px h-4 bg-gray-100 dark:bg-zinc-800 mx-0.5" />
           <button
             onClick={resetSim}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors border border-zinc-800"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors border border-gray-200 dark:border-zinc-800"
             title="Regenerate demo data"
           ><RotateCcw size={10} /> Reset</button>
         </div>
@@ -467,7 +467,7 @@ function ForceGraph({ maxNodes = 100 }: { maxNodes?: number }) {
       </svg>
 
       {/* Footer legend */}
-      <div className="flex items-center gap-5 px-4 py-2 border-t border-zinc-800 bg-zinc-900/40 flex-wrap">
+      <div className="flex items-center gap-5 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 bg-gray-50/40 dark:bg-zinc-900/40 flex-wrap">
         {(["session", "run", "task"] as SimKind[]).map(k => (
           <div key={k} className="flex items-center gap-1.5">
             <svg width={NODE_R[k] * 2 + 2} height={NODE_R[k] * 2 + 2}>
@@ -476,13 +476,13 @@ function ForceGraph({ maxNodes = 100 }: { maxNodes?: number }) {
                 fill={NODE_FILL[k]} stroke={NODE_STROKE[k]} strokeWidth={1}
               />
             </svg>
-            <span className="text-[11px] text-zinc-500 capitalize">{k}</span>
+            <span className="text-[11px] text-gray-400 dark:text-zinc-500 capitalize">{k}</span>
             {counts[k] != null && (
-              <span className="text-[10px] text-zinc-700 font-mono">{counts[k]}</span>
+              <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono">{counts[k]}</span>
             )}
           </div>
         ))}
-        <span className="ml-auto text-[10px] text-zinc-700 hidden sm:block">
+        <span className="ml-auto text-[10px] text-gray-300 dark:text-zinc-700 hidden sm:block">
           scroll to zoom · drag to pan · click node to highlight connections
         </span>
       </div>
@@ -497,9 +497,9 @@ function StatCard({ label, value, sub, accent = "border-l-zinc-700" }: {
 }) {
   return (
     <div className={clsx("border-l-2 pl-3 py-0.5", accent)}>
-      <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -513,8 +513,8 @@ function NodeCard({ node, selected, onClick }: {
       className={clsx(
         "w-full text-left rounded-lg border p-3 transition-all",
         selected
-          ? clsx("ring-1 ring-indigo-500/60 bg-zinc-800/60", node.color)
-          : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800/60 hover:border-zinc-700",
+          ? clsx("ring-1 ring-indigo-500/60 bg-gray-100/60 dark:bg-zinc-800/60", node.color)
+          : "border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60 hover:border-gray-200 dark:border-zinc-700",
       )}
     >
       <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -523,8 +523,8 @@ function NodeCard({ node, selected, onClick }: {
         </span>
         {selected && <ArrowRight size={11} className="text-indigo-400 shrink-0 mt-0.5" />}
       </div>
-      <p className="text-[12px] font-medium text-zinc-200 truncate">{node.label}</p>
-      <p className="text-[11px] text-zinc-600 mt-0.5 leading-snug">{node.description}</p>
+      <p className="text-[12px] font-medium text-gray-800 dark:text-zinc-200 truncate">{node.label}</p>
+      <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5 leading-snug">{node.description}</p>
     </button>
   );
 }
@@ -557,38 +557,38 @@ function NodeDetail({ node, onClose }: { node: NodeTypeDef; onClose: () => void 
   });
 
   return (
-    <aside className="w-72 shrink-0 border-l border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+    <aside className="w-72 shrink-0 border-l border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-zinc-800">
         <div>
           <span className={clsx("text-[10px] font-mono rounded px-1.5 py-0.5", node.bgColor)}>{node.kind}</span>
-          <p className="text-[13px] font-medium text-zinc-200 mt-1">{node.label}</p>
+          <p className="text-[13px] font-medium text-gray-800 dark:text-zinc-200 mt-1">{node.label}</p>
         </div>
         <button onClick={onClose}
-          className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">×</button>
+          className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">×</button>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <p className="text-[11px] text-zinc-500">{node.description}</p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-500">{node.description}</p>
         <div>
-          <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">Connected via</p>
+          <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">Connected via</p>
           {relevantEdges.length === 0 ? (
-            <p className="text-[11px] text-zinc-700 italic">No edges defined</p>
+            <p className="text-[11px] text-gray-300 dark:text-zinc-700 italic">No edges defined</p>
           ) : (
             <div className="space-y-1.5">
               {relevantEdges.map(e => (
-                <div key={e.kind} className="rounded bg-zinc-900 border border-zinc-800 px-2.5 py-1.5">
-                  <p className="text-[11px] font-mono text-zinc-400">{e.kind}</p>
-                  <p className="text-[10px] text-zinc-600 mt-0.5">{e.description}</p>
+                <div key={e.kind} className="rounded bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5">
+                  <p className="text-[11px] font-mono text-gray-500 dark:text-zinc-400">{e.kind}</p>
+                  <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-0.5">{e.description}</p>
                 </div>
               ))}
             </div>
           )}
         </div>
-        <div className="rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2.5">
+        <div className="rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-3 py-2.5">
           <div className="flex items-center gap-1.5 mb-1">
-            <Info size={10} className="text-zinc-600" />
-            <span className="text-[10px] text-zinc-600 font-medium">Live count</span>
+            <Info size={10} className="text-gray-400 dark:text-zinc-600" />
+            <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-medium">Live count</span>
           </div>
-          <p className="text-[13px] font-mono text-zinc-600 italic">— backend offline</p>
+          <p className="text-[13px] font-mono text-gray-400 dark:text-zinc-600 italic">— backend offline</p>
         </div>
       </div>
     </aside>
@@ -613,21 +613,21 @@ export function GraphPage() {
   );
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
+    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-5 h-11 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-3 px-5 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
         <Network size={13} className="text-indigo-400 shrink-0" />
-        <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Knowledge Graph</span>
+        <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Knowledge Graph</span>
 
         {/* View switcher */}
-        <div className="ml-4 flex items-center gap-0.5 rounded border border-zinc-800 bg-zinc-900 p-0.5">
+        <div className="ml-4 flex items-center gap-0.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-0.5">
           {(["simulation", "schema"] as View[]).map(v => (
             <button key={v} onClick={() => setView(v)}
               className={clsx(
                 "px-2.5 py-1 rounded text-[11px] font-medium transition-colors capitalize",
                 view === v
-                  ? "bg-zinc-700 text-zinc-100"
-                  : "text-zinc-500 hover:text-zinc-300",
+                  ? "bg-zinc-700 text-gray-900 dark:text-zinc-100"
+                  : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
               )}>
               {v}
             </button>
@@ -635,7 +635,7 @@ export function GraphPage() {
         </div>
 
         <div className="ml-auto flex items-center gap-3">
-          <span className="text-[11px] text-zinc-700">RFC 004</span>
+          <span className="text-[11px] text-gray-300 dark:text-zinc-700">RFC 004</span>
         </div>
       </div>
 
@@ -646,7 +646,7 @@ export function GraphPage() {
 
             {view === "simulation" ? (
               <>
-                <div className="text-[12px] text-zinc-600 leading-relaxed">
+                <div className="text-[12px] text-gray-400 dark:text-zinc-600 leading-relaxed">
                   Force-directed graph of demo sessions → runs → tasks.
                   Scroll to zoom · drag background to pan · click a node to highlight its connections.
                 </div>
@@ -655,7 +655,7 @@ export function GraphPage() {
             ) : (
               <>
                 {/* Stat strip */}
-                <div className="flex items-start gap-8 py-3 px-4 rounded-lg border border-zinc-800 bg-zinc-900/60">
+                <div className="flex items-start gap-8 py-3 px-4 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60">
                   <StatCard label="Node Types"  value={NODE_TYPES.length}  sub="defined in schema"  accent="border-l-indigo-500" />
                   <StatCard label="Edge Types"  value={EDGE_TYPES.length}  sub="relationship kinds" accent="border-l-indigo-500" />
                   <StatCard label="Live Nodes"  value="—"                  sub="backend offline"    accent="border-l-zinc-700"   />
@@ -682,26 +682,26 @@ export function GraphPage() {
 
                 {/* Search */}
                 <div className="relative">
-                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 pointer-events-none" />
                   <input value={query} onChange={e => setQuery(e.target.value)}
                     placeholder="Filter node types… (e.g. 'run', 'prompt', 'memory')"
-                    className="w-full rounded-lg border border-zinc-800 bg-zinc-900 text-[13px] text-zinc-200
+                    className="w-full rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-[13px] text-gray-800 dark:text-zinc-200
                                placeholder-zinc-600 pl-9 pr-4 py-2 focus:outline-none focus:border-indigo-500 transition-colors" />
                   {query && (
                     <button onClick={() => setQuery("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors">×</button>
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">×</button>
                   )}
                 </div>
 
                 {/* Node grid */}
                 {query ? (
                   filteredNodes.length === 0 ? (
-                    <p className="text-[13px] text-zinc-600 italic py-4 text-center">
+                    <p className="text-[13px] text-gray-400 dark:text-zinc-600 italic py-4 text-center">
                       No node types match &ldquo;{query}&rdquo;
                     </p>
                   ) : (
                     <div>
-                      <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-3">
+                      <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-3">
                         {filteredNodes.length} result{filteredNodes.length !== 1 ? "s" : ""}
                       </p>
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
@@ -719,9 +719,9 @@ export function GraphPage() {
                       const nodes = NODE_TYPES.filter(n => n.group === group);
                       return (
                         <div key={group}>
-                          <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">
+                          <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">
                             {GROUP_LABELS[group]}
-                            <span className="ml-2 text-zinc-700 normal-case font-normal">{nodes.length} types</span>
+                            <span className="ml-2 text-gray-300 dark:text-zinc-700 normal-case font-normal">{nodes.length} types</span>
                           </p>
                           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                             {nodes.map(n => (
@@ -738,26 +738,26 @@ export function GraphPage() {
 
                 {/* Edge types table */}
                 <div>
-                  <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-3">
+                  <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-3">
                     Edge Types
-                    <span className="ml-2 text-zinc-700 normal-case font-normal">{EDGE_TYPES.length} relationship kinds</span>
+                    <span className="ml-2 text-gray-300 dark:text-zinc-700 normal-case font-normal">{EDGE_TYPES.length} relationship kinds</span>
                   </p>
-                  <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                  <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
                     <table className="min-w-full text-[12px]">
-                      <thead className="bg-zinc-900">
+                      <thead className="bg-gray-50 dark:bg-zinc-900">
                         <tr>
-                          <th className="px-3 py-2 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider border-b border-zinc-800 w-40">Kind</th>
-                          <th className="px-3 py-2 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider border-b border-zinc-800 w-32">Label</th>
-                          <th className="px-3 py-2 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider border-b border-zinc-800">Description</th>
+                          <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider border-b border-gray-200 dark:border-zinc-800 w-40">Kind</th>
+                          <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider border-b border-gray-200 dark:border-zinc-800 w-32">Label</th>
+                          <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider border-b border-gray-200 dark:border-zinc-800">Description</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-zinc-800/50">
+                      <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
                         {EDGE_TYPES.map((e, i) => (
-                          <tr key={e.kind} className={clsx("transition-colors hover:bg-zinc-800/40",
-                            i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]")}>
-                            <td className="px-3 py-1.5 font-mono text-[11px] text-zinc-500 whitespace-nowrap">{e.kind}</td>
-                            <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap">{e.label}</td>
-                            <td className="px-3 py-1.5 text-zinc-600">{e.description}</td>
+                          <tr key={e.kind} className={clsx("transition-colors hover:bg-gray-100/40 dark:hover:bg-gray-100/40 dark:bg-zinc-800/40",
+                            i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]")}>
+                            <td className="px-3 py-1.5 font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap">{e.kind}</td>
+                            <td className="px-3 py-1.5 text-gray-500 dark:text-zinc-400 whitespace-nowrap">{e.label}</td>
+                            <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-600">{e.description}</td>
                           </tr>
                         ))}
                       </tbody>

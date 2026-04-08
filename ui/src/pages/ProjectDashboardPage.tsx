@@ -53,20 +53,20 @@ const ACTIVE_STATES = new Set<RunState>([
 
 const STATE_COLORS: Partial<Record<RunState, string>> = {
   running:            "text-blue-400",
-  pending:            "text-zinc-400",
+  pending:            "text-gray-500 dark:text-zinc-400",
   paused:             "text-amber-400",
   waiting_approval:   "text-purple-400",
   waiting_dependency: "text-sky-400",
   completed:          "text-emerald-400",
   failed:             "text-red-400",
-  canceled:           "text-zinc-500",
+  canceled:           "text-gray-400 dark:text-zinc-500",
 };
 
 // ── Panel / section primitives (local — not importing from DashboardPage) ─────
 
 function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={clsx("bg-zinc-900 border border-zinc-800 rounded-xl p-4", className)}>
+    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4", className)}>
       {children}
     </div>
   );
@@ -74,7 +74,7 @@ function Panel({ children, className }: { children: React.ReactNode; className?:
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-3">
+    <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
       {children}
     </p>
   );
@@ -86,20 +86,20 @@ function RunRow({ run }: { run: RunRecord }) {
   const isTerminal = ["completed", "failed", "canceled"].includes(run.state);
   return (
     <div
-      className="flex items-center gap-3 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer hover:bg-white/[0.02] transition-colors -mx-4 px-4"
+      className="flex items-center gap-3 py-2 border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0 cursor-pointer hover:bg-white/[0.02] transition-colors -mx-4 px-4"
       onClick={() => { window.location.hash = `run/${run.run_id}`; }}
     >
-      <Play size={10} className={clsx("shrink-0", STATE_COLORS[run.state] ?? "text-zinc-600")} />
-      <span className="flex-1 font-mono text-[12px] text-zinc-300 truncate" title={run.run_id}>
+      <Play size={10} className={clsx("shrink-0", STATE_COLORS[run.state] ?? "text-gray-400 dark:text-zinc-600")} />
+      <span className="flex-1 font-mono text-[12px] text-gray-700 dark:text-zinc-300 truncate" title={run.run_id}>
         {shortId(run.run_id)}
       </span>
-      <span className={clsx("text-[11px] font-medium capitalize shrink-0", STATE_COLORS[run.state] ?? "text-zinc-500")}>
+      <span className={clsx("text-[11px] font-medium capitalize shrink-0", STATE_COLORS[run.state] ?? "text-gray-400 dark:text-zinc-500")}>
         {run.state.replace(/_/g, " ")}
       </span>
-      <span className="text-[11px] text-zinc-600 tabular-nums shrink-0">
+      <span className="text-[11px] text-gray-400 dark:text-zinc-600 tabular-nums shrink-0">
         {fmtDuration(run.created_at, isTerminal ? run.updated_at : undefined)}
       </span>
-      <ChevronRight size={11} className="text-zinc-700 shrink-0" />
+      <ChevronRight size={11} className="text-gray-300 dark:text-zinc-700 shrink-0" />
     </div>
   );
 }
@@ -114,7 +114,7 @@ function TaskRing({ tasks }: { tasks: TaskRecord[] }) {
   }, [tasks]);
 
   const total = tasks.length;
-  if (total === 0) return <p className="text-[12px] text-zinc-600 italic text-center py-4">No tasks</p>;
+  if (total === 0) return <p className="text-[12px] text-gray-400 dark:text-zinc-600 italic text-center py-4">No tasks</p>;
 
   const segments: { label: string; count: number; color: string }[] = [
     { label: "completed", count: counts["completed"] ?? 0,  color: "#10b981" },
@@ -132,17 +132,17 @@ function TaskRing({ tasks }: { tasks: TaskRecord[] }) {
         return (
           <div key={s.label} className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
-            <span className="text-[11px] text-zinc-400 flex-1 capitalize">{s.label}</span>
-            <div className="w-24 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+            <span className="text-[11px] text-gray-500 dark:text-zinc-400 flex-1 capitalize">{s.label}</span>
+            <div className="w-24 h-1.5 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden">
               <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: s.color }} />
             </div>
-            <span className="text-[11px] font-mono text-zinc-500 tabular-nums w-6 text-right">
+            <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-500 tabular-nums w-6 text-right">
               {s.count}
             </span>
           </div>
         );
       })}
-      <p className="text-[10px] text-zinc-700 text-right pt-1">{total} total</p>
+      <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-right pt-1">{total} total</p>
     </div>
   );
 }
@@ -159,17 +159,17 @@ function ScopeSelector({
 }) {
   return (
     <div className="flex items-center gap-2 text-[11px]">
-      <span className="text-zinc-600">Tenant:</span>
+      <span className="text-gray-400 dark:text-zinc-600">Tenant:</span>
       <input
         value={tenantId}
         onChange={e => onTenantChange(e.target.value || "default")}
-        className="h-6 w-24 bg-zinc-800 border border-zinc-700 rounded px-2 font-mono text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors text-[11px]"
+        className="h-6 w-24 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 font-mono text-gray-700 dark:text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors text-[11px]"
       />
-      <span className="text-zinc-600">Workspace:</span>
+      <span className="text-gray-400 dark:text-zinc-600">Workspace:</span>
       <input
         value={workspaceId}
         onChange={e => onWorkspaceChange(e.target.value || "default")}
-        className="h-6 w-24 bg-zinc-800 border border-zinc-700 rounded px-2 font-mono text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors text-[11px]"
+        className="h-6 w-24 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 font-mono text-gray-700 dark:text-zinc-300 focus:outline-none focus:border-indigo-500 transition-colors text-[11px]"
       />
     </div>
   );
@@ -256,25 +256,25 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-full overflow-y-auto bg-zinc-950">
+    <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
       <div className="max-w-5xl mx-auto px-5 py-5 space-y-5">
 
         {/* Header */}
         <div className="space-y-3">
           <button
             onClick={() => { window.location.hash = "dashboard"; }}
-            className="flex items-center gap-1.5 text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="flex items-center gap-1.5 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
           >
             <ArrowLeft size={13} /> Back to Dashboard
           </button>
 
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
-              <p className="text-[11px] text-zinc-600 uppercase tracking-wider mb-1">Project</p>
-              <h2 className="text-[18px] font-semibold font-mono text-zinc-100 break-all">
+              <p className="text-[11px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-1">Project</p>
+              <h2 className="text-[18px] font-semibold font-mono text-gray-900 dark:text-zinc-100 break-all">
                 {projectId}
               </h2>
-              <p className="text-[12px] text-zinc-500 mt-1 font-mono">
+              <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-1 font-mono">
                 {tenantId} / {workspaceId} / {projectId}
               </p>
             </div>
@@ -282,7 +282,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
               <button
                 onClick={handleRefresh}
                 disabled={runsFetching}
-                className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+                className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 disabled:opacity-40 transition-colors"
               >
                 <RefreshCw size={11} className={runsFetching ? "animate-spin" : ""} />
                 Refresh
@@ -373,13 +373,13 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
           <Panel>
             <div className="flex items-center justify-between mb-3">
               <SectionLabel>Run Volume (12 h)</SectionLabel>
-              <span className="flex items-center gap-1 text-[10px] text-zinc-700">
+              <span className="flex items-center gap-1 text-[10px] text-gray-300 dark:text-zinc-700">
                 <Radio size={9} className="text-indigo-500" />
                 hourly
               </span>
             </div>
             {isLoading ? (
-              <div className="h-12 rounded bg-zinc-800 animate-pulse" />
+              <div className="h-12 rounded bg-gray-100 dark:bg-zinc-800 animate-pulse" />
             ) : (
               <>
                 <MiniChart
@@ -391,7 +391,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 />
                 <div className="flex justify-between mt-1">
                   {["12h", "10h", "8h", "6h", "4h", "2h", "now"].map(l => (
-                    <span key={l} className="text-[9px] text-zinc-700 font-mono">{l}</span>
+                    <span key={l} className="text-[9px] text-gray-300 dark:text-zinc-700 font-mono">{l}</span>
                   ))}
                 </div>
               </>
@@ -403,7 +403,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
             <SectionLabel>Task State Breakdown</SectionLabel>
             {tasksLoading ? (
               <div className="space-y-2 animate-pulse">
-                {[1,2,3].map(i => <div key={i} className="h-4 rounded bg-zinc-800" />)}
+                {[1,2,3].map(i => <div key={i} className="h-4 rounded bg-gray-100 dark:bg-zinc-800" />)}
               </div>
             ) : (
               <TaskRing tasks={allTasks} />
@@ -417,13 +417,13 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
             <SectionLabel>
               Active Runs
               {activeRuns.length > 0 && (
-                <span className="ml-1.5 text-zinc-700 font-normal normal-case tracking-normal">
+                <span className="ml-1.5 text-gray-300 dark:text-zinc-700 font-normal normal-case tracking-normal">
                   ({activeRuns.length})
                 </span>
               )}
             </SectionLabel>
             {allRuns.length > activeRuns.length && (
-              <span className="text-[10px] text-zinc-700">
+              <span className="text-[10px] text-gray-300 dark:text-zinc-700">
                 +{allRuns.length - activeRuns.length} completed/failed
               </span>
             )}
@@ -431,12 +431,12 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
 
           {runsLoading ? (
             <div className="space-y-2 animate-pulse">
-              {[1,2,3].map(i => <div key={i} className="h-8 rounded bg-zinc-800" />)}
+              {[1,2,3].map(i => <div key={i} className="h-8 rounded bg-gray-100 dark:bg-zinc-800" />)}
             </div>
           ) : activeRuns.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
               <CheckCircle2 size={18} className="text-emerald-600/60" />
-              <p className="text-[12px] text-zinc-600">No active runs</p>
+              <p className="text-[12px] text-gray-400 dark:text-zinc-600">No active runs</p>
             </div>
           ) : (
             <div>
@@ -444,7 +444,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 <RunRow key={run.run_id} run={run} />
               ))}
               {activeRuns.length > 10 && (
-                <p className="text-[11px] text-zinc-700 text-center pt-2">
+                <p className="text-[11px] text-gray-300 dark:text-zinc-700 text-center pt-2">
                   +{activeRuns.length - 10} more — <button
                     onClick={() => { window.location.hash = "runs"; }}
                     className="text-indigo-500 hover:text-indigo-400 transition-colors"
@@ -464,20 +464,20 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 <div
                   key={appr.approval_id}
                   className={clsx(
-                    "flex items-center gap-3 py-2 border-b border-zinc-800/50 last:border-0",
-                    i % 2 === 0 ? "" : "bg-zinc-900/30 -mx-4 px-4",
+                    "flex items-center gap-3 py-2 border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0",
+                    i % 2 === 0 ? "" : "bg-gray-50/30 dark:bg-zinc-900/30 -mx-4 px-4",
                   )}
                 >
                   <AlertTriangle size={12} className="text-amber-400 shrink-0" />
-                  <span className="flex-1 font-mono text-[12px] text-zinc-300 truncate" title={appr.approval_id}>
+                  <span className="flex-1 font-mono text-[12px] text-gray-700 dark:text-zinc-300 truncate" title={appr.approval_id}>
                     {shortId(appr.approval_id)}
                   </span>
                   {appr.run_id && (
-                    <span className="text-[11px] font-mono text-zinc-600 truncate max-w-[120px]" title={appr.run_id}>
+                    <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-600 truncate max-w-[120px]" title={appr.run_id}>
                       run: {shortId(appr.run_id)}
                     </span>
                   )}
-                  <span className="text-[10px] text-zinc-600 tabular-nums shrink-0">
+                  <span className="text-[10px] text-gray-400 dark:text-zinc-600 tabular-nums shrink-0">
                     {fmtAge(appr.created_at)}
                   </span>
                   <button
@@ -497,7 +497,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
           <Panel>
             <SectionLabel>Workers</SectionLabel>
             {tasksLoading ? (
-              <div className="h-12 rounded bg-zinc-800 animate-pulse" />
+              <div className="h-12 rounded bg-gray-100 dark:bg-zinc-800 animate-pulse" />
             ) : (() => {
               const workers = new Map<string, { active: number; done: number }>();
               for (const t of allTasks) {
@@ -508,22 +508,22 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 workers.set(t.lease_owner, e);
               }
               if (workers.size === 0) return (
-                <p className="text-[12px] text-zinc-600 italic text-center py-4">No workers seen</p>
+                <p className="text-[12px] text-gray-400 dark:text-zinc-600 italic text-center py-4">No workers seen</p>
               );
               return (
                 <div className="space-y-1.5">
                   {[...workers.entries()].slice(0, 6).map(([wid, { active, done }]) => (
                     <div key={wid} className="flex items-center gap-2.5">
-                      <Users size={11} className="text-zinc-600 shrink-0" />
-                      <span className="flex-1 font-mono text-[11px] text-zinc-400 truncate" title={wid}>
+                      <Users size={11} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+                      <span className="flex-1 font-mono text-[11px] text-gray-500 dark:text-zinc-400 truncate" title={wid}>
                         {shortId(wid)}
                       </span>
                       {active > 0 && <span className="text-[10px] text-blue-400">{active} active</span>}
-                      {done > 0   && <span className="text-[10px] text-zinc-600">{done} done</span>}
+                      {done > 0   && <span className="text-[10px] text-gray-400 dark:text-zinc-600">{done} done</span>}
                     </div>
                   ))}
                   {workers.size > 6 && (
-                    <p className="text-[10px] text-zinc-700 text-right">+{workers.size - 6} more</p>
+                    <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-right">+{workers.size - 6} more</p>
                   )}
                 </div>
               );
@@ -544,11 +544,11 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                     : "—",
                   sub: "" },
               ].map(({ icon: Icon, label, value, sub }) => (
-                <div key={label} className="flex items-center gap-2.5 py-1.5 border-b border-zinc-800/50 last:border-0">
-                  <Icon size={12} className="text-zinc-600 shrink-0" />
-                  <span className="text-[12px] text-zinc-400 flex-1">{label}</span>
-                  <span className="text-[12px] font-semibold text-zinc-200 tabular-nums">{value}</span>
-                  {sub && <span className="text-[10px] text-zinc-600">{sub}</span>}
+                <div key={label} className="flex items-center gap-2.5 py-1.5 border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0">
+                  <Icon size={12} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+                  <span className="text-[12px] text-gray-500 dark:text-zinc-400 flex-1">{label}</span>
+                  <span className="text-[12px] font-semibold text-gray-800 dark:text-zinc-200 tabular-nums">{value}</span>
+                  {sub && <span className="text-[10px] text-gray-400 dark:text-zinc-600">{sub}</span>}
                 </div>
               ))}
             </div>
@@ -559,7 +559,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
         <Panel>
           <div className="flex items-center justify-between mb-3">
             <SectionLabel>Live Events</SectionLabel>
-            <span className="flex items-center gap-1 text-[10px] text-zinc-700">
+            <span className="flex items-center gap-1 text-[10px] text-gray-300 dark:text-zinc-700">
               <Radio size={9} className="text-emerald-500" /> SSE
             </span>
           </div>

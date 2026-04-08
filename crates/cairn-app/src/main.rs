@@ -453,9 +453,8 @@ const CHANGELOG: &str = r##"[
       "Real-time SSE event stream with Last-Event-ID replay",
       "Multi-tenant isolation: tenant / workspace / project hierarchy with RBAC",
       "Human-in-the-loop approval workflows",
-      "LLM provider abstraction over Ollama, OpenAI-compatible endpoints",
+      "Provider-agnostic LLM integration: any OpenAI-compatible endpoint, Ollama, Bedrock, Vertex AI",
       "Built-in eval framework with rubrics, baselines, bandit experiments",
-      "Local LLM support via Ollama (qwen3:8b, nomic-embed-text)",
       "Cost tracking and token metering per call, run, and session",
       "Knowledge retrieval: ingest, chunking, multi-factor scoring, graph expansion",
       "Per-IP and per-token rate limiting (100/1000 req/min) with X-RateLimit-* headers",
@@ -3657,9 +3656,12 @@ async fn seed_demo_data(state: &AppState) {
     use cairn_runtime::{
         audits::AuditService,
         approvals::ApprovalService,
+        projects::ProjectService,
         runs::RunService,
         sessions::SessionService,
         tasks::TaskService,
+        tenants::TenantService,
+        workspaces::WorkspaceService,
     };
 
     let project = ProjectKey::new("default_tenant", "default_workspace", "demo_project");
@@ -3814,6 +3816,10 @@ async fn seed_demo_data(state: &AppState) {
 
 #[tokio::main]
 async fn main() {
+    // Load .env file if present (dev convenience — not required in production).
+    // Silently ignored when the file doesn't exist.
+    let _ = dotenvy::dotenv();
+
     // Initialise structured request tracing.  Operators can tune verbosity via
     // the RUST_LOG env var (e.g. RUST_LOG=cairn_app=info,tower_http=debug).
     tracing_subscriber::fmt()
@@ -4172,6 +4178,27 @@ async fn main() {
         .await
         .unwrap_or(None)
         .is_none();
+    // ── Always ensure the canonical "default" tenant exists ─────────────────
+    // This is idempotent — if the tenant already exists, create() returns Err
+    // which we ignore. Needed so provider connections, route policies, etc.
+    // work out-of-the-box on first boot.
+    {
+        use cairn_domain::{TenantId, tenancy::ProjectKey};
+        use cairn_runtime::{
+            tenants::TenantService, workspaces::WorkspaceService, projects::ProjectService,
+        };
+        let _ = state.runtime.tenants.create(TenantId::new("default"), "Default".into()).await;
+        let _ = state.runtime.workspaces.create(
+            TenantId::new("default"),
+            cairn_domain::WorkspaceId::new("default"),
+            "Default".into(),
+        ).await;
+        let _ = state.runtime.projects.create(
+            ProjectKey::new("default", "default", "default"),
+            "Default".into(),
+        ).await;
+    }
+
     if state.mode == DeploymentMode::Local && event_log_empty {
         seed_demo_data(&state).await;
     }

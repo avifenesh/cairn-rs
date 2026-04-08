@@ -41,7 +41,7 @@ const ACCENT_BORDER: Record<NonNullable<StatCardProps["accent"]>, string> = {
   violet:  "border-l-violet-500",
 };
 const ACCENT_VALUE: Record<NonNullable<StatCardProps["accent"]>, string> = {
-  default: "text-zinc-100",
+  default: "text-gray-900 dark:text-zinc-100",
   emerald: "text-emerald-400",
   blue:    "text-blue-400",
   violet:  "text-violet-400",
@@ -50,17 +50,17 @@ const ACCENT_VALUE: Record<NonNullable<StatCardProps["accent"]>, string> = {
 function StatCard({ label, value, sub, accent = "default", loading }: StatCardProps) {
   if (loading) {
     return (
-      <div className={clsx("bg-zinc-900 border border-zinc-800 border-l-2 rounded-lg p-4 animate-pulse", ACCENT_BORDER[accent])}>
-        <div className="h-2.5 w-20 rounded bg-zinc-800 mb-3" />
-        <div className="h-6 w-16 rounded bg-zinc-800" />
+      <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4 animate-pulse", ACCENT_BORDER[accent])}>
+        <div className="h-2.5 w-20 rounded bg-gray-100 dark:bg-zinc-800 mb-3" />
+        <div className="h-6 w-16 rounded bg-gray-100 dark:bg-zinc-800" />
       </div>
     );
   }
   return (
-    <div className={clsx("bg-zinc-900 border border-zinc-800 border-l-2 rounded-lg p-4", ACCENT_BORDER[accent])}>
-      <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-2 truncate">{label}</p>
+    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4", ACCENT_BORDER[accent])}>
+      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2 truncate">{label}</p>
       <p className={clsx("text-2xl font-semibold tabular-nums", ACCENT_VALUE[accent])}>{value}</p>
-      {sub && <p className="mt-1 text-[11px] text-zinc-600 truncate">{sub}</p>}
+      {sub && <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-600 truncate">{sub}</p>}
     </div>
   );
 }
@@ -74,11 +74,11 @@ function TokenBar({ input, output }: { input: number; output: number }) {
   const outPct = (output / total) * 100;
   return (
     <div className="space-y-1.5">
-      <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+      <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-zinc-800">
         <div className="bg-blue-500"   style={{ width: `${inPct}%` }} />
         <div className="bg-violet-500" style={{ width: `${outPct}%` }} />
       </div>
-      <div className="flex justify-between text-[11px] text-zinc-500">
+      <div className="flex justify-between text-[11px] text-gray-400 dark:text-zinc-500">
         <span className="flex items-center gap-1">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500" />
           {formatTokens(input)} in ({inPct.toFixed(0)}%)
@@ -97,9 +97,9 @@ function TokenBar({ input, output }: { input: number; output: number }) {
 interface BreakdownRowProps { label: string; value: string; mono?: boolean; even?: boolean }
 function BreakdownRow({ label, value, mono, even }: BreakdownRowProps) {
   return (
-    <div className={clsx("flex items-center justify-between px-4 h-9", even ? "bg-zinc-900" : "bg-zinc-900/50")}>
-      <span className="text-xs text-zinc-500">{label}</span>
-      <span className={clsx("text-xs text-zinc-200", mono && "font-mono tabular-nums")}>{value}</span>
+    <div className={clsx("flex items-center justify-between px-4 h-9", even ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50")}>
+      <span className="text-xs text-gray-400 dark:text-zinc-500">{label}</span>
+      <span className={clsx("text-xs text-gray-800 dark:text-zinc-200", mono && "font-mono tabular-nums")}>{value}</span>
     </div>
   );
 }
@@ -180,8 +180,8 @@ export function CostsPage() {
     <div className="p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Cost Tracking</p>
-        <button onClick={() => refetch()} className="flex items-center gap-1.5 rounded-md bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-500 hover:bg-white/5 transition-colors">
+        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Cost Tracking</p>
+        <button onClick={() => refetch()} className="flex items-center gap-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:bg-white/5 transition-colors">
           <RefreshCw size={11} /> Refresh
         </button>
       </div>
@@ -198,24 +198,24 @@ export function CostsPage() {
       {!isLoading && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/* Token distribution */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 h-9 flex items-center border-b border-zinc-800">
-              <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Token Distribution</p>
+          <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+            <div className="px-4 h-9 flex items-center border-b border-gray-200 dark:border-zinc-800">
+              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Token Distribution</p>
             </div>
             <div className="p-4">
               {totalTokens > 0
                 ? <TokenBar input={costs?.total_tokens_in ?? 0} output={costs?.total_tokens_out ?? 0} />
-                : <p className="text-[11px] text-zinc-600 text-center py-3">No token data yet</p>
+                : <p className="text-[11px] text-gray-400 dark:text-zinc-600 text-center py-3">No token data yet</p>
               }
             </div>
           </div>
 
           {/* Cost breakdown table */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 h-9 flex items-center border-b border-zinc-800">
-              <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Breakdown</p>
+          <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+            <div className="px-4 h-9 flex items-center border-b border-gray-200 dark:border-zinc-800">
+              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Breakdown</p>
             </div>
-            <div className="divide-y divide-zinc-800/50">
+            <div className="divide-y divide-gray-200 dark:divide-zinc-800/50">
               <BreakdownRow label="Total spend (USD)"   value={formatMicros(costs?.total_cost_micros ?? 0)} mono  even />
               <BreakdownRow label="Total spend (µUSD)"  value={(costs?.total_cost_micros ?? 0).toLocaleString()} mono />
               <BreakdownRow label="Avg cost / call"     value={formatMicros(avgPerCall)} mono even />
@@ -232,13 +232,13 @@ export function CostsPage() {
       {!isLoading && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/* Cost by model */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 h-9 flex items-center border-b border-zinc-800">
-              <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Cost by Model</p>
+          <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+            <div className="px-4 h-9 flex items-center border-b border-gray-200 dark:border-zinc-800">
+              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Cost by Model</p>
             </div>
             <div className="p-4">
               {modelCostItems.length === 0 ? (
-                <p className="text-[11px] text-zinc-600 text-center py-3 italic">
+                <p className="text-[11px] text-gray-400 dark:text-zinc-600 text-center py-3 italic">
                   No trace data yet — costs appear after LLM calls.
                 </p>
               ) : (
@@ -254,10 +254,10 @@ export function CostsPage() {
           </div>
 
           {/* Daily spend trend sparkline */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 h-9 flex items-center justify-between border-b border-zinc-800">
-              <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Daily Spend (7d)</p>
-              <span className="text-[10px] text-zinc-700 font-mono">µUSD</span>
+          <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+            <div className="px-4 h-9 flex items-center justify-between border-b border-gray-200 dark:border-zinc-800">
+              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Daily Spend (7d)</p>
+              <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono">µUSD</span>
             </div>
             <div className="p-4 flex items-end gap-4">
               <div className="flex-1">
@@ -271,12 +271,12 @@ export function CostsPage() {
                 {/* Day labels */}
                 <div className="flex justify-between mt-1.5">
                   {["6d", "5d", "4d", "3d", "2d", "1d", "Now"].map((label) => (
-                    <span key={label} className="text-[9px] text-zinc-700 font-mono">{label}</span>
+                    <span key={label} className="text-[9px] text-gray-300 dark:text-zinc-700 font-mono">{label}</span>
                   ))}
                 </div>
               </div>
               <div className="shrink-0 text-right">
-                <p className="text-[11px] text-zinc-500">Today</p>
+                <p className="text-[11px] text-gray-400 dark:text-zinc-500">Today</p>
                 <p className="text-[15px] font-semibold tabular-nums text-emerald-400">
                   {formatMicros(dailySpend[dailySpend.length - 1] ?? 0)}
                 </p>
@@ -288,9 +288,9 @@ export function CostsPage() {
 
       {/* Zero state */}
       {!isLoading && (costs?.total_provider_calls ?? 0) === 0 && (
-        <div className="flex flex-col items-center justify-center py-12 rounded-lg border border-zinc-800 text-center gap-2">
-          <p className="text-sm text-zinc-500">No spend recorded yet</p>
-          <p className="text-[11px] text-zinc-600">Costs appear once LLM calls are routed through a provider binding</p>
+        <div className="flex flex-col items-center justify-center py-12 rounded-lg border border-gray-200 dark:border-zinc-800 text-center gap-2">
+          <p className="text-sm text-gray-400 dark:text-zinc-500">No spend recorded yet</p>
+          <p className="text-[11px] text-gray-400 dark:text-zinc-600">Costs appear once LLM calls are routed through a provider binding</p>
         </div>
       )}
     </div>
