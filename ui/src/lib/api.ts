@@ -467,6 +467,21 @@ export function createApiClient(config: ApiClientConfig) {
       return getList(`/v1/approvals/pending${query}`);
     },
 
+    /** GET /v1/approvals — list all approvals (pending + resolved). */
+    getAllApprovals: (params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+    }): Promise<ApprovalRecord[]> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)   qs.set("project_id",   merged.project_id);
+      const query = qs.toString() ? `?${qs}` : "";
+      return getList(`/v1/approvals${query}`);
+    },
+
     /** POST /v1/approvals/:id/resolve — approve or reject. */
     resolveApproval: (
       approvalId: string,

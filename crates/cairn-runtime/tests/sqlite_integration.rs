@@ -186,6 +186,14 @@ impl ApprovalReadModel for SqliteStore {
     ) -> Result<Vec<ApprovalRecord>, StoreError> {
         ApprovalReadModel::list_pending(&self.adapter, p, l, o).await
     }
+    async fn list_all(
+        &self,
+        p: &ProjectKey,
+        l: usize,
+        o: usize,
+    ) -> Result<Vec<ApprovalRecord>, StoreError> {
+        ApprovalReadModel::list_all(&self.adapter, p, l, o).await
+    }
     async fn has_pending_for_run(&self, run_id: &RunId) -> Result<bool, StoreError> {
         ApprovalReadModel::has_pending_for_run(&self.adapter, run_id).await
     }

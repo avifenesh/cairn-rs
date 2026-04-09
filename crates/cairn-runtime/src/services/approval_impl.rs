@@ -143,4 +143,13 @@ where
     ) -> Result<Vec<ApprovalRecord>, RuntimeError> {
         Ok(self.store.list_pending(project, limit, offset).await?)
     }
+
+    async fn list_all(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ApprovalRecord>, RuntimeError> {
+        Ok(self.store.list_all(project, limit, offset).await?)
+    }
 }

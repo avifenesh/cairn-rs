@@ -12562,7 +12562,7 @@ async fn list_approvals_handler(
     match state
         .runtime
         .approvals
-        .list_pending(&query.project(), query.limit(), query.offset())
+        .list_all(&query.project(), query.limit(), query.offset())
         .await
     {
         Ok(items) => (

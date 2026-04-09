@@ -389,6 +389,32 @@ impl ApprovalReadModel for PgAdapter {
         rows.into_iter().map(ApprovalRow::into_record).collect()
     }
 
+    async fn list_all(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ApprovalRecord>, StoreError> {
+        let rows = sqlx::query_as::<_, ApprovalRow>(
+            "SELECT approval_id, tenant_id, workspace_id, project_id, run_id, task_id,
+                    requirement, decision, title, description, version, created_at, updated_at
+             FROM approvals
+             WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3
+             ORDER BY created_at ASC, approval_id ASC
+             LIMIT $4 OFFSET $5",
+        )
+        .bind(project.tenant_id.as_str())
+        .bind(project.workspace_id.as_str())
+        .bind(project.project_id.as_str())
+        .bind(limit as i64)
+        .bind(offset as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Internal(e.to_string()))?;
+
+        rows.into_iter().map(ApprovalRow::into_record).collect()
+    }
+
     async fn has_pending_for_run(&self, run_id: &RunId) -> Result<bool, StoreError> {
         let count: (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM approvals WHERE run_id = $1 AND decision IS NULL")

@@ -39,6 +39,14 @@ pub trait ApprovalService: Send + Sync {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ApprovalRecord>, RuntimeError>;
+
+    /// List all approvals (pending + resolved) for a project.
+    async fn list_all(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ApprovalRecord>, RuntimeError>;
 }
 
 #[cfg(test)]

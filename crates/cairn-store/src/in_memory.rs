@@ -2051,6 +2051,24 @@ impl ApprovalReadModel for InMemoryStore {
         Ok(results)
     }
 
+    async fn list_all(
+        &self,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ApprovalRecord>, StoreError> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<ApprovalRecord> = state
+            .approvals
+            .values()
+            .filter(|a| a.project == *project)
+            .cloned()
+            .collect();
+        results.sort_by_key(|a| (a.created_at, a.approval_id.as_str().to_owned()));
+        let results = results.into_iter().skip(offset).take(limit).collect();
+        Ok(results)
+    }
+
     async fn has_pending_for_run(&self, run_id: &RunId) -> Result<bool, StoreError> {
         let state = self.state.lock().unwrap();
         Ok(state
@@ -5311,6 +5329,22 @@ impl InMemoryStore {
             .approvals
             .values()
             .filter(|a| a.decision.is_none())
+            .cloned()
+            .collect();
+        results.sort_by_key(|a| a.created_at);
+        results.into_iter().skip(offset).take(limit).collect()
+    }
+
+    /// List all approvals (pending + resolved) across every project.
+    pub fn list_all_approvals(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Vec<crate::projections::ApprovalRecord> {
+        let state = self.state.lock().unwrap();
+        let mut results: Vec<crate::projections::ApprovalRecord> = state
+            .approvals
+            .values()
             .cloned()
             .collect();
         results.sort_by_key(|a| a.created_at);

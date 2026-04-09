@@ -216,7 +216,7 @@ export function ApprovalsPage() {
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["approvals"],
-    queryFn: () => defaultApi.getPendingApprovals(),
+    queryFn: () => defaultApi.getAllApprovals(),
     refetchInterval: refreshMs,
   });
 
