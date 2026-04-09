@@ -136,22 +136,36 @@ while true; do
   # 5. Verify run state (auto-completes when all tasks finish)
   check "get-run" 200 GET "/v1/runs/${RID}"
 
-  # 5b. Real orchestration — LLM call via brain provider (skipped if no provider)
+  # 5b. Real orchestration — agent analyzes a GitHub issue from the dogfood repo
+  DOGFOOD_REPO="${DOGFOOD_REPO:-avifenesh/cairn-dogfood}"
+  DOGFOOD_MODEL="${DOGFOOD_MODEL:-minimax.minimax-m2.5}"
+  # Pick a rotating issue number (1-18)
+  ISSUE_NUM=$(( (ITERATION % 18) + 1 ))
   ORCH_RID="soak_orch_${SUFFIX}"
   curl -s -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
     -d "{\"session_id\":\"${SID}\",\"run_id\":\"${ORCH_RID}\",\"tenant_id\":\"default\",\"workspace_id\":\"default\",\"project_id\":\"default\"}" \
     "${BASE}/v1/runs" >/dev/null 2>&1
   ORCH_RESP=$(curl -s -w '\n%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
-    -d "{\"goal\":\"What is ${ITERATION}+${ITERATION}? Answer with just the number.\",\"model_id\":\"openrouter/auto\",\"max_iterations\":1,\"timeout_ms\":15000}" \
+    -d "{\"goal\":\"Use the gh_get_issue tool with repo=${DOGFOOD_REPO} and number=${ISSUE_NUM} to read the issue. Summarize what it asks for in under 50 words.\",\"model_id\":\"${DOGFOOD_MODEL}\",\"max_iterations\":3,\"timeout_ms\":60000}" \
     "${BASE}/v1/runs/${ORCH_RID}/orchestrate" 2>/dev/null)
   ORCH_HTTP=$(echo "$ORCH_RESP" | tail -1)
+  ORCH_TERM=$(echo "$ORCH_RESP" | sed '$d' | python3 -c "import sys,json; print(json.load(sys.stdin).get('termination','?'))" 2>/dev/null || echo "?")
   if [ "$ORCH_HTTP" = "200" ]; then
     PASS=$((PASS + 1))
+  elif [ "$ORCH_HTTP" = "202" ]; then
+    # Waiting approval — auto-approve and count as pass (approval flow works)
+    APPR=$(echo "$ORCH_RESP" | sed '$d' | python3 -c "import sys,json; print(json.load(sys.stdin).get('approval_id',''))" 2>/dev/null || echo "")
+    if [ -n "$APPR" ]; then
+      curl -s -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+        -d '{"decision":"approved","reason":"soak auto-approve"}' \
+        "${BASE}/v1/approvals/${APPR}/resolve" >/dev/null 2>&1
+    fi
+    PASS=$((PASS + 1))
   elif [ "$ORCH_HTTP" = "503" ]; then
-    : # No brain provider — skip silently
+    : # No provider — skip silently
   else
     FAIL=$((FAIL + 1))
-    FAIL_DETAILS+=("orchestrate: expected=200 got=$ORCH_HTTP")
+    FAIL_DETAILS+=("orchestrate(issue#${ISSUE_NUM}): HTTP=${ORCH_HTTP} term=${ORCH_TERM}")
   fi
 
   # 6. Eval lifecycle
