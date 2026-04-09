@@ -18,9 +18,9 @@ export interface ProjectScope {
 export const SCOPE_KEY = 'cairn_scope';
 
 export const DEFAULT_SCOPE: ProjectScope = {
-  tenant_id:    'default_tenant',
-  workspace_id: 'default_workspace',
-  project_id:   'default_project',
+  tenant_id:    'default',
+  workspace_id: 'default',
+  project_id:   'default',
 };
 
 // ── Persistence helpers ───────────────────────────────────────────────────────

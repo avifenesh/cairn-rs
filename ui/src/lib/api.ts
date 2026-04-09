@@ -480,9 +480,9 @@ export function createApiClient(config: ApiClientConfig) {
       const s = config.scope;
       const qs = new URLSearchParams();
       qs.set("query_text",   params.query_text);
-      qs.set("tenant_id",    merged.tenant_id    ?? s?.tenant_id    ?? "default_tenant");
-      qs.set("workspace_id", merged.workspace_id ?? s?.workspace_id ?? "default_workspace");
-      qs.set("project_id",   merged.project_id   ?? s?.project_id   ?? "default_project");
+      qs.set("tenant_id",    merged.tenant_id    ?? s?.tenant_id    ?? "default");
+      qs.set("workspace_id", merged.workspace_id ?? s?.workspace_id ?? "default");
+      qs.set("project_id",   merged.project_id   ?? s?.project_id   ?? "default");
       if (params.limit !== undefined) qs.set("limit", String(params.limit));
       return get(`/v1/memory/search?${qs}`);
     },
