@@ -105,6 +105,156 @@ function unwrapList<T>(data: unknown): T[] {
   return [];
 }
 
+// ── Prometheus text parser ────────────────────────────────────────────────────
+
+/**
+ * Parse Prometheus exposition format text into a MetricsSnapshot object.
+ *
+ * The cairn backend emits lines like:
+ *   http_requests_total{method="GET",path="/v1/runs",status="200"} 42
+ *   http_request_duration_ms_sum{method="GET",path="/v1/runs"} 1234
+ *   http_request_duration_ms_count{method="GET",path="/v1/runs"} 42
+ *   http_request_duration_ms_bucket{method="GET",path="/v1/runs",le="100"} 40
+ *   active_runs_total 3
+ *   active_tasks_total 7
+ */
+function parsePrometheusMetrics(text: string): {
+  total_requests: number;
+  requests_by_path: Record<string, number>;
+  avg_latency_ms: number;
+  p50_latency_ms: number;
+  p95_latency_ms: number;
+  p99_latency_ms: number;
+  error_rate: number;
+  errors_by_status: Record<string, number>;
+} {
+  let totalRequests = 0;
+  const requestsByPath: Record<string, number> = {};
+  let totalErrors = 0;
+  const errorsByStatus: Record<string, number> = {};
+
+  // For latency: accumulate sum and count across all paths to compute avg.
+  // For percentile approximation from histogram buckets, track per-path data.
+  let globalDurationSum = 0;
+  let globalDurationCount = 0;
+
+  // Histogram buckets keyed by path: { le_value => cumulative_count }
+  const bucketsByPath: Record<string, { le: number; count: number }[]> = {};
+
+  function parseLabels(labelsStr: string | undefined): Record<string, string> {
+    const labels: Record<string, string> = {};
+    if (!labelsStr) return labels;
+    for (const pair of labelsStr.split(',')) {
+      const eqIdx = pair.indexOf('=');
+      if (eqIdx > 0) {
+        const k = pair.slice(0, eqIdx).trim();
+        let v = pair.slice(eqIdx + 1).trim();
+        if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+        labels[k] = v;
+      }
+    }
+    return labels;
+  }
+
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const match = trimmed.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+(.+)$/);
+    if (!match) continue;
+
+    const [, metricName, labelsStr, valueStr] = match;
+    const value = parseFloat(valueStr);
+    if (Number.isNaN(value)) continue;
+
+    const labels = parseLabels(labelsStr);
+
+    // http_requests_total{method,path,status} — aggregate by path; track errors.
+    if (metricName === 'http_requests_total' || metricName === 'cairn_http_requests_total') {
+      totalRequests += value;
+      if (labels.path) {
+        requestsByPath[labels.path] = (requestsByPath[labels.path] ?? 0) + value;
+      }
+      const status = Number(labels.status);
+      if (status >= 400) {
+        totalErrors += value;
+        const statusKey = String(status);
+        errorsByStatus[statusKey] = (errorsByStatus[statusKey] ?? 0) + value;
+      }
+    }
+
+    // http_request_duration_ms_sum{method,path}
+    if (metricName === 'http_request_duration_ms_sum') {
+      globalDurationSum += value;
+    }
+
+    // http_request_duration_ms_count{method,path}
+    if (metricName === 'http_request_duration_ms_count') {
+      globalDurationCount += value;
+    }
+
+    // http_request_duration_ms_bucket{method,path,le}
+    if (metricName === 'http_request_duration_ms_bucket' && labels.le) {
+      const pathKey = labels.path ?? '_all';
+      if (!bucketsByPath[pathKey]) bucketsByPath[pathKey] = [];
+      const le = labels.le === '+Inf' ? Infinity : parseFloat(labels.le);
+      bucketsByPath[pathKey].push({ le, count: value });
+    }
+
+    // active_runs_total / active_tasks_total — gauges (no labels).
+    if (metricName === 'active_runs_total') {
+      requestsByPath['active_runs (gauge)'] = value;
+    }
+    if (metricName === 'active_tasks_total') {
+      requestsByPath['active_tasks (gauge)'] = value;
+    }
+  }
+
+  // Compute avg latency from sum/count.
+  const avgLatency = globalDurationCount > 0
+    ? Math.round(globalDurationSum / globalDurationCount)
+    : 0;
+
+  // Approximate percentiles from merged histogram buckets.
+  // Merge all per-path buckets into one global histogram.
+  const globalBuckets: Record<number, number> = {};
+  for (const pathBuckets of Object.values(bucketsByPath)) {
+    for (const { le, count } of pathBuckets) {
+      globalBuckets[le] = (globalBuckets[le] ?? 0) + count;
+    }
+  }
+  const sortedLe = Object.keys(globalBuckets)
+    .map(Number)
+    .filter(n => Number.isFinite(n))
+    .sort((a, b) => a - b);
+
+  function percentileFromBuckets(target: number): number {
+    if (sortedLe.length === 0 || globalDurationCount === 0) return 0;
+    const threshold = target * globalDurationCount;
+    for (const le of sortedLe) {
+      if (globalBuckets[le] >= threshold) return le;
+    }
+    return sortedLe[sortedLe.length - 1] ?? 0;
+  }
+
+  const p50 = percentileFromBuckets(0.5);
+  const p95 = percentileFromBuckets(0.95);
+  const p99 = percentileFromBuckets(0.99);
+
+  const errorRate = totalRequests > 0 ? totalErrors / totalRequests : 0;
+
+  return {
+    total_requests: totalRequests,
+    requests_by_path: requestsByPath,
+    avg_latency_ms: avgLatency,
+    p50_latency_ms: p50,
+    p95_latency_ms: p95,
+    p99_latency_ms: p99,
+    error_rate: errorRate,
+    errors_by_status: errorsByStatus,
+  };
+}
+
 // ── API client factory ────────────────────────────────────────────────────────
 
 export function createApiClient(config: ApiClientConfig) {
@@ -214,8 +364,24 @@ export function createApiClient(config: ApiClientConfig) {
     getRun: (runId: string): Promise<RunRecord> => get(`/v1/runs/${runId}`),
 
     /** GET /v1/runs/:id/events — event timeline for a run. */
-    getRunEvents: (runId: string, limit = 100): Promise<import("./types").RunEventSummary[]> =>
-      get(`/v1/runs/${runId}/events?limit=${limit}`),
+    getRunEvents: async (runId: string, limit = 100): Promise<import("./types").RunEventSummary[]> => {
+      const raw = await get<unknown>(`/v1/runs/${runId}/events?limit=${limit}`);
+      // The backend returns { events: [...], next_cursor, has_more } (EventsPage)
+      // unless the legacy `from` param is used.  Normalise both shapes.
+      let arr: Record<string, unknown>[];
+      if (Array.isArray(raw)) {
+        arr = raw;
+      } else if (raw && typeof raw === 'object' && 'events' in raw && Array.isArray((raw as { events: unknown }).events)) {
+        arr = (raw as { events: Record<string, unknown>[] }).events;
+      } else {
+        return [];
+      }
+      // Backend sends `occurred_at_ms`; UI expects `stored_at`.  Normalise.
+      return arr.map(e => ({
+        ...e,
+        stored_at: (e.stored_at ?? e.occurred_at_ms ?? 0) as number,
+      })) as import("./types").RunEventSummary[];
+    },
 
     /** GET /v1/tasks — all tasks across every project (operator view). */
     getAllTasks: (params?: { limit?: number; offset?: number; tenant_id?: string; workspace_id?: string; project_id?: string }): Promise<import("./types").TaskRecord[]> => {
@@ -246,9 +412,15 @@ export function createApiClient(config: ApiClientConfig) {
     getRunTasks: (runId: string): Promise<import("./types").TaskRecord[]> =>
       getList(`/v1/runs/${runId}/tasks`),
 
-    /** GET /v1/runs/:id/cost — accumulated cost for a run. */
-    getRunCost: (runId: string): Promise<import("./types").RunCostRecord> =>
-      get(`/v1/runs/${runId}/cost`),
+    /** GET /v1/runs/:id/cost — accumulated cost for a run.  Returns null when no cost data exists (404). */
+    getRunCost: async (runId: string): Promise<import("./types").RunCostRecord | null> => {
+      try {
+        return await get<import("./types").RunCostRecord>(`/v1/runs/${runId}/cost`);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
 
     /** POST /v1/runs/:id/pause — pause a running run. */
     pauseRun: (runId: string, detail?: string): Promise<RunRecord> =>
@@ -309,8 +481,11 @@ export function createApiClient(config: ApiClientConfig) {
 
     // ── API metrics ──────────────────────────────────────────────────────────
 
-    /** GET /v1/metrics — rolling request metrics from the tracing middleware. */
-    getMetrics: (): Promise<{
+    /** GET /v1/metrics — rolling request metrics from the tracing middleware.
+     *  The backend may return JSON or Prometheus text/plain format.
+     *  This method handles both and normalises into a MetricsSnapshot object.
+     */
+    getMetrics: async (): Promise<{
       total_requests:   number;
       requests_by_path: Record<string, number>;
       avg_latency_ms:   number;
@@ -319,7 +494,29 @@ export function createApiClient(config: ApiClientConfig) {
       p99_latency_ms:   number;
       error_rate:       number;
       errors_by_status: Record<string, number>;
-    }> => get("/v1/metrics"),
+    }> => {
+      const url = `${config.baseUrl}/v1/metrics`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      if (!response.ok) {
+        throw new ApiError(response.status, "metrics_error", `HTTP ${response.status}`);
+      }
+      const contentType = response.headers.get("content-type") ?? "";
+      const text = await response.text();
+      if (!text) {
+        throw new ApiError(500, "empty_response", "empty metrics response");
+      }
+
+      // If the response is JSON, parse directly.
+      if (contentType.includes("application/json")) {
+        return JSON.parse(text);
+      }
+
+      // Otherwise parse Prometheus text exposition format into MetricsSnapshot.
+      return parsePrometheusMetrics(text);
+    },
 
     // ── Settings ─────────────────────────────────────────────────────────────
 
@@ -337,7 +534,13 @@ export function createApiClient(config: ApiClientConfig) {
     // ── Providers ────────────────────────────────────────────────────────────
 
     /** GET /v1/providers/health — list provider health records. */
-    getProviderHealth: (): Promise<import("./types").ProviderHealthEntry[]> => get("/v1/providers/health"),
+    getProviderHealth: (): Promise<import("./types").ProviderHealthEntry[]> => {
+      const tenantId = config.scope?.tenant_id ?? "default";
+      return getList(`/v1/providers/health?tenant_id=${encodeURIComponent(tenantId)}`);
+    },
+
+    /** GET /v1/providers/registry — static provider registry with availability and known models. */
+    getProviderRegistry: (): Promise<import("./types").ProviderRegistryEntry[]> => get("/v1/providers/registry"),
 
     /** GET /v1/providers/ollama/models — list locally available Ollama models. */
     getOllamaModels: (): Promise<{ host: string; models: string[]; count: number }> =>
@@ -427,8 +630,21 @@ export function createApiClient(config: ApiClientConfig) {
     // ── Evals ────────────────────────────────────────────────────────────────
 
     /** GET /v1/evals/runs — list eval runs (operator view). */
-    getEvalRuns: (limit = 100): Promise<import("./types").EvalRunsResponse> =>
-      get(`/v1/evals/runs?limit=${limit}`),
+    getEvalRuns: async (limit = 100): Promise<import("./types").EvalRunsResponse> => {
+      const merged = withScope();
+      const qs = new URLSearchParams();
+      if (merged.tenant_id)    qs.set("tenant_id",    merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id)   qs.set("project_id",   merged.project_id);
+      qs.set("limit", String(limit));
+      const raw = await get<{ items: Record<string, unknown>[]; hasMore?: boolean; has_more?: boolean }>(`/v1/evals/runs?${qs}`);
+      // Backend sends created_at; UI expects started_at.  Normalise.
+      const items = (raw.items ?? []).map(r => ({
+        ...r,
+        started_at: (r.started_at ?? r.created_at ?? 0) as number,
+      })) as import("./types").EvalRunRecord[];
+      return { items, has_more: raw.has_more ?? raw.hasMore ?? false };
+    },
 
     /** POST /v1/evals/runs — create a new eval run. */
     createEvalRun: (body: {

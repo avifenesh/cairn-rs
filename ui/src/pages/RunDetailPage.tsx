@@ -355,6 +355,10 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
     retry: false,
   });
 
+  // Defensive: ensure list responses are arrays even if the API returns an unexpected shape.
+  const safeTasks  = Array.isArray(tasks)  ? tasks  : undefined;
+  const safeEvents = Array.isArray(events) ? events : undefined;
+
   const isTerminal = run && ["completed", "failed", "canceled"].includes(run.state);
   const duration = run ? fmtDuration(run.created_at, isTerminal ? run.updated_at : undefined) : "—";
 
@@ -418,12 +422,12 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
           />
           <StatCard
             label="Tasks"
-            value={tasks?.length ?? "—"}
-            sub={tasks ? `${tasks.filter(t => t.state === "completed").length} completed` : undefined}
+            value={safeTasks?.length ?? "—"}
+            sub={safeTasks ? `${safeTasks.filter(t => t.state === "completed").length} completed` : undefined}
           />
           <StatCard
             label="Events"
-            value={events?.length ?? "—"}
+            value={safeEvents?.length ?? "—"}
           />
           <StatCard
             label="Cost"
@@ -436,12 +440,12 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
         <OrchestrationTimeline runId={runId} />
 
         {/* Task Gantt chart */}
-        {tasks && tasks.length > 0 && run && (
+        {safeTasks && safeTasks.length > 0 && run && (
           <Section title="Task Execution Timeline">
             <GanttView
               runStart={run.created_at}
               runEnd={run && ["completed","failed","canceled"].includes(run.state) ? run.updated_at : undefined}
-              tasks={tasks}
+              tasks={safeTasks}
             />
           </Section>
         )}
@@ -452,7 +456,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
             <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600 text-[13px] py-4">
               <Loader2 size={14} className="animate-spin" /> Loading tasks…
             </div>
-          ) : !tasks || tasks.length === 0 ? (
+          ) : !safeTasks || safeTasks.length === 0 ? (
             <p className="text-[13px] text-gray-400 dark:text-zinc-600 py-4 text-center">No tasks for this run.</p>
           ) : (
             <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-x-auto">
@@ -467,7 +471,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
-                  {tasks.map((t, i) => (
+                  {safeTasks.map((t, i) => (
                     <tr key={t.task_id} className={clsx(
                       "transition-colors",
                       i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]",
@@ -521,12 +525,12 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
         )}
 
         {/* Events timeline */}
-        <Section title={`Event Timeline${events ? ` (${events.length})` : ""}`}>
+        <Section title={`Event Timeline${safeEvents ? ` (${safeEvents.length})` : ""}`}>
           {eventsLoading ? (
             <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600 text-[13px] py-4">
               <Loader2 size={14} className="animate-spin" /> Loading events…
             </div>
-          ) : !events || events.length === 0 ? (
+          ) : !safeEvents || safeEvents.length === 0 ? (
             <p className="text-[13px] text-gray-400 dark:text-zinc-600 italic py-4">No events recorded.</p>
           ) : (
             <div className="relative">
@@ -534,7 +538,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
               <div className="absolute left-[19px] top-2 bottom-2 w-px bg-gray-100 dark:bg-zinc-800" />
 
               <div className="space-y-0">
-                {events.map((ev, i) => (
+                {safeEvents.map((ev, i) => (
                   <div key={`${ev.position}-${i}`} className="flex items-start gap-3 relative py-1.5 group">
                     {/* Dot */}
                     <div className={clsx(

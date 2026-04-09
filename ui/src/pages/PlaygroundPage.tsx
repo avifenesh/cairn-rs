@@ -706,18 +706,18 @@ function EmptyChat({ model, ollamaDown }: { model: string; ollamaDown?: boolean 
           <Bot size={18} className="text-amber-600" />
         </div>
         <div className="space-y-1">
-          <p className="text-[13px] font-medium text-amber-500">Ollama is not reachable</p>
+          <p className="text-[13px] font-medium text-amber-500">No LLM providers available</p>
           <p className="text-[11px] text-gray-400 dark:text-zinc-600 max-w-xs">
-            To use the Playground, you need Ollama running locally or a configured provider.
+            Configure at least one provider to use the Playground.
           </p>
         </div>
         <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-4 py-3 text-left max-w-xs space-y-1.5">
-          <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Quick fix</p>
+          <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Options</p>
           {[
-            '1. Install Ollama from ollama.ai',
-            '2. Run: ollama serve',
-            '3. Set OLLAMA_HOST and restart cairn-app',
-            '4. Pull a model: ollama pull llama3.2',
+            '1. Set OPENROUTER_API_KEY for OpenRouter',
+            '2. Set CAIRN_BRAIN_URL + CAIRN_BRAIN_KEY',
+            '3. Install Ollama and set OLLAMA_HOST',
+            '4. Restart cairn-app after configuring',
           ].map(step => (
             <p key={step} className="text-[11px] text-gray-500 dark:text-zinc-400 font-mono">{step}</p>
           ))}
@@ -954,15 +954,49 @@ export function PlaygroundPage() {
   useEffect(() => { bottomRef1.current?.scrollIntoView({ behavior: "smooth" }); }, [primary.messages]);
   useEffect(() => { bottomRef2.current?.scrollIntoView({ behavior: "smooth" }); }, [secondary.messages]);
 
+  // ── Model discovery ─────────────────────────────────────────────────────
+  // 1. Try Ollama for local models (may 503 when Ollama is offline).
+  // 2. Always fetch the provider registry — it reports which providers are
+  //    available (env var configured) and their known models. The stream
+  //    endpoint on the backend already falls through from Ollama → brain →
+  //    worker → OpenRouter, so any model ID works transparently.
+  // 3. As a last resort, check provider connections for supported_models.
+
   const { data: modelsData, isLoading: modelsLoading, error: modelsError } = useQuery({
     queryKey: ["ollama-models"],
     queryFn: () => defaultApi.getOllamaModels(),
     retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
   });
 
-  // When Ollama is unavailable, fall back to models from registered provider connections.
-  // The stream endpoint already falls through to the configured provider on the backend,
-  // so these model IDs work transparently.
+  const { data: registryData } = useQuery({
+    queryKey: ["provider-registry"],
+    queryFn: () => defaultApi.getProviderRegistry(),
+    retry: false, staleTime: 120_000, refetchOnWindowFocus: false,
+  });
+
+  // Fetch configured default models from the runtime settings.
+  // These are set via CAIRN_DEFAULT_STREAM_MODEL, CAIRN_BRAIN_MODEL, etc.
+  // Returns null on 404 (setting not configured), so we catch errors gracefully.
+  const resolveSetting = async (key: string) => {
+    try { return await defaultApi.resolveDefaultSetting(key); }
+    catch { return null; }
+  };
+  const { data: streamModelSetting } = useQuery({
+    queryKey: ["default-setting", "stream_model"],
+    queryFn: () => resolveSetting("stream_model"),
+    retry: false, staleTime: 120_000, refetchOnWindowFocus: false,
+  });
+  const { data: brainModelSetting } = useQuery({
+    queryKey: ["default-setting", "brain_model"],
+    queryFn: () => resolveSetting("brain_model"),
+    retry: false, staleTime: 120_000, refetchOnWindowFocus: false,
+  });
+  const { data: generateModelSetting } = useQuery({
+    queryKey: ["default-setting", "generate_model"],
+    queryFn: () => resolveSetting("generate_model"),
+    retry: false, staleTime: 120_000, refetchOnWindowFocus: false,
+  });
+
   const { data: connectionsData } = useQuery({
     queryKey: ["provider-connections"],
     queryFn:  () => defaultApi.listProviderConnections("default"),
@@ -971,16 +1005,41 @@ export function PlaygroundPage() {
   });
 
   const ollamaModels: string[] = modelsData?.models ?? [];
+
+  // Configured models from runtime settings (e.g. CAIRN_DEFAULT_STREAM_MODEL,
+  // CAIRN_BRAIN_MODEL).  These are the models the operator chose for this
+  // deployment and should appear first in the selector.
+  const configuredModels: string[] = [
+    streamModelSetting?.value,
+    brainModelSetting?.value,
+    generateModelSetting?.value,
+  ].filter((v): v is string => typeof v === "string" && v.length > 0);
+
+  // Build model list from available providers in the registry.
+  // Skip "ollama" (handled separately) and "anthropic" (non-OpenAI wire format).
+  const registryModels: string[] = (registryData ?? [])
+    .filter(p => p.available && p.id !== "ollama" && p.api_format !== "anthropic")
+    .flatMap(p => {
+      // If the provider has known models, list them. Otherwise expose the default.
+      if (p.models.length > 0) return p.models.map(m => m.id);
+      return p.default_model ? [p.default_model] : [];
+    });
+
   const connectionModels: string[] = (connectionsData?.items ?? []).flatMap(c => c.supported_models ?? []);
 
-  // Deduplicate: Ollama models first, then any unique connection models.
-  // Sort free-tier models first so the default selection works without payment.
-  const rawModels: string[] = ollamaModels.length > 0
-    ? ollamaModels
-    : [...new Set(connectionModels)];
+  // Merge: configured models first, then Ollama, then registry, then connections.
+  const allModels = [
+    ...configuredModels,
+    ...ollamaModels,
+    ...registryModels,
+    ...connectionModels,
+  ];
+  // Deduplicate while preserving order
+  const uniqueModels = [...new Set(allModels)];
+
   // Sort free-tier models first; prefer models that support system prompts
   // (llama, qwen, deepseek) over those that don't (gemma).
-  const models = [...rawModels].sort((a, b) => {
+  const models = [...uniqueModels].sort((a, b) => {
     const aFree = a.includes(':free');
     const bFree = b.includes(':free');
     if (aFree && !bFree) return -1;
@@ -995,7 +1054,8 @@ export function PlaygroundPage() {
     return 0;
   });
 
-  const ollamaDown  = !!modelsError && connectionModels.length === 0;
+  // "No providers" only when Ollama is down AND no registry/connection models exist.
+  const ollamaDown  = !!modelsError && models.length === 0;
   const activeModel = selectedModel || models[0] || "";
   const cmpModel    = compareModel  || models[1] || models[0] || "";
 
@@ -1093,7 +1153,7 @@ export function PlaygroundPage() {
   const turnCount = primary.messages.filter((m) => m.role === "user").length;
   const inputDisabled = !activeModel || ollamaDown;
   const inputPlaceholder =
-    ollamaDown   ? "Ollama offline" :
+    ollamaDown   ? "No LLM providers available" :
     !activeModel ? "No model selected" :
                    "Message… (⌘↵ to send)";
 
@@ -1132,7 +1192,7 @@ export function PlaygroundPage() {
             >
               ⚠ No providers
             </span>
-          ) : modelsError && connectionModels.length > 0 ? (
+          ) : modelsError && models.length > 0 ? (
             <span className="text-[11px] text-sky-400 flex items-center gap-1.5">
               <Zap size={10} className="text-sky-500" />
               {models.length} model{models.length !== 1 ? "s" : ""} (provider)

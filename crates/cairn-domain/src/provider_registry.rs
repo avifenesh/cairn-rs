@@ -344,7 +344,25 @@ pub static PROVIDERS: &[ProviderDef] = &[
         env_keys: &["OPENROUTER_API_KEY"],
         api_format: ApiFormat::OpenAiCompatible,
         default_model: "openrouter/auto",
-        models: &[],
+        models: &[
+            KnownModel { id: "openrouter/free", context_window: 200_000, capabilities: FULL },
+            KnownModel { id: "openrouter/auto", context_window: 128_000, capabilities: FULL },
+            KnownModel { id: "google/gemma-3-4b-it:free", context_window: 128_000, capabilities: BASIC },
+            KnownModel { id: "meta-llama/llama-4-scout:free", context_window: 512_000, capabilities: FULL },
+            KnownModel { id: "deepseek/deepseek-chat-v3-0324:free", context_window: 64_000, capabilities: FULL },
+            KnownModel { id: "qwen/qwen3-8b:free", context_window: 128_000, capabilities: FULL_THINKING },
+        ],
+    },
+    ProviderDef {
+        id: "bedrock",
+        name: "AWS Bedrock",
+        api_base: "https://bedrock-runtime.us-east-2.amazonaws.com",
+        env_keys: &["BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"],
+        api_format: ApiFormat::OpenAiCompatible, // uses Converse API internally, but listed for registry
+        default_model: "minimax.minimax-m2.5",
+        models: &[
+            KnownModel { id: "minimax.minimax-m2.5", context_window: 128_000, capabilities: FULL },
+        ],
     },
 ];
 

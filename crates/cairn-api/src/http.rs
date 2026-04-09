@@ -413,6 +413,11 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
         },
         RouteEntry {
             method: Get,
+            path: "/v1/admin/logs".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
             path: "/v1/admin/notifications/failed".into(),
             classification: Preserve,
         },

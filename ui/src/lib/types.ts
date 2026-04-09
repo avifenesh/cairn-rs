@@ -30,6 +30,31 @@ export interface AgentTemplate {
   agent_role: string;
 }
 
+// ── Provider registry (GET /v1/providers/registry) ──────────────────────────
+
+export interface ProviderRegistryModel {
+  id: string;
+  context_window: number;
+  capabilities: {
+    streaming: boolean;
+    tool_use: boolean;
+    vision: boolean;
+    thinking: boolean;
+  };
+}
+
+export interface ProviderRegistryEntry {
+  id: string;
+  name: string;
+  api_base: string;
+  api_format: string;
+  default_model: string;
+  available: boolean;
+  requires_key: boolean;
+  env_keys: string[];
+  models: ProviderRegistryModel[];
+}
+
 // ── Provider health (GET /v1/providers/health) ───────────────────────────────
 
 export interface ProviderHealthEntry {
@@ -192,8 +217,18 @@ export interface RunRecord {
 /** One entry from GET /v1/runs/:id/events */
 export interface RunEventSummary {
   position: number;
+  /** Backend field name is occurred_at_ms; stored_at kept for compatibility. */
+  occurred_at_ms: number;
   stored_at: number;
   event_type: string;
+  description?: string;
+}
+
+/** Paginated wrapper returned by GET /v1/runs/:id/events (without legacy `from` param). */
+export interface EventsPage {
+  events: RunEventSummary[];
+  next_cursor: number | null;
+  has_more: boolean;
 }
 
 /** GET /v1/runs/:id/cost */
@@ -483,18 +518,21 @@ export type EvalRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'ca
 /** One record from GET /v1/evals/runs */
 export interface EvalRunRecord {
   eval_run_id: string;
-  project: { tenant_id: string; workspace_id: string; project_id: string };
+  project_id?: string;
+  project?: { tenant_id: string; workspace_id: string; project_id: string };
   subject_kind: string;
   evaluator_type: string;
+  status?: string;
   success: boolean | null;
   error_message: string | null;
-  started_at: number;    // unix ms
+  started_at: number;    // unix ms — mapped from created_at
   completed_at: number | null;
 }
 
 export interface EvalRunsResponse {
   items: EvalRunRecord[];
-  has_more: boolean;
+  has_more?: boolean;
+  hasMore?: boolean;
 }
 
 // ── Plugins ───────────────────────────────────────────────────────────────────

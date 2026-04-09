@@ -146,6 +146,7 @@ struct AppState {
     notifications: Arc<std::sync::RwLock<NotificationBuffer>>,
     templates: Arc<templates::TemplateRegistry>,
     entitlements: Arc<entitlements::EntitlementService>,
+    bedrock: Option<Arc<cairn_runtime::services::BedrockProvider>>,
     process_role: cairn_api::bootstrap::ProcessRole,
 }
 
@@ -2139,8 +2140,9 @@ async fn mark_all_notifications_read_handler(State(state): State<AppState>) -> i
     StatusCode::NO_CONTENT
 }
 
-// ── Request log handler ───────────────────────────────────────────────────────
+// ── Request log handler (now served by lib.rs catalog; kept for OTLP export) ─
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct LogsQuery {
     /// Maximum entries to return (default 100, max 500).
@@ -2150,14 +2152,14 @@ struct LogsQuery {
     level: Option<String>,
 }
 
+#[allow(dead_code)]
 fn default_logs_limit() -> usize {
     100
 }
 
-/// `GET /v1/admin/logs?limit=100&level=error,warn` — structured request log tail.
-///
-/// Returns the most recent N entries from the in-memory request log ring buffer,
-/// written by the tracing middleware on every completed request.
+/// `GET /v1/admin/logs` — now served by the catalog-driven handler in lib.rs.
+/// This handler is retained for the OTLP export endpoint which also reads request logs.
+#[allow(dead_code)]
 async fn list_request_logs_handler(
     State(state): State<AppState>,
     Query(q): Query<LogsQuery>,
@@ -3387,6 +3389,52 @@ async fn ollama_stream_handler(
     State(state): State<AppState>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
+    let default_stream = state.runtime.runtime_config.default_stream_model().await;
+    let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
+
+    // Bedrock models contain a '.' (e.g. minimax.minimax-m2.5). Route them
+    // through the Bedrock provider's non-streaming API and emit the result as SSE.
+    let is_bedrock_model = model_id.contains('.');
+    if is_bedrock_model {
+        if let Some(ref bedrock) = state.bedrock {
+            use cairn_domain::providers::GenerationProvider as _;
+            let messages: Vec<serde_json::Value> = body
+                .messages
+                .unwrap_or_else(|| vec![serde_json::json!({"role": "user", "content": body.prompt})]);
+            let bedrock = bedrock.clone();
+            let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(8);
+            tokio::spawn(async move {
+                let start = std::time::Instant::now();
+                let settings = cairn_domain::providers::ProviderBindingSettings::default();
+                match bedrock.generate(&model_id, messages, &settings).await {
+                    Ok(resp) => {
+                        let _ = tx.send(Ok(Event::default().event("token").data(
+                            serde_json::json!({"text": resp.text}).to_string(),
+                        ))).await;
+                        let _ = tx.send(Ok(Event::default().event("done").data(
+                            serde_json::json!({
+                                "latency_ms": start.elapsed().as_millis() as u64,
+                                "model": resp.model_id,
+                                "tokens_in": resp.input_tokens,
+                                "tokens_out": resp.output_tokens,
+                            }).to_string(),
+                        ))).await;
+                    }
+                    Err(err) => {
+                        let msg = format!("{err}");
+                        let _ = tx.send(Ok(Event::default().event("error").data(
+                            serde_json::json!({"error": msg}).to_string(),
+                        ))).await;
+                    }
+                }
+            });
+            return Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+                .keep_alive(KeepAlive::default())
+                .into_response();
+        }
+        // Fall through to OpenAI-compat if no Bedrock provider
+    }
+
     // Provider resolution: Ollama first, then OpenAI-compat brain, then worker.
     // All three expose /v1/chat/completions (OpenAI wire format) so the same
     // streaming logic applies — only URL construction differs.
@@ -3415,9 +3463,6 @@ async fn ollama_stream_handler(
                 })),
             ).into_response();
     };
-
-    let default_stream = state.runtime.runtime_config.default_stream_model().await;
-    let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
     // Resolve thinking-mode flag before spawning (RuntimeConfig is not Send across spawn).
     let disable_thinking = state
         .runtime
@@ -4710,6 +4755,7 @@ async fn main() {
         notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
         templates: Arc::new(templates::TemplateRegistry::with_builtins()),
         entitlements: Arc::new(entitlements::EntitlementService::new()),
+        bedrock: bedrock.clone(),
         process_role: config.process_role,
     };
 
@@ -5182,7 +5228,9 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
         .route("/v1/traces", get(list_all_traces_handler))
         .route("/v1/traces/export", get(export_otlp_handler))
         // Admin utilities
-        .route("/v1/admin/logs", get(list_request_logs_handler))
+        // NOTE: /v1/admin/logs is now served by the catalog-driven router in lib.rs.
+        // The observability middleware populates lib_state.request_log, which the
+        // catalog handler reads — so the request log is always fresh.
         .route("/v1/admin/snapshot", post(admin_snapshot_handler))
         .route("/v1/admin/restore", post(admin_restore_handler))
         .route(
@@ -5388,6 +5436,7 @@ mod tests {
                 notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
                 templates: Arc::new(templates::TemplateRegistry::with_builtins()),
                 entitlements: Arc::new(entitlements::EntitlementService::new()),
+                bedrock: None,
                 process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
@@ -7115,6 +7164,7 @@ mod tests {
             notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
             templates: Arc::new(templates::TemplateRegistry::with_builtins()),
             entitlements: Arc::new(entitlements::EntitlementService::new()),
+                bedrock: None,
             process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
         };
         let app = make_app(state);
@@ -7849,6 +7899,7 @@ mod run_events_tests {
                 notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
                 templates: Arc::new(templates::TemplateRegistry::with_builtins()),
                 entitlements: Arc::new(entitlements::EntitlementService::new()),
+                bedrock: None,
                 process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
@@ -8130,6 +8181,7 @@ mod tool_invocations_tests {
                 notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
                 templates: Arc::new(templates::TemplateRegistry::with_builtins()),
                 entitlements: Arc::new(entitlements::EntitlementService::new()),
+                bedrock: None,
                 process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }
@@ -8451,6 +8503,7 @@ mod provider_health_tests {
                 notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
                 templates: Arc::new(templates::TemplateRegistry::with_builtins()),
                 entitlements: Arc::new(entitlements::EntitlementService::new()),
+                bedrock: None,
                 process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
             }
         }

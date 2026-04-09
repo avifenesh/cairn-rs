@@ -606,6 +606,58 @@ impl OperatorTokenStore {
     }
 }
 
+// ── Request log ring buffer ──────────────────────────────────────────────────
+
+const REQUEST_LOG_RING_SIZE: usize = 2_000;
+
+/// Structured log entry written by the observability middleware for every request.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RequestLogEntry {
+    pub timestamp: String,
+    pub level: &'static str,
+    pub message: String,
+    pub request_id: String,
+    pub method: String,
+    pub path: String,
+    pub query: Option<String>,
+    pub status: u16,
+    pub latency_ms: u64,
+}
+
+/// Fixed-capacity FIFO ring buffer of structured request log entries.
+#[derive(Clone)]
+pub struct RequestLogBuffer {
+    entries: std::collections::VecDeque<RequestLogEntry>,
+}
+
+impl RequestLogBuffer {
+    pub fn new() -> Self {
+        Self {
+            entries: std::collections::VecDeque::with_capacity(REQUEST_LOG_RING_SIZE),
+        }
+    }
+
+    pub fn push(&mut self, entry: RequestLogEntry) {
+        if self.entries.len() == REQUEST_LOG_RING_SIZE {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(entry);
+    }
+
+    /// Return the last `n` entries whose level matches the filter (empty = all).
+    pub fn tail(&self, n: usize, level_filter: &[&str]) -> Vec<&RequestLogEntry> {
+        self.entries
+            .iter()
+            .rev()
+            .filter(|e| level_filter.is_empty() || level_filter.contains(&e.level))
+            .take(n)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: BootstrapConfig,
@@ -657,6 +709,9 @@ pub struct AppState {
     /// Built-in tool registry wired by main.rs with real memory backends.
     /// `None` until set — orchestrate handler falls back to stub dispatcher.
     pub tool_registry: Option<Arc<cairn_tools::BuiltinToolRegistry>>,
+    /// Ring buffer of the last 2,000 structured request log entries, populated
+    /// by the observability middleware.  Consumed by `GET /v1/admin/logs`.
+    pub request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
 }
 
 impl AppState {
@@ -886,6 +941,7 @@ impl AppState {
             brain_provider: None,
             bedrock_provider: None,
             tool_registry: None,
+            request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
         })
     }
 }
@@ -3347,6 +3403,9 @@ impl AppBootstrap {
                     (HttpMethod::Get, "/v1/admin/audit-log/:resource_type/:resource_id") => {
                         router.route(&path, get(list_audit_log_for_resource_handler))
                     }
+                    (HttpMethod::Get, "/v1/admin/logs") => {
+                        router.route(&path, get(list_request_logs_handler))
+                    }
                     (HttpMethod::Get, "/v1/admin/tenants/:id") => {
                         router.route(&path, get(get_tenant_handler))
                     }
@@ -4869,6 +4928,12 @@ async fn observability_middleware(
         .map(MatchedPath::as_str)
         .unwrap_or_else(|| request.uri().path())
         .to_owned();
+    let query = request.uri().query().map(String::from);
+    let request_id = request
+        .extensions()
+        .get::<RequestId>()
+        .map(|r| r.0.clone())
+        .unwrap_or_default();
     let start = Instant::now();
     let response = next.run(request).await;
     let latency_ms = start.elapsed().as_millis() as u64;
@@ -4877,6 +4942,32 @@ async fn observability_middleware(
     state
         .metrics
         .record_request(&method, &path, status, latency_ms);
+
+    // Write structured log entry to the request log ring buffer.
+    let level = if status >= 500 {
+        "error"
+    } else if status >= 400 {
+        "warn"
+    } else {
+        "info"
+    };
+    let timestamp = chrono::Utc::now()
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let message = format!("{method} {path} -> {status} ({latency_ms}ms)");
+    if let Ok(mut log) = state.request_log.write() {
+        log.push(RequestLogEntry {
+            timestamp,
+            level,
+            message,
+            request_id,
+            method: method.clone(),
+            path: path.clone(),
+            query,
+            status,
+            latency_ms,
+        });
+    }
+
     refresh_activity_metrics(state.as_ref()).await;
 
     response
@@ -7182,23 +7273,52 @@ async fn list_audit_log_handler(
     Query(query): Query<AuditLogQuery>,
 ) -> impl IntoResponse {
     let limit = query.limit.unwrap_or(50);
-    match AuditLogReadModel::list_by_tenant(
-        state.runtime.store.as_ref(),
-        tenant_scope.tenant_id(),
-        query.since_ms,
-        limit,
-    )
-    .await
-    {
-        Ok(items) => (
-            StatusCode::OK,
-            Json(ListResponse {
-                has_more: items.len() >= limit,
-                items,
-            }),
+    // Admin users see all audit entries (scan all known tenants).
+    // Non-admin users only see their own tenant's entries.
+    if tenant_scope.is_admin {
+        // Collect audit entries across all tenants for admin visibility.
+        let tenants = match state.runtime.tenants.list(100, 0).await {
+            Ok(t) => t,
+            Err(err) => return runtime_error_response(err),
+        };
+        let mut all_items = Vec::new();
+        for tenant in &tenants {
+            match AuditLogReadModel::list_by_tenant(
+                state.runtime.store.as_ref(),
+                &tenant.tenant_id,
+                query.since_ms,
+                limit,
+            )
+            .await
+            {
+                Ok(mut items) => all_items.append(&mut items),
+                Err(err) => return runtime_error_response(err.into()),
+            }
+        }
+        // Sort by occurred_at_ms descending (most recent first) and cap at limit.
+        all_items.sort_by(|a, b| b.occurred_at_ms.cmp(&a.occurred_at_ms));
+        all_items.truncate(limit);
+        let has_more = all_items.len() >= limit;
+        (StatusCode::OK, Json(ListResponse { has_more, items: all_items })).into_response()
+    } else {
+        match AuditLogReadModel::list_by_tenant(
+            state.runtime.store.as_ref(),
+            tenant_scope.tenant_id(),
+            query.since_ms,
+            limit,
         )
-            .into_response(),
-        Err(err) => runtime_error_response(err.into()),
+        .await
+        {
+            Ok(items) => (
+                StatusCode::OK,
+                Json(ListResponse {
+                    has_more: items.len() >= limit,
+                    items,
+                }),
+            )
+                .into_response(),
+            Err(err) => runtime_error_response(err.into()),
+        }
     }
 }
 
@@ -7230,6 +7350,57 @@ async fn list_audit_log_for_resource_handler(
         }
         Err(err) => runtime_error_response(err.into()),
     }
+}
+
+// ── Request logs handler (GET /v1/admin/logs) ────────────────────────────────
+
+#[derive(Clone, Debug, serde::Deserialize)]
+struct RequestLogsQuery {
+    #[serde(default = "default_logs_limit")]
+    limit: usize,
+    level: Option<String>,
+}
+
+fn default_logs_limit() -> usize {
+    200
+}
+
+/// `GET /v1/admin/logs?limit=200&level=info,warn,error` — structured request
+/// log tail from the in-memory ring buffer populated by observability middleware.
+async fn list_request_logs_handler(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<RequestLogsQuery>,
+) -> impl IntoResponse {
+    let limit = q.limit.min(500);
+    let level_filter: Vec<&'static str> = q
+        .level
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .filter_map(|l| match l.trim() {
+                    "info" => Some("info"),
+                    "warn" => Some("warn"),
+                    "error" => Some("error"),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let entries: Vec<RequestLogEntry> = match state.request_log.read() {
+        Ok(log) => log.tail(limit, &level_filter).into_iter().cloned().collect(),
+        Err(_) => vec![],
+    };
+
+    let total = entries.len();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "entries": entries,
+            "total":   total,
+            "limit":   limit,
+        })),
+    )
 }
 
 #[utoipa::path(
@@ -7430,11 +7601,18 @@ async fn get_operator_notifications_handler(
         .await
     {
         Ok(Some(prefs)) => (StatusCode::OK, Json(prefs)).into_response(),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "no notification preferences set" })),
-        )
-            .into_response(),
+        Ok(None) => {
+            // Return an empty preference object instead of 404 so the UI
+            // renders an empty-state rather than an error.
+            let empty = cairn_domain::notification_prefs::NotificationPreference {
+                pref_id: String::new(),
+                tenant_id: tenant_id.clone(),
+                operator_id: operator_id.clone(),
+                event_types: vec![],
+                channels: vec![],
+            };
+            (StatusCode::OK, Json(empty)).into_response()
+        }
         Err(err) => runtime_error_response(err),
     }
 }
@@ -10230,13 +10408,25 @@ async fn get_run_cost_handler(
     tenant_scope: TenantScope,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    let run_id = RunId::new(id);
+    let run_id = RunId::new(id.clone());
     match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
         Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => {
             match RunCostReadModel::get_run_cost(state.runtime.store.as_ref(), &run_id).await {
                 Ok(Some(record)) => (StatusCode::OK, Json(record)).into_response(),
                 Ok(None) => {
-                    AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run cost not found")
+                    // Return a zero-valued cost record instead of 404 when no cost data exists.
+                    (
+                        StatusCode::OK,
+                        Json(cairn_domain::providers::RunCostRecord {
+                            run_id: RunId::new(id),
+                            total_cost_micros: 0,
+                            total_tokens_in: 0,
+                            total_tokens_out: 0,
+                            provider_calls: 0,
+                            token_in: 0,
+                            token_out: 0,
+                        }),
+                    )
                         .into_response()
                 }
                 Err(err) => store_error_response(err),

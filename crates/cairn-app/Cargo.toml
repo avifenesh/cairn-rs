@@ -40,7 +40,7 @@ x509-parser = "0.16"
 rust-embed = { version = "8", features = ["axum"] }
 mime_guess = "2"
 serde_yaml = "0.9"
-chrono = { version = "0.4", features = ["serde"], default-features = false }
+chrono = { version = "0.4", features = ["serde", "clock"], default-features = false }
 dotenvy = "0.15"
 
 [dev-dependencies]
