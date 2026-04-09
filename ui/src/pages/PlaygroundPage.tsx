@@ -698,8 +698,8 @@ function ChatBubble({ msg }: { msg: Message }) {
 
 // ── EmptyChat ─────────────────────────────────────────────────────────────────
 
-function EmptyChat({ model, ollamaDown }: { model: string; ollamaDown?: boolean }) {
-  if (ollamaDown) {
+function EmptyChat({ model, noProviders }: { model: string; noProviders?: boolean }) {
+  if (noProviders) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center py-12 px-6">
         <div className="w-10 h-10 rounded-full bg-amber-950/40 border border-amber-800/30 flex items-center justify-center">
@@ -715,9 +715,9 @@ function EmptyChat({ model, ollamaDown }: { model: string; ollamaDown?: boolean 
           <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Options</p>
           {[
             '1. Set OPENROUTER_API_KEY for OpenRouter',
-            '2. Set CAIRN_BRAIN_URL + CAIRN_BRAIN_KEY',
-            '3. Install Ollama and set OLLAMA_HOST',
-            '4. Restart cairn-app after configuring',
+            '2. Configure Bedrock via CAIRN_BRAIN_URL',
+            '3. Add any OpenAI-compatible provider',
+            '4. Optionally set OLLAMA_HOST for local models',
           ].map(step => (
             <p key={step} className="text-[11px] text-gray-500 dark:text-zinc-400 font-mono">{step}</p>
           ))}
@@ -955,23 +955,25 @@ export function PlaygroundPage() {
   useEffect(() => { bottomRef2.current?.scrollIntoView({ behavior: "smooth" }); }, [secondary.messages]);
 
   // ── Model discovery ─────────────────────────────────────────────────────
-  // 1. Try Ollama for local models (may 503 when Ollama is offline).
-  // 2. Always fetch the provider registry — it reports which providers are
-  //    available (env var configured) and their known models. The stream
-  //    endpoint on the backend already falls through from Ollama → brain →
-  //    worker → OpenRouter, so any model ID works transparently.
+  // 1. Always fetch the provider registry FIRST — it reports which providers
+  //    are available (env var configured) and their known models.
+  // 2. Only query Ollama when the registry marks it as available.
   // 3. As a last resort, check provider connections for supported_models.
 
-  const { data: modelsData, isLoading: modelsLoading, error: modelsError } = useQuery({
-    queryKey: ["ollama-models"],
-    queryFn: () => defaultApi.getOllamaModels(),
-    retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
-  });
-
-  const { data: registryData } = useQuery({
+  const { data: registryData, isLoading: registryLoading } = useQuery({
     queryKey: ["provider-registry"],
     queryFn: () => defaultApi.getProviderRegistry(),
     retry: false, staleTime: 120_000, refetchOnWindowFocus: false,
+  });
+
+  // Only query Ollama if the registry says it's available (OLLAMA_HOST set).
+  const ollamaAvailable = (registryData ?? []).some(p => p.id === "ollama" && p.available);
+
+  const { data: modelsData, isLoading: ollamaLoading } = useQuery({
+    queryKey: ["ollama-models"],
+    queryFn: () => defaultApi.getOllamaModels(),
+    retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
+    enabled: ollamaAvailable,
   });
 
   // Fetch configured default models from the runtime settings.
@@ -1001,7 +1003,6 @@ export function PlaygroundPage() {
     queryKey: ["provider-connections"],
     queryFn:  () => defaultApi.listProviderConnections("default"),
     retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
-    enabled: !!modelsError, // only fetch when Ollama is down
   });
 
   const ollamaModels: string[] = modelsData?.models ?? [];
@@ -1054,8 +1055,10 @@ export function PlaygroundPage() {
     return 0;
   });
 
-  // "No providers" only when Ollama is down AND no registry/connection models exist.
-  const ollamaDown  = !!modelsError && models.length === 0;
+  const modelsLoading = registryLoading || ollamaLoading;
+
+  // "No providers" only when there are zero models from any source.
+  const noProviders = !modelsLoading && models.length === 0;
   const activeModel = selectedModel || models[0] || "";
   const cmpModel    = compareModel  || models[1] || models[0] || "";
 
@@ -1151,9 +1154,9 @@ export function PlaygroundPage() {
   }
 
   const turnCount = primary.messages.filter((m) => m.role === "user").length;
-  const inputDisabled = !activeModel || ollamaDown;
+  const inputDisabled = !activeModel || noProviders;
   const inputPlaceholder =
-    ollamaDown   ? "No LLM providers available" :
+    noProviders  ? "No LLM providers available" :
     !activeModel ? "No model selected" :
                    "Message… (⌘↵ to send)";
 
@@ -1180,22 +1183,17 @@ export function PlaygroundPage() {
         )}
 
         <div className="ml-auto flex items-center gap-3">
-          {/* Ollama status */}
+          {/* Provider status */}
           {modelsLoading ? (
             <span className="text-[11px] text-gray-400 dark:text-zinc-600 flex items-center gap-1">
               <Loader2 size={10} className="animate-spin" /> Checking…
             </span>
-          ) : ollamaDown ? (
+          ) : noProviders ? (
             <span
               className="text-[11px] text-amber-600 cursor-help"
-              title="Ollama unreachable and no provider connections configured."
+              title="No LLM providers configured. Add one under Providers."
             >
               ⚠ No providers
-            </span>
-          ) : modelsError && models.length > 0 ? (
-            <span className="text-[11px] text-sky-400 flex items-center gap-1.5">
-              <Zap size={10} className="text-sky-500" />
-              {models.length} model{models.length !== 1 ? "s" : ""} (provider)
             </span>
           ) : (
             <span className="text-[11px] text-gray-400 dark:text-zinc-600 flex items-center gap-1.5 hidden sm:flex">
@@ -1281,7 +1279,7 @@ export function PlaygroundPage() {
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
             <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
               {primary.messages.length === 0
-                ? <EmptyChat model={activeModel} ollamaDown={ollamaDown} />
+                ? <EmptyChat model={activeModel} noProviders={noProviders} />
                 : primary.messages.map((msg, i) => <ChatBubble key={`msg-${i}-${msg.role}`} msg={msg} />)
               }
               <div ref={bottomRef1} />
@@ -1313,7 +1311,7 @@ export function PlaygroundPage() {
                 />
                 <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
                   {primary.messages.length === 0
-                    ? <EmptyChat model={activeModel} ollamaDown={ollamaDown} />
+                    ? <EmptyChat model={activeModel} noProviders={noProviders} />
                     : primary.messages.map((msg, i) => <ChatBubble key={`msg-${i}-${msg.role}`} msg={msg} />)
                   }
                   <div ref={bottomRef1} />
@@ -1333,7 +1331,7 @@ export function PlaygroundPage() {
                 />
                 <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
                   {secondary.messages.length === 0
-                    ? <EmptyChat model={cmpModel} ollamaDown={ollamaDown} />
+                    ? <EmptyChat model={cmpModel} noProviders={noProviders} />
                     : secondary.messages.map((msg, i) => <ChatBubble key={`msg-${i}-${msg.role}`} msg={msg} />)
                   }
                   <div ref={bottomRef2} />

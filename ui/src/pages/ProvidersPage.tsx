@@ -1003,10 +1003,19 @@ function OllamaSection() {
   const [expandedInfo, setExpandedInfo] = useState<string | null>(null);
   const [pullName, setPullName]         = useState("");
 
+  // Only probe Ollama when the provider registry reports it as available (OLLAMA_HOST set).
+  const { data: registryData } = useQuery({
+    queryKey: ["provider-registry"],
+    queryFn: () => defaultApi.getProviderRegistry(),
+    staleTime: 120_000,
+  });
+  const ollamaConfigured = (registryData ?? []).some(p => p.id === "ollama" && p.available);
+
   const { data: ollamaData, isLoading: ollamaLoading, error: ollamaError, refetch } = useQuery({
     queryKey: ["ollama-models"],
     queryFn:  () => defaultApi.getOllamaModels(),
     retry: false, staleTime: 30_000,
+    enabled: ollamaConfigured,
   });
 
   const connected = !!ollamaData && !ollamaError;
@@ -1031,7 +1040,7 @@ function OllamaSection() {
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Ollama — Local LLM</p>
+        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Ollama — Local Inference (optional)</p>
         <button onClick={() => refetch()}
           className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">
           <RefreshCw size={11} /> Refresh
@@ -1039,7 +1048,7 @@ function OllamaSection() {
       </div>
 
       <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Ollama Status"    value={ollamaStatus}     accent={statusAccent as "default" | "emerald" | "blue" | "red"} sub={connected ? ollamaData.host : "Set OLLAMA_HOST"} />
+        <StatCard label="Ollama Status"    value={ollamaStatus}     accent={statusAccent as "default" | "emerald" | "blue" | "red"} sub={connected ? ollamaData.host : "not configured"} />
         <StatCard label="Models Available" value={models.length}    accent={models.length > 0 ? "blue" : "default"} />
         <StatCard label="Embedding Model"  value={embedModel ? "yes" : "none"} accent={embedModel ? "emerald" : "default"} sub={embedModel ?? "no embed model"} />
       </div>
@@ -1054,7 +1063,7 @@ function OllamaSection() {
           {connected && <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-600 ml-1">{ollamaData.host}</span>}
         </div>
         {connected && <span className="text-[11px] text-gray-400 dark:text-zinc-600">{models.length} model{models.length !== 1 ? "s" : ""} installed</span>}
-        {!connected && !ollamaLoading && <span className="text-[11px] text-gray-400 dark:text-zinc-600">Set OLLAMA_HOST env var and restart</span>}
+        {!connected && !ollamaLoading && <span className="text-[11px] text-gray-400 dark:text-zinc-600">Optional — set OLLAMA_HOST to enable local models</span>}
       </div>
 
       {connected && (

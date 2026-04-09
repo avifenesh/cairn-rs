@@ -305,6 +305,7 @@ const SCENARIOS: ScenarioDef[] = [
         description: "GET /v1/providers/ollama/models",
         run: async (ctx) => {
           const r = await defaultApi.getOllamaModels();
+          if (!r) throw new Error("Ollama not configured — set OLLAMA_HOST");
           ctx["ollama_models"] = r.models;
           ctx["ollama_host"]   = r.host;
           if (r.count === 0) throw new Error("no Ollama models available");

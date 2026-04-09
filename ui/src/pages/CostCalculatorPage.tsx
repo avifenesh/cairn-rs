@@ -4,11 +4,19 @@
  * Enter expected token counts, pick a model, and see the estimated spend.
  * The pricing comparison table shows all models ranked by cost for those
  * exact token volumes, making it easy to find the cheapest option.
+ *
+ * Models are fetched dynamically from the provider registry API.
+ * Available (configured) providers are shown first, followed by reference
+ * entries for unconfigured providers. A hardcoded fallback array is used
+ * while the registry is loading.
  */
 
 import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Calculator, ChevronDown, ChevronUp, Coins, Info } from "lucide-react";
 import { clsx } from "clsx";
+import { defaultApi } from "../lib/api";
+import type { ProviderRegistryEntry } from "../lib/types";
 
 // ── Pricing data ──────────────────────────────────────────────────────────────
 // Prices in USD per 1 000 000 tokens (input / output).
@@ -22,53 +30,112 @@ export interface ModelPrice {
   outputPer1M: number;  // USD per 1M output tokens
   contextK:   number;   // context window in thousands
   note?:      string;
+  /** true when the provider has an API key configured (or doesn't need one). */
+  configured?: boolean;
 }
 
-const MODELS: ModelPrice[] = [
-  // OpenAI
+// Hardcoded fallback — used while registry is loading.
+const FALLBACK_MODELS: ModelPrice[] = [
+  // OpenAI (2025–2026)
+  { id: "gpt-4.1",            name: "GPT-4.1",              provider: "OpenAI",     inputPer1M:  2.00,  outputPer1M:  8.00,  contextK: 1000 },
+  { id: "gpt-4.1-mini",       name: "GPT-4.1 mini",         provider: "OpenAI",     inputPer1M:  0.40,  outputPer1M:  1.60,  contextK: 1000 },
+  { id: "gpt-4.1-nano",       name: "GPT-4.1 nano",         provider: "OpenAI",     inputPer1M:  0.10,  outputPer1M:  0.40,  contextK: 1000 },
   { id: "gpt-4o",             name: "GPT-4o",               provider: "OpenAI",     inputPer1M:  2.50,  outputPer1M: 10.00,  contextK: 128  },
   { id: "gpt-4o-mini",        name: "GPT-4o mini",          provider: "OpenAI",     inputPer1M:  0.15,  outputPer1M:  0.60,  contextK: 128  },
-  { id: "o1",                 name: "o1",                   provider: "OpenAI",     inputPer1M: 15.00,  outputPer1M: 60.00,  contextK: 200, note: "reasoning" },
-  { id: "o1-mini",            name: "o1-mini",              provider: "OpenAI",     inputPer1M:  3.00,  outputPer1M: 12.00,  contextK: 128, note: "reasoning" },
-  { id: "o3-mini",            name: "o3-mini",              provider: "OpenAI",     inputPer1M:  1.10,  outputPer1M:  4.40,  contextK: 200, note: "reasoning" },
-  { id: "gpt-3.5-turbo",      name: "GPT-3.5 Turbo",        provider: "OpenAI",     inputPer1M:  0.50,  outputPer1M:  1.50,  contextK: 16   },
-  // Anthropic
-  { id: "claude-3-5-sonnet",  name: "Claude 3.5 Sonnet",    provider: "Anthropic",  inputPer1M:  3.00,  outputPer1M: 15.00,  contextK: 200  },
-  { id: "claude-3-5-haiku",   name: "Claude 3.5 Haiku",     provider: "Anthropic",  inputPer1M:  0.80,  outputPer1M:  4.00,  contextK: 200  },
-  { id: "claude-3-opus",      name: "Claude 3 Opus",        provider: "Anthropic",  inputPer1M: 15.00,  outputPer1M: 75.00,  contextK: 200  },
-  { id: "claude-3-haiku",     name: "Claude 3 Haiku",       provider: "Anthropic",  inputPer1M:  0.25,  outputPer1M:  1.25,  contextK: 200  },
-  // Google
-  { id: "gemini-2.0-flash",   name: "Gemini 2.0 Flash",     provider: "Google",     inputPer1M:  0.10,  outputPer1M:  0.40,  contextK: 1000 },
-  { id: "gemini-1.5-pro",     name: "Gemini 1.5 Pro",       provider: "Google",     inputPer1M:  1.25,  outputPer1M:  5.00,  contextK: 2000 },
-  { id: "gemini-1.5-flash",   name: "Gemini 1.5 Flash",     provider: "Google",     inputPer1M:  0.075, outputPer1M:  0.30,  contextK: 1000 },
-  { id: "gemini-1.5-flash-8b",name: "Gemini 1.5 Flash-8B",  provider: "Google",     inputPer1M:  0.0375,outputPer1M:  0.15,  contextK: 1000 },
-  // Meta via Groq / Together
-  { id: "llama-3.3-70b",      name: "Llama 3.3 70B",        provider: "Meta/Groq",  inputPer1M:  0.59,  outputPer1M:  0.79,  contextK: 128  },
-  { id: "llama-3.2-3b",       name: "Llama 3.2 3B",         provider: "Meta/Groq",  inputPer1M:  0.06,  outputPer1M:  0.06,  contextK: 128  },
-  { id: "mixtral-8x7b",       name: "Mixtral 8x7B",         provider: "Mistral",    inputPer1M:  0.27,  outputPer1M:  0.27,  contextK: 32   },
-  { id: "mistral-large",      name: "Mistral Large 2",      provider: "Mistral",    inputPer1M:  2.00,  outputPer1M:  6.00,  contextK: 128  },
+  { id: "o3",                 name: "o3",                   provider: "OpenAI",     inputPer1M: 10.00,  outputPer1M: 40.00,  contextK: 200, note: "reasoning" },
+  { id: "o4-mini",            name: "o4-mini",              provider: "OpenAI",     inputPer1M:  1.10,  outputPer1M:  4.40,  contextK: 200, note: "reasoning" },
+  // Anthropic (Claude 4.x family)
+  { id: "claude-opus-4.6",    name: "Claude Opus 4.6",      provider: "Anthropic",  inputPer1M: 15.00,  outputPer1M: 75.00,  contextK: 200  },
+  { id: "claude-sonnet-4.6",  name: "Claude Sonnet 4.6",    provider: "Anthropic",  inputPer1M:  3.00,  outputPer1M: 15.00,  contextK: 200  },
+  { id: "claude-sonnet-4.5",  name: "Claude Sonnet 4.5",    provider: "Anthropic",  inputPer1M:  3.00,  outputPer1M: 15.00,  contextK: 200  },
+  { id: "claude-haiku-4.5",   name: "Claude Haiku 4.5",     provider: "Anthropic",  inputPer1M:  0.80,  outputPer1M:  4.00,  contextK: 200  },
+  // Google (Gemini 2.5)
+  { id: "gemini-2.5-flash",   name: "Gemini 2.5 Flash",     provider: "Google",     inputPer1M:  0.15,  outputPer1M:  0.60,  contextK: 1000 },
+  { id: "gemini-2.5-pro",     name: "Gemini 2.5 Pro",       provider: "Google",     inputPer1M:  1.25,  outputPer1M: 10.00,  contextK: 1000 },
+  // DeepSeek
+  { id: "deepseek-v3",        name: "DeepSeek V3",          provider: "DeepSeek",   inputPer1M:  0.27,  outputPer1M:  1.10,  contextK: 128  },
+  { id: "deepseek-r1",        name: "DeepSeek R1",          provider: "DeepSeek",   inputPer1M:  0.55,  outputPer1M:  2.19,  contextK: 128, note: "reasoning" },
+  // Meta (Llama 4)
+  { id: "llama-4-maverick",   name: "Llama 4 Maverick",     provider: "Meta/Groq",  inputPer1M:  0.20,  outputPer1M:  0.60,  contextK: 1000 },
+  { id: "llama-4-scout",      name: "Llama 4 Scout",        provider: "Meta/Groq",  inputPer1M:  0.15,  outputPer1M:  0.40,  contextK: 512  },
+  // Mistral
+  { id: "mistral-large",      name: "Mistral Large",        provider: "Mistral",    inputPer1M:  2.00,  outputPer1M:  6.00,  contextK: 128  },
+  { id: "codestral",          name: "Codestral",            provider: "Mistral",    inputPer1M:  0.30,  outputPer1M:  0.90,  contextK: 256  },
+  // xAI
+  { id: "grok-3",             name: "Grok 3",               provider: "xAI",        inputPer1M:  3.00,  outputPer1M: 15.00,  contextK: 128  },
+  { id: "grok-3-mini",        name: "Grok 3 mini",          provider: "xAI",        inputPer1M:  0.30,  outputPer1M:  0.50,  contextK: 128, note: "reasoning" },
   // Local / self-hosted
-  { id: "ollama-local",       name: "Local (Ollama)",        provider: "Self-hosted", inputPer1M:  0.00,  outputPer1M:  0.00,  contextK: 0,   note: "free (hardware cost only)" },
+  { id: "local",              name: "Local (self-hosted)",   provider: "Self-hosted", inputPer1M:  0.00,  outputPer1M:  0.00,  contextK: 0,   note: "free (hardware cost only)" },
 ];
 
-const PROVIDERS = [...new Set(MODELS.map(m => m.provider))];
+// ── Registry to ModelPrice mapper ────────────────────────────────────────────
+
+function registryToModels(registry: ProviderRegistryEntry[]): ModelPrice[] {
+  const configured: ModelPrice[] = [];
+  const reference: ModelPrice[] = [];
+
+  for (const entry of registry) {
+    for (const m of entry.models) {
+      const model: ModelPrice = {
+        id:         `${entry.id}/${m.id}`,
+        name:       m.id,
+        provider:   entry.name,
+        inputPer1M: m.input_cost_per_1m ?? 0,
+        outputPer1M: m.output_cost_per_1m ?? 0,
+        contextK:   Math.round(m.context_window / 1000),
+        configured: entry.available,
+        note:       m.capabilities.thinking ? "thinking" : undefined,
+      };
+      if (entry.available) {
+        configured.push(model);
+      } else {
+        reference.push(model);
+      }
+    }
+  }
+
+  // Configured providers first, then reference providers
+  return [...configured, ...reference];
+}
+
+// ── Provider colours ─────────────────────────────────────────────────────────
 
 const PROVIDER_COLOR: Record<string, string> = {
-  "OpenAI":      "text-emerald-400",
-  "Anthropic":   "text-amber-400",
-  "Google":      "text-blue-400",
-  "Meta/Groq":   "text-violet-400",
-  "Mistral":     "text-orange-400",
-  "Self-hosted": "text-gray-400 dark:text-zinc-500",
+  "OpenAI":         "text-emerald-400",
+  "Anthropic":      "text-amber-400",
+  "Google":         "text-blue-400",
+  "DeepSeek":       "text-pink-400",
+  "Meta/Groq":      "text-violet-400",
+  "Groq":           "text-violet-400",
+  "Mistral":        "text-orange-400",
+  "xAI":            "text-cyan-400",
+  "Self-hosted":    "text-gray-400 dark:text-zinc-500",
+  "Ollama":         "text-gray-400 dark:text-zinc-500",
+  "OpenRouter":     "text-rose-400",
+  "AWS Bedrock":    "text-yellow-400",
+  "Together":       "text-teal-400",
+  "Fireworks":      "text-red-400",
+  "Perplexity":     "text-indigo-400",
+  "Cerebras":       "text-lime-400",
 };
 
 const PROVIDER_DOT: Record<string, string> = {
-  "OpenAI":      "bg-emerald-500",
-  "Anthropic":   "bg-amber-500",
-  "Google":      "bg-blue-500",
-  "Meta/Groq":   "bg-violet-500",
-  "Mistral":     "bg-orange-500",
-  "Self-hosted": "bg-zinc-600",
+  "OpenAI":         "bg-emerald-500",
+  "Anthropic":      "bg-amber-500",
+  "Google":         "bg-blue-500",
+  "DeepSeek":       "bg-pink-500",
+  "Meta/Groq":      "bg-violet-500",
+  "Groq":           "bg-violet-500",
+  "Mistral":        "bg-orange-500",
+  "xAI":            "bg-cyan-500",
+  "Self-hosted":    "bg-zinc-600",
+  "Ollama":         "bg-zinc-600",
+  "OpenRouter":     "bg-rose-500",
+  "AWS Bedrock":    "bg-yellow-500",
+  "Together":       "bg-teal-500",
+  "Fireworks":      "bg-red-500",
+  "Perplexity":     "bg-indigo-500",
+  "Cerebras":       "bg-lime-500",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -165,6 +232,24 @@ export function CostCalculatorPage() {
   const [sortAsc,        setSortAsc]        = useState(true);
   const [filterProvider, setFilterProvider] = useState<string>("all");
 
+  // ── Fetch provider registry ───────────────────────────────────────────────
+  const { data: registry, isLoading: registryLoading } = useQuery({
+    queryKey: ["provider-registry"],
+    queryFn:  () => defaultApi.getProviderRegistry(),
+    staleTime: 120_000,
+    retry: 1,
+  });
+
+  // Merge registry models with fallback — configured providers first.
+  const MODELS = useMemo(() => {
+    if (!registry || registry.length === 0) return FALLBACK_MODELS;
+    return registryToModels(registry);
+  }, [registry]);
+
+  const PROVIDERS = useMemo(() => [...new Set(MODELS.map(m => m.provider))], [MODELS]);
+
+  // When registry loads, try to select the first available model if the
+  // current selection doesn't exist in the new model list.
   const selected = MODELS.find(m => m.id === selectedId) ?? MODELS[0];
   const selectedCost = calcCost(selected, tokensIn, tokensOut);
 
@@ -184,7 +269,7 @@ export function CostCalculatorPage() {
       return sortAsc ? v : -v;
     });
     return rows;
-  }, [tokensIn, tokensOut, sortBy, sortAsc, filterProvider]);
+  }, [MODELS, tokensIn, tokensOut, sortBy, sortAsc, filterProvider]);
 
   const maxCost = Math.max(...tableRows.map(r => r.cost), 0.0001);
 
@@ -211,6 +296,12 @@ export function CostCalculatorPage() {
             <h1 className="text-[15px] font-semibold text-gray-900 dark:text-zinc-100">Cost Calculator</h1>
             <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
               Estimate LLM API spend before choosing a model. Pricing per 1M tokens, approximate.
+              {registryLoading && <span className="ml-1 text-indigo-400">Loading providers...</span>}
+              {registry && !registryLoading && (
+                <span className="ml-1">
+                  {registry.filter(r => r.available).length} configured provider{registry.filter(r => r.available).length !== 1 ? "s" : ""}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -231,7 +322,9 @@ export function CostCalculatorPage() {
                 {PROVIDERS.map(prov => (
                   <optgroup key={prov} label={prov}>
                     {MODELS.filter(m => m.provider === prov).map(m => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
+                      <option key={m.id} value={m.id}>
+                        {m.name}{m.configured === false ? " (ref)" : ""}
+                      </option>
                     ))}
                   </optgroup>
                 ))}
@@ -250,6 +343,9 @@ export function CostCalculatorPage() {
                 <span className="text-[14px] font-medium text-gray-800 dark:text-zinc-200">{selected.name}</span>
                 {selected.note && (
                   <span className="text-[10px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1.5 py-0.5">{selected.note}</span>
+                )}
+                {selected.configured === false && (
+                  <span className="text-[10px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1.5 py-0.5">reference only</span>
                 )}
               </div>
               <div className="text-right">
@@ -281,7 +377,7 @@ export function CostCalculatorPage() {
                 <p className="text-[11px] text-gray-400 dark:text-zinc-600">
                   Context window: <span className="text-gray-400 dark:text-zinc-500 font-mono">{selected.contextK}K tokens</span>
                   {selected.contextK * 1000 < tokensIn + tokensOut && (
-                    <span className="ml-2 text-amber-500">⚠ exceeds context window</span>
+                    <span className="ml-2 text-amber-500">-- exceeds context window</span>
                   )}
                 </p>
               </div>
@@ -339,7 +435,7 @@ export function CostCalculatorPage() {
                         "cursor-pointer transition-colors",
                         isSelected
                           ? "bg-indigo-950/30 ring-1 ring-inset ring-indigo-800/40"
-                          : i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60" : "bg-gray-50/50 dark:bg-zinc-900/50 hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60",
+                          : i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100/60 dark:hover:bg-zinc-800/60" : "bg-gray-50/50 dark:bg-zinc-900/50 hover:bg-gray-100/60 dark:hover:bg-zinc-800/60",
                       )}>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2">
@@ -351,6 +447,11 @@ export function CostCalculatorPage() {
                           {m.note && (
                             <span className="text-[9px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800 rounded px-1 py-0.5 hidden sm:inline">
                               {m.note}
+                            </span>
+                          )}
+                          {m.configured === false && (
+                            <span className="text-[9px] text-gray-400 dark:text-zinc-700 bg-gray-100 dark:bg-zinc-800/60 rounded px-1 py-0.5 hidden sm:inline">
+                              ref
                             </span>
                           )}
                         </div>
@@ -389,6 +490,7 @@ export function CostCalculatorPage() {
 
           <p className="mt-2 text-[10px] text-gray-300 dark:text-zinc-700 text-center">
             Prices are approximate and subject to change. Always verify with the provider's official pricing page.
+            {registry && " Models sourced from your cairn provider registry."}
           </p>
         </div>
 

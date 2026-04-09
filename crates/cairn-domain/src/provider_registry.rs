@@ -32,11 +32,15 @@ pub struct ProviderCapabilities {
 }
 
 /// A known model within a provider.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct KnownModel {
     pub id: &'static str,
     pub context_window: u64,
     pub capabilities: ProviderCapabilities,
+    /// Cost in USD per 1 million input tokens. 0.0 = free / unknown.
+    pub input_cost_per_1m: f64,
+    /// Cost in USD per 1 million output tokens. 0.0 = free / unknown.
+    pub output_cost_per_1m: f64,
 }
 
 /// A known LLM provider.
@@ -135,16 +139,22 @@ pub static PROVIDERS: &[ProviderDef] = &[
                 id: "claude-opus-4-6",
                 context_window: 200_000,
                 capabilities: FULL_THINKING,
+                input_cost_per_1m: 15.0,
+                output_cost_per_1m: 75.0,
             },
             KnownModel {
                 id: "claude-sonnet-4-6",
                 context_window: 200_000,
                 capabilities: FULL_THINKING,
+                input_cost_per_1m: 3.0,
+                output_cost_per_1m: 15.0,
             },
             KnownModel {
                 id: "claude-haiku-4-5",
                 context_window: 200_000,
                 capabilities: FULL,
+                input_cost_per_1m: 0.8,
+                output_cost_per_1m: 4.0,
             },
         ],
     },
@@ -160,21 +170,29 @@ pub static PROVIDERS: &[ProviderDef] = &[
                 id: "gpt-4o",
                 context_window: 128_000,
                 capabilities: FULL,
+                input_cost_per_1m: 2.5,
+                output_cost_per_1m: 10.0,
             },
             KnownModel {
                 id: "gpt-4-turbo",
                 context_window: 128_000,
                 capabilities: FULL,
+                input_cost_per_1m: 10.0,
+                output_cost_per_1m: 30.0,
             },
             KnownModel {
                 id: "o1",
                 context_window: 200_000,
                 capabilities: FULL_THINKING,
+                input_cost_per_1m: 15.0,
+                output_cost_per_1m: 60.0,
             },
             KnownModel {
                 id: "o3",
                 context_window: 200_000,
                 capabilities: FULL_THINKING,
+                input_cost_per_1m: 10.0,
+                output_cost_per_1m: 40.0,
             },
         ],
     },
@@ -190,16 +208,22 @@ pub static PROVIDERS: &[ProviderDef] = &[
                 id: "gemini-2.0-flash",
                 context_window: 1_000_000,
                 capabilities: FULL,
+                input_cost_per_1m: 0.15,
+                output_cost_per_1m: 0.6,
             },
             KnownModel {
                 id: "gemini-2.0-pro",
                 context_window: 1_000_000,
                 capabilities: FULL,
+                input_cost_per_1m: 1.25,
+                output_cost_per_1m: 10.0,
             },
             KnownModel {
                 id: "gemini-1.5-pro",
                 context_window: 2_000_000,
                 capabilities: FULL,
+                input_cost_per_1m: 1.25,
+                output_cost_per_1m: 5.0,
             },
         ],
     },
@@ -215,11 +239,15 @@ pub static PROVIDERS: &[ProviderDef] = &[
                 id: "mistral-large-latest",
                 context_window: 128_000,
                 capabilities: FULL,
+                input_cost_per_1m: 2.0,
+                output_cost_per_1m: 6.0,
             },
             KnownModel {
                 id: "codestral-latest",
                 context_window: 256_000,
                 capabilities: BASIC,
+                input_cost_per_1m: 0.3,
+                output_cost_per_1m: 0.9,
             },
         ],
     },
@@ -235,11 +263,15 @@ pub static PROVIDERS: &[ProviderDef] = &[
                 id: "llama-3.3-70b-versatile",
                 context_window: 128_000,
                 capabilities: BASIC,
+                input_cost_per_1m: 0.59,
+                output_cost_per_1m: 0.79,
             },
             KnownModel {
                 id: "llama-3.1-8b-instant",
                 context_window: 128_000,
                 capabilities: BASIC,
+                input_cost_per_1m: 0.05,
+                output_cost_per_1m: 0.08,
             },
         ],
     },
@@ -255,11 +287,15 @@ pub static PROVIDERS: &[ProviderDef] = &[
                 id: "deepseek-chat",
                 context_window: 64_000,
                 capabilities: FULL,
+                input_cost_per_1m: 0.27,
+                output_cost_per_1m: 1.1,
             },
             KnownModel {
                 id: "deepseek-coder",
                 context_window: 64_000,
                 capabilities: BASIC,
+                input_cost_per_1m: 0.14,
+                output_cost_per_1m: 0.28,
             },
         ],
     },
@@ -274,6 +310,8 @@ pub static PROVIDERS: &[ProviderDef] = &[
             id: "grok-2",
             context_window: 128_000,
             capabilities: FULL,
+            input_cost_per_1m: 2.0,
+            output_cost_per_1m: 10.0,
         }],
     },
     ProviderDef {
@@ -287,6 +325,8 @@ pub static PROVIDERS: &[ProviderDef] = &[
             id: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
             context_window: 128_000,
             capabilities: BASIC,
+            input_cost_per_1m: 0.88,
+            output_cost_per_1m: 0.88,
         }],
     },
     ProviderDef {
@@ -300,6 +340,8 @@ pub static PROVIDERS: &[ProviderDef] = &[
             id: "accounts/fireworks/models/llama-v3p1-70b-instruct",
             context_window: 128_000,
             capabilities: BASIC,
+            input_cost_per_1m: 0.9,
+            output_cost_per_1m: 0.9,
         }],
     },
     ProviderDef {
@@ -313,6 +355,8 @@ pub static PROVIDERS: &[ProviderDef] = &[
             id: "llama-3.1-sonar-large-128k-online",
             context_window: 128_000,
             capabilities: BASIC,
+            input_cost_per_1m: 1.0,
+            output_cost_per_1m: 1.0,
         }],
     },
     ProviderDef {
@@ -326,13 +370,15 @@ pub static PROVIDERS: &[ProviderDef] = &[
             id: "llama3.1-70b",
             context_window: 128_000,
             capabilities: BASIC,
+            input_cost_per_1m: 0.6,
+            output_cost_per_1m: 0.6,
         }],
     },
     ProviderDef {
         id: "ollama",
         name: "Ollama",
         api_base: "http://localhost:11434/v1",
-        env_keys: &[],
+        env_keys: &["OLLAMA_HOST"],
         api_format: ApiFormat::OpenAiCompatible,
         default_model: "llama3.1",
         models: &[],
@@ -345,12 +391,12 @@ pub static PROVIDERS: &[ProviderDef] = &[
         api_format: ApiFormat::OpenAiCompatible,
         default_model: "openrouter/auto",
         models: &[
-            KnownModel { id: "openrouter/free", context_window: 200_000, capabilities: FULL },
-            KnownModel { id: "openrouter/auto", context_window: 128_000, capabilities: FULL },
-            KnownModel { id: "google/gemma-3-4b-it:free", context_window: 128_000, capabilities: BASIC },
-            KnownModel { id: "meta-llama/llama-4-scout:free", context_window: 512_000, capabilities: FULL },
-            KnownModel { id: "deepseek/deepseek-chat-v3-0324:free", context_window: 64_000, capabilities: FULL },
-            KnownModel { id: "qwen/qwen3-8b:free", context_window: 128_000, capabilities: FULL_THINKING },
+            KnownModel { id: "openrouter/free", context_window: 200_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
+            KnownModel { id: "openrouter/auto", context_window: 128_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
+            KnownModel { id: "google/gemma-3-4b-it:free", context_window: 128_000, capabilities: BASIC, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
+            KnownModel { id: "meta-llama/llama-4-scout:free", context_window: 512_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
+            KnownModel { id: "deepseek/deepseek-chat-v3-0324:free", context_window: 64_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
+            KnownModel { id: "qwen/qwen3-8b:free", context_window: 128_000, capabilities: FULL_THINKING, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
         ],
     },
     ProviderDef {
@@ -361,7 +407,7 @@ pub static PROVIDERS: &[ProviderDef] = &[
         api_format: ApiFormat::OpenAiCompatible, // uses Converse API internally, but listed for registry
         default_model: "minimax.minimax-m2.5",
         models: &[
-            KnownModel { id: "minimax.minimax-m2.5", context_window: 128_000, capabilities: FULL },
+            KnownModel { id: "minimax.minimax-m2.5", context_window: 128_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
         ],
     },
 ];
@@ -486,10 +532,14 @@ mod tests {
     }
 
     #[test]
-    fn ollama_requires_no_key() {
+    fn ollama_requires_host_env() {
         let ollama = lookup("ollama").unwrap();
-        assert!(!ollama.requires_key());
-        assert!(ollama.is_available());
+        // Ollama requires OLLAMA_HOST to be set to be considered available.
+        assert!(ollama.requires_key());
+        // Without the env var set, it should not be available.
+        if std::env::var("OLLAMA_HOST").is_err() {
+            assert!(!ollama.is_available());
+        }
     }
 
     #[test]

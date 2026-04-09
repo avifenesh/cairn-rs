@@ -542,9 +542,17 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/providers/registry — static provider registry with availability and known models. */
     getProviderRegistry: (): Promise<import("./types").ProviderRegistryEntry[]> => get("/v1/providers/registry"),
 
-    /** GET /v1/providers/ollama/models — list locally available Ollama models. */
-    getOllamaModels: (): Promise<{ host: string; models: string[]; count: number }> =>
-      get("/v1/providers/ollama/models"),
+    /** GET /v1/providers/ollama/models — list locally available Ollama models.
+     *  Returns null when Ollama is not configured (503) or unreachable (502)
+     *  so callers can treat absence silently without console errors. */
+    getOllamaModels: async (): Promise<{ host: string; models: string[]; count: number } | null> => {
+      try {
+        return await get("/v1/providers/ollama/models");
+      } catch (e) {
+        if (e instanceof ApiError && (e.status === 503 || e.status === 502)) return null;
+        throw e;
+      }
+    },
 
     /** GET /v1/providers/ollama/models/:name/info — detailed info for one model. */
     getOllamaModelInfo: (name: string): Promise<{
@@ -613,9 +621,16 @@ export function createApiClient(config: ApiClientConfig) {
       put(`/v1/settings/defaults/${encodeURIComponent(scope)}/${encodeURIComponent(scopeId)}/${encodeURIComponent(key)}`, { value }),
 
     /** GET /v1/settings/defaults/resolve/:key — resolve effective default for a key.
-     *  project must be "tenant/workspace/project" format, e.g. "default/default/default". */
-    resolveDefaultSetting: (key: string, project = "default/default/default"): Promise<{ key: string; value: unknown } | null> =>
-      get(`/v1/settings/defaults/resolve/${encodeURIComponent(key)}?project=${encodeURIComponent(project)}`),
+     *  project must be "tenant/workspace/project" format, e.g. "default/default/default".
+     *  Returns null on 404 (setting not configured) to avoid console error noise. */
+    resolveDefaultSetting: async (key: string, project = "default/default/default"): Promise<{ key: string; value: unknown } | null> => {
+      try {
+        return await get<{ key: string; value: unknown }>(`/v1/settings/defaults/resolve/${encodeURIComponent(key)}?project=${encodeURIComponent(project)}`);
+      } catch (e) {
+        if (e instanceof ApiError && (e.status === 404 || e.status === 501)) return null;
+        throw e;
+      }
+    },
 
     // ── LLM Traces ───────────────────────────────────────────────────────────
 

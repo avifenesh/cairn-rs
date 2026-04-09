@@ -2572,6 +2572,8 @@ async fn provider_registry_handler() -> impl axum::response::IntoResponse {
                         "vision": m.capabilities.vision,
                         "thinking": m.capabilities.thinking,
                     },
+                    "input_cost_per_1m": m.input_cost_per_1m,
+                    "output_cost_per_1m": m.output_cost_per_1m,
                 })).collect::<Vec<_>>(),
             })
         })

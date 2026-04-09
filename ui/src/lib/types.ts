@@ -41,6 +41,10 @@ export interface ProviderRegistryModel {
     vision: boolean;
     thinking: boolean;
   };
+  /** Cost in USD per 1 million input tokens. 0 = free / unknown. */
+  input_cost_per_1m?: number;
+  /** Cost in USD per 1 million output tokens. 0 = free / unknown. */
+  output_cost_per_1m?: number;
 }
 
 export interface ProviderRegistryEntry {

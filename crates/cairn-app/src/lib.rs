@@ -6814,7 +6814,13 @@ async fn resolve_default_setting_handler(
             })),
         )
             .into_response(),
-        Ok(None) => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "default not found")
+        Ok(None) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "key": key,
+                "value": null,
+            })),
+        )
             .into_response(),
         Err(err) => runtime_error_response(err),
     }
