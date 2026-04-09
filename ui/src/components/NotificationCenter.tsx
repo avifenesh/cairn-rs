@@ -111,7 +111,9 @@ export function NotificationCenter() {
     staleTime: 10_000,
   });
 
-  const notifications = data?.notifications ?? [];
+  const rawNotifications = data?.notifications ?? [];
+  // Sort newest first so the most recent notification is at the top.
+  const notifications = [...rawNotifications].sort((a, b) => b.created_at - a.created_at);
   const unread        = data?.unread_count  ?? 0;
 
   // Close on outside click.
