@@ -37,8 +37,8 @@ impl BedrockProvider {
         }
 
         let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-west-2".to_owned());
-        let model_id = std::env::var("BEDROCK_MODEL_ID")
-            .unwrap_or_else(|_| "minimax.minimax-m2.5".to_owned());
+        let model_id =
+            std::env::var("BEDROCK_MODEL_ID").unwrap_or_else(|_| "minimax.minimax-m2.5".to_owned());
 
         Some(Self::new(model_id, region))
     }

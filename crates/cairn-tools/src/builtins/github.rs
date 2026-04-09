@@ -73,10 +73,14 @@ impl ToolHandler for GhListIssuesTool {
         let limit = args["limit"].as_u64().unwrap_or(20).min(100);
 
         let mut gh_args = vec![
-            "issue", "list",
-            "--repo", repo,
-            "--state", state,
-            "--json", "number,title,labels,state,assignees,createdAt",
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            state,
+            "--json",
+            "number,title,labels,state,assignees,createdAt",
         ];
         let limit_str = limit.to_string();
         gh_args.extend_from_slice(&["--limit", &limit_str]);
@@ -86,8 +90,8 @@ impl ToolHandler for GhListIssuesTool {
         }
 
         let output = run_gh(&gh_args).await?;
-        let parsed: Value = serde_json::from_str(&output)
-            .unwrap_or_else(|_| Value::String(output.clone()));
+        let parsed: Value =
+            serde_json::from_str(&output).unwrap_or_else(|_| Value::String(output.clone()));
 
         Ok(ToolResult::ok(parsed))
     }
@@ -136,14 +140,18 @@ impl ToolHandler for GhGetIssueTool {
 
         let num_str = number.to_string();
         let output = run_gh(&[
-            "issue", "view", &num_str,
-            "--repo", repo,
-            "--json", "number,title,body,labels,state,assignees,comments,createdAt",
+            "issue",
+            "view",
+            &num_str,
+            "--repo",
+            repo,
+            "--json",
+            "number,title,body,labels,state,assignees,comments,createdAt",
         ])
         .await?;
 
-        let mut parsed: Value = serde_json::from_str(&output)
-            .unwrap_or_else(|_| Value::String(output.clone()));
+        let mut parsed: Value =
+            serde_json::from_str(&output).unwrap_or_else(|_| Value::String(output.clone()));
 
         // Truncate body if too long (save LLM context)
         if let Some(body) = parsed.get("body").and_then(|b| b.as_str()) {
@@ -211,12 +219,8 @@ impl ToolHandler for GhCreateCommentTool {
         let body = require_str(&args, "body")?;
 
         let num_str = number.to_string();
-        let output = run_gh(&[
-            "issue", "comment", &num_str,
-            "--repo", repo,
-            "--body", body,
-        ])
-        .await?;
+        let output =
+            run_gh(&["issue", "comment", &num_str, "--repo", repo, "--body", body]).await?;
 
         Ok(ToolResult::ok(serde_json::json!({
             "commented": true,
@@ -270,15 +274,18 @@ impl ToolHandler for GhSearchCodeTool {
 
         let limit_str = limit.to_string();
         let output = run_gh(&[
-            "search", "code",
+            "search",
+            "code",
             &search_query,
-            "--json", "path,repository,textMatches",
-            "--limit", &limit_str,
+            "--json",
+            "path,repository,textMatches",
+            "--limit",
+            &limit_str,
         ])
         .await?;
 
-        let parsed: Value = serde_json::from_str(&output)
-            .unwrap_or_else(|_| Value::String(output.clone()));
+        let parsed: Value =
+            serde_json::from_str(&output).unwrap_or_else(|_| Value::String(output.clone()));
 
         Ok(ToolResult::ok(parsed))
     }
@@ -300,9 +307,15 @@ mod tests {
 
     #[test]
     fn read_tools_are_read_only() {
-        assert_eq!(GhListIssuesTool.permission_level(), PermissionLevel::ReadOnly);
+        assert_eq!(
+            GhListIssuesTool.permission_level(),
+            PermissionLevel::ReadOnly
+        );
         assert_eq!(GhGetIssueTool.permission_level(), PermissionLevel::ReadOnly);
-        assert_eq!(GhSearchCodeTool.permission_level(), PermissionLevel::ReadOnly);
+        assert_eq!(
+            GhSearchCodeTool.permission_level(),
+            PermissionLevel::ReadOnly
+        );
     }
 
     #[test]
@@ -319,7 +332,7 @@ mod tests {
 
     #[test]
     fn tool_search_finds_github_tools() {
-        use super::super::{BuiltinToolRegistry, BuiltinToolDescriptor};
+        use super::super::{BuiltinToolDescriptor, BuiltinToolRegistry};
         use std::sync::Arc;
 
         let reg = BuiltinToolRegistry::new()

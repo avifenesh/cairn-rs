@@ -9418,9 +9418,9 @@ async fn orchestrate_run_handler(
             let output_tokens = d.output_tokens.unwrap_or(0);
             // Approximate cost: $0.50/M input, $1.50/M output (generic estimate).
             // Multiply first to avoid integer truncation on small token counts.
-            let cost_micros =
-                ((input_tokens as u64).saturating_mul(500) + (output_tokens as u64).saturating_mul(1500))
-                    / 1_000;
+            let cost_micros = ((input_tokens as u64).saturating_mul(500)
+                + (output_tokens as u64).saturating_mul(1500))
+                / 1_000;
             let trace = cairn_domain::LlmCallTrace {
                 trace_id: call_id,
                 model_id: d.model_id.clone(),

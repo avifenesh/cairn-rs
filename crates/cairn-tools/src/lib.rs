@@ -27,10 +27,10 @@ pub use builtin::{ToolDescriptor, ToolHost, ToolInput, ToolOutcome};
 pub use builtins::{
     BuiltinToolDescriptor, BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool,
     DeleteMemoryTool, EvalScoreTool, FileReadTool, FileWriteTool, GetApprovalsTool, GetRunTool,
-    GetTaskTool, GitOperationsTool, GlobFindTool, GraphQueryTool, GrepSearchTool, HttpRequestTool,
+    GetTaskTool, GhCreateCommentTool, GhGetIssueTool, GhListIssuesTool, GhSearchCodeTool,
+    GitOperationsTool, GlobFindTool, GraphQueryTool, GrepSearchTool, HttpRequestTool,
     JsonExtractTool, ListRunsTool, MemorySearchTool, MemoryStoreTool, NoopSink, NotificationSink,
-    GhCreateCommentTool, GhGetIssueTool, GhListIssuesTool, GhSearchCodeTool, NotifyOperatorTool,
-    PermissionLevel, ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool,
+    NotifyOperatorTool, PermissionLevel, ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool,
     SearchEventsTool, ShellExecTool, SummarizeTextTool, ToolCategory, ToolContext, ToolError,
     ToolExecute, ToolHandler, ToolResult, ToolSearchTool, ToolTier, UpdateMemoryTool,
     WaitForTaskTool, WebFetchTool,
