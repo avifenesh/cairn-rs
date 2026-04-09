@@ -136,6 +136,24 @@ while true; do
   # 5. Verify run state (auto-completes when all tasks finish)
   check "get-run" 200 GET "/v1/runs/${RID}"
 
+  # 5b. Real orchestration — LLM call via brain provider (skipped if no provider)
+  ORCH_RID="soak_orch_${SUFFIX}"
+  curl -s -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+    -d "{\"session_id\":\"${SID}\",\"run_id\":\"${ORCH_RID}\",\"tenant_id\":\"default\",\"workspace_id\":\"default\",\"project_id\":\"default\"}" \
+    "${BASE}/v1/runs" >/dev/null 2>&1
+  ORCH_RESP=$(curl -s -w '\n%{http_code}' -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+    -d "{\"goal\":\"What is ${ITERATION}+${ITERATION}? Answer with just the number.\",\"model_id\":\"openrouter/auto\",\"max_iterations\":1,\"timeout_ms\":15000}" \
+    "${BASE}/v1/runs/${ORCH_RID}/orchestrate" 2>/dev/null)
+  ORCH_HTTP=$(echo "$ORCH_RESP" | tail -1)
+  if [ "$ORCH_HTTP" = "200" ]; then
+    PASS=$((PASS + 1))
+  elif [ "$ORCH_HTTP" = "503" ]; then
+    : # No brain provider — skip silently
+  else
+    FAIL=$((FAIL + 1))
+    FAIL_DETAILS+=("orchestrate: expected=200 got=$ORCH_HTTP")
+  fi
+
   # 6. Eval lifecycle
   check "create-eval" 201 POST /v1/evals/runs \
     "{\"eval_run_id\":\"${EID}\",\"subject_kind\":\"prompt_release\",\"evaluator_type\":\"accuracy\",\"tenant_id\":\"default\",\"workspace_id\":\"default\",\"project_id\":\"default\"}"
