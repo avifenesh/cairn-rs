@@ -4621,9 +4621,20 @@ async fn main() {
         .or_else(|| openai_compat_worker.clone())
         .or_else(|| openai_compat_openrouter.clone());
 
+    // ── Bedrock provider (optional) ────────────────────────────────────────────
+    // Auto-detected from AWS CLI credentials. BEDROCK_MODEL_ID defaults to minimax.minimax-m2.5.
+    let bedrock: Option<Arc<cairn_runtime::services::BedrockProvider>> =
+        cairn_runtime::services::BedrockProvider::from_env().map(|p| {
+            eprintln!(
+                "bedrock: configured — model={} region={}",
+                p.model_id(),
+                p.region()
+            );
+            Arc::new(p)
+        });
+
     // ── Wire brain provider into lib_state for the orchestrate endpoint ──────
-    // Priority: brain → worker → Ollama.  The orchestrate handler reads
-    // lib_state.brain_provider so it can construct LlmDecidePhase.
+    // Priority: brain → worker → OpenRouter → Bedrock → Ollama.
     // Arc::get_mut is safe here: lib_state has not been cloned yet.
     {
         use cairn_domain::providers::GenerationProvider;
@@ -4641,15 +4652,24 @@ async fn main() {
                     .map(|p| p.clone() as Arc<dyn GenerationProvider>)
             })
             .or_else(|| {
+                bedrock
+                    .as_ref()
+                    .map(|p| p.clone() as Arc<dyn GenerationProvider>)
+            })
+            .or_else(|| {
                 ollama
                     .as_ref()
                     .map(|p| p.clone() as Arc<dyn GenerationProvider>)
             });
+        let lib_mut = Arc::get_mut(&mut lib_state)
+            .expect("lib_state must not be cloned before brain_provider is wired");
         if let Some(b) = brain {
-            let lib_mut = Arc::get_mut(&mut lib_state)
-                .expect("lib_state must not be cloned before brain_provider is wired");
             lib_mut.brain_provider = Some(b);
             eprintln!("brain provider: wired to lib_state");
+        }
+        if let Some(ref br) = bedrock {
+            lib_mut.bedrock_provider = Some(br.clone() as Arc<dyn GenerationProvider>);
+            eprintln!("bedrock provider: wired to lib_state");
         }
     }
 

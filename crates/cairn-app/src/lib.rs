@@ -652,6 +652,8 @@ pub struct AppState {
     /// once the concrete provider (Ollama or OpenAI-compat) is configured.
     /// `None` means orchestration is unavailable until a provider is configured.
     pub brain_provider: Option<Arc<dyn cairn_domain::providers::GenerationProvider>>,
+    /// Bedrock provider — used when the model_id is a Bedrock model (e.g. minimax.minimax-m2.5).
+    pub bedrock_provider: Option<Arc<dyn cairn_domain::providers::GenerationProvider>>,
     /// Built-in tool registry wired by main.rs with real memory backends.
     /// `None` until set — orchestrate handler falls back to stub dispatcher.
     pub tool_registry: Option<Arc<cairn_tools::BuiltinToolRegistry>>,
@@ -882,6 +884,7 @@ impl AppState {
             eval_rubrics,
             graph,
             brain_provider: None,
+            bedrock_provider: None,
             tool_registry: None,
         })
     }
@@ -9117,13 +9120,37 @@ async fn orchestrate_run_handler(
         }
     }
 
-    let brain = match &state.brain_provider {
-        Some(p) => p.clone(),
-        None => return AppApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "no_brain_provider",
-            "No LLM provider configured. Add one via POST /v1/providers/connections, or set CAIRN_BRAIN_URL / OPENROUTER_API_KEY / OLLAMA_HOST.",
-        ).into_response(),
+    // Select provider based on model_id: Bedrock models (contain '.') use the Bedrock provider.
+    let is_bedrock_model = body
+        .model_id
+        .as_deref()
+        .map(|m| m.contains('.') && !m.contains('/'))
+        .unwrap_or(false);
+
+    let brain = if is_bedrock_model {
+        match &state.bedrock_provider {
+            Some(p) => p.clone(),
+            None => {
+                return AppApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "no_bedrock_provider",
+                    "Bedrock model requested but AWS credentials not configured.",
+                )
+                .into_response()
+            }
+        }
+    } else {
+        match &state.brain_provider {
+            Some(p) => p.clone(),
+            None => {
+                return AppApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "no_brain_provider",
+                    "No LLM provider configured. Add one via POST /v1/providers/connections, or set CAIRN_BRAIN_URL / OPENROUTER_API_KEY / OLLAMA_HOST.",
+                )
+                .into_response()
+            }
+        }
     };
 
     let now_ms = std::time::SystemTime::now()
