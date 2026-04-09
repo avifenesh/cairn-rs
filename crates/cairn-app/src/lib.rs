@@ -9260,7 +9260,17 @@ async fn orchestrate_run_handler(
         let shell_exec: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(ShellExecTool);
 
-        // Build inner registry for ToolSearchTool (deferred tier).
+        // GitHub tools (Deferred — discovered via tool_search)
+        let gh_list: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(cairn_tools::GhListIssuesTool);
+        let gh_get: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(cairn_tools::GhGetIssueTool);
+        let gh_comment: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(cairn_tools::GhCreateCommentTool);
+        let gh_search: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(cairn_tools::GhSearchCodeTool);
+
+        // Build inner registry for ToolSearchTool (includes deferred GH tools).
         let inner = std::sync::Arc::new(
             BuiltinToolRegistry::new()
                 .register(search_tool.clone())
@@ -9270,7 +9280,11 @@ async fn orchestrate_run_handler(
                 .register(std::sync::Arc::new(NotifyOperatorTool::new(
                     Some(mailbox_svc.clone()),
                     sse_sink.clone(),
-                ))),
+                )))
+                .register(gh_list.clone())
+                .register(gh_get.clone())
+                .register(gh_comment.clone())
+                .register(gh_search.clone()),
         );
 
         // Full registry with ToolSearchTool that can search the deferred tier.
@@ -9284,6 +9298,10 @@ async fn orchestrate_run_handler(
                     Some(mailbox_svc),
                     sse_sink,
                 )))
+                .register(gh_list)
+                .register(gh_get)
+                .register(gh_comment)
+                .register(gh_search)
                 .register(std::sync::Arc::new(ToolSearchTool::new(inner))),
         )
     };
