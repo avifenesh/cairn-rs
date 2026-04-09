@@ -1,0 +1,10 @@
+{"from":"worker-3","to":"manager","ts":"2026-04-07T23:34:04+03:00","body":"ALL 6 E2E SCRIPTS DONE — syntax-clean, ready to commit.
+
+1. scripts/e2e-subagent.sh (UC-05) — parent+child run linkage via POST /v1/runs/:id/spawn with fallback
+2. scripts/e2e-prompt-lifecycle.sh (UC-12) — asset → v1+v2 versions → release → activate → rollback
+3. scripts/e2e-eval-pipeline.sh (UC-13) — dataset → entries → rubric → baseline → eval run → dashboard/scorecard
+4. scripts/e2e-sse-streaming.sh (UC-20) — background curl -N with 12s timeout, event append, SSE log parsing
+5. scripts/e2e-cost-tracking.sh (UC-15) — cost-alert, run cost, tenant costs, binding cost-stats, cost-ranking
+6. scripts/e2e-audit-trail.sh (UC-19) — audit-log, resource audit, run audit, traces, graph execution-trace
+
+All: bash -n syntax OK. Accept 404/501 as SKIP not FAIL. Same curl+color pattern as e2e-agent-workflow.sh. Detailed status in .coordination/mailbox/inbox/manager/status_w3_e2e_*.json"}

@@ -4622,7 +4622,8 @@ async fn main() {
         .or_else(|| openai_compat_openrouter.clone());
 
     // ── Bedrock provider (optional) ────────────────────────────────────────────
-    // Auto-detected from AWS CLI credentials. BEDROCK_MODEL_ID defaults to minimax.minimax-m2.5.
+    // Requires BEDROCK_API_KEY or AWS_BEARER_TOKEN_BEDROCK env var.
+    // BEDROCK_MODEL_ID defaults to minimax.minimax-m2.5, AWS_REGION to us-west-2.
     let bedrock: Option<Arc<cairn_runtime::services::BedrockProvider>> =
         cairn_runtime::services::BedrockProvider::from_env().map(|p| {
             eprintln!(

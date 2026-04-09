@@ -1,0 +1,17 @@
+{"from":"worker-1","to":"manager","ts":"2026-04-07T23:59:33+03:00","body":"PRODUCT FIX COMPLETE
+
+Both tasks done:
+
+1. multi_provider → GeneralAvailability (commercial.rs:156-160)
+   - Before: EntitlementGated + DeploymentTier required
+   - After: GeneralAvailability, no entitlement needed
+   - Solo devs can now add providers without any license
+
+2. Orchestrator 503 message improved (was already updated by linter before context reset)
+   - Message: 'No LLM provider configured. Add one via POST /v1/providers/connections, or set CAIRN_BRAIN_URL / OPENROUTER_API_KEY / OLLAMA_HOST.'
+
+Verification:
+  cargo test -p cairn-domain → 284/284 passed (0 failed)
+  cargo check -p cairn-app → Finished (warnings only, no errors)
+
+Ready for next assignment."}

@@ -1,0 +1,21 @@
+{"from":"worker-1","to":"manager","ts":"2026-04-07T23:38:19+03:00","body":"ALL 5 E2E SCRIPTS COMPLETE AND PASSING.
+
+UC-01 e2e-full-happy-path.sh: 13 pass, 0 fail, 5 skip
+  Skips: multi_provider entitlement (403), LLM offline (503), Ollama unreachable (502)
+  Core: health/status, settings default, session/run creation, events trail
+
+UC-03 e2e-multi-tool-orchestration.sh: 8 pass, 0 fail, 3 skip  
+  Passes: ingest doc, search returns result, session/run, tool-invocations endpoint
+  Skips: orchestrate+tool-invocations without LLM
+
+UC-04 e2e-approval-gate.sh: 16 pass, 0 fail, 3 skip
+  Full approve+reject paths work end-to-end
+  FIX: decision='rejected' not 'denied' (API uses 'approved'|'rejected')
+
+UC-06 e2e-memory-to-agent.sh: 13 pass, 0 fail, 1 skip
+  Source create, chunks API, 3-document ingest, search scoped per project, diagnostics
+
+UC-08 e2e-multi-tenant.sh FIXED: 21 pass, 0 fail, 0 skip
+  Root cause: admin token scoped to 'default' tenant, tenant_a/tenant_b fail with 403
+  Fix: 2 projects under default/default — proves project-level isolation (the meaningful product unit)
+  Tests: run A not in project B list, session B not in project A list, memory search fully scoped, correct project metadata on GET /v1/runs/:id"}

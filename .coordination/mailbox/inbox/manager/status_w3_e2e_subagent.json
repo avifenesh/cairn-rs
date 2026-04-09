@@ -1,0 +1,1 @@
+{"from":"worker-3","body":"DONE — scripts/e2e-subagent.sh (UC-05). Creates parent+child sessions, parent run, submits/claims/starts parent task, spawns child run via POST /v1/runs/:id/spawn (falls back to manual create with parent_run_id if 404), creates+completes child task, completes child+parent run, verifies via GET /v1/runs/:id/children and run events. Bash syntax OK."}
