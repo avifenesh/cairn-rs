@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw, ServerCrash, Loader2, Plus, Trash2, ChevronDown, ChevronRight,
   Download, HardDrive, Cpu as CpuIcon, Hash, FileType, Layers, XCircle,
-  Zap, Globe, Server, Check, X, Settings, Tag, Sparkles,
+  Zap, Globe, Server, Check, X, Settings, Tag,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
@@ -12,7 +12,7 @@ import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ProviderKind = "cairn_cloud" | "openrouter" | "openai_compat" | "ollama" | "local";
+type ProviderKind = "openai_compat" | "openrouter" | "ollama" | "local";
 
 interface ProviderKindMeta {
   label: string;
@@ -23,43 +23,22 @@ interface ProviderKindMeta {
   defaultUrl: string;
 }
 
-// Pre-configured Cairn Cloud connections (agntic.garden)
-const CAIRN_CLOUD_CONNECTIONS = [
-  {
-    id: "conn_cairn_brain",
-    label: "Brain",
-    url: "https://agntic.garden/inference/brain/v1",
-    models: ["cyankiwi/gemma-4-31B-it-AWQ-4bit"],
-    description: "High-capability reasoning model",
-  },
-  {
-    id: "conn_cairn_worker",
-    label: "Worker",
-    url: "https://agntic.garden/inference/worker/v1",
-    models: ["qwen3.5:9b", "qwen3-embedding:8b"],
-    description: "Fast worker + embedding models",
-  },
-] as const;
-
-const OPENROUTER_CONFIG = {
-  id: "conn_openrouter",
-  baseUrl: "https://openrouter.ai/api/v1",
-  models: ["openrouter/free", "google/gemma-3-4b-it:free"],
-  brainModel: "openrouter/free",
-  workerModel: "google/gemma-3-4b-it:free",
-  brainContext: "200K ctx",
-  workerContext: "32K ctx",
-  brainTooltip: "openrouter/free automatically routes to the best available free model on OpenRouter. The selected model may change as availability shifts.",
-} as const;
-
-const PROVIDER_KINDS: Record<Exclude<ProviderKind, "cairn_cloud" | "openrouter">, ProviderKindMeta> = {
+const PROVIDER_KINDS: Record<ProviderKind, ProviderKindMeta> = {
   openai_compat: {
     label: "OpenAI-compatible",
-    description: "Any API serving the OpenAI chat/completions format — Groq, Together, custom endpoints.",
+    description: "Any API serving the OpenAI chat/completions format — OpenAI, Anthropic, Groq, Together, Bedrock, Vertex, and more.",
     icon: <Globe size={16} />,
     defaultFamily: "openai_compat",
     defaultAdapter: "openai_compat",
     defaultUrl: "https://api.openai.com",
+  },
+  openrouter: {
+    label: "OpenRouter",
+    description: "Access 200+ models via one OpenAI-compatible endpoint. Free tier available at openrouter.ai.",
+    icon: <Globe size={16} />,
+    defaultFamily: "openai_compat",
+    defaultAdapter: "openai_compat",
+    defaultUrl: "https://openrouter.ai/api/v1",
   },
   ollama: {
     label: "Ollama",
@@ -356,6 +335,19 @@ function ConnectionRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const isHealthy = health?.healthy ?? null;
+  const toast = useToast();
+
+  const testConn = useMutation({
+    mutationFn: () => defaultApi.testConnection(record.provider_connection_id),
+    onSuccess: (r) => {
+      if (r.ok) {
+        toast.success(`${record.provider_connection_id} — reachable (${r.latency_ms}ms)`);
+      } else {
+        toast.error(`${record.provider_connection_id} — ${r.detail} (HTTP ${r.status})`);
+      }
+    },
+    onError: () => toast.error(`Failed to test ${record.provider_connection_id}`),
+  });
 
   const familyColor: Record<string, string> = {
     openai_compat: "text-sky-400 bg-sky-950/40 border-sky-800/40",
@@ -417,6 +409,20 @@ function ConnectionRow({
         <td className="px-3 h-10 text-right">
           <div className="flex items-center justify-end gap-2">
             <button
+              onClick={() => testConn.mutate()}
+              disabled={testConn.isPending}
+              className={clsx(
+                "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors",
+                testConn.isPending
+                  ? "text-gray-400 dark:text-zinc-600"
+                  : "text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/30",
+              )}
+              title="Test connection reachability"
+            >
+              {testConn.isPending ? <Loader2 size={10} className="animate-spin" /> : <Zap size={10} />}
+              Test
+            </button>
+            <button
               onClick={() => setExpanded(v => !v)}
               className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
               title={expanded ? "Collapse" : "Expand models"}
@@ -471,28 +477,25 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
   const toast = useToast();
   const formId = useId();
 
-  // Step: 0=type, 1=form, 2=models  (cairn_cloud skips to a dedicated confirm screen)
+  // Step: 0=type, 1=form, 2=models
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [kind, setKind] = useState<ProviderKind>("openai_compat");
 
-  // Safe accessor — cairn_cloud and openrouter don't have PROVIDER_KINDS entries
-  const meta = (kind !== "cairn_cloud" && kind !== "openrouter") ? PROVIDER_KINDS[kind] : PROVIDER_KINDS.openai_compat;
+  const meta = PROVIDER_KINDS[kind];
 
-  // Form fields (used for single-connection flow)
+  // Form fields
   const [connectionId, setConnectionId] = useState(() => genConnectionId("openai_compat"));
   const [baseUrl,      setBaseUrl]       = useState(meta.defaultUrl);
   const [apiKey,       setApiKey]        = useState("");
-  const [openrouterKey, setOpenrouterKey] = useState("");
   const [family,       setFamily]        = useState(meta.defaultFamily);
   const [adapter,      setAdapter]       = useState(meta.defaultAdapter);
 
-  // Model entry (single-connection flow)
+  // Model entry
   const [models, setModels]     = useState<string[]>([]);
   const [modelInput, setModelInput] = useState("");
 
   const selectKind = (k: ProviderKind) => {
     setKind(k);
-    if (k === "cairn_cloud" || k === "openrouter") return; // handled as presets
     const m = PROVIDER_KINDS[k];
     setConnectionId(genConnectionId(m.defaultFamily));
     setBaseUrl(m.defaultUrl);
@@ -508,7 +511,6 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
 
   const removeModel = (m: string) => setModels(prev => prev.filter(x => x !== m));
 
-  // Single-connection mutation (standard flow)
   const createMutation = useMutation({
     mutationFn: () =>
       defaultApi.createProviderConnection({
@@ -520,45 +522,6 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
       }),
     onSuccess: () => {
       toast.success(`Provider "${connectionId}" registered.`);
-      onCreated();
-      onClose();
-    },
-    onError: (e) => toast.error(`Failed: ${e instanceof Error ? e.message : "error"}`),
-  });
-
-  // Cairn Cloud dual-connection mutation
-  const cairnCloudMutation = useMutation({
-    mutationFn: async () => {
-      for (const conn of CAIRN_CLOUD_CONNECTIONS) {
-        await defaultApi.createProviderConnection({
-          tenant_id:              "default",
-          provider_connection_id: conn.id,
-          provider_family:        "openai_compat",
-          adapter_type:           "openai_compat",
-          supported_models:       [...conn.models],
-        });
-      }
-    },
-    onSuccess: () => {
-      toast.success("Cairn Cloud (agntic.garden) — 2 connections registered.");
-      onCreated();
-      onClose();
-    },
-    onError: (e) => toast.error(`Failed: ${e instanceof Error ? e.message : "error"}`),
-  });
-
-  // OpenRouter single-connection mutation
-  const openrouterMutation = useMutation({
-    mutationFn: () =>
-      defaultApi.createProviderConnection({
-        tenant_id:              "default",
-        provider_connection_id: OPENROUTER_CONFIG.id,
-        provider_family:        "openai_compat",
-        adapter_type:           "openai_compat",
-        supported_models:       [...OPENROUTER_CONFIG.models],
-      }),
-    onSuccess: () => {
-      toast.success("OpenRouter — connection registered.");
       onCreated();
       onClose();
     },
@@ -621,88 +584,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 Choose the type of provider you want to connect.
               </p>
 
-              {/* ── Cairn Cloud quick-start (featured) ── */}
-              <button
-                onClick={() => { selectKind("cairn_cloud"); setStep(1); }}
-                className={clsx(
-                  "w-full flex items-start gap-3 p-4 rounded-lg border text-left transition-colors",
-                  kind === "cairn_cloud"
-                    ? "border-emerald-500/60 bg-emerald-950/20"
-                    : "border-emerald-800/40 bg-emerald-950/10 hover:border-emerald-700/60 hover:bg-emerald-950/20",
-                )}
-              >
-                <span className={clsx("mt-0.5 shrink-0", kind === "cairn_cloud" ? "text-emerald-400" : "text-emerald-600")}>
-                  <Sparkles size={16} />
-                </span>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-[13px] font-medium text-gray-900 dark:text-zinc-100">Cairn Cloud</p>
-                    <span className="text-[10px] font-medium text-emerald-400 bg-emerald-900/40 border border-emerald-700/40 rounded px-1.5 py-0.5">
-                      Recommended
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-gray-400 dark:text-zinc-500 mt-0.5 leading-relaxed">
-                    agntic.garden — registers Brain (Gemma 4 31B) + Worker (Qwen 3.5 9B + embeddings) in one click.
-                  </p>
-                  <div className="flex items-center gap-2 mt-2">
-                    {CAIRN_CLOUD_CONNECTIONS.map(c => (
-                      <span key={c.id} className="text-[10px] font-mono text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
-                        {c.label}: {c.models.join(", ")}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                {kind === "cairn_cloud" && (
-                  <Check size={14} className="text-emerald-400 ml-auto mt-0.5 shrink-0" />
-                )}
-              </button>
-
-              {/* ── OpenRouter quick-start ── */}
-              <button
-                onClick={() => { selectKind("openrouter"); setStep(1); }}
-                className={clsx(
-                  "w-full flex items-start gap-3 p-4 rounded-lg border text-left transition-colors",
-                  kind === "openrouter"
-                    ? "border-violet-500/60 bg-violet-950/20"
-                    : "border-violet-800/40 bg-violet-950/10 hover:border-violet-700/60 hover:bg-violet-950/20",
-                )}
-              >
-                <span className={clsx("mt-0.5 shrink-0 font-bold text-[13px]", kind === "openrouter" ? "text-violet-400" : "text-violet-600")}>
-                  OR
-                </span>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-[13px] font-medium text-gray-900 dark:text-zinc-100">OpenRouter</p>
-                    <span className="text-[10px] font-medium text-violet-400 bg-violet-900/40 border border-violet-700/40 rounded px-1.5 py-0.5">
-                      Free tier available
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-gray-400 dark:text-zinc-500 mt-0.5 leading-relaxed">
-                    openrouter.ai — access 200+ models via one OpenAI-compatible endpoint. Free API key at openrouter.ai.
-                  </p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
-                      Brain: {OPENROUTER_CONFIG.brainModel} ({OPENROUTER_CONFIG.brainContext})
-                    </span>
-                    <span className="text-[10px] font-mono text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
-                      Worker: {OPENROUTER_CONFIG.workerModel} ({OPENROUTER_CONFIG.workerContext})
-                    </span>
-                  </div>
-                </div>
-                {kind === "openrouter" && (
-                  <Check size={14} className="text-violet-400 ml-auto mt-0.5 shrink-0" />
-                )}
-              </button>
-
-              {/* Divider */}
-              <div className="flex items-center gap-2 py-1">
-                <div className="flex-1 h-px bg-gray-100 dark:bg-zinc-800" />
-                <span className="text-[10px] text-gray-300 dark:text-zinc-700 uppercase tracking-wide">or configure manually</span>
-                <div className="flex-1 h-px bg-gray-100 dark:bg-zinc-800" />
-              </div>
-
-              {/* Standard provider types */}
-              {(Object.entries(PROVIDER_KINDS) as [Exclude<ProviderKind, "cairn_cloud">, ProviderKindMeta][]).map(([k, m]) => (
+              {(Object.entries(PROVIDER_KINDS) as [ProviderKind, ProviderKindMeta][]).map(([k, m]) => (
                 <button
                   key={k}
                   onClick={() => { selectKind(k); setStep(1); }}
@@ -710,7 +592,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                     "w-full flex items-start gap-3 p-4 rounded-lg border text-left transition-colors",
                     kind === k
                       ? "border-indigo-500/60 bg-indigo-950/30"
-                      : "border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60 hover:border-gray-200 dark:border-zinc-700 hover:bg-gray-100/40 dark:hover:bg-gray-100/40 dark:bg-zinc-800/40",
+                      : "border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60 hover:border-gray-300 dark:hover:border-zinc-700 hover:bg-gray-100/40 dark:hover:bg-zinc-800/40",
                   )}
                 >
                   <span className={clsx("mt-0.5 shrink-0", kind === k ? "text-indigo-400" : "text-gray-400 dark:text-zinc-500")}>
@@ -728,125 +610,8 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
             </div>
           )}
 
-          {/* ── Step 1: Cairn Cloud confirm screen ── */}
-          {step === 1 && kind === "cairn_cloud" && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Sparkles size={14} className="text-emerald-400" />
-                <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Cairn Cloud — agntic.garden</span>
-              </div>
-              <p className="text-[12px] text-gray-400 dark:text-zinc-500 leading-relaxed">
-                Two connections will be registered immediately. No API key is required for the agntic.garden inference endpoints.
-              </p>
-              <div className="space-y-3">
-                {CAIRN_CLOUD_CONNECTIONS.map(conn => (
-                  <div key={conn.id} className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60 p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[12px] font-medium text-gray-800 dark:text-zinc-200">{conn.label}</span>
-                      <code className="text-[10px] font-mono text-gray-400 dark:text-zinc-600">{conn.id}</code>
-                    </div>
-                    <p className="text-[11px] text-gray-400 dark:text-zinc-600 mb-2">{conn.description}</p>
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-gray-400 dark:text-zinc-600 w-12 shrink-0">URL</span>
-                        <code className="text-[10px] font-mono text-gray-500 dark:text-zinc-400 truncate">{conn.url}</code>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-gray-400 dark:text-zinc-600 w-12 shrink-0">Models</span>
-                        <div className="flex flex-wrap gap-1">
-                          {conn.models.map(m => (
-                            <span key={m} className="text-[10px] font-mono text-gray-700 dark:text-zinc-300 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">{m}</span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-md bg-emerald-950/20 border border-emerald-800/30">
-                <Check size={12} className="text-emerald-400 mt-0.5 shrink-0" />
-                <p className="text-[11px] text-emerald-300/70 leading-relaxed">
-                  You can add more models or edit connection settings later from the Providers table.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* ── Step 1: OpenRouter confirm screen ── */}
-          {step === 1 && kind === "openrouter" && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-[13px] text-violet-400">OR</span>
-                <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">OpenRouter</span>
-                <span className="text-[10px] font-medium text-violet-400 bg-violet-900/40 border border-violet-700/40 rounded px-1.5 py-0.5">Free tier available</span>
-              </div>
-              <p className="text-[12px] text-gray-400 dark:text-zinc-500 leading-relaxed">
-                One connection registers both models. Requires a free API key from{" "}
-                <span className="text-violet-400 font-mono text-[11px]">openrouter.ai</span>.
-              </p>
-
-              {/* Base URL (read-only) */}
-              <div>
-                <p className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide mb-1">Base URL</p>
-                <code className="text-[11px] font-mono text-gray-500 dark:text-zinc-400 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded px-2 py-1.5 block">
-                  {OPENROUTER_CONFIG.baseUrl}
-                </code>
-              </div>
-
-              {/* API Key */}
-              <label className="block">
-                <p className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide mb-1.5">API Key <span className="text-red-400">*</span></p>
-                <input
-                  type="password"
-                  value={openrouterKey}
-                  onChange={e => setOpenrouterKey(e.target.value)}
-                  placeholder="sk-or-v1-…"
-                  autoComplete="off"
-                  className="w-full rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-3 py-2 text-xs text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30 transition-colors"
-                />
-                <p className="mt-1 text-[10px] text-gray-400 dark:text-zinc-600">
-                  Get a free key at <span className="text-gray-400 dark:text-zinc-500 font-mono">openrouter.ai/settings/keys</span>. Never stored in plaintext.
-                </p>
-              </label>
-
-              {/* Pre-selected models */}
-              <div>
-                <p className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide mb-2">Pre-selected models</p>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between rounded bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-3 py-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-[11px] font-mono text-gray-800 dark:text-zinc-200">{OPENROUTER_CONFIG.brainModel}</p>
-                        <span
-                          title={OPENROUTER_CONFIG.brainTooltip}
-                          className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-zinc-700 text-gray-500 dark:text-zinc-400 text-[9px] font-bold cursor-help shrink-0"
-                        >?</span>
-                      </div>
-                      <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-0.5">Brain — {OPENROUTER_CONFIG.brainContext} context · auto-routes to best free model</p>
-                    </div>
-                    <span className="text-[10px] text-violet-400 bg-violet-900/30 border border-violet-700/40 rounded px-1.5 py-0.5 ml-2 shrink-0">free</span>
-                  </div>
-                  <div className="flex items-center justify-between rounded bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-3 py-2">
-                    <div>
-                      <p className="text-[11px] font-mono text-gray-800 dark:text-zinc-200">{OPENROUTER_CONFIG.workerModel}</p>
-                      <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-0.5">Worker — {OPENROUTER_CONFIG.workerContext} context</p>
-                    </div>
-                    <span className="text-[10px] text-violet-400 bg-violet-900/30 border border-violet-700/40 rounded px-1.5 py-0.5">free</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-md bg-violet-950/20 border border-violet-800/30">
-                <Check size={12} className="text-violet-400 mt-0.5 shrink-0" />
-                <p className="text-[11px] text-violet-300/70 leading-relaxed">
-                  Both models are served through a single connection. You can add more models from the connections table after registering.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* ── Step 1: Standard connection form ── */}
-          {step === 1 && kind !== "cairn_cloud" && kind !== "openrouter" && (
+          {/* ── Step 1: Connection form ── */}
+          {step === 1 && (
             <form
               id={`${formId}-form`}
               onSubmit={(e: FormEvent) => { e.preventDefault(); setStep(2); }}
@@ -881,7 +646,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 </label>
               )}
 
-              {kind === "openai_compat" && (
+              {(kind === "openai_compat" || kind === "openrouter") && (
                 <label className="block">
                   <span className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">API Key</span>
                   <input
@@ -927,7 +692,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 <p className="text-[11px] text-gray-400 dark:text-zinc-500 mt-1 leading-relaxed">
                   Enter the model IDs served through this connection.
                   {kind === "ollama" && " Model discovery via Ollama is coming — enter IDs manually for now."}
-                  {kind === "openai_compat" && " Discovery from the base URL is coming — enter IDs manually for now."}
+                  {(kind === "openai_compat" || kind === "openrouter") && " Discovery from the base URL is coming — enter IDs manually for now."}
                 </p>
               </div>
 
@@ -940,7 +705,8 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                     onChange={e => setModelInput(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addModel(); } }}
                     placeholder={
-                      kind === "openai_compat" ? "e.g. gemma4, qwen3.5:9b" :
+                      kind === "openrouter"    ? "e.g. openai/gpt-4o, anthropic/claude-3.5-sonnet" :
+                      kind === "openai_compat" ? "e.g. gpt-4o, claude-3.5-sonnet" :
                       kind === "ollama"        ? "e.g. llama3.2, mistral" :
                                                 "model_id"
                     }
@@ -957,7 +723,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 </button>
               </div>
 
-              {/* Discovery stub — placeholder for when W1 ships the endpoint */}
+              {/* Discovery notice */}
               <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-gray-50/60 dark:bg-zinc-900/60 border border-gray-200/60 dark:border-zinc-800/60 border-dashed">
                 <Zap size={12} className="text-gray-400 dark:text-zinc-600 shrink-0" />
                 <span className="text-[11px] text-gray-400 dark:text-zinc-600">
@@ -1007,33 +773,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
             {step === 0 ? "Cancel" : "← Back"}
           </button>
 
-          {/* Preset quick-registers: step 1 shows the register button immediately */}
-          {kind === "cairn_cloud" && step === 1 ? (
-            <button
-              onClick={() => cairnCloudMutation.mutate()}
-              disabled={cairnCloudMutation.isPending}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 text-white text-[12px] font-medium transition-colors"
-            >
-              {cairnCloudMutation.isPending ? (
-                <><Loader2 size={12} className="animate-spin" /> Registering…</>
-              ) : (
-                <><Sparkles size={12} /> Register Both</>
-              )}
-            </button>
-          ) : kind === "openrouter" && step === 1 ? (
-            <button
-              onClick={() => openrouterMutation.mutate()}
-              disabled={openrouterMutation.isPending || !openrouterKey.trim()}
-              title={!openrouterKey.trim() ? "Enter your OpenRouter API key first" : undefined}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-violet-600 hover:bg-violet-500 disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 text-white text-[12px] font-medium transition-colors"
-            >
-              {openrouterMutation.isPending ? (
-                <><Loader2 size={12} className="animate-spin" /> Registering…</>
-              ) : (
-                <><Check size={12} /> Register OpenRouter</>
-              )}
-            </button>
-          ) : step < 2 ? (
+          {step < 2 ? (
             <button
               type={step === 1 ? "submit" : "button"}
               form={step === 1 ? `${formId}-form` : undefined}

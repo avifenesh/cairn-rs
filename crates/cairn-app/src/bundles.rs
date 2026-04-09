@@ -128,19 +128,15 @@ pub struct CairnBundle {
 /// Strategy for handling conflicts when an artifact already exists during import.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ConflictStrategy {
     /// Skip the artifact — keep the existing one.
+    #[default]
     Skip,
     /// Overwrite the existing artifact with the imported one.
     Overwrite,
     /// Rename the imported artifact (append suffix) to avoid conflict.
     Rename,
-}
-
-impl Default for ConflictStrategy {
-    fn default() -> Self {
-        ConflictStrategy::Skip
-    }
 }
 
 // ── Validation ───────────────────────────────────────────────────────────────

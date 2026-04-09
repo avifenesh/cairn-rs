@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
 
 const GIT_TIMEOUT_SECS: u64 = 60;
 
@@ -74,9 +74,15 @@ impl ToolHandler for GitOperationsTool {
     }
 
     fn execution_class(&self) -> ExecutionClass {
-        // Sandboxed for read-only commands; the approval check happens inside
-        // execute() for protected-branch writes.
         ExecutionClass::SandboxedProcess
+    }
+
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Dangerous
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Shell
     }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {

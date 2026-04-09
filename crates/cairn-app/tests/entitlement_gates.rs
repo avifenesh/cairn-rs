@@ -3,7 +3,7 @@
 //! and 201/200 in team_self_hosted tier.
 
 use axum::{
-    body::{to_bytes, Body},
+    body::Body,
     http::{Request, StatusCode},
 };
 use cairn_api::auth::AuthPrincipal;

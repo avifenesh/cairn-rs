@@ -21,7 +21,7 @@ use serde_json::Value;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
 
 const MAX_OUTPUT_BYTES: usize = 16 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
@@ -70,6 +70,14 @@ impl ToolHandler for ShellExecTool {
     /// SENSITIVE — orchestrator gates every call through ApprovalService.
     fn execution_class(&self) -> ExecutionClass {
         ExecutionClass::Sensitive
+    }
+
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Execute
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Shell
     }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {

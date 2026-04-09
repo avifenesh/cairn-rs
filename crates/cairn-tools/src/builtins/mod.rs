@@ -98,6 +98,49 @@ pub enum ToolTier {
     Deferred,
 }
 
+// ── PermissionLevel ──────────────────────────────────────────────────────────
+
+/// Granular permission level for tool execution.
+///
+/// Adopted from Cersei (MIT, pacifio/cersei). The orchestrator's permission
+/// policy checks this before dispatching a tool call.
+///
+/// | Level       | Meaning                                                |
+/// |-------------|--------------------------------------------------------|
+/// | `None`      | No special permissions (e.g. calculate, json_extract)  |
+/// | `ReadOnly`  | Reads files / queries data (e.g. file_read, grep)      |
+/// | `Write`     | Writes or modifies files (e.g. file_write, memory)     |
+/// | `Execute`   | Runs processes or makes network calls (e.g. shell, http)|
+/// | `Dangerous` | Destructive / irreversible actions (e.g. delete, git)  |
+/// | `Forbidden` | Never auto-approved — always requires operator consent |
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionLevel {
+    None,
+    ReadOnly,
+    Write,
+    Execute,
+    Dangerous,
+    Forbidden,
+}
+
+// ── ToolCategory ─────────────────────────────────────────────────────────────
+
+/// Logical grouping for tool listings and operator dashboards.
+///
+/// Adopted from Cersei (MIT, pacifio/cersei).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCategory {
+    FileSystem,
+    Shell,
+    Web,
+    Memory,
+    Orchestration,
+    Query,
+    Custom,
+}
+
 // ── ToolResult ────────────────────────────────────────────────────────────────
 
 /// The structured output of a successful tool execution.
@@ -306,6 +349,16 @@ pub trait ToolHandler: Send + Sync {
         ExecutionClass::SupervisedProcess
     }
 
+    /// Granular permission level for policy enforcement.
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::None
+    }
+
+    /// Logical category for grouping in tool listings.
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Custom
+    }
+
     /// Execute the tool with the given project context and parsed arguments.
     async fn execute(&self, project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError>;
 
@@ -324,6 +377,26 @@ pub trait ToolHandler: Send + Sync {
     }
 }
 
+// ── ToolExecute trait ─────────────────────────────────────────────────────────
+
+/// Typed tool execution trait — used with `#[derive(Tool)]` from cairn-tools-derive.
+///
+/// Implement this alongside the derive macro to get automatic JSON
+/// deserialization and schema generation from the `Input` type.
+#[async_trait]
+pub trait ToolExecute: Send + Sync {
+    /// The strongly-typed input. Must impl `Deserialize + JsonSchema`.
+    type Input: serde::de::DeserializeOwned + schemars::JsonSchema;
+
+    /// Execute with typed input and full context.
+    async fn execute_typed(
+        &self,
+        project: &ProjectKey,
+        input: Self::Input,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult, ToolError>;
+}
+
 // ── BuiltinToolDescriptor ─────────────────────────────────────────────────────
 
 /// Rich descriptor used in both the LLM prompt and the operator API.
@@ -337,6 +410,8 @@ pub struct BuiltinToolDescriptor {
     /// dispatches them.  The orchestrator reads this field to set
     /// `ActionProposal::requires_approval`.
     pub execution_class: ExecutionClass,
+    pub permission_level: PermissionLevel,
+    pub category: ToolCategory,
 }
 
 impl BuiltinToolDescriptor {
@@ -347,6 +422,8 @@ impl BuiltinToolDescriptor {
             description: h.description().to_owned(),
             parameters_schema: h.parameters_schema(),
             execution_class: h.execution_class(),
+            permission_level: h.permission_level(),
+            category: h.category(),
         }
     }
 
@@ -559,6 +636,9 @@ impl Default for BuiltinToolRegistry {
 
 #[cfg(test)]
 mod tests {
+    // Allow the derive macro to reference `cairn_tools::builtins::*` from within this crate.
+    extern crate self as cairn_tools;
+
     use super::*;
 
     struct CoreEcho;
@@ -799,5 +879,109 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ToolError::Permanent(_)));
+    }
+
+    // ── PermissionLevel + ToolCategory ───────────────────────────────────────
+
+    #[test]
+    fn permission_level_default_is_none() {
+        assert_eq!(CoreEcho.permission_level(), PermissionLevel::None);
+    }
+
+    #[test]
+    fn category_default_is_custom() {
+        assert_eq!(CoreEcho.category(), ToolCategory::Custom);
+    }
+
+    #[test]
+    fn descriptor_includes_permission_and_category() {
+        let desc = BuiltinToolDescriptor::from_handler(&CoreEcho);
+        assert_eq!(desc.permission_level, PermissionLevel::None);
+        assert_eq!(desc.category, ToolCategory::Custom);
+    }
+
+    #[test]
+    fn permission_level_serde_roundtrip() {
+        let levels = vec![
+            PermissionLevel::None,
+            PermissionLevel::ReadOnly,
+            PermissionLevel::Write,
+            PermissionLevel::Execute,
+            PermissionLevel::Dangerous,
+            PermissionLevel::Forbidden,
+        ];
+        let json = serde_json::to_string(&levels).unwrap();
+        let parsed: Vec<PermissionLevel> = serde_json::from_str(&json).unwrap();
+        assert_eq!(levels, parsed);
+    }
+
+    // ── derive(Tool) macro ───────────────────────────────────────────────────
+
+    #[derive(serde::Deserialize, schemars::JsonSchema)]
+    struct GreetInput {
+        name: String,
+    }
+
+    #[derive(cairn_tools_derive::Tool)]
+    #[tool(
+        name = "greet",
+        description = "Greet a user",
+        permission = "read_only",
+        category = "custom"
+    )]
+    struct GreetTool;
+
+    #[async_trait]
+    impl ToolExecute for GreetTool {
+        type Input = GreetInput;
+        async fn execute_typed(
+            &self,
+            _project: &ProjectKey,
+            input: GreetInput,
+            _ctx: &ToolContext,
+        ) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult::ok(
+                serde_json::json!({ "greeting": format!("Hello, {}!", input.name) }),
+            ))
+        }
+    }
+
+    #[test]
+    fn derive_tool_name() {
+        assert_eq!(GreetTool.name(), "greet");
+    }
+
+    #[test]
+    fn derive_tool_description() {
+        assert_eq!(GreetTool.description(), "Greet a user");
+    }
+
+    #[test]
+    fn derive_tool_permission_level() {
+        assert_eq!(GreetTool.permission_level(), PermissionLevel::ReadOnly);
+    }
+
+    #[test]
+    fn derive_tool_schema_has_name_property() {
+        let schema = GreetTool.parameters_schema();
+        assert!(schema["properties"]["name"].is_object());
+    }
+
+    #[tokio::test]
+    async fn derive_tool_execute() {
+        let result = GreetTool
+            .execute(&project(), serde_json::json!({"name": "World"}))
+            .await
+            .unwrap();
+        assert_eq!(result.output["greeting"], "Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn derive_tool_bad_input() {
+        let err = GreetTool
+            .execute(&project(), serde_json::json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs { .. }));
     }
 }

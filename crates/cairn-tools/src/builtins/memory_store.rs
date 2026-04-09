@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use cairn_domain::ProjectKey;
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
 
 /// Stub: schema + metadata only. Concrete impl in cairn-memory.
 pub struct MemoryStoreTool;
@@ -45,6 +45,14 @@ impl ToolHandler for MemoryStoreTool {
             }
         })
     }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Write
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Memory
+    }
+
     async fn execute(&self, _: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
         let content = args["content"]
             .as_str()

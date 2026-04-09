@@ -5,6 +5,7 @@ pub mod builtins;
 pub mod execution_class;
 pub mod executor;
 pub mod graph_events;
+pub mod hooks;
 pub mod invocation;
 pub mod mcp_client;
 pub mod mcp_server;
@@ -28,13 +29,15 @@ pub use builtins::{
     DeleteMemoryTool, EvalScoreTool, FileReadTool, FileWriteTool, GetApprovalsTool, GetRunTool,
     GetTaskTool, GitOperationsTool, GlobFindTool, GraphQueryTool, GrepSearchTool, HttpRequestTool,
     JsonExtractTool, ListRunsTool, MemorySearchTool, MemoryStoreTool, NoopSink, NotificationSink,
-    NotifyOperatorTool, ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool, SearchEventsTool,
-    ShellExecTool, SummarizeTextTool, ToolContext, ToolError, ToolHandler, ToolResult,
-    ToolSearchTool, ToolTier, UpdateMemoryTool, WaitForTaskTool, WebFetchTool,
+    NotifyOperatorTool, PermissionLevel, ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool,
+    SearchEventsTool, ShellExecTool, SummarizeTextTool, ToolCategory, ToolContext, ToolError,
+    ToolExecute, ToolHandler, ToolResult, ToolSearchTool, ToolTier, UpdateMemoryTool,
+    WaitForTaskTool, WebFetchTool,
 };
 pub use execution_class::{select_execution_config, SelectedConfig};
 pub use executor::{execute_builtin, ExecutionOutcome};
 pub use graph_events::{ToolInvocationNodeData, UsedToolEdgeData};
+pub use hooks::{Hook, HookAction, HookContext, HookEvent, ShellHook};
 pub use invocation::{InvocationRequest, InvocationResult, InvocationService};
 pub use mcp_client::{
     mcp_endpoint_for_manifest, McpClient, McpEndpoint, McpError, McpTool, MCP_PROTOCOL_VERSION,

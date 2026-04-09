@@ -18,8 +18,6 @@ use cairn_api::bootstrap::BootstrapConfig;
 use cairn_app::AppBootstrap;
 use cairn_domain::tenancy::TenantKey;
 use cairn_domain::OperatorId;
-use http_body_util::BodyExt;
-use tokio::time::{timeout, Duration};
 use tower::ServiceExt;
 
 // ── Helper ────────────────────────────────────────────────────────────────────

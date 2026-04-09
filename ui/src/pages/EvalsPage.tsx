@@ -238,8 +238,8 @@ function EmptyState() {
       <div>
         <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No eval runs yet</p>
         <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-1 max-w-xs">
-          Eval runs appear here after orchestration completes or when created via the API.
-          Connect a provider and run an orchestration to see results.
+          Click <strong className="text-gray-500 dark:text-zinc-400">New Eval Run</strong> above to create one,
+          or eval runs will appear here automatically after orchestration completes.
         </p>
       </div>
     </div>
@@ -313,9 +313,15 @@ function CompareBanner({
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+const EVALUATOR_TYPES = ["accuracy", "relevance", "coherence", "safety", "custom"] as const;
+const SUBJECT_KINDS   = ["prompt_release", "agent_template", "run_output", "custom"] as const;
+
 export function EvalsPage() {
   const [statusFilter, setStatusFilter] = useState<EvalRunStatus | "all">("all");
   const [selected, setSelected]         = useState<Set<string>>(new Set());
+  const [showNewForm, setShowNewForm]   = useState(false);
+  const [newEvalType, setNewEvalType]   = useState<string>(EVALUATOR_TYPES[0]);
+  const [newSubject, setNewSubject]     = useState<string>(SUBJECT_KINDS[0]);
   const qc = useQueryClient();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
@@ -329,11 +335,14 @@ export function EvalsPage() {
       const id = `eval_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       return defaultApi.createEvalRun({
         eval_run_id: id,
-        subject_kind: "prompt_release",
-        evaluator_type: "accuracy",
+        subject_kind: newSubject,
+        evaluator_type: newEvalType,
       });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["evals"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["evals"] });
+      setShowNewForm(false);
+    },
   });
 
   const runs = data?.items ?? [];
@@ -406,16 +415,54 @@ export function EvalsPage() {
           <option value="pending">Pending</option>
         </select>
 
-        <button
-          onClick={() => createEval.mutate()}
-          disabled={createEval.isPending}
-          className="ml-auto flex items-center gap-1.5 rounded bg-indigo-600 hover:bg-indigo-500
-                     text-white text-[12px] font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
-          title="Create a new eval run"
-        >
-          {createEval.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-          {createEval.isPending ? "Creating…" : "New Eval Run"}
-        </button>
+        <div className="ml-auto relative">
+          <button
+            onClick={() => setShowNewForm(v => !v)}
+            className="flex items-center gap-1.5 rounded bg-indigo-600 hover:bg-indigo-500
+                       text-white text-[12px] font-medium px-3 py-1.5 transition-colors"
+            title="Create a new eval run"
+          >
+            <Plus size={12} />
+            New Eval Run
+          </button>
+
+          {showNewForm && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setShowNewForm(false)} />
+              <div className="absolute right-0 top-full mt-1 z-40 w-64 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg shadow-xl p-3 space-y-3">
+                <label className="block">
+                  <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Evaluator Type</span>
+                  <select
+                    value={newEvalType}
+                    onChange={e => setNewEvalType(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-950 text-gray-700 dark:text-zinc-300 text-[12px] px-2 py-1.5 focus:outline-none focus:border-indigo-500"
+                  >
+                    {EVALUATOR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Subject Kind</span>
+                  <select
+                    value={newSubject}
+                    onChange={e => setNewSubject(e.target.value)}
+                    className="mt-1 w-full rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-950 text-gray-700 dark:text-zinc-300 text-[12px] px-2 py-1.5 focus:outline-none focus:border-indigo-500"
+                  >
+                    {SUBJECT_KINDS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </label>
+                <button
+                  onClick={() => createEval.mutate()}
+                  disabled={createEval.isPending}
+                  className="w-full flex items-center justify-center gap-1.5 rounded bg-indigo-600 hover:bg-indigo-500
+                             text-white text-[12px] font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
+                >
+                  {createEval.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                  {createEval.isPending ? "Creating…" : "Create"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
 
         <button
           onClick={() => void refetch()}

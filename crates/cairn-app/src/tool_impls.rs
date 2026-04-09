@@ -530,7 +530,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(result.output["total"].as_u64().unwrap() > 0, true);
+        assert!(result.output["total"].as_u64().unwrap() > 0);
     }
 
     #[tokio::test]

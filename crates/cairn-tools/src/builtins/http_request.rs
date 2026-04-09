@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
 
 /// Send an HTTP request to any URL.
 ///
@@ -75,6 +75,14 @@ impl ToolHandler for HttpRequestTool {
 
     fn execution_class(&self) -> ExecutionClass {
         ExecutionClass::SandboxedProcess
+    }
+
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Execute
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Web
     }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {

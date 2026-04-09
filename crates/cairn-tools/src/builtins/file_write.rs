@@ -35,7 +35,10 @@ use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use serde_json::Value;
 
-use super::{file_read::resolve_safe_path, ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{
+    file_read::resolve_safe_path, PermissionLevel, ToolCategory, ToolError, ToolHandler,
+    ToolResult, ToolTier,
+};
 
 /// Write a file within the project workspace.
 ///
@@ -92,9 +95,16 @@ impl ToolHandler for FileWriteTool {
         })
     }
 
-    /// `Sensitive` — requires operator approval before execution.
     fn execution_class(&self) -> ExecutionClass {
         ExecutionClass::SupervisedProcess
+    }
+
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Write
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::FileSystem
     }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {

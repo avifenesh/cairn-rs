@@ -76,12 +76,11 @@ jobs:
           --workspace --exclude cairn-app
           --all-targets
           -- -D warnings
-      # Application crate: warn-only; in-progress stubs are expected.
-      # Allow the three categories that routinely appear during development.
+      # Application crate: same standard as library crates.
       - name: clippy (cairn-app)
         run: >
           cargo clippy -p cairn-app --all-targets
-          -- -A dead_code -A unused_variables -A unused_imports
+          -- -D warnings
 
   # ── 4. Test ──────────────────────────────────────────────────────────────────
   test:

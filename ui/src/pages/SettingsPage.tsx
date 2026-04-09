@@ -825,7 +825,7 @@ function PreferencesTab() {
           <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">Operator Defaults</p>
           <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
             Tenant-level defaults applied when no project-level or run-level override exists.
-            Saved to <code className="text-gray-400 dark:text-zinc-500 font-mono text-[10px]">PUT /v1/settings/defaults/tenant/default/:key</code>
+            Changes are saved automatically when you click Save.
           </p>
         </div>
         <div className="px-5 bg-gray-50/60 dark:bg-zinc-900/60">
@@ -874,8 +874,8 @@ function PreferencesTab() {
 
       {/* Hint about future per-project overrides */}
       <p className="text-[11px] text-gray-300 dark:text-zinc-700 leading-relaxed px-1">
-        These defaults apply at the <code className="font-mono text-gray-400 dark:text-zinc-600">tenant/default</code> scope.
-        Project-level overrides can be set via <code className="font-mono text-gray-400 dark:text-zinc-600">PUT /v1/settings/defaults/project/:project_id/:key</code> once multi-tenant project isolation is enabled.
+        These defaults apply at the tenant level.
+        Project-level overrides will be configurable here once multi-tenant project isolation is enabled.
       </p>
     </div>
   );
@@ -1010,11 +1010,7 @@ export function SettingsPage() {
                   label="Status"
                   value={
                     <span className="text-[12px] text-gray-400 dark:text-zinc-500 italic">
-                      Managed by the server — see{" "}
-                      <code className="text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 px-1 rounded text-[11px]">
-                        GET /v1/settings/tls
-                      </code>{" "}
-                      for certificate details.
+                      Managed by the server. Certificate details are available on the Deployment page.
                     </span>
                   }
                 />

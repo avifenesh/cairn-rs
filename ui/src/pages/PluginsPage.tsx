@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   RefreshCw, Loader2, Plus, ChevronDown, ChevronRight,
-  RotateCcw, Trash2, X, Puzzle, Terminal,
+  Trash2, X, Puzzle, Terminal,
 } from 'lucide-react';
 import { ErrorFallback } from '../components/ErrorFallback';
 import { defaultApi } from '../lib/api';
@@ -222,13 +222,6 @@ function PluginCard({
 
         {/* Actions */}
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={e => { e.stopPropagation(); /* restart — not yet implemented */ }}
-            title="Restart plugin"
-            className="flex items-center gap-1 px-2 py-1 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[11px] hover:bg-gray-200 dark:hover:bg-zinc-700 hover:text-gray-800 dark:text-zinc-200 transition-colors"
-          >
-            <RotateCcw size={10} /> Restart
-          </button>
           <button
             onClick={e => { e.stopPropagation(); onUnregister(); }}
             title="Unregister plugin"

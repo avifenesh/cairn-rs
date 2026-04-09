@@ -16,7 +16,6 @@ use cairn_domain::{
 use cairn_graph::projections::{EdgeKind, GraphEdge, GraphProjection};
 use cairn_runtime::ApprovalService;
 use cairn_store::EventLog;
-use http_body_util::BodyExt;
 use std::{fs, path::PathBuf};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -3127,9 +3126,7 @@ async fn runtime_stream_emits_frame_after_run_creation() {
         use http_body_util::BodyExt as _;
         let mut stream_body = stream_body;
         loop {
-            let Some(frame) = stream_body.frame().await else {
-                return None::<String>;
-            };
+            let frame = stream_body.frame().await?;
             let Ok(frame) = frame else {
                 return None;
             };

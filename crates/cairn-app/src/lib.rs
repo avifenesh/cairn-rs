@@ -17567,7 +17567,7 @@ mod tests {
         let resp2 = AppBootstrap::build_router(state.clone())
             .oneshot(
                 Request::builder()
-                    .uri(&format!(
+                    .uri(format!(
                         "/v1/runs/run_evp/events?cursor={next_cursor}&limit=10"
                     ))
                     .header("authorization", "Bearer evp-token")
@@ -17601,7 +17601,7 @@ mod tests {
             },
         );
 
-        let workspace_key = WorkspaceKey::new("t_evd", "ws_evd");
+        let _workspace_key = WorkspaceKey::new("t_evd", "ws_evd");
         let project_key_evd = ProjectKey::new("t_evd", "ws_evd", "proj_evd");
 
         // Create 2 prompt assets
@@ -18168,7 +18168,7 @@ mod tests {
         let response = AppBootstrap::build_router(state.clone())
             .oneshot(
                 Request::builder()
-                    .uri(&format!(
+                    .uri(format!(
                         "/v1/evals/matrices/provider-routing?tenant_id={}",
                         DEFAULT_TENANT_ID
                     ))

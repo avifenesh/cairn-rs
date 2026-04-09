@@ -394,7 +394,7 @@ fn pagination_headers(
 ) -> axum::response::AppendHeaders<[(String, String); 4]> {
     let per_page = limit.max(1);
     let page = offset / per_page + 1;
-    let last_page = (total.max(1) + per_page - 1) / per_page;
+    let last_page = total.max(1).div_ceil(per_page);
     let has_next = offset + per_page < total;
 
     let link = if has_next {
@@ -454,7 +454,6 @@ impl ProjectQuery {
 
 // ── Metrics middleware ────────────────────────────────────────────────────────
 
-/// Axum middleware that records request count, latency, and error rate.
 // ── Version + changelog ──────────────────────────────────────────────────────
 
 /// The canonical application version — sourced from Cargo.toml at compile time.
@@ -464,27 +463,34 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CHANGELOG: &str = r##"[
   {
     "version": "0.1.0",
-    "date":    "2026-04-06",
+    "date":    "2026-04-09",
     "changes": [
       "Initial release of cairn-rs",
-      "22 operator UI pages (Dashboard, Sessions, Runs, Tasks, Approvals, Prompts, Traces, Memory, Sources, Costs, Evals, Graph, Audit Log, Providers, Plugins, Credentials, Channels, Playground, API Docs, Settings, Profile, Eval Comparison)",
-      "56 REST API routes across Health, Sessions, Runs, Tasks, Approvals, Providers, Memory, Events, Evals, Admin groups",
+      "30 operator UI pages (Dashboard, Sessions, Runs, Tasks, Approvals, Prompts, Traces, Memory, Sources, Costs, Evals, Graph, Audit Log, Providers, Plugins, Credentials, Channels, Playground, API Docs, Settings, Profile, Eval Comparison, Workers, Orchestration, Deployment, Metrics, Logs, Test Harness, Cost Calculator, Workspaces)",
+      "56+ REST API routes across Health, Sessions, Runs, Tasks, Approvals, Providers, Memory, Events, Evals, Admin groups",
       "Event-sourced runtime: 56+ domain event types, append-only log, idempotent commands",
       "Real-time SSE event stream with Last-Event-ID replay",
       "Multi-tenant isolation: tenant / workspace / project hierarchy with RBAC",
       "Human-in-the-loop approval workflows",
       "Provider-agnostic LLM integration: any OpenAI-compatible endpoint, Ollama, Bedrock, Vertex AI",
+      "Provider registry with 13 known providers, model router, and test-connection endpoint",
+      "Stream accumulator for SSE event parsing (adopted from Cersei SDK)",
+      "ToolContext with session/run awareness, working directory, and extensions type-map",
+      "#[derive(Tool)] proc macro for declarative tool definitions",
+      "6-level PermissionLevel (None, ReadOnly, Write, Execute, Dangerous, Forbidden)",
+      "Hook system: PreToolUse, PostToolUse, PreModelTurn, PostModelTurn, Stop, Error events",
+      "Credential store with AES-256-GCM encryption, tenant-scoped, key rotation",
       "Built-in eval framework with rubrics, baselines, bandit experiments",
       "Cost tracking and token metering per call, run, and session",
       "Knowledge retrieval: ingest, chunking, multi-factor scoring, graph expansion",
       "Per-IP and per-token rate limiting (100/1000 req/min) with X-RateLimit-* headers",
-      "Request body size limit: 10 MB",
       "Batch operations: POST /v1/runs/batch, POST /v1/tasks/batch/cancel",
       "Static OpenAPI 3.0 spec at /v1/openapi.json and Swagger UI at /v1/docs",
       "Session and run export (JSON download) and import",
       "SQLite and Postgres persistence backends",
       "Embedded React UI served from the binary (rust-embed)",
-      "X-Cairn-Version header on every response"
+      "GitHub Actions CI: fmt, clippy (-D warnings), tests, UI build",
+      "Pre-push hook with smart Rust/frontend change detection"
     ]
   }
 ]"##;
@@ -890,7 +896,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
     let connected = serde_json::json!({ "type": "connected", "head_position": head_pos });
     if socket
-        .send(WsMessage::Text(connected.to_string().into()))
+        .send(WsMessage::Text(connected.to_string()))
         .await
         .is_err()
     {
@@ -917,7 +923,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
                                 }
                                 Some("ping") => {
                                     let _ = socket
-                                        .send(WsMessage::Text(r#"{"type":"pong"}"#.to_owned().into()))
+                                        .send(WsMessage::Text(r#"{"type":"pong"}"#.to_owned()))
                                         .await;
                                 }
                                 _ => {}
@@ -957,7 +963,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
                         });
 
                         if socket
-                            .send(WsMessage::Text(msg.to_string().into()))
+                            .send(WsMessage::Text(msg.to_string()))
                             .await
                             .is_err()
                         {
@@ -971,7 +977,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
                             "message": format!("lagged: missed {n} event(s)"),
                         });
                         let _ = socket
-                            .send(WsMessage::Text(warn.to_string().into()))
+                            .send(WsMessage::Text(warn.to_string()))
                             .await;
                     }
                     // Broadcast channel dropped — server shutting down.
@@ -2091,7 +2097,7 @@ async fn list_notifications_handler(
         .notifications
         .read()
         .expect("notification lock poisoned");
-    let notifications: Vec<Notification> = buf.list(limit).into_iter().map(|n| n.clone()).collect();
+    let notifications: Vec<Notification> = buf.list(limit).into_iter().cloned().collect();
     let unread_count = buf.unread_count();
     Json(NotifListResponse {
         notifications,
@@ -2606,44 +2612,11 @@ async fn ollama_models_handler(State(state): State<AppState>) -> impl IntoRespon
                 .into_response(),
         }
     } else {
-        // No Ollama — report configured OpenAI-compat providers as synthetic model list.
-        let mut models: Vec<&str> = vec![];
-        let mut host = String::new();
-        if let Some(ref worker) = state.openai_compat_worker {
-            models.push("qwen3.5:9b");
-            models.push("qwen3-embedding:8b");
-            host = worker.base_url().to_owned();
-        }
-        if let Some(ref brain) = state.openai_compat_brain {
-            models.push("cyankiwi/gemma-4-31B-it-AWQ-4bit");
-            if host.is_empty() {
-                host = brain.base_url().to_owned();
-            }
-        }
-        if let Some(ref or_) = state.openai_compat_openrouter {
-            models.push("openrouter/free");
-            models.push("google/gemma-3-4b-it:free");
-            models.push("google/gemma-3-27b-it:free");
-            models.push("meta-llama/llama-3.3-70b-instruct:free");
-            if host.is_empty() {
-                host = or_.base_url().to_owned();
-            }
-        }
-        if models.is_empty() {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                axum::Json(serde_json::json!({
-                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, CAIRN_WORKER_URL, or OPENROUTER_API_KEY"
-                })),
-            ).into_response();
-        }
+        // No Ollama configured — return 503 so callers know to use provider connections instead.
         (
-            StatusCode::OK,
+            StatusCode::SERVICE_UNAVAILABLE,
             axum::Json(serde_json::json!({
-                "host":     host,
-                "models":   models,
-                "count":    models.len(),
-                "provider": "openai_compat",
+                "error": "Ollama not configured — set OLLAMA_HOST to enable local model management"
             })),
         )
             .into_response()
@@ -2879,7 +2852,7 @@ async fn discover_openai_compat_models_live(
                         .and_then(|d| d.as_array())
                         .map(|arr| {
                             arr.iter()
-                                .filter_map(|m| openai_model_obj_to_discovered(m))
+                                .filter_map(openai_model_obj_to_discovered)
                                 .collect()
                         })
                         .unwrap_or_default();
@@ -3186,7 +3159,7 @@ async fn ollama_generate_handler(
     ]) {
         return bad_request(msg).into_response();
     }
-    if body.prompt.is_empty() && body.messages.as_ref().map_or(true, |m| m.is_empty()) {
+    if body.prompt.is_empty() && body.messages.as_ref().is_none_or(|m| m.is_empty()) {
         return bad_request("prompt or messages is required").into_response();
     }
 
@@ -4339,7 +4312,7 @@ async fn seed_demo_data(state: &AppState) {
                 (*action).to_owned(),
                 (*rtype).to_owned(),
                 (*rid).to_owned(),
-                outcome.clone(),
+                *outcome,
                 serde_json::json!({"source": "demo_seed"}),
             )
             .await
@@ -5901,7 +5874,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(&format!("/v1/runs/{run_id_str}/approvals"))
+                    .uri(format!("/v1/runs/{run_id_str}/approvals"))
                     .header("authorization", format!("Bearer {TEST_TOKEN}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -5975,7 +5948,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(&format!("/v1/runs/{run_id_str}/approvals"))
+                    .uri(format!("/v1/runs/{run_id_str}/approvals"))
                     .header("authorization", format!("Bearer {TEST_TOKEN}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -6061,7 +6034,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(&format!("/v1/runs/{run_id_str}/approvals"))
+                    .uri(format!("/v1/runs/{run_id_str}/approvals"))
                     .header("authorization", format!("Bearer {TEST_TOKEN}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -6441,7 +6414,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(&format!("/v1/runs/{run_id_str}"))
+                    .uri(format!("/v1/runs/{run_id_str}"))
                     .header("authorization", format!("Bearer {TEST_TOKEN}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -6974,8 +6947,6 @@ mod tests {
     #[tokio::test]
     #[ignore = "router unification: covered by integration tests"]
     async fn append_broadcasts_to_sse_subscribers() {
-        use tokio_stream::StreamExt as _;
-
         let state = make_state();
         // Subscribe to the broadcast channel BEFORE appending.
         let mut receiver = state.runtime.store.subscribe();
@@ -7610,7 +7581,7 @@ mod tests {
     async fn session_events_after_cursor_paginates() {
         use cairn_domain::{
             events::SessionStateChanged, events::StateTransition as ST, tenancy::OwnershipKey,
-            EventEnvelope, EventId, EventSource, SessionState,
+            EventEnvelope, EventId, EventSource,
         };
 
         let state = make_state();
@@ -8086,9 +8057,8 @@ mod tool_invocations_tests {
     use axum::body::Body;
     use axum::http::Request;
     use cairn_domain::{
-        policy::ExecutionClass,
-        tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget},
-        ProjectKey, RunId, SessionId, ToolInvocationId,
+        policy::ExecutionClass, tool_invocation::ToolInvocationTarget, ProjectKey, RunId,
+        SessionId, ToolInvocationId,
     };
     use cairn_runtime::ToolInvocationService as _;
     use tower::ServiceExt as _;
@@ -8406,7 +8376,7 @@ mod provider_health_tests {
     use axum::body::Body;
     use axum::http::Request;
     use cairn_domain::{
-        events::{ProviderConnectionRegistered, ProviderHealthChecked, ProviderMarkedDegraded},
+        events::{ProviderConnectionRegistered, ProviderHealthChecked},
         providers::{
             OperationKind, ProviderBindingSettings, ProviderConnectionStatus, ProviderHealthStatus,
         },
@@ -8640,7 +8610,7 @@ mod provider_health_tests {
         assert!(
             arr[0]["error_message"]
                 .as_str()
-                .map_or(false, |e| e.contains("latency")),
+                .is_some_and(|e| e.contains("latency")),
             "error_message must contain the degradation reason"
         );
         assert_eq!(arr[0]["last_checked_at"], 8_000);

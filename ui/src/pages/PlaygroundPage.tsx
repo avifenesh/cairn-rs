@@ -960,9 +960,9 @@ export function PlaygroundPage() {
     retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
   });
 
-  // When Ollama is unavailable, fall back to models from registered provider connections
-  // (e.g. Cairn Cloud brain/worker).  The stream endpoint already falls through to
-  // openai_compat_brain/worker on the backend, so these model IDs work transparently.
+  // When Ollama is unavailable, fall back to models from registered provider connections.
+  // The stream endpoint already falls through to the configured provider on the backend,
+  // so these model IDs work transparently.
   const { data: connectionsData } = useQuery({
     queryKey: ["provider-connections"],
     queryFn:  () => defaultApi.listProviderConnections("default"),

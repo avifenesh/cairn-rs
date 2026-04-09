@@ -191,7 +191,7 @@ export function SessionsPage() {
           csvRow={r => [r.session_id, r.project.tenant_id, r.project.workspace_id, r.project.project_id, r.state, r.created_at]}
           csvHeaders={['Session ID', 'Tenant', 'Workspace', 'Project', 'State', 'Created At']}
           filename="sessions"
-          emptyText="No sessions yet — click New Session above or run: python3 examples/basic-agent.py"
+          emptyText="No sessions yet — click New Session above to create one."
         />
       )}
     </div>

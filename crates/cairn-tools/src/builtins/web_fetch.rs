@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
 
 const MAX_BODY_BYTES: usize = 32 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 10_000;
@@ -67,9 +67,16 @@ impl ToolHandler for WebFetchTool {
         })
     }
 
-    // Network egress — monitored but no approval required.
     fn execution_class(&self) -> ExecutionClass {
         ExecutionClass::SupervisedProcess
+    }
+
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Execute
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Web
     }
 
     async fn execute(&self, _project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {

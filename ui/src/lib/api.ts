@@ -399,6 +399,10 @@ export function createApiClient(config: ApiClientConfig) {
     listConnectionModels: (id: string): Promise<{ items: unknown[]; has_more: boolean }> =>
       get(`/v1/providers/connections/${encodeURIComponent(id)}/models`),
 
+    /** GET /v1/providers/connections/:id/test — probe the provider and return reachability + latency. */
+    testConnection: (id: string): Promise<{ ok: boolean; latency_ms: number; provider: string; status: number; detail: string }> =>
+      get(`/v1/providers/connections/${encodeURIComponent(id)}/test`),
+
     // ── Default settings ─────────────────────────────────────────────────────
 
     /** PUT /v1/settings/defaults/:scope/:scopeId/:key — persist a tenant-level default. */
