@@ -1183,8 +1183,8 @@ export function ProvidersPage() {
       {/* User-created connections with Add Provider button */}
       <ConnectionsSection onAdd={() => setShowAddModal(true)} />
 
-      {/* Ollama local LLM */}
-      <OllamaSection />
+      {/* Ollama local LLM — only show when OLLAMA_HOST is configured */}
+      {(registryData ?? []).some(p => p.id === "ollama" && p.available) && <OllamaSection />}
 
       {/* Add Provider slide-over */}
       {showAddModal && (
