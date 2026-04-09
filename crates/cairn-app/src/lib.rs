@@ -9388,7 +9388,11 @@ async fn orchestrate_run_handler(
                         latency_ms: Some(d.latency_ms),
                         input_tokens: d.input_tokens,
                         output_tokens: d.output_tokens,
-                        cost_micros: None,
+                        cost_micros: Some(
+                            ((d.input_tokens.unwrap_or(0) as u64).saturating_mul(500)
+                                + (d.output_tokens.unwrap_or(0) as u64).saturating_mul(1500))
+                                / 1_000,
+                        ),
                         completed_at: now,
                         session_id: Some(ctx.session_id.clone()),
                         run_id: Some(ctx.run_id.clone()),
@@ -9407,6 +9411,29 @@ async fn orchestrate_run_handler(
                 ),
             );
             let _ = self.store.append(&[event]).await;
+
+            // Insert into the LlmCallTrace read model so /v1/traces is populated.
+            use cairn_store::projections::LlmCallTraceReadModel;
+            let input_tokens = d.input_tokens.unwrap_or(0);
+            let output_tokens = d.output_tokens.unwrap_or(0);
+            // Approximate cost: $0.50/M input, $1.50/M output (generic estimate).
+            // Multiply first to avoid integer truncation on small token counts.
+            let cost_micros =
+                ((input_tokens as u64).saturating_mul(500) + (output_tokens as u64).saturating_mul(1500))
+                    / 1_000;
+            let trace = cairn_domain::LlmCallTrace {
+                trace_id: call_id,
+                model_id: d.model_id.clone(),
+                prompt_tokens: input_tokens,
+                completion_tokens: output_tokens,
+                latency_ms: d.latency_ms,
+                cost_micros,
+                session_id: Some(ctx.session_id.clone()),
+                run_id: Some(ctx.run_id.clone()),
+                created_at_ms: now,
+                is_error: false,
+            };
+            let _ = self.store.insert_trace(trace).await;
         }
         async fn on_tool_called(
             &self,
