@@ -1,14 +1,17 @@
 # Handoff
 
 ## State
-Orchestrator complete and wired: cairn-orchestrator crate has GatherPhase, DecidePhase (LlmDecidePhase), ExecutePhase (RuntimeExecutePhase), and OrchestratorLoop with all 7 steps. POST /v1/runs/:id/orchestrate in lib.rs uses real services (no stubs). Last commits: cf6f279 (wire RuntimeExecutePhase), 9d70f89 (loop body), 5051563 (foundation). All workspace tests pass, zero warnings.
+Full dogfood pipeline built and tested end-to-end. Bedrock MiniMax M2.5 orchestrates agents that read GitHub issues via gh_list_issues/gh_get_issue tools. 15 crates, 4275+ tests. Brownfield repo at avifenesh/cairn-dogfood (18 issues). Soak test runs unattended with auto-approval.
 
 ## Next
-1. Update HANDOVER.md to mark orchestrator as complete, then final commit.
-2. Provider (agntic.garden) was down this session — smoke test section 21 (orchestrate) skips gracefully with 503. Verify when provider is back.
-3. W1 still needs to test ExecutePhase end-to-end with a live run; W3's HTTP entry point is complete.
+1. **Start the soak test** and let it run for days. Watch /tmp/cairn-soak-log.jsonl.
+2. When clean for 3+ days, tag v0.1.0.
+3. Future: have agent actually write code + open PRs (not just analyze issues).
 
 ## Context
-- `cargo test -p cairn-orchestrator --lib` runs the 30 unit tests; `--test gather_integration` runs the 5 integration tests.
-- RuntimeExecutePhase constructs service impls from state.runtime.store.clone() — all share the same Arc<InMemoryStore>.
-- CAIRN_BRAIN_URL / CAIRN_WORKER_URL env vars are hot-reloadable via DefaultsService (PUT /v1/settings/defaults/system/<key>).
+- Bedrock: `minimax.minimax-m2.5` in `us-west-2`. Routes by model_id: contains `.` without `/`.
+- GH tools: Deferred tier, discovered via tool_search. gh_list_issues/gh_get_issue/gh_search_code (ReadOnly), gh_create_comment (Sensitive).
+- Safe-read list in decide_impl.rs overrides LLM's over-cautious requires_approval for read tools.
+- Soak test auto-approves approval gates so it runs unattended.
+- Start command: `CAIRN_ADMIN_TOKEN=dev-admin-token cargo run -p cairn-app` then `CAIRN_TOKEN=dev-admin-token INTERVAL=300 ./scripts/soak-test.sh`
+- Dogfood repo: avifenesh/cairn-dogfood (Express+React+BullMQ monorepo, 18 issues).
