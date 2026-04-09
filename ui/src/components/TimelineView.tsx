@@ -118,13 +118,13 @@ function Tooltip({ tip, canvasW }: { tip: TooltipInfo; canvasW: number }) {
 
   return (
     <div
-      className="absolute z-20 pointer-events-none bg-zinc-900 border border-zinc-700 rounded-lg
+      className="absolute z-20 pointer-events-none bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 rounded-lg
                  px-3 py-2 shadow-xl text-[11px] space-y-1"
       style={{ left: LABEL_W + tipX, top: tip.y - 4 }}
     >
-      <p className="font-mono text-zinc-200 font-medium">{shortId(tip.id)}</p>
-      <p className="text-zinc-500 capitalize">{tip.state.replace(/_/g, " ")}</p>
-      <p className="text-zinc-600 tabular-nums">{fmtDur(dur)}</p>
+      <p className="font-mono text-gray-800 dark:text-zinc-200 font-medium">{shortId(tip.id)}</p>
+      <p className="text-gray-400 dark:text-zinc-500 capitalize">{tip.state.replace(/_/g, " ")}</p>
+      <p className="text-gray-400 dark:text-zinc-600 tabular-nums">{fmtDur(dur)}</p>
       {!tip.end && <p className="text-blue-400">still running</p>}
     </div>
   );
@@ -137,17 +137,17 @@ export function ZoomSelector({
 }: { value: ZoomLevel; onChange: (z: ZoomLevel) => void }) {
   const levels: ZoomLevel[] = ["15m", "1h", "6h", "24h", "7d"];
   return (
-    <div className="flex items-center rounded border border-zinc-700 overflow-hidden">
+    <div className="flex items-center rounded border border-gray-200 dark:border-zinc-700 overflow-hidden">
       {levels.map(z => (
         <button
           key={z}
           onClick={() => onChange(z)}
           className={clsx(
             "px-2 py-1 text-[11px] font-mono transition-colors",
-            z !== "15m" && "border-l border-zinc-700",
+            z !== "15m" && "border-l border-gray-200 dark:border-zinc-700",
             value === z
-              ? "bg-zinc-700 text-zinc-200"
-              : "text-zinc-500 hover:text-zinc-300",
+              ? "bg-zinc-700 text-gray-800 dark:text-zinc-200"
+              : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
           )}
         >
           {z}
@@ -366,7 +366,7 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
 
   if (visibleRuns.length === 0) {
     return (
-      <div className="flex items-center justify-center h-32 text-[12px] text-zinc-600">
+      <div className="flex items-center justify-center h-32 text-[12px] text-gray-400 dark:text-zinc-600">
         No runs in the selected time window.
       </div>
     );
@@ -379,12 +379,12 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
       <div className="flex overflow-x-hidden">
         {/* Left label column */}
         <div
-          className="shrink-0 border-r border-zinc-800 bg-zinc-950"
+          className="shrink-0 border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950"
           style={{ width: LABEL_W }}
         >
           {/* Axis header cell */}
           <div
-            className="flex items-end px-2 pb-1 text-[9px] text-zinc-700 uppercase tracking-wider border-b border-zinc-800"
+            className="flex items-end px-2 pb-1 text-[9px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider border-b border-gray-200 dark:border-zinc-800"
             style={{ height: AXIS_H }}
           >
             Run
@@ -399,7 +399,7 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
                 style={{ height: ROW_H * (hasTasks ? 2 : 1) }}
                 className={clsx(
                   "flex items-start pt-1.5 gap-1.5 px-2 cursor-pointer hover:bg-white/5 transition-colors",
-                  i % 2 === 0 ? "bg-zinc-950" : "bg-zinc-900/20",
+                  i % 2 === 0 ? "bg-white dark:bg-zinc-950" : "bg-gray-50/20 dark:bg-zinc-900/20",
                 )}
                 onClick={() => { window.location.hash = `run/${run.run_id}`; }}
               >
@@ -408,11 +408,11 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
                   style={{ backgroundColor: RUN_COLORS[run.state]?.stroke ?? "#52525b" }}
                 />
                 <div className="min-w-0">
-                  <p className="text-[10px] font-mono text-zinc-400 truncate">
+                  <p className="text-[10px] font-mono text-gray-500 dark:text-zinc-400 truncate">
                     {shortId(run.run_id)}
                   </p>
                   {hasTasks && (
-                    <p className="text-[9px] text-zinc-700 mt-0.5">
+                    <p className="text-[9px] text-gray-300 dark:text-zinc-700 mt-0.5">
                       {runTasks.length} task{runTasks.length !== 1 ? "s" : ""}
                     </p>
                   )}
@@ -427,7 +427,7 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
           <svg
             width={innerW}
             height={svgH}
-            className="block bg-zinc-950"
+            className="block bg-white dark:bg-zinc-950"
             style={{ minWidth: 300 }}
           >
             {/* ── Time axis ── */}
@@ -475,11 +475,11 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
       )}
 
       {/* Legend */}
-      <div className="flex items-center gap-4 px-3 py-1.5 border-t border-zinc-800 bg-zinc-950 flex-wrap">
+      <div className="flex items-center gap-4 px-3 py-1.5 border-t border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex-wrap">
         {(Object.entries(RUN_COLORS) as [RunState, typeof RUN_COLORS[RunState]][])
           .filter(([s]) => ["running", "completed", "failed", "canceled", "pending"].includes(s))
           .map(([state, col]) => (
-            <span key={state} className="flex items-center gap-1 text-[10px] text-zinc-600">
+            <span key={state} className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-zinc-600">
               <span className="w-3 h-2 rounded-sm" style={{ backgroundColor: col.stroke }} />
               {state}
             </span>
@@ -487,7 +487,7 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
         {tasks && tasks.length > 0 && (
           <>
             <span className="text-zinc-800 text-[10px]">|</span>
-            <span className="text-[10px] text-zinc-700 italic">smaller bars = tasks</span>
+            <span className="text-[10px] text-gray-300 dark:text-zinc-700 italic">smaller bars = tasks</span>
           </>
         )}
       </div>
@@ -521,9 +521,9 @@ export function GanttView({ runStart, runEnd, tasks }: GanttProps) {
   const sorted = [...tasks].sort((a, b) => a.created_at - b.created_at);
 
   return (
-    <div className="rounded-lg border border-zinc-800 overflow-hidden">
+    <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
       {/* Axis */}
-      <div className="relative h-6 bg-zinc-950 border-b border-zinc-800" style={{ paddingLeft: LABEL_W }}>
+      <div className="relative h-6 bg-white dark:bg-zinc-950 border-b border-gray-200 dark:border-zinc-800" style={{ paddingLeft: LABEL_W }}>
         {ticks.map((t, i) => {
           const left = ((t - runStart) / windowMs) * 100;
           return (
@@ -533,7 +533,7 @@ export function GanttView({ runStart, runEnd, tasks }: GanttProps) {
               style={{ left: `${left}%` }}
             >
               <div className="w-px h-2 bg-zinc-700 mb-0.5" />
-              <span className="text-[9px] font-mono text-zinc-600 ml-0.5 whitespace-nowrap">
+              <span className="text-[9px] font-mono text-gray-400 dark:text-zinc-600 ml-0.5 whitespace-nowrap">
                 +{fmtDur(t - runStart)}
               </span>
             </div>
@@ -550,7 +550,7 @@ export function GanttView({ runStart, runEnd, tasks }: GanttProps) {
 
       {/* Task rows */}
       {sorted.length === 0 ? (
-        <div className="px-4 py-6 text-center text-[12px] text-zinc-600">
+        <div className="px-4 py-6 text-center text-[12px] text-gray-400 dark:text-zinc-600">
           No tasks in this run.
         </div>
       ) : (
@@ -567,8 +567,8 @@ export function GanttView({ runStart, runEnd, tasks }: GanttProps) {
             <div
               key={task.task_id}
               className={clsx(
-                "flex items-center border-b border-zinc-800/50 last:border-0 h-8",
-                i % 2 === 0 ? "bg-zinc-900" : "bg-zinc-900/50",
+                "flex items-center border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0 h-8",
+                i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50",
               )}
             >
               {/* Label */}
@@ -577,7 +577,7 @@ export function GanttView({ runStart, runEnd, tasks }: GanttProps) {
                   className="w-1.5 h-1.5 rounded-full shrink-0"
                   style={{ backgroundColor: taskColors.stroke }}
                 />
-                <span className="text-[10px] font-mono text-zinc-400 truncate" title={task.task_id}>
+                <span className="text-[10px] font-mono text-gray-500 dark:text-zinc-400 truncate" title={task.task_id}>
                   {shortId(task.task_id)}
                 </span>
               </div>

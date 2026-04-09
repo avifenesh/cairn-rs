@@ -46,7 +46,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const isDev  = server.startsWith('localhost') || server.startsWith('127.');
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-zinc-950">
+    <div className="flex h-screen w-screen items-center justify-center bg-white dark:bg-zinc-950">
       <div className="w-full max-w-[360px] px-4 flex flex-col items-center">
 
         {/* Wordmark */}
@@ -60,20 +60,20 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             </svg>
           </div>
           <div className="text-center">
-            <h1 className="text-[24px] font-semibold text-zinc-100 tracking-tight leading-none">
+            <h1 className="text-[24px] font-semibold text-gray-900 dark:text-zinc-100 tracking-tight leading-none">
               cairn
             </h1>
-            <p className="text-[13px] text-zinc-500 mt-1.5">Operator Control Plane</p>
+            <p className="text-[13px] text-gray-400 dark:text-zinc-500 mt-1.5">Operator Control Plane</p>
           </div>
         </div>
 
         {/* Card */}
-        <div className="w-full rounded-xl bg-zinc-900 border border-zinc-800 shadow-2xl shadow-black/40 overflow-hidden">
+        <div className="w-full rounded-xl bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 shadow-2xl shadow-black/40 overflow-hidden">
 
           {/* Card header */}
-          <div className="px-6 pt-5 pb-4 border-b border-zinc-800/60">
-            <p className="text-[13px] font-semibold text-zinc-100">Sign in to your workspace</p>
-            <p className="text-[12px] text-zinc-500 mt-0.5">
+          <div className="px-6 pt-5 pb-4 border-b border-gray-200/60 dark:border-zinc-800/60">
+            <p className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">Sign in to your workspace</p>
+            <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-0.5">
               Enter your admin bearer token to continue.
             </p>
           </div>
@@ -81,7 +81,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           {/* Form */}
           <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
             <div className="space-y-1.5">
-              <label htmlFor="token" className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+              <label htmlFor="token" className="block text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
                 Admin Token
               </label>
               <div className="relative">
@@ -93,8 +93,8 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   value={token}
                   onChange={e => { setToken(e.target.value); setError(null); }}
                   placeholder={isDev ? 'dev-admin-token' : 'Bearer token…'}
-                  className="w-full h-9 rounded-lg bg-zinc-950 border border-zinc-700/80
-                             pl-3 pr-9 text-[13px] text-zinc-100 font-mono placeholder-zinc-700
+                  className="w-full h-9 rounded-lg bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-700/80
+                             pl-3 pr-9 text-[13px] text-gray-900 dark:text-zinc-100 font-mono placeholder-zinc-700
                              focus:outline-none focus:border-indigo-500 focus:ring-1
                              focus:ring-indigo-500/50 transition-colors"
                 />
@@ -102,7 +102,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   type="button"
                   tabIndex={-1}
                   onClick={() => setShowToken(v => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
                   aria-label={showToken ? 'Hide token' : 'Show token'}
                 >
                   {showToken ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -120,12 +120,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
             {/* Dev shortcut */}
             {isDev && !token && !error && (
-              <p className="text-[11px] text-zinc-700">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-700">
                 Dev mode — try{' '}
                 <button
                   type="button"
                   onClick={() => setToken('dev-admin-token')}
-                  className="font-mono text-zinc-600 hover:text-indigo-400 underline underline-offset-2 transition-colors"
+                  className="font-mono text-gray-400 dark:text-zinc-600 hover:text-indigo-400 underline underline-offset-2 transition-colors"
                 >
                   dev-admin-token
                 </button>
@@ -138,7 +138,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               disabled={loading || !token.trim()}
               className="w-full h-9 flex items-center justify-center gap-2 rounded-lg
                          bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700
-                         disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed
+                         disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 disabled:cursor-not-allowed
                          text-white text-[13px] font-medium
                          transition-colors focus:outline-none focus:ring-2
                          focus:ring-indigo-500 focus:ring-offset-1 focus:ring-offset-zinc-900"
@@ -150,7 +150,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         </div>
 
         {/* Server info */}
-        <p className="mt-5 text-[11px] text-zinc-700">
+        <p className="mt-5 text-[11px] text-gray-300 dark:text-zinc-700">
           {server}
         </p>
       </div>

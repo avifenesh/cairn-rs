@@ -37,9 +37,9 @@ function StatCard({
 }: { label: string; value: string | number; sub?: string; accent?: string }) {
   return (
     <div className={clsx("border-l-2 pl-3 py-0.5", accent ?? "border-indigo-500")}>
-      <p className="text-[11px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[22px] font-semibold text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-600 mt-0.5">{sub}</p>}
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[22px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -123,7 +123,7 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
 
 const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
   <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-zinc-800",
+    "px-3 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-gray-200 dark:border-zinc-800",
     right ? "text-right" : "text-left",
     hide,
   )}>{ch}</th>
@@ -132,9 +132,9 @@ const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: 
 function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
   if (approvals.length === 0) return (
     <div className="flex flex-col items-center justify-center py-16 gap-2 text-center px-6">
-      <Inbox size={26} className="text-zinc-700" />
-      <p className="text-[13px] text-zinc-600 font-medium">Inbox clear</p>
-      <p className="text-[11px] text-zinc-700 max-w-xs">
+      <Inbox size={26} className="text-gray-300 dark:text-zinc-700" />
+      <p className="text-[13px] text-gray-400 dark:text-zinc-600 font-medium">Inbox clear</p>
+      <p className="text-[11px] text-gray-300 dark:text-zinc-700 max-w-xs">
         No approvals match this filter. Approvals appear here when a run hits a human-in-the-loop gate
         that requires operator sign-off.
       </p>
@@ -143,7 +143,7 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
 
   return (
     <table className="min-w-full text-[13px]">
-      <thead className="bg-zinc-900 sticky top-0 z-10">
+      <thead className="bg-gray-50 dark:bg-zinc-900 sticky top-0 z-10">
         <tr>
           <TH ch="ID" />
           <TH ch="Run"          hide="hidden sm:table-cell" />
@@ -154,29 +154,29 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
           <TH ch="" right />
         </tr>
       </thead>
-      <tbody className="divide-y divide-zinc-800/50">
+      <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
         {approvals.map((a, i) => (
           <tr key={a.approval_id}
             className={clsx(
               "group transition-colors",
-              i % 2 === 0 ? "bg-zinc-900" : "bg-[#111113]",
-              "hover:bg-zinc-800/70",
+              i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]",
+              "hover:bg-gray-100/70 dark:hover:bg-gray-100/70 dark:bg-zinc-800/70",
             )}>
-            <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap" title={a.approval_id}>
+            <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-zinc-300 whitespace-nowrap" title={a.approval_id}>
               <span className="flex items-center gap-1 group/id">{shortId(a.approval_id)}<CopyButton text={a.approval_id} label="Copy approval ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>
             </td>
-            <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px] hidden sm:table-cell">
-              {a.run_id ? <span title={a.run_id}>{shortId(a.run_id)}</span> : <span className="text-zinc-700">—</span>}
+            <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-500 whitespace-nowrap text-[12px] hidden sm:table-cell">
+              {a.run_id ? <span title={a.run_id}>{shortId(a.run_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
             </td>
-            <td className="px-3 py-1.5 font-mono text-zinc-500 whitespace-nowrap text-[12px] hidden md:table-cell">
-              {a.task_id ? <span title={a.task_id}>{shortId(a.task_id)}</span> : <span className="text-zinc-700">—</span>}
+            <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-500 whitespace-nowrap text-[12px] hidden md:table-cell">
+              {a.task_id ? <span title={a.task_id}>{shortId(a.task_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
             </td>
             <td className="px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">
               <span className={clsx(
                 "text-[11px] font-medium rounded px-1.5 py-0.5",
                 a.requirement === "required"
                   ? "text-violet-300 bg-violet-950/40 border border-violet-800/40"
-                  : "text-zinc-400 bg-zinc-800/60 border border-zinc-700",
+                  : "text-gray-500 dark:text-zinc-400 bg-gray-100/60 dark:bg-zinc-800/60 border border-gray-200 dark:border-zinc-700",
               )}>
                 {a.requirement}
               </span>
@@ -184,7 +184,7 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
             <td className="px-3 py-1.5 whitespace-nowrap">
               <DecisionBadge decision={a.decision} />
             </td>
-            <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap tabular-nums hidden md:table-cell" title={fmtTime(a.created_at)}>
+            <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-500 whitespace-nowrap tabular-nums hidden md:table-cell" title={fmtTime(a.created_at)}>
               {fmtRelative(a.created_at)}
             </td>
             <td className="px-3 py-1.5 whitespace-nowrap">
@@ -235,10 +235,10 @@ export function ApprovalsPage() {
   if (isError) return <ErrorFallback error={error} resource="approvals" onRetry={() => void refetch()} />;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900">
+    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       {/* Stat strip */}
       {!isLoading && (
-        <div className="grid grid-cols-3 gap-x-6 gap-y-3 px-5 py-3 border-b border-zinc-800 bg-zinc-900 shrink-0">
+        <div className="grid grid-cols-3 gap-x-6 gap-y-3 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 shrink-0">
           <StatCard
             label="Pending"
             value={pending.length}
@@ -251,7 +251,7 @@ export function ApprovalsPage() {
       )}
 
       {/* Toolbar */}
-      <div className="flex items-center gap-4 px-4 h-10 border-b border-zinc-800 shrink-0 bg-zinc-900">
+      <div className="flex items-center gap-4 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
         {/* Filter tabs */}
         <div className="flex items-center gap-0">
           {TABS.map(t => (
@@ -261,14 +261,14 @@ export function ApprovalsPage() {
               className={clsx(
                 "px-3 h-10 text-[12px] font-medium transition-colors border-b-2",
                 tab === t.id
-                  ? "text-zinc-100 border-indigo-500"
-                  : "text-zinc-500 border-transparent hover:text-zinc-300",
+                  ? "text-gray-900 dark:text-zinc-100 border-indigo-500"
+                  : "text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:text-zinc-300",
               )}
             >
               {t.label}
               <span className={clsx(
                 "ml-1.5 text-[10px] px-1 rounded",
-                tab === t.id ? "text-zinc-400" : "text-zinc-600",
+                tab === t.id ? "text-gray-500 dark:text-zinc-400" : "text-gray-400 dark:text-zinc-600",
               )}>
                 {t.id === "all" ? all.length : t.id === "pending" ? pending.length : resolved.length}
               </span>
@@ -282,18 +282,18 @@ export function ApprovalsPage() {
             <select
               value={refreshInterval.option}
               onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
-              className="appearance-none rounded border border-zinc-700 bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors hover:border-zinc-600"
+              className="appearance-none rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-gray-500 dark:text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors hover:border-zinc-600"
               title="Auto-refresh interval"
             >
               {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
             </select>
             {isFetching
               ? <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none"><RefreshCw size={9} className="animate-spin text-indigo-400" /></span>
-              : <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-600"><RefreshCw size={9} /></span>
+              : <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 dark:text-zinc-600"><RefreshCw size={9} /></span>
             }
           </div>
           <button onClick={() => refetch()} disabled={isFetching}
-            className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
             title="Refresh now"
           >
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
@@ -305,15 +305,15 @@ export function ApprovalsPage() {
       {/* Table */}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         {isLoading ? (
-          <div className="divide-y divide-zinc-800/40">
+          <div className="divide-y divide-gray-200 dark:divide-zinc-800/40">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4 px-4 h-9 animate-pulse">
-                <div className="h-2.5 w-24 rounded bg-zinc-800" />
-                <div className="h-2.5 w-20 rounded bg-zinc-800 hidden sm:block" />
-                <div className="h-2.5 w-20 rounded bg-zinc-800 hidden md:block" />
-                <div className="h-4 w-14 rounded bg-zinc-800 hidden sm:block" />
-                <div className="h-5 w-16 rounded bg-zinc-800" />
-                <div className="ml-auto h-2.5 w-16 rounded bg-zinc-800 hidden md:block" />
+                <div className="h-2.5 w-24 rounded bg-gray-100 dark:bg-zinc-800" />
+                <div className="h-2.5 w-20 rounded bg-gray-100 dark:bg-zinc-800 hidden sm:block" />
+                <div className="h-2.5 w-20 rounded bg-gray-100 dark:bg-zinc-800 hidden md:block" />
+                <div className="h-4 w-14 rounded bg-gray-100 dark:bg-zinc-800 hidden sm:block" />
+                <div className="h-5 w-16 rounded bg-gray-100 dark:bg-zinc-800" />
+                <div className="ml-auto h-2.5 w-16 rounded bg-gray-100 dark:bg-zinc-800 hidden md:block" />
               </div>
             ))}
           </div>

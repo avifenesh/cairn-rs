@@ -33,7 +33,7 @@ const VARIANT_META: Record<Variant, {
   },
   not_found: {
     icon: FileQuestion,
-    iconClass: 'text-zinc-500',
+    iconClass: 'text-gray-400 dark:text-zinc-500',
     title: 'Resource not found',
     hint: 'The requested resource no longer exists or the URL is incorrect.',
   },
@@ -80,15 +80,15 @@ export function ErrorFallback({
 
   if (compact) {
     return (
-      <div className="flex items-center gap-2 px-4 py-3 rounded bg-zinc-900 border border-zinc-800 text-[12px]">
+      <div className="flex items-center gap-2 px-4 py-3 rounded bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 text-[12px]">
         <Icon size={13} className={clsx('shrink-0', iconClass)} />
-        <span className="text-zinc-400 truncate">
+        <span className="text-gray-500 dark:text-zinc-400 truncate">
           {resource ? `Failed to load ${resource}: ` : ''}{message}
         </span>
         {onRetry && (
           <button
             onClick={onRetry}
-            className="ml-auto flex items-center gap-1 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
+            className="ml-auto flex items-center gap-1 text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors shrink-0"
           >
             <RefreshCw size={11} />
             Retry
@@ -100,19 +100,19 @@ export function ErrorFallback({
 
   return (
     <div className="flex flex-col items-center justify-center min-h-48 gap-4 p-8 text-center">
-      <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+      <div className="w-10 h-10 rounded-full bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 flex items-center justify-center">
         <Icon size={18} className={iconClass} />
       </div>
 
       <div className="space-y-1">
-        <p className="text-[13px] font-medium text-zinc-300">
+        <p className="text-[13px] font-medium text-gray-700 dark:text-zinc-300">
           {resource ? `Failed to load ${resource}` : title}
         </p>
-        <p className="text-[12px] text-zinc-600 max-w-sm">{hint}</p>
+        <p className="text-[12px] text-gray-400 dark:text-zinc-600 max-w-sm">{hint}</p>
       </div>
 
       {/* Error detail */}
-      <p className="text-[11px] font-mono text-zinc-700 bg-zinc-900 border border-zinc-800
+      <p className="text-[11px] font-mono text-gray-300 dark:text-zinc-700 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800
                     rounded px-3 py-1.5 max-w-sm break-all">
         {message}
       </p>
@@ -120,8 +120,8 @@ export function ErrorFallback({
       {onRetry && (
         <button
           onClick={onRetry}
-          className="flex items-center gap-1.5 rounded bg-zinc-800 hover:bg-zinc-700
-                     border border-zinc-700 text-zinc-300 text-[12px] font-medium
+          className="flex items-center gap-1.5 rounded bg-gray-100 dark:bg-zinc-800 hover:bg-gray-200 dark:hover:bg-zinc-700
+                     border border-gray-200 dark:border-zinc-700 text-gray-700 dark:text-zinc-300 text-[12px] font-medium
                      px-3 py-1.5 transition-colors"
         >
           <RefreshCw size={12} />

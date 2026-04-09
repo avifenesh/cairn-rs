@@ -152,7 +152,7 @@ function matches(query: string, text: string): boolean {
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex items-center justify-center min-w-[1.375rem] h-5 rounded bg-zinc-800 px-1 text-[10px] font-mono text-zinc-400 ring-1 ring-inset ring-zinc-700">
+    <kbd className="inline-flex items-center justify-center min-w-[1.375rem] h-5 rounded bg-gray-100 dark:bg-zinc-800 px-1 text-[10px] font-mono text-gray-500 dark:text-zinc-400 ring-1 ring-inset ring-gray-300 dark:ring-zinc-700">
       {children}
     </kbd>
   );
@@ -187,7 +187,7 @@ function OptionRow({
     (isPage || isAction) ? option.shortcut : undefined;
 
   const iconBg = isPage
-    ? 'bg-zinc-800 text-zinc-300'
+    ? 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300'
     : isAction
       ? 'bg-indigo-950 text-indigo-400'
       : isRun
@@ -201,8 +201,8 @@ function OptionRow({
       className={clsx(
         'w-full flex items-center gap-3 px-3 py-2 text-left rounded-md transition-colors',
         active
-          ? 'bg-zinc-800 ring-1 ring-inset ring-zinc-700'
-          : 'hover:bg-zinc-800/60',
+          ? 'bg-gray-100 dark:bg-zinc-800 ring-1 ring-inset ring-gray-300 dark:ring-zinc-700'
+          : 'hover:bg-gray-100/60 dark:hover:bg-zinc-800/60',
       )}
     >
       {/* Icon */}
@@ -215,8 +215,8 @@ function OptionRow({
 
       {/* Label + description */}
       <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-medium text-zinc-100 truncate">{option.label}</p>
-        <p className="text-[11px] text-zinc-500 truncate">{option.description}</p>
+        <p className="text-[13px] font-medium text-gray-900 dark:text-zinc-100 truncate">{option.label}</p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-500 truncate">{option.description}</p>
       </div>
 
       {/* Shortcut hint */}
@@ -225,7 +225,7 @@ function OptionRow({
           {shortcut.map((k, i) => <Kbd key={i}>{k}</Kbd>)}
         </span>
       ) : active ? (
-        <ArrowRight size={13} className="shrink-0 text-zinc-500" />
+        <ArrowRight size={13} className="shrink-0 text-gray-400 dark:text-zinc-500" />
       ) : null}
     </button>
   );
@@ -235,7 +235,7 @@ function OptionRow({
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-600 select-none">
+    <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-zinc-600 select-none">
       {children}
     </p>
   );
@@ -260,21 +260,21 @@ function ShortcutsHelp({ onClose }: { onClose: () => void }) {
       aria-hidden="false"
     >
       <div
-        className="w-full max-w-md rounded-xl bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden"
+        className="w-full max-w-md rounded-xl bg-gray-50 dark:bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-label="Keyboard shortcuts"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-zinc-800">
           <div className="flex items-center gap-2">
-            <Keyboard size={14} className="text-zinc-500" />
-            <span className="text-[13px] font-medium text-zinc-200">Keyboard Shortcuts</span>
+            <Keyboard size={14} className="text-gray-400 dark:text-zinc-500" />
+            <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Keyboard Shortcuts</span>
           </div>
           <button
             onClick={onClose}
             aria-label="Close shortcuts"
-            className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
           >
             <X size={14} />
           </button>
@@ -284,13 +284,13 @@ function ShortcutsHelp({ onClose }: { onClose: () => void }) {
         <div className="p-4 space-y-4">
           {SHORTCUT_SECTIONS.map((section) => (
             <div key={section.title}>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600 mb-2">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-zinc-600 mb-2">
                 {section.title}
               </p>
               <div className="space-y-1">
                 {section.items.map(({ keys, label }) => (
                   <div key={label} className="flex items-center justify-between py-1">
-                    <span className="text-[13px] text-zinc-400">{label}</span>
+                    <span className="text-[13px] text-gray-500 dark:text-zinc-400">{label}</span>
                     <span className="flex items-center gap-0.5">
                       {keys.map((k, i) => <Kbd key={i}>{k}</Kbd>)}
                     </span>
@@ -302,8 +302,8 @@ function ShortcutsHelp({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2.5 border-t border-zinc-800 text-center">
-          <span className="text-[11px] text-zinc-600">
+        <div className="px-4 py-2.5 border-t border-gray-200 dark:border-zinc-800 text-center">
+          <span className="text-[11px] text-gray-400 dark:text-zinc-600">
             Press <Kbd>?</Kbd> or <Kbd>Esc</Kbd> to close
           </span>
         </div>
@@ -515,14 +515,14 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
           onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
         >
           <div
-            className="w-full max-w-lg rounded-xl bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden"
+            className="w-full max-w-lg rounded-xl bg-gray-50 dark:bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden"
             role="dialog"
             aria-modal="true"
             aria-label="Command palette"
           >
             {/* Search row */}
-            <div className="flex items-center gap-3 px-3.5 py-3 border-b border-zinc-800">
-              <Search size={15} className="shrink-0 text-zinc-500" />
+            <div className="flex items-center gap-3 px-3.5 py-3 border-b border-gray-200 dark:border-zinc-800">
+              <Search size={15} className="shrink-0 text-gray-400 dark:text-zinc-500" />
               <input
                 ref={inputRef}
                 value={query}
@@ -533,13 +533,13 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
                 aria-autocomplete="list"
                 aria-expanded={allOptions.length > 0}
                 role="combobox"
-                className="flex-1 bg-transparent text-[13px] text-zinc-100 placeholder-zinc-600 outline-none"
+                className="flex-1 bg-transparent text-[13px] text-gray-900 dark:text-zinc-100 placeholder-zinc-600 outline-none"
               />
               {query ? (
                 <button
                   onClick={() => { setQuery(''); setActiveIdx(0); inputRef.current?.focus(); }}
                   aria-label="Clear search"
-                  className="shrink-0 p-0.5 rounded text-zinc-600 hover:text-zinc-400 transition-colors"
+                  className="shrink-0 p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
                 >
                   <X size={13} />
                 </button>
@@ -551,7 +551,7 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
             {/* Results */}
             <div className="max-h-[26rem] overflow-y-auto p-1.5">
               {allOptions.length === 0 && (
-                <p className="py-8 text-center text-[13px] text-zinc-600">
+                <p className="py-8 text-center text-[13px] text-gray-400 dark:text-zinc-600">
                   No results for &ldquo;{query}&rdquo;
                 </p>
               )}
@@ -603,7 +603,7 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
             </div>
 
             {/* Footer */}
-            <div className="flex items-center gap-3 px-4 py-2 border-t border-zinc-800 text-[10px] text-zinc-600 font-mono select-none">
+            <div className="flex items-center gap-3 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 text-[10px] text-gray-400 dark:text-zinc-600 font-mono select-none">
               <span className="flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> navigate</span>
               <span className="flex items-center gap-1"><Kbd>↵</Kbd> select</span>
               <span className="flex items-center gap-1"><Kbd>?</Kbd> shortcuts</span>

@@ -50,7 +50,7 @@ export function HelpTooltip({ text, placement = 'top', className }: HelpTooltipP
       <span
         className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full
                    text-[9px] font-bold leading-none cursor-help select-none
-                   bg-zinc-700/60 text-zinc-500
+                   bg-zinc-700/60 text-gray-400 dark:text-zinc-500
                    group-hover/tooltip:bg-indigo-500/20 group-hover/tooltip:text-indigo-400
                    transition-colors"
         aria-hidden="true"
@@ -62,8 +62,8 @@ export function HelpTooltip({ text, placement = 'top', className }: HelpTooltipP
       <span
         className={clsx(
           'absolute z-50 w-max max-w-[220px] px-2.5 py-1.5',
-          'rounded-md bg-zinc-800 border border-zinc-700/60',
-          'text-[11px] text-zinc-300 leading-snug shadow-lg shadow-black/40',
+          'rounded-md bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700/60',
+          'text-[11px] text-gray-700 dark:text-zinc-300 leading-snug shadow-lg shadow-black/40',
           'pointer-events-none select-none whitespace-normal',
           // Visibility — hidden until hover, then fade in.
           'opacity-0 group-hover/tooltip:opacity-100',

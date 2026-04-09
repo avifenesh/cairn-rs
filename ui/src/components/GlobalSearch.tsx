@@ -217,7 +217,7 @@ function ResultRow({
       onClick={onSelect}
       className={clsx(
         'w-full flex items-center gap-3 px-3 py-2 text-left rounded-md transition-colors',
-        active ? 'bg-zinc-800 ring-1 ring-inset ring-zinc-700' : 'hover:bg-zinc-800/60',
+        active ? 'bg-gray-100 dark:bg-zinc-800 ring-1 ring-inset ring-gray-300 dark:ring-zinc-700' : 'hover:bg-gray-100/60 dark:hover:bg-zinc-800/60',
       )}
     >
       {/* Type badge */}
@@ -231,10 +231,10 @@ function ResultRow({
 
       {/* Title + subtitle */}
       <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-mono text-zinc-200 truncate" title={result.id}>
+        <p className="text-[13px] font-mono text-gray-800 dark:text-zinc-200 truncate" title={result.id}>
           {result.title}
         </p>
-        <p className="text-[11px] text-zinc-500 truncate">{result.subtitle}</p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-500 truncate">{result.subtitle}</p>
       </div>
 
       {/* Meta (state/latency) */}
@@ -246,7 +246,7 @@ function ResultRow({
           result.meta === 'running'  ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40' :
           result.meta === 'approved' ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40' :
           result.meta === 'rejected' ? 'bg-red-950/60 text-red-400 border border-red-800/40' :
-                                       'bg-zinc-800/60 text-zinc-500 border border-zinc-700',
+                                       'bg-gray-100/60 dark:bg-zinc-800/60 text-gray-400 dark:text-zinc-500 border border-gray-200 dark:border-zinc-700',
         )}>
           {result.meta}
         </span>
@@ -378,23 +378,23 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="w-full max-w-2xl rounded-xl bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden"
+        className="w-full max-w-2xl rounded-xl bg-gray-50 dark:bg-zinc-900 ring-1 ring-zinc-800 shadow-2xl shadow-black/60 overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-label="Global search"
       >
         {/* Search input */}
-        <div className="flex items-center gap-3 px-3.5 py-3 border-b border-zinc-800">
+        <div className="flex items-center gap-3 px-3.5 py-3 border-b border-gray-200 dark:border-zinc-800">
           {onBack && (
             <button
               onClick={onBack}
               aria-label="Back to commands"
-              className="shrink-0 p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+              className="shrink-0 p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
             >
               <ArrowLeft size={14} />
             </button>
           )}
-          <Search size={15} className="shrink-0 text-zinc-500" />
+          <Search size={15} className="shrink-0 text-gray-400 dark:text-zinc-500" />
           <input
             ref={inputRef}
             value={query}
@@ -402,16 +402,16 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
             onKeyDown={handleKeyDown}
             placeholder="Search runs, sessions, tasks, approvals, traces, prompts…"
             aria-label="Search entities"
-            className="flex-1 bg-transparent text-[13px] text-zinc-100 placeholder-zinc-600 outline-none"
+            className="flex-1 bg-transparent text-[13px] text-gray-900 dark:text-zinc-100 placeholder-zinc-600 outline-none"
           />
           {isLoading && enabled && (
-            <Loader2 size={13} className="shrink-0 text-zinc-600 animate-spin" />
+            <Loader2 size={13} className="shrink-0 text-gray-400 dark:text-zinc-600 animate-spin" />
           )}
           {query && (
             <button
               onClick={() => { setQuery(''); setActiveIdx(0); inputRef.current?.focus(); }}
               aria-label="Clear search"
-              className="shrink-0 p-0.5 rounded text-zinc-600 hover:text-zinc-400 transition-colors"
+              className="shrink-0 p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
             >
               ×
             </button>
@@ -423,25 +423,25 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
           {!enabled ? (
             /* Prompt when query is too short */
             <div className="py-10 flex flex-col items-center gap-2 text-center">
-              <Search size={22} className="text-zinc-700" />
-              <p className="text-[13px] text-zinc-600">
+              <Search size={22} className="text-gray-300 dark:text-zinc-700" />
+              <p className="text-[13px] text-gray-400 dark:text-zinc-600">
                 Type at least 2 characters to search
               </p>
-              <p className="text-[11px] text-zinc-700">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-700">
                 Searches across runs, sessions, tasks, approvals, traces and prompts
               </p>
             </div>
           ) : isLoading ? (
-            <div className="py-10 flex items-center justify-center gap-2 text-zinc-600">
+            <div className="py-10 flex items-center justify-center gap-2 text-gray-400 dark:text-zinc-600">
               <Loader2 size={14} className="animate-spin" />
               <span className="text-[13px]">Searching…</span>
             </div>
           ) : totalResults === 0 ? (
             <div className="py-10 flex flex-col items-center gap-2 text-center">
-              <p className="text-[13px] text-zinc-600">
+              <p className="text-[13px] text-gray-400 dark:text-zinc-600">
                 No results for &ldquo;{debouncedQuery}&rdquo;
               </p>
-              <p className="text-[11px] text-zinc-700">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-700">
                 Try a shorter query or different entity type
               </p>
             </div>
@@ -458,11 +458,11 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
                   <div key={type} className="mb-1">
                     {/* Group header */}
                     <div className="flex items-center gap-2 px-3 py-1">
-                      <cfg.icon size={11} className="text-zinc-600 shrink-0" />
-                      <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">
+                      <cfg.icon size={11} className="text-gray-400 dark:text-zinc-600 shrink-0" />
+                      <span className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-widest">
                         {cfg.label}
                       </span>
-                      <span className="text-[10px] text-zinc-700">{items.length}</span>
+                      <span className="text-[10px] text-gray-300 dark:text-zinc-700">{items.length}</span>
                     </div>
                     {/* Results */}
                     {items.map((result, i) => (
@@ -482,7 +482,7 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
 
         {/* Footer */}
         {enabled && totalResults > 0 && (
-          <div className="flex items-center gap-3 px-4 py-2 border-t border-zinc-800 text-[10px] text-zinc-600 font-mono select-none">
+          <div className="flex items-center gap-3 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 text-[10px] text-gray-400 dark:text-zinc-600 font-mono select-none">
             <span>{totalResults} result{totalResults !== 1 ? 's' : ''}</span>
             <span className="flex items-center gap-1">↑↓ navigate</span>
             <span className="flex items-center gap-1">↵ open</span>

@@ -41,10 +41,10 @@ export interface ToastAPI {
 const VARIANT: Record<ToastVariant, {
   border: string; icon: typeof CheckCircle2; iconCls: string; textCls: string;
 }> = {
-  success: { border: 'border-l-emerald-500', icon: CheckCircle2,  iconCls: 'text-emerald-400', textCls: 'text-zinc-200' },
-  error:   { border: 'border-l-red-500',     icon: XCircle,        iconCls: 'text-red-400',     textCls: 'text-zinc-200' },
-  warning: { border: 'border-l-amber-500',   icon: AlertTriangle,  iconCls: 'text-amber-400',   textCls: 'text-zinc-200' },
-  info:    { border: 'border-l-blue-500',    icon: Info,           iconCls: 'text-blue-400',    textCls: 'text-zinc-300' },
+  success: { border: 'border-l-emerald-500', icon: CheckCircle2,  iconCls: 'text-emerald-400', textCls: 'text-gray-800 dark:text-zinc-200' },
+  error:   { border: 'border-l-red-500',     icon: XCircle,        iconCls: 'text-red-400',     textCls: 'text-gray-800 dark:text-zinc-200' },
+  warning: { border: 'border-l-amber-500',   icon: AlertTriangle,  iconCls: 'text-amber-400',   textCls: 'text-gray-800 dark:text-zinc-200' },
+  info:    { border: 'border-l-blue-500',    icon: Info,           iconCls: 'text-blue-400',    textCls: 'text-gray-700 dark:text-zinc-300' },
 };
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ function ToastCard({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => vo
       className={clsx(
         // base
         'pointer-events-auto flex items-start gap-3',
-        'bg-zinc-900 border border-zinc-800 border-l-2 rounded-lg px-4 py-3',
+        'bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg px-4 py-3',
         'shadow-lg shadow-black/40',
         // slide-in from right (Tailwind v4 animation or fallback)
         'translate-x-0 opacity-100',
@@ -124,7 +124,7 @@ function ToastCard({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => vo
       </p>
       <button
         onClick={onDismiss}
-        className="shrink-0 mt-0.5 text-zinc-600 hover:text-zinc-400 transition-colors"
+        className="shrink-0 mt-0.5 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
         aria-label="Dismiss"
       >
         <X size={12} />

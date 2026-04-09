@@ -30,15 +30,15 @@ export function TableSkeleton({ rows = 6, cols = 5, className }: TableSkeletonPr
         <div
           key={ri}
           className={clsx(
-            'flex items-center gap-4 px-4 h-9 border-b border-zinc-800/50',
-            ri % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-900/50',
+            'flex items-center gap-4 px-4 h-9 border-b border-gray-200/50 dark:border-zinc-800/50',
+            ri % 2 === 0 ? 'bg-gray-50 dark:bg-zinc-900' : 'bg-gray-50/50 dark:bg-zinc-900/50',
           )}
         >
           {Array.from({ length: cols }).map((_, ci) => (
             <div
               key={ci}
               className={clsx(
-                'h-2 rounded-sm bg-zinc-800',
+                'h-2 rounded-sm bg-gray-100 dark:bg-zinc-800',
                 widths[ci % widths.length],
                 ci === cols - 1 && 'ml-auto', // last col right-aligned
               )}
@@ -63,10 +63,10 @@ export function CardSkeleton({ count = 4, className }: CardSkeletonProps) {
       {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}
-          className="bg-zinc-900 border border-zinc-800 border-l-2 border-l-zinc-700 rounded-lg p-4 animate-pulse"
+          className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-zinc-700 rounded-lg p-4 animate-pulse"
         >
-          <div className="h-2.5 w-20 rounded-sm bg-zinc-800 mb-3" />
-          <div className="h-6 w-14 rounded-sm bg-zinc-800" />
+          <div className="h-2.5 w-20 rounded-sm bg-gray-100 dark:bg-zinc-800 mb-3" />
+          <div className="h-6 w-14 rounded-sm bg-gray-100 dark:bg-zinc-800" />
         </div>
       ))}
     </div>
@@ -83,7 +83,7 @@ interface SpinnerProps {
 
 export function Spinner({ size = 16, className, label }: SpinnerProps) {
   return (
-    <span className={clsx('inline-flex items-center gap-2 text-zinc-500', className)}>
+    <span className={clsx('inline-flex items-center gap-2 text-gray-400 dark:text-zinc-500', className)}>
       <Loader2 size={size} className="animate-spin shrink-0" />
       {label && <span className="text-xs">{label}</span>}
     </span>
@@ -105,9 +105,9 @@ export function EmptyState({ title, sub, className }: EmptyStateProps) {
       className,
     )}>
       {/* Minimal geometric illustration */}
-      <div className="w-8 h-8 rounded-lg border-2 border-zinc-800 border-dashed mb-2 opacity-50" />
-      <p className="text-sm font-medium text-zinc-500">{title}</p>
-      {sub && <p className="text-[11px] text-zinc-600 max-w-xs">{sub}</p>}
+      <div className="w-8 h-8 rounded-lg border-2 border-gray-200 dark:border-zinc-800 border-dashed mb-2 opacity-50" />
+      <p className="text-sm font-medium text-gray-400 dark:text-zinc-500">{title}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 max-w-xs">{sub}</p>}
     </div>
   );
 }
@@ -120,7 +120,7 @@ interface PageLoadingProps {
 
 export function PageLoading({ label = 'Loading…' }: PageLoadingProps) {
   return (
-    <div className="flex items-center justify-center min-h-48 gap-2 text-zinc-600 text-xs">
+    <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600 text-xs">
       <Loader2 size={14} className="animate-spin" />
       {label}
     </div>

@@ -48,7 +48,7 @@ export function CopyButton({
       title={label}
       className={clsx(
         'inline-flex items-center justify-center rounded transition-colors',
-        'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-700/40',
+        'text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700/40',
         'p-0.5',
         className,
       )}

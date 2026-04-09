@@ -51,15 +51,15 @@ export class ErrorBoundary extends Component<Props, State> {
       <div className="flex items-start justify-center min-h-48 pt-12 px-6">
         <div className="w-full max-w-xl">
           {/* Card */}
-          <div className="rounded-lg bg-zinc-900 border border-zinc-800 border-l-2 border-l-red-500 overflow-hidden">
+          <div className="rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-red-500 overflow-hidden">
             {/* Header */}
-            <div className="flex items-start gap-3 px-4 py-3.5 border-b border-zinc-800">
+            <div className="flex items-start gap-3 px-4 py-3.5 border-b border-gray-200 dark:border-zinc-800">
               <AlertTriangle size={15} className="text-red-400 shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium text-zinc-200">
+                <p className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
                   {name ? `${name} failed to render` : 'Something went wrong'}
                 </p>
-                <p className="text-[12px] text-zinc-500 mt-0.5 break-words">
+                <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-0.5 break-words">
                   {error.message || 'An unexpected error occurred.'}
                 </p>
               </div>
@@ -67,11 +67,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
             {/* Stack trace (collapsible) */}
             {error.stack && (
-              <div className="border-b border-zinc-800">
+              <div className="border-b border-gray-200 dark:border-zinc-800">
                 <button
                   onClick={this.toggleStack}
-                  className="w-full flex items-center gap-1.5 px-4 py-2 text-[11px] text-zinc-600
-                             hover:text-zinc-400 hover:bg-zinc-800/40 transition-colors text-left"
+                  className="w-full flex items-center gap-1.5 px-4 py-2 text-[11px] text-gray-400 dark:text-zinc-600
+                             hover:text-gray-500 dark:text-zinc-400 hover:bg-gray-100/40 dark:hover:bg-gray-100/40 dark:bg-zinc-800/40 transition-colors text-left"
                 >
                   <ChevronDown
                     size={11}
@@ -80,7 +80,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   {showStack ? 'Hide' : 'Show'} stack trace
                 </button>
                 {showStack && (
-                  <pre className="px-4 pb-3 text-[10px] font-mono text-zinc-600 leading-relaxed
+                  <pre className="px-4 pb-3 text-[10px] font-mono text-gray-400 dark:text-zinc-600 leading-relaxed
                                   overflow-x-auto whitespace-pre-wrap break-all">
                     {error.stack}
                   </pre>
@@ -92,14 +92,14 @@ export class ErrorBoundary extends Component<Props, State> {
             <div className="flex items-center gap-3 px-4 py-3">
               <button
                 onClick={this.reset}
-                className="flex items-center gap-1.5 rounded bg-zinc-800 hover:bg-zinc-700
-                           border border-zinc-700 text-zinc-300 text-[12px] font-medium
+                className="flex items-center gap-1.5 rounded bg-gray-100 dark:bg-zinc-800 hover:bg-gray-200 dark:hover:bg-zinc-700
+                           border border-gray-200 dark:border-zinc-700 text-gray-700 dark:text-zinc-300 text-[12px] font-medium
                            px-3 py-1.5 transition-colors"
               >
                 <RotateCcw size={12} />
                 Try again
               </button>
-              <p className="text-[11px] text-zinc-700 ml-auto">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-700 ml-auto">
                 Reload the page if the problem persists.
               </p>
             </div>

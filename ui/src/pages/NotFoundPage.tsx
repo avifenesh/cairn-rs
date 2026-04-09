@@ -11,7 +11,7 @@ export function NotFoundPage({ onNavigate }: NotFoundPageProps) {
   }
 
   return (
-    <div className="flex h-full items-center justify-center bg-zinc-950">
+    <div className="flex h-full items-center justify-center bg-white dark:bg-zinc-950">
       <div className="flex flex-col items-center gap-6 text-center select-none">
         {/* Large 404 */}
         <div className="relative">
@@ -25,8 +25,8 @@ export function NotFoundPage({ onNavigate }: NotFoundPageProps) {
 
         {/* Message */}
         <div className="space-y-1.5">
-          <p className="text-[16px] font-semibold text-zinc-300">Page not found</p>
-          <p className="text-[13px] text-zinc-600 max-w-xs">
+          <p className="text-[16px] font-semibold text-gray-700 dark:text-zinc-300">Page not found</p>
+          <p className="text-[13px] text-gray-400 dark:text-zinc-600 max-w-xs">
             The page you're looking for doesn't exist or was moved.
           </p>
         </div>

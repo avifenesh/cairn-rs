@@ -50,7 +50,7 @@ export function BarChart({
 
   if (visible.length === 0) {
     return (
-      <div className={clsx("text-[11px] text-zinc-600 italic py-2 text-center", className)}>
+      <div className={clsx("text-[11px] text-gray-400 dark:text-zinc-600 italic py-2 text-center", className)}>
         No data
       </div>
     );
@@ -75,7 +75,7 @@ export function BarChart({
           >
             {/* Label */}
             <span
-              className="text-[11px] text-zinc-400 truncate shrink-0 text-right"
+              className="text-[11px] text-gray-500 dark:text-zinc-400 truncate shrink-0 text-right"
               style={{ width: labelW }}
               title={item.label}
             >
@@ -94,19 +94,19 @@ export function BarChart({
               />
               {/* Track background */}
               <div
-                className="absolute inset-0 rounded-full bg-zinc-800"
+                className="absolute inset-0 rounded-full bg-gray-100 dark:bg-zinc-800"
                 style={{ zIndex: -1 }}
               />
             </div>
 
             {/* Value */}
             <span
-              className="text-[11px] font-mono tabular-nums text-zinc-500 shrink-0 text-right"
+              className="text-[11px] font-mono tabular-nums text-gray-400 dark:text-zinc-500 shrink-0 text-right"
               style={{ minWidth: 48 }}
             >
               {formatValue(item.value)}
               {item.sublabel && (
-                <span className="text-zinc-700 ml-1">{item.sublabel}</span>
+                <span className="text-gray-300 dark:text-zinc-700 ml-1">{item.sublabel}</span>
               )}
             </span>
           </div>
@@ -114,7 +114,7 @@ export function BarChart({
       })}
 
       {items.length > maxItems && (
-        <p className="text-[10px] text-zinc-700 text-right pt-1">
+        <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-right pt-1">
           +{items.length - maxItems} more
         </p>
       )}

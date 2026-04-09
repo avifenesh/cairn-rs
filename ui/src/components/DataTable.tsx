@@ -88,7 +88,7 @@ function triggerDownload(csv: string, filename: string) {
 // ── Sort icon ─────────────────────────────────────────────────────────────────
 
 function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) return <ChevronsUpDown size={11} className="text-zinc-700 ml-1 inline shrink-0" />;
+  if (!active) return <ChevronsUpDown size={11} className="text-gray-300 dark:text-zinc-700 ml-1 inline shrink-0" />;
   return dir === 'asc'
     ? <ChevronUp   size={11} className="text-indigo-400 ml-1 inline shrink-0" />
     : <ChevronDown size={11} className="text-indigo-400 ml-1 inline shrink-0" />;
@@ -177,20 +177,20 @@ export function DataTable<T>({
         {/* Search */}
         {filterFn && (
           <div className="relative flex-1 max-w-xs">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 pointer-events-none" />
             <input
               value={query}
               onChange={e => handleFilter(e.target.value)}
               placeholder="Filter…"
-              className="w-full h-8 pl-7 pr-3 rounded-md bg-zinc-900 border border-zinc-800
-                         text-xs text-zinc-300 placeholder-zinc-600
+              className="w-full h-8 pl-7 pr-3 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800
+                         text-xs text-gray-700 dark:text-zinc-300 placeholder-zinc-600
                          focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500
                          transition-colors"
             />
           </div>
         )}
 
-        <span className="text-[11px] text-zinc-600 ml-1">
+        <span className="text-[11px] text-gray-400 dark:text-zinc-600 ml-1">
           {filtered.length !== data.length
             ? `${filtered.length} / ${data.length}`
             : `${data.length} rows`}
@@ -201,8 +201,8 @@ export function DataTable<T>({
           <button
             onClick={handleExport}
             className="ml-auto flex items-center gap-1.5 h-8 px-2.5 rounded-md
-                       bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-500
-                       hover:bg-white/5 hover:text-zinc-300 transition-colors"
+                       bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 text-[11px] text-gray-400 dark:text-zinc-500
+                       hover:bg-white/5 hover:text-gray-700 dark:text-zinc-300 transition-colors"
             title="Export filtered data as CSV"
           >
             <Download size={12} /> CSV
@@ -211,9 +211,9 @@ export function DataTable<T>({
       </div>
 
       {/* ── Table ────────────────────────────────────────────────────────── */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+      <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
         {/* Header */}
-        <div className="border-b border-zinc-800 bg-zinc-950">
+        <div className="border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
           <table className="w-full">
             <thead>
               <tr>
@@ -225,8 +225,8 @@ export function DataTable<T>({
                       key={col.key}
                       onClick={sortable ? () => handleSort(col.key) : undefined}
                       className={clsx(
-                        'px-4 h-8 text-left text-[10px] font-medium text-zinc-600 uppercase tracking-wider select-none whitespace-nowrap',
-                        sortable && 'cursor-pointer hover:text-zinc-400 transition-colors',
+                        'px-4 h-8 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider select-none whitespace-nowrap',
+                        sortable && 'cursor-pointer hover:text-gray-500 dark:text-zinc-400 transition-colors',
                         active && 'text-indigo-400',
                         col.headClass,
                       )}
@@ -243,7 +243,7 @@ export function DataTable<T>({
 
         {/* Body */}
         {pageRows.length === 0 ? (
-          <div className="px-4 py-12 text-center text-xs text-zinc-600">{emptyText}</div>
+          <div className="px-4 py-12 text-center text-xs text-gray-400 dark:text-zinc-600">{emptyText}</div>
         ) : (
           <table className="w-full">
             <tbody>
@@ -258,15 +258,15 @@ export function DataTable<T>({
                   key={i}
                   onClick={() => onRowClick?.(row, absIdx)}
                   className={clsx(
-                    'border-b border-zinc-800/50 last:border-0 transition-colors',
+                    'border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0 transition-colors',
                     onRowClick ? 'cursor-pointer' : '',
                     isActive
                       ? 'bg-zinc-700/70 ring-1 ring-inset ring-zinc-500/60'
                       : isSelected
                         ? 'bg-indigo-950/40 hover:bg-indigo-950/60'
                         : i % 2 === 0
-                          ? 'bg-zinc-900 hover:bg-white/5'
-                          : 'bg-zinc-900/50 hover:bg-white/5',
+                          ? 'bg-gray-50 dark:bg-zinc-900 hover:bg-white/5'
+                          : 'bg-gray-50/50 dark:bg-zinc-900/50 hover:bg-white/5',
                   )}
                 >
                   {columns.map(col => (
@@ -286,11 +286,11 @@ export function DataTable<T>({
       {sorted.length > 10 && (
         <div className="flex items-center justify-between mt-2 px-1">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-zinc-600">Rows per page</span>
+            <span className="text-[11px] text-gray-400 dark:text-zinc-600">Rows per page</span>
             <select
               value={pageSize}
               onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }}
-              className="h-7 px-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400
+              className="h-7 px-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 text-[11px] text-gray-500 dark:text-zinc-400
                          focus:outline-none focus:border-indigo-500 transition-colors"
             >
               {PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
@@ -298,26 +298,26 @@ export function DataTable<T>({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-zinc-600">
+            <span className="text-[11px] text-gray-400 dark:text-zinc-600">
               {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, sorted.length)} of {sorted.length}
             </span>
             <button
               onClick={() => setPage(p => Math.max(0, p - 1))}
               disabled={safePage === 0}
-              className="flex items-center justify-center w-7 h-7 rounded-md bg-zinc-900 border border-zinc-800
-                         text-zinc-500 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed
+              className="flex items-center justify-center w-7 h-7 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800
+                         text-gray-400 dark:text-zinc-500 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed
                          transition-colors"
             >
               <ChevronLeft size={13} />
             </button>
-            <span className="text-[11px] text-zinc-500 tabular-nums min-w-[3rem] text-center">
+            <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums min-w-[3rem] text-center">
               {safePage + 1} / {totalPages}
             </span>
             <button
               onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
               disabled={safePage >= totalPages - 1}
-              className="flex items-center justify-center w-7 h-7 rounded-md bg-zinc-900 border border-zinc-800
-                         text-zinc-500 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed
+              className="flex items-center justify-center w-7 h-7 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800
+                         text-gray-400 dark:text-zinc-500 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed
                          transition-colors"
             >
               <ChevronRight size={13} />

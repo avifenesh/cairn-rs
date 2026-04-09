@@ -55,8 +55,8 @@ type AuthState = 'checking' | 'authenticated' | 'unauthenticated';
 
 function PageLoader() {
   return (
-    <div className="flex h-full items-center justify-center bg-zinc-950">
-      <Loader2 size={16} className="animate-spin text-zinc-600" />
+    <div className="flex h-full items-center justify-center bg-white dark:bg-zinc-950">
+      <Loader2 size={16} className="animate-spin text-gray-400 dark:text-zinc-600" />
     </div>
   );
 }
@@ -165,7 +165,7 @@ function renderRoute(route: Route): React.ReactNode {
 
 function ValidatingScreen() {
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-zinc-950">
+    <div className="flex h-screen w-screen items-center justify-center bg-white dark:bg-zinc-950">
       <div className="flex flex-col items-center gap-5">
         <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 shadow-lg shadow-indigo-600/30">
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -175,7 +175,7 @@ function ValidatingScreen() {
             <rect x="10" y="10" width="6" height="6" rx="1.5" fill="white" opacity="0.9"/>
           </svg>
         </div>
-        <div className="flex items-center gap-2 text-zinc-600">
+        <div className="flex items-center gap-2 text-gray-400 dark:text-zinc-600">
           <Loader2 size={14} className="animate-spin" />
           <span className="text-[13px]">Verifying session…</span>
         </div>

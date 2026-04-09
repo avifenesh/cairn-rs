@@ -150,12 +150,12 @@ export function useRefreshControl(props: RefreshControlProps): {
           onChange={e => setOption(e.target.value as RefreshOption)}
           disabled={!globalEnabled}
           className={clsx(
-            "appearance-none rounded border bg-zinc-900 text-[11px] font-mono",
+            "appearance-none rounded border bg-gray-50 dark:bg-zinc-900 text-[11px] font-mono",
             "pl-5 pr-2 h-7 focus:outline-none focus:border-indigo-500 transition-colors",
             "disabled:opacity-40 disabled:cursor-not-allowed",
             interval.option === 'off'
-              ? "border-zinc-700 text-zinc-600"
-              : "border-zinc-700 text-zinc-400 hover:border-zinc-600",
+              ? "border-gray-200 dark:border-zinc-700 text-gray-400 dark:text-zinc-600"
+              : "border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 hover:border-zinc-600",
           )}
           title={globalEnabled ? "Auto-refresh interval" : "Auto-refresh is disabled globally (see Preferences)"}
         >
@@ -168,7 +168,7 @@ export function useRefreshControl(props: RefreshControlProps): {
           size={9}
           className={clsx(
             "absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none",
-            isFetching ? "animate-spin text-indigo-400" : "text-zinc-600",
+            isFetching ? "animate-spin text-indigo-400" : "text-gray-400 dark:text-zinc-600",
           )}
         />
       </div>
@@ -177,8 +177,8 @@ export function useRefreshControl(props: RefreshControlProps): {
       <button
         onClick={onRefresh}
         disabled={isFetching}
-        className="flex items-center gap-1 h-7 px-2 rounded border border-zinc-700 bg-zinc-900
-                   text-[11px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600
+        className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900
+                   text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600
                    disabled:opacity-40 transition-colors"
         title="Refresh now"
       >
