@@ -9,12 +9,12 @@
 //! There is NO `Connected` state and NO `POST /v1/plugins/:id/connect` endpoint.
 //! Process instances are managed by the plugin host, not the marketplace.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cairn_domain::contexts::{PluginCategory, SignalCaptureOverride};
-use cairn_domain::ids::{CredentialId, OperatorId, SignalId};
+use cairn_domain::contexts::{PluginCategory, SignalCaptureOverride, VisibilityContext};
+use cairn_domain::ids::{CredentialId, OperatorId, RunId, SignalId};
 use cairn_domain::tenancy::ProjectKey;
 use cairn_plugin_catalog::CatalogEntry;
 use serde::{Deserialize, Serialize};
@@ -484,6 +484,40 @@ impl<S> MarketplaceService<S> {
             .collect()
     }
 
+    /// Build a VisibilityContext for a run in a project.
+    ///
+    /// This is used by prompt building and tool_search to filter tools
+    /// to only those from plugins enabled for the project.
+    pub fn build_visibility_context(
+        &self,
+        project: &ProjectKey,
+        run_id: Option<RunId>,
+    ) -> VisibilityContext {
+        let enablements = self.enablements_for_project(project);
+
+        let enabled_plugins: HashSet<String> = enablements
+            .iter()
+            .map(|e| e.plugin_id.clone())
+            .collect();
+
+        let allowlisted_tools: HashMap<String, Option<HashSet<String>>> = enablements
+            .iter()
+            .map(|e| {
+                let tools = e.tool_allowlist.as_ref().map(|list| {
+                    list.iter().cloned().collect::<HashSet<String>>()
+                });
+                (e.plugin_id.clone(), tools)
+            })
+            .collect();
+
+        VisibilityContext {
+            project: project.clone(),
+            run_id,
+            enabled_plugins,
+            allowlisted_tools,
+        }
+    }
+
     // ── Command Handlers ─────────────────────────────────────────────────
 
     fn handle_install(
@@ -495,6 +529,11 @@ impl<S> MarketplaceService<S> {
             .records
             .get(&plugin_id)
             .ok_or_else(|| MarketplaceError::PluginNotFound(plugin_id.clone()))?;
+
+        // RFC 015 Non-Goals: reject manifests declaring eval_scorer capability.
+        if record.descriptor.category == PluginCategory::EvalScorer {
+            return Err(MarketplaceError::EvalScorerReserved);
+        }
 
         match &record.state {
             MarketplaceState::Listed | MarketplaceState::InstallationFailed { .. } => {}
@@ -647,13 +686,12 @@ impl<S> MarketplaceService<S> {
         disabled_by: OperatorId,
     ) -> Result<Vec<MarketplaceEvent>, MarketplaceError> {
         let key = (plugin_id.clone(), project.clone());
-        let enablement = self
-            .enablements
-            .get_mut(&key)
-            .ok_or_else(|| MarketplaceError::NotEnabledForProject {
+        let enablement = self.enablements.get_mut(&key).ok_or_else(|| {
+            MarketplaceError::NotEnabledForProject {
                 plugin_id: plugin_id.clone(),
                 project: project.clone(),
-            })?;
+            }
+        })?;
 
         enablement.enabled = false;
 
@@ -864,10 +902,7 @@ mod tests {
                 "github.list_issues".into(),
                 "github.create_pull_request".into(),
             ],
-            signal_sources: vec![
-                "github.issue.opened".into(),
-                "github.issue.labeled".into(),
-            ],
+            signal_sources: vec!["github.issue.opened".into(), "github.issue.labeled".into()],
             channels: Vec::new(),
             required_credentials: vec![
                 CredentialSpec {
@@ -1103,7 +1138,10 @@ mod tests {
         assert_eq!(desc.vendor, "cairn");
         assert_eq!(desc.required_credentials.len(), 2);
         assert_eq!(desc.required_credentials[0].key, "github_app_id");
-        assert_eq!(desc.required_credentials[0].scope, CredentialScopeHint::Tenant);
+        assert_eq!(
+            desc.required_credentials[0].scope,
+            CredentialScopeHint::Tenant
+        );
         assert!(desc.has_signal_source);
         assert!(desc.post_install_health_check.is_some());
     }
@@ -1146,7 +1184,9 @@ mod tests {
 
         // At least one event (GitHub), all are PluginListed
         assert!(!events.is_empty());
-        assert!(events.iter().all(|e| matches!(e, MarketplaceEvent::PluginListed { .. })));
+        assert!(events
+            .iter()
+            .all(|e| matches!(e, MarketplaceEvent::PluginListed { .. })));
 
         // GitHub is now listed
         let github = svc.get_record("github").expect("github must be listed");
@@ -1198,5 +1238,109 @@ mod tests {
             svc.get_record("github").unwrap().state,
             MarketplaceState::Installed
         );
+    }
+
+    #[test]
+    fn eval_scorer_manifest_rejected_at_install() {
+        let mut svc = MarketplaceService::new(test_store());
+
+        // Create a descriptor with EvalScorer category
+        let mut desc = github_descriptor();
+        desc.id = "eval-scorer-plugin".into();
+        desc.category = PluginCategory::EvalScorer;
+        svc.list_plugin(desc);
+
+        let result = svc.handle_command(MarketplaceCommand::InstallPlugin {
+            plugin_id: "eval-scorer-plugin".into(),
+            initiated_by: operator(),
+        });
+
+        assert!(matches!(result, Err(MarketplaceError::EvalScorerReserved)));
+    }
+
+    #[test]
+    fn build_visibility_context_from_enablements() {
+        let mut svc = MarketplaceService::new(test_store());
+        svc.list_plugin(github_descriptor());
+        svc.handle_command(MarketplaceCommand::InstallPlugin {
+            plugin_id: "github".into(),
+            initiated_by: operator(),
+        })
+        .unwrap();
+
+        let p1 = project_p1();
+
+        // Enable with tool allowlist
+        svc.handle_command(MarketplaceCommand::EnablePluginForProject {
+            plugin_id: "github".into(),
+            project: p1.clone(),
+            tool_allowlist: Some(vec![
+                "github.get_issue".into(),
+                "github.list_issues".into(),
+            ]),
+            signal_allowlist: None,
+            signal_capture_override: None,
+            enabled_by: operator(),
+        })
+        .unwrap();
+
+        let ctx = svc.build_visibility_context(&p1, Some(RunId::new("run-1")));
+
+        assert!(ctx.enabled_plugins.contains("github"));
+        assert_eq!(ctx.enabled_plugins.len(), 1);
+
+        let tools = ctx.allowlisted_tools.get("github").unwrap();
+        let tool_set = tools.as_ref().unwrap();
+        assert!(tool_set.contains("github.get_issue"));
+        assert!(tool_set.contains("github.list_issues"));
+        assert!(!tool_set.contains("github.create_pull_request"));
+    }
+
+    #[test]
+    fn visibility_context_none_allowlist_means_all_tools() {
+        let mut svc = MarketplaceService::new(test_store());
+        svc.list_plugin(github_descriptor());
+        svc.handle_command(MarketplaceCommand::InstallPlugin {
+            plugin_id: "github".into(),
+            initiated_by: operator(),
+        })
+        .unwrap();
+
+        let p1 = project_p1();
+
+        // Enable with no tool allowlist (None = all tools)
+        svc.handle_command(MarketplaceCommand::EnablePluginForProject {
+            plugin_id: "github".into(),
+            project: p1.clone(),
+            tool_allowlist: None,
+            signal_allowlist: None,
+            signal_capture_override: None,
+            enabled_by: operator(),
+        })
+        .unwrap();
+
+        let ctx = svc.build_visibility_context(&p1, None);
+        assert!(ctx.enabled_plugins.contains("github"));
+
+        // None means all tools are allowed
+        let tools = ctx.allowlisted_tools.get("github").unwrap();
+        assert!(tools.is_none());
+    }
+
+    #[test]
+    fn visibility_context_empty_for_unenabled_project() {
+        let mut svc = MarketplaceService::new(test_store());
+        svc.list_plugin(github_descriptor());
+        svc.handle_command(MarketplaceCommand::InstallPlugin {
+            plugin_id: "github".into(),
+            initiated_by: operator(),
+        })
+        .unwrap();
+
+        let p2 = ProjectKey::new("t1", "w1", "p2");
+        let ctx = svc.build_visibility_context(&p2, None);
+
+        assert!(ctx.enabled_plugins.is_empty());
+        assert!(ctx.allowlisted_tools.is_empty());
     }
 }
