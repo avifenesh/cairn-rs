@@ -7,6 +7,7 @@
 //!   cairn-app --addr 0.0.0.0          # bind all interfaces
 
 pub mod marketplace_routes;
+pub mod repo_routes;
 pub mod sse_hooks;
 pub mod tool_impls;
 
@@ -698,6 +699,8 @@ pub struct AppState {
     pub plugin_host: Arc<Mutex<StdioPluginHost>>,
     /// RFC 015: plugin marketplace service — manages discover/install/enable lifecycle.
     pub marketplace: Arc<Mutex<cairn_runtime::services::MarketplaceService<cairn_store::InMemoryStore>>>,
+    pub repo_clone_cache: Arc<cairn_workspace::RepoCloneCache>,
+    pub project_repo_access: Arc<cairn_workspace::ProjectRepoAccessService>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
     pub metrics: Arc<AppMetrics>,
     #[allow(dead_code)]
@@ -859,6 +862,8 @@ impl AppState {
         let mailbox_messages = Arc::new(Mutex::new(HashMap::new()));
         let service_tokens = Arc::new(ServiceTokenRegistry::new());
         let plugin_host = Arc::new(Mutex::new(StdioPluginHost::new()));
+        let repo_clone_cache = Arc::new(cairn_workspace::RepoCloneCache::default());
+        let project_repo_access = Arc::new(cairn_workspace::ProjectRepoAccessService::new());
         // RFC 015: marketplace service wrapping the plugin host.
         let marketplace = {
             let mut svc =
@@ -935,6 +940,8 @@ impl AppState {
             plugin_registry,
             plugin_host,
             marketplace,
+            repo_clone_cache,
+            project_repo_access,
             rate_limits,
             metrics,
             memory_proposal_hook,
@@ -3555,6 +3562,25 @@ impl AppBootstrap {
                     (HttpMethod::Post, "/v1/runs/:id/revise") => {
                         router.route(&path, post(revise_plan_handler))
                     }
+                    // ── SQ/EQ + A2A (RFC 021) ────────────────────────────────
+                    (HttpMethod::Post, "/v1/sqeq/initialize") => {
+                        router.route(&path, post(sqeq_initialize_handler))
+                    }
+                    (HttpMethod::Post, "/v1/sqeq/submit") => {
+                        router.route(&path, post(sqeq_submit_handler))
+                    }
+                    (HttpMethod::Get, "/v1/sqeq/events") => {
+                        router.route(&path, get(sqeq_events_handler))
+                    }
+                    (HttpMethod::Get, "/.well-known/agent.json") => {
+                        router.route(&path, get(a2a_agent_card_handler))
+                    }
+                    (HttpMethod::Post, "/v1/a2a/tasks") => {
+                        router.route(&path, post(a2a_submit_task_handler))
+                    }
+                    (HttpMethod::Get, "/v1/a2a/tasks/:id") => {
+                        router.route(&path, get(a2a_get_task_handler))
+                    }
                     // ── Decisions (RFC 019) — handled via nest below ─────────
                     (HttpMethod::Get, "/v1/decisions")
                     | (HttpMethod::Get, "/v1/decisions/cache")
@@ -4254,6 +4280,13 @@ impl AppBootstrap {
                     .route("/:id", get(get_decision_handler))
                     .route("/:id/invalidate", post(invalidate_decision_handler))
             })
+            // ── SQ/EQ + A2A (RFC 021) ────────────────────────────────────────────────
+            .route("/v1/sqeq/initialize", post(sqeq_initialize_handler))
+            .route("/v1/sqeq/submit", post(sqeq_submit_handler))
+            .route("/v1/sqeq/events", get(sqeq_events_handler))
+            .route("/.well-known/agent.json", get(a2a_agent_card_handler))
+            .route("/v1/a2a/tasks", post(a2a_submit_task_handler))
+            .route("/v1/a2a/tasks/:id", get(a2a_get_task_handler))
             // ── Prompts ───────────────────────────────────────────────────────────────
             .route(
                 "/v1/prompts/assets/:id/versions",
@@ -4492,6 +4525,16 @@ impl AppBootstrap {
             .route("/v1/plugins/:id/credentials", post(marketplace_routes::provide_credentials_handler))
             .route("/v1/plugins/:id/verify", post(marketplace_routes::verify_credentials_handler))
             .route("/v1/projects/:proj/plugins/:id", post(marketplace_routes::enable_plugin_handler).delete(marketplace_routes::disable_plugin_handler))
+            .route(
+                "/v1/projects/:project/repos",
+                get(repo_routes::list_project_repos_handler)
+                    .post(repo_routes::add_project_repo_handler),
+            )
+            .route(
+                "/v1/projects/:project/repos/:owner/:repo",
+                get(repo_routes::get_project_repo_handler)
+                    .delete(repo_routes::delete_project_repo_handler),
+            )
             .route("/v1/plugins/:id/uninstall", delete(marketplace_routes::uninstall_plugin_handler))
     }
 

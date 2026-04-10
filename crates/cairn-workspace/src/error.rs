@@ -158,15 +158,27 @@ impl RepoStoreError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SweepError {
+    RepoStore(RepoStoreError),
+    ActiveSandboxQuery(String),
     Unimplemented(&'static str),
 }
 
 impl Display for SweepError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            SweepError::RepoStore(error) => write!(f, "{error}"),
+            SweepError::ActiveSandboxQuery(message) => {
+                write!(f, "active sandbox repo query failed: {message}")
+            }
             SweepError::Unimplemented(message) => write!(f, "unimplemented: {message}"),
         }
     }
 }
 
 impl std::error::Error for SweepError {}
+
+impl From<RepoStoreError> for SweepError {
+    fn from(value: RepoStoreError) -> Self {
+        Self::RepoStore(value)
+    }
+}

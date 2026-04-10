@@ -4,6 +4,8 @@ pub mod facade;
 pub mod sweep;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use cairn_domain::{ActorRef, ProjectKey, TenantId};
 
@@ -12,13 +14,26 @@ use crate::sandbox::RepoId;
 pub use access_service::ProjectRepoAccessService;
 pub use clone_cache::{RefreshOutcome, RepoCloneCache};
 pub use facade::RepoStore;
-pub use sweep::{ActiveSandboxRepoSource, RepoCloneSweepTask};
+pub use sweep::{
+    ActiveSandboxRepoSource, BufferedRepoStoreEventSink, RepoCloneSweepTask, RepoStoreEventSink,
+    SweepRunSummary,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SweepId(String);
 
 impl SweepId {
-    pub fn new(value: impl Into<String>) -> Self {
+    pub fn new() -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_millis();
+        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+        Self(format!("sweep-{now}-{counter}"))
+    }
+
+    pub fn from_value(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 }

@@ -14,6 +14,7 @@ cairn-api = { path = "../cairn-api" }
 cairn-memory = { path = "../cairn-memory" }
 cairn-orchestrator = { path = "../cairn-orchestrator" }
 cairn-runtime = { path = "../cairn-runtime" }
+cairn-workspace = { path = "../cairn-workspace" }
 cairn-evals = { path = "../cairn-evals" }
 cairn-graph = { path = "../cairn-graph" }
 cairn-store = { path = "../cairn-store", features = ["postgres", "sqlite"] }

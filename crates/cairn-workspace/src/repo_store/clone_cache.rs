@@ -177,6 +177,27 @@ impl RepoCloneCache {
         clones
     }
 
+    pub async fn delete(
+        &self,
+        tenant: &TenantId,
+        repo_id: &RepoId,
+    ) -> Result<(), crate::error::RepoStoreError> {
+        let clone_lock = self.clone_lock(tenant, repo_id);
+        let _guard = clone_lock.lock().expect("clone lock poisoned");
+        let path = self.path(tenant, repo_id);
+
+        if !path.exists() {
+            return Ok(());
+        }
+
+        Self::set_readonly_recursive(&path, false)?;
+        fs::remove_dir_all(&path).map_err(|error| {
+            crate::error::RepoStoreError::io("delete clone", path.clone(), error)
+        })?;
+        Self::prune_empty_parents(&self.base_dir, &path)?;
+        Ok(())
+    }
+
     fn clone_lock(&self, tenant: &TenantId, repo_id: &RepoId) -> Arc<Mutex<()>> {
         let key = (tenant.clone(), repo_id.clone());
         if let Some(existing) = self
@@ -250,6 +271,39 @@ impl RepoCloneCache {
         fs::set_permissions(path, permissions).map_err(|error| {
             crate::error::RepoStoreError::io("set permissions", path.to_path_buf(), error)
         })
+    }
+
+    fn prune_empty_parents(
+        root: &Path,
+        starting_path: &Path,
+    ) -> Result<(), crate::error::RepoStoreError> {
+        let mut current = starting_path.parent();
+        while let Some(path) = current {
+            if path == root {
+                break;
+            }
+
+            let is_empty = fs::read_dir(path)
+                .map_err(|error| {
+                    crate::error::RepoStoreError::io(
+                        "scan parent for prune",
+                        path.to_path_buf(),
+                        error,
+                    )
+                })?
+                .next()
+                .is_none();
+            if !is_empty {
+                break;
+            }
+
+            fs::remove_dir(path).map_err(|error| {
+                crate::error::RepoStoreError::io("prune empty parent", path.to_path_buf(), error)
+            })?;
+            current = path.parent();
+        }
+
+        Ok(())
     }
 
     fn now_millis() -> u64 {
@@ -349,5 +403,23 @@ mod tests {
             fs::read_to_string(&head_path).unwrap().trim(),
             refresh.new_head
         );
+    }
+
+    #[tokio::test]
+    async fn delete_removes_clone_and_prunes_empty_owner_dirs() {
+        let temp_dir = TestDir::new("clone-delete");
+        let cache = RepoCloneCache::new(&temp_dir.path);
+        let tenant = TenantId::new("tenant-a");
+        let repo = RepoId::new("octocat/hello-world");
+
+        cache.ensure_cloned(&tenant, &repo).await.unwrap();
+        let clone_path = cache.path(&tenant, &repo);
+        let owner_dir = clone_path.parent().unwrap().to_path_buf();
+
+        cache.delete(&tenant, &repo).await.unwrap();
+
+        assert!(!clone_path.exists());
+        assert!(!owner_dir.exists());
+        assert!(!cache.is_cloned(&tenant, &repo).await);
     }
 }
