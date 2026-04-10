@@ -18,12 +18,11 @@ pub mod context_builder;
 pub mod credentials;
 pub mod decisions;
 pub mod defaults;
-pub mod guardian;
-pub mod telemetry;
 pub mod enrichment;
 pub mod error;
 pub mod eval_runs;
 pub mod fleet;
+pub mod guardian;
 pub mod guardrails;
 pub mod ingest_jobs;
 pub mod licenses;
@@ -61,6 +60,7 @@ pub mod soul_guard;
 pub mod spend_alert;
 pub mod startup;
 pub mod tasks;
+pub mod telemetry;
 pub mod tenants;
 pub mod voice;
 pub mod workspace_memberships;
@@ -79,7 +79,6 @@ pub use context_builder::{
 pub use decisions::{
     DecisionError, DecisionResult, DecisionService, DecisionServiceImpl, StubDecisionService,
 };
-pub use guardian::GuardianResolver;
 pub use enrichment::{
     ApprovalEnrichment, CheckpointEnrichment, RunEnrichment, RuntimeEnrichment, SessionEnrichment,
     StoreBackedEnrichment, TaskEnrichment,
@@ -87,6 +86,7 @@ pub use enrichment::{
 pub use error::RuntimeError;
 pub use eval_runs::EvalRunService;
 pub use fleet::{FleetReport, FleetService, FleetServiceImpl, WorkerState};
+pub use guardian::GuardianResolver;
 pub use ingest_jobs::IngestJobService;
 pub use mailbox::MailboxService;
 pub use mailbox_delivery::{MailboxDeliveryService, MailboxWatcher};
@@ -151,7 +151,18 @@ pub use services::event_helpers::seed_event_counter;
 pub use services::{OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OllamaTagsResponse};
 
 // ── OpenAI-compatible inference provider ─────────────────────────────────────
+pub use services::BedrockProvider;
 pub use services::OpenAiCompatProvider;
+
+// ── Stable app/runtime boundary exports ──────────────────────────────────────
+pub use services::make_envelope;
+pub use services::parse_outcome;
+pub use services::{
+    CredentialScopeKey, CredentialValue, GraphNodeId, MarketplaceCommand, MarketplaceError,
+    MarketplaceEvent, MarketplaceRecord, MarketplaceService, MarketplaceState, RateLimitConfig,
+    RunTemplate, SignalPattern, TemplateBudget, Trigger, TriggerCondition, TriggerError,
+    TriggerEvent, TriggerService, TriggerState,
+};
 
 // ── RFC 009: Provider routing + health tracking ──────────────────────────────
 pub use services::{

@@ -106,13 +106,19 @@ mod tests {
     #[test]
     fn bundled_catalog_parses() {
         let entries = load_bundled_catalog().unwrap();
-        assert!(!entries.is_empty(), "bundled catalog should have at least one entry");
+        assert!(
+            !entries.is_empty(),
+            "bundled catalog should have at least one entry"
+        );
     }
 
     #[test]
     fn github_entry_present_and_correct() {
         let entries = load_bundled_catalog().unwrap();
-        let github = entries.iter().find(|e| e.id == "github").expect("github entry must exist");
+        let github = entries
+            .iter()
+            .find(|e| e.id == "github")
+            .expect("github entry must exist");
 
         assert_eq!(github.name, "GitHub");
         assert_eq!(github.category, "issue_tracker");
@@ -130,19 +136,36 @@ mod tests {
         let entries = load_bundled_catalog().unwrap();
         let github = entries.iter().find(|e| e.id == "github").unwrap();
 
-        let cred_keys: Vec<&str> = github.required_credentials.iter().map(|c| c.key.as_str()).collect();
+        let cred_keys: Vec<&str> = github
+            .required_credentials
+            .iter()
+            .map(|c| c.key.as_str())
+            .collect();
         assert_eq!(
             cred_keys,
-            vec!["github_app_id", "github_app_private_key", "github_webhook_secret", "github_installation_id"]
+            vec![
+                "github_app_id",
+                "github_app_private_key",
+                "github_webhook_secret",
+                "github_installation_id"
+            ]
         );
 
         // webhook_secret is tenant-scoped and auto-generated
-        let webhook_secret = github.required_credentials.iter().find(|c| c.key == "github_webhook_secret").unwrap();
+        let webhook_secret = github
+            .required_credentials
+            .iter()
+            .find(|c| c.key == "github_webhook_secret")
+            .unwrap();
         assert_eq!(webhook_secret.scope, "tenant");
         assert!(webhook_secret.generated);
 
         // installation_id is project-scoped
-        let install_id = github.required_credentials.iter().find(|c| c.key == "github_installation_id").unwrap();
+        let install_id = github
+            .required_credentials
+            .iter()
+            .find(|c| c.key == "github_installation_id")
+            .unwrap();
         assert_eq!(install_id.scope, "project");
     }
 
@@ -153,8 +176,12 @@ mod tests {
 
         // Verify the 12 read-only + 7 mutating = 19 tools
         assert!(github.tools.contains(&"github.get_issue".to_string()));
-        assert!(github.tools.contains(&"github.create_pull_request".to_string()));
-        assert!(github.tools.contains(&"github.merge_pull_request".to_string()));
+        assert!(github
+            .tools
+            .contains(&"github.create_pull_request".to_string()));
+        assert!(github
+            .tools
+            .contains(&"github.merge_pull_request".to_string()));
         assert!(github.tools.contains(&"github.get_rate_limit".to_string()));
     }
 

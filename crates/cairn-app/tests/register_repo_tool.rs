@@ -13,7 +13,9 @@ use cairn_memory::{
     retrieval::RetrievalService,
 };
 use cairn_tools::builtins::{RetrySafety, ToolEffect, ToolHandler, ToolTier};
-use cairn_workspace::{ProjectRepoAccessService, RepoCloneCache, RepoId, RepoStore, RepoStoreError};
+use cairn_workspace::{
+    ProjectRepoAccessService, RepoCloneCache, RepoId, RepoStore, RepoStoreError,
+};
 
 struct TestDir {
     path: PathBuf,
@@ -74,7 +76,10 @@ async fn register_repo_is_project_scoped_and_hides_host_path() {
     let repo_id = RepoId::new("octocat/hello-world");
 
     let result = tool
-        .execute(&project_a, serde_json::json!({ "repo_id": repo_id.as_str() }))
+        .execute(
+            &project_a,
+            serde_json::json!({ "repo_id": repo_id.as_str() }),
+        )
         .await
         .unwrap();
 
@@ -90,7 +95,10 @@ async fn register_repo_is_project_scoped_and_hides_host_path() {
     assert!(cache.is_cloned(&project_a.tenant_id, &repo_id).await);
 
     let store = RepoStore::new(cache, access);
-    let err = store.resolve(&repo_ctx(&project_b), &repo_id).await.unwrap_err();
+    let err = store
+        .resolve(&repo_ctx(&project_b), &repo_id)
+        .await
+        .unwrap_err();
     assert_eq!(
         err,
         RepoStoreError::NotAllowedForProject {
@@ -115,7 +123,10 @@ async fn register_repo_rejects_invalid_repo_shape() {
         .await
         .unwrap_err();
 
-    assert!(matches!(err, cairn_tools::builtins::ToolError::InvalidArgs { .. }));
+    assert!(matches!(
+        err,
+        cairn_tools::builtins::ToolError::InvalidArgs { .. }
+    ));
 }
 
 #[tokio::test]
@@ -123,8 +134,9 @@ async fn registry_exposes_register_repo_with_sensitive_metadata() {
     let temp_dir = TestDir::new("registry");
     let (_, pipeline) = make_ingest();
     let registry = build_tool_registry(
-        Arc::new(InMemoryRetrieval::new(Arc::new(InMemoryDocumentStore::new())))
-            as Arc<dyn RetrievalService>,
+        Arc::new(InMemoryRetrieval::new(Arc::new(
+            InMemoryDocumentStore::new(),
+        ))) as Arc<dyn RetrievalService>,
         pipeline as Arc<dyn IngestService>,
         Arc::new(ProjectRepoAccessService::new()),
         Arc::new(RepoCloneCache::new(&temp_dir.path)),

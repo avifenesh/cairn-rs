@@ -391,12 +391,48 @@ pub static PROVIDERS: &[ProviderDef] = &[
         api_format: ApiFormat::OpenAiCompatible,
         default_model: "openrouter/auto",
         models: &[
-            KnownModel { id: "openrouter/free", context_window: 200_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
-            KnownModel { id: "openrouter/auto", context_window: 128_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
-            KnownModel { id: "google/gemma-3-4b-it:free", context_window: 128_000, capabilities: BASIC, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
-            KnownModel { id: "meta-llama/llama-4-scout:free", context_window: 512_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
-            KnownModel { id: "deepseek/deepseek-chat-v3-0324:free", context_window: 64_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
-            KnownModel { id: "qwen/qwen3-8b:free", context_window: 128_000, capabilities: FULL_THINKING, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
+            KnownModel {
+                id: "openrouter/free",
+                context_window: 200_000,
+                capabilities: FULL,
+                input_cost_per_1m: 0.0,
+                output_cost_per_1m: 0.0,
+            },
+            KnownModel {
+                id: "openrouter/auto",
+                context_window: 128_000,
+                capabilities: FULL,
+                input_cost_per_1m: 0.0,
+                output_cost_per_1m: 0.0,
+            },
+            KnownModel {
+                id: "google/gemma-3-4b-it:free",
+                context_window: 128_000,
+                capabilities: BASIC,
+                input_cost_per_1m: 0.0,
+                output_cost_per_1m: 0.0,
+            },
+            KnownModel {
+                id: "meta-llama/llama-4-scout:free",
+                context_window: 512_000,
+                capabilities: FULL,
+                input_cost_per_1m: 0.0,
+                output_cost_per_1m: 0.0,
+            },
+            KnownModel {
+                id: "deepseek/deepseek-chat-v3-0324:free",
+                context_window: 64_000,
+                capabilities: FULL,
+                input_cost_per_1m: 0.0,
+                output_cost_per_1m: 0.0,
+            },
+            KnownModel {
+                id: "qwen/qwen3-8b:free",
+                context_window: 128_000,
+                capabilities: FULL_THINKING,
+                input_cost_per_1m: 0.0,
+                output_cost_per_1m: 0.0,
+            },
         ],
     },
     ProviderDef {
@@ -406,9 +442,13 @@ pub static PROVIDERS: &[ProviderDef] = &[
         env_keys: &["BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"],
         api_format: ApiFormat::OpenAiCompatible, // uses Converse API internally, but listed for registry
         default_model: "minimax.minimax-m2.5",
-        models: &[
-            KnownModel { id: "minimax.minimax-m2.5", context_window: 128_000, capabilities: FULL, input_cost_per_1m: 0.0, output_cost_per_1m: 0.0 },
-        ],
+        models: &[KnownModel {
+            id: "minimax.minimax-m2.5",
+            context_window: 128_000,
+            capabilities: FULL,
+            input_cost_per_1m: 0.0,
+            output_cost_per_1m: 0.0,
+        }],
     },
 ];
 

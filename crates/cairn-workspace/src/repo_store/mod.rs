@@ -22,6 +22,12 @@ pub use sweep::{
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SweepId(String);
 
+impl Default for SweepId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SweepId {
     pub fn new() -> Self {
         static COUNTER: AtomicU64 = AtomicU64::new(1);

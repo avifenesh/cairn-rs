@@ -205,7 +205,10 @@ impl DecidePhase for LlmDecidePhase {
         if matches!(ctx.run_mode, cairn_domain::decisions::RunMode::Plan) {
             use cairn_domain::decisions::ToolEffect;
             tool_descs.retain(|d| {
-                matches!(d.tool_effect, ToolEffect::Observational | ToolEffect::Internal)
+                matches!(
+                    d.tool_effect,
+                    ToolEffect::Observational | ToolEffect::Internal
+                )
             });
         }
 
@@ -1171,13 +1174,15 @@ mod tests {
         // Build a registry with both Observational and External tools.
         let registry = std::sync::Arc::new(
             cairn_tools::builtins::BuiltinToolRegistry::new()
-                .register(std::sync::Arc::new(cairn_tools::GrepSearchTool::default()))   // Observational
-                .register(std::sync::Arc::new(cairn_tools::CalculateTool::default()))     // Observational
-                .register(std::sync::Arc::new(cairn_tools::ShellExecTool))                // External
+                .register(std::sync::Arc::new(cairn_tools::GrepSearchTool::default())) // Observational
+                .register(std::sync::Arc::new(cairn_tools::CalculateTool::default())) // Observational
+                .register(std::sync::Arc::new(cairn_tools::ShellExecTool)), // External
         );
 
         let phase = LlmDecidePhase::new(
-            std::sync::Arc::new(CapturingProvider { captured: prompt_ref }),
+            std::sync::Arc::new(CapturingProvider {
+                captured: prompt_ref,
+            }),
             "test-model",
         )
         .with_tools(registry);
@@ -1191,9 +1196,18 @@ mod tests {
 
         // The prompt tool descriptor lines use the format "tool_name(params) — desc".
         // Check for descriptor lines, not arbitrary mentions of tool names in prose.
-        assert!(prompt.contains("  - grep_search("), "Observational tool descriptor should be in Plan mode prompt");
-        assert!(prompt.contains("  - calculate("), "Observational tool descriptor should be in Plan mode prompt");
+        assert!(
+            prompt.contains("  - grep_search("),
+            "Observational tool descriptor should be in Plan mode prompt"
+        );
+        assert!(
+            prompt.contains("  - calculate("),
+            "Observational tool descriptor should be in Plan mode prompt"
+        );
         // External tools should not have descriptor lines in Plan mode.
-        assert!(!prompt.contains("  - shell_exec("), "External tool descriptor must NOT be in Plan mode prompt");
+        assert!(
+            !prompt.contains("  - shell_exec("),
+            "External tool descriptor must NOT be in Plan mode prompt"
+        );
     }
 }

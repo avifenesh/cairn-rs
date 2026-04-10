@@ -330,9 +330,7 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
             cairn_orchestrator::LoopTermination::WaitingSubagent { .. } => {
                 ("waiting_subagent", None)
             }
-            cairn_orchestrator::LoopTermination::PlanProposed { .. } => {
-                ("plan_proposed", None)
-            }
+            cairn_orchestrator::LoopTermination::PlanProposed { .. } => ("plan_proposed", None),
         };
         self.emit(serde_json::json!({
             "event":       "orchestrate_finished",

@@ -358,7 +358,10 @@ impl DecisionCache {
             hit_count: 0,
             is_pending: true,
         };
-        self.entries.lock().unwrap_or_else(|e| e.into_inner()).insert(ck, entry);
+        self.entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(ck, entry);
     }
 
     /// Promote Pending → Resolved.
@@ -387,26 +390,34 @@ impl DecisionCache {
             }
         }
 
-        self.entries.lock().unwrap_or_else(|e| e.into_inner()).insert(
-            ck,
-            CacheEntry {
-                decision_id: decision_id.clone(),
-                outcome: Some(outcome.clone()),
-                source: Some(source.clone()),
-                reasoning_chain: chain.to_vec(),
-                expires_at,
-                created_at: now,
-                hit_count: 0,
-                is_pending: false,
-            },
-        );
+        self.entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                ck,
+                CacheEntry {
+                    decision_id: decision_id.clone(),
+                    outcome: Some(outcome.clone()),
+                    source: Some(source.clone()),
+                    reasoning_chain: chain.to_vec(),
+                    expires_at,
+                    created_at: now,
+                    hit_count: 0,
+                    is_pending: false,
+                },
+            );
 
         expires_at
     }
 
     fn record_hit(&self, key: &DecisionKey) {
         let ck = Self::cache_key_string(key);
-        if let Some(entry) = self.entries.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&ck) {
+        if let Some(entry) = self
+            .entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(&ck)
+        {
             entry.hit_count += 1;
         }
     }

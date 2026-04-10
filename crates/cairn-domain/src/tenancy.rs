@@ -25,7 +25,7 @@ pub struct WorkspaceKey {
 }
 
 /// Runtime ownership key for execution-truth entities.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProjectKey {
     pub tenant_id: TenantId,
     pub workspace_id: WorkspaceId,

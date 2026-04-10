@@ -58,6 +58,7 @@ pub use approval_policy_impl::ApprovalPolicyServiceImpl;
 pub use checkpoint_impl::CheckpointServiceImpl;
 pub use confidence_calibrator::{CalibrationAdjustment, ConfidenceCalibrator};
 pub use eval_run_impl::EvalRunServiceImpl;
+pub use event_helpers::make_envelope;
 pub use external_worker_impl::{parse_outcome, ExternalWorkerService, ExternalWorkerServiceImpl};
 pub use ingest_job_impl::IngestJobServiceImpl;
 pub use mailbox_impl::MailboxServiceImpl;

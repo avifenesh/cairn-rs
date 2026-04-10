@@ -237,11 +237,7 @@ fn rfc015_test6_different_project_sees_nothing() {
 
     // p2 sees nothing — plugin not enabled there
     let ctx2 = svc.build_visibility_context(&p2, None);
-    assert!(!is_plugin_tool_visible(
-        &ctx2,
-        "github",
-        "github.get_issue"
-    ));
+    assert!(!is_plugin_tool_visible(&ctx2, "github", "github.get_issue"));
 }
 
 // ── RFC 015 Integration Test 7: Tool allowlist ──────────────────────────────
@@ -307,10 +303,7 @@ fn rfc015_test7a_signal_allowlist_restricts_routing() {
         &enablement,
         "github.pull_request.opened"
     ));
-    assert!(!is_signal_allowed(
-        &enablement,
-        "github.rate_limit.warning"
-    ));
+    assert!(!is_signal_allowed(&enablement, "github.rate_limit.warning"));
 }
 
 // ── RFC 015 Integration Test 8b: Per-project signal capture override ────────

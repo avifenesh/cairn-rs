@@ -18,8 +18,8 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use cairn_domain::contexts::SignalCaptureOverride;
-use cairn_runtime::services::marketplace_service::{
-    MarketplaceCommand, MarketplaceEvent, MarketplaceRecord, MarketplaceState,
+use cairn_runtime::{
+    CredentialScopeKey, MarketplaceCommand, MarketplaceEvent, MarketplaceRecord, MarketplaceState,
 };
 
 use crate::AppState;
@@ -196,10 +196,7 @@ pub async fn verify_credentials_handler(
     let operator = operator_id_from_state(&state);
     let mut marketplace = state.marketplace.lock().unwrap();
 
-    let scope_key = body.and_then(|Json(b)| {
-        b.credential_scope_key
-            .map(cairn_runtime::services::marketplace_service::CredentialScopeKey)
-    });
+    let scope_key = body.and_then(|Json(b)| b.credential_scope_key.map(CredentialScopeKey));
 
     match marketplace.handle_command(MarketplaceCommand::VerifyPluginCredentials {
         plugin_id,

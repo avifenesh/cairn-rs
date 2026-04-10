@@ -8,10 +8,13 @@ use cairn_domain::TenantId;
 
 use crate::sandbox::{RepoId, SandboxId};
 
+type CloneKey = (TenantId, RepoId);
+type CloneGuard = Arc<Mutex<()>>;
+
 #[derive(Debug)]
 pub struct RepoCloneCache {
     base_dir: PathBuf,
-    clone_locks: RwLock<HashMap<(TenantId, RepoId), Arc<Mutex<()>>>>,
+    clone_locks: RwLock<HashMap<CloneKey, CloneGuard>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -198,7 +201,7 @@ impl RepoCloneCache {
         Ok(())
     }
 
-    fn clone_lock(&self, tenant: &TenantId, repo_id: &RepoId) -> Arc<Mutex<()>> {
+    fn clone_lock(&self, tenant: &TenantId, repo_id: &RepoId) -> CloneGuard {
         let key = (tenant.clone(), repo_id.clone());
         if let Some(existing) = self
             .clone_locks

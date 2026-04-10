@@ -1783,7 +1783,9 @@ fn event_matches_entity(event: &RuntimeEvent, entity: &EntityRef) -> bool {
         (RuntimeEvent::PlanProposed(e), EntityRef::Run(id)) => e.plan_run_id == *id,
         (RuntimeEvent::PlanApproved(e), EntityRef::Run(id)) => e.plan_run_id == *id,
         (RuntimeEvent::PlanRejected(e), EntityRef::Run(id)) => e.plan_run_id == *id,
-        (RuntimeEvent::PlanRevisionRequested(e), EntityRef::Run(id)) => e.original_plan_run_id == *id,
+        (RuntimeEvent::PlanRevisionRequested(e), EntityRef::Run(id)) => {
+            e.original_plan_run_id == *id
+        }
         (RuntimeEvent::PromptAssetCreated(e), EntityRef::PromptAsset(id)) => {
             e.prompt_asset_id == *id
         }

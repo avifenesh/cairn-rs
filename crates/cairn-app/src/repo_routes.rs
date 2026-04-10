@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use cairn_domain::{ActorRef, OperatorId, ProjectKey, RepoAccessContext};
-use cairn_workspace::RepoId;
+use cairn_workspace::{RepoId, RepoStoreError};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
@@ -96,6 +96,23 @@ fn clone_status(is_cloned: bool) -> String {
     }
 }
 
+fn repo_store_error_response(error: RepoStoreError) -> axum::response::Response {
+    let status = match error {
+        RepoStoreError::NotAllowedForProject { .. } => StatusCode::FORBIDDEN,
+        RepoStoreError::CloneMissing { .. } => StatusCode::NOT_FOUND,
+        RepoStoreError::Io { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        RepoStoreError::Unimplemented(_) => StatusCode::NOT_IMPLEMENTED,
+    };
+
+    (
+        status,
+        Json(ErrorResponse {
+            error: error.to_string(),
+        }),
+    )
+        .into_response()
+}
+
 async fn repo_entry_response(
     state: &AppState,
     ctx: &RepoAccessContext,
@@ -147,13 +164,7 @@ pub async fn add_project_repo_handler(
     };
 
     if let Err(error) = state.project_repo_access.allow(&ctx, &repo_id, actor).await {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: error.to_string(),
-            }),
-        )
-            .into_response();
+        return repo_store_error_response(error);
     }
 
     if let Err(error) = state
@@ -161,13 +172,7 @@ pub async fn add_project_repo_handler(
         .ensure_cloned(&ctx.project.tenant_id, &repo_id)
         .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: error.to_string(),
-            }),
-        )
-            .into_response();
+        return repo_store_error_response(error);
     }
 
     let is_cloned = state
@@ -225,13 +230,7 @@ pub async fn delete_project_repo_handler(
         .revoke(&ctx, &repo_id, actor)
         .await
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: error.to_string(),
-            }),
-        )
-            .into_response();
+        return repo_store_error_response(error);
     }
 
     StatusCode::NO_CONTENT.into_response()

@@ -47,7 +47,8 @@ use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
 use cairn_runtime::{
-    InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OpenAiCompatProvider,
+    BedrockProvider, InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider,
+    OpenAiCompatProvider,
 };
 use cairn_store::pg::PgMigrationRunner;
 use cairn_store::pg::{PgAdapter, PgEventLog};
@@ -146,7 +147,7 @@ struct AppState {
     notifications: Arc<std::sync::RwLock<NotificationBuffer>>,
     templates: Arc<templates::TemplateRegistry>,
     entitlements: Arc<entitlements::EntitlementService>,
-    bedrock: Option<Arc<cairn_runtime::services::BedrockProvider>>,
+    bedrock: Option<Arc<BedrockProvider>>,
     process_role: cairn_api::bootstrap::ProcessRole,
 }
 
@@ -3400,9 +3401,9 @@ async fn ollama_stream_handler(
     if is_bedrock_model {
         if let Some(ref bedrock) = state.bedrock {
             use cairn_domain::providers::GenerationProvider as _;
-            let messages: Vec<serde_json::Value> = body
-                .messages
-                .unwrap_or_else(|| vec![serde_json::json!({"role": "user", "content": body.prompt})]);
+            let messages: Vec<serde_json::Value> = body.messages.unwrap_or_else(|| {
+                vec![serde_json::json!({"role": "user", "content": body.prompt})]
+            });
             let bedrock = bedrock.clone();
             let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(8);
             tokio::spawn(async move {
@@ -3410,23 +3411,30 @@ async fn ollama_stream_handler(
                 let settings = cairn_domain::providers::ProviderBindingSettings::default();
                 match bedrock.generate(&model_id, messages, &settings).await {
                     Ok(resp) => {
-                        let _ = tx.send(Ok(Event::default().event("token").data(
-                            serde_json::json!({"text": resp.text}).to_string(),
-                        ))).await;
-                        let _ = tx.send(Ok(Event::default().event("done").data(
-                            serde_json::json!({
-                                "latency_ms": start.elapsed().as_millis() as u64,
-                                "model": resp.model_id,
-                                "tokens_in": resp.input_tokens,
-                                "tokens_out": resp.output_tokens,
-                            }).to_string(),
-                        ))).await;
+                        let _ = tx
+                            .send(Ok(Event::default()
+                                .event("token")
+                                .data(serde_json::json!({"text": resp.text}).to_string())))
+                            .await;
+                        let _ = tx
+                            .send(Ok(Event::default().event("done").data(
+                                serde_json::json!({
+                                    "latency_ms": start.elapsed().as_millis() as u64,
+                                    "model": resp.model_id,
+                                    "tokens_in": resp.input_tokens,
+                                    "tokens_out": resp.output_tokens,
+                                })
+                                .to_string(),
+                            )))
+                            .await;
                     }
                     Err(err) => {
                         let msg = format!("{err}");
-                        let _ = tx.send(Ok(Event::default().event("error").data(
-                            serde_json::json!({"error": msg}).to_string(),
-                        ))).await;
+                        let _ = tx
+                            .send(Ok(Event::default()
+                                .event("error")
+                                .data(serde_json::json!({"error": msg}).to_string())))
+                            .await;
                     }
                 }
             });
@@ -4671,15 +4679,14 @@ async fn main() {
     // ── Bedrock provider (optional) ────────────────────────────────────────────
     // Requires BEDROCK_API_KEY or AWS_BEARER_TOKEN_BEDROCK env var.
     // BEDROCK_MODEL_ID defaults to minimax.minimax-m2.5, AWS_REGION to us-west-2.
-    let bedrock: Option<Arc<cairn_runtime::services::BedrockProvider>> =
-        cairn_runtime::services::BedrockProvider::from_env().map(|p| {
-            eprintln!(
-                "bedrock: configured — model={} region={}",
-                p.model_id(),
-                p.region()
-            );
-            Arc::new(p)
-        });
+    let bedrock: Option<Arc<BedrockProvider>> = BedrockProvider::from_env().map(|p| {
+        eprintln!(
+            "bedrock: configured — model={} region={}",
+            p.model_id(),
+            p.region()
+        );
+        Arc::new(p)
+    });
 
     // ── Wire brain provider into lib_state for the orchestrate endpoint ──────
     // Priority: brain → worker → OpenRouter → Bedrock → Ollama.
@@ -7171,7 +7178,7 @@ mod tests {
             notifications: Arc::new(std::sync::RwLock::new(NotificationBuffer::new())),
             templates: Arc::new(templates::TemplateRegistry::with_builtins()),
             entitlements: Arc::new(entitlements::EntitlementService::new()),
-                bedrock: None,
+            bedrock: None,
             process_role: cairn_api::bootstrap::ProcessRole::AllInOne,
         };
         let app = make_app(state);

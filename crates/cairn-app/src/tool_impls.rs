@@ -19,7 +19,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::{policy::ExecutionClass, ActorRef, KnowledgeDocumentId, OperatorId, ProjectKey, RepoAccessContext, SourceId};
+use cairn_domain::{
+    policy::ExecutionClass, ActorRef, KnowledgeDocumentId, OperatorId, ProjectKey,
+    RepoAccessContext, SourceId,
+};
 use cairn_memory::{
     ingest::{IngestRequest, IngestService, SourceType},
     retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService},
@@ -404,7 +407,9 @@ impl ToolHandler for ConcreteRegisterRepoTool {
                 },
             )
             .await
-            .map_err(|error| ToolError::Permanent(format!("repo allowlist update failed: {error}")))?;
+            .map_err(|error| {
+                ToolError::Permanent(format!("repo allowlist update failed: {error}"))
+            })?;
 
         self.cache
             .ensure_cloned(&project.tenant_id, &repo_id)

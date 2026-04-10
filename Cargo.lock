@@ -391,6 +391,7 @@ dependencies = [
  "cairn-runtime",
  "cairn-store",
  "cairn-tools",
+ "cairn-workspace",
  "chrono",
  "dotenvy",
  "http-body-util",

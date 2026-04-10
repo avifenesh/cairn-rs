@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 use cairn_domain::decisions::RunMode;
 use cairn_domain::ids::{OperatorId, RunTemplateId, TriggerId};
 use cairn_domain::tenancy::ProjectKey;
-use cairn_runtime::services::trigger_service::{
+use cairn_runtime::{
     RateLimitConfig, RunTemplate, SignalPattern, TemplateBudget, Trigger, TriggerCondition,
-    TriggerEvent, TriggerState,
+    TriggerError, TriggerEvent, TriggerState,
 };
 
 use crate::AppState;
@@ -349,7 +349,7 @@ pub async fn delete_run_template_handler(
             }),
         )
             .into_response(),
-        Err(cairn_runtime::services::trigger_service::TriggerError::TemplateInUse { .. }) => (
+        Err(TriggerError::TemplateInUse { .. }) => (
             StatusCode::CONFLICT,
             Json(ErrorResponse {
                 error: "template is referenced by one or more triggers".to_string(),
