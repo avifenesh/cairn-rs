@@ -56,11 +56,20 @@ impl GuardianResolver {
             DecisionKind::ToolInvocation { tool_name, effect } => {
                 format!("Tool invocation: {} (effect: {:?})", tool_name, effect)
             }
-            DecisionKind::ProviderCall { model_id, estimated_tokens } => {
+            DecisionKind::ProviderCall {
+                model_id,
+                estimated_tokens,
+            } => {
                 format!("Provider call: {} (~{} tokens)", model_id, estimated_tokens)
             }
-            DecisionKind::CredentialAccess { credential_id, purpose } => {
-                format!("Credential access: {} (purpose: {})", credential_id, purpose)
+            DecisionKind::CredentialAccess {
+                credential_id,
+                purpose,
+            } => {
+                format!(
+                    "Credential access: {} (purpose: {})",
+                    credential_id, purpose
+                )
             }
             DecisionKind::DestructiveAction { action, resource } => {
                 format!("Destructive action: {} on {}", action, resource)
@@ -136,10 +145,7 @@ impl ApprovalResolver for GuardianResolver {
             Some(id) => id.clone(),
             None => {
                 // Guardian not configured — fall through.
-                return (
-                    DecisionOutcome::Allowed,
-                    DecisionSource::FreshEvaluation,
-                );
+                return (DecisionOutcome::Allowed, DecisionSource::FreshEvaluation);
             }
         };
 
@@ -150,26 +156,25 @@ impl ApprovalResolver for GuardianResolver {
         };
 
         // Call the provider. On any error, fail closed (fall through).
-        let response: GenerationResponse = match self.provider.generate(&model_id, messages, &settings).await {
-            Ok(resp) => resp,
-            Err(e) => {
-                eprintln!("[guardian] LLM call failed (model={model_id}): {e} — falling through to human");
-                return (
-                    DecisionOutcome::Allowed,
-                    DecisionSource::FreshEvaluation,
+        let response: GenerationResponse =
+            match self.provider.generate(&model_id, messages, &settings).await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    eprintln!(
+                    "[guardian] LLM call failed (model={model_id}): {e} — falling through to human"
                 );
-            }
-        };
+                    return (DecisionOutcome::Allowed, DecisionSource::FreshEvaluation);
+                }
+            };
 
         // Parse the structured response.
         let (outcome, risk_level, rationale) = match Self::parse_response(&response.text) {
             Some(parsed) => parsed,
             None => {
-                eprintln!("[guardian] response unparseable (model={model_id}) — falling through to human");
-                return (
-                    DecisionOutcome::Allowed,
-                    DecisionSource::FreshEvaluation,
+                eprintln!(
+                    "[guardian] response unparseable (model={model_id}) — falling through to human"
                 );
+                return (DecisionOutcome::Allowed, DecisionSource::FreshEvaluation);
             }
         };
 
@@ -179,10 +184,7 @@ impl ApprovalResolver for GuardianResolver {
                 "[guardian] risk {:?} exceeds ceiling {:?} — falling through to human",
                 risk_level, self.config.risk_ceiling,
             );
-            return (
-                DecisionOutcome::Allowed,
-                DecisionSource::FreshEvaluation,
-            );
+            return (DecisionOutcome::Allowed, DecisionSource::FreshEvaluation);
         }
 
         let _ = &rationale; // used in source below
@@ -295,16 +297,20 @@ mod tests {
             _: Vec<serde_json::Value>,
             _: &ProviderBindingSettings,
         ) -> Result<GenerationResponse, cairn_domain::providers::ProviderAdapterError> {
-            Err(cairn_domain::providers::ProviderAdapterError::TransportFailure(
-                "timeout".to_owned(),
-            ))
+            Err(
+                cairn_domain::providers::ProviderAdapterError::TransportFailure(
+                    "timeout".to_owned(),
+                ),
+            )
         }
     }
 
     #[tokio::test]
     async fn guardian_approves_low_risk_action() {
         let provider = Arc::new(MockProvider {
-            response: r#"{"outcome":"allowed","rationale":"safe read operation","risk_level":"low"}"#.to_owned(),
+            response:
+                r#"{"outcome":"allowed","rationale":"safe read operation","risk_level":"low"}"#
+                    .to_owned(),
         });
         let resolver = GuardianResolver::new(
             provider,
@@ -322,7 +328,8 @@ mod tests {
     #[tokio::test]
     async fn guardian_denies_action() {
         let provider = Arc::new(MockProvider {
-            response: r#"{"outcome":"denied","rationale":"too risky","risk_level":"medium"}"#.to_owned(),
+            response: r#"{"outcome":"denied","rationale":"too risky","risk_level":"medium"}"#
+                .to_owned(),
         });
         let resolver = GuardianResolver::new(
             provider,
@@ -340,7 +347,8 @@ mod tests {
     #[tokio::test]
     async fn guardian_falls_through_when_risk_exceeds_ceiling() {
         let provider = Arc::new(MockProvider {
-            response: r#"{"outcome":"allowed","rationale":"seems ok","risk_level":"medium"}"#.to_owned(),
+            response: r#"{"outcome":"allowed","rationale":"seems ok","risk_level":"medium"}"#
+                .to_owned(),
         });
         let resolver = GuardianResolver::new(
             provider,

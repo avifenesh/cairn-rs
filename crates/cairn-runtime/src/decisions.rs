@@ -451,7 +451,7 @@ impl DecisionCache {
                     return false;
                 }
                 let matches_scope = parts[1] == scope_str;
-                let matches_kind = kind_filter.map_or(true, |f| parts[0] == f);
+                let matches_kind = kind_filter.is_none_or(|f| parts[0] == f);
                 matches_scope && matches_kind
             })
             .cloned()
@@ -944,7 +944,7 @@ impl DecisionService for DecisionServiceImpl {
                 };
                 let event = DecisionEvent::DecisionRecorded {
                     decision_id: decision_id.clone(),
-                    request,
+                    request: Box::new(request),
                     outcome: cached_outcome.clone(),
                     reasoning_chain: chain,
                     source: source.clone(),
@@ -1072,7 +1072,7 @@ impl DecisionService for DecisionServiceImpl {
 
         let event = DecisionEvent::DecisionRecorded {
             decision_id: decision_id.clone(),
-            request,
+            request: Box::new(request),
             outcome: outcome.clone(),
             reasoning_chain: chain,
             source,
@@ -1190,7 +1190,7 @@ impl DecisionServiceImpl {
         };
         let event = DecisionEvent::DecisionRecorded {
             decision_id: decision_id.clone(),
-            request,
+            request: Box::new(request),
             outcome: outcome.clone(),
             reasoning_chain: chain,
             source: DecisionSource::FreshEvaluation,
@@ -1238,7 +1238,7 @@ impl DecisionService for StubDecisionService {
         };
         let event = DecisionEvent::DecisionRecorded {
             decision_id: decision_id.clone(),
-            request: request.clone(),
+            request: Box::new(request.clone()),
             outcome: DecisionOutcome::Allowed,
             reasoning_chain: vec![StepResult {
                 step: 8,

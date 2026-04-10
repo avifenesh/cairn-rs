@@ -77,6 +77,8 @@ domain → store → runtime → {memory, graph, evals, tools, agent, signal, ch
 | `cairn-evals` | Prompt registry, version/release lifecycle, scorecards, bandit experiments. |
 | `cairn-tools` | Tool invocation, stdio JSON-RPC plugin host, permission gates, concurrency limits. |
 | `cairn-orchestrator` | Agent orchestration loop, step execution, event emission. |
+| `cairn-workspace` | Sandbox workspace primitive (RFC 016): repo store, clone cache, sandbox lifecycle. |
+| `cairn-plugin-catalog` | Plugin marketplace and catalog (RFC 015): discovery, publishing, reviews. |
 
 ### Event Sourcing
 

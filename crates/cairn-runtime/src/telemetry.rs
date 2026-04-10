@@ -118,22 +118,24 @@ impl OtlpExporter {
     /// Map a RuntimeEvent to zero or more exportable spans.
     fn event_to_spans(&self, event: &RuntimeEvent) -> Vec<ExportableSpan> {
         match event {
-            RuntimeEvent::RunCreated(e) => vec![self.run_span(
-                &e.run_id.to_string(),
-                &e.session_id.to_string(),
-                "run.created",
-                0,
-            )],
+            RuntimeEvent::RunCreated(e) => {
+                vec![self.run_span(e.run_id.as_ref(), e.session_id.as_ref(), "run.created", 0)]
+            }
             RuntimeEvent::RunStateChanged(e) => vec![self.run_span(
-                &e.run_id.to_string(),
+                e.run_id.as_ref(),
                 "",
                 &format!("run.state_changed:{:?}", e.transition.to),
                 0,
             )],
             RuntimeEvent::ToolInvocationStarted(e) => {
                 let tool_name = match &e.target {
-                    cairn_domain::tool_invocation::ToolInvocationTarget::Builtin { tool_name } => tool_name.clone(),
-                    cairn_domain::tool_invocation::ToolInvocationTarget::Plugin { tool_name, .. } => tool_name.clone(),
+                    cairn_domain::tool_invocation::ToolInvocationTarget::Builtin { tool_name } => {
+                        tool_name.clone()
+                    }
+                    cairn_domain::tool_invocation::ToolInvocationTarget::Plugin {
+                        tool_name,
+                        ..
+                    } => tool_name.clone(),
                 };
                 let mut attrs = HashMap::new();
                 attrs.insert(
@@ -146,7 +148,7 @@ impl OtlpExporter {
                 );
                 let run_str = e.run_id.as_ref().map(|r| r.to_string()).unwrap_or_default();
                 vec![ExportableSpan {
-                    span_id: format!("{:016x}", hash_id(&e.invocation_id.to_string())),
+                    span_id: format!("{:016x}", hash_id(e.invocation_id.as_ref())),
                     parent_span_id: Some(format!("{:016x}", hash_id(&run_str))),
                     trace_id: format!("{:032x}", hash_id(&run_str)),
                     name: format!("tool:{tool_name}"),
@@ -173,9 +175,9 @@ impl OtlpExporter {
                     SpanAttributeValue::String(e.tool_name.clone()),
                 );
                 vec![ExportableSpan {
-                    span_id: format!("{:016x}", hash_id(&e.invocation_id.to_string())),
+                    span_id: format!("{:016x}", hash_id(e.invocation_id.as_ref())),
                     parent_span_id: None,
-                    trace_id: format!("{:032x}", hash_id(&e.invocation_id.to_string())),
+                    trace_id: format!("{:032x}", hash_id(e.invocation_id.as_ref())),
                     name: format!("tool:{}", e.tool_name),
                     start_time_ns: 0,
                     end_time_ns: e.finished_at_ms * 1_000_000,
@@ -208,9 +210,17 @@ impl OtlpExporter {
                 }
                 let run_str = e.run_id.as_ref().map(|r| r.to_string()).unwrap_or_default();
                 vec![ExportableSpan {
-                    span_id: format!("{:016x}", hash_id(&e.provider_call_id.to_string())),
-                    parent_span_id: if run_str.is_empty() { None } else { Some(format!("{:016x}", hash_id(&run_str))) },
-                    trace_id: if run_str.is_empty() { format!("{:032x}", hash_id(&e.provider_call_id.to_string())) } else { format!("{:032x}", hash_id(&run_str)) },
+                    span_id: format!("{:016x}", hash_id(e.provider_call_id.as_ref())),
+                    parent_span_id: if run_str.is_empty() {
+                        None
+                    } else {
+                        Some(format!("{:016x}", hash_id(&run_str)))
+                    },
+                    trace_id: if run_str.is_empty() {
+                        format!("{:032x}", hash_id(e.provider_call_id.as_ref()))
+                    } else {
+                        format!("{:032x}", hash_id(&run_str))
+                    },
                     name: format!("llm:{}", e.provider_model_id),
                     start_time_ns: 0,
                     end_time_ns: e.completed_at * 1_000_000,
@@ -256,11 +266,9 @@ impl OtlpExporter {
 
 /// Simple FNV-1a hash for deterministic span/trace IDs from string keys.
 fn hash_id(s: &str) -> u64 {
-    s.as_bytes()
-        .iter()
-        .fold(0xcbf29ce484222325u64, |h, &b| {
-            h.wrapping_mul(0x100000001b3) ^ (b as u64)
-        })
+    s.as_bytes().iter().fold(0xcbf29ce484222325u64, |h, &b| {
+        h.wrapping_mul(0x100000001b3) ^ (b as u64)
+    })
 }
 
 /// Truncate a string to at most `max_bytes` (for attribute value size limits).
@@ -292,16 +300,20 @@ mod tests {
     #[tokio::test]
     async fn disabled_export_is_noop() {
         let exporter = OtlpExporter::disabled();
-        let event = cairn_domain::RuntimeEvent::SessionCreated(cairn_domain::events::SessionCreated {
-            project: cairn_domain::ProjectKey::new("t", "w", "p"),
-            session_id: cairn_domain::SessionId::new("s1"),
-        });
+        let event =
+            cairn_domain::RuntimeEvent::SessionCreated(cairn_domain::events::SessionCreated {
+                project: cairn_domain::ProjectKey::new("t", "w", "p"),
+                session_id: cairn_domain::SessionId::new("s1"),
+            });
         assert!(exporter.export_event(&event).await.is_ok());
     }
 
     #[test]
     fn tool_invocation_started_produces_span() {
-        let config = OtlpConfig { enabled: true, ..Default::default() };
+        let config = OtlpConfig {
+            enabled: true,
+            ..Default::default()
+        };
         let exporter = OtlpExporter::new(config, Box::new(NoOpSink));
         let event = cairn_domain::RuntimeEvent::ToolInvocationStarted(
             cairn_domain::events::ToolInvocationStarted {
@@ -327,7 +339,10 @@ mod tests {
 
     #[test]
     fn memory_search_gets_retrieval_operation_name() {
-        let config = OtlpConfig { enabled: true, ..Default::default() };
+        let config = OtlpConfig {
+            enabled: true,
+            ..Default::default()
+        };
         let exporter = OtlpExporter::new(config, Box::new(NoOpSink));
         let event = cairn_domain::RuntimeEvent::ToolInvocationCompleted(
             cairn_domain::events::ToolInvocationCompleted {
@@ -349,7 +364,10 @@ mod tests {
 
     #[test]
     fn provider_call_produces_genai_span() {
-        let config = OtlpConfig { enabled: true, ..Default::default() };
+        let config = OtlpConfig {
+            enabled: true,
+            ..Default::default()
+        };
         let exporter = OtlpExporter::new(config, Box::new(NoOpSink));
         let event = cairn_domain::RuntimeEvent::ProviderCallCompleted(
             cairn_domain::events::ProviderCallCompleted {
@@ -391,14 +409,16 @@ mod tests {
 
     #[test]
     fn unhandled_event_produces_no_spans() {
-        let config = OtlpConfig { enabled: true, ..Default::default() };
+        let config = OtlpConfig {
+            enabled: true,
+            ..Default::default()
+        };
         let exporter = OtlpExporter::new(config, Box::new(NoOpSink));
-        let event = cairn_domain::RuntimeEvent::SessionCreated(
-            cairn_domain::events::SessionCreated {
+        let event =
+            cairn_domain::RuntimeEvent::SessionCreated(cairn_domain::events::SessionCreated {
                 project: cairn_domain::ProjectKey::new("t", "w", "p"),
                 session_id: cairn_domain::SessionId::new("s1"),
-            },
-        );
+            });
         assert!(exporter.event_to_spans(&event).is_empty());
     }
 
