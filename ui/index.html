@@ -6,8 +6,11 @@
     <script>
       try {
         var t = localStorage.getItem('cairn_theme') || 'dark';
-        if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        var isDark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (isDark) {
           document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
         }
         var prefs = JSON.parse(localStorage.getItem('cairn_preferences') || '{}');
         if (prefs.compactMode) document.documentElement.classList.add('compact');

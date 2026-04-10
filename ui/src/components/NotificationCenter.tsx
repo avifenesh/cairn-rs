@@ -63,27 +63,27 @@ function NotifRow({
       onClick={handleClick}
       className={clsx(
         'w-full flex items-start gap-3 px-4 py-3 text-left transition-colors',
-        'hover:bg-zinc-800/50 border-b border-zinc-800/60 last:border-0',
-        !notif.read && 'bg-zinc-900/60',
+        'hover:bg-gray-100 dark:hover:bg-zinc-800/50 border-b border-gray-200 dark:border-zinc-800/60 last:border-0',
+        !notif.read && 'bg-gray-50 dark:bg-zinc-900/60',
       )}
     >
       {/* Type icon */}
       <div className={clsx(
         'shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5',
-        notif.read ? 'bg-zinc-800/60' : 'bg-zinc-800',
+        notif.read ? 'bg-gray-100 dark:bg-zinc-800/60' : 'bg-gray-200 dark:bg-zinc-800',
       )}>
-        <cfg.icon size={13} className={notif.read ? 'text-zinc-600' : cfg.iconClass} />
+        <cfg.icon size={13} className={notif.read ? 'text-gray-400 dark:text-zinc-600' : cfg.iconClass} />
       </div>
 
       {/* Message + time */}
       <div className="flex-1 min-w-0">
         <p className={clsx(
           'text-[12px] leading-snug',
-          notif.read ? 'text-zinc-500' : 'text-zinc-200',
+          notif.read ? 'text-gray-400 dark:text-zinc-500' : 'text-gray-800 dark:text-zinc-200',
         )}>
           {notif.message}
         </p>
-        <p className="text-[10px] text-zinc-600 mt-0.5 tabular-nums">
+        <p className="text-[10px] text-gray-400 dark:text-zinc-600 mt-0.5 tabular-nums">
           {fmtRelative(notif.created_at)}
         </p>
       </div>
@@ -187,25 +187,25 @@ export function NotificationCenter() {
       {open && (
         <div
           className="absolute right-0 top-full mt-1.5 w-[340px] rounded-xl
-                     bg-zinc-950 dark:bg-zinc-950 border border-zinc-800
-                     shadow-2xl shadow-black/40 z-50 overflow-hidden"
+                     bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800
+                     shadow-2xl shadow-black/20 dark:shadow-black/40 z-50 overflow-hidden"
           role="dialog"
           aria-label="Notifications"
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-zinc-800">
             <div className="flex items-center gap-2">
-              <Bell size={13} className="text-zinc-500" />
-              <span className="text-[12px] font-semibold text-zinc-300">Notifications</span>
+              <Bell size={13} className="text-gray-400 dark:text-zinc-500" />
+              <span className="text-[12px] font-semibold text-gray-800 dark:text-zinc-300">Notifications</span>
               {unread > 0 && (
-                <span className="text-[10px] text-zinc-600">{unread} unread</span>
+                <span className="text-[10px] text-gray-400 dark:text-zinc-600">{unread} unread</span>
               )}
             </div>
             {unread > 0 && (
               <button
                 onClick={handleMarkAll}
                 disabled={markAll.isPending}
-                className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40"
+                className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors disabled:opacity-40"
               >
                 <CheckCheck size={11} />
                 Mark all read
@@ -216,10 +216,10 @@ export function NotificationCenter() {
           {/* List */}
           <div className="max-h-[360px] overflow-y-auto">
             {notifications.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 gap-2 text-zinc-700">
-                <Play size={20} className="text-zinc-800" />
+              <div className="flex flex-col items-center justify-center py-10 gap-2 text-gray-400 dark:text-zinc-700">
+                <Play size={20} className="text-gray-300 dark:text-zinc-800" />
                 <p className="text-[12px]">No notifications yet</p>
-                <p className="text-[11px] text-zinc-800">
+                <p className="text-[11px] text-gray-300 dark:text-zinc-800">
                   Approvals, run completions, and stuck tasks appear here.
                 </p>
               </div>
@@ -236,13 +236,13 @@ export function NotificationCenter() {
 
           {/* Footer */}
           {notifications.length > 0 && (
-            <div className="px-4 py-2 border-t border-zinc-800 flex items-center justify-between">
-              <span className="text-[10px] text-zinc-700">
+            <div className="px-4 py-2 border-t border-gray-200 dark:border-zinc-800 flex items-center justify-between">
+              <span className="text-[10px] text-gray-400 dark:text-zinc-700">
                 {notifications.length} notification{notifications.length !== 1 ? 's' : ''}
               </span>
               <button
                 onClick={() => { window.location.hash = 'audit-log'; setOpen(false); }}
-                className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-400 transition-colors"
               >
                 View audit log →
               </button>
