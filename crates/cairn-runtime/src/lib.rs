@@ -19,6 +19,7 @@ pub mod credentials;
 pub mod decisions;
 pub mod defaults;
 pub mod guardian;
+pub mod telemetry;
 pub mod enrichment;
 pub mod error;
 pub mod eval_runs;
