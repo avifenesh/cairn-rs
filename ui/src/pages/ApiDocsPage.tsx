@@ -427,7 +427,7 @@ function TryItPanel({ ep }: { ep: Endpoint }) {
           onClick={() => setShowCurl(v => !v)}
           className={clsx(
             "flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 transition-colors shrink-0",
-            showCurl ? "bg-zinc-700 text-gray-700 dark:text-zinc-300" : "text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400",
+            showCurl ? "bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300" : "text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400",
           )}
         >
           <Terminal size={10} /> curl

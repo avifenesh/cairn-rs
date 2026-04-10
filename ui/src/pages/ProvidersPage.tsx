@@ -552,7 +552,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
               >
                 <span className={clsx(
                   "w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-semibold",
-                  i === step ? "bg-indigo-600 text-white" : i < step ? "bg-zinc-700 text-gray-700 dark:text-zinc-300" : "bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-600",
+                  i === step ? "bg-indigo-600 text-white" : i < step ? "bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300" : "bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-600",
                 )}>
                   {i < step ? <Check size={9} strokeWidth={3} /> : i + 1}
                 </span>

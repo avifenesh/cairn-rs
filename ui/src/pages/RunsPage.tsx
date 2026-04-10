@@ -303,12 +303,12 @@ export function RunsPage() {
         <div className="flex items-center rounded border border-gray-200 dark:border-zinc-700 overflow-hidden">
           <button onClick={() => setViewMode("table")} title="Table view"
             className={clsx("flex items-center gap-1 px-2.5 py-1 text-[11px] transition-colors",
-              viewMode === "table" ? "bg-zinc-700 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300")}>
+              viewMode === "table" ? "bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300")}>
             <LayoutList size={12} /> Table
           </button>
           <button onClick={() => setViewMode("timeline")} title="Timeline view"
             className={clsx("flex items-center gap-1 px-2.5 py-1 text-[11px] border-l border-gray-200 dark:border-zinc-700 transition-colors",
-              viewMode === "timeline" ? "bg-zinc-700 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300")}>
+              viewMode === "timeline" ? "bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300")}>
             <GanttChart size={12} /> Timeline
           </button>
         </div>

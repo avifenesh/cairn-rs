@@ -626,7 +626,7 @@ export function GraphPage() {
               className={clsx(
                 "px-2.5 py-1 rounded text-[11px] font-medium transition-colors capitalize",
                 view === v
-                  ? "bg-zinc-700 text-gray-900 dark:text-zinc-100"
+                  ? "bg-gray-200 dark:bg-zinc-700 text-gray-900 dark:text-zinc-100"
                   : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300",
               )}>
               {v}
