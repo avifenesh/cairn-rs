@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   RefreshCw, Loader2, Plus, ChevronDown, ChevronRight,
   Trash2, X, Puzzle, Terminal, Download, ShieldCheck, Power, PowerOff,
-  Key, CheckCircle2, Store,
+  Key, Store,
 } from 'lucide-react';
 import { ErrorFallback } from '../components/ErrorFallback';
 import { defaultApi } from '../lib/api';

@@ -289,7 +289,7 @@ function OrchestrationTimeline({ runId }: { runId: string }) {
 
 // ── Plan Artifact Panel (RFC 018) ─────────────────────────────────────────────
 
-function PlanArtifactPanel({ runId, run }: { runId: string; run?: { state: string } & Record<string, unknown> }) {
+function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib/types").RunRecord }) {
   const queryClient = useQueryClient();
   const [rejectReason, setRejectReason] = useState("");
   const [reviseComments, setReviseComments] = useState("");
@@ -317,8 +317,8 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: { state: strin
 
   // Check if mode is plan by looking at run metadata
   const isPlanMode = run && (
-    (run as Record<string, unknown>).mode === "plan" ||
-    String((run as Record<string, unknown>).mode ?? "").includes("plan") ||
+    run.mode === "plan" ||
+    (run.mode ?? "").includes("plan") ||
     hasPlan
   );
 
@@ -383,9 +383,12 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: { state: strin
           <p className="text-[11px] text-indigo-400/70 uppercase tracking-wider mb-2">Plan Artifact</p>
           <div className="bg-zinc-950/60 rounded-md p-3 max-h-64 overflow-y-auto">
             <pre className="text-[12px] text-zinc-300 font-mono whitespace-pre-wrap leading-relaxed">
-              {typeof (planProposed as Record<string, unknown>).plan_markdown === "string"
-                ? String((planProposed as Record<string, unknown>).plan_markdown)
-                : JSON.stringify(planProposed, null, 2)}
+              {(() => {
+                const ev = planProposed as unknown as Record<string, unknown>;
+                return typeof ev.plan_markdown === "string"
+                  ? ev.plan_markdown
+                  : JSON.stringify(planProposed, null, 2);
+              })()}
             </pre>
           </div>
         </div>
@@ -629,23 +632,23 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
         </div>
 
         {/* Trigger origin badge */}
-        {run && (run as Record<string, unknown>).created_by_trigger_id && (
+        {run?.created_by_trigger_id && (
           <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-amber-800/40 bg-amber-950/20">
             <Bolt size={13} className="text-amber-400 shrink-0" />
             <span className="text-[12px] text-amber-300">
-              Created by trigger: <span className="font-mono font-medium">{String((run as Record<string, unknown>).created_by_trigger_id)}</span>
+              Created by trigger: <span className="font-mono font-medium">{run.created_by_trigger_id}</span>
             </span>
           </div>
         )}
 
         {/* Sandbox status */}
-        {run && (run as Record<string, unknown>).sandbox_id && (
+        {run?.sandbox_id && (
           <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-teal-800/40 bg-teal-950/20">
             <Box size={13} className="text-teal-400 shrink-0" />
             <span className="text-[12px] text-teal-300">
-              Sandbox: <span className="font-mono font-medium">{String((run as Record<string, unknown>).sandbox_id)}</span>
-              {(run as Record<string, unknown>).sandbox_path && (
-                <span className="text-teal-500 ml-2">{String((run as Record<string, unknown>).sandbox_path)}</span>
+              Sandbox: <span className="font-mono font-medium">{run.sandbox_id}</span>
+              {run.sandbox_path && (
+                <span className="text-teal-500 ml-2">{run.sandbox_path}</span>
               )}
             </span>
           </div>

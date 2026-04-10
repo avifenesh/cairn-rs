@@ -214,6 +214,14 @@ export interface RunRecord {
   version: number;
   created_at: number; // unix ms
   updated_at: number; // unix ms
+  /** RFC 018: execution mode (direct/plan/execute) */
+  mode?: string;
+  /** RFC 022: trigger that created this run */
+  created_by_trigger_id?: string;
+  /** RFC 016: sandbox ID if run has a sandbox */
+  sandbox_id?: string;
+  /** RFC 016: sandbox filesystem path */
+  sandbox_path?: string;
 }
 
 // ── Run sub-resources ─────────────────────────────────────────────────────────
