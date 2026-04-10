@@ -4,9 +4,9 @@ use cairn_domain::decisions::RunMode;
 use cairn_domain::ids::{OperatorId, RunTemplateId, SignalId, TriggerId};
 use cairn_domain::tenancy::ProjectKey;
 use cairn_runtime::services::trigger_service::{
-    evaluate_conditions, substitute_variables, RateLimitConfig, RunTemplate, SignalPattern,
-    SkipReason, TemplateBudget, Trigger, TriggerCondition, TriggerError, TriggerEvent,
-    TriggerService, TriggerState,
+    auto_approve_decision, evaluate_conditions, substitute_variables, RateLimitConfig, RunTemplate,
+    SignalPattern, SkipReason, TemplateBudget, Trigger, TriggerCondition, TriggerError,
+    TriggerEvent, TriggerService, TriggerState,
 };
 use serde_json::json;
 
@@ -95,6 +95,7 @@ fn rfc022_test1_create_enable_fire() {
         "github",
         &github_payload(),
         None,
+        &auto_approve_decision,
     );
 
     assert_eq!(events.len(), 1);
@@ -139,6 +140,7 @@ fn rfc022_test2_condition_mismatch_skips() {
         "github",
         &payload,
         None,
+        &auto_approve_decision,
     );
 
     assert_eq!(events.len(), 1);
@@ -171,6 +173,7 @@ fn rfc022_test3_multiple_triggers_fan_out() {
         "github",
         &github_payload(),
         None,
+        &auto_approve_decision,
     );
 
     let fired = events
@@ -200,6 +203,7 @@ fn rfc022_test4_cross_project_isolation() {
         "github",
         &github_payload(),
         None,
+        &auto_approve_decision,
     );
 
     assert!(events.is_empty(), "p2 has no triggers");
@@ -225,6 +229,7 @@ fn rfc022_test6_fire_ledger_dedup() {
         "github",
         &github_payload(),
         None,
+        &auto_approve_decision,
     );
     assert!(matches!(&events1[0], TriggerEvent::TriggerFired { .. }));
 
@@ -236,6 +241,7 @@ fn rfc022_test6_fire_ledger_dedup() {
         "github",
         &github_payload(),
         None,
+        &auto_approve_decision,
     );
     assert!(matches!(
         &events2[0],
@@ -253,6 +259,7 @@ fn rfc022_test6_fire_ledger_dedup() {
         "github",
         &github_payload(),
         None,
+        &auto_approve_decision,
     );
     assert!(matches!(&events3[0], TriggerEvent::TriggerFired { .. }));
 }
@@ -318,8 +325,12 @@ fn rfc022_test9_chain_depth_prevents_loops() {
         "github",
         &github_payload(),
         Some(2),
+        &auto_approve_decision,
     );
-    assert!(matches!(&events[0], TriggerEvent::TriggerFired { chain_depth: 3, .. }));
+    assert!(matches!(
+        &events[0],
+        TriggerEvent::TriggerFired { chain_depth: 3, .. }
+    ));
 
     // Depth 4 (source at 3) is too deep
     let events = svc.evaluate_signal(
@@ -329,6 +340,7 @@ fn rfc022_test9_chain_depth_prevents_loops() {
         "github",
         &github_payload(),
         Some(3),
+        &auto_approve_decision,
     );
     assert!(matches!(
         &events[0],
@@ -380,6 +392,7 @@ fn rfc022_test11_required_fields_skip() {
         "github",
         &payload,
         None,
+        &auto_approve_decision,
     );
 
     assert_eq!(events.len(), 1);
@@ -430,6 +443,7 @@ fn rfc022_test14_run_carries_trigger_origin() {
         "github",
         &github_payload(),
         None,
+        &auto_approve_decision,
     );
 
     if let TriggerEvent::TriggerFired {
@@ -458,8 +472,12 @@ fn trigger_enable_disable_resume_lifecycle() {
         .unwrap();
 
     // Disable
-    svc.disable_trigger(&TriggerId::new("t1"), operator(), Some("maintenance".into()))
-        .unwrap();
+    svc.disable_trigger(
+        &TriggerId::new("t1"),
+        operator(),
+        Some("maintenance".into()),
+    )
+    .unwrap();
 
     // Signal should not match disabled trigger
     let events = svc.evaluate_signal(
@@ -469,6 +487,7 @@ fn trigger_enable_disable_resume_lifecycle() {
         "github",
         &github_payload(),
         None,
+        &auto_approve_decision,
     );
     assert!(events.is_empty(), "disabled trigger should not fire");
 
@@ -484,6 +503,7 @@ fn trigger_enable_disable_resume_lifecycle() {
         "github",
         &github_payload(),
         None,
+        &auto_approve_decision,
     );
     assert!(matches!(&events[0], TriggerEvent::TriggerFired { .. }));
 }

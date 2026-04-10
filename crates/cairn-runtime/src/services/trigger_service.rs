@@ -9,11 +9,12 @@
 //! router (RFC 015) and creates runs for matching triggers.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cairn_domain::decisions::RunMode;
-use cairn_domain::ids::{ApprovalId, OperatorId, RunId, RunTemplateId, SignalId, TriggerId};
+use cairn_domain::decisions::{DecisionKind, DecisionOutcome, RunMode};
+use cairn_domain::ids::{
+    ApprovalId, DecisionId, OperatorId, RunId, RunTemplateId, SignalId, TriggerId,
+};
 use cairn_domain::tenancy::ProjectKey;
 use serde::{Deserialize, Serialize};
 
@@ -201,12 +202,15 @@ pub enum TriggerEvent {
     TriggerDenied {
         trigger_id: TriggerId,
         signal_id: SignalId,
+        decision_id: DecisionId,
         reason: String,
         denied_at: u64,
     },
     TriggerRateLimited {
         trigger_id: TriggerId,
         signal_id: SignalId,
+        bucket_remaining: u32,
+        bucket_capacity: u32,
         rate_limited_at: u64,
     },
     TriggerPendingApproval {
@@ -250,14 +254,10 @@ pub enum SkipReason {
 /// Evaluate a trigger condition against a JSON payload.
 pub fn evaluate_condition(condition: &TriggerCondition, payload: &serde_json::Value) -> bool {
     match condition {
-        TriggerCondition::Equals { path, value } => {
-            resolve_path(payload, path).map_or(false, |v| v == value)
-        }
+        TriggerCondition::Equals { path, value } => resolve_path(payload, path) == Some(value),
         TriggerCondition::Contains { path, value } => {
             // For array paths like "labels[].name", check if any element matches
-            resolve_array_path(payload, path)
-                .iter()
-                .any(|v| v == value)
+            resolve_array_path(payload, path).iter().any(|v| v == value)
         }
         TriggerCondition::Exists { path } => resolve_path(payload, path).is_some(),
         TriggerCondition::Not(inner) => !evaluate_condition(inner, payload),
@@ -265,10 +265,7 @@ pub fn evaluate_condition(condition: &TriggerCondition, payload: &serde_json::Va
 }
 
 /// Evaluate all conditions — all must pass (AND semantics).
-pub fn evaluate_conditions(
-    conditions: &[TriggerCondition],
-    payload: &serde_json::Value,
-) -> bool {
+pub fn evaluate_conditions(conditions: &[TriggerCondition], payload: &serde_json::Value) -> bool {
     conditions.iter().all(|c| evaluate_condition(c, payload))
 }
 
@@ -293,10 +290,7 @@ fn resolve_array_path(value: &serde_json::Value, path: &str) -> Vec<serde_json::
     let parts: Vec<&str> = path.splitn(2, "[].").collect();
     if parts.len() != 2 {
         // No array expansion — fall back to scalar
-        return resolve_path(value, path)
-            .cloned()
-            .into_iter()
-            .collect();
+        return resolve_path(value, path).cloned().into_iter().collect();
     }
 
     let array_path = parts[0];
@@ -323,7 +317,7 @@ pub fn substitute_variables(
     payload: &serde_json::Value,
     required_fields: &[String],
 ) -> Result<String, Vec<String>> {
-    let mut result = template.to_string();
+    let result = template.to_string();
     let mut missing = Vec::new();
 
     // Find all {{...}} patterns
@@ -346,7 +340,7 @@ pub fn substitute_variables(
                 } else {
                     values
                         .iter()
-                        .map(|v| value_to_string(v))
+                        .map(value_to_string)
                         .collect::<Vec<_>>()
                         .join(", ")
                 }
@@ -387,6 +381,37 @@ fn value_to_string(v: &serde_json::Value) -> String {
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Null => String::new(),
         other => other.to_string(),
+    }
+}
+
+// ── Decision Layer Integration (RFC 019 × RFC 022) ──────────────────────────
+
+/// Outcome of submitting a trigger fire to the decision layer.
+///
+/// In production, this is the result of `DecisionService::evaluate()` for
+/// `DecisionKind::TriggerFire`. In tests, callers can supply a closure
+/// that returns the desired outcome.
+#[derive(Clone, Debug)]
+pub enum TriggerDecisionOutcome {
+    /// Decision layer approved the fire.
+    Approved { decision_id: DecisionId },
+    /// Decision layer denied the fire.
+    Denied {
+        decision_id: DecisionId,
+        reason: String,
+    },
+    /// Decision layer requires human/guardian approval before proceeding.
+    PendingApproval { approval_id: ApprovalId },
+}
+
+/// Default decision function that auto-approves all trigger fires.
+/// Used in tests and when no DecisionService is configured.
+pub fn auto_approve_decision(
+    _trigger_id: &TriggerId,
+    _signal_type: &str,
+) -> TriggerDecisionOutcome {
+    TriggerDecisionOutcome::Approved {
+        decision_id: DecisionId::new(format!("auto_{}", now_ms())),
     }
 }
 
@@ -551,10 +576,7 @@ impl TriggerService {
         })
     }
 
-    pub fn resume_trigger(
-        &mut self,
-        id: &TriggerId,
-    ) -> Result<TriggerEvent, TriggerError> {
+    pub fn resume_trigger(&mut self, id: &TriggerId) -> Result<TriggerEvent, TriggerError> {
         let trigger = self
             .triggers
             .get_mut(id)
@@ -598,7 +620,13 @@ impl TriggerService {
     // ── Trigger Evaluation ──────────────────────────────────────────
 
     /// Evaluate a signal against all enabled triggers in the project.
-    /// Returns events for each trigger that matches.
+    ///
+    /// The `decision_fn` callback is called for each trigger that passes
+    /// condition matching, chain depth, and rate limit checks. It integrates
+    /// with RFC 019's decision layer — in production this calls
+    /// `DecisionService::evaluate()` with `DecisionKind::TriggerFire`.
+    ///
+    /// Use `auto_approve_decision` for tests or when no decision layer is configured.
     pub fn evaluate_signal(
         &mut self,
         project: &ProjectKey,
@@ -607,12 +635,19 @@ impl TriggerService {
         plugin_id: &str,
         payload: &serde_json::Value,
         source_run_chain_depth: Option<u8>,
+        decision_fn: &dyn Fn(&TriggerId, &str) -> TriggerDecisionOutcome,
     ) -> Vec<TriggerEvent> {
         let now = now_ms();
         let mut events = Vec::new();
 
         // Collect matching trigger IDs first to avoid borrow issues
-        let matching_triggers: Vec<(TriggerId, RunTemplateId, Vec<TriggerCondition>, u8, RateLimitConfig)> = self
+        let matching_triggers: Vec<(
+            TriggerId,
+            RunTemplateId,
+            Vec<TriggerCondition>,
+            u8,
+            RateLimitConfig,
+        )> = self
             .triggers
             .values()
             .filter(|t| {
@@ -622,15 +657,17 @@ impl TriggerService {
                     && t.signal_pattern
                         .plugin_id
                         .as_ref()
-                        .map_or(true, |pid| pid == plugin_id)
+                        .is_none_or(|pid| pid == plugin_id)
             })
-            .map(|t| (
-                t.id.clone(),
-                t.run_template_id.clone(),
-                t.conditions.clone(),
-                t.max_chain_depth,
-                t.rate_limit.clone(),
-            ))
+            .map(|t| {
+                (
+                    t.id.clone(),
+                    t.run_template_id.clone(),
+                    t.conditions.clone(),
+                    t.max_chain_depth,
+                    t.rate_limit.clone(),
+                )
+            })
             .collect();
 
         for (trigger_id, template_id, conditions, max_depth, rate_limit) in matching_triggers {
@@ -670,16 +707,15 @@ impl TriggerService {
             }
 
             // Rate limit check
-            let counts = self
-                .fire_counts
-                .entry(trigger_id.clone())
-                .or_default();
+            let counts = self.fire_counts.entry(trigger_id.clone()).or_default();
             let window_start = now.saturating_sub(60_000);
             counts.retain(|&ts| ts > window_start);
             if counts.len() as u32 >= rate_limit.max_per_minute {
                 events.push(TriggerEvent::TriggerRateLimited {
                     trigger_id,
                     signal_id: signal_id.clone(),
+                    bucket_remaining: 0,
+                    bucket_capacity: rate_limit.max_per_minute,
                     rate_limited_at: now,
                 });
                 continue;
@@ -700,6 +736,41 @@ impl TriggerService {
                         signal_id: signal_id.clone(),
                         reason: SkipReason::MissingRequiredField { field },
                         skipped_at: now,
+                    });
+                    continue;
+                }
+            }
+
+            // Decision layer check (RFC 019 integration).
+            // The decision_fn callback simulates DecisionService::evaluate()
+            // for the TriggerFire decision kind. In production, this calls
+            // the actual DecisionService; in tests it can be overridden.
+            let decision_outcome = (decision_fn)(&trigger_id, signal_type);
+
+            match &decision_outcome {
+                TriggerDecisionOutcome::Approved { decision_id } => {
+                    // Approved — proceed to fire
+                    let _ = decision_id; // used in event below
+                }
+                TriggerDecisionOutcome::Denied {
+                    decision_id,
+                    reason,
+                } => {
+                    events.push(TriggerEvent::TriggerDenied {
+                        trigger_id,
+                        signal_id: signal_id.clone(),
+                        decision_id: decision_id.clone(),
+                        reason: reason.clone(),
+                        denied_at: now,
+                    });
+                    continue;
+                }
+                TriggerDecisionOutcome::PendingApproval { approval_id } => {
+                    events.push(TriggerEvent::TriggerPendingApproval {
+                        trigger_id,
+                        signal_id: signal_id.clone(),
+                        approval_id: approval_id.clone(),
+                        pending_at: now,
                     });
                     continue;
                 }
@@ -944,19 +1015,15 @@ mod tests {
     #[test]
     fn substitution_missing_field_empty_string() {
         let payload = json!({"action": "labeled"});
-        let result =
-            substitute_variables("Value: {{nonexistent}}", &payload, &[]).unwrap();
+        let result = substitute_variables("Value: {{nonexistent}}", &payload, &[]).unwrap();
         assert_eq!(result, "Value: ");
     }
 
     #[test]
     fn substitution_required_field_missing_errors() {
         let payload = json!({"action": "labeled"});
-        let result = substitute_variables(
-            "{{issue.number}}",
-            &payload,
-            &["issue.number".to_string()],
-        );
+        let result =
+            substitute_variables("{{issue.number}}", &payload, &["issue.number".to_string()]);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), vec!["issue.number".to_string()]);
     }
@@ -991,10 +1058,14 @@ mod tests {
             "github",
             &payload,
             None,
+            &auto_approve_decision,
         );
 
         assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0], TriggerEvent::TriggerFired { chain_depth: 1, .. }));
+        assert!(matches!(
+            &events[0],
+            TriggerEvent::TriggerFired { chain_depth: 1, .. }
+        ));
     }
 
     #[test]
@@ -1016,6 +1087,7 @@ mod tests {
             "github",
             &payload,
             None,
+            &auto_approve_decision,
         );
 
         assert_eq!(events.len(), 1);
@@ -1045,6 +1117,7 @@ mod tests {
             "github",
             &payload,
             None,
+            &auto_approve_decision,
         );
         assert!(matches!(&events1[0], TriggerEvent::TriggerFired { .. }));
 
@@ -1056,6 +1129,7 @@ mod tests {
             "github",
             &payload,
             None,
+            &auto_approve_decision,
         );
         assert!(matches!(
             &events2[0],
@@ -1085,8 +1159,12 @@ mod tests {
             "github",
             &payload,
             Some(2),
+            &auto_approve_decision,
         );
-        assert!(matches!(&events[0], TriggerEvent::TriggerFired { chain_depth: 3, .. }));
+        assert!(matches!(
+            &events[0],
+            TriggerEvent::TriggerFired { chain_depth: 3, .. }
+        ));
 
         // Depth 4 (source at 3, +1 = 4) — exceeds limit
         let events = svc.evaluate_signal(
@@ -1096,6 +1174,7 @@ mod tests {
             "github",
             &payload,
             Some(3),
+            &auto_approve_decision,
         );
         assert!(matches!(
             &events[0],
@@ -1123,6 +1202,7 @@ mod tests {
             "github",
             &payload,
             None,
+            &auto_approve_decision,
         );
 
         // Both triggers should fire
@@ -1175,6 +1255,7 @@ mod tests {
             "github",
             &payload,
             None,
+            &auto_approve_decision,
         );
         assert!(events.is_empty());
     }

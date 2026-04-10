@@ -19,6 +19,13 @@ use cairn_domain::tenancy::ProjectKey;
 use cairn_plugin_catalog::CatalogEntry;
 use serde::{Deserialize, Serialize};
 
+/// Opaque credential value — the encrypted/raw value provided by the operator.
+/// RFC 015 §Commands specifies `CredentialValue`; currently a String wrapper.
+pub type CredentialValue = String;
+
+/// Graph node identifier — matches cairn-graph's GraphNode.node_id type.
+pub type GraphNodeId = String;
+
 // ── Plugin Descriptor (RFC 015 §"Plugin Descriptor") ─────────────────────────
 
 /// Marketplace metadata wrapping the plugin manifest.
@@ -188,7 +195,7 @@ pub enum MarketplaceCommand {
     },
     ProvidePluginCredentials {
         plugin_id: String,
-        credentials: Vec<(String, String)>,
+        credentials: Vec<(String, CredentialValue)>,
         provided_by: OperatorId,
     },
     VerifyPluginCredentials {
@@ -293,7 +300,7 @@ pub enum MarketplaceEvent {
         signal_id: SignalId,
         plugin_id: String,
         project: ProjectKey,
-        node_id: String,
+        node_id: GraphNodeId,
         at: u64,
     },
     SignalIngestedToMemory {
@@ -576,7 +583,7 @@ impl<S> MarketplaceService<S> {
     fn handle_provide_credentials(
         &mut self,
         plugin_id: String,
-        _credentials: Vec<(String, String)>,
+        _credentials: Vec<(String, CredentialValue)>,
         provided_by: OperatorId,
     ) -> Result<Vec<MarketplaceEvent>, MarketplaceError> {
         let record = self
@@ -882,9 +889,7 @@ pub fn resolve_capture_policy(
 ) -> ResolvedCapturePolicy {
     let override_cfg = enablement.signal_capture_override.as_ref();
 
-    let graph_project = override_cfg
-        .and_then(|o| o.graph_project)
-        .unwrap_or(true); // default ON
+    let graph_project = override_cfg.and_then(|o| o.graph_project).unwrap_or(true); // default ON
 
     let memory_ingest = override_cfg
         .and_then(|o| o.memory_ingest)

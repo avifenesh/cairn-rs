@@ -122,18 +122,19 @@ pub use provider_health_tracker::ProviderHealthTracker;
 
 pub mod marketplace_service;
 pub use marketplace_service::{
-    catalog_entry_to_descriptor, is_plugin_tool_visible, is_signal_allowed,
-    resolve_capture_policy, CredentialKind, CredentialScopeHint, CredentialScopeKey,
-    CredentialSpec, DescriptorSource, HealthCheckSpec, MarketplaceCommand, MarketplaceError,
+    catalog_entry_to_descriptor, is_plugin_tool_visible, is_signal_allowed, resolve_capture_policy,
+    CredentialKind, CredentialScopeHint, CredentialScopeKey, CredentialSpec, CredentialValue,
+    DescriptorSource, GraphNodeId, HealthCheckSpec, MarketplaceCommand, MarketplaceError,
     MarketplaceEvent, MarketplaceRecord, MarketplaceService, MarketplaceState, PluginDescriptor,
     PluginEnablement, ResolvedCapturePolicy,
 };
 
 pub mod trigger_service;
 pub use trigger_service::{
-    evaluate_condition, evaluate_conditions, substitute_variables, RateLimitConfig, RunTemplate,
-    SignalPattern, SkipReason, SuspensionReason, TemplateBudget, Trigger, TriggerCondition,
-    TriggerError, TriggerEvent, TriggerService, TriggerState,
+    auto_approve_decision, evaluate_condition, evaluate_conditions, substitute_variables,
+    RateLimitConfig, RunTemplate, SignalPattern, SkipReason, SuspensionReason, TemplateBudget,
+    Trigger, TriggerCondition, TriggerDecisionOutcome, TriggerError, TriggerEvent, TriggerService,
+    TriggerState,
 };
 
 pub mod plugin_health_monitor;
