@@ -69,10 +69,12 @@ pub use approval_policies::ApprovalPolicyService;
 pub use approvals::ApprovalService;
 pub use bandit::{BanditError, BanditServiceImpl, CreateExperimentRequest, SelectedArm};
 pub use checkpoints::CheckpointService;
-pub use decisions::{DecisionError, DecisionResult, DecisionService, StubDecisionService};
 pub use config_store::{ConfigStore, ConfigStoreError, FileConfigStore, InMemoryConfigStore};
 pub use context_builder::{
     ContextBuildError, ContextBuilder, ContextBuilderInput, DefaultContextBuilder,
+};
+pub use decisions::{
+    DecisionError, DecisionResult, DecisionService, DecisionServiceImpl, StubDecisionService,
 };
 pub use enrichment::{
     ApprovalEnrichment, CheckpointEnrichment, RunEnrichment, RuntimeEnrichment, SessionEnrichment,
