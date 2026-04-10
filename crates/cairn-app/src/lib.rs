@@ -697,7 +697,7 @@ pub struct AppState {
     pub plugin_registry: Arc<InMemoryPluginRegistry>,
     pub plugin_host: Arc<Mutex<StdioPluginHost>>,
     /// RFC 015: plugin marketplace service — manages discover/install/enable lifecycle.
-    pub marketplace: Arc<Mutex<cairn_runtime::services::MarketplaceService<cairn_store::InMemoryEventStore>>>,
+    pub marketplace: Arc<Mutex<cairn_runtime::services::MarketplaceService<cairn_store::InMemoryStore>>>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
     pub metrics: Arc<AppMetrics>,
     #[allow(dead_code)]
@@ -861,7 +861,8 @@ impl AppState {
         let plugin_host = Arc::new(Mutex::new(StdioPluginHost::new()));
         // RFC 015: marketplace service wrapping the plugin host.
         let marketplace = {
-            let mut svc = cairn_runtime::services::MarketplaceService::new(store.clone());
+            let mut svc =
+                cairn_runtime::services::MarketplaceService::new(runtime.store.clone());
             svc.load_bundled_catalog();
             Arc::new(Mutex::new(svc))
         };
@@ -3544,6 +3545,16 @@ impl AppBootstrap {
                     (HttpMethod::Post, "/v1/approvals/:id/delegate") => {
                         router.route(&path, post(delegate_approval_handler))
                     }
+                    // ── Plan review (RFC 018) ────────────────────────────────
+                    (HttpMethod::Post, "/v1/runs/:id/approve") => {
+                        router.route(&path, post(approve_plan_handler))
+                    }
+                    (HttpMethod::Post, "/v1/runs/:id/reject") => {
+                        router.route(&path, post(reject_plan_handler))
+                    }
+                    (HttpMethod::Post, "/v1/runs/:id/revise") => {
+                        router.route(&path, post(revise_plan_handler))
+                    }
                     // ── Decisions (RFC 019) — handled via nest below ─────────
                     (HttpMethod::Get, "/v1/decisions")
                     | (HttpMethod::Get, "/v1/decisions/cache")
@@ -3975,6 +3986,10 @@ impl AppBootstrap {
             .route("/v1/runs/:id/cancel", post(cancel_run_handler))
             .route("/v1/runs/:id/pause", post(pause_run_handler))
             .route("/v1/runs/:id/resume", post(resume_run_handler))
+            // Plan review (RFC 018)
+            .route("/v1/runs/:id/approve", post(approve_plan_handler))
+            .route("/v1/runs/:id/reject", post(reject_plan_handler))
+            .route("/v1/runs/:id/revise", post(revise_plan_handler))
             .route(
                 "/v1/runs/:id/checkpoint-strategy",
                 get(get_checkpoint_strategy_handler).post(set_checkpoint_strategy_handler),
@@ -4471,6 +4486,13 @@ impl AppBootstrap {
             .route("/v1/trace/:trace_id", get(get_trace_handler))
             .route("/v1/export/:format", get(export_bundle_by_format_handler))
             .route("/healthz", get(health_handler)) // alias for k8s liveness probes
+            // ── Marketplace (RFC 015) ─────────────────────────────────────────
+            .route("/v1/plugins/catalog", get(marketplace_routes::list_catalog_handler))
+            .route("/v1/plugins/:id/install", post(marketplace_routes::install_plugin_handler))
+            .route("/v1/plugins/:id/credentials", post(marketplace_routes::provide_credentials_handler))
+            .route("/v1/plugins/:id/verify", post(marketplace_routes::verify_credentials_handler))
+            .route("/v1/projects/:proj/plugins/:id", post(marketplace_routes::enable_plugin_handler).delete(marketplace_routes::disable_plugin_handler))
+            .route("/v1/plugins/:id/uninstall", delete(marketplace_routes::uninstall_plugin_handler))
     }
 
     /// Apply the standard middleware stack (auth, CORS, rate-limit, tracing)
@@ -12901,6 +12923,157 @@ async fn delegate_approval_handler(
         "approval delegation is not yet implemented",
     )
     .into_response()
+}
+
+// ── Plan review handlers (RFC 018) ───────────────────────────────────────────
+
+/// POST /v1/runs/:plan_run_id/approve
+async fn approve_plan_handler(
+    State(state): State<Arc<AppState>>,
+    Path(plan_run_id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use cairn_domain::events::PlanApproved;
+    use cairn_runtime::services::event_helpers::make_envelope;
+
+    let run_id = RunId::new(&plan_run_id);
+    let run = match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response(),
+        Err(e) => return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response(),
+    };
+
+    let reviewer_comments = body.get("reviewer_comments").and_then(|v| v.as_str()).map(str::to_owned);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let evt = make_envelope(cairn_domain::RuntimeEvent::PlanApproved(PlanApproved {
+        project: run.project.clone(),
+        plan_run_id: run_id,
+        approved_by: cairn_domain::OperatorId::new("operator"),
+        reviewer_comments,
+        approved_at: now_ms,
+    }));
+
+    if let Err(e) = state.runtime.store.append(&[evt]).await {
+        return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response();
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "plan_run_id": plan_run_id,
+        "status": "approved",
+        "next_step": "create_execute_run",
+    }))).into_response()
+}
+
+/// POST /v1/runs/:plan_run_id/reject
+async fn reject_plan_handler(
+    State(state): State<Arc<AppState>>,
+    Path(plan_run_id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use cairn_domain::events::PlanRejected;
+    use cairn_runtime::services::event_helpers::make_envelope;
+
+    let run_id = RunId::new(&plan_run_id);
+    let run = match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response(),
+        Err(e) => return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response(),
+    };
+
+    let reason = body.get("reason").and_then(|v| v.as_str()).unwrap_or("rejected by operator").to_owned();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let evt = make_envelope(cairn_domain::RuntimeEvent::PlanRejected(PlanRejected {
+        project: run.project.clone(),
+        plan_run_id: run_id,
+        rejected_by: cairn_domain::OperatorId::new("operator"),
+        reason,
+        rejected_at: now_ms,
+    }));
+
+    if let Err(e) = state.runtime.store.append(&[evt]).await {
+        return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response();
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "plan_run_id": plan_run_id,
+        "status": "rejected",
+    }))).into_response()
+}
+
+/// POST /v1/runs/:plan_run_id/revise
+async fn revise_plan_handler(
+    State(state): State<Arc<AppState>>,
+    Path(plan_run_id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use cairn_domain::events::PlanRevisionRequested;
+    use cairn_runtime::services::event_helpers::make_envelope;
+
+    let original_run_id = RunId::new(&plan_run_id);
+    let original_run = match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &original_run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response(),
+        Err(e) => return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response(),
+    };
+
+    let reviewer_comments = body.get("reviewer_comments").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+    if reviewer_comments.is_empty() {
+        return bad_request_response("reviewer_comments is required for revise");
+    }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    // Create a new Plan-mode run for the revision.
+    let new_run_id = RunId::new(format!("run_{now_ms}_rev"));
+    let before = current_event_head(&state).await;
+    match state
+        .runtime
+        .runs
+        .start(
+            &original_run.project,
+            &original_run.session_id,
+            new_run_id.clone(),
+            Some(original_run_id.clone()),
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(err) => return runtime_error_response(err),
+    }
+
+    // Emit PlanRevisionRequested event.
+    let evt = make_envelope(cairn_domain::RuntimeEvent::PlanRevisionRequested(
+        PlanRevisionRequested {
+            project: original_run.project.clone(),
+            original_plan_run_id: original_run_id,
+            new_plan_run_id: new_run_id.clone(),
+            reviewer_comments,
+            requested_at: now_ms,
+        },
+    ));
+
+    if let Err(e) = state.runtime.store.append(&[evt]).await {
+        return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response();
+    }
+
+    publish_runtime_frames_since(&state, before).await;
+
+    (StatusCode::CREATED, Json(serde_json::json!({
+        "plan_run_id": plan_run_id,
+        "new_plan_run_id": new_run_id.as_str(),
+        "status": "revision_requested",
+    }))).into_response()
 }
 
 // ── Decision handlers (RFC 019) ──────────────────────────────────────────────
