@@ -18035,11 +18035,21 @@ fn deployment_mode_tier(mode: DeploymentMode) -> ProductTier {
 }
 
 /// Build the active EntitlementSet for the current deployment config.
-/// Mirrors the pattern used in GatedEvalsEndpoints: LocalEval gets no
-/// DeploymentTier entitlement so gated features are denied in local mode.
+/// Self-hosted team mode gets DeploymentTier by default. Local in-memory dev
+/// runs also get DeploymentTier when credentials are available so operator
+/// flows can exercise credential management without a paid license.
+fn local_dev_deployment_entitlements(config: &BootstrapConfig) -> bool {
+    matches!(config.mode, DeploymentMode::Local)
+        && matches!(config.storage, StorageBackend::InMemory)
+        && config.credentials_available()
+}
+
 fn app_entitlements(config: &BootstrapConfig) -> EntitlementSet {
     let tier = deployment_mode_tier(config.mode);
     let base = EntitlementSet::new(TenantId::new("bootstrap"), tier);
+    if local_dev_deployment_entitlements(config) {
+        return base.with_entitlement(Entitlement::DeploymentTier);
+    }
     match config.mode {
         DeploymentMode::SelfHostedTeam => base.with_entitlement(Entitlement::DeploymentTier),
         DeploymentMode::Local => base,
@@ -18738,6 +18748,25 @@ mod tests {
     }
 
     #[test]
+    fn local_in_memory_dev_grants_deployment_tier_for_credentials() {
+        let config = BootstrapConfig::default();
+
+        assert!(app_entitlements(&config).has(Entitlement::DeploymentTier));
+    }
+
+    #[test]
+    fn local_sqlite_does_not_grant_deployment_tier() {
+        let config = BootstrapConfig {
+            storage: StorageBackend::Sqlite {
+                path: "cairn.db".to_owned(),
+            },
+            ..BootstrapConfig::default()
+        };
+
+        assert!(!app_entitlements(&config).has(Entitlement::DeploymentTier));
+    }
+
+    #[test]
     fn parse_args_sets_tls_fields_when_cert_and_key_present() {
         let args = vec![
             "cairn-app".to_owned(),
@@ -18818,6 +18847,29 @@ mod tests {
             json["capabilities"][0]["capability"]["type"],
             "tool_provider"
         );
+    }
+
+    #[tokio::test]
+    async fn local_dev_can_store_credentials_via_admin_route() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "credential-token");
+
+        let response = post_json(
+            AppBootstrap::build_router(state),
+            "/v1/admin/tenants/default_tenant/credentials",
+            "credential-token",
+            serde_json::json!({
+                "provider_id": "openai",
+                "plaintext_value": "sk-local-dev",
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = response_json(response).await;
+        assert_eq!(body["tenant_id"], DEFAULT_TENANT_ID);
+        assert_eq!(body["provider_id"], "openai");
+        assert_eq!(body["active"], true);
     }
 
     #[tokio::test]
