@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
 use cairn_domain::{
-    CheckpointKind, DestroyReason, PreservationReason, ProjectKey, ResourceDimension, RunId,
-    TaskId,
+    CheckpointKind, DestroyReason, PreservationReason, ProjectKey, ResourceDimension, RunId, TaskId,
 };
 
 use crate::sandbox::{RepoId, SandboxId, SandboxPolicy, SandboxStrategy};

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use cairn_domain::{ProjectKey, RunId};
+use cairn_domain::{ProjectKey, RunId, TaskId};
 
 use crate::sandbox::{RepoId, SandboxId, SandboxState, SandboxStrategy};
 
@@ -8,6 +8,7 @@ use crate::sandbox::{RepoId, SandboxId, SandboxState, SandboxStrategy};
 pub struct SandboxMetadata {
     pub sandbox_id: SandboxId,
     pub run_id: RunId,
+    pub task_id: Option<TaskId>,
     pub project: ProjectKey,
     pub strategy: SandboxStrategy,
     pub state: SandboxState,

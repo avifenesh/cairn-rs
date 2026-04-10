@@ -4,15 +4,13 @@ pub mod policy;
 pub mod service;
 pub mod types;
 
-pub use events::{
-    SandboxCheckpointKind, SandboxErrorKind, SandboxEvent, SandboxPolicySnapshot,
-};
+pub use events::{SandboxCheckpointKind, SandboxErrorKind, SandboxEvent, SandboxPolicySnapshot};
 pub use metadata::SandboxMetadata;
 pub use policy::{
     CredentialReference, HostCapabilityRequirements, RepoId, SandboxBase, SandboxPolicy,
     SandboxStrategy, SandboxStrategyRequest,
 };
-pub use service::SandboxService;
+pub use service::{BufferedSandboxEventSink, Clock, SandboxEventSink, SandboxService, SystemClock};
 pub use types::{
     DestroyResult, ProvisionedSandbox, SandboxCheckpoint, SandboxHandle, SandboxId, SandboxState,
 };

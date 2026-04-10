@@ -12,10 +12,11 @@ pub use repo_store::{
     RepoCloneSweepTask, RepoStore, RepoStoreEvent, SweepId,
 };
 pub use sandbox::{
-    CredentialReference, DestroyResult, HostCapabilityRequirements, ProvisionedSandbox, RepoId,
-    SandboxBase, SandboxCheckpoint, SandboxCheckpointKind, SandboxErrorKind, SandboxEvent,
-    SandboxHandle, SandboxId, SandboxMetadata, SandboxPolicy, SandboxPolicySnapshot,
-    SandboxService, SandboxState, SandboxStrategy, SandboxStrategyRequest,
+    BufferedSandboxEventSink, Clock, CredentialReference, DestroyResult,
+    HostCapabilityRequirements, ProvisionedSandbox, RepoId, SandboxBase, SandboxCheckpoint,
+    SandboxCheckpointKind, SandboxErrorKind, SandboxEvent, SandboxEventSink, SandboxHandle,
+    SandboxId, SandboxMetadata, SandboxPolicy, SandboxPolicySnapshot, SandboxService, SandboxState,
+    SandboxStrategy, SandboxStrategyRequest, SystemClock,
 };
 
 #[cfg(test)]
