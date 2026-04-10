@@ -46,6 +46,7 @@ pub struct ExportableDocument {
 pub struct InMemoryDocumentStore {
     docs: Mutex<HashMap<String, (IngestStatus, ProjectKey, SourceType)>>,
     chunks: Mutex<Vec<ChunkRecord>>,
+    registered_sources: Mutex<HashMap<ProjectKey, HashSet<SourceId>>>,
     schedules: Mutex<HashMap<String, RefreshSchedule>>,
     /// Tracks the last embedding model used across all chunks.
     ///
@@ -59,6 +60,7 @@ impl InMemoryDocumentStore {
         Self {
             docs: Mutex::new(HashMap::new()),
             chunks: Mutex::new(Vec::new()),
+            registered_sources: Mutex::new(HashMap::new()),
             schedules: Mutex::new(HashMap::new()),
             last_embedding_model_id: Mutex::new(None),
         }
@@ -197,6 +199,7 @@ impl InMemoryDocumentStore {
     /// List all known sources for a project.
     pub fn list_sources(&self, project: &cairn_domain::ProjectKey) -> Vec<SourceSummary> {
         let chunks = self.chunks.lock().unwrap();
+        let registered_sources = self.registered_sources.lock().unwrap();
         // Count distinct document_ids per source_id.
         let mut source_docs: std::collections::HashMap<String, std::collections::HashSet<String>> =
             std::collections::HashMap::new();
@@ -216,7 +219,16 @@ impl InMemoryDocumentStore {
             }
             source_ids.entry(key).or_insert_with(|| c.source_id.clone());
         }
-        source_ids
+
+        if let Some(registered) = registered_sources.get(project) {
+            for source_id in registered {
+                source_ids
+                    .entry(source_id.as_str().to_owned())
+                    .or_insert_with(|| source_id.clone());
+            }
+        }
+
+        let mut summaries = source_ids
             .into_iter()
             .map(|(key, source_id)| SourceSummary {
                 source_id,
@@ -224,15 +236,23 @@ impl InMemoryDocumentStore {
                 avg_quality_score: 0.0,
                 last_ingested_at_ms: source_last_ts.get(&key).copied(),
             })
-            .collect()
+            .collect::<Vec<_>>();
+        summaries.sort_by(|a, b| a.source_id.as_str().cmp(b.source_id.as_str()));
+        summaries
     }
 
-    /// Register a source (no-op stub; returns a SourceSummary).
+    /// Register a source so it appears before any documents are ingested.
     pub fn register_source(
         &self,
-        _project: &cairn_domain::ProjectKey,
+        project: &cairn_domain::ProjectKey,
         source_id: &cairn_domain::SourceId,
     ) -> SourceSummary {
+        self.registered_sources
+            .lock()
+            .unwrap()
+            .entry(project.clone())
+            .or_default()
+            .insert(source_id.clone());
         SourceSummary {
             source_id: source_id.clone(),
             document_count: 0,
@@ -246,11 +266,28 @@ impl InMemoryDocumentStore {
         let mut chunks = self.chunks.lock().unwrap();
         let before = chunks.len();
         chunks.retain(|c| &c.source_id != source_id);
-        chunks.len() < before
+
+        let mut registered_sources = self.registered_sources.lock().unwrap();
+        let mut removed_registered = false;
+        for sources in registered_sources.values_mut() {
+            removed_registered |= sources.remove(source_id);
+        }
+        registered_sources.retain(|_, sources| !sources.is_empty());
+
+        chunks.len() < before || removed_registered
     }
 
     /// Check if a source is active (has any chunks).
     pub fn is_source_active(&self, source_id: &cairn_domain::SourceId) -> bool {
+        if self
+            .registered_sources
+            .lock()
+            .unwrap()
+            .values()
+            .any(|sources| sources.contains(source_id))
+        {
+            return true;
+        }
         let chunks = self.chunks.lock().unwrap();
         chunks.iter().any(|c| &c.source_id == source_id)
     }
@@ -908,13 +945,7 @@ impl InMemoryRetrieval {
         project: &cairn_domain::ProjectKey,
         source_id: &cairn_domain::SourceId,
     ) -> SourceSummary {
-        let _ = project;
-        SourceSummary {
-            source_id: source_id.clone(),
-            document_count: 0,
-            avg_quality_score: 0.0,
-            last_ingested_at_ms: None,
-        }
+        self.store.register_source(project, source_id)
     }
 
     /// List all known sources for a project.
@@ -925,16 +956,12 @@ impl InMemoryRetrieval {
 
     /// Check if a source is active (has any chunks).
     pub fn is_source_active(&self, source_id: &cairn_domain::SourceId) -> bool {
-        let chunks = self.store.chunks.lock().unwrap();
-        chunks.iter().any(|c| &c.source_id == source_id)
+        self.store.is_source_active(source_id)
     }
 
     /// Deactivate a source (removes all its chunks).
     pub fn deactivate_source(&self, source_id: &cairn_domain::SourceId) -> bool {
-        let mut chunks = self.store.chunks.lock().unwrap();
-        let before = chunks.len();
-        chunks.retain(|c| &c.source_id != source_id);
-        chunks.len() < before
+        self.store.deactivate_source(source_id)
     }
 
     /// Get all chunks (alias for all_chunks used by diagnostics).

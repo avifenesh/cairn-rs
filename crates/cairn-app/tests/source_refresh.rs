@@ -225,3 +225,95 @@ async fn source_refresh_get_unknown_source_returns_404() {
         "unknown source must return 404"
     );
 }
+
+#[tokio::test]
+async fn source_create_list_and_delete_persist_registered_sources() {
+    let app = make_app().await;
+    let source_id = "web/source_refresh_registered";
+    let encoded_source_id = source_id.replace('/', "%2F");
+    let scope = format!("tenant_id={TENANT}&workspace_id=ws_refresh&project_id=proj_refresh");
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sources")
+                .header("authorization", format!("Bearer {TOKEN}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "tenant_id": TENANT,
+                        "workspace_id": "ws_refresh",
+                        "project_id": "proj_refresh",
+                        "source_id": source_id,
+                        "name": "Refresh Source",
+                        "description": "registered before ingest",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/sources?{scope}"))
+                .header("authorization", format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let sources: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let items = sources.as_array().expect("sources list response must be an array");
+    assert!(
+        items.iter().any(|item| item["source_id"].as_str() == Some(source_id)),
+        "newly registered source must appear in the project source list"
+    );
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/sources/{encoded_source_id}"))
+                .header("authorization", format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/sources?{scope}"))
+                .header("authorization", format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let sources: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let items = sources.as_array().expect("sources list response must be an array");
+    assert!(
+        items.iter().all(|item| item["source_id"].as_str() != Some(source_id)),
+        "deleted source must be removed from the project source list"
+    );
+}
