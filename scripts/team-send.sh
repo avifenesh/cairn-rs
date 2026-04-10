@@ -23,14 +23,26 @@ NANO="$(date +%s%N)"
 TMP="$INBOX/.tmp-$NANO.json"
 FINAL="$INBOX/msg-$NANO.json"
 
-# Escape body for JSON (handle quotes and backslashes)
-ESCAPED_BODY="${BODY//\\/\\\\}"
-ESCAPED_BODY="${ESCAPED_BODY//\"/\\\"}"
-
-printf '{"from":"%s","to":"%s","ts":"%s","body":"%s"}\n' \
-  "$FROM" "$TO" "$TIMESTAMP" "$ESCAPED_BODY" > "$TMP"
+# Build JSON via python3's json.dumps — handles ALL escapes required by RFC 8259
+# (quotes, backslashes, line-feeds, carriage-returns, tabs, other control chars,
+# and unicode). The earlier printf+manual-escape approach only handled \ and ",
+# so multi-line bodies produced invalid JSON that the watcher silently dropped.
+python3 -c '
+import json, sys
+msg = {
+    "from": sys.argv[1],
+    "to":   sys.argv[2],
+    "ts":   sys.argv[3],
+    "body": sys.argv[4],
+}
+with open(sys.argv[5], "w", encoding="utf-8") as f:
+    json.dump(msg, f, ensure_ascii=False)
+' "$FROM" "$TO" "$TIMESTAMP" "$BODY" "$TMP"
 
 # Atomic rename — prevents watcher from reading a partial file
 mv "$TMP" "$FINAL"
 
-echo "[team-send] $FROM → $TO: $BODY"
+# Log confirmation with a one-line preview of the body so long messages
+# don't flood the sender's terminal.
+PREVIEW="${BODY%%$'\n'*}"
+echo "[team-send] $FROM → $TO: $PREVIEW"
