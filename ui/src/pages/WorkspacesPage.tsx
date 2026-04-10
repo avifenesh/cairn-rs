@@ -295,7 +295,11 @@ export function WorkspacesPage() {
       workspace_id: ws.workspace_id,
       project_id:   DEFAULT_SCOPE.project_id,
     });
-    void qc.invalidateQueries();
+    // Invalidate data queries so they refetch with the new scope,
+    // but exclude the workspace list itself to prevent a flash.
+    void qc.invalidateQueries({
+      predicate: (query) => query.queryKey[0] !== 'workspaces',
+    });
   }
 
   async function handleNewWorkspace(wsId: string) {
