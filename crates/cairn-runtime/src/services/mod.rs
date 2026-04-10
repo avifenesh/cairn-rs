@@ -120,6 +120,12 @@ pub use openai_compat_provider::OpenAiCompatProvider;
 pub mod provider_health_tracker;
 pub use provider_health_tracker::ProviderHealthTracker;
 
+pub mod marketplace_service;
+pub use marketplace_service::{
+    MarketplaceCommand, MarketplaceError, MarketplaceEvent, MarketplaceService,
+    MarketplaceState, PluginEnablement,
+};
+
 pub mod plugin_health_monitor;
 pub use plugin_health_monitor::PluginHealthMonitor;
 
