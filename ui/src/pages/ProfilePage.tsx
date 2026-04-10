@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { ErrorFallback } from '../components/ErrorFallback';
 import {
   User,
   KeyRound,
@@ -375,7 +376,7 @@ function AboutSection() {
 // ── Changelog ─────────────────────────────────────────────────────────────────
 
 function ChangelogSection() {
-  const { data: entries, isLoading } = useQuery({
+  const { data: entries, isLoading, isError } = useQuery({
     queryKey: ['changelog'],
     queryFn:  (): Promise<ChangelogEntry[]> => defaultApi.getChangelog(),
     staleTime: Infinity,
@@ -385,7 +386,9 @@ function ChangelogSection() {
 
   return (
     <SectionCard title="Changelog" icon={ListOrdered}>
-      {isLoading ? (
+      {isError ? (
+        <p className="text-[12px] text-gray-400 dark:text-zinc-600">Could not load changelog.</p>
+      ) : isLoading ? (
         <p className="text-[12px] text-gray-400 dark:text-zinc-600">Loading…</p>
       ) : list.length === 0 ? (
         <p className="text-[12px] text-gray-400 dark:text-zinc-600">No changelog entries.</p>

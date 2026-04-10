@@ -16,6 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Calculator, ChevronDown, ChevronUp, Coins, Info } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
+import { ErrorFallback } from "../components/ErrorFallback";
 import type { ProviderRegistryEntry } from "../lib/types";
 
 // ── Pricing data ──────────────────────────────────────────────────────────────
@@ -231,7 +232,7 @@ export function CostCalculatorPage() {
   const [filterProvider, setFilterProvider] = useState<string>("all");
 
   // ── Fetch provider registry ───────────────────────────────────────────────
-  const { data: registry, isLoading: registryLoading } = useQuery({
+  const { data: registry, isLoading: registryLoading, isError: regError, error: regErr, refetch: regRefetch } = useQuery({
     queryKey: ["provider-registry"],
     queryFn:  () => defaultApi.getProviderRegistry(),
     staleTime: 120_000,
@@ -280,6 +281,8 @@ export function CostCalculatorPage() {
     sortBy !== col ? null :
     sortAsc ? <ChevronUp size={10} className="inline ml-0.5" /> :
               <ChevronDown size={10} className="inline ml-0.5" />;
+
+  if (regError) return <ErrorFallback error={regErr} resource="cost calculator" onRetry={() => void regRefetch()} />;
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-zinc-950 overflow-y-auto">

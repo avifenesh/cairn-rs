@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ErrorFallback } from "../components/ErrorFallback";
 import {
   ChevronRight, ChevronDown, RefreshCw, Loader2,
   Radio, Layers, Play, ListChecks, Cpu,
@@ -388,7 +389,7 @@ export function OrchestrationPage() {
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
-  const { data: sessions, isLoading: sLoading, refetch: rSessions, isFetching: sFetching } = useQuery({
+  const { data: sessions, isLoading: sLoading, isError: sError, error: sErr, refetch: rSessions, isFetching: sFetching } = useQuery({
     queryKey: ["orch-sessions"],
     queryFn:  () => defaultApi.getSessions({ limit: 100 }),
     refetchInterval: 10_000,
@@ -510,6 +511,8 @@ export function OrchestrationPage() {
   const isFetching = sFetching;
 
   // ── Render ──────────────────────────────────────────────────────────────────
+
+  if (sError) return <ErrorFallback error={sErr} resource="orchestration" onRetry={() => void rSessions()} />;
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-zinc-950">

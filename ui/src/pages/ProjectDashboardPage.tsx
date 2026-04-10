@@ -9,6 +9,7 @@
 
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ErrorFallback } from "../components/ErrorFallback";
 import {
   ArrowLeft, RefreshCw, Play, ListChecks,
   CheckCircle2, AlertTriangle, Coins, Clock, Radio,
@@ -191,7 +192,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
-  const { data: runs, isLoading: runsLoading, refetch: rRuns, isFetching: runsFetching } = useQuery({
+  const { data: runs, isLoading: runsLoading, isError: runsError, error: runsErr, refetch: rRuns, isFetching: runsFetching } = useQuery({
     queryKey: ["proj-runs", projectId, tenantId, workspaceId],
     queryFn:  () => defaultApi.getRuns({ ...scope, limit: 200 }),
     refetchInterval: 15_000,
@@ -256,6 +257,8 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
+
+  if (runsError) return <ErrorFallback error={runsErr} resource="project dashboard" onRetry={() => void rRuns()} />;
 
   return (
     <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
