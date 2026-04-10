@@ -13,8 +13,9 @@ pub use repo_store::{
 };
 pub use sandbox::{
     CredentialReference, DestroyResult, HostCapabilityRequirements, ProvisionedSandbox, RepoId,
-    SandboxBase, SandboxCheckpoint, SandboxId, SandboxMetadata, SandboxPolicy, SandboxService,
-    SandboxState, SandboxStrategy, SandboxStrategyRequest,
+    SandboxBase, SandboxCheckpoint, SandboxCheckpointKind, SandboxErrorKind, SandboxEvent,
+    SandboxHandle, SandboxId, SandboxMetadata, SandboxPolicy, SandboxPolicySnapshot,
+    SandboxService, SandboxState, SandboxStrategy, SandboxStrategyRequest,
 };
 
 #[cfg(test)]

@@ -6,14 +6,15 @@ use cairn_domain::{CheckpointKind, RunId};
 
 use crate::error::WorkspaceError;
 use crate::sandbox::{
-    DestroyResult, ProvisionedSandbox, SandboxCheckpoint, SandboxPolicy, SandboxStrategy,
+    DestroyResult, ProvisionedSandbox, SandboxCheckpoint, SandboxHandle, SandboxPolicy,
+    SandboxStrategy,
 };
 
 pub use overlay::OverlayProvider;
 pub use reflink::ReflinkProvider;
 
 #[async_trait]
-pub trait SandboxProvider: Send + Sync {
+pub trait SandboxProvider: Send + Sync + 'static {
     fn strategy(&self) -> SandboxStrategy;
 
     async fn provision(
@@ -43,6 +44,8 @@ pub trait SandboxProvider: Send + Sync {
         run_id: &RunId,
         preserve: bool,
     ) -> Result<DestroyResult, WorkspaceError>;
+
+    async fn list(&self) -> Result<Vec<SandboxHandle>, WorkspaceError>;
 
     async fn heartbeat(&self, run_id: &RunId) -> Result<(), WorkspaceError>;
 }

@@ -1,19 +1,51 @@
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
-use cairn_domain::{ProjectKey, TenantId};
+use cairn_domain::{ProjectKey, ResourceDimension, RunId, TenantId};
 
-use crate::sandbox::RepoId;
+use crate::sandbox::{RepoId, SandboxState, SandboxStrategy};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorkspaceError {
     Unimplemented(&'static str),
     RepoStore(RepoStoreError),
+    ProviderUnavailable {
+        strategy: SandboxStrategy,
+    },
+    SandboxNotFound {
+        run_id: RunId,
+    },
+    InvalidSandboxStateTransition {
+        run_id: RunId,
+        from: SandboxState,
+        to: SandboxState,
+    },
+    ResourceLimitMissing {
+        run_id: RunId,
+        dimension: ResourceDimension,
+    },
+    SandboxOperation {
+        run_id: RunId,
+        operation: &'static str,
+        message: String,
+    },
 }
 
 impl WorkspaceError {
     pub fn unimplemented(message: &'static str) -> Self {
         Self::Unimplemented(message)
+    }
+
+    pub fn sandbox_op(
+        run_id: &RunId,
+        operation: &'static str,
+        error: impl std::fmt::Display,
+    ) -> Self {
+        Self::SandboxOperation {
+            run_id: run_id.clone(),
+            operation,
+            message: error.to_string(),
+        }
     }
 }
 
@@ -22,6 +54,25 @@ impl Display for WorkspaceError {
         match self {
             WorkspaceError::Unimplemented(message) => write!(f, "unimplemented: {message}"),
             WorkspaceError::RepoStore(error) => write!(f, "{error}"),
+            WorkspaceError::ProviderUnavailable { strategy } => {
+                write!(f, "sandbox provider {strategy:?} is unavailable")
+            }
+            WorkspaceError::SandboxNotFound { run_id } => {
+                write!(f, "sandbox for run {run_id} was not found")
+            }
+            WorkspaceError::InvalidSandboxStateTransition { run_id, from, to } => write!(
+                f,
+                "invalid sandbox transition for run {run_id}: {from:?} -> {to:?}"
+            ),
+            WorkspaceError::ResourceLimitMissing { run_id, dimension } => write!(
+                f,
+                "sandbox for run {run_id} has no configured limit for {dimension:?}"
+            ),
+            WorkspaceError::SandboxOperation {
+                run_id,
+                operation,
+                message,
+            } => write!(f, "sandbox operation {operation} failed for run {run_id}: {message}"),
         }
     }
 }
