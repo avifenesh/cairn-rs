@@ -139,9 +139,18 @@ function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
 
   const mutation = useMutation({
     mutationFn: async () => {
+      const sid = sessionId.trim() || `sess_${Date.now()}`;
       const pfx = prefix.trim() || `run-${Date.now()}-`;
+
+      // Ensure session exists before creating runs
+      try {
+        await defaultApi.createSession({ session_id: sid });
+      } catch {
+        // Session may already exist — that's fine
+      }
+
       const runs = Array.from({ length: count }, (_, i) => ({
-        session_id:   sessionId.trim() || `sess_${Date.now()}`,
+        session_id:   sid,
         run_id:       `${pfx}${i + 1}`,
         mode:         planMode ? { type: "plan" as const } : undefined,
       }));
