@@ -441,7 +441,7 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
                 </button>
                 <button
                   onClick={() => setShowReject(false)}
-                  className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-400 text-[12px] hover:bg-zinc-700 transition-colors"
+                  className="px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
                 >
                   Cancel
                 </button>
@@ -468,7 +468,7 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
                 </button>
                 <button
                   onClick={() => setShowRevise(false)}
-                  className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-400 text-[12px] hover:bg-zinc-700 transition-colors"
+                  className="px-3 py-1.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[12px] hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors"
                 >
                   Cancel
                 </button>

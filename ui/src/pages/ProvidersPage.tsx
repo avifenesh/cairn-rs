@@ -2,8 +2,8 @@ import { useState, type FormEvent, useId } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw, ServerCrash, Loader2, Plus, Trash2, ChevronDown, ChevronRight,
-  Download, HardDrive, Cpu as CpuIcon, Hash, FileType, Layers, XCircle,
-  Zap, Globe, Server, Check, X, Settings, Tag,
+  HardDrive,
+  Globe, Server, Check, X, Settings, Tag,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
