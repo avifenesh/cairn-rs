@@ -129,6 +129,13 @@ pub use marketplace_service::{
     PluginEnablement, ResolvedCapturePolicy,
 };
 
+pub mod trigger_service;
+pub use trigger_service::{
+    evaluate_condition, evaluate_conditions, substitute_variables, RateLimitConfig, RunTemplate,
+    SignalPattern, SkipReason, SuspensionReason, TemplateBudget, Trigger, TriggerCondition,
+    TriggerError, TriggerEvent, TriggerService, TriggerState,
+};
+
 pub mod plugin_health_monitor;
 pub use plugin_health_monitor::PluginHealthMonitor;
 
