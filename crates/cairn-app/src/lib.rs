@@ -97,15 +97,16 @@ use cairn_memory::ingest::{DocumentVersionReadModel, IngestRequest, IngestServic
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
 use cairn_runtime::{
-    set_current_trace_id, ApprovalPolicyService, ApprovalService, AuditService, BudgetService,
-    ChannelService, CheckpointService, CredentialService, DecisionService, DefaultsService,
-    ExternalWorkerService, GuardrailService, InMemoryServices, IngestJobService, LicenseService,
-    MailboxService, NotificationService, OperatorProfileService, ProjectService,
-    PromptAssetService, PromptReleaseService, PromptVersionService, ProviderBindingService,
-    ProviderConnectionConfig, ProviderConnectionService, ProviderHealthService, QuotaService,
-    RecoveryService, RetentionService, RoutePolicyService, RunCostAlertService, RunService,
-    RunSlaService, RuntimeError, SessionService, SignalRouterService, SignalService, TaskService,
-    TenantService, ToolInvocationService, WorkspaceMembershipService, WorkspaceService,
+    make_envelope, parse_outcome, set_current_trace_id, ApprovalPolicyService, ApprovalService,
+    AuditService, BudgetService, ChannelService, CheckpointService, CredentialService,
+    DecisionService, DefaultsService, ExternalWorkerService, GuardrailService, InMemoryServices,
+    IngestJobService, LicenseService, MailboxService, MarketplaceService, NotificationService,
+    OperatorProfileService, ProjectService, PromptAssetService, PromptReleaseService,
+    PromptVersionService, ProviderBindingService, ProviderConnectionConfig,
+    ProviderConnectionService, ProviderHealthService, QuotaService, RecoveryService,
+    RetentionService, RoutePolicyService, RunCostAlertService, RunService, RunSlaService,
+    RuntimeError, SessionService, SignalRouterService, SignalService, TaskService, TenantService,
+    ToolInvocationService, TriggerService, WorkspaceMembershipService, WorkspaceService,
 };
 use cairn_store::projections::{
     ApprovalReadModel, AuditLogReadModel, CheckpointReadModel, CheckpointStrategyReadModel,
@@ -705,10 +706,9 @@ pub struct AppState {
     pub plugin_registry: Arc<InMemoryPluginRegistry>,
     pub plugin_host: Arc<Mutex<StdioPluginHost>>,
     /// RFC 015: plugin marketplace service — manages discover/install/enable lifecycle.
-    pub marketplace:
-        Arc<Mutex<cairn_runtime::services::MarketplaceService<cairn_store::InMemoryStore>>>,
+    pub marketplace: Arc<Mutex<MarketplaceService<cairn_store::InMemoryStore>>>,
     /// RFC 022: trigger service — manages triggers and run templates.
-    pub triggers: Arc<Mutex<cairn_runtime::services::TriggerService>>,
+    pub triggers: Arc<Mutex<TriggerService>>,
     pub repo_clone_cache: Arc<cairn_workspace::RepoCloneCache>,
     pub project_repo_access: Arc<cairn_workspace::ProjectRepoAccessService>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
@@ -876,7 +876,7 @@ impl AppState {
         let project_repo_access = Arc::new(cairn_workspace::ProjectRepoAccessService::new());
         // RFC 015: marketplace service wrapping the plugin host.
         let marketplace = {
-            let mut svc = cairn_runtime::services::MarketplaceService::new(runtime.store.clone());
+            let mut svc = MarketplaceService::new(runtime.store.clone());
             svc.load_bundled_catalog();
             Arc::new(Mutex::new(svc))
         };
@@ -949,7 +949,7 @@ impl AppState {
             plugin_registry,
             plugin_host,
             marketplace,
-            triggers: Arc::new(Mutex::new(cairn_runtime::services::TriggerService::new())),
+            triggers: Arc::new(Mutex::new(TriggerService::new())),
             repo_clone_cache,
             project_repo_access,
             rate_limits,
@@ -4291,12 +4291,7 @@ impl AppBootstrap {
                     .route("/:id", get(get_decision_handler))
                     .route("/:id/invalidate", post(invalidate_decision_handler))
             })
-            // ── SQ/EQ + A2A (RFC 021) ────────────────────────────────────────────────
-            .route("/v1/sqeq/initialize", post(sqeq_initialize_handler))
-            .route("/v1/sqeq/submit", post(sqeq_submit_handler))
-            .route("/v1/sqeq/events", get(sqeq_events_handler))
-            .route("/.well-known/agent.json", get(a2a_agent_card_handler))
-            .route("/v1/a2a/tasks", post(a2a_submit_task_handler))
+            // SQ/EQ + A2A routes (RFC 021) are registered via the catalog fold above.
             .route("/v1/a2a/tasks/:id", get(a2a_get_task_handler))
             // ── Prompts ───────────────────────────────────────────────────────────────
             .route(
@@ -9491,7 +9486,7 @@ async fn orchestrate_run_handler(
     // Transition run to Running if it's still Pending
     if run.state == cairn_domain::RunState::Pending {
         use cairn_domain::{RunState, RunStateChanged, RuntimeEvent, StateTransition};
-        use cairn_runtime::services::event_helpers::make_envelope;
+        use cairn_runtime::make_envelope;
         let evt = make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
             project: run.project.clone(),
             run_id: run.run_id.clone(),
@@ -13297,7 +13292,7 @@ async fn approve_plan_handler(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     use cairn_domain::events::PlanApproved;
-    use cairn_runtime::services::event_helpers::make_envelope;
+    use cairn_runtime::make_envelope;
 
     let run_id = RunId::new(&plan_run_id);
     let run =
@@ -13363,7 +13358,7 @@ async fn reject_plan_handler(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     use cairn_domain::events::PlanRejected;
-    use cairn_runtime::services::event_helpers::make_envelope;
+    use cairn_runtime::make_envelope;
 
     let run_id = RunId::new(&plan_run_id);
     let run =
@@ -13429,7 +13424,7 @@ async fn revise_plan_handler(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     use cairn_domain::events::PlanRevisionRequested;
-    use cairn_runtime::services::event_helpers::make_envelope;
+    use cairn_runtime::make_envelope;
 
     let original_run_id = RunId::new(&plan_run_id);
     let original_run = match cairn_store::projections::RunReadModel::get(
@@ -16225,8 +16220,8 @@ async fn set_provider_retry_policy_handler(
     Json(body): Json<SetProviderRetryPolicyRequest>,
 ) -> impl IntoResponse {
     use cairn_domain::{providers::RetryPolicy, ProviderRetryPolicySet};
-    let event = cairn_runtime::services::event_helpers::make_envelope(
-        RuntimeEvent::ProviderRetryPolicySet(ProviderRetryPolicySet {
+    let event = cairn_runtime::make_envelope(RuntimeEvent::ProviderRetryPolicySet(
+        ProviderRetryPolicySet {
             connection_id: ProviderConnectionId::new(connection_id),
             tenant_id: tenant_scope.tenant_id().clone(),
             policy: RetryPolicy {
@@ -16235,8 +16230,8 @@ async fn set_provider_retry_policy_handler(
                 retryable_error_classes: body.retryable_error_classes,
             },
             set_at_ms: now_ms(),
-        }),
-    );
+        },
+    ));
     match state.runtime.store.append(&[event]).await {
         Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
         Err(err) => store_error_response(err),
@@ -16820,7 +16815,7 @@ fn build_external_worker_report(
     outcome: Option<&str>,
 ) -> Result<ExternalWorkerReport, String> {
     let outcome = outcome
-        .map(cairn_runtime::services::parse_outcome)
+        .map(cairn_runtime::parse_outcome)
         .transpose()
         .map_err(|err| err.to_string())?;
 
