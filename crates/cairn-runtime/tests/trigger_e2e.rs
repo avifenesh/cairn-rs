@@ -290,6 +290,7 @@ fn rfc022_test7_rate_limit_drops_excess() {
             "github",
             &github_payload(),
             None,
+            &auto_approve_decision,
         );
 
         for e in &events {
