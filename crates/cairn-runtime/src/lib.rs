@@ -18,6 +18,7 @@ pub mod context_builder;
 pub mod credentials;
 pub mod decisions;
 pub mod defaults;
+pub mod guardian;
 pub mod enrichment;
 pub mod error;
 pub mod eval_runs;
@@ -76,6 +77,7 @@ pub use context_builder::{
 pub use decisions::{
     DecisionError, DecisionResult, DecisionService, DecisionServiceImpl, StubDecisionService,
 };
+pub use guardian::GuardianResolver;
 pub use enrichment::{
     ApprovalEnrichment, CheckpointEnrichment, RunEnrichment, RuntimeEnrichment, SessionEnrichment,
     StoreBackedEnrichment, TaskEnrichment,

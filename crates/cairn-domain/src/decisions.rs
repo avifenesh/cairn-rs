@@ -382,6 +382,68 @@ pub struct CachedDecisionRef {
     pub expires_at: u64,
 }
 
+// ── RiskLevel (RFC 018) ──────────────────────────────────────────────────────
+
+/// Risk classification returned by the guardian resolver.
+///
+/// The guardian evaluates a pending approval and classifies the risk.
+/// If the risk exceeds the project's `risk_ceiling`, the guardian falls
+/// through to the human resolver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+}
+
+// ── ResolverDecision (RFC 018) ──────────────────────────────────────────────
+
+/// The structured decision returned by an approval resolver.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolverDecision {
+    /// Whether the action is approved or denied.
+    pub outcome: DecisionOutcome,
+    /// Human-readable explanation of why.
+    pub rationale: String,
+    /// Risk classification.
+    pub risk_level: RiskLevel,
+    /// Who resolved: "human:operator_id" or "guardian:model_id".
+    pub resolved_by: String,
+    /// How long to cache this decision (seconds). `None` = use kind default.
+    pub ttl_secs: Option<u64>,
+}
+
+// ── GuardianConfig (RFC 018) ─────────────────────────────────────────────────
+
+/// Per-project guardian resolver configuration.
+///
+/// If `model_id` is `None`, the guardian is not in the resolver chain
+/// and all approvals go to a human.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuardianConfig {
+    /// LLM model to use for guardian evaluation. `None` = guardian disabled.
+    pub model_id: Option<String>,
+    /// Timeout for the guardian LLM call in milliseconds.
+    pub timeout_ms: u64,
+    /// Maximum risk level the guardian is allowed to approve.
+    /// Anything above this falls through to the human resolver.
+    pub risk_ceiling: RiskLevel,
+    /// Maximum tokens for the guardian prompt context.
+    pub max_context_tokens: usize,
+}
+
+impl Default for GuardianConfig {
+    fn default() -> Self {
+        Self {
+            model_id: None,
+            timeout_ms: 60_000,
+            risk_ceiling: RiskLevel::Low,
+            max_context_tokens: 16_000,
+        }
+    }
+}
+
 // ── DecisionEvent (RFC 019) ──────────────────────────────────────────────────
 
 /// Events emitted by the decision layer.
