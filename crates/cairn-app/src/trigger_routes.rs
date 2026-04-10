@@ -102,7 +102,7 @@ pub async fn list_triggers_handler(
     let triggers = state.triggers.lock().unwrap();
     let project = project_key(&project_id);
     let list: Vec<&Trigger> = triggers.list_triggers_for_project(&project);
-    Json(serde_json::to_value(list).unwrap_or_default())
+    Json(serde_json::to_value(&list).expect("trigger/template list serialization"))
 }
 
 /// POST /v1/projects/:project/triggers
@@ -158,7 +158,9 @@ pub async fn get_trigger_handler(
 ) -> impl IntoResponse {
     let triggers = state.triggers.lock().unwrap();
     match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
-        Some(trigger) => Json(serde_json::to_value(trigger).unwrap_or_default()).into_response(),
+        Some(trigger) => {
+            Json(serde_json::to_value(trigger).expect("trigger serialization")).into_response()
+        }
         None => (
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -277,7 +279,7 @@ pub async fn list_run_templates_handler(
     let triggers = state.triggers.lock().unwrap();
     let project = project_key(&project_id);
     let list: Vec<&RunTemplate> = triggers.list_templates_for_project(&project);
-    Json(serde_json::to_value(list).unwrap_or_default())
+    Json(serde_json::to_value(&list).expect("trigger/template list serialization"))
 }
 
 /// POST /v1/projects/:project/run-templates
@@ -323,7 +325,9 @@ pub async fn get_run_template_handler(
 ) -> impl IntoResponse {
     let triggers = state.triggers.lock().unwrap();
     match triggers.get_template(&RunTemplateId::new(&template_id)) {
-        Some(template) => Json(serde_json::to_value(template).unwrap_or_default()).into_response(),
+        Some(template) => {
+            Json(serde_json::to_value(template).expect("template serialization")).into_response()
+        }
         None => (
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {

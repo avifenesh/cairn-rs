@@ -843,9 +843,8 @@ impl TriggerService {
             let decision_outcome = (decision_fn)(&trigger_id, signal_type);
 
             match &decision_outcome {
-                TriggerDecisionOutcome::Approved { decision_id } => {
+                TriggerDecisionOutcome::Approved { .. } => {
                     // Approved — proceed to fire
-                    let _ = decision_id; // used in event below
                 }
                 TriggerDecisionOutcome::Denied {
                     decision_id,
