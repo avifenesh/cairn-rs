@@ -13,5 +13,8 @@ path = "src/lib.rs"
 cairn-domain = { path = "../cairn-domain" }
 async-trait = "0.1"
 
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+
 [lints]
 workspace = true

@@ -9,7 +9,7 @@ pub use error::{RepoStoreError, SweepError, WorkspaceError};
 pub use providers::{OverlayProvider, ReflinkProvider, SandboxProvider};
 pub use repo_store::{
     ActiveSandboxRepoSource, ProjectRepoAccessService, RefreshOutcome, RepoCloneCache,
-    RepoCloneSweepTask, RepoStore,
+    RepoCloneSweepTask, RepoStore, RepoStoreEvent, SweepId,
 };
 pub use sandbox::{
     CredentialReference, DestroyResult, HostCapabilityRequirements, ProvisionedSandbox, RepoId,

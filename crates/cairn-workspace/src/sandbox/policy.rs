@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use cairn_domain::OnExhaustion;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RepoId(String);
 
 impl RepoId {
@@ -24,6 +24,18 @@ impl RepoId {
 impl Display for RepoId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl From<&str> for RepoId {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<String> for RepoId {
+    fn from(value: String) -> Self {
+        Self::new(value)
     }
 }
 

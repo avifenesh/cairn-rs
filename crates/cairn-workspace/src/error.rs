@@ -1,6 +1,7 @@
 use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
 
-use cairn_domain::ProjectKey;
+use cairn_domain::{ProjectKey, TenantId};
 
 use crate::sandbox::RepoId;
 
@@ -39,6 +40,15 @@ pub enum RepoStoreError {
         project: ProjectKey,
         repo_id: RepoId,
     },
+    CloneMissing {
+        tenant: TenantId,
+        repo_id: RepoId,
+    },
+    Io {
+        action: &'static str,
+        path: PathBuf,
+        message: String,
+    },
     Unimplemented(&'static str),
 }
 
@@ -52,12 +62,32 @@ impl Display for RepoStoreError {
                     project
                 )
             }
+            RepoStoreError::CloneMissing { tenant, repo_id } => {
+                write!(f, "clone {repo_id} is missing for tenant {tenant}")
+            }
+            RepoStoreError::Io {
+                action,
+                path,
+                message,
+            } => {
+                write!(f, "{action} failed at {}: {message}", path.display())
+            }
             RepoStoreError::Unimplemented(message) => write!(f, "unimplemented: {message}"),
         }
     }
 }
 
 impl std::error::Error for RepoStoreError {}
+
+impl RepoStoreError {
+    pub fn io(action: &'static str, path: PathBuf, error: impl std::fmt::Display) -> Self {
+        Self::Io {
+            action,
+            path,
+            message: error.to_string(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SweepError {
