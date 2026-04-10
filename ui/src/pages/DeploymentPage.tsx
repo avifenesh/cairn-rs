@@ -280,32 +280,24 @@ export function DeploymentPage() {
 
   return (
     <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
-      <div className="max-w-4xl mx-auto px-5 py-5 space-y-5">
+      <div className="p-6 space-y-5">
 
         {/* Toolbar */}
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-[14px] font-semibold text-gray-900 dark:text-zinc-100">Deployment Health</h2>
-            <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
-              Infrastructure topology, runtime status, and configuration snapshot
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Deployment</p>
             {health && (
-              <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">
-                v{health.version}
-              </span>
+              <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">v{health.version}</span>
             )}
-            <button
-              onClick={() => rHealth()}
-              disabled={hFetching}
-              className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-400 dark:text-zinc-500
-                         text-[12px] px-2.5 py-1.5 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 disabled:opacity-40 transition-colors"
-            >
-              <RefreshCw size={11} className={hFetching ? "animate-spin" : ""} />
-              Refresh
-            </button>
           </div>
+          <button
+            onClick={() => rHealth()}
+            disabled={hFetching}
+            className="flex items-center gap-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:bg-white/5 transition-colors disabled:opacity-40"
+          >
+            <RefreshCw size={11} className={hFetching ? "animate-spin" : ""} />
+            Refresh
+          </button>
         </div>
 
         {/* Overall health banner */}

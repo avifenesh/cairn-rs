@@ -7,7 +7,7 @@
  * created by earlier ones (e.g. session_id → create run → claim task).
  */
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import {
   FlaskConical, Play, CheckCircle2, XCircle, Loader2, ChevronDown,
   ChevronRight, RefreshCw, Clock, Zap, AlertTriangle, Code2,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
+import { useScope, type ProjectScope } from "../hooks/useScope";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,7 +58,8 @@ function fmtMs(ms: number): string {
 
 // ── Scenario definitions ──────────────────────────────────────────────────────
 
-const SCENARIOS: ScenarioDef[] = [
+function buildScenarios(scope: ProjectScope): ScenarioDef[] {
+  return [
 
   // ── 1. Full session/run/task lifecycle ──────────────────────────────────────
   {
@@ -85,9 +87,9 @@ const SCENARIOS: ScenarioDef[] = [
           const sessionId = makeId("sess");
           ctx["session_id"] = sessionId;
           const r = await defaultApi.createSession({
-            tenant_id:    "test",
-            workspace_id: "default",
-            project_id:   "harness",
+            tenant_id:    scope.tenant_id,
+            workspace_id: scope.workspace_id,
+            project_id:   scope.project_id,
             session_id:   sessionId,
           });
           if (r.session_id !== sessionId) throw new Error("session_id mismatch");
@@ -103,9 +105,9 @@ const SCENARIOS: ScenarioDef[] = [
           const runId = makeId("run");
           ctx["run_id"] = runId;
           const r = await defaultApi.createRun({
-            tenant_id:    "test",
-            workspace_id: "default",
-            project_id:   "harness",
+            tenant_id:    scope.tenant_id,
+            workspace_id: scope.workspace_id,
+            project_id:   scope.project_id,
             session_id:   String(ctx["session_id"]),
             run_id:       runId,
           });
@@ -291,9 +293,8 @@ const SCENARIOS: ScenarioDef[] = [
       },
     ],
   },
-
-
-];
+  ];
+}
 
 // ── Step component ────────────────────────────────────────────────────────────
 
@@ -643,6 +644,7 @@ function SuiteSummary({ results, onClear }: {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function TestHarnessPage() {
+  const [scope] = useScope();
   const [suiteResults,  setSuiteResults]  = useState<SuiteResult[]>([]);
   const [runningAll,    setRunningAll]    = useState(false);
   const [groupFilter,   setGroupFilter]   = useState<string>("All");
@@ -651,8 +653,9 @@ export function TestHarnessPage() {
   const [runAllKey, setRunAllKey] = useState(0);
   const [autoRunIds, setAutoRunIds] = useState<Set<string>>(new Set());
 
-  const groups = ["All", ...Array.from(new Set(SCENARIOS.map(s => s.group)))];
-  const visible = groupFilter === "All" ? SCENARIOS : SCENARIOS.filter(s => s.group === groupFilter);
+  const scenarios = useMemo(() => buildScenarios(scope), [scope]);
+  const groups = ["All", ...Array.from(new Set(scenarios.map(s => s.group)))];
+  const visible = groupFilter === "All" ? scenarios : scenarios.filter(s => s.group === groupFilter);
 
   async function handleRunAll() {
     setRunningAll(true);
@@ -687,67 +690,78 @@ export function TestHarnessPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
-        <Code2 size={14} className="text-indigo-400 shrink-0" />
-        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Test Harness</span>
-        <span className="text-[11px] text-gray-400 dark:text-zinc-600">{visible.length} scenarios</span>
+    <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
+      <div className="p-6 space-y-5">
+
+        {/* Toolbar — matches established pattern */}
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Test Harness</p>
+          <div className="flex items-center gap-2">
+            {suiteResults.length > 0 && (
+              <button onClick={() => setSuiteResults([])}
+                className="flex items-center gap-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:bg-white/5 transition-colors">
+                <RotateCcw size={11} /> Reset
+              </button>
+            )}
+            <button onClick={handleRunAll} disabled={runningAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium disabled:opacity-40 transition-colors">
+              {runningAll ? <><Loader2 size={11} className="animate-spin" /> Running…</> : <><Zap size={11} /> Run All Scenarios</>}
+            </button>
+          </div>
+        </div>
+
+        {/* How it works — clear instructions */}
+        <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-4">
+          <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300 mb-1">How the Test Harness works</p>
+          <p className="text-[11px] text-gray-400 dark:text-zinc-500 leading-relaxed">
+            Each scenario runs a sequence of API calls against the live server. Click <strong>Run</strong> on a scenario to test it,
+            or <strong>Run All Scenarios</strong> to exercise the full API surface. Results show pass/fail per step with timing.
+            Green = passed, red = failed, gray = not run yet.
+          </p>
+        </div>
+
+        {/* Suite summary — shown after Run All */}
+        <SuiteSummary results={suiteResults} onClear={() => setSuiteResults([])} />
+
+        {/* Stat cards — scenario counts by result */}
+        {suiteResults.length > 0 && (
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-emerald-500 rounded-lg p-4">
+              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">Passed</p>
+              <p className="text-2xl font-semibold tabular-nums text-emerald-400">{suiteResults.filter(r => r.pass).length}</p>
+            </div>
+            <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-red-500 rounded-lg p-4">
+              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">Failed</p>
+              <p className="text-2xl font-semibold tabular-nums text-red-400">{suiteResults.filter(r => !r.pass).length}</p>
+            </div>
+            <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-zinc-700 rounded-lg p-4">
+              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">Total</p>
+              <p className="text-2xl font-semibold tabular-nums text-gray-900 dark:text-zinc-100">{suiteResults.length}</p>
+            </div>
+          </div>
+        )}
 
         {/* Group filter */}
-        <div className="flex items-center rounded border border-gray-200 dark:border-zinc-700 overflow-hidden ml-2">
+        <div className="flex items-center gap-1 border-b border-gray-200 dark:border-zinc-800">
           {groups.map(g => (
-            <button
-              key={g}
-              onClick={() => setGroupFilter(g)}
+            <button key={g} onClick={() => setGroupFilter(g)}
               className={clsx(
-                "px-2.5 py-1 text-[11px] transition-colors",
-                g !== "All" && "border-l border-gray-200 dark:border-zinc-700",
+                "px-3 py-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors",
                 groupFilter === g
-                  ? "bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
-                  : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300",
-              )}
-            >
-              {g}
+                  ? "text-gray-900 dark:text-zinc-100 border-indigo-500"
+                  : "text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:hover:text-zinc-300",
+              )}>
+              {g} {g !== "All" ? "" : `(${visible.length})`}
             </button>
           ))}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={handleRunAll}
-            disabled={runningAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500
-                       text-white text-[12px] font-medium disabled:opacity-40 transition-colors"
-          >
-            {runningAll
-              ? <><Loader2 size={12} className="animate-spin" /> Running all…</>
-              : <><Zap size={12} /> Run All</>
-            }
-          </button>
-          {suiteResults.length > 0 && (
-            <button
-              onClick={() => setSuiteResults([])}
-              className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
-            >
-              <RefreshCw size={11} /> Clear
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-        {/* Suite summary */}
-        <SuiteSummary results={suiteResults} onClear={() => setSuiteResults([])} />
-
         {/* Warning */}
-        <div className="flex items-start gap-2.5 rounded-lg border border-amber-800/30 bg-amber-950/15 px-4 py-3">
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
           <AlertTriangle size={13} className="text-amber-400 shrink-0 mt-0.5" />
-          <p className="text-[12px] text-amber-300/80">
-            Test scenarios create real resources (sessions, runs) in the connected server.
-            Data is written to <code className="bg-amber-950/50 rounded px-1">tenant=test</code> and
-            can be cleared by restarting the server or using the admin API.
+          <p className="text-[11px] text-gray-500 dark:text-zinc-400">
+            Scenarios create real resources (sessions, runs, tasks) in the connected server.
+            Clear test data by restarting the server or using the admin API.
           </p>
         </div>
 
