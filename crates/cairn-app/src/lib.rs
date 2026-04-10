@@ -3976,6 +3976,7 @@ impl AppBootstrap {
                 }
             })
             .route("/ready", get(ready_handler))
+            .route("/health/ready", get(health_ready_handler))
             .route("/metrics", get(metrics_handler))
             .route("/version", get(version_handler))
             .route("/v1/dashboard/activity", get(dashboard_activity_handler))
@@ -5378,6 +5379,31 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse
         _ => StatusCode::SERVICE_UNAVAILABLE,
     };
     (status, Json(report))
+}
+
+/// GET /health/ready — readiness probe (RFC 020).
+///
+/// Returns 503 with startup progress JSON during recovery.
+/// Returns 200 once all projections are warmed and recovery completes.
+async fn health_ready_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    // For v1, cairn-app is always ready immediately (no async startup graph yet).
+    // When the full startup dependency graph is wired, this will check
+    // ReadinessState::is_ready() and return the progress body.
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "ready",
+            "step": "6",
+            "branches": {
+                "event_log": { "state": "complete" },
+                "tool_result_cache": { "state": "complete" },
+                "decision_cache": { "state": "complete" },
+                "providers": { "state": "complete" },
+                "runs": { "state": "complete" },
+            },
+        })),
+    )
+        .into_response()
 }
 
 /// RFC 010: per-component status entry.

@@ -86,6 +86,7 @@ define_id!(ScheduledTaskId);
 define_id!(SourceId);
 define_id!(TaskId);
 define_id!(TenantId);
+define_id!(ToolCallId);
 define_id!(ToolInvocationId);
 define_id!(TriggerId);
 define_id!(WorkerId);

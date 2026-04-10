@@ -4728,11 +4728,16 @@ async fn main() {
         use cairn_memory::{retrieval::RetrievalService, IngestService};
         let retrieval = lib_state.retrieval.clone() as Arc<dyn RetrievalService>;
         let ingest = lib_state.ingest.clone() as Arc<dyn IngestService>;
-        let registry = cairn_app::tool_impls::build_tool_registry(retrieval, ingest);
+        let registry = cairn_app::tool_impls::build_tool_registry(
+            retrieval,
+            ingest,
+            lib_state.project_repo_access.clone(),
+            lib_state.repo_clone_cache.clone(),
+        );
         let lib_mut = Arc::get_mut(&mut lib_state)
             .expect("lib_state must not be cloned before tool_registry is wired");
         lib_mut.tool_registry = Some(Arc::new(registry));
-        eprintln!("tool registry: memory_search + memory_store wired");
+        eprintln!("tool registry: memory tools + cairn.registerRepo wired");
     }
 
     // ── Binary-specific state (shares runtime + tokens with lib.rs) ────────
