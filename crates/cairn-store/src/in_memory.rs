@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use cairn_domain::*;
+use serde::{Deserialize, Serialize};
 
 use crate::error::StoreError;
 use crate::event_log::*;
@@ -95,6 +96,7 @@ struct State {
 
 pub struct InMemoryStore {
     state: Mutex<State>,
+    usage_counters: Arc<Mutex<HashMap<ProjectKey, UsageCounters>>>,
     /// Broadcast channel for real-time SSE streaming (RFC 002).
     ///
     /// Every successfully appended `StoredEvent` is sent here. Receivers can
@@ -113,6 +115,15 @@ pub struct InMemoryStore {
     /// is best-effort: failures are logged but do NOT roll back the in-memory
     /// write, preserving the existing availability guarantee.
     secondary_log: std::sync::RwLock<Option<Arc<dyn EventLog + Send + Sync>>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsageCounters {
+    pub run_count: u64,
+    pub event_count: u64,
+    pub sandbox_provision_count: u64,
+    pub decision_evaluation_count: u64,
+    pub trigger_fire_count: u64,
 }
 
 impl InMemoryStore {
@@ -182,9 +193,54 @@ impl InMemoryStore {
                 projects: HashMap::new(),
                 snapshots: Vec::new(),
             }),
+            usage_counters: Arc::new(Mutex::new(HashMap::new())),
             event_tx,
             secondary_log: std::sync::RwLock::new(None),
         }
+    }
+
+    fn increment_usage_for_project(
+        &self,
+        project: &ProjectKey,
+        update: impl FnOnce(&mut UsageCounters),
+    ) {
+        let mut usage = self
+            .usage_counters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        update(usage.entry(project.clone()).or_default());
+    }
+
+    pub fn increment_sandbox_provision_count(&self, project: &ProjectKey) {
+        self.increment_usage_for_project(project, |counters| {
+            counters.sandbox_provision_count += 1;
+        });
+    }
+
+    pub fn increment_decision_evaluation_count(&self, project: &ProjectKey) {
+        self.increment_usage_for_project(project, |counters| {
+            counters.decision_evaluation_count += 1;
+        });
+    }
+
+    pub fn increment_trigger_fire_count(&self, project: &ProjectKey) {
+        self.increment_usage_for_project(project, |counters| {
+            counters.trigger_fire_count += 1;
+        });
+    }
+
+    pub fn usage_snapshot(&self) -> HashMap<ProjectKey, UsageCounters> {
+        self.usage_counters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub fn reset_usage_counters(&self) {
+        self.usage_counters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// Attach a durable secondary event log.
@@ -1645,10 +1701,20 @@ impl EventLog for InMemoryStore {
         // Scope the MutexGuard so it is lexically dropped before any `.await`.
         let positions = {
             let mut state = self.state.lock().unwrap();
+            let mut usage = self
+                .usage_counters
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let now = now_millis();
             let mut positions = Vec::with_capacity(events.len());
 
             for envelope in events {
+                let counters = usage.entry(envelope.project().clone()).or_default();
+                counters.event_count += 1;
+                if matches!(&envelope.payload, RuntimeEvent::RunCreated(_)) {
+                    counters.run_count += 1;
+                }
+
                 let pos = EventPosition(state.next_position);
                 state.next_position += 1;
 
@@ -5856,6 +5922,10 @@ impl InMemoryStore {
     /// Returns the number of events replayed.
     pub fn load_snapshot(&self, snap: crate::snapshot::StoreSnapshot) -> u64 {
         let mut state = self.state.lock().unwrap();
+        self.usage_counters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
 
         // Reset all projections to empty.
         state.events.clear();

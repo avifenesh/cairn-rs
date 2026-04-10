@@ -25,7 +25,7 @@ pub mod sqlite;
 pub use db::{Backend, DbAdapter};
 pub use error::StoreError;
 pub use event_log::{DurabilityClass, EntityRef, EventLog, EventPosition, StoredEvent};
-pub use in_memory::InMemoryStore;
+pub use in_memory::{InMemoryStore, UsageCounters};
 pub use migrations::{AppliedMigration, Migration, MigrationRunner};
 pub use projections::SyncProjection;
 

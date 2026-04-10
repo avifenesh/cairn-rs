@@ -9,6 +9,7 @@
 pub mod marketplace_routes;
 pub mod repo_routes;
 pub mod sse_hooks;
+pub mod telemetry_routes;
 pub mod tool_impls;
 pub mod trigger_routes;
 
@@ -669,13 +670,6 @@ impl RequestLogBuffer {
     }
 }
 
-#[derive(Debug, Default)]
-struct NoopSandboxEventSink;
-
-impl cairn_workspace::SandboxEventSink for NoopSandboxEventSink {
-    fn publish(&self, _event: cairn_workspace::SandboxEvent) {}
-}
-
 fn default_sandbox_base_dir() -> PathBuf {
     std::env::temp_dir().join("cairn-workspace-sandboxes")
 }
@@ -683,12 +677,16 @@ fn default_sandbox_base_dir() -> PathBuf {
 fn default_sandbox_strategy() -> cairn_workspace::SandboxStrategyRequest {
     #[cfg(target_os = "linux")]
     {
-        cairn_workspace::SandboxStrategyRequest::Preferred(cairn_workspace::SandboxStrategy::Overlay)
+        cairn_workspace::SandboxStrategyRequest::Preferred(
+            cairn_workspace::SandboxStrategy::Overlay,
+        )
     }
 
     #[cfg(not(target_os = "linux"))]
     {
-        cairn_workspace::SandboxStrategyRequest::Preferred(cairn_workspace::SandboxStrategy::Reflink)
+        cairn_workspace::SandboxStrategyRequest::Preferred(
+            cairn_workspace::SandboxStrategy::Reflink,
+        )
     }
 }
 
@@ -744,10 +742,12 @@ fn workspace_error_response(err: cairn_workspace::WorkspaceError) -> axum::respo
             err.to_string(),
         )
         .into_response(),
-        WorkspaceError::BaseRevisionDrift { .. } => {
-            AppApiError::new(StatusCode::CONFLICT, "sandbox_base_revision_drift", err.to_string())
-                .into_response()
-        }
+        WorkspaceError::BaseRevisionDrift { .. } => AppApiError::new(
+            StatusCode::CONFLICT,
+            "sandbox_base_revision_drift",
+            err.to_string(),
+        )
+        .into_response(),
         WorkspaceError::SandboxOperation { operation, .. } => AppApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "sandbox_operation_failed",
@@ -755,8 +755,7 @@ fn workspace_error_response(err: cairn_workspace::WorkspaceError) -> axum::respo
         )
         .into_response(),
         WorkspaceError::Unimplemented(message) => {
-            AppApiError::new(StatusCode::NOT_IMPLEMENTED, "unimplemented", message)
-                .into_response()
+            AppApiError::new(StatusCode::NOT_IMPLEMENTED, "unimplemented", message).into_response()
         }
     }
 }
@@ -1014,6 +1013,10 @@ impl AppState {
         let sandbox_repo_source = Arc::new(cairn_workspace::providers::RepoCloneCacheSource::new(
             repo_clone_cache.clone(),
         ));
+        let sandbox_event_sink = Arc::new(telemetry_routes::UsageSandboxEventSink::new(
+            runtime.store.clone(),
+            Arc::new(cairn_workspace::BufferedSandboxEventSink::default()),
+        ));
         let sandbox_service = Arc::new(cairn_workspace::SandboxService::new(
             HashMap::from([
                 (
@@ -1031,7 +1034,7 @@ impl AppState {
                     )) as Box<dyn cairn_workspace::SandboxProvider>,
                 ),
             ]),
-            Arc::new(NoopSandboxEventSink),
+            sandbox_event_sink,
             default_sandbox_base_dir(),
             Arc::new(cairn_workspace::SystemClock),
         ));
@@ -1090,7 +1093,7 @@ impl AppState {
             .await
             .map_err(|err| format!("failed to seed default license: {err}"))?;
 
-        Ok(Self {
+        let state = Self {
             config,
             document_store,
             retrieval,
@@ -1133,7 +1136,9 @@ impl AppState {
             bedrock_provider: None,
             tool_registry: None,
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
-        })
+        };
+        state.runtime.store.reset_usage_counters();
+        Ok(state)
     }
 }
 
@@ -4491,6 +4496,10 @@ impl AppBootstrap {
             )
             // ── Feed ──────────────────────────────────────────────────────────────────
             .route("/v1/feed/:id/read", post(mark_feed_item_read_handler))
+            .route(
+                "/v1/telemetry/usage",
+                get(telemetry_routes::get_usage_telemetry_handler),
+            )
             // ── Runs ──────────────────────────────────────────────────────────────────
             .route("/v1/runs/:id", get(get_run_handler))
             .route("/v1/runs/:id/cost-alert", post(set_run_cost_alert_handler))
@@ -5511,7 +5520,10 @@ async fn publish_runtime_frames_since(state: &Arc<AppState>, after: Option<Event
 
     for stored in events {
         // OTLP export (RFC 021): send each event to the exporter.
-        let _ = state.otlp_exporter.export_event(&stored.envelope.payload).await;
+        let _ = state
+            .otlp_exporter
+            .export_event(&stored.envelope.payload)
+            .await;
 
         if let Some(mut frame) = build_runtime_sse_frame(state, &stored).await {
             // Assign a monotonic sequence ID for Last-Event-ID replay.
@@ -8634,10 +8646,15 @@ async fn ingest_signal_handler(
                     &project,
                     &record.id,
                     &record.source,
-                    "",  // plugin_id — empty for direct API signals
+                    "", // plugin_id — empty for direct API signals
                     &record.payload,
                     None, // source_run_chain_depth
                     &cairn_runtime::services::trigger_service::auto_approve_decision,
+                );
+                telemetry_routes::record_trigger_fire_usage(
+                    state.runtime.store.as_ref(),
+                    &project,
+                    &trigger_events,
                 );
                 for event in &trigger_events {
                     if let cairn_runtime::services::trigger_service::TriggerEvent::TriggerFired {
@@ -10005,7 +10022,12 @@ async fn orchestrate_run_handler(
         .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
         .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
         .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
-        .decision_service(state.runtime.decision_service.clone())
+        .decision_service(Arc::new(
+            telemetry_routes::UsageMeteredDecisionService::new(
+                state.runtime.decision_service.clone(),
+                state.runtime.store.clone(),
+            ),
+        ))
         .checkpoint_every_n_tool_calls(cfg.checkpoint_every_n_tool_calls)
         .build();
 

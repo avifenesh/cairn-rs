@@ -43,10 +43,10 @@ use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::provider_health::ProviderHealthService;
-use cairn_runtime::RecoveryService;
 use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
+use cairn_runtime::RecoveryService;
 use cairn_runtime::{
     BedrockProvider, InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider,
     OpenAiCompatProvider,
@@ -4872,7 +4872,12 @@ async fn main() {
         Ok(_) => {}
         Err(error) => eprintln!("lease recovery failed: {error}"),
     }
-    match lib_state.runtime.recovery.recover_interrupted_runs(1_000).await {
+    match lib_state
+        .runtime
+        .recovery
+        .recover_interrupted_runs(1_000)
+        .await
+    {
         Ok(summary) if summary.scanned > 0 || !summary.actions.is_empty() => {
             eprintln!(
                 "run recovery: scanned={} actions={}",
@@ -4883,7 +4888,12 @@ async fn main() {
         Ok(_) => {}
         Err(error) => eprintln!("run recovery failed: {error}"),
     }
-    match lib_state.runtime.recovery.resolve_stale_dependencies(1_000).await {
+    match lib_state
+        .runtime
+        .recovery
+        .resolve_stale_dependencies(1_000)
+        .await
+    {
         Ok(summary) if summary.scanned > 0 || !summary.actions.is_empty() => {
             eprintln!(
                 "dependency recovery: scanned={} actions={}",
@@ -4901,6 +4911,7 @@ async fn main() {
     // requiring an SSE connection first.
     lib_state.replay_graph().await;
     lib_state.replay_evals().await;
+    lib_state.runtime.store.reset_usage_counters();
 
     eprintln!("cairn-app starting with role: {}", config.process_role);
 
