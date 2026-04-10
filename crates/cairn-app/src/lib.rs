@@ -833,9 +833,45 @@ async fn resolve_run_string_default(
         .and_then(|value| value.as_str().map(ToOwned::to_owned))
 }
 
+async fn resolve_run_mode_default(
+    state: &AppState,
+    project: &ProjectKey,
+    run_id: &RunId,
+) -> Option<cairn_domain::decisions::RunMode> {
+    let key = run_default_key(run_id, "run_mode");
+    state
+        .runtime
+        .defaults
+        .resolve(project, &key)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
+
+async fn persist_run_mode_default(
+    state: &AppState,
+    project: &ProjectKey,
+    run_id: &RunId,
+    mode: &cairn_domain::decisions::RunMode,
+) -> Result<(), cairn_runtime::RuntimeError> {
+    state
+        .runtime
+        .defaults
+        .set(
+            cairn_domain::tenancy::Scope::Project,
+            project.project_id.to_string(),
+            run_default_key(run_id, "run_mode"),
+            serde_json::to_value(mode).unwrap_or(serde_json::Value::Null),
+        )
+        .await
+        .map(|_| ())
+}
+
 async fn build_run_record_view(state: &AppState, run: RunRecord) -> RunRecordView {
     let created_by_trigger_id =
         resolve_run_string_default(state, &run.project, &run.run_id, "created_by_trigger_id").await;
+    let mode = resolve_run_mode_default(state, &run.project, &run.run_id).await;
     let sandbox_id =
         resolve_run_string_default(state, &run.project, &run.run_id, "sandbox_id").await;
     let sandbox_path =
@@ -843,6 +879,7 @@ async fn build_run_record_view(state: &AppState, run: RunRecord) -> RunRecordVie
 
     RunRecordView {
         run,
+        mode,
         created_by_trigger_id,
         sandbox_id,
         sandbox_path,
@@ -3178,6 +3215,8 @@ struct RunDetailResponse {
 struct RunRecordView {
     #[serde(flatten)]
     run: RunRecord,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mode: Option<cairn_domain::decisions::RunMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     created_by_trigger_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -9879,8 +9918,16 @@ async fn create_run_handler(
         .await
     {
         Ok(run) => {
+            if let Some(mode) = body.mode.as_ref() {
+                if let Err(err) =
+                    persist_run_mode_default(state.as_ref(), &project, &run.run_id, mode).await
+                {
+                    return runtime_error_response(err);
+                }
+            }
             publish_runtime_frames_since(&state, before).await;
-            (StatusCode::CREATED, Json(run)).into_response()
+            let view = build_run_record_view(state.as_ref(), run).await;
+            (StatusCode::CREATED, Json(view)).into_response()
         }
         Err(err) => runtime_error_response(err),
     }
@@ -10105,6 +10152,8 @@ async fn orchestrate_run_handler(
         resolve_run_string_default(state.as_ref(), &run.project, &run.run_id, "goal").await;
     let default_agent_role =
         resolve_run_string_default(state.as_ref(), &run.project, &run.run_id, "agent_role").await;
+    let default_run_mode =
+        resolve_run_mode_default(state.as_ref(), &run.project, &run.run_id).await;
 
     let ctx = OrchestrationContext {
         project: run.project.clone(),
@@ -10122,7 +10171,7 @@ async fn orchestrate_run_handler(
             .unwrap_or_else(|| "orchestrator".to_owned()),
         run_started_at_ms: now_ms,
         working_dir: working_dir.clone(),
-        run_mode: body.mode.clone().unwrap_or_default(),
+        run_mode: body.mode.clone().or(default_run_mode).unwrap_or_default(),
         discovered_tool_names: vec![],
     };
 

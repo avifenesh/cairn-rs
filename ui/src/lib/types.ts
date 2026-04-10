@@ -249,7 +249,7 @@ export interface RunRecord {
   created_at: number; // unix ms
   updated_at: number; // unix ms
   /** RFC 018: execution mode (direct/plan/execute) */
-  mode?: string;
+  mode?: string | { type: string; plan_run_id?: string };
   /** RFC 022: trigger that created this run */
   created_by_trigger_id?: string;
   /** RFC 016: sandbox ID if run has a sandbox */

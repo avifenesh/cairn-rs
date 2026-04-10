@@ -20,6 +20,11 @@ import type {
 } from "./types";
 import { getStoredScope } from "../hooks/useScope";
 
+type RunModeRequest =
+  | { type: "direct" }
+  | { type: "plan" }
+  | { type: "execute"; plan_run_id: string };
+
 // ── Client config ─────────────────────────────────────────────────────────────
 
 export interface ApiClientConfig {
@@ -493,6 +498,7 @@ export function createApiClient(config: ApiClientConfig) {
       session_id?: string;
       run_id?: string;
       parent_run_id?: string;
+      mode?: RunModeRequest;
     }): Promise<RunRecord> => post("/v1/runs", withScope(body)),
 
     /** POST /v1/runs/batch — create multiple runs at once. */
@@ -502,6 +508,7 @@ export function createApiClient(config: ApiClientConfig) {
       project_id?: string;
       session_id?: string;
       run_id?: string;
+      mode?: RunModeRequest;
     }>): Promise<{ results: Array<{ ok: boolean; run?: RunRecord; error?: string }> }> =>
       post('/v1/runs/batch', { runs: runs.map((run) => withScope(run)) }),
 

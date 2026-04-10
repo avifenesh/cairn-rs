@@ -134,16 +134,31 @@ function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
   const [count, setCount]       = useState(3);
   const [sessionId, setSession] = useState("session_1");
   const [prefix, setPrefix]     = useState("run_batch_");
+  const [planMode, setPlanMode] = useState(false);
   const toast = useToast();
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const pfx = prefix.trim() || `run-${Date.now()}-`;
       const runs = Array.from({ length: count }, (_, i) => ({
         session_id:   sessionId.trim() || `sess_${Date.now()}`,
         run_id:       `${pfx}${i + 1}`,
+        mode:         planMode ? { type: "plan" as const } : undefined,
       }));
-      return defaultApi.batchCreateRuns(runs);
+      const results = await Promise.all(
+        runs.map(async (run) => {
+          try {
+            const created = await defaultApi.createRun(run);
+            return { ok: true as const, run: created };
+          } catch (error) {
+            return {
+              ok: false as const,
+              error: error instanceof Error ? error.message : "run creation failed",
+            };
+          }
+        }),
+      );
+      return { results };
     },
     onSuccess: result => {
       const ok  = result.results.filter(r => r.ok).length;
@@ -208,6 +223,21 @@ function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
               Runs will be named {prefix || "auto"}{prefix ? "1" : ""} through {prefix || "auto"}{prefix ? count : ""}
             </p>
           </div>
+
+          <label className="flex items-start gap-3 rounded border border-gray-200 dark:border-zinc-700 bg-gray-100 dark:bg-zinc-800/80 px-3 py-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={planMode}
+              onChange={e => setPlanMode(e.target.checked)}
+              className="mt-0.5 rounded border-gray-300 dark:border-zinc-600 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span className="space-y-1">
+              <span className="block text-[12px] font-medium text-gray-800 dark:text-zinc-200">Plan Mode</span>
+              <span className="block text-[10px] text-gray-400 dark:text-zinc-500">
+                New runs stay in plan mode so the Run Detail page opens with the review panel visible.
+              </span>
+            </span>
+          </label>
         </div>
 
         {/* Actions */}
@@ -225,7 +255,7 @@ function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
                        text-white text-[12px] font-medium px-3 py-1.5 disabled:opacity-40 transition-colors"
           >
             {mutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-            Create {count} run{count !== 1 ? "s" : ""}
+            Create {count} {planMode ? "plan " : ""}run{count !== 1 ? "s" : ""}
           </button>
         </div>
       </div>

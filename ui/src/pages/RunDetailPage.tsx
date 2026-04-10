@@ -315,11 +315,16 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
   const planProposed = planEvents?.find(e => e.event_type === "plan_proposed");
   const planApproved = planEvents?.find(e => e.event_type === "plan_approved");
   const planRejected = planEvents?.find(e => e.event_type === "plan_rejected");
+  const runModeType =
+    !run?.mode ? "" :
+    typeof run.mode === "string" ? run.mode :
+    typeof run.mode.type === "string" ? run.mode.type :
+    "";
 
   // Check if mode is plan by looking at run metadata
   const isPlanMode = run && (
-    run.mode === "plan" ||
-    (run.mode ?? "").includes("plan") ||
+    runModeType === "plan" ||
+    runModeType.includes("plan") ||
     hasPlan
   );
 
