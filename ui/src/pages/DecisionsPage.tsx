@@ -67,9 +67,9 @@ const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: 
 function DecisionsTable({ decisions }: { decisions: Decision[] }) {
   if (decisions.length === 0) return (
     <div className="flex flex-col items-center justify-center py-16 gap-2 text-center px-6">
-      <Inbox size={26} className="text-gray-300 dark:text-zinc-700" />
+      <Inbox size={26} className="text-gray-300 dark:text-zinc-600" />
       <p className="text-[13px] text-gray-400 dark:text-zinc-600 font-medium">No decisions yet</p>
-      <p className="text-[11px] text-gray-300 dark:text-zinc-700 max-w-xs">
+      <p className="text-[11px] text-gray-300 dark:text-zinc-600 max-w-xs">
         Decisions appear when the unified decision layer evaluates tool invocations, trigger fires, or plugin enablements.
       </p>
     </div>
@@ -189,10 +189,12 @@ export function DecisionsPage() {
   const [tab, setTab] = useState<"recent" | "cache">("recent");
   const { ms: refreshMs, setOption: setRefreshOption } = useAutoRefresh("decisions", "15s");
 
+  const scopeQs = `tenant_id=${encodeURIComponent(scope.tenant_id)}&workspace_id=${encodeURIComponent(scope.workspace_id)}&project_id=${encodeURIComponent(scope.project_id)}`;
+
   const decisionsQ = useQuery<Decision[]>({
-    queryKey: ["decisions"],
+    queryKey: ["decisions", scope.tenant_id, scope.workspace_id, scope.project_id],
     queryFn: async () => {
-      const res = await fetch("/v1/decisions", { headers: authHeaders() });
+      const res = await fetch(`/v1/decisions?${scopeQs}`, { headers: authHeaders() });
       if (!res.ok) {
         throw new Error(await parseErrorMessage(res, "Failed to load decisions."));
       }
@@ -203,9 +205,9 @@ export function DecisionsPage() {
   });
 
   const cacheQ = useQuery<CacheEntry[]>({
-    queryKey: ["decisions-cache"],
+    queryKey: ["decisions-cache", scope.tenant_id, scope.workspace_id, scope.project_id],
     queryFn: async () => {
-      const res = await fetch("/v1/decisions/cache", { headers: authHeaders() });
+      const res = await fetch(`/v1/decisions/cache?${scopeQs}`, { headers: authHeaders() });
       if (!res.ok) {
         throw new Error(await parseErrorMessage(res, "Failed to load decision cache."));
       }

@@ -477,7 +477,7 @@ export function createApiClient(config: ApiClientConfig) {
       session_id?: string;
       run_id?: string;
     }>): Promise<{ results: Array<{ ok: boolean; run?: RunRecord; error?: string }> }> =>
-      post('/v1/runs/batch', { runs }),
+      post('/v1/runs/batch', { runs: runs.map((run) => withScope(run)) }),
 
     // ── Approvals ─────────────────────────────────────────────────────────────
 

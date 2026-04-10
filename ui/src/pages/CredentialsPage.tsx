@@ -12,7 +12,7 @@
  *   DELETE /v1/admin/tenants/:tenantId/credentials/:id
  */
 
-import { useState, useId } from 'react';
+import { useEffect, useState, useId } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   RefreshCw, Loader2, ServerCrash, Plus, Trash2, X,
@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
+import { useScope } from '../hooks/useScope';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import type { CredentialSummary, StoreCredentialRequest } from '../lib/types';
 
@@ -155,16 +156,18 @@ interface AddCredentialFormState {
 }
 
 function AddCredentialModal({
+  initialTenantId,
   onClose,
   onCreated,
 }: {
+  initialTenantId: string;
   onClose: () => void;
   onCreated: () => void;
 }) {
   const formId = useId();
 
   const [form, setForm] = useState<AddCredentialFormState>({
-    tenant_id:       DEFAULT_TENANT,
+    tenant_id:       initialTenantId,
     provider_id:     '',
     cred_type:       'api_key',
     plaintext_value: '',
@@ -302,7 +305,7 @@ function AddCredentialModal({
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
-              <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-700">Informational — backend derives type from provider_id</p>
+              <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-600">Informational — backend derives type from provider_id</p>
             </div>
           </div>
 
@@ -338,7 +341,7 @@ function AddCredentialModal({
             {fieldErr.plaintext_value && (
               <p className="mt-1 text-[11px] text-red-400">{fieldErr.plaintext_value}</p>
             )}
-            <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-700">
+            <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-600">
               Entered once — not retrievable after creation.
             </p>
           </div>
@@ -346,7 +349,7 @@ function AddCredentialModal({
           {/* Optional key_id */}
           <div>
             <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
-              Encryption Key ID <span className="text-gray-300 dark:text-zinc-700">(optional)</span>
+              Encryption Key ID <span className="text-gray-300 dark:text-zinc-600">(optional)</span>
             </label>
             <input
               type="text"
@@ -355,7 +358,7 @@ function AddCredentialModal({
               placeholder="key_prod_v2"
               className="w-full h-8 bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-md px-3 text-[12px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
             />
-            <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-700">
+            <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-600">
               Leave blank to use the default tenant encryption key.
             </p>
           </div>
@@ -484,10 +487,15 @@ function CredentialRow({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function CredentialsPage() {
-  const [tenantId,    setTenantId]    = useState(DEFAULT_TENANT);
+  const [scope] = useScope();
+  const [tenantId,    setTenantId]    = useState(scope.tenant_id || DEFAULT_TENANT);
   const [showAdd,     setShowAdd]     = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<CredentialSummary | null>(null);
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    setTenantId(scope.tenant_id || DEFAULT_TENANT);
+  }, [scope.tenant_id]);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['credentials', tenantId],
@@ -638,6 +646,7 @@ export function CredentialsPage() {
       {/* Modals */}
       {showAdd && (
         <AddCredentialModal
+          initialTenantId={tenantId}
           onClose={() => setShowAdd(false)}
           onCreated={() => queryClient.invalidateQueries({ queryKey: ['credentials', tenantId] })}
         />
