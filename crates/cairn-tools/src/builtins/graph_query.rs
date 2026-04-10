@@ -31,7 +31,8 @@ use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use cairn_graph::queries::{GraphQuery, GraphQueryService, TraversalDirection};
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 /// Multi-hop graph traversal tool.
 pub struct GraphQueryTool {
@@ -52,6 +53,12 @@ impl ToolHandler for GraphQueryTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
 
     fn description(&self) -> &str {

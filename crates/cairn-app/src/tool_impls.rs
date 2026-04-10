@@ -24,7 +24,9 @@ use cairn_memory::{
     ingest::{IngestRequest, IngestService, SourceType},
     retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService},
 };
-use cairn_tools::builtins::{BuiltinToolRegistry, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_tools::builtins::{
+    BuiltinToolRegistry, RetrySafety, ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier,
+};
 use serde_json::Value;
 
 // ── ConcreteMemorySearchTool ──────────────────────────────────────────────────
@@ -48,6 +50,12 @@ impl ToolHandler for ConcreteMemorySearchTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Core
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
 
     fn description(&self) -> &str {
@@ -172,6 +180,12 @@ impl ToolHandler for ConcreteMemoryStoreTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Core
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Internal
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
 
     fn description(&self) -> &str {

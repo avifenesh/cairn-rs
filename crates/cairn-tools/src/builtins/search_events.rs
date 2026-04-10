@@ -18,12 +18,12 @@
 //! }
 //! ```
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
 use async_trait::async_trait;
 use cairn_domain::{
-    policy::ExecutionClass, ApprovalId, CheckpointId, EvalRunId, IngestJobId, MailboxMessageId,
-    ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId, RunId, SessionId, SignalId,
-    TaskId, ToolInvocationId,
+    policy::ExecutionClass, recovery::RetrySafety, ApprovalId, CheckpointId, EvalRunId,
+    IngestJobId, MailboxMessageId, ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId,
+    RunId, SessionId, SignalId, TaskId, ToolInvocationId,
 };
 use cairn_store::{EntityRef, EventLog, EventPosition};
 use serde_json::Value;
@@ -68,6 +68,12 @@ impl ToolHandler for SearchEventsTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "Query the event log for recent events, optionally scoped to one entity."

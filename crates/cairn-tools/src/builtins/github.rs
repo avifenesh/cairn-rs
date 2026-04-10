@@ -7,7 +7,10 @@ use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use serde_json::Value;
 
-use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{
+    PermissionLevel, ToolCategory, ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier,
+};
+use cairn_domain::recovery::RetrySafety;
 
 async fn run_gh(args: &[&str]) -> Result<String, ToolError> {
     let output = tokio::process::Command::new("gh")
@@ -44,6 +47,12 @@ impl ToolHandler for GhListIssuesTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Deferred
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "List GitHub issues for a repository. Returns JSON array with number, title, labels, state."
@@ -108,6 +117,12 @@ impl ToolHandler for GhGetIssueTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Deferred
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "Get a single GitHub issue with full body and comments."
@@ -184,6 +199,12 @@ impl ToolHandler for GhCreateCommentTool {
     fn tier(&self) -> ToolTier {
         ToolTier::Deferred
     }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::External
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::DangerousPause
+    }
     fn description(&self) -> &str {
         "Add a comment to a GitHub issue. SENSITIVE — requires approval."
     }
@@ -241,6 +262,12 @@ impl ToolHandler for GhSearchCodeTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Deferred
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "Search code across a GitHub repository."

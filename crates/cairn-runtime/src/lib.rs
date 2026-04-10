@@ -16,6 +16,7 @@ pub mod checkpoints;
 pub mod config_store;
 pub mod context_builder;
 pub mod credentials;
+pub mod decisions;
 pub mod defaults;
 pub mod enrichment;
 pub mod error;
@@ -68,6 +69,7 @@ pub use approval_policies::ApprovalPolicyService;
 pub use approvals::ApprovalService;
 pub use bandit::{BanditError, BanditServiceImpl, CreateExperimentRequest, SelectedArm};
 pub use checkpoints::CheckpointService;
+pub use decisions::{DecisionError, DecisionResult, DecisionService, StubDecisionService};
 pub use config_store::{ConfigStore, ConfigStoreError, FileConfigStore, InMemoryConfigStore};
 pub use context_builder::{
     ContextBuildError, ContextBuilder, ContextBuilderInput, DefaultContextBuilder,

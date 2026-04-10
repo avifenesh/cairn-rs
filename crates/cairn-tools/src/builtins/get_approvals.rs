@@ -16,9 +16,9 @@
 //! }
 //! ```
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
 use async_trait::async_trait;
-use cairn_domain::{policy::ExecutionClass, ProjectKey, RunId};
+use cairn_domain::{policy::ExecutionClass, recovery::RetrySafety, ProjectKey, RunId};
 use cairn_store::projections::ApprovalReadModel;
 use serde_json::Value;
 use std::sync::Arc;
@@ -43,6 +43,12 @@ impl ToolHandler for GetApprovalsTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "List pending approvals for the current project, optionally filtered by run."

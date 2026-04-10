@@ -10,11 +10,11 @@
 //! { "scheduled_task_id": "sched_...", "name": "weekly_review", "cron_expression": "0 9 * * 1" }
 //! ```
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
 use async_trait::async_trait;
 use cairn_domain::{
-    events::ScheduledTaskCreated, policy::ExecutionClass, EventEnvelope, EventId, EventSource,
-    ProjectKey, RuntimeEvent, ScheduledTaskId,
+    events::ScheduledTaskCreated, policy::ExecutionClass, recovery::RetrySafety, EventEnvelope,
+    EventId, EventSource, ProjectKey, RuntimeEvent, ScheduledTaskId,
 };
 use cairn_store::EventLog;
 use serde_json::Value;
@@ -37,6 +37,12 @@ impl ToolHandler for ScheduleTaskTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::External
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::DangerousPause
     }
     fn description(&self) -> &str {
         "Create a recurring scheduled task with a cron expression."

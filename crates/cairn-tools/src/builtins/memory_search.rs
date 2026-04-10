@@ -17,7 +17,10 @@ use async_trait::async_trait;
 use cairn_domain::ProjectKey;
 use serde_json::Value;
 
-use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{
+    PermissionLevel, ToolCategory, ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier,
+};
+use cairn_domain::recovery::RetrySafety;
 
 /// Stub tool handler — describes the memory_search interface for the registry
 /// and LLM prompt.  Replace with a concrete implementation in cairn-memory.
@@ -43,6 +46,12 @@ impl ToolHandler for MemorySearchTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Core
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
 
     fn description(&self) -> &str {

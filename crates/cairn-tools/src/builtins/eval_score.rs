@@ -30,7 +30,8 @@ use cairn_domain::{
 use cairn_store::EventLog;
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 /// Eval-score tool — appends an OutcomeRecorded event for a run.
 pub struct EvalScoreTool {
@@ -51,6 +52,12 @@ impl ToolHandler for EvalScoreTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::External
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::DangerousPause
     }
 
     fn description(&self) -> &str {

@@ -1,10 +1,11 @@
 //! summarize_text — meta-tool calling the worker LLM to compress text.
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
 use async_trait::async_trait;
 use cairn_domain::{
     providers::{
         GenerationProvider, GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
     },
+    recovery::RetrySafety,
     ProjectKey,
 };
 use serde_json::Value;
@@ -58,6 +59,12 @@ impl ToolHandler for SummarizeTextTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Internal
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "Compress text using the worker LLM. \

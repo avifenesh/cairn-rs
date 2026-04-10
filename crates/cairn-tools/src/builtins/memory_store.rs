@@ -7,7 +7,10 @@ use async_trait::async_trait;
 use cairn_domain::ProjectKey;
 use serde_json::Value;
 
-use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{
+    PermissionLevel, ToolCategory, ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier,
+};
+use cairn_domain::recovery::RetrySafety;
 
 /// Stub: schema + metadata only. Concrete impl in cairn-memory.
 pub struct MemoryStoreTool;
@@ -31,6 +34,12 @@ impl ToolHandler for MemoryStoreTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Core
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Internal
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::AuthorResponsible
     }
     fn description(&self) -> &str {
         "Store new content or a fact into the agent's memory for future retrieval."

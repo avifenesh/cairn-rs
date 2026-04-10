@@ -32,7 +32,10 @@ use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use serde_json::Value;
 
-use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{
+    PermissionLevel, ToolCategory, ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier,
+};
+use cairn_domain::recovery::RetrySafety;
 
 /// Maximum bytes returned in a single `file_read` call.
 const MAX_BYTES: usize = 64 * 1024; // 64 KiB
@@ -61,6 +64,12 @@ impl ToolHandler for FileReadTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
 
     fn description(&self) -> &str {

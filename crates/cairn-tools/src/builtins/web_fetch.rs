@@ -17,7 +17,10 @@ use async_trait::async_trait;
 use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use serde_json::Value;
 
-use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{
+    PermissionLevel, ToolCategory, ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier,
+};
+use cairn_domain::recovery::RetrySafety;
 
 const MAX_BODY_BYTES: usize = 32 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 10_000;
@@ -46,6 +49,12 @@ impl ToolHandler for WebFetchTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
 
     fn description(&self) -> &str {

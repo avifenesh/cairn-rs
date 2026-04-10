@@ -4951,8 +4951,7 @@ async fn observability_middleware(
     } else {
         "info"
     };
-    let timestamp = chrono::Utc::now()
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let message = format!("{method} {path} -> {status} ({latency_ms}ms)");
     if let Ok(mut log) = state.request_log.write() {
         log.push(RequestLogEntry {
@@ -7305,7 +7304,14 @@ async fn list_audit_log_handler(
         all_items.sort_by(|a, b| b.occurred_at_ms.cmp(&a.occurred_at_ms));
         all_items.truncate(limit);
         let has_more = all_items.len() >= limit;
-        (StatusCode::OK, Json(ListResponse { has_more, items: all_items })).into_response()
+        (
+            StatusCode::OK,
+            Json(ListResponse {
+                has_more,
+                items: all_items,
+            }),
+        )
+            .into_response()
     } else {
         match AuditLogReadModel::list_by_tenant(
             state.runtime.store.as_ref(),
@@ -7394,7 +7400,11 @@ async fn list_request_logs_handler(
         .unwrap_or_default();
 
     let entries: Vec<RequestLogEntry> = match state.request_log.read() {
-        Ok(log) => log.tail(limit, &level_filter).into_iter().cloned().collect(),
+        Ok(log) => log
+            .tail(limit, &level_filter)
+            .into_iter()
+            .cloned()
+            .collect(),
         Err(_) => vec![],
     };
 
@@ -9263,8 +9273,12 @@ async fn orchestrate_run_handler(
     };
     use cairn_store::projections::RunReadModel;
     use cairn_tools::{
-        BuiltinToolRegistry, MemorySearchTool, MemoryStoreTool, NotificationSink,
-        NotifyOperatorTool, ShellExecTool, ToolSearchTool, WebFetchTool,
+        BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool, EvalScoreTool,
+        FileReadTool, FileWriteTool, GetApprovalsTool, GetRunTool, GetTaskTool, GitOperationsTool,
+        GlobFindTool, GraphQueryTool, GrepSearchTool, HttpRequestTool, JsonExtractTool,
+        ListRunsTool, MemorySearchTool, MemoryStoreTool, NotificationSink, NotifyOperatorTool,
+        ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool, SearchEventsTool, ShellExecTool,
+        SummarizeTextTool, ToolSearchTool, WaitForTaskTool, WebFetchTool,
     };
 
     let run_id = RunId::new(run_id_str);
@@ -9414,6 +9428,7 @@ async fn orchestrate_run_handler(
     );
 
     // ── Build BuiltinToolRegistry ────────────────────────────────────────────
+    // Wire all ~30 built-in tools (RFC 018 prerequisite).
     // Prefer real memory tool implementations (wired at startup with live
     // RetrievalService + IngestPipeline).  Fall back to stubs otherwise.
     let registry = {
@@ -9423,8 +9438,6 @@ async fn orchestrate_run_handler(
             std::sync::Arc<dyn cairn_tools::ToolHandler>,
             std::sync::Arc<dyn cairn_tools::ToolHandler>,
         ) = if let Some(ref real) = state.tool_registry {
-            // Extract the real tools from the pre-built registry.
-            // If somehow not present, fall through to stubs.
             let search: std::sync::Arc<dyn cairn_tools::ToolHandler> = real
                 .get("memory_search")
                 .unwrap_or_else(|| std::sync::Arc::new(MemorySearchTool::new()));
@@ -9439,10 +9452,68 @@ async fn orchestrate_run_handler(
             )
         };
 
+        // Shared services needed by tool constructors
+        let store_ref = state.runtime.store.clone();
+        let workspace_root =
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let task_svc: Arc<dyn cairn_runtime::tasks::TaskService> =
+            Arc::new(TaskServiceImpl::new(store_ref.clone()));
+        let approval_svc: Arc<dyn cairn_runtime::ApprovalService> =
+            Arc::new(ApprovalServiceImpl::new(store_ref.clone()));
+
+        // ── Observational tools ─────────────────────────────────────────────
         let web_fetch: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(WebFetchTool::default());
+        let grep_search: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GrepSearchTool::default());
+        let file_read: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(FileReadTool::new(workspace_root.clone()));
+        let glob_find: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GlobFindTool::default());
+        let json_extract: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(JsonExtractTool::default());
+        let calculate: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(CalculateTool::default());
+        let graph_query: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GraphQueryTool::new(state.graph.clone()));
+        let get_run: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GetRunTool::new(store_ref.clone()));
+        let get_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GetTaskTool::new(store_ref.clone()));
+        let get_approvals: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GetApprovalsTool::new(store_ref.clone()));
+        let list_runs: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(ListRunsTool::new(store_ref.clone()));
+        let search_events: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(SearchEventsTool::new(store_ref.clone()));
+        let wait_for_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(WaitForTaskTool::new(store_ref.clone()));
+
+        // ── Internal tools ──────────────────────────────────────────────────
+        let scratch_pad: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(ScratchPadTool::new());
+        let file_write: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(FileWriteTool::new(workspace_root.clone()));
+        let create_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(CreateTaskTool::new(task_svc.clone()));
+        let cancel_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(CancelTaskTool::new(task_svc));
+        let summarize_text: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(SummarizeTextTool::new(brain.clone(), model_id.clone()));
+
+        // ── External tools ──────────────────────────────────────────────────
         let shell_exec: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(ShellExecTool);
+        let http_request: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(HttpRequestTool::default());
+        let git_operations: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(GitOperationsTool::new(workspace_root));
+        let resolve_approval: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(ResolveApprovalTool::new(approval_svc));
+        let schedule_task: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(ScheduleTaskTool::new(store_ref.clone()));
+        let eval_score: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+            std::sync::Arc::new(EvalScoreTool::new(store_ref));
 
         // GitHub tools (Deferred — discovered via tool_search)
         let gh_list: std::sync::Arc<dyn cairn_tools::ToolHandler> =
@@ -9454,38 +9525,54 @@ async fn orchestrate_run_handler(
         let gh_search: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(cairn_tools::GhSearchCodeTool);
 
-        // Build inner registry for ToolSearchTool (includes deferred GH tools).
-        let inner = std::sync::Arc::new(
-            BuiltinToolRegistry::new()
+        // Helper: register all tools in a registry builder.
+        let register_all = |reg: BuiltinToolRegistry| -> BuiltinToolRegistry {
+            reg // Core / Observational
                 .register(search_tool.clone())
                 .register(store_tool.clone())
                 .register(web_fetch.clone())
+                .register(grep_search.clone())
+                .register(file_read.clone())
+                .register(glob_find.clone())
+                .register(json_extract.clone())
+                .register(calculate.clone())
+                .register(graph_query.clone())
+                .register(get_run.clone())
+                .register(get_task.clone())
+                .register(get_approvals.clone())
+                .register(list_runs.clone())
+                .register(search_events.clone())
+                .register(wait_for_task.clone())
+                // Internal
+                .register(scratch_pad.clone())
+                .register(file_write.clone())
+                .register(create_task.clone())
+                .register(cancel_task.clone())
+                .register(summarize_text.clone())
+                // External
                 .register(shell_exec.clone())
                 .register(std::sync::Arc::new(NotifyOperatorTool::new(
                     Some(mailbox_svc.clone()),
                     sse_sink.clone(),
                 )))
+                .register(http_request.clone())
+                .register(git_operations.clone())
+                .register(resolve_approval.clone())
+                .register(schedule_task.clone())
+                .register(eval_score.clone())
+                // GitHub (Deferred)
                 .register(gh_list.clone())
                 .register(gh_get.clone())
                 .register(gh_comment.clone())
-                .register(gh_search.clone()),
-        );
+                .register(gh_search.clone())
+        };
+
+        // Build inner registry for ToolSearchTool (includes deferred GH tools).
+        let inner = std::sync::Arc::new(register_all(BuiltinToolRegistry::new()));
 
         // Full registry with ToolSearchTool that can search the deferred tier.
         std::sync::Arc::new(
-            BuiltinToolRegistry::new()
-                .register(search_tool)
-                .register(store_tool)
-                .register(web_fetch)
-                .register(shell_exec)
-                .register(std::sync::Arc::new(NotifyOperatorTool::new(
-                    Some(mailbox_svc),
-                    sse_sink,
-                )))
-                .register(gh_list)
-                .register(gh_get)
-                .register(gh_comment)
-                .register(gh_search)
+            register_all(BuiltinToolRegistry::new())
                 .register(std::sync::Arc::new(ToolSearchTool::new(inner))),
         )
     };

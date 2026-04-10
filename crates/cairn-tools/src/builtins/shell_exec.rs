@@ -21,7 +21,10 @@ use serde_json::Value;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
-use super::{PermissionLevel, ToolCategory, ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{
+    PermissionLevel, ToolCategory, ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier,
+};
+use cairn_domain::recovery::RetrySafety;
 
 const MAX_OUTPUT_BYTES: usize = 16 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
@@ -46,6 +49,12 @@ impl ToolHandler for ShellExecTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::External
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::DangerousPause
     }
 
     fn description(&self) -> &str {

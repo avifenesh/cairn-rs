@@ -29,7 +29,8 @@ use cairn_domain::ProjectKey;
 use regex::{Regex, RegexBuilder};
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 pub struct GrepSearchTool;
 
@@ -191,6 +192,12 @@ impl ToolHandler for GrepSearchTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
 
     fn description(&self) -> &str {

@@ -34,7 +34,8 @@ use cairn_domain::{policy::ExecutionClass, ProjectKey, RunId, TaskId};
 use cairn_runtime::tasks::TaskService;
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 /// Sub-task creation tool.
 pub struct CreateTaskTool {
@@ -55,6 +56,12 @@ impl ToolHandler for CreateTaskTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Internal
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::AuthorResponsible
     }
 
     fn description(&self) -> &str {

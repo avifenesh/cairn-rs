@@ -1,6 +1,7 @@
 //! resolve_approval — agent-initiated approval resolution.
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
 use async_trait::async_trait;
+use cairn_domain::recovery::RetrySafety;
 use cairn_domain::{policy::ApprovalDecision, ApprovalId, ProjectKey};
 use cairn_runtime::ApprovalService;
 use serde_json::Value;
@@ -31,6 +32,12 @@ impl ToolHandler for ResolveApprovalTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Core
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::External
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::DangerousPause
     }
     fn description(&self) -> &str {
         "Approve or reject a pending approval gate. \

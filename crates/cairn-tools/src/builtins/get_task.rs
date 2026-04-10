@@ -7,7 +7,8 @@ use cairn_domain::{policy::ExecutionClass, ProjectKey, TaskId};
 use cairn_store::projections::TaskReadModel;
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 /// Read the current state of a task.
 pub struct GetTaskTool {
@@ -27,6 +28,12 @@ impl ToolHandler for GetTaskTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "Inspect a specific task by its ID. \

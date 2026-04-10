@@ -1,8 +1,9 @@
 //! calculate — safe arithmetic evaluator (no eval()).
 //!
 //! Recursive descent parser: + - * / % ** with parens and unary minus.
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
 use async_trait::async_trait;
+use cairn_domain::recovery::RetrySafety;
 use cairn_domain::ProjectKey;
 use serde_json::Value;
 
@@ -193,6 +194,12 @@ impl ToolHandler for CalculateTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "Evaluate a mathematical expression safely. \

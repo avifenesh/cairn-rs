@@ -10,7 +10,8 @@ use cairn_domain::{policy::ExecutionClass, ProjectKey, TaskId};
 use cairn_runtime::tasks::TaskService;
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 /// Cancel a task — Sensitive, requires approval.
 pub struct CancelTaskTool {
@@ -30,6 +31,12 @@ impl ToolHandler for CancelTaskTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Internal
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::AuthorResponsible
     }
     fn description(&self) -> &str {
         "Cancel a task that is queued, leased, or running. \

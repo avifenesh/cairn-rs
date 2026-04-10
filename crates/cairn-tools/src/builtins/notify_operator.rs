@@ -29,7 +29,8 @@ use cairn_domain::{MailboxMessageId, ProjectKey};
 use cairn_runtime::MailboxService;
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 // ── NotificationSink ──────────────────────────────────────────────────────────
 
@@ -112,6 +113,12 @@ impl ToolHandler for NotifyOperatorTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Core
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::External
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::DangerousPause
     }
 
     fn description(&self) -> &str {

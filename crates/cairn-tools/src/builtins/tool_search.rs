@@ -40,7 +40,8 @@ use async_trait::async_trait;
 use cairn_domain::ProjectKey;
 use serde_json::Value;
 
-use super::{BuiltinToolRegistry, ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{BuiltinToolRegistry, ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 // ── ToolSearchTool ────────────────────────────────────────────────────────────
 
@@ -66,6 +67,12 @@ impl ToolHandler for ToolSearchTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Core
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
 
     fn description(&self) -> &str {

@@ -36,9 +36,10 @@ use cairn_domain::{policy::ExecutionClass, ProjectKey};
 use serde_json::Value;
 
 use super::{
-    file_read::resolve_safe_path, PermissionLevel, ToolCategory, ToolError, ToolHandler,
-    ToolResult, ToolTier,
+    file_read::resolve_safe_path, PermissionLevel, ToolCategory, ToolEffect, ToolError,
+    ToolHandler, ToolResult, ToolTier,
 };
+use cairn_domain::recovery::RetrySafety;
 
 /// Write a file within the project workspace.
 ///
@@ -65,6 +66,12 @@ impl ToolHandler for FileWriteTool {
 
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Internal
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::AuthorResponsible
     }
 
     fn description(&self) -> &str {

@@ -16,9 +16,9 @@
 //! { "key": "plan_step_2", "written": true, "expires_at_ms": 1234567890 }
 //! ```
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
 use async_trait::async_trait;
-use cairn_domain::{policy::ExecutionClass, ProjectKey};
+use cairn_domain::{policy::ExecutionClass, recovery::RetrySafety, ProjectKey};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -65,6 +65,12 @@ impl ToolHandler for ScratchPadTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Internal
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "Ephemeral key-value scratch pad with TTL for agent working memory during a run."

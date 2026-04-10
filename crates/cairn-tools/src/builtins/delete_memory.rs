@@ -2,7 +2,8 @@
 use async_trait::async_trait;
 use cairn_domain::ProjectKey;
 use serde_json::Value;
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 pub struct DeleteMemoryTool;
 impl Default for DeleteMemoryTool { fn default() -> Self { Self } }
@@ -11,6 +12,8 @@ impl Default for DeleteMemoryTool { fn default() -> Self { Self } }
 impl ToolHandler for DeleteMemoryTool {
     fn name(&self) -> &str { "delete_memory" }
     fn tier(&self) -> ToolTier { ToolTier::Registered }
+    fn tool_effect(&self) -> ToolEffect { ToolEffect::Internal }
+    fn retry_safety(&self) -> RetrySafety { RetrySafety::AuthorResponsible }
     fn description(&self) -> &str { "Delete a document from the agent memory store." }
     fn parameters_schema(&self) -> Value {
         serde_json::json!({"type":"object","required":["document_id"],"properties":{

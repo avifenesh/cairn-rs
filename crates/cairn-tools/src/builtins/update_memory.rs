@@ -15,9 +15,9 @@
 //! { "document_id": "doc_123", "updated": true }
 //! ```
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
 use async_trait::async_trait;
-use cairn_domain::{policy::ExecutionClass, ProjectKey};
+use cairn_domain::{policy::ExecutionClass, recovery::RetrySafety, ProjectKey};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -54,6 +54,12 @@ impl ToolHandler for UpdateMemoryTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Internal
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::AuthorResponsible
     }
     fn description(&self) -> &str {
         "Replace the content of an existing document in the knowledge store."
@@ -133,6 +139,12 @@ impl ToolHandler for DeleteMemoryTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Internal
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::AuthorResponsible
     }
     fn description(&self) -> &str {
         "Remove a document from the knowledge store. SENSITIVE — irreversible."

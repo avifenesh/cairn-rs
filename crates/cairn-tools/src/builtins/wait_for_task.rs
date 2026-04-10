@@ -13,7 +13,8 @@ use cairn_domain::{policy::ExecutionClass, ProjectKey, TaskId};
 use cairn_store::projections::TaskReadModel;
 use serde_json::Value;
 
-use super::{ToolError, ToolHandler, ToolResult, ToolTier};
+use super::{ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier};
+use cairn_domain::recovery::RetrySafety;
 
 /// Maximum wait time (hard cap regardless of what caller requests).
 const MAX_WAIT_SECS: u64 = 300; // 5 minutes
@@ -38,6 +39,12 @@ impl ToolHandler for WaitForTaskTool {
     }
     fn tier(&self) -> ToolTier {
         ToolTier::Registered
+    }
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::Observational
+    }
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::IdempotentSafe
     }
     fn description(&self) -> &str {
         "Wait until a task reaches a terminal state (completed/failed/canceled). \
