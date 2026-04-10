@@ -19,14 +19,16 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
+use cairn_domain::{policy::ExecutionClass, ActorRef, KnowledgeDocumentId, OperatorId, ProjectKey, RepoAccessContext, SourceId};
 use cairn_memory::{
     ingest::{IngestRequest, IngestService, SourceType},
     retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService},
 };
 use cairn_tools::builtins::{
-    BuiltinToolRegistry, RetrySafety, ToolEffect, ToolError, ToolHandler, ToolResult, ToolTier,
+    BuiltinToolRegistry, PermissionLevel, RetrySafety, ToolCategory, ToolEffect, ToolError,
+    ToolHandler, ToolResult, ToolTier,
 };
+use cairn_workspace::{ProjectRepoAccessService, RepoCloneCache, RepoId};
 use serde_json::Value;
 
 // ── ConcreteMemorySearchTool ──────────────────────────────────────────────────
@@ -283,19 +285,167 @@ impl ToolHandler for ConcreteMemoryStoreTool {
     }
 }
 
+// ── ConcreteRegisterRepoTool ────────────────────────────────────────────────
+
+/// Real `cairn.registerRepo` — expands the current project's allowlist and
+/// ensures the tenant-scoped clone exists without exposing a host path.
+pub struct ConcreteRegisterRepoTool {
+    access: Arc<ProjectRepoAccessService>,
+    cache: Arc<RepoCloneCache>,
+}
+
+impl ConcreteRegisterRepoTool {
+    pub fn new(access: Arc<ProjectRepoAccessService>, cache: Arc<RepoCloneCache>) -> Self {
+        Self { access, cache }
+    }
+}
+
+fn parse_repo_id(args: &Value) -> Result<RepoId, ToolError> {
+    let repo_id = args
+        .get("repo_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ToolError::InvalidArgs {
+            field: "repo_id".into(),
+            message: "required string in owner/repo form".into(),
+        })?
+        .trim();
+
+    let mut parts = repo_id.split('/');
+    let Some(owner) = parts.next() else {
+        return Err(ToolError::InvalidArgs {
+            field: "repo_id".into(),
+            message: "must be in owner/repo form".into(),
+        });
+    };
+    let Some(repo) = parts.next() else {
+        return Err(ToolError::InvalidArgs {
+            field: "repo_id".into(),
+            message: "must be in owner/repo form".into(),
+        });
+    };
+    if owner.is_empty() || repo.is_empty() || parts.next().is_some() {
+        return Err(ToolError::InvalidArgs {
+            field: "repo_id".into(),
+            message: "must be in owner/repo form".into(),
+        });
+    }
+
+    Ok(RepoId::new(repo_id))
+}
+
+fn clone_status(is_cloned: bool) -> &'static str {
+    if is_cloned {
+        "present"
+    } else {
+        "missing"
+    }
+}
+
+#[async_trait]
+impl ToolHandler for ConcreteRegisterRepoTool {
+    fn name(&self) -> &str {
+        "cairn.registerRepo"
+    }
+
+    fn tier(&self) -> ToolTier {
+        ToolTier::Registered
+    }
+
+    fn description(&self) -> &str {
+        "Allowlist a repository for the current project and ensure its tenant-scoped clone exists. SENSITIVE — requires operator approval."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "required": ["repo_id"],
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Repository identifier in owner/repo form"
+                }
+            }
+        })
+    }
+
+    fn execution_class(&self) -> ExecutionClass {
+        ExecutionClass::Sensitive
+    }
+
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Execute
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Orchestration
+    }
+
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::External
+    }
+
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::DangerousPause
+    }
+
+    async fn execute(&self, project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError> {
+        let repo_id = parse_repo_id(&args)?;
+        let access_ctx = RepoAccessContext {
+            project: project.clone(),
+        };
+        let was_cloned = self.cache.is_cloned(&project.tenant_id, &repo_id).await;
+
+        self.access
+            .allow(
+                &access_ctx,
+                &repo_id,
+                ActorRef::Operator {
+                    operator_id: OperatorId::new("agent"),
+                },
+            )
+            .await
+            .map_err(|error| ToolError::Permanent(format!("repo allowlist update failed: {error}")))?;
+
+        self.cache
+            .ensure_cloned(&project.tenant_id, &repo_id)
+            .await
+            .map_err(|error| ToolError::Transient(format!("repo clone failed: {error}")))?;
+
+        let is_cloned = self.cache.is_cloned(&project.tenant_id, &repo_id).await;
+
+        Ok(ToolResult::ok(serde_json::json!({
+            "project": {
+                "tenant_id": project.tenant_id.as_str(),
+                "workspace_id": project.workspace_id.as_str(),
+                "project_id": project.project_id.as_str(),
+            },
+            "repo_id": repo_id.as_str(),
+            "authorization_status": "granted",
+            "clone_status": clone_status(is_cloned),
+            "clone_created": !was_cloned && is_cloned,
+        })))
+    }
+}
+
 // ── Registry builder ──────────────────────────────────────────────────────────
 
-/// Build a [`BuiltinToolRegistry`] pre-populated with the concrete memory tools.
+/// Build a [`BuiltinToolRegistry`] pre-populated with the concrete app tools.
 ///
 /// Call this at startup and attach the result to `RuntimeExecutePhase::builder()
 /// .tool_registry(Arc::new(registry))`.
 pub fn build_tool_registry(
     retrieval: Arc<dyn RetrievalService>,
     ingest: Arc<dyn IngestService>,
+    project_repo_access: Arc<ProjectRepoAccessService>,
+    repo_clone_cache: Arc<RepoCloneCache>,
 ) -> BuiltinToolRegistry {
     BuiltinToolRegistry::new()
         .register(Arc::new(ConcreteMemorySearchTool::new(retrieval)))
         .register(Arc::new(ConcreteMemoryStoreTool::new(ingest)))
+        .register(Arc::new(ConcreteRegisterRepoTool::new(
+            project_repo_access,
+            repo_clone_cache,
+        )))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -534,7 +684,12 @@ mod tests {
 
         let retrieval = Arc::new(InMemoryRetrieval::new(store)) as Arc<dyn RetrievalService>;
         let ingest = pipeline as Arc<dyn IngestService>;
-        let registry = build_tool_registry(retrieval, ingest);
+        let registry = build_tool_registry(
+            retrieval,
+            ingest,
+            Arc::new(ProjectRepoAccessService::new()),
+            Arc::new(RepoCloneCache::default()),
+        );
 
         let result = registry
             .execute(
@@ -554,7 +709,12 @@ mod tests {
             InMemoryDocumentStore::new(),
         ))) as Arc<dyn RetrievalService>;
         let ingest = pipeline as Arc<dyn IngestService>;
-        let registry = build_tool_registry(retrieval, ingest);
+        let registry = build_tool_registry(
+            retrieval,
+            ingest,
+            Arc::new(ProjectRepoAccessService::new()),
+            Arc::new(RepoCloneCache::default()),
+        );
 
         let result = registry
             .execute(
@@ -573,7 +733,12 @@ mod tests {
         let retrieval = Arc::new(InMemoryRetrieval::new(Arc::new(
             InMemoryDocumentStore::new(),
         ))) as Arc<dyn RetrievalService>;
-        let registry = build_tool_registry(retrieval, pipeline as Arc<dyn IngestService>);
+        let registry = build_tool_registry(
+            retrieval,
+            pipeline as Arc<dyn IngestService>,
+            Arc::new(ProjectRepoAccessService::new()),
+            Arc::new(RepoCloneCache::default()),
+        );
 
         let err = registry
             .execute("nonexistent_tool", &project(), serde_json::json!({}))

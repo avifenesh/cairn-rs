@@ -9549,7 +9549,8 @@ async fn orchestrate_run_handler(
     let registry = {
         // Concrete memory tools: use real impl when state.tool_registry is set,
         // otherwise fall back to stubs (schema-correct but no backing service).
-        let (search_tool, store_tool): (
+        let (search_tool, store_tool, register_repo_tool): (
+            std::sync::Arc<dyn cairn_tools::ToolHandler>,
             std::sync::Arc<dyn cairn_tools::ToolHandler>,
             std::sync::Arc<dyn cairn_tools::ToolHandler>,
         ) = if let Some(ref real) = state.tool_registry {
@@ -9559,11 +9560,23 @@ async fn orchestrate_run_handler(
             let store: std::sync::Arc<dyn cairn_tools::ToolHandler> = real
                 .get("memory_store")
                 .unwrap_or_else(|| std::sync::Arc::new(MemoryStoreTool::new()));
-            (search, store)
+            let register_repo: std::sync::Arc<dyn cairn_tools::ToolHandler> = real
+                .get("cairn.registerRepo")
+                .unwrap_or_else(|| {
+                    std::sync::Arc::new(crate::tool_impls::ConcreteRegisterRepoTool::new(
+                        state.project_repo_access.clone(),
+                        state.repo_clone_cache.clone(),
+                    ))
+                });
+            (search, store, register_repo)
         } else {
             (
                 std::sync::Arc::new(MemorySearchTool::new()),
                 std::sync::Arc::new(MemoryStoreTool::new()),
+                std::sync::Arc::new(crate::tool_impls::ConcreteRegisterRepoTool::new(
+                    state.project_repo_access.clone(),
+                    state.repo_clone_cache.clone(),
+                )),
             )
         };
 
@@ -9645,6 +9658,7 @@ async fn orchestrate_run_handler(
             reg // Core / Observational
                 .register(search_tool.clone())
                 .register(store_tool.clone())
+                .register(register_repo_tool.clone())
                 .register(web_fetch.clone())
                 .register(grep_search.clone())
                 .register(file_read.clone())
