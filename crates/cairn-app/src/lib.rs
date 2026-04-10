@@ -716,6 +716,8 @@ pub struct AppState {
     #[allow(dead_code)]
     pub memory_proposal_hook: Arc<sse_hooks::SseMemoryProposalHook>,
     pub started_at: Instant,
+    /// OTLP span exporter (RFC 021). Disabled by default.
+    pub otlp_exporter: Arc<cairn_runtime::telemetry::OtlpExporter>,
     /// Brain LLM provider for orchestration — set post-construction by main.rs
     /// once the concrete provider (Ollama or OpenAI-compat) is configured.
     /// `None` means orchestration is unavailable until a provider is configured.
@@ -956,6 +958,7 @@ impl AppState {
             metrics,
             memory_proposal_hook,
             started_at: Instant::now(),
+            otlp_exporter: Arc::new(cairn_runtime::telemetry::OtlpExporter::disabled()),
             runtime_sse_tx,
             sse_event_buffer,
             sse_seq,
@@ -5346,6 +5349,9 @@ async fn publish_runtime_frames_since(state: &Arc<AppState>, after: Option<Event
     let _ = projector.project_events(&events).await;
 
     for stored in events {
+        // OTLP export (RFC 021): send each event to the exporter.
+        let _ = state.otlp_exporter.export_event(&stored.envelope.payload).await;
+
         if let Some(mut frame) = build_runtime_sse_frame(state, &stored).await {
             // Assign a monotonic sequence ID for Last-Event-ID replay.
             let seq = state
