@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
 use cairn_domain::{ProjectKey, RunId, TaskId};
+use serde::{Deserialize, Serialize};
 
 use crate::sandbox::{RepoId, SandboxId, SandboxState, SandboxStrategy};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxMetadata {
     pub sandbox_id: SandboxId,
     pub run_id: RunId,

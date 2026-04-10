@@ -72,7 +72,10 @@ impl Display for WorkspaceError {
                 run_id,
                 operation,
                 message,
-            } => write!(f, "sandbox operation {operation} failed for run {run_id}: {message}"),
+            } => write!(
+                f,
+                "sandbox operation {operation} failed for run {run_id}: {message}"
+            ),
         }
     }
 }

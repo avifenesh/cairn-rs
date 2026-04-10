@@ -1,4 +1,5 @@
 use std::collections::{hash_map::DefaultHasher, HashMap};
+use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
@@ -222,6 +223,27 @@ impl SandboxService {
                     session.sandbox = Some(sandbox.clone());
                     session.metadata = Some(metadata.clone());
                 }
+                if let Err(error) = self.persist_metadata(&metadata) {
+                    let failed_at = self.clock.now_millis();
+                    {
+                        let mut sessions = self
+                            .sessions
+                            .write()
+                            .expect("sandbox session lock poisoned");
+                        if let Some(session) = sessions.get_mut(run_id) {
+                            session.state = SandboxState::Failed;
+                        }
+                    }
+                    self.event_sink
+                        .publish(SandboxEvent::SandboxProvisioningFailed {
+                            sandbox_id: sandbox.sandbox_id.clone(),
+                            run_id: run_id.clone(),
+                            error_kind: SandboxErrorKind::Filesystem,
+                            error: error.to_string(),
+                            failed_at,
+                        });
+                    return Err(error);
+                }
 
                 self.event_sink.publish(SandboxEvent::SandboxProvisioned {
                     sandbox_id: sandbox.sandbox_id.clone(),
@@ -270,7 +292,7 @@ impl SandboxService {
         pid: Option<u32>,
     ) -> Result<ProvisionedSandbox, WorkspaceError> {
         let activated_at = self.clock.now_millis();
-        let (sandbox_id, sandbox) = {
+        let (sandbox_id, sandbox, metadata) = {
             let mut sessions = self
                 .sessions
                 .write()
@@ -294,8 +316,15 @@ impl SandboxService {
                 metadata.pid = pid;
                 metadata.heartbeat_at = activated_at;
             }
-            (session.sandbox_id.clone(), sandbox.clone())
+            (
+                session.sandbox_id.clone(),
+                sandbox.clone(),
+                session.metadata.clone(),
+            )
         };
+        if let Some(metadata) = metadata.as_ref() {
+            self.persist_metadata(metadata)?;
+        }
 
         self.event_sink.publish(SandboxEvent::SandboxActivated {
             sandbox_id,
@@ -334,7 +363,7 @@ impl SandboxService {
         self.provider(strategy)?.heartbeat(run_id).await?;
 
         let heartbeat_at = self.clock.now_millis();
-        let sandbox_id = {
+        let (sandbox_id, metadata) = {
             let mut sessions = self
                 .sessions
                 .write()
@@ -343,8 +372,11 @@ impl SandboxService {
             if let Some(metadata) = session.metadata.as_mut() {
                 metadata.heartbeat_at = heartbeat_at;
             }
-            session.sandbox_id.clone()
+            (session.sandbox_id.clone(), session.metadata.clone())
         };
+        if let Some(metadata) = metadata.as_ref() {
+            self.persist_metadata(metadata)?;
+        }
 
         self.event_sink.publish(SandboxEvent::SandboxHeartbeat {
             sandbox_id,
@@ -364,7 +396,7 @@ impl SandboxService {
         let checkpoint = self.provider(strategy)?.checkpoint(run_id, kind).await?;
         let checkpointed_at = self.clock.now_millis();
 
-        {
+        let metadata = {
             let mut sessions = self
                 .sessions
                 .write()
@@ -374,6 +406,10 @@ impl SandboxService {
             if let Some(metadata) = session.metadata.as_mut() {
                 metadata.state = SandboxState::Checkpointed;
             }
+            session.metadata.clone()
+        };
+        if let Some(metadata) = metadata.as_ref() {
+            self.persist_metadata(metadata)?;
         }
 
         self.event_sink.publish(SandboxEvent::SandboxCheckpointed {
@@ -394,7 +430,7 @@ impl SandboxService {
         reason: PreservationReason,
     ) -> Result<(), WorkspaceError> {
         let preserved_at = self.clock.now_millis();
-        let sandbox_id = {
+        let (sandbox_id, metadata) = {
             let mut sessions = self
                 .sessions
                 .write()
@@ -405,8 +441,11 @@ impl SandboxService {
                 metadata.state = SandboxState::Preserved;
                 metadata.pid = None;
             }
-            session.sandbox_id.clone()
+            (session.sandbox_id.clone(), session.metadata.clone())
         };
+        if let Some(metadata) = metadata.as_ref() {
+            self.persist_metadata(metadata)?;
+        }
 
         self.event_sink.publish(SandboxEvent::SandboxPreserved {
             sandbox_id,
@@ -636,6 +675,19 @@ impl SandboxService {
         session.state = next;
         Ok(())
     }
+
+    fn persist_metadata(&self, metadata: &SandboxMetadata) -> Result<(), WorkspaceError> {
+        let sandbox_dir = self.base_dir.join(metadata.sandbox_id.as_str());
+        fs::create_dir_all(&sandbox_dir).map_err(|error| {
+            WorkspaceError::sandbox_op(&metadata.run_id, "create_metadata_dir", error)
+        })?;
+        let metadata_path = sandbox_dir.join("meta.json");
+        let encoded = serde_json::to_vec_pretty(metadata).map_err(|error| {
+            WorkspaceError::sandbox_op(&metadata.run_id, "serialize_metadata", error)
+        })?;
+        fs::write(&metadata_path, encoded)
+            .map_err(|error| WorkspaceError::sandbox_op(&metadata.run_id, "write_metadata", error))
+    }
 }
 
 fn fallback_strategy(strategy: SandboxStrategy) -> SandboxStrategy {
@@ -671,6 +723,7 @@ fn policy_hash(policy: &SandboxPolicy) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -847,13 +900,27 @@ mod tests {
         providers: Vec<(SandboxStrategy, Box<dyn SandboxProvider>)>,
     ) -> (SandboxService, Arc<BufferedSandboxEventSink>) {
         let sink = Arc::new(BufferedSandboxEventSink::default());
+        let base_dir = unique_test_dir("service");
         let service = SandboxService::new(
             HashMap::from_iter(providers),
             sink.clone(),
-            "/tmp/cairn-sandboxes",
+            base_dir,
             Arc::new(FixedClock::new(1_000)),
         );
         (service, sink)
+    }
+
+    fn unique_test_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "cairn-workspace-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("test temp dir should be creatable");
+        dir
     }
 
     fn run_id() -> RunId {
@@ -1129,5 +1196,55 @@ mod tests {
 
         assert_eq!(metadata.task_id, Some(cairn_domain::TaskId::new("task-1")));
         assert_eq!(metadata.policy_hash, "policy:abc");
+    }
+
+    #[tokio::test]
+    async fn service_persists_metadata_for_recovery() {
+        let (service, _sink) = service_with_providers(vec![(
+            SandboxStrategy::Overlay,
+            Box::new(TestProvider::new(SandboxStrategy::Overlay)),
+        )]);
+        let run = run_id();
+
+        service
+            .provision_or_reconnect(
+                &run,
+                Some(cairn_domain::TaskId::new("task-9")),
+                project(),
+                policy(
+                    SandboxStrategyRequest::Force(SandboxStrategy::Overlay),
+                    OnExhaustion::Destroy,
+                ),
+            )
+            .await
+            .unwrap();
+
+        let metadata_path = service.base_dir().join("sbx-run-1").join("meta.json");
+        let metadata: SandboxMetadata =
+            serde_json::from_slice(&fs::read(&metadata_path).unwrap()).unwrap();
+        assert_eq!(metadata.state, SandboxState::Ready);
+        assert_eq!(metadata.task_id, Some(cairn_domain::TaskId::new("task-9")));
+
+        service.activate(&run, Some(77)).await.unwrap();
+        let metadata: SandboxMetadata =
+            serde_json::from_slice(&fs::read(&metadata_path).unwrap()).unwrap();
+        assert_eq!(metadata.state, SandboxState::Active);
+        assert_eq!(metadata.pid, Some(77));
+
+        service
+            .checkpoint(&run, CheckpointKind::Result)
+            .await
+            .unwrap();
+        let metadata: SandboxMetadata =
+            serde_json::from_slice(&fs::read(&metadata_path).unwrap()).unwrap();
+        assert_eq!(metadata.state, SandboxState::Checkpointed);
+
+        service
+            .preserve(&run, PreservationReason::ControlPlaneRestart)
+            .unwrap();
+        let metadata: SandboxMetadata =
+            serde_json::from_slice(&fs::read(&metadata_path).unwrap()).unwrap();
+        assert_eq!(metadata.state, SandboxState::Preserved);
+        assert_eq!(metadata.pid, None);
     }
 }

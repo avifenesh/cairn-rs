@@ -2,19 +2,25 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use cairn_domain::{CheckpointKind, RunId};
+use serde::{Deserialize, Serialize};
 
 use crate::sandbox::{SandboxBase, SandboxMetadata, SandboxStrategy};
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SandboxId(String);
 
 impl SandboxId {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SandboxState {
     Initial,
     Provisioning,

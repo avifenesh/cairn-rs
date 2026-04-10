@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use cairn_domain::OnExhaustion;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RepoId(String);
 
 impl RepoId {
@@ -39,30 +40,32 @@ impl From<String> for RepoId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SandboxStrategy {
+    #[serde(rename = "overlay_fs")]
     Overlay,
+    #[serde(rename = "reflink")]
     Reflink,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SandboxStrategyRequest {
     Preferred(SandboxStrategy),
     Force(SandboxStrategy),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostCapabilityRequirements {
     pub requires_user_namespaces: bool,
     pub requires_reflink_support: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CredentialReference {
     Named(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SandboxBase {
     Repo {
         repo_id: RepoId,
@@ -74,7 +77,7 @@ pub enum SandboxBase {
     Empty,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxPolicy {
     pub strategy: SandboxStrategyRequest,
     pub base: SandboxBase,
