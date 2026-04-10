@@ -309,15 +309,46 @@ pub async fn enable_plugin_handler(
         None => (None, None, None),
     };
 
+    // Check if the plugin has SignalSource before enabling (for eager spawn)
+    let has_signal_source = marketplace
+        .get_record(&plugin_id)
+        .map(|r| r.descriptor.has_signal_source)
+        .unwrap_or(false);
+
     match marketplace.handle_command(MarketplaceCommand::EnablePluginForProject {
-        plugin_id,
+        plugin_id: plugin_id.clone(),
         project,
         tool_allowlist,
         signal_allowlist,
         signal_capture_override,
         enabled_by: operator,
     }) {
-        Ok(events) => (StatusCode::OK, Json(PluginEventResponse { events })).into_response(),
+        Ok(events) => {
+            // RFC 015 spawn policy: SignalSource-declaring plugins eager-spawn
+            // at EnablePluginForProject so webhook ingress has a listener.
+            if has_signal_source {
+                if let Some(record) = marketplace.get_record(&plugin_id) {
+                    let manifest = cairn_tools::PluginManifest {
+                        id: record.descriptor.id.clone(),
+                        name: record.descriptor.name.clone(),
+                        version: record.descriptor.version.clone(),
+                        command: record.descriptor.command.clone(),
+                        capabilities: Vec::new(),
+                        permissions: cairn_tools::DeclaredPermissions::default(),
+                        limits: None,
+                        execution_class: cairn_domain::policy::ExecutionClass::Sandboxed,
+                        description: record.descriptor.description.clone(),
+                        homepage: None,
+                    };
+                    drop(marketplace); // release Mutex before locking plugin_host
+                    if let Ok(mut host) = state.plugin_host.lock() {
+                        // Register with host — process spawns on first use or handshake
+                        let _ = host.register(manifest);
+                    }
+                }
+            }
+            (StatusCode::OK, Json(PluginEventResponse { events })).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
