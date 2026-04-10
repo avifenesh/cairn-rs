@@ -16,7 +16,7 @@ use cairn_domain::ids::{
     ApprovalId, DecisionId, OperatorId, RunId, RunTemplateId, SignalId, TriggerId,
 };
 use cairn_domain::tenancy::ProjectKey;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 // ── Trigger Entity (RFC 022 §"The Trigger Entity") ──────────────────────────
 
@@ -75,8 +75,7 @@ pub enum SuspensionReason {
 // ── Trigger Condition DSL (RFC 022 §"The Trigger Entity") ────────────────────
 
 /// Condition for matching a signal payload.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TriggerCondition {
     /// JSON path equals value: payload.action == "labeled"
     Equals {
@@ -92,6 +91,102 @@ pub enum TriggerCondition {
     Exists { path: String },
     /// Negate a child condition
     Not(Box<TriggerCondition>),
+}
+
+impl Serialize for TriggerCondition {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        trigger_condition_to_value(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TriggerCondition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        trigger_condition_from_value(value).map_err(serde::de::Error::custom)
+    }
+}
+
+fn trigger_condition_to_value(condition: &TriggerCondition) -> serde_json::Value {
+    match condition {
+        TriggerCondition::Equals { path, value } => serde_json::json!({
+            "type": "equals",
+            "path": path,
+            "value": value,
+        }),
+        TriggerCondition::Contains { path, value } => serde_json::json!({
+            "type": "contains",
+            "path": path,
+            "value": value,
+        }),
+        TriggerCondition::Exists { path } => serde_json::json!({
+            "type": "exists",
+            "path": path,
+        }),
+        TriggerCondition::Not(inner) => serde_json::json!({
+            "type": "not",
+            "condition": trigger_condition_to_value(inner),
+        }),
+    }
+}
+
+fn trigger_condition_from_value(value: serde_json::Value) -> Result<TriggerCondition, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "trigger condition must be an object".to_owned())?;
+    let kind = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "trigger condition is missing string field `type`".to_owned())?;
+
+    match kind {
+        "equals" => Ok(TriggerCondition::Equals {
+            path: condition_path(object)?,
+            value: condition_value(object)?,
+        }),
+        "contains" => Ok(TriggerCondition::Contains {
+            path: condition_path(object)?,
+            value: condition_value(object)?,
+        }),
+        "exists" => Ok(TriggerCondition::Exists {
+            path: condition_path(object)?,
+        }),
+        "not" => {
+            let nested = object
+                .get("condition")
+                .or_else(|| object.get("inner"))
+                .cloned()
+                .ok_or_else(|| {
+                    "trigger condition `not` is missing object field `condition`".to_owned()
+                })?;
+            Ok(TriggerCondition::Not(Box::new(
+                trigger_condition_from_value(nested)?,
+            )))
+        }
+        other => Err(format!("unsupported trigger condition type `{other}`")),
+    }
+}
+
+fn condition_path(object: &serde_json::Map<String, serde_json::Value>) -> Result<String, String> {
+    object
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| "trigger condition is missing string field `path`".to_owned())
+}
+
+fn condition_value(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    object
+        .get("value")
+        .cloned()
+        .ok_or_else(|| "trigger condition is missing field `value`".to_owned())
 }
 
 /// Rate limit configuration for a trigger (token bucket).
@@ -982,6 +1077,22 @@ mod tests {
             value: json!("labeled"),
         }));
         assert!(evaluate_condition(&cond, &payload));
+    }
+
+    #[test]
+    fn condition_serializes_and_roundtrips_with_nested_not() {
+        let cond = TriggerCondition::Not(Box::new(TriggerCondition::Contains {
+            path: "labels[].name".into(),
+            value: json!("cairn-ready"),
+        }));
+
+        let json = serde_json::to_value(&cond).expect("trigger condition should serialize");
+        assert_eq!(json["type"], json!("not"));
+        assert_eq!(json["condition"]["type"], json!("contains"));
+
+        let restored: TriggerCondition =
+            serde_json::from_value(json).expect("trigger condition should deserialize");
+        assert_eq!(restored, cond);
     }
 
     // ── Variable Substitution Tests ─────────────────────────────────

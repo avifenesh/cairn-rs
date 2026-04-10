@@ -13072,13 +13072,6 @@ async fn delegate_approval_handler(
 
 // ── SQ/EQ Protocol handlers (RFC 021) ────────────────────────────────────────
 
-/// In-memory SQ/EQ session state. Keyed by sqeq_session_id.
-struct SqEqSession {
-    session_id: String,
-    bound_scope: cairn_domain::ProjectKey,
-    subscriptions: cairn_domain::protocols::SqEqSubscriptions,
-}
-
 /// POST /v1/sqeq/initialize — scope binding + capability negotiation.
 async fn sqeq_initialize_handler(
     State(_state): State<Arc<AppState>>,

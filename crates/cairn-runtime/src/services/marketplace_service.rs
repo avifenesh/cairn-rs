@@ -345,7 +345,7 @@ pub struct PluginEnablement {
 /// The marketplace service sits above the plugin host and manages the
 /// discover → install → credential → enable → disable → uninstall lifecycle.
 pub struct MarketplaceService<S> {
-    store: Arc<S>,
+    _store: Arc<S>,
     /// Plugin marketplace records, keyed by plugin_id.
     records: HashMap<String, MarketplaceRecord>,
     /// Per-project enablements, keyed by (plugin_id, project).
@@ -362,7 +362,7 @@ fn now_ms() -> u64 {
 impl<S> MarketplaceService<S> {
     pub fn new(store: Arc<S>) -> Self {
         Self {
-            store,
+            _store: store,
             records: HashMap::new(),
             enablements: HashMap::new(),
         }
