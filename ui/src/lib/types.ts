@@ -53,6 +53,71 @@ export interface SkillsResponse {
   currently_active: string[];
 }
 
+// ── Graph (GET /v1/graph/trace) ─────────────────────────────────────────────
+
+export type GraphNodeKind =
+  | "session"
+  | "run"
+  | "task"
+  | "approval"
+  | "checkpoint"
+  | "mailbox_message"
+  | "tool_invocation"
+  | "memory"
+  | "document"
+  | "chunk"
+  | "source"
+  | "prompt_asset"
+  | "prompt_version"
+  | "prompt_release"
+  | "eval_run"
+  | "skill"
+  | "channel_target"
+  | "signal"
+  | "ingest_job"
+  | "route_decision"
+  | "provider_call";
+
+export type GraphEdgeKind =
+  | "triggered"
+  | "spawned"
+  | "depended_on"
+  | "approved_by"
+  | "resumed_from"
+  | "sent_to"
+  | "read_from"
+  | "cited"
+  | "derived_from"
+  | "embedded_as"
+  | "evaluated_by"
+  | "released_as"
+  | "rolled_back_to"
+  | "routed_to"
+  | "used_prompt"
+  | "used_tool"
+  | "called_provider";
+
+export interface GraphNodeRecord {
+  node_id: string;
+  kind: GraphNodeKind;
+  project?: ProjectKey | null;
+  created_at: number;
+}
+
+export interface GraphEdgeRecord {
+  source_node_id: string;
+  target_node_id: string;
+  kind: GraphEdgeKind;
+  created_at: number;
+  confidence?: number | null;
+}
+
+export interface GraphTraceResponse {
+  nodes: GraphNodeRecord[];
+  edges: GraphEdgeRecord[];
+  root?: string | null;
+}
+
 // ── Provider registry (GET /v1/providers/registry) ──────────────────────────
 
 export interface ProviderRegistryModel {

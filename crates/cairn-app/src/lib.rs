@@ -3290,6 +3290,13 @@ struct GraphResponse {
     edges: Vec<GraphEdge>,
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+struct GraphTraceResponse {
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+    root: Option<String>,
+}
+
 impl From<cairn_graph::queries::Subgraph> for GraphResponse {
     fn from(value: cairn_graph::queries::Subgraph) -> Self {
         Self {
@@ -3297,6 +3304,51 @@ impl From<cairn_graph::queries::Subgraph> for GraphResponse {
             edges: value.edges,
         }
     }
+}
+
+fn graph_trace_snapshot(
+    graph: &InMemoryGraphStore,
+    project: &ProjectKey,
+    limit: usize,
+) -> GraphTraceResponse {
+    let mut nodes = graph
+        .all_nodes()
+        .into_values()
+        .filter(|node| node.project.as_ref() == Some(project))
+        .collect::<Vec<_>>();
+    nodes.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| left.node_id.cmp(&right.node_id))
+    });
+    nodes.truncate(limit.max(1).min(500));
+
+    let node_ids = nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<HashSet<_>>();
+    let mut edges = graph
+        .all_edges()
+        .into_iter()
+        .filter(|edge| {
+            node_ids.contains(&edge.source_node_id) && node_ids.contains(&edge.target_node_id)
+        })
+        .collect::<Vec<_>>();
+    edges.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| left.source_node_id.cmp(&right.source_node_id))
+            .then_with(|| left.target_node_id.cmp(&right.target_node_id))
+    });
+
+    let root = nodes
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Session | NodeKind::Run | NodeKind::Task))
+        .map(|node| node.node_id.clone());
+
+    GraphTraceResponse { nodes, edges, root }
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize)]
@@ -12053,16 +12105,16 @@ async fn list_memories_preserved_handler() -> impl IntoResponse {
         .into_response()
 }
 
-async fn graph_trace_preserved_handler() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "nodes": [],
-            "edges": [],
-            "root": null,
-        })),
-    )
-        .into_response()
+async fn graph_trace_preserved_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<OptionalProjectScopedQuery>,
+) -> impl IntoResponse {
+    let response = graph_trace_snapshot(
+        state.graph.as_ref(),
+        &query.project(),
+        query.limit().max(100).min(500),
+    );
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 async fn list_skills_preserved_handler() -> impl IntoResponse {
@@ -20407,6 +20459,104 @@ mod tests {
     async fn response_json(resp: axum::response::Response) -> serde_json::Value {
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice(&bytes).expect("response is valid JSON")
+    }
+
+    #[tokio::test]
+    async fn graph_trace_returns_live_project_nodes_and_edges() {
+        use cairn_graph::projections::GraphProjection;
+
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "graph-trace-token");
+
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let other_project = ProjectKey::new("other_tenant", "other_workspace", "other_project");
+
+        state
+            .graph
+            .add_node(GraphNode {
+                node_id: "session_graph_trace".to_owned(),
+                kind: NodeKind::Session,
+                project: Some(project.clone()),
+                created_at: 30,
+            })
+            .await
+            .unwrap();
+        state
+            .graph
+            .add_node(GraphNode {
+                node_id: "run_graph_trace".to_owned(),
+                kind: NodeKind::Run,
+                project: Some(project.clone()),
+                created_at: 20,
+            })
+            .await
+            .unwrap();
+        state
+            .graph
+            .add_node(GraphNode {
+                node_id: "task_graph_trace".to_owned(),
+                kind: NodeKind::Task,
+                project: Some(project.clone()),
+                created_at: 10,
+            })
+            .await
+            .unwrap();
+        state
+            .graph
+            .add_edge(GraphEdge {
+                source_node_id: "session_graph_trace".to_owned(),
+                target_node_id: "run_graph_trace".to_owned(),
+                kind: cairn_graph::projections::EdgeKind::Triggered,
+                created_at: 31,
+                confidence: None,
+            })
+            .await
+            .unwrap();
+        state
+            .graph
+            .add_edge(GraphEdge {
+                source_node_id: "run_graph_trace".to_owned(),
+                target_node_id: "task_graph_trace".to_owned(),
+                kind: cairn_graph::projections::EdgeKind::Spawned,
+                created_at: 21,
+                confidence: None,
+            })
+            .await
+            .unwrap();
+        state
+            .graph
+            .add_node(GraphNode {
+                node_id: "run_other_project".to_owned(),
+                kind: NodeKind::Run,
+                project: Some(other_project),
+                created_at: 40,
+            })
+            .await
+            .unwrap();
+
+        let body = get_json(
+            AppBootstrap::build_router(state),
+            &format!(
+                "/v1/graph/trace?tenant_id={DEFAULT_TENANT_ID}&workspace_id={DEFAULT_WORKSPACE_ID}&project_id={DEFAULT_PROJECT_ID}&limit=50"
+            ),
+            "graph-trace-token",
+        )
+        .await;
+
+        let nodes = body["nodes"].as_array().expect("nodes array");
+        let edges = body["edges"].as_array().expect("edges array");
+        let node_ids = nodes
+            .iter()
+            .filter_map(|node| node["node_id"].as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(node_ids.len(), 3);
+        assert!(node_ids.contains(&"session_graph_trace"));
+        assert!(node_ids.contains(&"run_graph_trace"));
+        assert!(node_ids.contains(&"task_graph_trace"));
+        assert!(!node_ids.contains(&"run_other_project"));
+        assert_eq!(edges.len(), 2);
+        assert_eq!(body["root"], "session_graph_trace");
     }
 
     #[tokio::test]

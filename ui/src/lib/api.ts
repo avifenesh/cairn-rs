@@ -780,6 +780,22 @@ export function createApiClient(config: ApiClientConfig) {
       return get(`/v1/memory/search?${qs}`);
     },
 
+    /** GET /v1/graph/trace — live graph snapshot for the current project scope. */
+    getGraphTrace: (params?: {
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+      limit?: number;
+    }): Promise<import("./types").GraphTraceResponse> => {
+      const merged = withScope(params);
+      const qs = new URLSearchParams();
+      if (merged.tenant_id) qs.set("tenant_id", merged.tenant_id);
+      if (merged.workspace_id) qs.set("workspace_id", merged.workspace_id);
+      if (merged.project_id) qs.set("project_id", merged.project_id);
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+      return get(`/v1/graph/trace?${qs}`);
+    },
+
     /** GET /v1/sources — list registered signal sources. */
     getSources: (params?: {
       tenant_id?: string;
