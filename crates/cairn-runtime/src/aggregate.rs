@@ -97,6 +97,9 @@ pub struct InMemoryServices {
     // ── Resource sharing ──────────────────────────────────────────────────
     pub resource_sharing: ResourceSharingServiceImpl<InMemoryStore>,
 
+    // ── Decision layer (RFC 019) ─────────────────────────────────────────
+    pub decisions: crate::decisions::DecisionServiceImpl,
+
     // ── Hot-reloadable configuration ──────────────────────────────────────
     /// Typed accessors for model settings and operational knobs.
     ///
@@ -157,6 +160,7 @@ impl InMemoryServices {
             audit: AuditServiceImpl::new(store.clone()),
             tool_invocations: ToolInvocationServiceImpl::new(store.clone()),
             resource_sharing: ResourceSharingServiceImpl::new(store.clone()),
+            decisions: crate::decisions::DecisionServiceImpl::new(),
             runtime_config: std::sync::Arc::new(crate::runtime_config::RuntimeConfig::new(
                 store.clone(),
             )),

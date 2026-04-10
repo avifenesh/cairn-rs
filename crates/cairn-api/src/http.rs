@@ -157,6 +157,37 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
             path: "/v1/approvals/:id/deny".into(),
             classification: Preserve,
         },
+        // ── Decisions (RFC 019) ──────────────────────────────────────────
+        RouteEntry {
+            method: Get,
+            path: "/v1/decisions".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/decisions/cache".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/decisions/:id".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/decisions/:id/invalidate".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/decisions/invalidate".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/decisions/invalidate-by-rule".into(),
+            classification: Preserve,
+        },
         RouteEntry {
             method: Get,
             path: "/v1/assistant/sessions".into(),

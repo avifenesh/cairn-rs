@@ -972,7 +972,9 @@ impl DecisionService for DecisionServiceImpl {
                     step: 5,
                     name: "cache".into(),
                     outcome: "pending".into(),
-                    detail: Some(format!("concurrent eval by {owner_decision_id}, proceeding fresh")),
+                    detail: Some(format!(
+                        "concurrent eval by {owner_decision_id}, proceeding fresh"
+                    )),
                     rule_ids: vec![],
                 });
             }
