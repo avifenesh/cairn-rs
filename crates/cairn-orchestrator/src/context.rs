@@ -218,6 +218,8 @@ pub struct LoopConfig {
     pub timeout_ms: u64,
     /// Save a checkpoint after every N tool calls (0 = every step).
     pub checkpoint_every_n_tool_calls: u32,
+    /// Context compaction settings (RFC 018).
+    pub compaction: CompactionConfig,
 }
 
 impl Default for LoopConfig {
@@ -226,6 +228,42 @@ impl Default for LoopConfig {
             max_iterations: 20,
             timeout_ms: 5 * 60 * 1_000, // 5 minutes
             checkpoint_every_n_tool_calls: 1,
+            compaction: CompactionConfig::default(),
+        }
+    }
+}
+
+// ── CompactionConfig ────────────────────────────────────────────────────────
+
+/// Configuration for inline context compaction (RFC 018 Enhancement 3).
+///
+/// When the step history exceeds `threshold_pct` of the estimated context
+/// budget, the loop runner triggers a summarization turn to compress
+/// older history into a compact summary, preserving the most recent
+/// `keep_last` steps verbatim.
+#[derive(Clone, Debug)]
+pub struct CompactionConfig {
+    /// Whether compaction is enabled.
+    pub enabled: bool,
+    /// Trigger compaction when step_history tokens exceed this percentage
+    /// of the model's context window (0–100).
+    pub threshold_pct: u32,
+    /// Minimum number of steps before compaction can trigger.
+    pub min_steps: usize,
+    /// Always keep the most recent N steps verbatim (not compacted).
+    pub keep_last: usize,
+    /// Maximum tokens for the compacted summary.
+    pub summary_token_budget: usize,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            threshold_pct: 70,
+            min_steps: 10,
+            keep_last: 4,
+            summary_token_budget: 2000,
         }
     }
 }

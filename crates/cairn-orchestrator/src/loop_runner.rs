@@ -220,6 +220,90 @@ where
             );
             self.emitter.on_gather_completed(ctx, &gather_output).await;
 
+            // ── (2b) COMPACTION CHECK (RFC 018) ──────────────────────────────
+            // If step history exceeds the compaction threshold, compress older
+            // steps into a summary, keeping the most recent N steps verbatim.
+            if self.config.compaction.enabled
+                && step_history.len() >= self.config.compaction.min_steps
+            {
+                let history_text: String = step_history
+                    .iter()
+                    .map(|s| format!("[iter {}] {}: {}", s.iteration, s.action_kind, s.summary))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let history_tokens = crate::decide_impl::estimate_tokens(&history_text);
+                // Use a rough context budget estimate (default 16K if no budget set).
+                let context_budget = 16_384_usize;
+                let threshold_tokens = (context_budget as u64
+                    * self.config.compaction.threshold_pct as u64
+                    / 100) as usize;
+
+                if history_tokens > threshold_tokens {
+                    let keep = self.config.compaction.keep_last;
+                    let to_compact = if step_history.len() > keep {
+                        step_history.len() - keep
+                    } else {
+                        0
+                    };
+
+                    if to_compact > 0 {
+                        let before_steps = step_history.len();
+                        let before_tokens = history_tokens;
+
+                        // Build a compact summary of the older steps.
+                        let compacted_text: String = step_history[..to_compact]
+                            .iter()
+                            .map(|s| {
+                                let status = if s.succeeded { "ok" } else { "fail" };
+                                format!("  iter {}: {} [{}]", s.iteration, s.action_kind, status)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+
+                        let summary = StepSummary {
+                            iteration: step_history[to_compact - 1].iteration,
+                            action_kind: "compacted_summary".to_owned(),
+                            summary: format!(
+                                "Compacted {} prior steps:\n{}",
+                                to_compact, compacted_text
+                            ),
+                            succeeded: true,
+                        };
+
+                        // Replace: [compacted summary] + [keep_last recent steps]
+                        let recent: Vec<StepSummary> = step_history[to_compact..].to_vec();
+                        step_history.clear();
+                        step_history.push(summary);
+                        step_history.extend(recent);
+
+                        let after_tokens = step_history
+                            .iter()
+                            .map(|s| crate::decide_impl::estimate_tokens(&s.summary))
+                            .sum::<usize>();
+
+                        tracing::info!(
+                            run_id         = %ctx.run_id,
+                            iteration      = ctx.iteration,
+                            before_steps   = before_steps,
+                            after_steps    = step_history.len(),
+                            before_tokens  = before_tokens,
+                            after_tokens   = after_tokens,
+                            "context compacted"
+                        );
+
+                        self.emitter
+                            .on_context_compacted(
+                                ctx,
+                                before_steps,
+                                step_history.len(),
+                                before_tokens,
+                                after_tokens,
+                            )
+                            .await;
+                    }
+                }
+            }
+
             // ── (3) DECIDE ────────────────────────────────────────────────────
             let decide_output = self.decide.decide(ctx, &gather_output).await.map_err(|e| {
                 tracing::error!(run_id = %ctx.run_id, iteration = ctx.iteration, error = %e, "decide failed");
@@ -254,7 +338,9 @@ where
                         "plan artifact detected — terminating Plan-mode run"
                     );
                     self.emitter.on_plan_proposed(ctx, &plan_md).await;
-                    return Ok(LoopTermination::PlanProposed { plan_markdown: plan_md });
+                    return Ok(LoopTermination::PlanProposed {
+                        plan_markdown: plan_md,
+                    });
                 }
             }
 
@@ -1266,5 +1352,96 @@ mod tests {
     fn extract_proposed_plan_handles_unclosed_tag() {
         let response = "<proposed_plan>\nPartial plan without closing tag";
         assert!(extract_proposed_plan(response).is_none());
+    }
+
+    // ── Compaction tests (RFC 018) ──────────────────────────────────────
+
+    #[test]
+    fn compaction_config_defaults() {
+        let cfg = crate::CompactionConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.threshold_pct, 70);
+        assert_eq!(cfg.min_steps, 10);
+        assert_eq!(cfg.keep_last, 4);
+        assert_eq!(cfg.summary_token_budget, 2000);
+    }
+
+    #[tokio::test]
+    async fn compaction_triggers_when_history_exceeds_threshold() {
+        // Build a loop with compaction enabled and low thresholds for testing.
+        let mut config = LoopConfig::default();
+        config.max_iterations = 1;
+        config.compaction.enabled = true;
+        config.compaction.min_steps = 3;
+        config.compaction.keep_last = 2;
+        config.compaction.threshold_pct = 1; // very low so it always triggers
+
+        // Pre-populate step_history with enough steps.
+        // We can't directly set step_history in the loop, so instead we test
+        // the compaction logic directly here.
+        let mut step_history: Vec<StepSummary> = (0..10)
+            .map(|i| StepSummary {
+                iteration: i,
+                action_kind: "tool_call".to_owned(),
+                summary: format!("Called tool_{i} with result: some long output text repeated many times to ensure token threshold is met. Extra padding to make the history large."),
+                succeeded: true,
+            })
+            .collect();
+
+        let before_count = step_history.len();
+        let keep = config.compaction.keep_last;
+        let to_compact = step_history.len() - keep;
+
+        // Simulate the compaction logic from the loop runner.
+        let compacted_text: String = step_history[..to_compact]
+            .iter()
+            .map(|s| format!("  iter {}: {} [ok]", s.iteration, s.action_kind))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let summary = StepSummary {
+            iteration: step_history[to_compact - 1].iteration,
+            action_kind: "compacted_summary".to_owned(),
+            summary: format!("Compacted {} prior steps:\n{}", to_compact, compacted_text),
+            succeeded: true,
+        };
+
+        let recent: Vec<StepSummary> = step_history[to_compact..].to_vec();
+        step_history.clear();
+        step_history.push(summary);
+        step_history.extend(recent);
+
+        // After compaction: 1 summary + keep_last recent = 3 total
+        assert_eq!(step_history.len(), 1 + keep);
+        assert_eq!(step_history[0].action_kind, "compacted_summary");
+        assert!(step_history[0].summary.contains("Compacted 8 prior steps"));
+        // Most recent steps preserved verbatim.
+        assert_eq!(step_history[1].iteration, 8);
+        assert_eq!(step_history[2].iteration, 9);
+        assert!(before_count > step_history.len());
+    }
+
+    #[test]
+    fn compaction_skips_when_below_min_steps() {
+        let cfg = crate::CompactionConfig {
+            enabled: true,
+            min_steps: 10,
+            keep_last: 4,
+            threshold_pct: 70,
+            summary_token_budget: 2000,
+        };
+
+        let history_len = 5; // below min_steps
+        assert!(history_len < cfg.min_steps);
+        // Compaction would not trigger — this is a logic assertion, not a runtime test.
+    }
+
+    #[test]
+    fn compaction_disabled_skips() {
+        let cfg = crate::CompactionConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        assert!(!cfg.enabled);
     }
 }

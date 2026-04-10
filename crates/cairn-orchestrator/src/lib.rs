@@ -29,8 +29,8 @@ pub mod loop_runner;
 // ── Public re-exports ─────────────────────────────────────────────────────────
 
 pub use context::{
-    ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput, LoopConfig, LoopSignal,
-    LoopTermination, OrchestrationContext, StepSummary,
+    ActionResult, ActionStatus, CompactionConfig, DecideOutput, ExecuteOutcome, GatherOutput,
+    LoopConfig, LoopSignal, LoopTermination, OrchestrationContext, StepSummary,
 };
 pub use decide::DecidePhase;
 pub use decide_impl::{estimate_tokens, LlmDecidePhase, TokenBudget};

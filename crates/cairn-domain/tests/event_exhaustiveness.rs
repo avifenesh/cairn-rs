@@ -480,6 +480,38 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
         RuntimeEvent::ScheduledTaskCreated(_) => {
             assert!(eref.is_none());
         }
+        RuntimeEvent::PlanProposed(e) => {
+            assert_eq!(
+                eref,
+                Some(RuntimeEntityRef::Run {
+                    run_id: e.plan_run_id.clone()
+                })
+            );
+        }
+        RuntimeEvent::PlanApproved(e) => {
+            assert_eq!(
+                eref,
+                Some(RuntimeEntityRef::Run {
+                    run_id: e.plan_run_id.clone()
+                })
+            );
+        }
+        RuntimeEvent::PlanRejected(e) => {
+            assert_eq!(
+                eref,
+                Some(RuntimeEntityRef::Run {
+                    run_id: e.plan_run_id.clone()
+                })
+            );
+        }
+        RuntimeEvent::PlanRevisionRequested(e) => {
+            assert_eq!(
+                eref,
+                Some(RuntimeEntityRef::Run {
+                    run_id: e.original_plan_run_id.clone()
+                })
+            );
+        }
     }
 }
 
@@ -1333,6 +1365,35 @@ fn all_variants() -> Vec<RuntimeEvent> {
             message: None,
             updated_at_ms: ts,
         }),
+        // ── Plan review events (RFC 018) ─────────────────────────────────
+        RuntimeEvent::PlanProposed(cairn_domain::events::PlanProposed {
+            project: p(),
+            plan_run_id: RunId::new("plan_r1"),
+            session_id: SessionId::new("s1"),
+            plan_markdown: "# Plan\n\n## Steps\n1. Do thing".to_owned(),
+            proposed_at: ts,
+        }),
+        RuntimeEvent::PlanApproved(cairn_domain::events::PlanApproved {
+            project: p(),
+            plan_run_id: RunId::new("plan_r1"),
+            approved_by: cairn_domain::OperatorId::new("op1"),
+            reviewer_comments: Some("looks good".to_owned()),
+            approved_at: ts,
+        }),
+        RuntimeEvent::PlanRejected(cairn_domain::events::PlanRejected {
+            project: p(),
+            plan_run_id: RunId::new("plan_r1"),
+            rejected_by: cairn_domain::OperatorId::new("op1"),
+            reason: "too risky".to_owned(),
+            rejected_at: ts,
+        }),
+        RuntimeEvent::PlanRevisionRequested(cairn_domain::events::PlanRevisionRequested {
+            project: p(),
+            original_plan_run_id: RunId::new("plan_r1"),
+            new_plan_run_id: RunId::new("plan_r2"),
+            reviewer_comments: "please reconsider step 3".to_owned(),
+            requested_at: ts,
+        }),
     ]
 }
 
@@ -1341,11 +1402,11 @@ fn all_variants() -> Vec<RuntimeEvent> {
 #[test]
 fn all_runtime_event_variants_covered_count() {
     let variants = all_variants();
-    // 113 variants in the RuntimeEvent enum.
+    // 117 variants in the RuntimeEvent enum (113 original + 4 plan review events).
     assert_eq!(
         variants.len(),
-        113,
-        "all_variants() must construct exactly 113 RuntimeEvent instances"
+        117,
+        "all_variants() must construct exactly 117 RuntimeEvent instances"
     );
 }
 

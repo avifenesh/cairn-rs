@@ -85,6 +85,16 @@ pub enum OrchestratorEvent {
         succeeded: usize,
         failed: usize,
     },
+    /// Context was compacted to fit the model's context window (RFC 018).
+    ContextCompacted {
+        run_id: RunId,
+        iteration: u32,
+        before_steps: usize,
+        after_steps: usize,
+        before_tokens_est: usize,
+        after_tokens_est: usize,
+        strategy: String,
+    },
     /// A Plan-mode run has emitted a `<proposed_plan>` block (RFC 018).
     PlanProposed {
         run_id: RunId,
@@ -146,6 +156,17 @@ pub trait OrchestratorEventEmitter: Send + Sync {
         _ctx: &OrchestrationContext,
         _decide: &DecideOutput,
         _execute: &ExecuteOutcome,
+    ) {
+    }
+
+    /// Called when context compaction runs (RFC 018).
+    async fn on_context_compacted(
+        &self,
+        _ctx: &OrchestrationContext,
+        _before_steps: usize,
+        _after_steps: usize,
+        _before_tokens_est: usize,
+        _after_tokens_est: usize,
     ) {
     }
 
@@ -285,6 +306,25 @@ impl OrchestratorEventEmitter for ChannelEmitter {
             signal,
             succeeded,
             failed,
+        });
+    }
+
+    async fn on_context_compacted(
+        &self,
+        ctx: &OrchestrationContext,
+        before_steps: usize,
+        after_steps: usize,
+        before_tokens_est: usize,
+        after_tokens_est: usize,
+    ) {
+        self.send(OrchestratorEvent::ContextCompacted {
+            run_id: ctx.run_id.clone(),
+            iteration: ctx.iteration,
+            before_steps,
+            after_steps,
+            before_tokens_est,
+            after_tokens_est,
+            strategy: "inline_summarization".to_owned(),
         });
     }
 
