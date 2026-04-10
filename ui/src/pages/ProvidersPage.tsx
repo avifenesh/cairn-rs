@@ -12,7 +12,7 @@ import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ProviderKind = "openai_compat" | "openrouter" | "ollama" | "local";
+type ProviderKind = "openai_compat" | "openrouter" | "local";
 
 interface ProviderKindMeta {
   label: string;
@@ -39,14 +39,6 @@ const PROVIDER_KINDS: Record<ProviderKind, ProviderKindMeta> = {
     defaultFamily: "openai_compat",
     defaultAdapter: "openai_compat",
     defaultUrl: "https://openrouter.ai/api/v1",
-  },
-  ollama: {
-    label: "Ollama",
-    description: "Local Ollama instance running on this machine or your network.",
-    icon: <Server size={16} />,
-    defaultFamily: "ollama",
-    defaultAdapter: "ollama",
-    defaultUrl: "http://localhost:11434",
   },
   local: {
     label: "Local / Custom",
@@ -351,7 +343,6 @@ function ConnectionRow({
 
   const familyColor: Record<string, string> = {
     openai_compat: "text-sky-400 bg-sky-950/40 border-sky-800/40",
-    ollama:        "text-emerald-400 bg-emerald-950/40 border-emerald-800/40",
     custom:        "text-gray-500 dark:text-zinc-400 bg-gray-100/60 dark:bg-zinc-800/60 border-gray-200 dark:border-zinc-700",
   };
 
@@ -691,8 +682,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 <p className="text-[12px] text-gray-700 dark:text-zinc-300 font-medium">Add models</p>
                 <p className="text-[11px] text-gray-400 dark:text-zinc-500 mt-1 leading-relaxed">
                   Enter the model IDs served through this connection.
-                  {kind === "ollama" && " Model discovery via Ollama is coming — enter IDs manually for now."}
-                  {(kind === "openai_compat" || kind === "openrouter") && " Discovery from the base URL is coming — enter IDs manually for now."}
+                  {" Discovery from the base URL is coming — enter IDs manually for now."}
                 </p>
               </div>
 
@@ -707,7 +697,6 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                     placeholder={
                       kind === "openrouter"    ? "e.g. openai/gpt-4o, anthropic/claude-3.5-sonnet" :
                       kind === "openai_compat" ? "e.g. gpt-4o, claude-3.5-sonnet" :
-                      kind === "ollama"        ? "e.g. llama3.2, mistral" :
                                                 "model_id"
                     }
                     className="w-full rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 pl-7 pr-3 h-8 text-xs text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"

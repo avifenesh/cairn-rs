@@ -6,7 +6,6 @@ import {
   Clock,
   Database,
   Cpu,
-  Zap,
   Activity,
   TrendingUp,
   TrendingDown,
@@ -359,17 +358,7 @@ function ProviderStatusWidget() {
     retry: false,
   });
 
-  // Only query Ollama models when health data has loaded AND says it's configured.
-  const ollamaConfigured = !!health && health.checks.ollama.status !== "unconfigured";
-  const { data: ollamaModels, isLoading: modelsLoading } = useQuery({
-    queryKey: ["ollama-models-dashboard"],
-    queryFn:  () => defaultApi.getOllamaModels(),
-    refetchInterval: 60_000,
-    retry: false,
-    enabled: ollamaConfigured,
-  });
-
-  const isLoading = healthLoading || (ollamaConfigured && modelsLoading);
+  const isLoading = healthLoading;
 
   type ProviderRow = { name: string; status: string; detail: string };
   const providers: ProviderRow[] = [];
@@ -394,27 +383,12 @@ function ProviderStatusWidget() {
         ? `${health.checks.memory.rss_mb}MB RSS`
         : health.checks.memory.status,
     });
-    // Only show Ollama row if it's configured — keep it quiet otherwise.
-    if (health.checks.ollama.status !== "unconfigured") {
-      providers.push({
-        name:   "Ollama",
-        status: health.checks.ollama.status,
-        detail: health.checks.ollama.models !== undefined
-          ? `${health.checks.ollama.models} model${health.checks.ollama.models !== 1 ? "s" : ""}`
-          : health.checks.ollama.status,
-      });
-    }
   }
 
   return (
     <Panel>
       <div className="flex items-center justify-between mb-2">
         <SectionLabel>System Services</SectionLabel>
-        {ollamaModels && (
-          <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono truncate max-w-[100px]">
-            {ollamaModels.host.replace(/^https?:\/\//, "")}
-          </span>
-        )}
       </div>
 
       {isLoading ? (
@@ -446,19 +420,6 @@ function ProviderStatusWidget() {
             </div>
           ))}
 
-          {/* Ollama model list (compact) — only when configured */}
-          {ollamaModels && ollamaModels.models.length > 0 && (
-            <div className="pt-2 mt-1 border-t border-gray-200/60 dark:border-zinc-800/60">
-              <p className="text-[10px] text-gray-300 dark:text-zinc-700 mb-1.5">Local models</p>
-              <div className="flex flex-wrap gap-1">
-                {ollamaModels.models.map(m => (
-                  <span key={m} className="text-[10px] font-mono text-gray-400 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
-                    {m}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </Panel>
@@ -564,7 +525,6 @@ function SystemHealthCard() {
       ) : (
         <div className="space-y-0">
           <CheckRow icon={Database} label="Store"  check={data.checks.store} />
-          <CheckRow icon={Zap}      label="Ollama" check={data.checks.ollama} />
           <CheckRow icon={Activity} label="Events" check={data.checks.event_buffer} />
 
           {(data.checks.memory.rss_mb ?? 0) > 0 && (
@@ -778,7 +738,7 @@ function ModelUsageWidget() {
 const ONBOARDED_KEY = 'cairn_onboarded';
 
 const STEPS = [
-  { n: 1, title: 'Connect an LLM', body: 'Configure a provider under Providers \u2014 Bedrock, OpenRouter, Ollama, or any OpenAI-compatible endpoint.' },
+  { n: 1, title: 'Connect an LLM', body: 'Configure a provider under Settings \u2014 any OpenAI-compatible endpoint, Bedrock, Vertex, or OpenRouter.' },
   { n: 2, title: 'Create a Session', body: 'Go to the Sessions page and click New Session to create a conversation context for your agent.' },
   { n: 3, title: 'Start a Run', body: 'Create a run within a session to kick off agent execution. Runs, tasks, and costs appear here in real time.' },
 ];
@@ -1134,7 +1094,7 @@ export function DashboardPage() {
         <div>
           <SectionLabel>Infrastructure</SectionLabel>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Providers"   value={data?.active_providers ?? 0} loading={isLoading} help="Registered LLM provider connections (e.g. OpenRouter, Bedrock, Ollama, OpenAI)." />
+            <StatCard label="Providers"   value={data?.active_providers ?? 0} loading={isLoading} help="Registered LLM provider connections (e.g. OpenRouter, Bedrock, Vertex, OpenAI-compatible)." />
             <StatCard label="Plugins"     value={data?.active_plugins   ?? 0} loading={isLoading} help="Active cairn plugins — external tools and skill extensions." />
             <StatCard label="Memory Docs" value={data?.memory_doc_count  ?? 0} loading={isLoading} help="Total document chunks indexed in the knowledge base for retrieval." />
             <StatCard label="Evals Today" value={data?.eval_runs_today   ?? 0} loading={isLoading} help="Evaluation runs completed today across all prompt releases." />
