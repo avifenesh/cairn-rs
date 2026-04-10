@@ -1,12 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Inbox, Play, Pause, Trash2, Zap } from "lucide-react";
 import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 import type { RefreshOption } from "../hooks/useAutoRefresh";
+import { useScope } from "../hooks/useScope";
 
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("cairn_token") || ""}` });
+
+async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
+  const data = await res.json().catch(() => ({}));
+  return typeof data?.error === "string" ? data.error : fallback;
+}
 
 const shortId = (id: string) =>
   id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
@@ -78,21 +84,54 @@ const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: 
   )}>{ch}</th>
 );
 
-function TriggersTable({ triggers }: { triggers: Trigger[] }) {
+function TriggersTable({ triggers, projectPath }: { triggers: Trigger[]; projectPath: string }) {
   const qc = useQueryClient();
   const toast = useToast();
 
   const enableMut = useMutation({
-    mutationFn: (id: string) => fetch(`/v1/projects/default/triggers/${id}/enable`, { method: "POST", headers: authHeaders() }),
-    onSuccess: () => { toast.success("Trigger enabled."); void qc.invalidateQueries({ queryKey: ["triggers"] }); },
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/v1/projects/${projectPath}/triggers/${id}/enable`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Failed to enable trigger."));
+      }
+    },
+    onSuccess: () => { toast.success("Trigger enabled."); void qc.invalidateQueries({ queryKey: ["triggers", projectPath] }); },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Failed to enable trigger.");
+    },
   });
   const disableMut = useMutation({
-    mutationFn: (id: string) => fetch(`/v1/projects/default/triggers/${id}/disable`, { method: "POST", headers: authHeaders() }),
-    onSuccess: () => { toast.success("Trigger disabled."); void qc.invalidateQueries({ queryKey: ["triggers"] }); },
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/v1/projects/${projectPath}/triggers/${id}/disable`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Failed to disable trigger."));
+      }
+    },
+    onSuccess: () => { toast.success("Trigger disabled."); void qc.invalidateQueries({ queryKey: ["triggers", projectPath] }); },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Failed to disable trigger.");
+    },
   });
   const deleteMut = useMutation({
-    mutationFn: (id: string) => fetch(`/v1/projects/default/triggers/${id}`, { method: "DELETE", headers: authHeaders() }),
-    onSuccess: () => { toast.success("Trigger deleted."); void qc.invalidateQueries({ queryKey: ["triggers"] }); },
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/v1/projects/${projectPath}/triggers/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Failed to delete trigger."));
+      }
+    },
+    onSuccess: () => { toast.success("Trigger deleted."); void qc.invalidateQueries({ queryKey: ["triggers", projectPath] }); },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Failed to delete trigger.");
+    },
   });
 
   if (triggers.length === 0) return (
@@ -169,14 +208,196 @@ function TemplatesSection({ templates }: { templates: RunTemplate[] }) {
   );
 }
 
+function CreateRunTemplateForm({
+  projectPath,
+  onCreated,
+}: {
+  projectPath: string;
+  onCreated: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("You are a helpful operator automation.");
+  const createTemplate = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/v1/projects/${projectPath}/run-templates`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          system_prompt: systemPrompt.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to create run template.");
+      }
+    },
+    onSuccess: () => {
+      toast.success("Run template created.");
+      setName("");
+      onCreated();
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Failed to create run template.");
+    },
+  });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!name.trim() || !systemPrompt.trim()) return;
+        createTemplate.mutate();
+      }}
+      className="border-b border-gray-200 dark:border-zinc-800 p-4 space-y-3 bg-gray-50/60 dark:bg-zinc-900/40"
+    >
+      <div>
+        <p className="text-[12px] font-medium text-gray-800 dark:text-zinc-200">Create Run Template</p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">Minimal template creation for trigger setup.</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="nightly-sync"
+          className="rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 text-[12px] text-gray-800 dark:text-zinc-200"
+        />
+        <input
+          value={systemPrompt}
+          onChange={(e) => setSystemPrompt(e.target.value)}
+          placeholder="System prompt"
+          className="rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 text-[12px] text-gray-800 dark:text-zinc-200"
+        />
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={createTemplate.isPending || !name.trim() || !systemPrompt.trim()}
+          className="rounded bg-violet-600 px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
+        >
+          {createTemplate.isPending ? "Creating…" : "Create Template"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function CreateTriggerForm({
+  projectPath,
+  templates,
+  onCreated,
+}: {
+  projectPath: string;
+  templates: RunTemplate[];
+  onCreated: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [signalType, setSignalType] = useState("operator.signal");
+  const [templateId, setTemplateId] = useState("");
+
+  useEffect(() => {
+    if (!templateId && templates.length > 0) {
+      setTemplateId(templates[0].id);
+    }
+  }, [templateId, templates]);
+  const createTrigger = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/v1/projects/${projectPath}/triggers`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          signal_type: signalType.trim(),
+          run_template_id: templateId,
+          conditions: [],
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to create trigger.");
+      }
+    },
+    onSuccess: () => {
+      toast.success("Trigger created.");
+      setName("");
+      setSignalType("operator.signal");
+      onCreated();
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Failed to create trigger.");
+    },
+  });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!name.trim() || !signalType.trim() || !templateId) return;
+        createTrigger.mutate();
+      }}
+      className="border-b border-gray-200 dark:border-zinc-800 p-4 space-y-3 bg-gray-50/60 dark:bg-zinc-900/40"
+    >
+      <div>
+        <p className="text-[12px] font-medium text-gray-800 dark:text-zinc-200">Create Trigger</p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">Binds a signal type to a selected run template in the current project.</p>
+      </div>
+      {templates.length === 0 ? (
+        <p className="text-[11px] text-amber-500">Create a run template first. A trigger must reference one.</p>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="nightly-ingest"
+            className="rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 text-[12px] text-gray-800 dark:text-zinc-200"
+          />
+          <input
+            value={signalType}
+            onChange={(e) => setSignalType(e.target.value)}
+            placeholder="github.issue_opened"
+            className="rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 text-[12px] text-gray-800 dark:text-zinc-200"
+          />
+          <select
+            value={templateId}
+            onChange={(e) => setTemplateId(e.target.value)}
+            className="rounded border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 text-[12px] text-gray-800 dark:text-zinc-200"
+          >
+            <option value="">Select template…</option>
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>{template.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={createTrigger.isPending || !name.trim() || !signalType.trim() || !templateId || templates.length === 0}
+          className="rounded bg-violet-600 px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-50"
+        >
+          {createTrigger.isPending ? "Creating…" : "Create Trigger"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function TriggersPage() {
+  const [scope] = useScope();
   const [tab, setTab] = useState<"triggers" | "templates">("triggers");
   const { ms: refreshMs, setOption: setRefreshOption } = useAutoRefresh("triggers", "15s");
+  const qc = useQueryClient();
+  const projectPath = encodeURIComponent(`${scope.tenant_id}/${scope.workspace_id}/${scope.project_id}`);
 
   const triggersQ = useQuery<Trigger[]>({
-    queryKey: ["triggers"],
+    queryKey: ["triggers", projectPath],
     queryFn: async () => {
-      const res = await fetch("/v1/projects/default/triggers", { headers: authHeaders() });
+      const res = await fetch(`/v1/projects/${projectPath}/triggers`, { headers: authHeaders() });
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Failed to load triggers."));
+      }
       const data = await res.json();
       return Array.isArray(data) ? data : (data.items ?? []);
     },
@@ -184,9 +405,12 @@ export function TriggersPage() {
   });
 
   const templatesQ = useQuery<RunTemplate[]>({
-    queryKey: ["run-templates"],
+    queryKey: ["run-templates", projectPath],
     queryFn: async () => {
-      const res = await fetch("/v1/projects/default/run-templates", { headers: authHeaders() });
+      const res = await fetch(`/v1/projects/${projectPath}/run-templates`, { headers: authHeaders() });
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Failed to load run templates."));
+      }
       const data = await res.json();
       return Array.isArray(data) ? data : (data.items ?? []);
     },
@@ -235,9 +459,25 @@ export function TriggersPage() {
 
       <div className="bg-white dark:bg-zinc-900/50 rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
         {tab === "triggers" ? (
-          triggersQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <TriggersTable triggers={triggers} />
+          triggersQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <>
+            <CreateTriggerForm
+              projectPath={projectPath}
+              templates={templates}
+              onCreated={() => {
+                void qc.invalidateQueries({ queryKey: ["triggers", projectPath] });
+                void qc.invalidateQueries({ queryKey: ["run-templates", projectPath] });
+              }}
+            />
+            <TriggersTable triggers={triggers} projectPath={projectPath} />
+          </>
         ) : (
-          templatesQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <div className="p-4"><TemplatesSection templates={templates} /></div>
+          templatesQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <div>
+            <CreateRunTemplateForm
+              projectPath={projectPath}
+              onCreated={() => { void qc.invalidateQueries({ queryKey: ["run-templates", projectPath] }); }}
+            />
+            <div className="p-4"><TemplatesSection templates={templates} /></div>
+          </div>
         )}
       </div>
     </div>

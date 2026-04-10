@@ -798,7 +798,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
 
   const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["provider-connections"],
-    queryFn:  () => defaultApi.listProviderConnections("default"),
+    queryFn:  () => defaultApi.listProviderConnections(),
     staleTime: 30_000,
   });
 

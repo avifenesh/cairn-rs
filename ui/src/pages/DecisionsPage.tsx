@@ -5,8 +5,14 @@ import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 import type { RefreshOption } from "../hooks/useAutoRefresh";
+import { useScope } from "../hooks/useScope";
 
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("cairn_token") || ""}` });
+
+async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
+  const data = await res.json().catch(() => ({}));
+  return typeof data?.error === "string" ? data.error : fallback;
+}
 
 const shortId = (id: string) =>
   id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
@@ -92,24 +98,49 @@ function DecisionsTable({ decisions }: { decisions: Decision[] }) {
   );
 }
 
-function CacheTable({ entries }: { entries: CacheEntry[] }) {
+function CacheTable({ entries, scope }: { entries: CacheEntry[]; scope: { tenant_id: string; workspace_id: string; project_id: string } }) {
   const qc = useQueryClient();
   const toast = useToast();
 
   const invalidateMut = useMutation({
-    mutationFn: (id: string) => fetch(`/v1/decisions/${id}/invalidate`, {
-      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: "operator-invalidated" }),
-    }),
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/v1/decisions/${id}/invalidate`, {
+        method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "operator-invalidated" }),
+      });
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Failed to invalidate cache entry."));
+      }
+    },
     onSuccess: () => { toast.success("Cache entry invalidated."); void qc.invalidateQueries({ queryKey: ["decisions-cache"] }); },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Failed to invalidate cache entry.");
+    },
   });
 
   const bulkMut = useMutation({
-    mutationFn: () => fetch("/v1/decisions/cache/invalidate-all", {
-      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: "operator-bulk-clear" }),
-    }),
+    mutationFn: async () => {
+      const res = await fetch("/v1/decisions/invalidate", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope: {
+            level: "project",
+            tenant_id: scope.tenant_id,
+            workspace_id: scope.workspace_id,
+            project_id: scope.project_id,
+          },
+          reason: "operator-bulk-clear",
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Failed to bulk invalidate cache."));
+      }
+    },
     onSuccess: () => { toast.success("All cache entries invalidated."); void qc.invalidateQueries({ queryKey: ["decisions-cache"] }); },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Failed to bulk invalidate cache.");
+    },
   });
 
   if (entries.length === 0) return (
@@ -154,6 +185,7 @@ function CacheTable({ entries }: { entries: CacheEntry[] }) {
 }
 
 export function DecisionsPage() {
+  const [scope] = useScope();
   const [tab, setTab] = useState<"recent" | "cache">("recent");
   const { ms: refreshMs, setOption: setRefreshOption } = useAutoRefresh("decisions", "15s");
 
@@ -161,6 +193,9 @@ export function DecisionsPage() {
     queryKey: ["decisions"],
     queryFn: async () => {
       const res = await fetch("/v1/decisions", { headers: authHeaders() });
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Failed to load decisions."));
+      }
       const data = await res.json();
       return Array.isArray(data) ? data : (data.items ?? []);
     },
@@ -171,6 +206,9 @@ export function DecisionsPage() {
     queryKey: ["decisions-cache"],
     queryFn: async () => {
       const res = await fetch("/v1/decisions/cache", { headers: authHeaders() });
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Failed to load decision cache."));
+      }
       const data = await res.json();
       return Array.isArray(data) ? data : (data.items ?? []);
     },
@@ -221,7 +259,7 @@ export function DecisionsPage() {
         {tab === "recent" ? (
           decisionsQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <DecisionsTable decisions={decisions} />
         ) : (
-          cacheQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <CacheTable entries={cacheEntries} />
+          cacheQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <CacheTable entries={cacheEntries} scope={scope} />
         )}
       </div>
     </div>

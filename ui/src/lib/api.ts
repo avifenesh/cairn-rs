@@ -344,7 +344,7 @@ export function createApiClient(config: ApiClientConfig) {
       workspace_id?: string;
       project_id?: string;
       session_id?: string;
-    }): Promise<SessionRecord> => post("/v1/sessions", body),
+    }): Promise<SessionRecord> => post("/v1/sessions", withScope(body)),
 
     // ── Runs ──────────────────────────────────────────────────────────────────
 
@@ -467,7 +467,7 @@ export function createApiClient(config: ApiClientConfig) {
       session_id?: string;
       run_id?: string;
       parent_run_id?: string;
-    }): Promise<RunRecord> => post("/v1/runs", body),
+    }): Promise<RunRecord> => post("/v1/runs", withScope(body)),
 
     /** POST /v1/runs/batch — create multiple runs at once. */
     batchCreateRuns: (runs: Array<{
@@ -579,8 +579,12 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/providers/health — list provider health records. */
     getProviderHealth: (): Promise<import("./types").ProviderHealthEntry[]> => {
-      const tenantId = config.scope?.tenant_id ?? "default";
-      return getList(`/v1/providers/health?tenant_id=${encodeURIComponent(tenantId)}`);
+      const s = withScope();
+      const qs = new URLSearchParams();
+      if (s.tenant_id)    qs.set("tenant_id",    s.tenant_id);
+      if (s.workspace_id) qs.set("workspace_id", s.workspace_id);
+      if (s.project_id)   qs.set("project_id",   s.project_id);
+      return getList(`/v1/providers/health?${qs}`);
     },
 
     /** GET /v1/providers/registry — static provider registry with availability and known models. */
@@ -589,10 +593,17 @@ export function createApiClient(config: ApiClientConfig) {
     // ── Provider connections ─────────────────────────────────────────────────
 
     /** GET /v1/providers/connections — list registered provider connections. */
-    listProviderConnections: (tenantId = "default"): Promise<{
+    listProviderConnections: (): Promise<{
       items: import("./types").ProviderConnectionRecord[];
       has_more: boolean;
-    }> => get(`/v1/providers/connections?tenant_id=${encodeURIComponent(tenantId)}`),
+    }> => {
+      const s = withScope();
+      const qs = new URLSearchParams();
+      if (s.tenant_id)    qs.set("tenant_id",    s.tenant_id);
+      if (s.workspace_id) qs.set("workspace_id", s.workspace_id);
+      if (s.project_id)   qs.set("project_id",   s.project_id);
+      return get(`/v1/providers/connections?${qs}`);
+    },
 
     /** POST /v1/providers/connections — register a new provider connection. */
     createProviderConnection: (body: {
@@ -687,7 +698,7 @@ export function createApiClient(config: ApiClientConfig) {
       session_id: string; run_id: string;
       goal: string; default_tools: string[];
       agent_role: string; approval_policy: string;
-    }> => post(`/v1/agent-templates/${encodeURIComponent(templateId)}/instantiate`, body),
+    }> => post(`/v1/agent-templates/${encodeURIComponent(templateId)}/instantiate`, withScope(body)),
 
     getChangelog: (): Promise<import("./types").ChangelogEntry[]> =>
       get('/v1/changelog'),
