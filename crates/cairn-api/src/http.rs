@@ -194,6 +194,38 @@ pub fn preserved_route_catalog() -> Vec<RouteEntry> {
             path: "/v1/decisions/:id/invalidate".into(),
             classification: Preserve,
         },
+        // ── SQ/EQ Protocol (RFC 021) ────────────────────────────────────────
+        RouteEntry {
+            method: Post,
+            path: "/v1/sqeq/initialize".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/sqeq/submit".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/sqeq/events".into(),
+            classification: Preserve,
+        },
+        // ── A2A (RFC 021) ───────────────────────────────────────────────────
+        RouteEntry {
+            method: Get,
+            path: "/.well-known/agent.json".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Post,
+            path: "/v1/a2a/tasks".into(),
+            classification: Preserve,
+        },
+        RouteEntry {
+            method: Get,
+            path: "/v1/a2a/tasks/:id".into(),
+            classification: Preserve,
+        },
         RouteEntry {
             method: Post,
             path: "/v1/decisions/invalidate".into(),
