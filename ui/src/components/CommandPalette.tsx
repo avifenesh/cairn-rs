@@ -335,7 +335,11 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
       label:       'New Session',
       description: 'Create a new agent session and open Sessions',
       icon:        Plus,
-      action:      () => { void defaultApi.createSession({}); onNavigate('sessions'); },
+      action:      () => {
+        const id = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        void defaultApi.createSession({ session_id: id });
+        onNavigate('sessions');
+      },
     },
     {
       kind:        'action',
