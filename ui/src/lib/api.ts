@@ -774,6 +774,50 @@ export function createApiClient(config: ApiClientConfig) {
     getPluginLogs: (id: string): Promise<{ entries: import("./types").PluginLogEntry[] }> =>
       get(`/v1/plugins/${encodeURIComponent(id)}/logs`),
 
+    // ── Marketplace (RFC 015) ─────────────────────────────────────────────────
+
+    /** GET /v1/plugins/catalog — list marketplace catalog entries. */
+    getPluginCatalog: (): Promise<{ plugins: import("./types").CatalogEntry[] }> =>
+      get("/v1/plugins/catalog"),
+
+    /** POST /v1/plugins/:id/install — install a marketplace plugin. */
+    installPlugin: (pluginId: string): Promise<unknown> =>
+      post(`/v1/plugins/${encodeURIComponent(pluginId)}/install`),
+
+    /** POST /v1/plugins/:id/credentials — provide credentials for an installed plugin. */
+    providePluginCredentials: (pluginId: string, credentials: Record<string, string>): Promise<unknown> =>
+      post(`/v1/plugins/${encodeURIComponent(pluginId)}/credentials`, { credentials }),
+
+    /** POST /v1/plugins/:id/verify — verify credentials are working. */
+    verifyPlugin: (pluginId: string): Promise<unknown> =>
+      post(`/v1/plugins/${encodeURIComponent(pluginId)}/verify`),
+
+    /** POST /v1/plugins/:id/uninstall — uninstall a marketplace plugin. */
+    uninstallPlugin: (pluginId: string): Promise<unknown> =>
+      del(`/v1/plugins/${encodeURIComponent(pluginId)}/uninstall`),
+
+    /** POST /v1/projects/:project/plugins/:id/enable — enable plugin for project. */
+    enablePluginForProject: (project: string, pluginId: string, body?: unknown): Promise<unknown> =>
+      post(`/v1/projects/${encodeURIComponent(project)}/plugins/${encodeURIComponent(pluginId)}/enable`, body),
+
+    /** DELETE /v1/projects/:project/plugins/:id/disable — disable plugin for project. */
+    disablePluginForProject: (project: string, pluginId: string): Promise<unknown> =>
+      post(`/v1/projects/${encodeURIComponent(project)}/plugins/${encodeURIComponent(pluginId)}/disable`),
+
+    // ── Plan Review (RFC 018) ──────────────────────────────────────────────────
+
+    /** POST /v1/runs/:id/approve — approve a plan-mode run. */
+    approvePlan: (runId: string, body: { approved_by: string; comments?: string }): Promise<unknown> =>
+      post(`/v1/runs/${encodeURIComponent(runId)}/approve`, body),
+
+    /** POST /v1/runs/:id/reject — reject a plan-mode run. */
+    rejectPlan: (runId: string, body: { rejected_by: string; reason: string }): Promise<unknown> =>
+      post(`/v1/runs/${encodeURIComponent(runId)}/reject`, body),
+
+    /** POST /v1/runs/:id/revise — request revision of a plan-mode run. */
+    revisePlan: (runId: string, body: { reviewer_comments: string }): Promise<unknown> =>
+      post(`/v1/runs/${encodeURIComponent(runId)}/revise`, body),
+
     // ── Credentials (RFC 011) ────────────────────────────────────────────────
 
     /**

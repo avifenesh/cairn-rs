@@ -742,6 +742,48 @@ export interface SystemInfo {
   environment:  SystemInfoEnvironment;
 }
 
+// ── Marketplace Catalog (RFC 015) ──────────────────────────────────────────────
+
+/** GET /v1/plugins/catalog — one entry per marketplace plugin */
+export interface CatalogEntry {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  category: string;
+  vendor: string;
+  state: string;
+  tools_count: number;
+  signals_count: number;
+  download_url: string | null;
+  has_signal_source: boolean;
+}
+
+/** Credential spec from plugin descriptor */
+export interface CredentialSpec {
+  key: string;
+  label: string;
+  scope: string;
+  required: boolean;
+}
+
+/** Marketplace plugin detail (installed state) */
+export interface MarketplacePluginDetail {
+  plugin_id: string;
+  state: string;
+  descriptor: CatalogEntry & { required_credentials: CredentialSpec[] };
+  installed_at: number | null;
+}
+
+// ── Plan Review (RFC 018) ─────────────────────────────────────────────────────
+
+export interface PlanReviewRequest {
+  approved_by?: string;
+  rejected_by?: string;
+  reason?: string;
+  reviewer_comments?: string;
+}
+
 // ── Changelog ─────────────────────────────────────────────────────────────────
 
 export interface ChangelogEntry {

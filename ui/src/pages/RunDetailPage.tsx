@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, useRef } from "react";
 import {
   ArrowLeft, Loader2, Clock, Hash, Cpu, Download,
   Brain, Search, Zap, CheckCircle2, Wrench, ChevronDown, ChevronRight,
-  Play, AlertTriangle,
+  Play, AlertTriangle, FileText, ThumbsUp, ThumbsDown, RotateCcw,
+  Bolt, Box,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
@@ -286,6 +287,197 @@ function OrchestrationTimeline({ runId }: { runId: string }) {
   );
 }
 
+// ── Plan Artifact Panel (RFC 018) ─────────────────────────────────────────────
+
+function PlanArtifactPanel({ runId, run }: { runId: string; run?: { state: string } & Record<string, unknown> }) {
+  const queryClient = useQueryClient();
+  const [rejectReason, setRejectReason] = useState("");
+  const [reviseComments, setReviseComments] = useState("");
+  const [showReject, setShowReject] = useState(false);
+  const [showRevise, setShowRevise] = useState(false);
+
+  // Check if this run has a plan artifact via events
+  const { data: planEvents } = useQuery({
+    queryKey: ["run-plan", runId],
+    queryFn: async () => {
+      const events = await defaultApi.getRunEvents(runId, 200);
+      return events.filter(e =>
+        e.event_type === "plan_proposed" ||
+        e.event_type === "plan_approved" ||
+        e.event_type === "plan_rejected"
+      );
+    },
+    staleTime: 10_000,
+  });
+
+  const hasPlan = planEvents && planEvents.length > 0;
+  const planProposed = planEvents?.find(e => e.event_type === "plan_proposed");
+  const planApproved = planEvents?.find(e => e.event_type === "plan_approved");
+  const planRejected = planEvents?.find(e => e.event_type === "plan_rejected");
+
+  // Check if mode is plan by looking at run metadata
+  const isPlanMode = run && (
+    (run as Record<string, unknown>).mode === "plan" ||
+    String((run as Record<string, unknown>).mode ?? "").includes("plan") ||
+    hasPlan
+  );
+
+  const approveMut = useMutation({
+    mutationFn: () => defaultApi.approvePlan(runId, { approved_by: "operator" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run-plan", runId] });
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+    },
+  });
+
+  const rejectMut = useMutation({
+    mutationFn: () => defaultApi.rejectPlan(runId, { rejected_by: "operator", reason: rejectReason }),
+    onSuccess: () => {
+      setShowReject(false);
+      queryClient.invalidateQueries({ queryKey: ["run-plan", runId] });
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+    },
+  });
+
+  const reviseMut = useMutation({
+    mutationFn: () => defaultApi.revisePlan(runId, { reviewer_comments: reviseComments }),
+    onSuccess: () => {
+      setShowRevise(false);
+      queryClient.invalidateQueries({ queryKey: ["run-plan", runId] });
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+    },
+  });
+
+  if (!isPlanMode) return null;
+
+  const isPending = !planApproved && !planRejected;
+
+  return (
+    <div className="rounded-lg border border-indigo-800/40 bg-indigo-950/20 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-indigo-800/30">
+        <div className="flex items-center gap-2">
+          <FileText size={14} className="text-indigo-400" />
+          <span className="text-[13px] font-medium text-indigo-200">Plan Mode</span>
+          {planApproved && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-950 text-emerald-300 border border-emerald-800/50">
+              Approved
+            </span>
+          )}
+          {planRejected && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-950 text-red-300 border border-red-800/50">
+              Rejected
+            </span>
+          )}
+          {isPending && hasPlan && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-950 text-amber-300 border border-amber-800/50">
+              Awaiting Review
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Plan artifact content */}
+      {planProposed && (
+        <div className="px-4 py-3">
+          <p className="text-[11px] text-indigo-400/70 uppercase tracking-wider mb-2">Plan Artifact</p>
+          <div className="bg-zinc-950/60 rounded-md p-3 max-h-64 overflow-y-auto">
+            <pre className="text-[12px] text-zinc-300 font-mono whitespace-pre-wrap leading-relaxed">
+              {typeof (planProposed as Record<string, unknown>).plan_markdown === "string"
+                ? String((planProposed as Record<string, unknown>).plan_markdown)
+                : JSON.stringify(planProposed, null, 2)}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons — only when plan is pending */}
+      {isPending && hasPlan && (
+        <div className="px-4 py-3 border-t border-indigo-800/30 space-y-3">
+          {!showReject && !showRevise && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => approveMut.mutate()}
+                disabled={approveMut.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-emerald-600 text-white text-[12px] font-medium hover:bg-emerald-500 disabled:opacity-50 transition-colors"
+              >
+                {approveMut.isPending ? <Loader2 size={11} className="animate-spin" /> : <ThumbsUp size={11} />}
+                Approve
+              </button>
+              <button
+                onClick={() => setShowReject(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-red-600/80 text-white text-[12px] font-medium hover:bg-red-500 transition-colors"
+              >
+                <ThumbsDown size={11} /> Reject
+              </button>
+              <button
+                onClick={() => setShowRevise(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-zinc-700 text-zinc-200 text-[12px] font-medium hover:bg-zinc-600 transition-colors"
+              >
+                <RotateCcw size={11} /> Request Revision
+              </button>
+            </div>
+          )}
+
+          {/* Reject form */}
+          {showReject && (
+            <div className="space-y-2">
+              <textarea
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                placeholder="Reason for rejection…"
+                className="w-full h-20 bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-[12px] text-zinc-300 resize-none focus:outline-none focus:border-red-500"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => rejectMut.mutate()}
+                  disabled={rejectMut.isPending || !rejectReason.trim()}
+                  className="px-3 py-1.5 rounded bg-red-600 text-white text-[12px] hover:bg-red-500 disabled:opacity-50 transition-colors"
+                >
+                  {rejectMut.isPending ? "Rejecting…" : "Confirm Reject"}
+                </button>
+                <button
+                  onClick={() => setShowReject(false)}
+                  className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-400 text-[12px] hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Revise form */}
+          {showRevise && (
+            <div className="space-y-2">
+              <textarea
+                value={reviseComments}
+                onChange={e => setReviseComments(e.target.value)}
+                placeholder="What should be changed in the plan?"
+                className="w-full h-20 bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-[12px] text-zinc-300 resize-none focus:outline-none focus:border-indigo-500"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => reviseMut.mutate()}
+                  disabled={reviseMut.isPending || !reviseComments.trim()}
+                  className="px-3 py-1.5 rounded bg-indigo-600 text-white text-[12px] hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+                >
+                  {reviseMut.isPending ? "Submitting…" : "Request Revision"}
+                </button>
+                <button
+                  onClick={() => setShowRevise(false)}
+                  className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-400 text-[12px] hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Section wrapper ────────────────────────────────────────────────────────────
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -435,6 +627,32 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
             sub={cost && cost.provider_calls > 0 ? `${cost.provider_calls} provider call${cost.provider_calls !== 1 ? "s" : ""}` : undefined}
           />
         </div>
+
+        {/* Trigger origin badge */}
+        {run && (run as Record<string, unknown>).created_by_trigger_id && (
+          <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-amber-800/40 bg-amber-950/20">
+            <Bolt size={13} className="text-amber-400 shrink-0" />
+            <span className="text-[12px] text-amber-300">
+              Created by trigger: <span className="font-mono font-medium">{String((run as Record<string, unknown>).created_by_trigger_id)}</span>
+            </span>
+          </div>
+        )}
+
+        {/* Sandbox status */}
+        {run && (run as Record<string, unknown>).sandbox_id && (
+          <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-teal-800/40 bg-teal-950/20">
+            <Box size={13} className="text-teal-400 shrink-0" />
+            <span className="text-[12px] text-teal-300">
+              Sandbox: <span className="font-mono font-medium">{String((run as Record<string, unknown>).sandbox_id)}</span>
+              {(run as Record<string, unknown>).sandbox_path && (
+                <span className="text-teal-500 ml-2">{String((run as Record<string, unknown>).sandbox_path)}</span>
+              )}
+            </span>
+          </div>
+        )}
+
+        {/* Plan artifact (RFC 018 — Plan mode) */}
+        <PlanArtifactPanel runId={runId} run={run} />
 
         {/* Orchestration live timeline — visible when SSE events arrive */}
         <OrchestrationTimeline runId={runId} />
