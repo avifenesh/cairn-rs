@@ -66,17 +66,17 @@ impl<S: EventLog + RunReadModel + SessionReadModel + 'static> RunServiceImpl<S> 
     }
 }
 
-#[async_trait]
-impl<S> RunService for RunServiceImpl<S>
+impl<S> RunServiceImpl<S>
 where
-    S: EventLog + RunReadModel + SessionReadModel + QuotaReadModel + ApprovalReadModel + 'static,
+    S: EventLog + RunReadModel + SessionReadModel + QuotaReadModel + 'static,
 {
-    async fn start(
+    async fn start_internal(
         &self,
         project: &ProjectKey,
         session_id: &SessionId,
         run_id: RunId,
         parent_run_id: Option<RunId>,
+        correlation_id: Option<&str>,
     ) -> Result<RunRecord, RuntimeError> {
         if RunReadModel::get(self.store.as_ref(), &run_id)
             .await?
@@ -91,7 +91,7 @@ where
         // Enforce run quota before creating the run.
         enforce_run_quota(self.store.as_ref(), &project.tenant_id).await?;
 
-        let event = make_envelope(RuntimeEvent::RunCreated(RunCreated {
+        let mut event = make_envelope(RuntimeEvent::RunCreated(RunCreated {
             project: project.clone(),
             session_id: session_id.clone(),
             run_id: run_id.clone(),
@@ -99,9 +99,47 @@ where
             prompt_release_id: None,
             agent_role_id: None,
         }));
+        if let Some(correlation_id) = correlation_id {
+            event = event.with_correlation_id(correlation_id);
+        }
 
         self.store.append(&[event]).await?;
         self.get_run(&run_id).await
+    }
+
+    pub async fn start_with_correlation(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        correlation_id: impl AsRef<str>,
+    ) -> Result<RunRecord, RuntimeError> {
+        self.start_internal(
+            project,
+            session_id,
+            run_id,
+            parent_run_id,
+            Some(correlation_id.as_ref()),
+        )
+        .await
+    }
+}
+
+#[async_trait]
+impl<S> RunService for RunServiceImpl<S>
+where
+    S: EventLog + RunReadModel + SessionReadModel + QuotaReadModel + ApprovalReadModel + 'static,
+{
+    async fn start(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+    ) -> Result<RunRecord, RuntimeError> {
+        self.start_internal(project, session_id, run_id, parent_run_id, None)
+            .await
     }
 
     async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, RuntimeError> {

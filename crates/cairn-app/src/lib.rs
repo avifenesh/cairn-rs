@@ -219,6 +219,17 @@ const DEFAULT_WORKSPACE_ID: &str = "default_workspace";
 const DEFAULT_PROJECT_ID: &str = "default_project";
 type AppIngestPipeline = IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>;
 
+#[derive(Clone, Debug)]
+struct SqEqSessionBinding {
+    project: ProjectKey,
+}
+
+#[derive(Clone, Debug)]
+struct A2aTaskBinding {
+    task_id: TaskId,
+    project: ProjectKey,
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MailboxMessageView {
@@ -845,6 +856,8 @@ pub struct AppState {
     pub repo_clone_cache: Arc<cairn_workspace::RepoCloneCache>,
     pub project_repo_access: Arc<cairn_workspace::ProjectRepoAccessService>,
     pub sandbox_service: Arc<cairn_workspace::SandboxService>,
+    sqeq_sessions: Arc<Mutex<HashMap<String, SqEqSessionBinding>>>,
+    a2a_tasks: Arc<Mutex<HashMap<String, A2aTaskBinding>>>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
     pub metrics: Arc<AppMetrics>,
     #[allow(dead_code)]
@@ -1010,6 +1023,8 @@ impl AppState {
         let plugin_host = Arc::new(Mutex::new(StdioPluginHost::new()));
         let repo_clone_cache = Arc::new(cairn_workspace::RepoCloneCache::default());
         let project_repo_access = Arc::new(cairn_workspace::ProjectRepoAccessService::new());
+        let sqeq_sessions = Arc::new(Mutex::new(HashMap::new()));
+        let a2a_tasks = Arc::new(Mutex::new(HashMap::new()));
         let sandbox_repo_source = Arc::new(cairn_workspace::providers::RepoCloneCacheSource::new(
             repo_clone_cache.clone(),
         ));
@@ -1117,6 +1132,8 @@ impl AppState {
             repo_clone_cache,
             project_repo_access,
             sandbox_service,
+            sqeq_sessions,
+            a2a_tasks,
             rate_limits,
             metrics,
             memory_proposal_hook,
@@ -5587,7 +5604,27 @@ async fn build_runtime_sse_frame(
         None => None,
     };
 
-    build_sse_frame_with_current_state(stored, task_record.as_ref(), approval_record.as_ref())
+    let mut frame =
+        build_sse_frame_with_current_state(stored, task_record.as_ref(), approval_record.as_ref())?;
+
+    if let Some(correlation_id) = stored.envelope.correlation_id.as_ref() {
+        match &mut frame.data {
+            serde_json::Value::Object(map) => {
+                map.insert(
+                    "correlation_id".to_owned(),
+                    serde_json::Value::String(correlation_id.clone()),
+                );
+            }
+            payload => {
+                frame.data = serde_json::json!({
+                    "payload": payload.clone(),
+                    "correlation_id": correlation_id,
+                });
+            }
+        }
+    }
+
+    Some(frame)
 }
 
 #[utoipa::path(
@@ -10041,6 +10078,7 @@ async fn orchestrate_run_handler(
     struct TracingEmitter {
         inner: std::sync::Arc<crate::sse_hooks::SseOrchestratorEmitter>,
         store: std::sync::Arc<cairn_store::InMemoryStore>,
+        exporter: std::sync::Arc<cairn_runtime::telemetry::OtlpExporter>,
     }
     #[async_trait::async_trait]
     impl cairn_orchestrator::OrchestratorEventEmitter for TracingEmitter {
@@ -10109,7 +10147,9 @@ async fn orchestrate_run_handler(
                     },
                 ),
             );
+            let payload = event.payload.clone();
             let _ = self.store.append(&[event]).await;
+            let _ = self.exporter.export_event(&payload).await;
 
             // Insert into the LlmCallTrace read model so /v1/traces is populated.
             use cairn_store::projections::LlmCallTraceReadModel;
@@ -10172,6 +10212,7 @@ async fn orchestrate_run_handler(
         std::sync::Arc::new(TracingEmitter {
             inner: sse_emitter,
             store: state.runtime.store.clone(),
+            exporter: state.otlp_exporter.clone(),
         });
 
     match OrchestratorLoop::new(gather, decide, execute, cfg)
@@ -13296,9 +13337,37 @@ async fn delegate_approval_handler(
 
 // ── SQ/EQ Protocol handlers (RFC 021) ────────────────────────────────────────
 
+#[derive(Clone, Debug, serde::Deserialize)]
+struct SqEqStartRunParams {
+    sqeq_session_id: String,
+    session_id: String,
+    run_id: String,
+    parent_run_id: Option<String>,
+}
+
+fn sqeq_ack_response(
+    status: StatusCode,
+    accepted: bool,
+    correlation_id: String,
+    projected_event_seq: Option<u64>,
+    error: Option<String>,
+) -> Response {
+    (
+        status,
+        Json(cairn_domain::protocols::SqEqSubmissionAck {
+            accepted,
+            correlation_id,
+            projected_event_seq,
+            error,
+        }),
+    )
+        .into_response()
+}
+
 /// POST /v1/sqeq/initialize — scope binding + capability negotiation.
 async fn sqeq_initialize_handler(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Json(body): Json<cairn_domain::protocols::SqEqInitializeRequest>,
 ) -> impl IntoResponse {
     use cairn_domain::protocols::{SqEqCapabilities, SqEqInitializeResponse};
@@ -13316,6 +13385,21 @@ async fn sqeq_initialize_handler(
         .unwrap_or_default()
         .as_millis() as u64;
     let session_id = format!("sqeq_{now_ms}");
+
+    if !tenant_scope.is_admin && body.scope.tenant_id != *tenant_scope.tenant_id() {
+        return tenant_scope_mismatch_error().into_response();
+    }
+
+    state
+        .sqeq_sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(
+            session_id.clone(),
+            SqEqSessionBinding {
+                project: body.scope.clone(),
+            },
+        );
 
     let include_reasoning = body
         .subscriptions
@@ -13356,10 +13440,9 @@ async fn sqeq_initialize_handler(
 /// POST /v1/sqeq/submit — validated command submission with correlation.
 async fn sqeq_submit_handler(
     State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Json(body): Json<cairn_domain::protocols::SqEqSubmission>,
 ) -> impl IntoResponse {
-    use cairn_domain::protocols::SqEqSubmissionAck;
-
     // Validate the method is known.
     let known_methods = [
         "start_run",
@@ -13371,16 +13454,144 @@ async fn sqeq_submit_handler(
         "cancel_task",
     ];
     if !known_methods.contains(&body.method.as_str()) {
-        return (
+        return sqeq_ack_response(
             StatusCode::BAD_REQUEST,
-            Json(SqEqSubmissionAck {
-                accepted: false,
-                correlation_id: body.correlation_id.clone(),
-                projected_event_seq: None,
-                error: Some(format!("unknown method: {}", body.method)),
-            }),
-        )
-            .into_response();
+            false,
+            body.correlation_id.clone(),
+            None,
+            Some(format!("unknown method: {}", body.method)),
+        );
+    }
+
+    if body.method == "start_run" {
+        let params: SqEqStartRunParams = match serde_json::from_value(body.params.clone()) {
+            Ok(params) => params,
+            Err(err) => {
+                return sqeq_ack_response(
+                    StatusCode::BAD_REQUEST,
+                    false,
+                    body.correlation_id.clone(),
+                    None,
+                    Some(format!("invalid start_run params: {err}")),
+                )
+            }
+        };
+
+        let binding = match state
+            .sqeq_sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&params.sqeq_session_id)
+            .cloned()
+        {
+            Some(binding) => binding,
+            None => {
+                return sqeq_ack_response(
+                    StatusCode::NOT_FOUND,
+                    false,
+                    body.correlation_id.clone(),
+                    None,
+                    Some("sqeq session not found".to_owned()),
+                )
+            }
+        };
+
+        if !tenant_scope.is_admin && binding.project.tenant_id != *tenant_scope.tenant_id() {
+            return sqeq_ack_response(
+                StatusCode::FORBIDDEN,
+                false,
+                body.correlation_id.clone(),
+                None,
+                Some("sqeq session does not belong to authenticated tenant".to_owned()),
+            );
+        }
+
+        let session_id = SessionId::new(params.session_id.clone());
+        match state.runtime.sessions.get(&session_id).await {
+            Ok(Some(session)) if session.project == binding.project => {}
+            Ok(Some(_)) | Ok(None) => {
+                return sqeq_ack_response(
+                    StatusCode::NOT_FOUND,
+                    false,
+                    body.correlation_id.clone(),
+                    None,
+                    Some("session not found".to_owned()),
+                )
+            }
+            Err(err) => {
+                return sqeq_ack_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    false,
+                    body.correlation_id.clone(),
+                    None,
+                    Some(err.to_string()),
+                )
+            }
+        }
+
+        if let Some(parent_run_id) = params.parent_run_id.as_ref().map(RunId::new) {
+            match state.runtime.runs.get(&parent_run_id).await {
+                Ok(Some(parent_run)) if parent_run.project == binding.project => {}
+                Ok(Some(_)) | Ok(None) => {
+                    return sqeq_ack_response(
+                        StatusCode::NOT_FOUND,
+                        false,
+                        body.correlation_id.clone(),
+                        None,
+                        Some("parent run not found".to_owned()),
+                    )
+                }
+                Err(err) => {
+                    return sqeq_ack_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        false,
+                        body.correlation_id.clone(),
+                        None,
+                        Some(err.to_string()),
+                    )
+                }
+            }
+        }
+
+        let before = current_event_head(&state).await;
+        return match state
+            .runtime
+            .runs
+            .start_with_correlation(
+                &binding.project,
+                &session_id,
+                RunId::new(params.run_id),
+                params.parent_run_id.map(RunId::new),
+                &body.correlation_id,
+            )
+            .await
+        {
+            Ok(_) => {
+                publish_runtime_frames_since(&state, before).await;
+                let projected = state
+                    .runtime
+                    .store
+                    .head_position()
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|position| position.0);
+                sqeq_ack_response(
+                    StatusCode::ACCEPTED,
+                    true,
+                    body.correlation_id,
+                    projected,
+                    None,
+                )
+            }
+            Err(err) => sqeq_ack_response(
+                StatusCode::CONFLICT,
+                false,
+                body.correlation_id,
+                None,
+                Some(err.to_string()),
+            ),
+        };
     }
 
     // Get current event sequence for projected_event_seq.
@@ -13394,16 +13605,13 @@ async fn sqeq_submit_handler(
         .map(|p| p.0)
         .unwrap_or(0);
 
-    (
+    sqeq_ack_response(
         StatusCode::ACCEPTED,
-        Json(SqEqSubmissionAck {
-            accepted: true,
-            correlation_id: body.correlation_id,
-            projected_event_seq: Some(seq + 1),
-            error: None,
-        }),
+        true,
+        body.correlation_id,
+        Some(seq + 1),
+        None,
     )
-        .into_response()
 }
 
 /// GET /v1/sqeq/events — SSE event stream with scope filtering.
@@ -13411,25 +13619,32 @@ async fn sqeq_submit_handler(
 /// Delegates to the existing SSE broadcast infrastructure with scope filtering
 /// applied per the bound SQ/EQ session.
 async fn sqeq_events_handler(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
+    headers: HeaderMap,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    // For v1, delegate to the existing SSE stream infrastructure.
-    // The sqeq_session_id parameter is accepted but scope filtering
-    // is applied at the SSE broadcast level.
-    let _session_id = params.get("sqeq_session_id");
+    let Some(session_id) = params.get("sqeq_session_id") else {
+        return bad_request_response("sqeq_session_id is required");
+    };
 
-    // Return a simple JSON response indicating SSE is available.
-    // Full SSE streaming is handled by the existing /v1/stream endpoint;
-    // /v1/sqeq/events wraps it with protocol semantics.
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "status": "connected",
-            "stream_url": "/v1/stream",
-            "note": "v1: SQ/EQ events delegate to /v1/stream SSE. Use Last-Event-ID for replay."
-        })),
-    )
+    let Some(binding) = state
+        .sqeq_sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(session_id)
+        .cloned()
+    else {
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "sqeq session not found")
+            .into_response();
+    };
+
+    if !tenant_scope.is_admin && binding.project.tenant_id != *tenant_scope.tenant_id() {
+        return tenant_scope_mismatch_error().into_response();
+    }
+
+    runtime_stream_handler(State(state), headers)
+        .await
         .into_response()
 }
 
@@ -13477,39 +13692,86 @@ async fn a2a_agent_card_handler(State(_state): State<Arc<AppState>>) -> impl Int
 
 /// POST /v1/a2a/tasks — A2A task submission.
 async fn a2a_submit_task_handler(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Json(_body): Json<cairn_domain::protocols::A2aTaskSubmission>,
 ) -> impl IntoResponse {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let task_id = format!("a2a_task_{now_ms}");
+    let task_id = format!("a2a_task_{}", now_ms());
+    let task_key = TaskId::new(task_id.clone());
+    let project = ProjectKey::new(
+        tenant_scope.tenant_id().as_ref(),
+        DEFAULT_WORKSPACE_ID,
+        DEFAULT_PROJECT_ID,
+    );
 
-    let resp = cairn_domain::protocols::A2aTaskResponse {
-        task_id: task_id.clone(),
-        status: "submitted".to_owned(),
-        status_url: format!("/v1/a2a/tasks/{task_id}"),
-    };
+    match state
+        .runtime
+        .tasks
+        .submit(&project, task_key.clone(), None, None, 0)
+        .await
+    {
+        Ok(_) => {
+            state
+                .a2a_tasks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(
+                    task_id.clone(),
+                    A2aTaskBinding {
+                        task_id: task_key,
+                        project,
+                    },
+                );
 
-    (StatusCode::CREATED, Json(resp)).into_response()
+            let resp = cairn_domain::protocols::A2aTaskResponse {
+                task_id: task_id.clone(),
+                status: "submitted".to_owned(),
+                status_url: format!("/v1/a2a/tasks/{task_id}"),
+            };
+
+            (StatusCode::CREATED, Json(resp)).into_response()
+        }
+        Err(err) => runtime_error_response(err),
+    }
 }
 
 /// GET /v1/a2a/tasks/:id — A2A task status.
 async fn a2a_get_task_handler(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
+    tenant_scope: TenantScope,
     Path(task_id): Path<String>,
 ) -> impl IntoResponse {
-    // V1 stub: return task_id with pending status.
-    // Full implementation will query the cairn task model.
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "task_id": task_id,
-            "status": "pending",
-        })),
-    )
-        .into_response()
+    let Some(binding) = state
+        .a2a_tasks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&task_id)
+        .cloned()
+    else {
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
+            .into_response();
+    };
+
+    if !tenant_scope.is_admin && binding.project.tenant_id != *tenant_scope.tenant_id() {
+        return tenant_scope_mismatch_error().into_response();
+    }
+
+    match state.runtime.tasks.get(&binding.task_id).await {
+        Ok(Some(task)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "task_id": task_id,
+                "status": task.state,
+                "source": "A2A",
+                "internal_task_id": task.task_id,
+            })),
+        )
+            .into_response(),
+        Ok(None) => {
+            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found").into_response()
+        }
+        Err(err) => runtime_error_response(err),
+    }
 }
 
 // ── Plan review handlers (RFC 018) ───────────────────────────────────────────
@@ -19686,6 +19948,11 @@ mod tests {
         serde_json::from_slice(&bytes).expect("response is valid JSON")
     }
 
+    async fn response_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).expect("response is valid JSON")
+    }
+
     #[tokio::test]
     async fn deny_approval_returns_rejected_decision() {
         let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
@@ -19854,6 +20121,309 @@ mod tests {
         );
         assert!(first["stored_at"].is_number(), "stored_at must be a number");
         assert!(first["position"].is_number(), "position must be a number");
+    }
+
+    #[tokio::test]
+    async fn sqeq_start_run_roundtrip_streams_correlation_id() {
+        use http_body_util::BodyExt as _;
+        use tokio::time::{timeout, Duration};
+
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "sqeq-token");
+
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let session_id = SessionId::new("session_sqeq_roundtrip");
+        state
+            .runtime
+            .sessions
+            .create(&project, session_id.clone())
+            .await
+            .unwrap();
+
+        let init_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/sqeq/initialize",
+            "sqeq-token",
+            serde_json::json!({
+                "protocol_versions": ["1.0"],
+                "scope": {
+                    "tenant_id": DEFAULT_TENANT_ID,
+                    "workspace_id": DEFAULT_WORKSPACE_ID,
+                    "project_id": DEFAULT_PROJECT_ID,
+                },
+                "subscriptions": {
+                    "event_types": ["run.*"]
+                }
+            }),
+        )
+        .await;
+        assert_eq!(init_resp.status(), StatusCode::OK);
+        let init_body = response_json(init_resp).await;
+        let sqeq_session_id = init_body["sqeq_session_id"]
+            .as_str()
+            .expect("sqeq init must return session id")
+            .to_owned();
+
+        let stream_resp = AppBootstrap::build_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/sqeq/events?sqeq_session_id={sqeq_session_id}"))
+                    .header("authorization", "Bearer sqeq-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stream_resp.status(), StatusCode::OK);
+
+        let stream_body = stream_resp.into_body();
+        let read_stream = tokio::spawn(async move {
+            let mut stream_body = stream_body;
+            loop {
+                let frame = stream_body.frame().await?;
+                let Ok(frame) = frame else {
+                    return None;
+                };
+                if let Ok(data) = frame.into_data() {
+                    let text = String::from_utf8_lossy(data.as_ref()).to_string();
+                    if !text.trim().is_empty() {
+                        return Some(text);
+                    }
+                }
+            }
+        });
+
+        let submit_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/sqeq/submit",
+            "sqeq-token",
+            serde_json::json!({
+                "method": "start_run",
+                "correlation_id": "corr_sqeq_roundtrip",
+                "params": {
+                    "sqeq_session_id": sqeq_session_id,
+                    "session_id": session_id.as_str(),
+                    "run_id": "run_sqeq_roundtrip"
+                }
+            }),
+        )
+        .await;
+        assert_eq!(submit_resp.status(), StatusCode::ACCEPTED);
+        let submit_body = response_json(submit_resp).await;
+        assert_eq!(submit_body["accepted"], true);
+        assert_eq!(submit_body["correlation_id"], "corr_sqeq_roundtrip");
+        assert!(submit_body["projected_event_seq"].is_number());
+
+        let frame_text = timeout(Duration::from_millis(500), read_stream)
+            .await
+            .expect("timed out waiting for sqeq sse frame")
+            .expect("stream task panicked")
+            .expect("stream ended before yielding a frame");
+        assert!(frame_text.contains("run_sqeq_roundtrip"), "{frame_text}");
+        assert!(frame_text.contains("corr_sqeq_roundtrip"), "{frame_text}");
+
+        let run = state
+            .runtime
+            .runs
+            .get(&RunId::new("run_sqeq_roundtrip"))
+            .await
+            .unwrap()
+            .expect("run must be created");
+        assert_eq!(run.project, project);
+    }
+
+    #[tokio::test]
+    async fn a2a_submission_creates_internal_task_with_a2a_source() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "a2a-token");
+
+        let submit_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/a2a/tasks",
+            "a2a-token",
+            serde_json::json!({
+                "task": {
+                    "kind": "research",
+                    "input": {
+                        "content_type": "text/markdown",
+                        "content": "Investigate the latest alert"
+                    },
+                    "metadata": {}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(submit_resp.status(), StatusCode::CREATED);
+        let submit_body = response_json(submit_resp).await;
+        let task_id = submit_body["task_id"]
+            .as_str()
+            .expect("a2a submit must return task id")
+            .to_owned();
+        assert_eq!(submit_body["status"], "submitted");
+
+        let task = state
+            .runtime
+            .tasks
+            .get(&TaskId::new(task_id.clone()))
+            .await
+            .unwrap()
+            .expect("internal task must be created");
+        assert_eq!(task.project.tenant_id, TenantId::new(DEFAULT_TENANT_ID));
+        assert_eq!(task.state, TaskState::Queued);
+
+        let status_body = get_json(
+            AppBootstrap::build_router(state),
+            &format!("/v1/a2a/tasks/{task_id}"),
+            "a2a-token",
+        )
+        .await;
+        assert_eq!(status_body["task_id"], task_id);
+        assert_eq!(status_body["source"], "A2A");
+        assert_eq!(status_body["internal_task_id"], task.task_id.as_str());
+        assert_eq!(status_body["status"], "queued");
+    }
+
+    #[tokio::test]
+    async fn orchestrate_run_exports_otlp_spans_with_genai_attributes() {
+        use cairn_domain::protocols::OtlpConfig;
+        use cairn_domain::providers::{
+            GenerationProvider, GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
+        };
+        use cairn_runtime::telemetry::{ExportableSpan, SpanAttributeValue, SpanExportSink};
+
+        #[derive(Clone)]
+        struct RecordingSink {
+            spans: Arc<Mutex<Vec<ExportableSpan>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl SpanExportSink for RecordingSink {
+            async fn export(&self, spans: &[ExportableSpan]) -> Result<(), String> {
+                self.spans
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .extend_from_slice(spans);
+                Ok(())
+            }
+        }
+
+        struct CompleteRunProvider;
+
+        #[async_trait::async_trait]
+        impl GenerationProvider for CompleteRunProvider {
+            async fn generate(
+                &self,
+                model_id: &str,
+                _messages: Vec<serde_json::Value>,
+                _settings: &ProviderBindingSettings,
+            ) -> Result<GenerationResponse, ProviderAdapterError> {
+                Ok(GenerationResponse {
+                    text: serde_json::json!([{
+                        "action_type": "complete_run",
+                        "description": "done",
+                        "confidence": 0.98
+                    }])
+                    .to_string(),
+                    input_tokens: Some(42),
+                    output_tokens: Some(17),
+                    model_id: model_id.to_owned(),
+                    tool_calls: vec![],
+                })
+            }
+        }
+
+        let captured_spans = Arc::new(Mutex::new(Vec::<ExportableSpan>::new()));
+        let mut app_state = AppState::new(BootstrapConfig::default()).await.unwrap();
+        app_state.otlp_exporter = Arc::new(cairn_runtime::telemetry::OtlpExporter::new(
+            OtlpConfig {
+                enabled: true,
+                service_name: "cairn-test".to_owned(),
+                ..Default::default()
+            },
+            Box::new(RecordingSink {
+                spans: captured_spans.clone(),
+            }),
+        ));
+        app_state.brain_provider = Some(Arc::new(CompleteRunProvider));
+        let state = Arc::new(app_state);
+        register_token(&state, "otlp-token");
+
+        let create_session = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/sessions",
+            "otlp-token",
+            serde_json::json!({
+                "tenant_id": DEFAULT_TENANT_ID,
+                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "project_id": DEFAULT_PROJECT_ID,
+                "session_id": "sess_otlp_1"
+            }),
+        )
+        .await;
+        assert_eq!(create_session.status(), StatusCode::CREATED);
+
+        let create_run = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/runs",
+            "otlp-token",
+            serde_json::json!({
+                "tenant_id": DEFAULT_TENANT_ID,
+                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "project_id": DEFAULT_PROJECT_ID,
+                "session_id": "sess_otlp_1",
+                "run_id": "run_otlp_1"
+            }),
+        )
+        .await;
+        assert_eq!(create_run.status(), StatusCode::CREATED);
+
+        let orchestrate_response = post_json(
+            AppBootstrap::build_router(state),
+            "/v1/runs/run_otlp_1/orchestrate",
+            "otlp-token",
+            serde_json::json!({
+                "goal": "Finish immediately",
+                "model_id": "test-brain",
+                "max_iterations": 1
+            }),
+        )
+        .await;
+        assert_eq!(orchestrate_response.status(), StatusCode::OK);
+        let orchestrate_body = response_json(orchestrate_response).await;
+        assert_eq!(orchestrate_body["termination"], "completed");
+
+        let spans = captured_spans
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert!(
+            spans.iter().any(|span| span.name == "run.created"
+                && matches!(
+                    span.attributes.get("service.name"),
+                    Some(SpanAttributeValue::String(service)) if service == "cairn-test"
+                )),
+            "expected run.created span with service.name attribute: {spans:?}"
+        );
+        assert!(
+            spans.iter().any(|span| span.name == "llm:test-brain"
+                && matches!(
+                    span.attributes.get("gen_ai.operation.name"),
+                    Some(SpanAttributeValue::String(name)) if name == "chat"
+                )
+                && matches!(
+                    span.attributes.get("gen_ai.request.model"),
+                    Some(SpanAttributeValue::String(model)) if model == "test-brain"
+                )
+                && matches!(
+                    span.attributes.get("gen_ai.usage.input_tokens"),
+                    Some(SpanAttributeValue::Int(42))
+                )
+                && matches!(
+                    span.attributes.get("gen_ai.usage.output_tokens"),
+                    Some(SpanAttributeValue::Int(17))
+                )),
+            "expected provider span with GenAI attributes: {spans:?}"
+        );
     }
 
     #[tokio::test]
