@@ -2,8 +2,8 @@
 
 use cairn_domain::recovery::{CheckpointKind, RetrySafety};
 use cairn_runtime::startup::{
-    recovery_dispatch_decision, BranchState, CachedToolResult, CheckpointMeta,
-    ReadinessState, RecoveryDispatchDecision, RecoverySummary, ToolCallId, ToolCallResultCache,
+    recovery_dispatch_decision, BranchState, CachedToolResult, CheckpointMeta, ReadinessState,
+    RecoveryDispatchDecision, RecoverySummary, ToolCallId, ToolCallResultCache,
 };
 
 // ── RFC 020 Invariant 5: Two checkpoints per iteration ──────────────────────
@@ -80,7 +80,13 @@ fn rfc020_idempotent_safe_retries_silently() {
 #[test]
 fn rfc020_dangerous_pause_requires_operator_confirmation() {
     let cache = ToolCallResultCache::new();
-    let tcid = ToolCallId::derive("run-300", 0, 0, "shell_exec", r#"{"cmd":"rm -rf /tmp/build"}"#);
+    let tcid = ToolCallId::derive(
+        "run-300",
+        0,
+        0,
+        "shell_exec",
+        r#"{"cmd":"rm -rf /tmp/build"}"#,
+    );
 
     let decision = recovery_dispatch_decision(
         &cache,
@@ -152,27 +158,27 @@ fn rfc020_readiness_flips_after_all_branches_complete() {
 
     // Simulate step 2: event log replay
     state.update_branch("2", |b| {
-        b.event_log = super::branch_complete(15234);
-        b.tool_result_cache = super::branch_complete(42);
-        b.decision_cache = super::branch_complete(87);
-        b.memory = super::branch_complete(3401);
-        b.graph = super::branch_complete(892);
-        b.evals = super::branch_complete(14);
-        b.webhook_dedup = super::branch_complete(156);
-        b.triggers = super::branch_complete(5);
+        b.event_log = branch_complete(15234);
+        b.tool_result_cache = branch_complete(42);
+        b.decision_cache = branch_complete(87);
+        b.memory = branch_complete(3401);
+        b.graph = branch_complete(892);
+        b.evals = branch_complete(14);
+        b.webhook_dedup = branch_complete(156);
+        b.triggers = branch_complete(5);
     });
 
     // Step 3: parallel branches
     state.update_branch("3", |b| {
-        b.repo_store = super::branch_complete(3);
-        b.plugin_host = super::branch_complete(1);
-        b.providers = super::branch_complete(2);
+        b.repo_store = branch_complete(3);
+        b.plugin_host = branch_complete(1);
+        b.providers = branch_complete(2);
     });
 
     // Step 4: sequential recovery
     state.update_branch("4b", |b| {
-        b.sandboxes = super::branch_complete(4);
-        b.runs = super::branch_complete(7);
+        b.sandboxes = branch_complete(4);
+        b.runs = branch_complete(7);
     });
 
     // Flip ready

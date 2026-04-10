@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cairn_domain::decisions::{DecisionKind, DecisionOutcome, RunMode};
+use cairn_domain::decisions::RunMode;
 use cairn_domain::ids::{
     ApprovalId, DecisionId, OperatorId, RunId, RunTemplateId, SignalId, TriggerId,
 };
