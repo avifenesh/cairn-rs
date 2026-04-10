@@ -138,9 +138,10 @@ function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
 
   const mutation = useMutation({
     mutationFn: () => {
+      const pfx = prefix.trim() || `run-${Date.now()}-`;
       const runs = Array.from({ length: count }, (_, i) => ({
-        session_id:   sessionId.trim() || "session_1",
-        run_id:       prefix.trim() ? `${prefix.trim()}${i + 1}` : undefined,
+        session_id:   sessionId.trim() || `sess_${Date.now()}`,
+        run_id:       `${pfx}${i + 1}`,
       }));
       return defaultApi.batchCreateRuns(runs);
     },

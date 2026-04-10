@@ -343,7 +343,11 @@ export function CommandPalette({ onNavigate }: CommandPaletteProps) {
       label:       'New Run',
       description: 'Start a new agent run and open Runs',
       icon:        Play,
-      action:      () => { void defaultApi.createRun({}); onNavigate('runs'); },
+      action:      () => {
+        const id = `run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        void defaultApi.createRun({ run_id: id, session_id: `sess_${Date.now()}` });
+        onNavigate('runs');
+      },
     },
     {
       kind:        'action',
