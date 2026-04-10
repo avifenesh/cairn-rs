@@ -532,7 +532,7 @@ export function GanttView({ runStart, runEnd, tasks }: GanttProps) {
               className="absolute top-0 h-full flex items-end pb-0.5"
               style={{ left: `${left}%` }}
             >
-              <div className="w-px h-2 bg-zinc-700 mb-0.5" />
+              <div className="w-px h-2 bg-gray-300 dark:bg-zinc-700 mb-0.5" />
               <span className="text-[9px] font-mono text-gray-400 dark:text-zinc-600 ml-0.5 whitespace-nowrap">
                 +{fmtDur(t - runStart)}
               </span>

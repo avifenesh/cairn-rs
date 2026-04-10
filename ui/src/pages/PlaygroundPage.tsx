@@ -254,7 +254,7 @@ function parseInline(text: string, depth = 0): React.ReactNode {
     // Inline code: `code`
     { re: /`([^`\n]+)`/,
       render: (m) => (
-        <code className="font-mono text-[11.5px] bg-zinc-700/70 text-amber-300 px-1 py-px rounded mx-0.5">
+        <code className="font-mono text-[11.5px] bg-gray-200 dark:bg-zinc-700/70 text-amber-700 dark:text-amber-300 px-1 py-px rounded mx-0.5">
           {m[1]}
         </code>
       ),
@@ -990,7 +990,7 @@ export function PlaygroundPage() {
 
   const { data: connectionsData } = useQuery({
     queryKey: ["provider-connections"],
-    queryFn:  () => defaultApi.listProviderConnections("default"),
+    queryFn:  () => defaultApi.listProviderConnections(),
     retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
   });
 

@@ -306,7 +306,7 @@ function MetricsUnavailable() {
           "The metrics middleware has not yet recorded any requests",
         ].map((msg, i) => (
           <li key={i} className="flex items-start gap-2 text-[12px] text-gray-400 dark:text-zinc-500">
-            <span className="mt-1.5 h-1 w-1 rounded-full bg-zinc-700 shrink-0" />
+            <span className="mt-1.5 h-1 w-1 rounded-full bg-gray-400 dark:bg-zinc-700 shrink-0" />
             {msg}
           </li>
         ))}
