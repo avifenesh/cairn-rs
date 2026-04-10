@@ -127,7 +127,6 @@ function SystemInfoSections({ info }: { info: SystemInfo }) {
       {/* Features */}
       <Section title="Features">
         <FeatureRow label="WebSocket transport"      enabled={info.features.websocket_enabled} />
-        <FeatureRow label="Ollama connected"         enabled={info.features.ollama_connected} />
         <FeatureRow label="PostgreSQL backend"       enabled={info.features.postgres_enabled} />
         <FeatureRow label="SQLite backend"           enabled={info.features.sqlite_enabled} />
         <FeatureRow label="Store type"               value={info.features.store_type} />
@@ -153,14 +152,6 @@ function SystemInfoSections({ info }: { info: SystemInfo }) {
                 <X size={10} strokeWidth={2} /> Not set
               </span>
             )
-          }
-        />
-        <KV
-          label="Ollama host"
-          value={
-            <span className="font-mono text-[12px] text-gray-500 dark:text-zinc-400 truncate max-w-[200px]" title={info.environment.ollama_host}>
-              {info.environment.ollama_host}
-            </span>
           }
         />
         <KV label="Uptime"      value={(() => {
@@ -231,21 +222,6 @@ function EnvVarsSection({
       } />,
       default_:    '(none)',
       description: 'Bearer token for admin API authentication. Required for all /v1/* requests.',
-      secret: true,
-    },
-    {
-      name: 'OLLAMA_HOST',
-      current: info?.environment.ollama_host
-        ? <EnvValue value={info.environment.ollama_host} />
-        : <SecretChip status="unset" />,
-      default_:    '(none)',
-      description: 'Base URL for the local Ollama API. Enables LLM generation, embedding, and model management.',
-    },
-    {
-      name: 'OPENROUTER_API_KEY',
-      current: <SecretChip status="unknown" />,
-      default_:    '(none)',
-      description: 'API key for OpenRouter (openrouter.ai). Enables 200+ models via the OpenAI-compatible endpoint. Get a free key at openrouter.ai/settings/keys.',
       secret: true,
     },
     {
