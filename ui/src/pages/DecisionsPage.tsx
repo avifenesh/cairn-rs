@@ -136,9 +136,12 @@ export function DecisionsPage() {
     <div className="p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Decisions</p>
-          <HelpTooltip text="Unified decision layer (RFC 019). Every tool invocation, trigger fire, and plugin enablement goes through policy evaluation before proceeding." placement="right" />
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Decisions</p>
+            <HelpTooltip text="Unified decision layer (RFC 019). Every tool invocation, trigger fire, and plugin enablement goes through policy evaluation before proceeding." placement="right" />
+          </div>
+          <p className="text-[11px] text-gray-500 dark:text-zinc-400">Implements RFC 019 — Unified Decision Layer.</p>
         </div>
         <div className="flex items-center gap-2">
           {tab === "cache" && cacheEntries.length > 0 && (

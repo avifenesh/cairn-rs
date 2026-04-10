@@ -365,6 +365,7 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
         <div className="flex items-center gap-2">
           <FileText size={14} className="text-indigo-400" />
           <span className="text-[13px] font-medium text-indigo-200">Plan Mode</span>
+          <span className="text-[10px] text-indigo-300/70">RFC 018 — Plan/Execute Review</span>
           {planApproved && (
             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-950 text-emerald-300 border border-emerald-800/50">
               Approved

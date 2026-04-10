@@ -769,6 +769,7 @@ export function GraphPage() {
       <div className="flex items-center gap-3 px-5 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
         <Network size={13} className="text-indigo-400 shrink-0" />
         <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Knowledge Graph</span>
+        <span className="text-[10px] text-gray-300 dark:text-zinc-600">Implements RFC 015</span>
 
         <div className="ml-4 flex items-center gap-0.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 p-0.5">
           {(["simulation", "schema"] as View[]).map((nextView) => (

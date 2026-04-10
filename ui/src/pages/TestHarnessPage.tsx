@@ -10,7 +10,7 @@
 import { useState, useRef, useCallback, useMemo } from "react";
 import {
   FlaskConical, Play, CheckCircle2, XCircle, Loader2, ChevronDown,
-  ChevronRight, RefreshCw, Clock, Zap, AlertTriangle, Code2,
+  ChevronRight, Clock, Zap, AlertTriangle,
   RotateCcw,
 } from "lucide-react";
 import { clsx } from "clsx";

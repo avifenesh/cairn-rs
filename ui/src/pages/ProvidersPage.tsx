@@ -506,14 +506,26 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
   const removeModel = (m: string) => setModels(prev => prev.filter(x => x !== m));
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      defaultApi.createProviderConnection({
+    mutationFn: async () => {
+      let credentialId: string | undefined;
+      if (apiKey.trim()) {
+        const stored = await defaultApi.storeCredential(scope.tenant_id, {
+          provider_id: connectionId.trim(),
+          plaintext_value: apiKey,
+        });
+        credentialId = stored.id;
+      }
+
+      return defaultApi.createProviderConnection({
         tenant_id: scope.tenant_id,
         provider_connection_id: connectionId.trim(),
         provider_family: family.trim(),
         adapter_type: adapter.trim(),
         supported_models: models,
-      }),
+        credential_id: credentialId,
+        endpoint_url: baseUrl.trim() || undefined,
+      });
+    },
     onSuccess: () => {
       toast.success(`Provider "${connectionId}" registered.`);
       onCreated();
@@ -821,13 +833,15 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
 
   const handleDelete = (id: string) => {
     if (!confirm(`Delete connection "${id}"?`)) return;
-    fetch(`/v1/providers/connections/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${localStorage.getItem("cairn_token") ?? ""}` },
-    }).then(r => {
-      if (r.ok) { toast.success(`Connection ${id} deleted.`); refetch(); }
-      else toast.error(`Delete failed (HTTP ${r.status}).`);
-    }).catch(() => toast.error("Delete failed — network error."));
+    defaultApi
+      .deleteProviderConnection(id)
+      .then(() => {
+        toast.success(`Connection ${id} deleted.`);
+        refetch();
+      })
+      .catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : "Delete failed.");
+      });
   };
 
   return (
@@ -951,43 +965,16 @@ export function ProvidersPage() {
     void qc.invalidateQueries({ queryKey: ["providers-health"] });
   };
 
-  // Env-configured providers from the registry (OpenRouter, Bedrock, etc.)
-  const { data: registryData } = useQuery({
-    queryKey: ["provider-registry"],
-    queryFn: () => defaultApi.getProviderRegistry(),
-    staleTime: 120_000,
-  });
-  const envProviders = (registryData ?? []).filter(p => p.available);
-
   return (
     <div className="p-6 space-y-6">
-      {/* Env-configured providers (from env vars) */}
-      {envProviders.length > 0 && (
-        <section className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-white dark:bg-[#111113] p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
-              Configured Providers ({envProviders.length})
-            </p>
-          </div>
-          <div className="grid gap-2">
-            {envProviders.map(p => (
-              <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                  <span className="text-[13px] font-medium text-gray-700 dark:text-zinc-300">{p.name}</span>
-                  <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">{p.api_base}</span>
-                </div>
-                <span className="text-[11px] text-gray-400 dark:text-zinc-600">
-                  {p.models.length} model{p.models.length !== 1 ? "s" : ""}
-                </span>
-              </div>
-            ))}
-          </div>
-          <p className="text-[10px] text-gray-300 dark:text-zinc-600">
-            Activated via environment variables. Manage API keys in your .env file.
-          </p>
-        </section>
-      )}
+      <div className="space-y-1">
+        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
+          Providers
+        </p>
+        <p className="text-[12px] text-gray-500 dark:text-zinc-400">
+          Only real provider connections registered for the current scope appear here.
+        </p>
+      </div>
 
       {/* User-created connections with Add Provider button */}
       <ConnectionsSection onAdd={() => setShowAddModal(true)} />

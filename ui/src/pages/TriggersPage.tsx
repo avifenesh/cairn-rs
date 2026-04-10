@@ -147,9 +147,12 @@ export function TriggersPage() {
     <div className="p-6 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Triggers</p>
-          <HelpTooltip text="Signal-to-run bindings (RFC 022). When a signal arrives matching a trigger's pattern, a run is created from the linked template." placement="right" />
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Triggers</p>
+            <HelpTooltip text="Signal-to-run bindings (RFC 022). When a signal arrives matching a trigger's pattern, a run is created from the linked template." placement="right" />
+          </div>
+          <p className="text-[11px] text-gray-500 dark:text-zinc-400">Implements RFC 022 — Trigger-Based Automation.</p>
         </div>
         <button onClick={() => triggersQ.refetch()} className="flex items-center gap-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:bg-white/5 transition-colors">
           <RefreshCw size={11} className={clsx(triggersQ.isFetching && "animate-spin")} /> Refresh
