@@ -1144,13 +1144,47 @@ function NotificationPreferencesSection() {
   );
 }
 
+function ModelPicker({ local, setLocal }: { local: string; setLocal: (v: string) => void }) {
+  const { data: registry } = useQuery({
+    queryKey: ["provider-registry"],
+    queryFn: () => defaultApi.getProviderRegistry(),
+    staleTime: 120_000,
+    retry: false,
+  });
+
+  // Collect all known model IDs from registry entries
+  const models: string[] = (registry ?? [])
+    .flatMap((entry: { known_models?: string[] }) => entry.known_models ?? [])
+    .filter((m: string, i: number, arr: string[]) => arr.indexOf(m) === i)
+    .sort();
+
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        value={local}
+        onChange={e => setLocal(e.target.value)}
+        className="flex-1 rounded border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      >
+        <option value="">— select a model —</option>
+        {models.map(m => <option key={m} value={m}>{m}</option>)}
+      </select>
+      <input
+        value={local}
+        onChange={e => setLocal(e.target.value)}
+        placeholder="or type a model ID"
+        className="w-48 rounded border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-[12px] font-mono text-gray-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      />
+    </div>
+  );
+}
+
 function PreferencesTab() {
   return (
     <div className="max-w-3xl space-y-6">
-      {/* Section: operator defaults */}
+      {/* Section: tenant defaults */}
       <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
         <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
-          <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">Operator Defaults</p>
+          <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">Tenant Defaults</p>
           <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
             Tenant-level defaults applied when no project-level or run-level override exists.
             Changes are saved automatically when you click Save.
@@ -1159,10 +1193,10 @@ function PreferencesTab() {
         <div className="px-5 bg-gray-50/60 dark:bg-zinc-900/60">
           <PreferenceRow
             label="Default model"
-            description="Model ID used when no binding specifies one."
+            description="Model ID used when no binding specifies one. Pick from configured providers or type a custom ID."
             settingKey="default_model"
             control={(_, local, setLocal) => (
-              <PrefText local={local} setLocal={setLocal} placeholder="e.g. gemma4, gpt-4o" mono />
+              <ModelPicker local={local} setLocal={setLocal} />
             )}
           />
           <PreferenceRow
@@ -1200,8 +1234,6 @@ function PreferencesTab() {
         </div>
       </div>
 
-      <NotificationPreferencesSection />
-
       {/* Hint about future per-project overrides */}
       <p className="text-[11px] text-gray-300 dark:text-zinc-600 leading-relaxed px-1">
         These defaults apply at the tenant level.
@@ -1213,10 +1245,10 @@ function PreferencesTab() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type SettingsTab = "system" | "preferences";
+type SettingsTab = "preferences" | "defaults" | "diagnostics";
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("system");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("preferences");
 
   const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ["settings"],
@@ -1240,12 +1272,12 @@ export function SettingsPage() {
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
         <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Settings</span>
-        {activeTab === "system" && dataUpdatedAt > 0 && (
+        {activeTab === "diagnostics" && dataUpdatedAt > 0 && (
           <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">
             {new Date(dataUpdatedAt).toLocaleTimeString()}
           </span>
         )}
-        {activeTab === "system" && (
+        {activeTab === "diagnostics" && (
           <button onClick={() => refetch()} disabled={isFetching}
             className="ml-auto flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors">
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
@@ -1254,9 +1286,13 @@ export function SettingsPage() {
         )}
       </div>
 
-      {/* Tab bar */}
+      {/* Tab bar — 3 sections per manager spec */}
       <div className="flex items-center gap-1 px-4 h-9 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50/80 dark:bg-zinc-900/80">
-        {([ ["system", "System", <Server size={12} />], ["preferences", "Preferences", <SlidersHorizontal size={12} />] ] as [SettingsTab, string, React.ReactNode][]).map(([tab, label, icon]) => (
+        {([
+          ["preferences",  "Operator Preferences", <SlidersHorizontal size={12} key="pref" />],
+          ["defaults",     "Tenant Defaults",      <Server size={12} key="def" />],
+          ["diagnostics",  "System Diagnostics",   <ShieldCheck size={12} key="diag" />],
+        ] as [SettingsTab, string, React.ReactNode][]).map(([tab, label, icon]) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -1275,11 +1311,21 @@ export function SettingsPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-5">
 
-        {/* ── Preferences tab ── */}
-        {activeTab === "preferences" && <PreferencesTab />}
+        {/* ── Operator Preferences tab ── */}
+        {activeTab === "preferences" && (
+          <div className="max-w-3xl space-y-6">
+            <NotificationPreferencesSection />
+            <p className="text-[11px] text-gray-300 dark:text-zinc-600 leading-relaxed px-1">
+              Theme follows your browser/OS preference by default. Use the sun/moon toggle in the top bar to override.
+            </p>
+          </div>
+        )}
 
-        {/* ── System tab ── */}
-        {activeTab === "system" && (
+        {/* ── Tenant Defaults tab ── */}
+        {activeTab === "defaults" && <PreferencesTab />}
+
+        {/* ── System Diagnostics tab ── */}
+        {activeTab === "diagnostics" && (
           isLoading ? (
             <div className="flex items-center justify-center min-h-48 gap-2 text-gray-400 dark:text-zinc-600">
               <Loader2 size={16} className="animate-spin" />
