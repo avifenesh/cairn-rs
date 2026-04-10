@@ -48,7 +48,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::{policy::ExecutionClass, ProjectKey};
+pub use cairn_domain::decisions::ToolEffect;
+pub use cairn_domain::recovery::RetrySafety;
+use cairn_domain::{policy::ExecutionClass, ProjectKey, RuntimeEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -188,6 +190,8 @@ pub struct ToolContext {
     pub run_id: Option<String>,
     /// Working directory for file-system tools.
     pub working_dir: std::path::PathBuf,
+    /// Runtime events emitted by the tool and flushed by the caller in one batch.
+    buffered_events: Vec<RuntimeEvent>,
     /// Type-safe extension map for injecting runtime services.
     extensions: std::sync::Arc<
         std::sync::RwLock<
@@ -205,6 +209,7 @@ impl Default for ToolContext {
             session_id: None,
             run_id: None,
             working_dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            buffered_events: Vec::new(),
             extensions: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
@@ -237,6 +242,16 @@ impl ToolContext {
             .get(&std::any::TypeId::of::<T>())
             .and_then(|v| std::sync::Arc::clone(v).downcast::<T>().ok())
     }
+
+    /// Buffer a runtime event for the caller to append alongside tool completion.
+    pub fn buffer_event(&mut self, event: RuntimeEvent) {
+        self.buffered_events.push(event);
+    }
+
+    /// Drain and return all runtime events buffered during tool execution.
+    pub fn drain_buffered_events(&mut self) -> Vec<RuntimeEvent> {
+        std::mem::take(&mut self.buffered_events)
+    }
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -245,6 +260,7 @@ impl std::fmt::Debug for ToolContext {
             .field("session_id", &self.session_id)
             .field("run_id", &self.run_id)
             .field("working_dir", &self.working_dir)
+            .field("buffered_event_count", &self.buffered_events.len())
             .finish()
     }
 }
@@ -361,6 +377,21 @@ pub trait ToolHandler: Send + Sync {
         ToolCategory::Custom
     }
 
+    /// Side-effect classification (RFC 018).
+    ///
+    /// Plan mode filters: only `Observational` + `Internal` tools are visible.
+    /// Default is `External` (conservative — tools must opt in to lower classification).
+    fn tool_effect(&self) -> ToolEffect {
+        ToolEffect::External
+    }
+
+    /// Whether this tool can be safely retried after a transient failure.
+    ///
+    /// Default is `DangerousPause` (conservative — tools must opt in to retry).
+    fn retry_safety(&self) -> RetrySafety {
+        RetrySafety::DangerousPause
+    }
+
     /// Execute the tool with the given project context and parsed arguments.
     async fn execute(&self, project: &ProjectKey, args: Value) -> Result<ToolResult, ToolError>;
 
@@ -414,6 +445,10 @@ pub struct BuiltinToolDescriptor {
     pub execution_class: ExecutionClass,
     pub permission_level: PermissionLevel,
     pub category: ToolCategory,
+    /// Side-effect classification (RFC 018). Plan mode uses this to filter tools.
+    pub tool_effect: ToolEffect,
+    /// Retry safety classification for the orchestrator's retry policy.
+    pub retry_safety: RetrySafety,
 }
 
 impl BuiltinToolDescriptor {
@@ -426,6 +461,8 @@ impl BuiltinToolDescriptor {
             execution_class: h.execution_class(),
             permission_level: h.permission_level(),
             category: h.category(),
+            tool_effect: h.tool_effect(),
+            retry_safety: h.retry_safety(),
         }
     }
 
@@ -642,6 +679,7 @@ mod tests {
     extern crate self as cairn_tools;
 
     use super::*;
+    use cairn_domain::{RunCreated, RunId, RuntimeEvent, SessionId};
 
     struct CoreEcho;
     #[async_trait]
@@ -716,6 +754,24 @@ mod tests {
             .register(Arc::new(CoreEcho))
             .register(Arc::new(RegisteredSearch))
             .register(Arc::new(DeferredPlugin))
+    }
+
+    #[test]
+    fn tool_context_buffers_and_drains_events() {
+        let mut ctx = ToolContext::for_run("sess_buffer", "run_buffer");
+        let event = RuntimeEvent::RunCreated(RunCreated {
+            project: project(),
+            session_id: SessionId::new("sess_buffer"),
+            run_id: RunId::new("run_buffer"),
+            parent_run_id: None,
+            prompt_release_id: None,
+            agent_role_id: None,
+        });
+
+        ctx.buffer_event(event.clone());
+
+        assert_eq!(ctx.drain_buffered_events(), vec![event]);
+        assert!(ctx.drain_buffered_events().is_empty());
     }
 
     // ── ToolResult ────────────────────────────────────────────────────────────
