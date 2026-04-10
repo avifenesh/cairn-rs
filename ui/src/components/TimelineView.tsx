@@ -486,7 +486,7 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
           ))}
         {tasks && tasks.length > 0 && (
           <>
-            <span className="text-zinc-800 text-[10px]">|</span>
+            <span className="text-gray-300 dark:text-zinc-600 text-[10px]">|</span>
             <span className="text-[10px] text-gray-300 dark:text-zinc-600 italic">smaller bars = tasks</span>
           </>
         )}

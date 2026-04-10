@@ -372,7 +372,7 @@ function KanbanColumn({ state, tasks }: { state: TaskState; tasks: TaskRecord[] 
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5 bg-white dark:bg-zinc-950/30 min-h-[80px]">
         {shown.length === 0 ? (
           <div className="flex items-center justify-center h-12">
-            <span className="text-[10px] text-zinc-800">empty</span>
+            <span className="text-[10px] text-gray-400 dark:text-zinc-600">empty</span>
           </div>
         ) : (
           <>

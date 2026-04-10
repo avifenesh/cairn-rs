@@ -156,7 +156,7 @@ function PresenceDots({ entries }: { entries: PresenceEntry[] }) {
         />
       ))}
       {overflow > 0 && (
-        <span className="text-[9px] text-zinc-600 font-mono leading-none">+{overflow}</span>
+        <span className="text-[9px] text-gray-400 dark:text-zinc-600 font-mono leading-none">+{overflow}</span>
       )}
     </span>
   );

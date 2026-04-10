@@ -50,7 +50,7 @@ export function HelpTooltip({ text, placement = 'top', className }: HelpTooltipP
       <span
         className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full
                    text-[9px] font-bold leading-none cursor-help select-none
-                   bg-zinc-700/60 text-gray-400 dark:text-zinc-500
+                   bg-gray-200/60 dark:bg-zinc-700/60 text-gray-400 dark:text-zinc-500
                    group-hover/tooltip:bg-indigo-500/20 group-hover/tooltip:text-indigo-400
                    transition-colors"
         aria-hidden="true"

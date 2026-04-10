@@ -504,7 +504,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
             <span className="text-[11px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider font-medium">
               {scenario.group}
             </span>
-            <span className="text-[10px] text-zinc-800">·</span>
+            <span className="text-[10px] text-gray-300 dark:text-zinc-600">·</span>
             <p className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">{scenario.label}</p>
           </div>
           <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-0.5">{scenario.description}</p>

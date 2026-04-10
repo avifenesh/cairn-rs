@@ -98,7 +98,7 @@ function SkeletonRows() {
 function EmptyState({ filtered }: { filtered: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 gap-2 text-gray-300 dark:text-zinc-600">
-      <Shield size={28} className="text-zinc-800" />
+      <Shield size={28} className="text-gray-300 dark:text-zinc-600" />
       <p className="text-[13px]">
         {filtered ? "No entries match this filter" : "No audit log entries yet"}
       </p>

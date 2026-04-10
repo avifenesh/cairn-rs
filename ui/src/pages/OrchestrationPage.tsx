@@ -542,7 +542,7 @@ export function OrchestrationPage() {
           >
             Expand all
           </button>
-          <span className="text-zinc-800 text-[11px]">·</span>
+          <span className="text-gray-300 dark:text-zinc-600 text-[11px]">·</span>
           <button
             onClick={collapseAll}
             className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
