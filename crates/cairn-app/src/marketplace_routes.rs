@@ -195,9 +195,9 @@ pub async fn verify_credentials_handler(
     body: Option<Json<VerifyCredentialsRequest>>,
 ) -> impl IntoResponse {
     let operator = operator_id_from_state(&state);
-    let marketplace = state.marketplace.lock().unwrap();
+    let mut marketplace = state.marketplace.lock().unwrap();
 
-    let scope_key = body.and_then(|b| {
+    let scope_key = body.and_then(|Json(b)| {
         b.credential_scope_key.map(|k| {
             cairn_runtime::services::marketplace_service::CredentialScopeKey(k)
         })
@@ -232,7 +232,7 @@ pub async fn enable_plugin_handler(
     let mut marketplace = state.marketplace.lock().unwrap();
 
     // TODO: resolve full ProjectKey from project_id via project service
-    let project = cairn_domain::tenancy::ProjectKey::new("default", "default", &project_id);
+    let project = cairn_domain::tenancy::ProjectKey::new("default", "default", project_id.as_str());
 
     let (tool_allowlist, signal_allowlist, signal_capture_override) = match body {
         Some(Json(b)) => (b.tool_allowlist, b.signal_allowlist, b.signal_capture_override),
@@ -268,7 +268,7 @@ pub async fn disable_plugin_handler(
     let operator = operator_id_from_state(&state);
     let mut marketplace = state.marketplace.lock().unwrap();
 
-    let project = cairn_domain::tenancy::ProjectKey::new("default", "default", &project_id);
+    let project = cairn_domain::tenancy::ProjectKey::new("default", "default", project_id.as_str());
 
     match marketplace.handle_command(MarketplaceCommand::DisablePluginForProject {
         plugin_id,
