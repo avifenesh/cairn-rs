@@ -26,6 +26,7 @@ import {
   User,
   BarChart2,
   Waves,
+  Scale,
   Zap,
   CheckSquare,
   Bot,
@@ -65,6 +66,8 @@ export type NavPage =
   | 'api-docs'
   | 'test-harness'
   | 'settings'
+  | 'triggers'
+  | 'decisions'
   | 'deployment'
   | 'profile';
 
@@ -98,6 +101,8 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'workers',        label: 'Workers',        icon: Cpu       },
       { id: 'orchestration',  label: 'Orchestration',  icon: GitBranch },
       { id: 'approvals',        label: 'Approvals',        icon: CheckSquare },
+      { id: 'triggers',         label: 'Triggers',         icon: Zap         },
+      { id: 'decisions',        label: 'Decisions',        icon: Scale       },
       { id: 'prompts',          label: 'Prompts',          icon: FileText    },
       { id: 'agent-templates',  label: 'Agent Templates',  icon: Bot         },
     ],

@@ -32,6 +32,8 @@ const CostCalculatorPage = lazy(() => import('./pages/CostCalculatorPage').then(
 const MemoryPage         = lazy(() => import('./pages/MemoryPage').then(m => ({ default: m.MemoryPage })));
 const ProvidersPage      = lazy(() => import('./pages/ProvidersPage').then(m => ({ default: m.ProvidersPage })));
 const PluginsPage        = lazy(() => import('./pages/PluginsPage').then(m => ({ default: m.PluginsPage })));
+const TriggersPage       = lazy(() => import('./pages/TriggersPage').then(m => ({ default: m.TriggersPage })));
+const DecisionsPage      = lazy(() => import('./pages/DecisionsPage').then(m => ({ default: m.DecisionsPage })));
 const SourcesPage        = lazy(() => import('./pages/SourcesPage').then(m => ({ default: m.SourcesPage })));
 const CredentialsPage    = lazy(() => import('./pages/CredentialsPage').then(m => ({ default: m.CredentialsPage })));
 const ChannelsPage       = lazy(() => import('./pages/ChannelsPage').then(m => ({ default: m.ChannelsPage })));
@@ -135,6 +137,8 @@ function renderRoute(route: Route): React.ReactNode {
       case 'cost-calc':   return <CostCalculatorPage />;
       case 'traces':      return <TracesPage />;
       case 'plugins':     return <PluginsPage />;
+      case 'triggers':    return <TriggersPage />;
+      case 'decisions':   return <DecisionsPage />;
       case 'sources':     return <SourcesPage />;
       case 'credentials': return <CredentialsPage />;
       case 'channels':    return <ChannelsPage />;
