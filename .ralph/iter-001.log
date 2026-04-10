@@ -1,9 +1,0 @@
-**Iteration complete: RFC 002 Phase 1 — Gap analysis**
-
-Summary of findings:
-- The 7 `full_history` entities (session, run, task, approval, checkpoint, mailbox, tool invocation) are **fully implemented** across all 3 crates with commands, events, projections, and services.
-- **Primary gap**: The **signal event** entity is completely missing — no ID, no types, no commands/events, no projections. RFC 002 classifies it as `current_state_plus_audit` and requires a "signal feed" projection.
-- **Minor gap**: Terminal operation commands (`CompleteRun`, `FailRun`, `CompleteTask`, `FailTask`, etc.) are handled by service methods but not encoded as `RuntimeCommand` variants, creating an asymmetry with pause/resume.
-- Cross-RFC entities (memory ingest, prompt release, eval run) are deferred to their respective RFCs.
-
-**Next iteration**: Phase 2 — Add signal event types and traits.
