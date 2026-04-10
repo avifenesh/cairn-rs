@@ -1735,4 +1735,135 @@ mod tests {
         let event = svc.get_decision(&result.decision_id).await.unwrap();
         assert!(event.is_some());
     }
+
+    // ── RFC 019 sealed integration tests (compliance) ───────────────────
+
+    /// RFC 019 test #2: semantic difference produces different cache keys.
+    #[tokio::test]
+    async fn cache_miss_by_semantic_difference() {
+        let svc = DecisionServiceImpl::new();
+        // First: approve grep_search (Observational).
+        let r1 = svc.evaluate(observational_request()).await.unwrap();
+        assert_eq!(r1.outcome, DecisionOutcome::Allowed);
+        // Second: different tool → different semantic hash → cache miss.
+        let mut req2 = observational_request();
+        req2.kind = DecisionKind::ToolInvocation {
+            tool_name: "file_read".into(),
+            effect: ToolEffect::Observational,
+        };
+        req2.correlation_id = CorrelationId::new("cor_diff");
+        let r2 = svc.evaluate(req2).await.unwrap();
+        // Must be a fresh evaluation, NOT a cache hit from the first.
+        if let DecisionEvent::DecisionRecorded { source, .. } = &r2.event {
+            assert!(
+                matches!(source, DecisionSource::FreshEvaluation),
+                "different tool must produce a cache miss, not a hit"
+            );
+        }
+    }
+
+    /// RFC 019 test #3: scope isolation — P1 cache does not apply to P2.
+    #[tokio::test]
+    async fn scope_isolation_different_projects() {
+        let svc = DecisionServiceImpl::new();
+        // Cache a decision for project P1.
+        let r1 = svc.evaluate(observational_request()).await.unwrap();
+        assert_eq!(r1.outcome, DecisionOutcome::Allowed);
+        // Same tool, different project P2.
+        let mut req2 = observational_request();
+        req2.scope = ProjectKey::new("t", "w", "p2");
+        req2.correlation_id = CorrelationId::new("cor_p2");
+        let r2 = svc.evaluate(req2).await.unwrap();
+        if let DecisionEvent::DecisionRecorded { source, .. } = &r2.event {
+            assert!(
+                matches!(source, DecisionSource::FreshEvaluation),
+                "different project must not share cache"
+            );
+        }
+    }
+
+    /// RFC 019 test #8: guardian decision tagged with Guardian source.
+    #[tokio::test]
+    async fn guardian_decision_cached_with_guardian_source() {
+        struct EscalateGuard;
+        #[async_trait]
+        impl GuardrailChecker for EscalateGuard {
+            async fn check(&self, _: &DecisionRequest) -> GuardrailCheckResult {
+                GuardrailCheckResult {
+                    outcome: GuardrailCheckOutcome::Escalate,
+                    rule_ids: vec![],
+                }
+            }
+        }
+        struct GuardianApprover;
+        #[async_trait]
+        impl ApprovalResolver for GuardianApprover {
+            async fn resolve(&self, _: &DecisionRequest) -> (DecisionOutcome, DecisionSource) {
+                (
+                    DecisionOutcome::Allowed,
+                    DecisionSource::Guardian {
+                        model_id: "guardian-gpt".into(),
+                    },
+                )
+            }
+        }
+        let svc = DecisionServiceImpl::with_services(
+            Arc::new(AllowAllScopeChecker),
+            Arc::new(AllowAllVisibilityChecker),
+            Arc::new(EscalateGuard),
+            Arc::new(AllowAllBudgetChecker),
+            Arc::new(GuardianApprover),
+        );
+        let r1 = svc.evaluate(sample_request()).await.unwrap();
+        assert_eq!(r1.outcome, DecisionOutcome::Allowed);
+        if let DecisionEvent::DecisionRecorded { source, .. } = &r1.event {
+            assert!(
+                matches!(source, DecisionSource::Guardian { .. }),
+                "guardian-resolved decisions must be tagged Guardian"
+            );
+        }
+    }
+
+    /// RFC 019 test #10: expired cache entry treated as miss.
+    #[tokio::test]
+    async fn cache_expiry_treated_as_miss() {
+        let svc = DecisionServiceImpl::new();
+        // Write a cache entry with 0 TTL by using a custom policy.
+        // PluginEnablement has NeverCache, so we use an external tool
+        // that has CacheIfApproved + 4h TTL. Instead, we manually test
+        // the cache lookup with an expired entry.
+        let key = DecisionKey {
+            kind_tag: "tool_invocation".into(),
+            scope_ref: DecisionScopeRef::Project(ProjectKey::new("t", "w", "p")),
+            semantic_hash: "expired_test".into(),
+        };
+        // Install an entry that's already expired (expires_at = 0).
+        {
+            let ck = crate::decisions::DecisionCache::cache_key_string(&key);
+            svc.cache
+                .entries
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    ck,
+                    crate::decisions::CacheEntry {
+                        decision_id: DecisionId::new("dec_expired"),
+                        outcome: Some(DecisionOutcome::Allowed),
+                        source: Some(DecisionSource::FreshEvaluation),
+                        #[allow(dead_code)]
+                        reasoning_chain: vec![],
+                        expires_at: 1, // epoch ms 1 = long expired
+                        created_at: 0,
+                        hit_count: 0,
+                        is_pending: false,
+                    },
+                );
+        }
+        // Lookup should return Miss (expired).
+        let state = svc.cache_lookup(&key).await.unwrap();
+        assert!(
+            matches!(state, CacheEntryState::Miss),
+            "expired entry must be treated as miss"
+        );
+    }
 }

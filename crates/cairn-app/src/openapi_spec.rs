@@ -1043,6 +1043,132 @@ pub const OPENAPI_JSON: &str = r##"{
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
         "responses": { "200": { "description": "Marked read" } }
       }
+    },
+    "/v1/decisions": {
+      "get": {
+        "tags": ["Decisions"],
+        "summary": "List recent decisions (RFC 019)",
+        "operationId": "listDecisions",
+        "responses": { "200": { "description": "Decision list" } }
+      }
+    },
+    "/v1/decisions/cache": {
+      "get": {
+        "tags": ["Decisions"],
+        "summary": "List active cached decisions (learned rules)",
+        "operationId": "listDecisionCache",
+        "responses": { "200": { "description": "Cached decisions" } }
+      }
+    },
+    "/v1/decisions/{id}": {
+      "get": {
+        "tags": ["Decisions"],
+        "summary": "Get decision with full reasoning chain",
+        "operationId": "getDecision",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Decision detail" } }
+      }
+    },
+    "/v1/decisions/{id}/invalidate": {
+      "post": {
+        "tags": ["Decisions"],
+        "summary": "Invalidate a specific cached decision",
+        "operationId": "invalidateDecision",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Invalidated" } }
+      }
+    },
+    "/v1/decisions/invalidate": {
+      "post": {
+        "tags": ["Decisions"],
+        "summary": "Bulk invalidate by scope and kind",
+        "operationId": "bulkInvalidateDecisions",
+        "responses": { "200": { "description": "Invalidation count" } }
+      }
+    },
+    "/v1/decisions/invalidate-by-rule": {
+      "post": {
+        "tags": ["Decisions"],
+        "summary": "Invalidate decisions referencing a guardrail rule",
+        "operationId": "invalidateByRule",
+        "responses": { "200": { "description": "Invalidation count" } }
+      }
+    },
+    "/v1/runs/{id}/approve": {
+      "post": {
+        "tags": ["Plan Review"],
+        "summary": "Approve a plan artifact (RFC 018)",
+        "operationId": "approvePlan",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Approved, next_step: create_execute_run" } }
+      }
+    },
+    "/v1/runs/{id}/reject": {
+      "post": {
+        "tags": ["Plan Review"],
+        "summary": "Reject a plan artifact",
+        "operationId": "rejectPlan",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Rejected" } }
+      }
+    },
+    "/v1/runs/{id}/revise": {
+      "post": {
+        "tags": ["Plan Review"],
+        "summary": "Request plan revision, creates new Plan-mode run",
+        "operationId": "revisePlan",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "201": { "description": "New plan run created" } }
+      }
+    },
+    "/v1/sqeq/initialize": {
+      "post": {
+        "tags": ["SQ/EQ Protocol"],
+        "summary": "Initialize SQ/EQ transport session (RFC 021)",
+        "operationId": "sqeqInitialize",
+        "responses": { "200": { "description": "Session established" } }
+      }
+    },
+    "/v1/sqeq/submit": {
+      "post": {
+        "tags": ["SQ/EQ Protocol"],
+        "summary": "Submit a command via SQ/EQ",
+        "operationId": "sqeqSubmit",
+        "responses": { "202": { "description": "Submission accepted" } }
+      }
+    },
+    "/v1/sqeq/events": {
+      "get": {
+        "tags": ["SQ/EQ Protocol"],
+        "summary": "SSE event stream with scope filtering",
+        "operationId": "sqeqEvents",
+        "responses": { "200": { "description": "Event stream" } }
+      }
+    },
+    "/.well-known/agent.json": {
+      "get": {
+        "tags": ["A2A"],
+        "summary": "A2A Agent Card (RFC 021)",
+        "operationId": "a2aAgentCard",
+        "responses": { "200": { "description": "Agent Card JSON" } }
+      }
+    },
+    "/v1/a2a/tasks": {
+      "post": {
+        "tags": ["A2A"],
+        "summary": "Submit an A2A task",
+        "operationId": "a2aSubmitTask",
+        "responses": { "201": { "description": "Task submitted" } }
+      }
+    },
+    "/v1/a2a/tasks/{id}": {
+      "get": {
+        "tags": ["A2A"],
+        "summary": "Get A2A task status",
+        "operationId": "a2aGetTask",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Task status" } }
+      }
     }
   }
 }"##;
