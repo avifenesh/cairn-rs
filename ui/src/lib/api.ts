@@ -105,6 +105,17 @@ function unwrapList<T>(data: unknown): T[] {
   return [];
 }
 
+/**
+ * The server may return a run endpoint as either a bare `RunRecord` or an
+ * envelope such as `{ run, tasks }`. Normalize both into the canonical run.
+ */
+function unwrapRun(data: unknown): RunRecord {
+  if (data && typeof data === "object" && "run" in data) {
+    return (data as { run: RunRecord }).run;
+  }
+  return data as RunRecord;
+}
+
 // ── Prometheus text parser ────────────────────────────────────────────────────
 
 /**
@@ -369,7 +380,12 @@ export function createApiClient(config: ApiClientConfig) {
     },
 
     /** GET /v1/runs/:id — fetch a single run by ID. */
-    getRun: (runId: string): Promise<RunRecord> => get(`/v1/runs/${runId}`),
+    getRun: async (runId: string): Promise<RunRecord> => {
+      const raw = await get<RunRecord | { run: RunRecord; tasks?: import("./types").TaskRecord[] }>(
+        `/v1/runs/${encodeURIComponent(runId)}`,
+      );
+      return unwrapRun(raw);
+    },
 
     // ── Workspaces ────────────────────────────────────────────────────────────
 
@@ -394,7 +410,13 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/runs/:id/events — event timeline for a run. */
     getRunEvents: async (runId: string, limit = 100): Promise<import("./types").RunEventSummary[]> => {
-      const raw = await get<unknown>(`/v1/runs/${runId}/events?limit=${limit}`);
+      let raw: unknown;
+      try {
+        raw = await get<unknown>(`/v1/runs/${encodeURIComponent(runId)}/events?limit=${limit}`);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return [];
+        throw e;
+      }
       // The backend returns { events: [...], next_cursor, has_more } (EventsPage)
       // unless the legacy `from` param is used.  Normalise both shapes.
       let arr: Record<string, unknown>[];
@@ -439,25 +461,29 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/runs/:id/tasks — tasks belonging to a run. */
     getRunTasks: (runId: string): Promise<import("./types").TaskRecord[]> =>
-      getList(`/v1/runs/${runId}/tasks`),
+      getList(`/v1/runs/${encodeURIComponent(runId)}/tasks`),
 
     /** GET /v1/runs/:id/cost — accumulated cost for a run.  Returns null when no cost data exists (404). */
     getRunCost: async (runId: string): Promise<import("./types").RunCostRecord | null> => {
       try {
-        return await get<import("./types").RunCostRecord>(`/v1/runs/${runId}/cost`);
+        return await get<import("./types").RunCostRecord>(`/v1/runs/${encodeURIComponent(runId)}/cost`);
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) return null;
         throw e;
       }
     },
 
+    /** POST /v1/runs/:id/cancel — cancel a run. */
+    cancelRun: async (runId: string): Promise<RunRecord> =>
+      unwrapRun(await post<RunRecord | { run: RunRecord }>(`/v1/runs/${encodeURIComponent(runId)}/cancel`, {})),
+
     /** POST /v1/runs/:id/pause — pause a running run. */
-    pauseRun: (runId: string, detail?: string): Promise<RunRecord> =>
-      post(`/v1/runs/${runId}/pause`, { detail }),
+    pauseRun: async (runId: string, detail?: string): Promise<RunRecord> =>
+      unwrapRun(await post<RunRecord | { run: RunRecord }>(`/v1/runs/${encodeURIComponent(runId)}/pause`, { detail })),
 
     /** POST /v1/runs/:id/resume — resume a paused run. */
-    resumeRun: (runId: string): Promise<RunRecord> =>
-      post(`/v1/runs/${runId}/resume`, {}),
+    resumeRun: async (runId: string): Promise<RunRecord> =>
+      unwrapRun(await post<RunRecord | { run: RunRecord }>(`/v1/runs/${encodeURIComponent(runId)}/resume`, {})),
 
     /** POST /v1/runs — start a new run in a session. */
     createRun: (body: {
