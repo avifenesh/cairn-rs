@@ -777,24 +777,6 @@ function PreferenceRow({
   );
 }
 
-/** Text input control for preference rows. */
-function PrefText({ local, setLocal, placeholder, mono = false }: {
-  local: string; setLocal: (v: string) => void; placeholder?: string; mono?: boolean;
-}) {
-  return (
-    <input
-      value={local}
-      onChange={e => setLocal(e.target.value)}
-      placeholder={placeholder}
-      className={clsx(
-        "w-full rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-3 py-1.5 text-[13px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600",
-        "focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors",
-        mono && "font-mono",
-      )}
-    />
-  );
-}
-
 /** Number input control for preference rows. */
 function PrefNumber({ local, setLocal, min, max, placeholder }: {
   local: string; setLocal: (v: string) => void; min?: number; max?: number; placeholder?: string;
@@ -1154,8 +1136,8 @@ function ModelPicker({ local, setLocal }: { local: string; setLocal: (v: string)
 
   // Collect all known model IDs from registry entries
   const models: string[] = (registry ?? [])
-    .flatMap((entry: { known_models?: string[] }) => entry.known_models ?? [])
-    .filter((m: string, i: number, arr: string[]) => arr.indexOf(m) === i)
+    .flatMap((entry) => entry.models?.map((m) => m.id) ?? [])
+    .filter((m, i, arr) => arr.indexOf(m) === i)
     .sort();
 
   return (
