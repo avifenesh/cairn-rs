@@ -208,6 +208,15 @@ pub enum RuntimeEvent {
     OutcomeRecorded(OutcomeRecorded),
     /// Go PR #1229: scheduled task registration.
     ScheduledTaskCreated(ScheduledTaskCreated),
+    // ── Plan review events (RFC 018) ──────────────────────────────────────
+    /// A Plan-mode run emitted a `<proposed_plan>` artifact.
+    PlanProposed(PlanProposed),
+    /// An operator approved a plan artifact; next step is creating an Execute run.
+    PlanApproved(PlanApproved),
+    /// An operator rejected a plan artifact.
+    PlanRejected(PlanRejected),
+    /// An operator requested a revision; a new Plan-mode run was created.
+    PlanRevisionRequested(PlanRevisionRequested),
 }
 
 impl RuntimeEvent {
@@ -259,6 +268,10 @@ impl RuntimeEvent {
             RuntimeEvent::RunCostUpdated(event) => &event.project,
             RuntimeEvent::SpendAlertTriggered(event) => &event.project,
             RuntimeEvent::OutcomeRecorded(event) => &event.project,
+            RuntimeEvent::PlanProposed(event) => &event.project,
+            RuntimeEvent::PlanApproved(event) => &event.project,
+            RuntimeEvent::PlanRejected(event) => &event.project,
+            RuntimeEvent::PlanRevisionRequested(event) => &event.project,
             RuntimeEvent::ProviderBudgetSet(_)
             | RuntimeEvent::ChannelCreated(_)
             | RuntimeEvent::ChannelMessageSent(_)
@@ -442,6 +455,18 @@ impl RuntimeEvent {
             }),
             RuntimeEvent::OutcomeRecorded(event) => Some(RuntimeEntityRef::Run {
                 run_id: event.run_id.clone(),
+            }),
+            RuntimeEvent::PlanProposed(event) => Some(RuntimeEntityRef::Run {
+                run_id: event.plan_run_id.clone(),
+            }),
+            RuntimeEvent::PlanApproved(event) => Some(RuntimeEntityRef::Run {
+                run_id: event.plan_run_id.clone(),
+            }),
+            RuntimeEvent::PlanRejected(event) => Some(RuntimeEntityRef::Run {
+                run_id: event.plan_run_id.clone(),
+            }),
+            RuntimeEvent::PlanRevisionRequested(event) => Some(RuntimeEntityRef::Run {
+                run_id: event.original_plan_run_id.clone(),
             }),
             RuntimeEvent::PromptAssetCreated(event) => Some(RuntimeEntityRef::PromptAsset {
                 prompt_asset_id: event.prompt_asset_id.clone(),
@@ -923,6 +948,48 @@ pub struct ScheduledTaskCreated {
     pub cron_expression: String,
     pub next_run_at: Option<u64>,
     pub created_at: u64,
+}
+
+// ── Plan review events (RFC 018) ─────────────────────────────────────────────
+
+/// A Plan-mode run produced a plan artifact via `<proposed_plan>`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanProposed {
+    pub project: ProjectKey,
+    pub plan_run_id: RunId,
+    pub session_id: SessionId,
+    pub plan_markdown: String,
+    pub proposed_at: u64,
+}
+
+/// An operator approved the plan artifact. Next step: create an Execute-mode run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanApproved {
+    pub project: ProjectKey,
+    pub plan_run_id: RunId,
+    pub approved_by: OperatorId,
+    pub reviewer_comments: Option<String>,
+    pub approved_at: u64,
+}
+
+/// An operator rejected the plan artifact. No execution run will be created.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanRejected {
+    pub project: ProjectKey,
+    pub plan_run_id: RunId,
+    pub rejected_by: OperatorId,
+    pub reason: String,
+    pub rejected_at: u64,
+}
+
+/// An operator requested plan revision. A new Plan-mode run has been created.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanRevisionRequested {
+    pub project: ProjectKey,
+    pub original_plan_run_id: RunId,
+    pub new_plan_run_id: RunId,
+    pub reviewer_comments: String,
+    pub requested_at: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

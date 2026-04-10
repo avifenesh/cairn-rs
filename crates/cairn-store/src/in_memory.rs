@@ -1146,7 +1146,11 @@ impl InMemoryStore {
             RuntimeEvent::CheckpointRestored(_)
             | RuntimeEvent::RecoveryAttempted(_)
             | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::UserMessageAppended(_) => {}
+            | RuntimeEvent::UserMessageAppended(_)
+            | RuntimeEvent::PlanProposed(_)
+            | RuntimeEvent::PlanApproved(_)
+            | RuntimeEvent::PlanRejected(_)
+            | RuntimeEvent::PlanRevisionRequested(_) => {}
             RuntimeEvent::ScheduledTaskCreated(e) => {
                 state.scheduled_tasks.insert(
                     e.scheduled_task_id.as_str().to_owned(),
@@ -1776,6 +1780,10 @@ fn event_matches_entity(event: &RuntimeEvent, entity: &EntityRef) -> bool {
         (RuntimeEvent::EvalRunStarted(e), EntityRef::EvalRun(id)) => e.eval_run_id == *id,
         (RuntimeEvent::EvalRunCompleted(e), EntityRef::EvalRun(id)) => e.eval_run_id == *id,
         (RuntimeEvent::OutcomeRecorded(e), EntityRef::Run(id)) => e.run_id == *id,
+        (RuntimeEvent::PlanProposed(e), EntityRef::Run(id)) => e.plan_run_id == *id,
+        (RuntimeEvent::PlanApproved(e), EntityRef::Run(id)) => e.plan_run_id == *id,
+        (RuntimeEvent::PlanRejected(e), EntityRef::Run(id)) => e.plan_run_id == *id,
+        (RuntimeEvent::PlanRevisionRequested(e), EntityRef::Run(id)) => e.original_plan_run_id == *id,
         (RuntimeEvent::PromptAssetCreated(e), EntityRef::PromptAsset(id)) => {
             e.prompt_asset_id == *id
         }
@@ -5342,11 +5350,8 @@ impl InMemoryStore {
         offset: usize,
     ) -> Vec<crate::projections::ApprovalRecord> {
         let state = self.state.lock().unwrap();
-        let mut results: Vec<crate::projections::ApprovalRecord> = state
-            .approvals
-            .values()
-            .cloned()
-            .collect();
+        let mut results: Vec<crate::projections::ApprovalRecord> =
+            state.approvals.values().cloned().collect();
         results.sort_by_key(|a| a.created_at);
         results.into_iter().skip(offset).take(limit).collect()
     }

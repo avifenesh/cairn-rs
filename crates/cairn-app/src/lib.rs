@@ -6,6 +6,7 @@
 //!   cairn-app --port 8080             # custom port
 //!   cairn-app --addr 0.0.0.0          # bind all interfaces
 
+pub mod marketplace_routes;
 pub mod sse_hooks;
 pub mod tool_impls;
 
@@ -695,6 +696,8 @@ pub struct AppState {
     pub operator_tokens: Arc<OperatorTokenStore>,
     pub plugin_registry: Arc<InMemoryPluginRegistry>,
     pub plugin_host: Arc<Mutex<StdioPluginHost>>,
+    /// RFC 015: plugin marketplace service — manages discover/install/enable lifecycle.
+    pub marketplace: Arc<Mutex<cairn_runtime::services::MarketplaceService<cairn_store::InMemoryEventStore>>>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
     pub metrics: Arc<AppMetrics>,
     #[allow(dead_code)]
@@ -856,6 +859,12 @@ impl AppState {
         let mailbox_messages = Arc::new(Mutex::new(HashMap::new()));
         let service_tokens = Arc::new(ServiceTokenRegistry::new());
         let plugin_host = Arc::new(Mutex::new(StdioPluginHost::new()));
+        // RFC 015: marketplace service wrapping the plugin host.
+        let marketplace = {
+            let mut svc = cairn_runtime::services::MarketplaceService::new(store.clone());
+            svc.load_bundled_catalog();
+            Arc::new(Mutex::new(svc))
+        };
         let rate_limits = Arc::new(Mutex::new(HashMap::new()));
         let metrics = Arc::new(AppMetrics::default());
         let (runtime_sse_tx, _) = broadcast::channel(256);
@@ -924,6 +933,7 @@ impl AppState {
             operator_tokens: Arc::new(OperatorTokenStore::new()),
             plugin_registry,
             plugin_host,
+            marketplace,
             rate_limits,
             metrics,
             memory_proposal_hook,
@@ -5907,6 +5917,10 @@ fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::SpendAlertTriggered(_) => "spend_alert_triggered",
         RuntimeEvent::OutcomeRecorded(_) => "outcome_recorded",
         RuntimeEvent::ScheduledTaskCreated(_) => "scheduled_task_created",
+        RuntimeEvent::PlanProposed(_) => "plan_proposed",
+        RuntimeEvent::PlanApproved(_) => "plan_approved",
+        RuntimeEvent::PlanRejected(_) => "plan_rejected",
+        RuntimeEvent::PlanRevisionRequested(_) => "plan_revision_requested",
     }
 }
 
@@ -6335,7 +6349,11 @@ fn event_message(event: &RuntimeEvent) -> String {
         | RuntimeEvent::SoulPatchApplied(_)
         | RuntimeEvent::SpendAlertTriggered(_)
         | RuntimeEvent::OutcomeRecorded(_)
-        | RuntimeEvent::ScheduledTaskCreated(_) => "unknown".to_string(),
+        | RuntimeEvent::ScheduledTaskCreated(_)
+        | RuntimeEvent::PlanProposed(_)
+        | RuntimeEvent::PlanApproved(_)
+        | RuntimeEvent::PlanRejected(_)
+        | RuntimeEvent::PlanRevisionRequested(_) => "unknown".to_string(),
     }
 }
 

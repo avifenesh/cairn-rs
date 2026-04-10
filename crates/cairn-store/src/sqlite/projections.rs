@@ -312,7 +312,11 @@ impl SqliteSyncProjection {
             | RuntimeEvent::RouteDecisionMade(_)
             | RuntimeEvent::ProviderCallCompleted(_)
             | RuntimeEvent::OutcomeRecorded(_)
-            | RuntimeEvent::ScheduledTaskCreated(_) => {}
+            | RuntimeEvent::ScheduledTaskCreated(_)
+            | RuntimeEvent::PlanProposed(_)
+            | RuntimeEvent::PlanApproved(_)
+            | RuntimeEvent::PlanRejected(_)
+            | RuntimeEvent::PlanRevisionRequested(_) => {}
             RuntimeEvent::ProviderBudgetSet(_)
             | RuntimeEvent::ChannelCreated(_)
             | RuntimeEvent::ChannelMessageSent(_)
