@@ -1529,8 +1529,9 @@ async fn load_run_visible_to_tenant(
         }
     }
 
-    Ok(reconstructed
-        .filter(|run| tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id()))
+    Ok(reconstructed.filter(|run| {
+        tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id()
+    }))
 }
 
 fn forbidden_api_error(message: impl Into<String>) -> AppApiError {
@@ -11947,12 +11948,10 @@ async fn list_tool_invocations_handler(
     let Some(run_id) = query.run_id.as_deref() else {
         return (
             StatusCode::OK,
-            Json(
-                ListResponse::<cairn_domain::tool_invocation::ToolInvocationRecord> {
-                    items: Vec::new(),
-                    has_more: false,
-                },
-            ),
+            Json(ListResponse::<cairn_domain::tool_invocation::ToolInvocationRecord> {
+                items: Vec::new(),
+                has_more: false,
+            }),
         )
             .into_response();
     };
