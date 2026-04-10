@@ -8,6 +8,7 @@ import {
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
+import { useScope } from "../hooks/useScope";
 import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
