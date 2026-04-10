@@ -117,12 +117,11 @@ fn operator_id_from_state(_state: &AppState) -> cairn_domain::ids::OperatorId {
 /// GET /v1/plugins/catalog
 ///
 /// Lists all known plugin descriptors with their marketplace state.
-pub async fn list_catalog_handler(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+pub async fn list_catalog_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let marketplace = state.marketplace.lock().unwrap();
     let records = marketplace.list_all_records();
-    let plugins: Vec<CatalogEntryResponse> = records.iter().map(|r| record_to_response(r)).collect();
+    let plugins: Vec<CatalogEntryResponse> =
+        records.iter().map(|r| record_to_response(r)).collect();
     Json(CatalogResponse { plugins })
 }
 
@@ -198,9 +197,8 @@ pub async fn verify_credentials_handler(
     let mut marketplace = state.marketplace.lock().unwrap();
 
     let scope_key = body.and_then(|Json(b)| {
-        b.credential_scope_key.map(|k| {
-            cairn_runtime::services::marketplace_service::CredentialScopeKey(k)
-        })
+        b.credential_scope_key
+            .map(cairn_runtime::services::marketplace_service::CredentialScopeKey)
     });
 
     match marketplace.handle_command(MarketplaceCommand::VerifyPluginCredentials {
@@ -235,7 +233,11 @@ pub async fn enable_plugin_handler(
     let project = cairn_domain::tenancy::ProjectKey::new("default", "default", project_id.as_str());
 
     let (tool_allowlist, signal_allowlist, signal_capture_override) = match body {
-        Some(Json(b)) => (b.tool_allowlist, b.signal_allowlist, b.signal_capture_override),
+        Some(Json(b)) => (
+            b.tool_allowlist,
+            b.signal_allowlist,
+            b.signal_capture_override,
+        ),
         None => (None, None, None),
     };
 

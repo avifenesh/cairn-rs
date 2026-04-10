@@ -633,6 +633,12 @@ pub struct RequestLogBuffer {
     entries: std::collections::VecDeque<RequestLogEntry>,
 }
 
+impl Default for RequestLogBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RequestLogBuffer {
     pub fn new() -> Self {
         Self {
@@ -699,7 +705,8 @@ pub struct AppState {
     pub plugin_registry: Arc<InMemoryPluginRegistry>,
     pub plugin_host: Arc<Mutex<StdioPluginHost>>,
     /// RFC 015: plugin marketplace service — manages discover/install/enable lifecycle.
-    pub marketplace: Arc<Mutex<cairn_runtime::services::MarketplaceService<cairn_store::InMemoryStore>>>,
+    pub marketplace:
+        Arc<Mutex<cairn_runtime::services::MarketplaceService<cairn_store::InMemoryStore>>>,
     /// RFC 022: trigger service — manages triggers and run templates.
     pub triggers: Arc<Mutex<cairn_runtime::services::TriggerService>>,
     pub repo_clone_cache: Arc<cairn_workspace::RepoCloneCache>,
@@ -869,8 +876,7 @@ impl AppState {
         let project_repo_access = Arc::new(cairn_workspace::ProjectRepoAccessService::new());
         // RFC 015: marketplace service wrapping the plugin host.
         let marketplace = {
-            let mut svc =
-                cairn_runtime::services::MarketplaceService::new(runtime.store.clone());
+            let mut svc = cairn_runtime::services::MarketplaceService::new(runtime.store.clone());
             svc.load_bundled_catalog();
             Arc::new(Mutex::new(svc))
         };
@@ -4525,11 +4531,27 @@ impl AppBootstrap {
             .route("/v1/export/:format", get(export_bundle_by_format_handler))
             .route("/healthz", get(health_handler)) // alias for k8s liveness probes
             // ── Marketplace (RFC 015) ─────────────────────────────────────────
-            .route("/v1/plugins/catalog", get(marketplace_routes::list_catalog_handler))
-            .route("/v1/plugins/:id/install", post(marketplace_routes::install_plugin_handler))
-            .route("/v1/plugins/:id/credentials", post(marketplace_routes::provide_credentials_handler))
-            .route("/v1/plugins/:id/verify", post(marketplace_routes::verify_credentials_handler))
-            .route("/v1/projects/:proj/plugins/:id", post(marketplace_routes::enable_plugin_handler).delete(marketplace_routes::disable_plugin_handler))
+            .route(
+                "/v1/plugins/catalog",
+                get(marketplace_routes::list_catalog_handler),
+            )
+            .route(
+                "/v1/plugins/:id/install",
+                post(marketplace_routes::install_plugin_handler),
+            )
+            .route(
+                "/v1/plugins/:id/credentials",
+                post(marketplace_routes::provide_credentials_handler),
+            )
+            .route(
+                "/v1/plugins/:id/verify",
+                post(marketplace_routes::verify_credentials_handler),
+            )
+            .route(
+                "/v1/projects/:proj/plugins/:id",
+                post(marketplace_routes::enable_plugin_handler)
+                    .delete(marketplace_routes::disable_plugin_handler),
+            )
             .route(
                 "/v1/projects/:project/repos",
                 get(repo_routes::list_project_repos_handler)
@@ -4540,16 +4562,44 @@ impl AppBootstrap {
                 get(repo_routes::get_project_repo_handler)
                     .delete(repo_routes::delete_project_repo_handler),
             )
-            .route("/v1/plugins/:id/uninstall", delete(marketplace_routes::uninstall_plugin_handler))
+            .route(
+                "/v1/plugins/:id/uninstall",
+                delete(marketplace_routes::uninstall_plugin_handler),
+            )
             // ── Triggers (RFC 022) ────────────────────────────────────────────
-            .route("/v1/projects/:project/triggers", get(trigger_routes::list_triggers_handler).post(trigger_routes::create_trigger_handler))
-            .route("/v1/projects/:project/triggers/:trigger_id", get(trigger_routes::get_trigger_handler).delete(trigger_routes::delete_trigger_handler))
-            .route("/v1/projects/:project/triggers/:trigger_id/enable", post(trigger_routes::enable_trigger_handler))
-            .route("/v1/projects/:project/triggers/:trigger_id/disable", post(trigger_routes::disable_trigger_handler))
-            .route("/v1/projects/:project/triggers/:trigger_id/resume", post(trigger_routes::resume_trigger_handler))
+            .route(
+                "/v1/projects/:project/triggers",
+                get(trigger_routes::list_triggers_handler)
+                    .post(trigger_routes::create_trigger_handler),
+            )
+            .route(
+                "/v1/projects/:project/triggers/:trigger_id",
+                get(trigger_routes::get_trigger_handler)
+                    .delete(trigger_routes::delete_trigger_handler),
+            )
+            .route(
+                "/v1/projects/:project/triggers/:trigger_id/enable",
+                post(trigger_routes::enable_trigger_handler),
+            )
+            .route(
+                "/v1/projects/:project/triggers/:trigger_id/disable",
+                post(trigger_routes::disable_trigger_handler),
+            )
+            .route(
+                "/v1/projects/:project/triggers/:trigger_id/resume",
+                post(trigger_routes::resume_trigger_handler),
+            )
             // ── Run Templates (RFC 022) ───────────────────────────────────────
-            .route("/v1/projects/:project/run-templates", get(trigger_routes::list_run_templates_handler).post(trigger_routes::create_run_template_handler))
-            .route("/v1/projects/:project/run-templates/:template_id", get(trigger_routes::get_run_template_handler).delete(trigger_routes::delete_run_template_handler))
+            .route(
+                "/v1/projects/:project/run-templates",
+                get(trigger_routes::list_run_templates_handler)
+                    .post(trigger_routes::create_run_template_handler),
+            )
+            .route(
+                "/v1/projects/:project/run-templates/:template_id",
+                get(trigger_routes::get_run_template_handler)
+                    .delete(trigger_routes::delete_run_template_handler),
+            )
     }
 
     /// Apply the standard middleware stack (auth, CORS, rate-limit, tracing)
@@ -5385,7 +5435,7 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse
 ///
 /// Returns 503 with startup progress JSON during recovery.
 /// Returns 200 once all projections are warmed and recovery completes.
-async fn health_ready_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn health_ready_handler(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // For v1, cairn-app is always ready immediately (no async startup graph yet).
     // When the full startup dependency graph is wired, this will check
     // ReadinessState::is_ready() and return the progress body.
@@ -9586,9 +9636,8 @@ async fn orchestrate_run_handler(
             let store: std::sync::Arc<dyn cairn_tools::ToolHandler> = real
                 .get("memory_store")
                 .unwrap_or_else(|| std::sync::Arc::new(MemoryStoreTool::new()));
-            let register_repo: std::sync::Arc<dyn cairn_tools::ToolHandler> = real
-                .get("cairn.registerRepo")
-                .unwrap_or_else(|| {
+            let register_repo: std::sync::Arc<dyn cairn_tools::ToolHandler> =
+                real.get("cairn.registerRepo").unwrap_or_else(|| {
                     std::sync::Arc::new(crate::tool_impls::ConcreteRegisterRepoTool::new(
                         state.project_repo_access.clone(),
                         state.repo_clone_cache.clone(),
@@ -9619,15 +9668,15 @@ async fn orchestrate_run_handler(
         let web_fetch: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(WebFetchTool::default());
         let grep_search: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(GrepSearchTool::default());
+            std::sync::Arc::new(GrepSearchTool);
         let file_read: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(FileReadTool::new(workspace_root.clone()));
         let glob_find: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(GlobFindTool::default());
+            std::sync::Arc::new(GlobFindTool);
         let json_extract: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(JsonExtractTool::default());
+            std::sync::Arc::new(JsonExtractTool);
         let calculate: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(CalculateTool::default());
+            std::sync::Arc::new(CalculateTool);
         let graph_query: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(GraphQueryTool::new(state.graph.clone()));
         let get_run: std::sync::Arc<dyn cairn_tools::ToolHandler> =
@@ -9659,7 +9708,7 @@ async fn orchestrate_run_handler(
         let shell_exec: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(ShellExecTool);
         let http_request: std::sync::Arc<dyn cairn_tools::ToolHandler> =
-            std::sync::Arc::new(HttpRequestTool::default());
+            std::sync::Arc::new(HttpRequestTool);
         let git_operations: std::sync::Arc<dyn cairn_tools::ToolHandler> =
             std::sync::Arc::new(GitOperationsTool::new(workspace_root));
         let resolve_approval: std::sync::Arc<dyn cairn_tools::ToolHandler> =
@@ -13032,7 +13081,7 @@ struct SqEqSession {
 
 /// POST /v1/sqeq/initialize — scope binding + capability negotiation.
 async fn sqeq_initialize_handler(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Json(body): Json<cairn_domain::protocols::SqEqInitializeRequest>,
 ) -> impl IntoResponse {
     use cairn_domain::protocols::{SqEqCapabilities, SqEqInitializeResponse};
@@ -13065,12 +13114,19 @@ async fn sqeq_initialize_handler(
         include_reasoning,
         capabilities: SqEqCapabilities {
             supported_commands: vec![
-                "start_run".into(), "pause_run".into(), "resume_run".into(),
-                "cancel_run".into(), "resolve_approval".into(), "create_task".into(),
+                "start_run".into(),
+                "pause_run".into(),
+                "resume_run".into(),
+                "cancel_run".into(),
+                "resolve_approval".into(),
+                "create_task".into(),
             ],
             supported_events: vec![
-                "run.*".into(), "task.*".into(), "decision.*".into(),
-                "memory.*".into(), "approval.*".into(),
+                "run.*".into(),
+                "task.*".into(),
+                "decision.*".into(),
+                "memory.*".into(),
+                "approval.*".into(),
             ],
             supports_replay: true,
             max_event_buffer: 10_000,
@@ -13089,8 +13145,13 @@ async fn sqeq_submit_handler(
 
     // Validate the method is known.
     let known_methods = [
-        "start_run", "pause_run", "resume_run", "cancel_run",
-        "resolve_approval", "create_task", "cancel_task",
+        "start_run",
+        "pause_run",
+        "resume_run",
+        "cancel_run",
+        "resolve_approval",
+        "create_task",
+        "cancel_task",
     ];
     if !known_methods.contains(&body.method.as_str()) {
         return (
@@ -13133,7 +13194,7 @@ async fn sqeq_submit_handler(
 /// Delegates to the existing SSE broadcast infrastructure with scope filtering
 /// applied per the bound SQ/EQ session.
 async fn sqeq_events_handler(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     // For v1, delegate to the existing SSE stream infrastructure.
@@ -13158,9 +13219,7 @@ async fn sqeq_events_handler(
 // ── A2A handlers (RFC 021) ───────────────────────────────────────────────────
 
 /// GET /.well-known/agent.json — A2A Agent Card.
-async fn a2a_agent_card_handler(
-    State(_state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn a2a_agent_card_handler(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     use cairn_domain::protocols::*;
 
     let card = A2aAgentCard {
@@ -13184,8 +13243,11 @@ async fn a2a_agent_card_handler(
             supports_push_notifications: false,
         },
         accepted_task_kinds: vec![
-            "research".into(), "code_edit".into(), "incident_triage".into(),
-            "content_drafting".into(), "data_analysis".into(),
+            "research".into(),
+            "code_edit".into(),
+            "incident_triage".into(),
+            "content_drafting".into(),
+            "data_analysis".into(),
         ],
         supported_input_formats: vec!["text/markdown".into(), "application/json".into()],
         supported_output_formats: vec!["text/markdown".into(), "application/json".into()],
@@ -13198,8 +13260,8 @@ async fn a2a_agent_card_handler(
 
 /// POST /v1/a2a/tasks — A2A task submission.
 async fn a2a_submit_task_handler(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<cairn_domain::protocols::A2aTaskSubmission>,
+    State(_state): State<Arc<AppState>>,
+    Json(_body): Json<cairn_domain::protocols::A2aTaskSubmission>,
 ) -> impl IntoResponse {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -13218,7 +13280,7 @@ async fn a2a_submit_task_handler(
 
 /// GET /v1/a2a/tasks/:id — A2A task status.
 async fn a2a_get_task_handler(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Path(task_id): Path<String>,
 ) -> impl IntoResponse {
     // V1 stub: return task_id with pending status.
@@ -13245,13 +13307,29 @@ async fn approve_plan_handler(
     use cairn_runtime::services::event_helpers::make_envelope;
 
     let run_id = RunId::new(&plan_run_id);
-    let run = match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
-        Ok(Some(r)) => r,
-        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response(),
-        Err(e) => return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response(),
-    };
+    let run =
+        match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id)
+            .await
+        {
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                    .into_response()
+            }
+            Err(e) => {
+                return AppApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "store_error",
+                    e.to_string(),
+                )
+                .into_response()
+            }
+        };
 
-    let reviewer_comments = body.get("reviewer_comments").and_then(|v| v.as_str()).map(str::to_owned);
+    let reviewer_comments = body
+        .get("reviewer_comments")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -13266,14 +13344,23 @@ async fn approve_plan_handler(
     }));
 
     if let Err(e) = state.runtime.store.append(&[evt]).await {
-        return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response();
+        return AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            e.to_string(),
+        )
+        .into_response();
     }
 
-    (StatusCode::OK, Json(serde_json::json!({
-        "plan_run_id": plan_run_id,
-        "status": "approved",
-        "next_step": "create_execute_run",
-    }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "plan_run_id": plan_run_id,
+            "status": "approved",
+            "next_step": "create_execute_run",
+        })),
+    )
+        .into_response()
 }
 
 /// POST /v1/runs/:plan_run_id/reject
@@ -13286,13 +13373,30 @@ async fn reject_plan_handler(
     use cairn_runtime::services::event_helpers::make_envelope;
 
     let run_id = RunId::new(&plan_run_id);
-    let run = match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
-        Ok(Some(r)) => r,
-        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response(),
-        Err(e) => return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response(),
-    };
+    let run =
+        match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id)
+            .await
+        {
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                    .into_response()
+            }
+            Err(e) => {
+                return AppApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "store_error",
+                    e.to_string(),
+                )
+                .into_response()
+            }
+        };
 
-    let reason = body.get("reason").and_then(|v| v.as_str()).unwrap_or("rejected by operator").to_owned();
+    let reason = body
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("rejected by operator")
+        .to_owned();
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -13307,13 +13411,22 @@ async fn reject_plan_handler(
     }));
 
     if let Err(e) = state.runtime.store.append(&[evt]).await {
-        return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response();
+        return AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            e.to_string(),
+        )
+        .into_response();
     }
 
-    (StatusCode::OK, Json(serde_json::json!({
-        "plan_run_id": plan_run_id,
-        "status": "rejected",
-    }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "plan_run_id": plan_run_id,
+            "status": "rejected",
+        })),
+    )
+        .into_response()
 }
 
 /// POST /v1/runs/:plan_run_id/revise
@@ -13326,13 +13439,32 @@ async fn revise_plan_handler(
     use cairn_runtime::services::event_helpers::make_envelope;
 
     let original_run_id = RunId::new(&plan_run_id);
-    let original_run = match cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &original_run_id).await {
+    let original_run = match cairn_store::projections::RunReadModel::get(
+        state.runtime.store.as_ref(),
+        &original_run_id,
+    )
+    .await
+    {
         Ok(Some(r)) => r,
-        Ok(None) => return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response(),
-        Err(e) => return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response(),
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response()
+        }
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "store_error",
+                e.to_string(),
+            )
+            .into_response()
+        }
     };
 
-    let reviewer_comments = body.get("reviewer_comments").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+    let reviewer_comments = body
+        .get("reviewer_comments")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
     if reviewer_comments.is_empty() {
         return bad_request_response("reviewer_comments is required for revise");
     }
@@ -13372,16 +13504,25 @@ async fn revise_plan_handler(
     ));
 
     if let Err(e) = state.runtime.store.append(&[evt]).await {
-        return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store_error", e.to_string()).into_response();
+        return AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            e.to_string(),
+        )
+        .into_response();
     }
 
     publish_runtime_frames_since(&state, before).await;
 
-    (StatusCode::CREATED, Json(serde_json::json!({
-        "plan_run_id": plan_run_id,
-        "new_plan_run_id": new_run_id.as_str(),
-        "status": "revision_requested",
-    }))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "plan_run_id": plan_run_id,
+            "new_plan_run_id": new_run_id.as_str(),
+            "status": "revision_requested",
+        })),
+    )
+        .into_response()
 }
 
 // ── Decision handlers (RFC 019) ──────────────────────────────────────────────

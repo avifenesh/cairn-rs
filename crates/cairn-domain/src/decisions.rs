@@ -19,21 +19,16 @@ use std::time::Duration;
 /// - `Plan` — agent sees only Observational + Internal tools; produces a plan
 ///   artifact and terminates with `outcome: plan_proposed`.
 /// - `Execute` — agent follows an approved plan from a prior Plan-mode run.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunMode {
+    #[default]
     Direct,
     Plan,
     Execute {
         /// The Plan-mode run whose approved artifact seeds this execution.
         plan_run_id: RunId,
     },
-}
-
-impl Default for RunMode {
-    fn default() -> Self {
-        Self::Direct
-    }
 }
 
 // ── ToolEffect (RFC 018) ─────────────────────────────────────────────────────
@@ -455,7 +450,7 @@ pub enum DecisionEvent {
     /// Single canonical audit record for every decision (Allowed or Denied).
     DecisionRecorded {
         decision_id: DecisionId,
-        request: DecisionRequest,
+        request: Box<DecisionRequest>,
         outcome: DecisionOutcome,
         /// Full chain from steps 1-7.
         reasoning_chain: Vec<StepResult>,

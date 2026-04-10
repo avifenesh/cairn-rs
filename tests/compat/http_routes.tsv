@@ -57,6 +57,7 @@ GET	/v1/import/reports	preserve	query: limit?	{ items }
 GET	/v1/admin/entitlements	preserve	-	tenant entitlement set
 GET	/v1/admin/capabilities	preserve	-	feature capability map
 GET	/v1/admin/license	preserve	-	active license record
+GET	/v1/admin/logs	preserve	-	admin logs
 POST	/v1/admin/license/activate	preserve	body: { license_key }	{ ok }
 POST	/v1/admin/tenants	preserve	-	-
 POST	/v1/admin/license/override	preserve	-	-
@@ -114,3 +115,18 @@ GET	/v1/settings/tls	preserve	-	TLS config
 GET	/v1/streams/runtime	preserve	query: token?	SSE runtime stream
 GET	/v1/tasks/expired	preserve	-	{ items }
 GET	/v1/tool-invocations	preserve	query: run_id?, limit?	{ items }
+GET	/.well-known/agent.json	preserve	-	A2A Agent Card (RFC 021)
+GET	/v1/a2a/tasks/:id	preserve	-	A2A task status
+GET	/v1/decisions	preserve	query: scope?, kind?, outcome?	{ items }
+GET	/v1/decisions/:id	preserve	-	full decision with reasoning chain
+GET	/v1/decisions/cache	preserve	-	{ items } active cached decisions
+POST	/v1/decisions/:id/invalidate	preserve	body: { reason }	invalidate one cached decision
+POST	/v1/decisions/invalidate	preserve	body: { scope, kind }	bulk invalidation
+POST	/v1/decisions/invalidate-by-rule	preserve	body: { rule_id }	selective invalidation via rule
+POST	/v1/runs/:id/approve	preserve	body: { reviewer_comments? }	approve plan run
+POST	/v1/runs/:id/reject	preserve	body: { reason }	reject plan run
+POST	/v1/runs/:id/revise	preserve	body: { reviewer_comments }	create revision plan run
+GET	/v1/sqeq/events	preserve	query: sqeq_session_id	SSE event stream (RFC 021)
+POST	/v1/sqeq/initialize	preserve	body: { protocol_versions, scope, subscriptions }	SQ/EQ session init
+POST	/v1/sqeq/submit	preserve	body: { method, correlation_id, params }	SQ/EQ command submission
+POST	/v1/a2a/tasks	preserve	body: A2A task shape	A2A task submission
