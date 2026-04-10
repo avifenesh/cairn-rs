@@ -3,7 +3,7 @@
  *
  * Aggregates:
  *   GET /v1/settings        → deployment mode, store backend, encryption, plugin count
- *   GET /v1/health/detailed → per-subsystem liveness, memory RSS, Ollama models
+ *   GET /v1/health/detailed → per-subsystem liveness, memory RSS
  *   GET /v1/system/info     → version, OS, build, features, environment
  *   GET /v1/status          → status, components[], uptime_secs
  */
@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   RefreshCw, CheckCircle2, AlertTriangle, XCircle,
   Database, Shield, Radio, Cpu, Globe,
-  Clock, GitCommit, Lock, Unlock, Zap,
+  Clock, GitCommit, Lock, Unlock,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
@@ -275,7 +275,6 @@ export function DeploymentPage() {
   }
 
   const storeStatus   = checkStatus(health?.checks.store);
-  const ollamaStatus  = checkStatus(health?.checks.ollama);
   const memStatus     = checkStatus(health?.checks.memory);
   const bufStatus     = checkStatus(health?.checks.event_buffer);
 
@@ -320,7 +319,6 @@ export function DeploymentPage() {
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             <RoleChip label="API Server"    active={status?.status === 'ok'}         icon={Globe}    />
             <RoleChip label="Runtime"       active={status?.status === 'ok'}         icon={Cpu}      />
-            <RoleChip label="Ollama"        active={ollamaStatus === "ok"}           icon={Zap}      />
             <RoleChip label="Plugin Host"   active={(settings?.plugin_count ?? 0) > 0} icon={Radio}  />
           </div>
         </div>
@@ -493,30 +491,6 @@ export function DeploymentPage() {
             </div>
           </Card>
 
-          {/* Ollama */}
-          <Card icon={Zap} title="Ollama (Local LLM)" status={ollamaStatus} loading={isLoading}>
-            <div className="space-y-0">
-              <Row
-                label="Status"
-                value={ollamaStatus === "ok" ? "Connected" : ollamaStatus === "off" ? "Not configured" : "Unreachable"}
-                status={ollamaStatus}
-              />
-              {info?.environment.ollama_host && info.environment.ollama_host !== "" && (
-                <Row label="Host" value={info.environment.ollama_host} mono />
-              )}
-              {health?.checks.ollama.latency_ms !== undefined && (
-                <Row label="Last probe" value={`${health.checks.ollama.latency_ms}ms`} mono />
-              )}
-              {health?.checks.ollama.models !== undefined && (
-                <Row label="Models loaded" value={String(health.checks.ollama.models)} mono />
-              )}
-              {info?.features.ollama_connected === false && (
-                <p className="text-[11px] text-gray-400 dark:text-zinc-600 italic mt-2">
-                  Set <code className="bg-gray-100 dark:bg-zinc-800 rounded px-1">OLLAMA_HOST</code> to connect.
-                </p>
-              )}
-            </div>
-          </Card>
 
           {/* Event system */}
           <Card icon={Radio} title="Event System" status={bufStatus === "off" ? "ok" : bufStatus} loading={isLoading}>
