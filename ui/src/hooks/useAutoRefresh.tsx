@@ -178,7 +178,7 @@ export function useRefreshControl(props: RefreshControlProps): {
         onClick={onRefresh}
         disabled={isFetching}
         className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900
-                   text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600
+                   text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-gray-400 dark:hover:border-zinc-600
                    disabled:opacity-40 transition-colors"
         title="Refresh now"
       >
