@@ -4,7 +4,7 @@ import { RefreshCw, Loader2, Check, X, Radio, Wifi, ShieldCheck, SlidersHorizont
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
-import { usePreferences } from "../hooks/usePreferences";
+import { usePreferences, type Preferences } from "../hooks/usePreferences";
 import { useScope } from "../hooks/useScope";
 import { useWebSocket } from "../hooks/useWebSocket";
 import type { DeploymentSettings, NotificationChannel, SystemInfo } from "../lib/types";
@@ -1225,6 +1225,103 @@ function PreferencesTab() {
   );
 }
 
+// ── Operator Preferences Section ──────────────────────────────────────────────
+
+function OperatorPreferencesSection() {
+  const [prefs, setPrefs] = usePreferences();
+
+  const themes: Array<{ value: Preferences['theme']; label: string; desc: string }> = [
+    { value: 'dark',   label: 'Dark',   desc: 'Dark background, light text' },
+    { value: 'light',  label: 'Light',  desc: 'Light background, dark text' },
+    { value: 'system', label: 'System', desc: 'Follow your OS preference' },
+  ];
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      {/* Appearance */}
+      <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
+        <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
+          <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">Appearance</p>
+        </div>
+        <div className="px-5 py-4 bg-gray-50/60 dark:bg-zinc-900/60 space-y-4">
+          {/* Theme selector */}
+          <div>
+            <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300 mb-2">Theme</p>
+            <div className="flex gap-2">
+              {themes.map(t => (
+                <button key={t.value} onClick={() => setPrefs({ theme: t.value })}
+                  className={clsx(
+                    "flex-1 rounded-md border px-3 py-2 text-left transition-colors",
+                    prefs.theme === t.value
+                      ? "border-indigo-500 bg-indigo-500/10"
+                      : "border-gray-200 dark:border-zinc-700 hover:border-gray-300 dark:hover:border-zinc-600",
+                  )}>
+                  <p className={clsx("text-[12px] font-medium", prefs.theme === t.value ? "text-indigo-400" : "text-gray-700 dark:text-zinc-300")}>{t.label}</p>
+                  <p className="text-[10px] text-gray-400 dark:text-zinc-500 mt-0.5">{t.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Compact mode */}
+          <div className="flex items-center justify-between py-2 border-t border-gray-200 dark:border-zinc-800">
+            <div>
+              <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">Compact mode</p>
+              <p className="text-[11px] text-gray-400 dark:text-zinc-500">Reduce padding and spacing in data-dense views.</p>
+            </div>
+            <button onClick={() => setPrefs({ compactMode: !prefs.compactMode })}
+              className={clsx("w-9 h-5 rounded-full transition-colors relative", prefs.compactMode ? "bg-indigo-500" : "bg-gray-300 dark:bg-zinc-700")}>
+              <span className={clsx("absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform", prefs.compactMode ? "translate-x-4" : "translate-x-0.5")} />
+            </button>
+          </div>
+
+          {/* Auto-refresh */}
+          <div className="flex items-center justify-between py-2 border-t border-gray-200 dark:border-zinc-800">
+            <div>
+              <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">Auto-refresh</p>
+              <p className="text-[11px] text-gray-400 dark:text-zinc-500">Automatically refresh data pages at regular intervals.</p>
+            </div>
+            <button onClick={() => setPrefs({ autoRefresh: !prefs.autoRefresh })}
+              className={clsx("w-9 h-5 rounded-full transition-colors relative", prefs.autoRefresh ? "bg-indigo-500" : "bg-gray-300 dark:bg-zinc-700")}>
+              <span className={clsx("absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform", prefs.autoRefresh ? "translate-x-4" : "translate-x-0.5")} />
+            </button>
+          </div>
+
+          {/* Date format */}
+          <div className="flex items-center justify-between py-2 border-t border-gray-200 dark:border-zinc-800">
+            <div>
+              <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">Date format</p>
+              <p className="text-[11px] text-gray-400 dark:text-zinc-500">How timestamps are displayed.</p>
+            </div>
+            <select value={prefs.dateFormat} onChange={e => setPrefs({ dateFormat: e.target.value as 'relative' | 'absolute' })}
+              className="rounded border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-[12px] text-gray-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+              <option value="relative">Relative (5m ago)</option>
+              <option value="absolute">Absolute (Apr 11, 10:30 PM)</option>
+            </select>
+          </div>
+
+          {/* Items per page */}
+          <div className="flex items-center justify-between py-2 border-t border-gray-200 dark:border-zinc-800">
+            <div>
+              <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">Rows per page</p>
+              <p className="text-[11px] text-gray-400 dark:text-zinc-500">Default number of items shown in data tables.</p>
+            </div>
+            <select value={prefs.itemsPerPage} onChange={e => setPrefs({ itemsPerPage: Number(e.target.value) as 25 | 50 | 100 })}
+              className="rounded border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-[12px] text-gray-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Notifications */}
+      <NotificationPreferencesSection />
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 type SettingsTab = "preferences" | "defaults" | "diagnostics";
@@ -1294,14 +1391,7 @@ export function SettingsPage() {
       <div className="flex-1 overflow-y-auto p-5">
 
         {/* ── Operator Preferences tab ── */}
-        {activeTab === "preferences" && (
-          <div className="max-w-3xl space-y-6">
-            <NotificationPreferencesSection />
-            <p className="text-[11px] text-gray-300 dark:text-zinc-600 leading-relaxed px-1">
-              Theme follows your browser/OS preference by default. Use the sun/moon toggle in the top bar to override.
-            </p>
-          </div>
-        )}
+        {activeTab === "preferences" && <OperatorPreferencesSection />}
 
         {/* ── Tenant Defaults tab ── */}
         {activeTab === "defaults" && <PreferencesTab />}
