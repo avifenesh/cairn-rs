@@ -2,7 +2,8 @@
  * WorkspacesPage — discover and switch between workspaces for the current tenant.
  *
  * Workspaces are persisted server-side and fetched from the admin API.
- * Session/run data is layered on top to provide activity counts.
+ * This page intentionally uses that persisted list as the source of truth so
+ * newly created workspaces survive navigation and reloads.
  */
 
 import { useState, useMemo } from 'react';
@@ -232,19 +233,6 @@ export function WorkspacesPage() {
     staleTime: 60_000,
   });
 
-  // Fetch sessions and runs with tenant-only scope so stats reflect all workspaces.
-  const { data: sessions, isLoading: sessLoading, refetch: refetchSess, isFetching: sessFetching } = useQuery({
-    queryKey: ['sessions', 'workspace-catalog', scope.tenant_id],
-    queryFn:  () => defaultApi.getSessions({ tenant_id: scope.tenant_id, limit: 500, inherit_scope: false }),
-    staleTime: 60_000,
-  });
-
-  const { data: runs, isLoading: runsLoading, refetch: refetchRuns, isFetching: runsFetching } = useQuery({
-    queryKey: ['runs', 'workspace-catalog', scope.tenant_id],
-    queryFn:  () => defaultApi.getRuns({ tenant_id: scope.tenant_id, limit: 500, inherit_scope: false }),
-    staleTime: 60_000,
-  });
-
   const createWorkspace = useMutation({
     mutationFn: (workspaceId: string) =>
       defaultApi.createWorkspace(scope.tenant_id, {
@@ -253,10 +241,10 @@ export function WorkspacesPage() {
       }),
   });
 
-  const isLoading  = wsLoading || sessLoading || runsLoading;
-  const isFetching = wsFetching || sessFetching || runsFetching;
+  const isLoading  = wsLoading;
+  const isFetching = wsFetching;
 
-  // Build workspace map from persisted records, then overlay runtime activity.
+  // Build workspace map from persisted records only.
   const workspaces = useMemo((): WorkspaceInfo[] => {
     const map = new Map<string, WorkspaceInfo>();
 
@@ -285,20 +273,6 @@ export function WorkspacesPage() {
       );
     }
 
-    for (const s of sessions ?? []) {
-      const ws = ensureWs(s.project.tenant_id, s.project.workspace_id);
-      ws.sessions++;
-      ws.project_ids.add(s.project.project_id);
-      ws.latest_at = Math.max(ws.latest_at, s.created_at);
-    }
-
-    for (const r of runs ?? []) {
-      const ws = ensureWs(r.project.tenant_id, r.project.workspace_id);
-      ws.runs++;
-      ws.project_ids.add(r.project.project_id);
-      ws.latest_at = Math.max(ws.latest_at, r.created_at);
-    }
-
     // Always include the currently-active workspace even if it has no data.
     ensureWs(scope.tenant_id, scope.workspace_id);
 
@@ -306,7 +280,7 @@ export function WorkspacesPage() {
     ensureWs(DEFAULT_SCOPE.tenant_id, DEFAULT_SCOPE.workspace_id);
 
     return Array.from(map.values()).sort((a, b) => b.latest_at - a.latest_at);
-  }, [workspaceRecords, sessions, runs, scope.tenant_id, scope.workspace_id]);
+  }, [workspaceRecords, scope.tenant_id, scope.workspace_id]);
 
   const filtered = filter.trim()
     ? workspaces.filter(ws =>
@@ -326,11 +300,7 @@ export function WorkspacesPage() {
 
   async function handleNewWorkspace(wsId: string) {
     const created = await createWorkspace.mutateAsync(wsId);
-    await Promise.all([
-      qc.invalidateQueries({ queryKey: ['workspaces', scope.tenant_id] }),
-      qc.invalidateQueries({ queryKey: ['sessions', 'workspace-catalog', scope.tenant_id] }),
-      qc.invalidateQueries({ queryKey: ['runs', 'workspace-catalog', scope.tenant_id] }),
-    ]);
+    await qc.invalidateQueries({ queryKey: ['workspaces', scope.tenant_id] });
     setScope({
       tenant_id:    created.tenant_id,
       workspace_id: created.workspace_id,
@@ -372,8 +342,6 @@ export function WorkspacesPage() {
             <button
               onClick={() => {
                 void refetchWorkspaces();
-                void refetchSess();
-                void refetchRuns();
               }}
               disabled={isFetching}
               className="p-1.5 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors disabled:opacity-40"
