@@ -30,6 +30,29 @@ export interface AgentTemplate {
   agent_role: string;
 }
 
+// ── Skills (GET /v1/skills) ─────────────────────────────────────────────────
+
+export interface SkillRecord {
+  id?: string;
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+  source?: string;
+  [key: string]: unknown;
+}
+
+export interface SkillsSummary {
+  total: number;
+  enabled: number;
+  disabled: number;
+}
+
+export interface SkillsResponse {
+  items: SkillRecord[];
+  summary: SkillsSummary;
+  currently_active: string[];
+}
+
 // ── Provider registry (GET /v1/providers/registry) ──────────────────────────
 
 export interface ProviderRegistryModel {

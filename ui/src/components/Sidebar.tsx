@@ -18,6 +18,7 @@ import {
   Network,
   Play,
   Puzzle,
+  Wrench,
   Settings,
   ScrollText,
   Shield,
@@ -56,6 +57,7 @@ export type NavPage =
   | 'sources'
   | 'providers'
   | 'plugins'
+  | 'skills'
   | 'credentials'
   | 'channels'
   | 'playground'
@@ -127,6 +129,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'providers',   label: 'Providers',   icon: Zap      },
       { id: 'plugins',     label: 'Plugins',     icon: Puzzle   },
+      { id: 'skills',      label: 'Skills',      icon: Wrench   },
       { id: 'credentials',  label: 'Credentials',  icon: KeyRound     },
       { id: 'deployment',   label: 'Deployment',   icon: ServerCrash  },
       { id: 'channels',     label: 'Channels',     icon: Bell     },

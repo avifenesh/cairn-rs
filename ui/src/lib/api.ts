@@ -638,8 +638,14 @@ export function createApiClient(config: ApiClientConfig) {
       provider_family: string;
       adapter_type: string;
       supported_models?: string[];
+      credential_id?: string;
+      endpoint_url?: string;
     }): Promise<import("./types").ProviderConnectionRecord> =>
       post("/v1/providers/connections", body),
+
+    /** DELETE /v1/providers/connections/:id — disable/remove a provider connection. */
+    deleteProviderConnection: (id: string): Promise<{ deleted: boolean; connection_id: string }> =>
+      del(`/v1/providers/connections/${encodeURIComponent(id)}`),
 
     /** GET /v1/providers/connections/:id/models — list models for a connection. */
     listConnectionModels: (id: string): Promise<{ items: unknown[]; has_more: boolean }> =>
@@ -725,6 +731,20 @@ export function createApiClient(config: ApiClientConfig) {
       goal: string; default_tools: string[];
       agent_role: string; approval_policy: string;
     }> => post(`/v1/agent-templates/${encodeURIComponent(templateId)}/instantiate`, withScope(body)),
+
+    listSkills: async (): Promise<import("./types").SkillsResponse> => {
+      const raw = await get<{
+        items?: import("./types").SkillRecord[];
+        summary?: import("./types").SkillsSummary;
+        currentlyActive?: string[];
+        currently_active?: string[];
+      }>("/v1/skills");
+      return {
+        items: raw.items ?? [],
+        summary: raw.summary ?? { total: 0, enabled: 0, disabled: 0 },
+        currently_active: raw.currently_active ?? raw.currentlyActive ?? [],
+      };
+    },
 
     getChangelog: (): Promise<import("./types").ChangelogEntry[]> =>
       get('/v1/changelog'),

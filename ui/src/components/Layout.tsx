@@ -12,7 +12,7 @@ const VALID_PAGES: NavPage[] = [
   'dashboard', 'workspaces',
   'sessions', 'runs', 'tasks', 'workers', 'orchestration', 'approvals', 'triggers', 'decisions', 'prompts', 'agent-templates',
   'traces', 'memory', 'sources', 'costs', 'cost-calc', 'evals', 'graph', 'audit-log', 'logs', 'metrics',
-  'providers', 'plugins', 'credentials', 'channels', 'deployment', 'playground', 'test-harness', 'api-docs', 'settings', 'profile',
+  'providers', 'plugins', 'skills', 'credentials', 'channels', 'deployment', 'playground', 'test-harness', 'api-docs', 'settings', 'profile',
 ];
 
 // ── Route descriptor ──────────────────────────────────────────────────────────
@@ -82,6 +82,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   'api-docs':  'API Reference',
   providers:   'Providers',
   plugins:     'Plugins',
+  skills:      'Skills',
   credentials:  'Credentials',
   deployment:   'Deployment Health',
   channels:    'Channels',
@@ -115,6 +116,7 @@ const PAGE_GROUP: Partial<Record<NavPage, string>> = {
   metrics:     'Observability',
   providers:   'Infrastructure',
   plugins:      'Infrastructure',
+  skills:       'Infrastructure',
   credentials:  'Infrastructure',
   deployment:   'Infrastructure',
   channels:     'Infrastructure',
