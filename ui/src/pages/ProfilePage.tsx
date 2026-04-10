@@ -150,7 +150,7 @@ function TokenSection() {
           </span>
           <button
             onClick={() => setShown((v) => !v)}
-            className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+            className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
             title={shown ? 'Hide' : 'Reveal'}
           >
             {shown ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -181,7 +181,7 @@ function TokenSection() {
           </button>
           <button
             onClick={() => setEditing(false)}
-            className="rounded border border-gray-200 dark:border-zinc-700 text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 text-[12px] px-2.5 py-1.5 transition-colors"
+            className="rounded border border-gray-200 dark:border-zinc-700 text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 text-[12px] px-2.5 py-1.5 transition-colors"
           >
             Cancel
           </button>
@@ -244,7 +244,7 @@ function PreferencesSection() {
                 'flex items-center gap-1.5 rounded px-2.5 py-1 text-[12px] font-medium transition-colors',
                 prefs.theme === value
                   ? 'bg-gray-100 dark:bg-zinc-800 text-gray-900 dark:text-zinc-100'
-                  : 'text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300',
+                  : 'text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300',
               )}
             >
               <Icon size={12} />

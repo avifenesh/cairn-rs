@@ -74,7 +74,7 @@ function LevelToggle({
         'flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] font-medium transition-colors',
         active
           ? colors.badge
-          : 'text-gray-400 dark:text-zinc-600 bg-gray-50 dark:bg-zinc-900 border-gray-200 dark:border-zinc-800 hover:border-gray-200 dark:border-zinc-700 hover:text-gray-500 dark:text-zinc-400',
+          : 'text-gray-400 dark:text-zinc-600 bg-gray-50 dark:bg-zinc-900 border-gray-200 dark:border-zinc-800 hover:border-gray-200 dark:border-zinc-700 hover:text-gray-500 dark:hover:text-zinc-400',
       )}
     >
       <span className={clsx('h-1.5 w-1.5 rounded-full', active ? colors.dot : 'bg-zinc-700')} />
@@ -289,7 +289,7 @@ export function LogsPage() {
           {search && (
             <button
               onClick={() => setSearch('')}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400"
             >
               <X size={10} />
             </button>
@@ -306,7 +306,7 @@ export function LogsPage() {
               'flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors',
               paused
                 ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20'
-                : 'text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300',
+                : 'text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300',
             )}
           >
             {paused ? <PlayIcon size={10} /> : <Pause size={10} />}

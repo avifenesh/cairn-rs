@@ -263,7 +263,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
         <div className="space-y-3">
           <button
             onClick={() => { window.location.hash = "dashboard"; }}
-            className="flex items-center gap-1.5 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+            className="flex items-center gap-1.5 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
           >
             <ArrowLeft size={13} /> Back to Dashboard
           </button>
@@ -282,7 +282,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
               <button
                 onClick={handleRefresh}
                 disabled={runsFetching}
-                className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 disabled:opacity-40 transition-colors"
+                className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 disabled:opacity-40 transition-colors"
               >
                 <RefreshCw size={11} className={runsFetching ? "animate-spin" : ""} />
                 Refresh

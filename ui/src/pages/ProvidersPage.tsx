@@ -165,7 +165,7 @@ function ModelSettingsRow({ connectionId, modelId }: { connectionId: string; mod
     <div className="relative">
       <button
         onClick={handleOpen}
-        className="flex items-center gap-1 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors px-1.5 py-0.5 rounded"
+        className="flex items-center gap-1 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors px-1.5 py-0.5 rounded"
         title="Model settings"
       >
         <Settings size={11} />
@@ -179,7 +179,7 @@ function ModelSettingsRow({ connectionId, modelId }: { connectionId: string; mod
             <span className="text-[12px] font-medium text-gray-800 dark:text-zinc-200 truncate max-w-[220px]" title={modelId}>
               {modelId}
             </span>
-            <button onClick={() => setOpen(false)} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400">
+            <button onClick={() => setOpen(false)} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400">
               <X size={13} />
             </button>
           </div>
@@ -415,7 +415,7 @@ function ConnectionRow({
             </button>
             <button
               onClick={() => setExpanded(v => !v)}
-              className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+              className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
               title={expanded ? "Collapse" : "Expand models"}
             >
               {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -531,7 +531,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 h-12 border-b border-gray-200 dark:border-zinc-800 shrink-0">
           <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Add Provider</span>
-          <button onClick={onClose} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">
+          <button onClick={onClose} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors">
             <XCircle size={16} />
           </button>
         </div>
@@ -545,7 +545,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 i === step
                   ? "text-indigo-300"
                   : i < step
-                    ? "text-gray-500 dark:text-zinc-400 cursor-pointer hover:text-gray-700 dark:text-zinc-300"
+                    ? "text-gray-500 dark:text-zinc-400 cursor-pointer hover:text-gray-700 dark:hover:text-zinc-300"
                     : "text-gray-300 dark:text-zinc-700",
               )}
                 onClick={() => i < step && setStep(i as 0 | 1 | 2)}
@@ -757,7 +757,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
         <div className="flex items-center justify-between px-5 py-3 border-t border-gray-200 dark:border-zinc-800 shrink-0 bg-white dark:bg-zinc-950">
           <button
             onClick={() => step === 0 ? onClose() : setStep((step - 1) as 0 | 1 | 2)}
-            className="text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors px-3 py-1.5"
+            className="text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors px-3 py-1.5"
           >
             {step === 0 ? "Cancel" : "← Back"}
           </button>
@@ -959,7 +959,7 @@ function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }
     <div className="bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-md p-3 mt-1 space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-mono text-gray-500 dark:text-zinc-400">{name}</span>
-        <button onClick={onClose} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"><XCircle size={12} /></button>
+        <button onClick={onClose} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"><XCircle size={12} /></button>
       </div>
       {isLoading && <p className="text-[11px] text-gray-400 dark:text-zinc-600 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading…</p>}
       {isError   && <p className="text-[11px] text-red-400">Could not load model info.</p>}
@@ -1031,7 +1031,7 @@ function OllamaSection() {
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Ollama — Local Inference (optional)</p>
         <button onClick={() => refetch()}
-          className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">
+          className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors">
           <RefreshCw size={11} /> Refresh
         </button>
       </div>
@@ -1072,7 +1072,7 @@ function OllamaSection() {
                   <div key={m} className={clsx("border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0", i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50")}>
                     <div className="flex items-center justify-between px-4 h-9 hover:bg-white/5 transition-colors">
                       <span className="text-xs font-mono text-gray-700 dark:text-zinc-300 truncate flex-1">{m}</span>
-                      <button onClick={() => setExpandedInfo(isExpanded ? null : m)} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors ml-3" title="Show model info">
+                      <button onClick={() => setExpandedInfo(isExpanded ? null : m)} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors ml-3" title="Show model info">
                         {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                       </button>
                       <button

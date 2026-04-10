@@ -599,7 +599,7 @@ export function TasksPage() {
               "flex items-center gap-1 px-2.5 py-1 text-[11px] transition-colors",
               viewMode === "table"
                 ? "bg-zinc-700 text-gray-800 dark:text-zinc-200"
-                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
+                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300",
             )}
           >
             <LayoutList size={12} /> Table
@@ -611,7 +611,7 @@ export function TasksPage() {
               "flex items-center gap-1 px-2.5 py-1 text-[11px] border-l border-gray-200 dark:border-zinc-700 transition-colors",
               viewMode === "board"
                 ? "bg-zinc-700 text-gray-800 dark:text-zinc-200"
-                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
+                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300",
             )}
           >
             <LayoutGrid size={12} /> Board
@@ -640,7 +640,7 @@ export function TasksPage() {
               onClick={() => releaseSelected.mutate()}
               disabled={releaseSelected.isPending}
               className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900
-                         text-gray-500 dark:text-zinc-400 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600
+                         text-gray-500 dark:text-zinc-400 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600
                          disabled:opacity-40 transition-colors"
             >
               <Unlock size={11} />
@@ -676,7 +676,7 @@ export function TasksPage() {
           {selCount > 0 && viewMode === "table" && (
             <button
               onClick={kbd.clearSelection}
-              className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+              className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
             >
               Clear
             </button>
@@ -700,7 +700,7 @@ export function TasksPage() {
             </span>
           </div>
           <button onClick={() => refetch()} disabled={isFetching}
-            className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors">
+            className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors">
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
             <span className="hidden sm:inline">Refresh</span>
           </button>

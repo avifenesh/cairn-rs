@@ -344,23 +344,23 @@ function ForceGraph({ maxNodes = 100 }: { maxNodes?: number }) {
         <div className="ml-auto flex items-center gap-1">
           <button
             onClick={() => setXf(t => { const k = Math.min(5, t.k * 1.25); return { ...t, k }; })}
-            className="p-1.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
             title="Zoom in"
           ><ZoomIn size={12} /></button>
           <button
             onClick={() => setXf(t => { const k = Math.max(0.15, t.k * 0.8); return { ...t, k }; })}
-            className="p-1.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
             title="Zoom out"
           ><ZoomOut size={12} /></button>
           <button
             onClick={() => setXf({ tx: 0, ty: 0, k: 1 })}
-            className="px-1.5 py-1 rounded text-[10px] font-mono text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
+            className="px-1.5 py-1 rounded text-[10px] font-mono text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
             title="Reset zoom"
           >1:1</button>
           <div className="w-px h-4 bg-gray-100 dark:bg-zinc-800 mx-0.5" />
           <button
             onClick={resetSim}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors border border-gray-200 dark:border-zinc-800"
+            className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors border border-gray-200 dark:border-zinc-800"
             title="Regenerate demo data"
           ><RotateCcw size={10} /> Reset</button>
         </div>
@@ -564,7 +564,7 @@ function NodeDetail({ node, onClose }: { node: NodeTypeDef; onClose: () => void 
           <p className="text-[13px] font-medium text-gray-800 dark:text-zinc-200 mt-1">{node.label}</p>
         </div>
         <button onClick={onClose}
-          className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">×</button>
+          className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">×</button>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <p className="text-[11px] text-gray-400 dark:text-zinc-500">{node.description}</p>
@@ -627,7 +627,7 @@ export function GraphPage() {
                 "px-2.5 py-1 rounded text-[11px] font-medium transition-colors capitalize",
                 view === v
                   ? "bg-zinc-700 text-gray-900 dark:text-zinc-100"
-                  : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
+                  : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300",
               )}>
               {v}
             </button>
@@ -687,7 +687,7 @@ export function GraphPage() {
                                placeholder-zinc-600 pl-9 pr-4 py-2 focus:outline-none focus:border-indigo-500 transition-colors" />
                   {query && (
                     <button onClick={() => setQuery("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">×</button>
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors">×</button>
                   )}
                 </div>
 

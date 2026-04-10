@@ -71,7 +71,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 <button
                   onClick={this.toggleStack}
                   className="w-full flex items-center gap-1.5 px-4 py-2 text-[11px] text-gray-400 dark:text-zinc-600
-                             hover:text-gray-500 dark:text-zinc-400 hover:bg-gray-100/40 dark:hover:bg-gray-100/40 dark:bg-zinc-800/40 transition-colors text-left"
+                             hover:text-gray-500 dark:hover:text-zinc-400 hover:bg-gray-100/40 dark:hover:bg-gray-100/40 dark:bg-zinc-800/40 transition-colors text-left"
                 >
                   <ChevronDown
                     size={11}

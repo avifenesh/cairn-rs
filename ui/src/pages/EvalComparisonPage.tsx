@@ -402,7 +402,7 @@ export function EvalComparisonPage({ leftId, rightId }: EvalComparisonPageProps)
       <div className="flex items-center gap-3 px-4 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
         <button
           onClick={handleBack}
-          className="p-1 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
+          className="p-1 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
           title="Back to Evaluations"
         >
           <ArrowLeft size={14} />

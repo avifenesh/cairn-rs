@@ -538,21 +538,21 @@ export function OrchestrationPage() {
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={expandAll}
-            className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+            className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
           >
             Expand all
           </button>
           <span className="text-zinc-800 text-[11px]">·</span>
           <button
             onClick={collapseAll}
-            className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+            className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
           >
             Collapse all
           </button>
           <button
             onClick={() => { void rSessions(); void rRuns(); void rTasks(); }}
             disabled={isFetching}
-            className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors ml-1"
+            className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors ml-1"
           >
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
             Refresh

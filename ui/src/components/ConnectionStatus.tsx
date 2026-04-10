@@ -284,7 +284,7 @@ export function ConnectionStatus() {
             <button
               onClick={() => setDismissed(true)}
               aria-label="Dismiss connection status"
-              className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+              className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
             >
               <X size={12} />
             </button>

@@ -230,7 +230,7 @@ export function TracesPage() {
           {filterQuery && (
             <button
               onClick={() => setFilterQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400"
             >
               <X size={11} />
             </button>
@@ -241,7 +241,7 @@ export function TracesPage() {
           onClick={() => exportCsv(filtered)}
           disabled={filtered.length === 0}
           title="Export filtered traces as CSV"
-          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-30 transition-colors"
+          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 disabled:opacity-30 transition-colors"
         >
           <Download size={11} />
         </button>
@@ -263,7 +263,7 @@ export function TracesPage() {
               }
             </div>
             <button onClick={() => refetch()} disabled={isFetching}
-              className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
               title="Refresh now"
             >
               <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />

@@ -202,7 +202,7 @@ export function DataTable<T>({
             onClick={handleExport}
             className="ml-auto flex items-center gap-1.5 h-8 px-2.5 rounded-md
                        bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 text-[11px] text-gray-400 dark:text-zinc-500
-                       hover:bg-white/5 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+                       hover:bg-white/5 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
             title="Export filtered data as CSV"
           >
             <Download size={12} /> CSV
@@ -226,7 +226,7 @@ export function DataTable<T>({
                       onClick={sortable ? () => handleSort(col.key) : undefined}
                       className={clsx(
                         'px-4 h-8 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider select-none whitespace-nowrap',
-                        sortable && 'cursor-pointer hover:text-gray-500 dark:text-zinc-400 transition-colors',
+                        sortable && 'cursor-pointer hover:text-gray-500 dark:hover:text-zinc-400 transition-colors',
                         active && 'text-indigo-400',
                         col.headClass,
                       )}

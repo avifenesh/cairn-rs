@@ -196,7 +196,7 @@ function TokenInput({ label, value, onChange }: {
                 "rounded px-2 py-0.5 text-[10px] font-mono font-medium transition-colors border",
                 value === p.value
                   ? "bg-indigo-600/20 text-indigo-300 border-indigo-700/50"
-                  : "text-gray-400 dark:text-zinc-600 border-gray-200 dark:border-zinc-800 hover:text-gray-700 dark:text-zinc-300 hover:border-zinc-600",
+                  : "text-gray-400 dark:text-zinc-600 border-gray-200 dark:border-zinc-800 hover:text-gray-700 dark:hover:text-zinc-300 hover:border-zinc-600",
               )}>
               {p.label}
             </button>
@@ -405,11 +405,11 @@ export function CostCalculatorPage() {
               <thead>
                 <tr className="bg-gray-50 dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800">
                   <th onClick={() => toggleSort("name")}
-                    className="px-4 py-2.5 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:text-zinc-300 transition-colors">
+                    className="px-4 py-2.5 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
                     Model <SortIcon col="name" />
                   </th>
                   <th onClick={() => toggleSort("provider")}
-                    className="px-3 py-2.5 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:text-zinc-300 transition-colors hidden sm:table-cell">
+                    className="px-3 py-2.5 text-left text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-zinc-300 transition-colors hidden sm:table-cell">
                     Provider <SortIcon col="provider" />
                   </th>
                   <th className="px-3 py-2.5 text-right text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider hidden md:table-cell">
@@ -419,7 +419,7 @@ export function CostCalculatorPage() {
                     Output / 1M
                   </th>
                   <th onClick={() => toggleSort("cost")}
-                    className="px-4 py-2.5 text-right text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:text-zinc-300 transition-colors">
+                    className="px-4 py-2.5 text-right text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
                     Est. Cost <SortIcon col="cost" />
                   </th>
                   <th className="px-4 py-2.5 w-32 hidden sm:table-cell" />

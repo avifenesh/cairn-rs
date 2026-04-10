@@ -301,7 +301,7 @@ export function DeploymentPage() {
               onClick={() => rHealth()}
               disabled={hFetching}
               className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-400 dark:text-zinc-500
-                         text-[12px] px-2.5 py-1.5 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 disabled:opacity-40 transition-colors"
+                         text-[12px] px-2.5 py-1.5 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 disabled:opacity-40 transition-colors"
             >
               <RefreshCw size={11} className={hFetching ? "animate-spin" : ""} />
               Refresh

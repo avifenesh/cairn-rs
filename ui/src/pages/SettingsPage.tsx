@@ -380,7 +380,7 @@ function TransportSection() {
                 "flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors border",
                 !isWs
                   ? "bg-indigo-600/20 text-indigo-300 border-indigo-700/50"
-                  : "text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-700 hover:text-gray-700 dark:text-zinc-300",
+                  : "text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-700 hover:text-gray-700 dark:hover:text-zinc-300",
               )}
             >
               <Radio size={11} /> SSE
@@ -392,7 +392,7 @@ function TransportSection() {
                 "flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors border",
                 isWs
                   ? "bg-indigo-600/20 text-indigo-300 border-indigo-700/50"
-                  : "text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-700 hover:text-gray-700 dark:text-zinc-300",
+                  : "text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-700 hover:text-gray-700 dark:hover:text-zinc-300",
               )}
             >
               <Wifi size={11} /> WebSocket
@@ -412,7 +412,7 @@ function TransportSection() {
               {(wsStatus === "failed" || wsStatus === "idle") && (
                 <button
                   onClick={reconnect}
-                  className="text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+                  className="text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
                 >
                   Reconnect
                 </button>
@@ -552,7 +552,7 @@ function CorsDiagnosticsSection({ deploymentMode }: { deploymentMode?: string })
           onClick={() => void runPreflight()}
           disabled={testing}
           className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-100 dark:bg-zinc-800
-                     text-[11px] font-medium text-gray-700 dark:text-zinc-300 hover:text-gray-900 dark:text-zinc-100 hover:border-zinc-600
+                     text-[11px] font-medium text-gray-700 dark:text-zinc-300 hover:text-gray-900 dark:hover:text-zinc-100 hover:border-zinc-600
                      disabled:opacity-40 px-2.5 py-1 transition-colors"
         >
           {testing
@@ -917,7 +917,7 @@ export function SettingsPage() {
         )}
         {activeTab === "system" && (
           <button onClick={() => refetch()} disabled={isFetching}
-            className="ml-auto flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors">
+            className="ml-auto flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors">
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
             Refresh
           </button>
@@ -934,7 +934,7 @@ export function SettingsPage() {
               "flex items-center gap-1.5 px-3 h-7 rounded text-[12px] font-medium transition-colors",
               activeTab === tab
                 ? "bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-zinc-200"
-                : "text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400",
+                : "text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400",
             )}
           >
             {icon}{label}

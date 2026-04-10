@@ -33,7 +33,7 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
                   e.preventDefault();
                   window.location.hash = item.href!.replace(/^#/, '');
                 }}
-                className="shrink-0 text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-gray-700 dark:text-zinc-300 transition-colors whitespace-nowrap"
+                className="shrink-0 text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-gray-700 dark:hover:text-zinc-300 transition-colors whitespace-nowrap"
               >
                 {item.label}
               </a>

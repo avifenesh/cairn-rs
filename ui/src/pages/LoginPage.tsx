@@ -102,7 +102,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   type="button"
                   tabIndex={-1}
                   onClick={() => setShowToken(v => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
                   aria-label={showToken ? 'Hide token' : 'Show token'}
                 >
                   {showToken ? <EyeOff size={13} /> : <Eye size={13} />}

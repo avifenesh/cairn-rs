@@ -75,7 +75,7 @@ function InstantiateModal({ template, onClose, onDone }: InstantiateModalProps) 
                 <p className="text-[11px] text-gray-400 dark:text-zinc-500">Enter a goal to start</p>
               </div>
             </div>
-            <button onClick={onClose} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">
+            <button onClick={onClose} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors">
               <X size={16} />
             </button>
           </div>
@@ -112,7 +112,7 @@ function InstantiateModal({ template, onClose, onDone }: InstantiateModalProps) 
           <div className="flex items-center justify-between px-5 py-3 border-t border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 rounded-b-xl">
             <button
               onClick={onClose}
-              className="text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+              className="text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
             >Cancel</button>
             <button
               onClick={() => mutation.mutate()}
@@ -179,7 +179,7 @@ function TemplateCard({ template, onInstantiate, recentRunId }: TemplateCardProp
           <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wide">Tools</p>
           <button
             onClick={() => setExpanded(v => !v)}
-            className="text-[10px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 flex items-center gap-0.5 transition-colors"
+            className="text-[10px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 flex items-center gap-0.5 transition-colors"
           >
             {expanded ? "less" : "prompt"} <ChevronRight size={10} className={expanded ? "rotate-90" : ""} />
           </button>

@@ -389,7 +389,7 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
             <button
               onClick={onBack}
               aria-label="Back to commands"
-              className="shrink-0 p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
+              className="shrink-0 p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
             >
               <ArrowLeft size={14} />
             </button>
@@ -411,7 +411,7 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
             <button
               onClick={() => { setQuery(''); setActiveIdx(0); inputRef.current?.focus(); }}
               aria-label="Clear search"
-              className="shrink-0 p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+              className="shrink-0 p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
             >
               ×
             </button>

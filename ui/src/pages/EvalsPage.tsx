@@ -289,7 +289,7 @@ function CompareBanner({
       {selected.length > 0 && (
         <button
           onClick={onClear}
-          className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+          className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
         >
           <X size={10} /> Clear
         </button>
@@ -468,7 +468,7 @@ export function EvalsPage() {
           onClick={() => void refetch()}
           disabled={isFetching}
           className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
-                     text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
+                     text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
                      disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={clsx(isFetching && "animate-spin")} />

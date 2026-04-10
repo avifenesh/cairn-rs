@@ -588,7 +588,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
             <button
               onClick={resetScenario}
               title="Reset"
-              className="flex items-center gap-1 px-2 py-1 rounded border border-gray-200 dark:border-zinc-700 bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 text-[11px] hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded border border-gray-200 dark:border-zinc-700 bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 text-[11px] hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600 transition-colors"
             >
               <RotateCcw size={11} />
             </button>
@@ -610,7 +610,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
           </button>
           <button
             onClick={() => setExpanded(v => !v)}
-            className="p-1.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+            className="p-1.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
           >
             {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </button>
@@ -671,7 +671,7 @@ function SuiteSummary({ results, onClear }: {
       </div>
       <button
         onClick={onClear}
-        className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+        className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
       >
         Clear
       </button>
@@ -744,7 +744,7 @@ export function TestHarnessPage() {
                 g !== "All" && "border-l border-gray-200 dark:border-zinc-700",
                 groupFilter === g
                   ? "bg-zinc-700 text-gray-800 dark:text-zinc-200"
-                  : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300",
+                  : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300",
               )}
             >
               {g}
@@ -767,7 +767,7 @@ export function TestHarnessPage() {
           {suiteResults.length > 0 && (
             <button
               onClick={() => setSuiteResults([])}
-              className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+              className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
             >
               <RefreshCw size={11} /> Clear
             </button>

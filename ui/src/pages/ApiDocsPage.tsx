@@ -427,7 +427,7 @@ function TryItPanel({ ep }: { ep: Endpoint }) {
           onClick={() => setShowCurl(v => !v)}
           className={clsx(
             "flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 transition-colors shrink-0",
-            showCurl ? "bg-zinc-700 text-gray-700 dark:text-zinc-300" : "text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400",
+            showCurl ? "bg-zinc-700 text-gray-700 dark:text-zinc-300" : "text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400",
           )}
         >
           <Terminal size={10} /> curl
@@ -503,7 +503,7 @@ function TryItPanel({ ep }: { ep: Endpoint }) {
             <div className="flex items-center justify-between mb-1">
               <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">curl command</p>
               <button onClick={copyCurl}
-                className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors">
+                className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
                 {curlCopied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
                 {curlCopied ? "Copied!" : "Copy"}
               </button>
@@ -543,7 +543,7 @@ function TryItPanel({ ep }: { ep: Endpoint }) {
                 <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">{result.latency}ms</span>
               </div>
               <button onClick={copyResult}
-                className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors">
+                className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
                 {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
                 {copied ? "Copied" : "Copy"}
               </button>
@@ -605,7 +605,7 @@ function EndpointRow({ ep }: { ep: Endpoint }) {
             <button onClick={() => setTryOpen(v => !v)}
               className={clsx(
                 "flex items-center gap-1.5 rounded px-3 py-1.5 text-[12px] font-medium transition-colors",
-                tryOpen ? "bg-indigo-600/20 text-indigo-400 border border-indigo-700/40" : "bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:bg-gray-200 dark:hover:bg-zinc-700 hover:text-gray-800 dark:text-zinc-200",
+                tryOpen ? "bg-indigo-600/20 text-indigo-400 border border-indigo-700/40" : "bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:bg-gray-200 dark:hover:bg-zinc-700 hover:text-gray-800 dark:hover:text-zinc-200",
               )}>
               {tryOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
               Try it
@@ -720,7 +720,7 @@ function RequestLogPanel() {
                         </p>
                         {e.resBody != null && (
                           <button onClick={() => copyEntry(e.id, JSON.stringify(e.resBody as object, null, 2))}
-                            className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors">
+                            className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
                             {isCopied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
                             {isCopied ? "Copied" : "Copy"}
                           </button>
@@ -794,7 +794,7 @@ export function ApiDocsPage() {
             <button key={tab} onClick={() => setPageTab(tab)}
               className={clsx(
                 "px-3 h-11 text-[11px] font-medium transition-colors border-b-2 capitalize flex items-center gap-1.5",
-                pageTab === tab ? "text-gray-900 dark:text-zinc-100 border-indigo-500" : "text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:text-zinc-300",
+                pageTab === tab ? "text-gray-900 dark:text-zinc-100 border-indigo-500" : "text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:hover:text-zinc-300",
               )}>
               {tab}
               {tab === 'requests' && unreadReqs > 0 && (
@@ -827,7 +827,7 @@ export function ApiDocsPage() {
                   <button key={d.id} onClick={() => setActiveDomain(d.id)}
                     className={clsx(
                       "w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors text-[12px]",
-                      d.id === activeDomain ? "bg-gray-100/60 dark:bg-zinc-800/60 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:bg-gray-50/60 dark:bg-zinc-900/60 hover:text-gray-700 dark:text-zinc-300",
+                      d.id === activeDomain ? "bg-gray-100/60 dark:bg-zinc-800/60 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:bg-gray-50/60 dark:bg-zinc-900/60 hover:text-gray-700 dark:hover:text-zinc-300",
                     )}>
                     <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", d.dot)} />
                     {d.label}

@@ -124,7 +124,7 @@ function ToastCard({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => vo
       </p>
       <button
         onClick={onDismiss}
-        className="shrink-0 mt-0.5 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+        className="shrink-0 mt-0.5 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
         aria-label="Dismiss"
       >
         <X size={12} />

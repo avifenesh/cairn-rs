@@ -98,7 +98,7 @@ function WorkspaceCard({
             <Check size={9} strokeWidth={3} /> Active
           </span>
         ) : (
-          <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-zinc-600 group-hover:text-gray-500 dark:text-zinc-400">
+          <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-zinc-600 group-hover:text-gray-500 dark:hover:text-zinc-400">
             <ArrowRight size={13} />
           </span>
         )}
@@ -188,7 +188,7 @@ function NewWorkspaceForm({
         <button
           type="button"
           onClick={onCancel}
-          className="px-3 py-1.5 rounded text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+          className="px-3 py-1.5 rounded text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
         >
           Cancel
         </button>
@@ -328,7 +328,7 @@ export function WorkspacesPage() {
             <button
               onClick={() => { void refetchSess(); void refetchRuns(); }}
               disabled={isFetching}
-              className="p-1.5 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors disabled:opacity-40"
+              className="p-1.5 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors disabled:opacity-40"
               title="Refresh"
             >
               <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
@@ -385,7 +385,7 @@ export function WorkspacesPage() {
           {filter && (
             <button
               onClick={() => setFilter('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
             >
               ×
             </button>

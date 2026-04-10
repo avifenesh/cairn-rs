@@ -38,7 +38,7 @@ function DetailsCell({ metadata }: { metadata: Record<string, unknown> }) {
     <div>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+        className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
       >
         {open
           ? <ChevronDown size={11} className="shrink-0" />
@@ -184,7 +184,7 @@ export function AuditLogPage() {
           onClick={() => void refetch()}
           disabled={isFetching}
           className="ml-auto flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
-                     text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
+                     text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
                      disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={clsx(isFetching && "animate-spin")} />

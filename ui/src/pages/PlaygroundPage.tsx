@@ -384,7 +384,7 @@ function CopyCodeButton({ code }: { code: string }) {
           setTimeout(() => setCopied(false), 1500);
         });
       }}
-      className="text-[10px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors flex items-center gap-1"
+      className="text-[10px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors flex items-center gap-1"
     >
       {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
     </button>
@@ -581,7 +581,7 @@ function SystemPromptPanel({ value, onChange, open, onToggle, disabled }: {
           <div className="flex items-center gap-3">
             {!isDefault && (
               <button type="button" onClick={() => onChange(DEFAULT_SYSTEM_PROMPT)}
-                className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">
+                className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors">
                 Reset to default
               </button>
             )}
@@ -658,7 +658,7 @@ function ChatBubble({ msg }: { msg: Message }) {
                     "opacity-0 group-hover/bubble:opacity-100",
                     copied
                       ? "text-emerald-400 bg-emerald-950/40"
-                      : "text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800",
+                      : "text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800",
                   )}
                 >
                   {copied ? <Check size={11} /> : <Copy size={11} />}
@@ -758,7 +758,7 @@ function ConversationSidebar({ conversations, activeId, onNew, onSelect, onDelet
         <button
           onClick={onNew}
           title="New chat"
-          className="p-1 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors shrink-0"
+          className="p-1 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors shrink-0"
         >
           <Plus size={13} />
         </button>
@@ -830,7 +830,7 @@ function CompareHeader({ label, model, onModelChange, models, streaming, onStop,
         </button>
       ) : (
         <button onClick={onClear} title="Clear" disabled={streaming}
-          className="shrink-0 p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">
+          className="shrink-0 p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">
           <Trash2 size={11} />
         </button>
       )}
@@ -1170,7 +1170,7 @@ export function PlaygroundPage() {
           title={sidebarOpen ? "Close history" : "Open history"}
           aria-expanded={sidebarOpen}
           aria-label={sidebarOpen ? "Close conversation history" : "Open conversation history"}
-          className="p-1 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
+          className="p-1 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
         >
           {sidebarOpen ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
         </button>
@@ -1210,7 +1210,7 @@ export function PlaygroundPage() {
               "flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors",
               compareMode
                 ? "bg-indigo-600/20 text-indigo-400 border border-indigo-700/40"
-                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800",
+                : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800",
             )}
           >
             <GitCompare size={12} />
@@ -1231,7 +1231,7 @@ export function PlaygroundPage() {
                 onClick={() => exportConversation(primary.messages, activeModel, systemPrompt)}
                 title="Export conversation as Markdown"
                 disabled={primary.streaming}
-                className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300
+                className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300
                            disabled:opacity-30 transition-colors px-1.5 py-1 rounded hover:bg-gray-50 dark:bg-zinc-900">
                 <Download size={12} />
                 <span className="hidden sm:inline">Export</span>

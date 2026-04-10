@@ -91,7 +91,7 @@ function DiffPanel({ diff, onClose }: { diff: PromptVersionDiff; onClose: () => 
             {pct}% similar
           </span>
         </div>
-        <button onClick={onClose} className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors">
+        <button onClick={onClose} className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
           <X size={12} />
         </button>
       </div>
@@ -184,7 +184,7 @@ function VersionRow({
                 "flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
                 diffOpen
                   ? "bg-indigo-600/20 text-indigo-400 border border-indigo-700/40"
-                  : "text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800",
+                  : "text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800",
               )}
             >
               <GitCompare size={10} /> Diff
@@ -193,7 +193,7 @@ function VersionRow({
           <button
             onClick={() => onCreateRelease(version.prompt_version_id)}
             className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium
-                       text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
+                       text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors"
           >
             <Package size={10} /> Release
           </button>
@@ -501,7 +501,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
     <div className="rounded-lg border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 px-4 py-3 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">New Prompt Asset</span>
-        <button onClick={onClose} className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors">
+        <button onClick={onClose} className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
           <X size={13} />
         </button>
       </div>
@@ -539,7 +539,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
       </div>
       <div className="flex items-center gap-2 justify-end">
         <button onClick={onClose}
-          className="px-3 py-1.5 rounded text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors">
+          className="px-3 py-1.5 rounded text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
           Cancel
         </button>
         <button
@@ -631,7 +631,7 @@ export function PromptsPage() {
                 "px-3 h-11 text-[11px] font-medium transition-colors border-b-2 capitalize",
                 filter === f
                   ? "text-gray-900 dark:text-zinc-100 border-indigo-500"
-                  : "text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:text-zinc-300",
+                  : "text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:hover:text-zinc-300",
               )}
             >
               {f}
@@ -641,7 +641,7 @@ export function PromptsPage() {
 
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => refetch()} disabled={isFetching}
-            className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors">
+            className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors">
             <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
           </button>
           <button

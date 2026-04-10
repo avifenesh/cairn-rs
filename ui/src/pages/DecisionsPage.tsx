@@ -161,7 +161,8 @@ export function DecisionsPage() {
     queryKey: ["decisions"],
     queryFn: async () => {
       const res = await fetch("/v1/decisions", { headers: authHeaders() });
-      return res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.items ?? []);
     },
     refetchInterval: refreshMs,
   });
@@ -170,7 +171,8 @@ export function DecisionsPage() {
     queryKey: ["decisions-cache"],
     queryFn: async () => {
       const res = await fetch("/v1/decisions/cache", { headers: authHeaders() });
-      return res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.items ?? []);
     },
     refetchInterval: refreshMs,
   });

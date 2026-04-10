@@ -158,7 +158,7 @@ export function MemoryPage() {
           />
           {query && (
             <button type="button" onClick={clearSearch}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400">
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400">
               <X size={12} />
             </button>
           )}
@@ -239,7 +239,7 @@ export function MemoryPage() {
             )}
           </p>
           <button onClick={() => refetchSources()}
-            className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors">
+            className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors">
             <RefreshCw size={11} /> Refresh
           </button>
         </div>

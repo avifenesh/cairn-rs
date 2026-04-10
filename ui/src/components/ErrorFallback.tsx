@@ -88,7 +88,7 @@ export function ErrorFallback({
         {onRetry && (
           <button
             onClick={onRetry}
-            className="ml-auto flex items-center gap-1 text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors shrink-0"
+            className="ml-auto flex items-center gap-1 text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors shrink-0"
           >
             <RefreshCw size={11} />
             Retry

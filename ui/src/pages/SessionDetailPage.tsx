@@ -141,7 +141,7 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
         <div className="space-y-3">
           <button
             onClick={onBack ?? (() => { window.location.hash = "sessions"; })}
-            className="flex items-center gap-1.5 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors"
+            className="flex items-center gap-1.5 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
           >
             <ArrowLeft size={13} /> Back to Sessions
           </button>
@@ -181,7 +181,7 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                 }}
                 title="Export session as JSON"
                 className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] font-medium
-                           border border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600
+                           border border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600
                            bg-gray-50 dark:bg-zinc-900 transition-colors"
               >
                 <Download size={12} /> Export

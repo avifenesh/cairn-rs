@@ -213,7 +213,7 @@ function ChannelDetail({
           <button
             onClick={testConnection}
             disabled={testState === 'sending'}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[11px] hover:bg-gray-200 dark:hover:bg-zinc-700 hover:text-gray-800 dark:text-zinc-200 disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[11px] hover:bg-gray-200 dark:hover:bg-zinc-700 hover:text-gray-800 dark:hover:text-zinc-200 disabled:opacity-40 transition-colors"
           >
             {testState === 'sending'
               ? <Loader2 size={10} className="animate-spin" />
@@ -242,7 +242,7 @@ function ChannelDetail({
               {!rec.delivered && (
                 <button
                   onClick={() => retryRecord(rec.record_id)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 text-[10px] hover:text-gray-700 dark:text-zinc-300 transition-all"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 text-[10px] hover:text-gray-700 dark:hover:text-zinc-300 transition-all"
                 >
                   <RotateCcw size={9} /> Retry
                 </button>
@@ -449,7 +449,7 @@ function AddChannelModal({
             <Bell size={14} className="text-indigo-400" />
             <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100">Add Channel</span>
           </div>
-          <button onClick={onClose} className="text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 transition-colors">
+          <button onClick={onClose} className="text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
             <X size={14} />
           </button>
         </div>
@@ -512,7 +512,7 @@ function AddChannelModal({
                     onChange={() => toggleEvent(value)}
                     className="w-3.5 h-3.5 rounded bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 accent-indigo-500"
                   />
-                  <span className="text-[12px] text-gray-500 dark:text-zinc-400 group-hover:text-gray-700 dark:text-zinc-300 transition-colors">
+                  <span className="text-[12px] text-gray-500 dark:text-zinc-400 group-hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
                     {label}
                   </span>
                 </label>
@@ -715,7 +715,7 @@ export function ChannelsPage() {
         <button
           onClick={() => { prefsQuery.refetch(); failedQuery.refetch(); }}
           disabled={prefsQuery.isFetching}
-          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300 disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={prefsQuery.isFetching ? 'animate-spin' : ''} />
           Refresh
