@@ -314,7 +314,7 @@ impl DecisionCache {
     /// Step 5: Atomically check cache.
     fn lookup(&self, key: &DecisionKey) -> CacheEntryState {
         let ck = Self::cache_key_string(key);
-        let mut entries = self.entries.lock().unwrap();
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let now = Self::now_ms();
 
         if let Some(entry) = entries.get(&ck) {
@@ -358,7 +358,7 @@ impl DecisionCache {
             hit_count: 0,
             is_pending: true,
         };
-        self.entries.lock().unwrap().insert(ck, entry);
+        self.entries.lock().unwrap_or_else(|e| e.into_inner()).insert(ck, entry);
     }
 
     /// Promote Pending → Resolved.
@@ -381,13 +381,13 @@ impl DecisionCache {
             .flat_map(|s| s.rule_ids.iter().map(|r| r.as_str().to_owned()))
             .collect();
         if !rule_ids.is_empty() {
-            let mut rule_idx = self.rule_index.lock().unwrap();
+            let mut rule_idx = self.rule_index.lock().unwrap_or_else(|e| e.into_inner());
             for rid in &rule_ids {
                 rule_idx.entry(rid.clone()).or_default().push(ck.clone());
             }
         }
 
-        self.entries.lock().unwrap().insert(
+        self.entries.lock().unwrap_or_else(|e| e.into_inner()).insert(
             ck,
             CacheEntry {
                 decision_id: decision_id.clone(),
@@ -406,7 +406,7 @@ impl DecisionCache {
 
     fn record_hit(&self, key: &DecisionKey) {
         let ck = Self::cache_key_string(key);
-        if let Some(entry) = self.entries.lock().unwrap().get_mut(&ck) {
+        if let Some(entry) = self.entries.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&ck) {
             entry.hit_count += 1;
         }
     }
@@ -427,7 +427,7 @@ impl DecisionCache {
     }
 
     fn remove_by_decision_id(&self, decision_id: &DecisionId) -> bool {
-        let mut entries = self.entries.lock().unwrap();
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let target_id = decision_id.as_str();
         let key = entries
             .iter()
@@ -443,7 +443,7 @@ impl DecisionCache {
 
     fn remove_by_scope(&self, scope: &DecisionScopeRef, kind_filter: Option<&str>) -> u32 {
         let scope_str = scope_ref_string(scope);
-        let mut entries = self.entries.lock().unwrap();
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let keys_to_remove: Vec<String> = entries
             .keys()
             .filter(|k| {
@@ -467,10 +467,10 @@ impl DecisionCache {
     fn remove_by_rule_id(&self, rule_id: &PolicyId) -> u32 {
         let rid = rule_id.as_str().to_owned();
         let keys = {
-            let mut rule_idx = self.rule_index.lock().unwrap();
+            let mut rule_idx = self.rule_index.lock().unwrap_or_else(|e| e.into_inner());
             rule_idx.remove(&rid).unwrap_or_default()
         };
-        let mut entries = self.entries.lock().unwrap();
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let mut count = 0u32;
         for k in keys {
             if entries.remove(&k).is_some() {
@@ -482,7 +482,7 @@ impl DecisionCache {
 
     fn list_active(&self, scope: &ProjectKey, limit: usize) -> Vec<CachedDecisionSummary> {
         let now = Self::now_ms();
-        let entries = self.entries.lock().unwrap();
+        let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         entries
             .iter()
             .filter(|(_, e)| e.outcome.is_some() && e.expires_at > now)
