@@ -267,6 +267,7 @@ struct CacheEntry {
     decision_id: DecisionId,
     outcome: Option<DecisionOutcome>,
     source: Option<DecisionSource>,
+    #[allow(dead_code)]
     reasoning_chain: Vec<StepResult>,
     expires_at: u64,
     created_at: u64,
@@ -746,7 +747,6 @@ impl DecisionService for DecisionServiceImpl {
 
         let mut chain: Vec<StepResult> = Vec::with_capacity(8);
         let mut needs_escalation = false;
-        let mut guardrail_rule_ids: Vec<PolicyId> = Vec::new();
 
         // ── Step 1: Scope check ─────────────────────────────────────────
         let scope_result = self.scope_checker.check(&request).await;
@@ -812,7 +812,7 @@ impl DecisionService for DecisionServiceImpl {
 
         // ── Step 3: Guardrail check ─────────────────────────────────────
         let guard_result = self.guardrail_checker.check(&request).await;
-        guardrail_rule_ids = guard_result.rule_ids.clone();
+        let guardrail_rule_ids = guard_result.rule_ids.clone();
         match &guard_result.outcome {
             GuardrailCheckOutcome::Allow => {
                 chain.push(StepResult {

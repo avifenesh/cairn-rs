@@ -11,9 +11,9 @@
 //! Step 6: Flip /health/ready to 200
 //! ```
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -306,8 +306,7 @@ impl ToolCallResultCache {
 
     /// Insert a completed tool result.
     pub fn insert(&mut self, result: CachedToolResult) {
-        self.entries
-            .insert(result.tool_call_id.0.clone(), result);
+        self.entries.insert(result.tool_call_id.0.clone(), result);
     }
 
     /// Look up a cached result by tool call ID.
@@ -343,10 +342,7 @@ pub enum RecoveryDispatchDecision {
     /// Safe to re-dispatch (IdempotentSafe or AuthorResponsible).
     Dispatch,
     /// Must pause for operator confirmation (DangerousPause).
-    Pause {
-        tool_name: String,
-        reason: String,
-    },
+    Pause { tool_name: String, reason: String },
 }
 
 /// Decide whether to dispatch a tool call during recovery.
@@ -488,7 +484,10 @@ impl ProjectionWarmupProgress {
         for name in REQUIRED_PROJECTIONS {
             per.insert(
                 name.to_string(),
-                ProjectionStatus { state: BranchState::Pending, entries: 0 },
+                ProjectionStatus {
+                    state: BranchState::Pending,
+                    entries: 0,
+                },
             );
         }
         Self {
@@ -519,8 +518,8 @@ use cairn_domain::{EventEnvelope, RuntimeEvent};
 /// `ToolInvocationCompleted` event into a single `EventLog::append` batch.
 ///
 /// This enforces RFC 020 invariant 11: either ALL events (tool side-effects
-/// + completion marker) are durable, or NONE are. No partial state where the
-/// projection saw the side-effect but the cache did not.
+/// and the completion marker) are durable, or NONE are. No partial state
+/// where the projection saw the side-effect but the cache did not.
 pub struct ToolDispatchBatch {
     events: Vec<EventEnvelope<RuntimeEvent>>,
 }
@@ -808,7 +807,10 @@ mod tests {
     fn warmup_progress_tracks_completion() {
         let mut progress = ProjectionWarmupProgress::new();
         assert!(!progress.is_complete());
-        assert_eq!(progress.projections_total, REQUIRED_PROJECTIONS.len() as u32);
+        assert_eq!(
+            progress.projections_total,
+            REQUIRED_PROJECTIONS.len() as u32
+        );
 
         for name in REQUIRED_PROJECTIONS {
             progress.mark_complete(name, 100);

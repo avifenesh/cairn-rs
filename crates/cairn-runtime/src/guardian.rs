@@ -159,10 +159,7 @@ impl ApprovalResolver for GuardianResolver {
         let response: GenerationResponse =
             match self.provider.generate(&model_id, messages, &settings).await {
                 Ok(resp) => resp,
-                Err(e) => {
-                    eprintln!(
-                    "[guardian] LLM call failed (model={model_id}): {e} — falling through to human"
-                );
+                Err(_) => {
                     return (DecisionOutcome::Allowed, DecisionSource::FreshEvaluation);
                 }
             };
@@ -171,19 +168,12 @@ impl ApprovalResolver for GuardianResolver {
         let (outcome, risk_level, rationale) = match Self::parse_response(&response.text) {
             Some(parsed) => parsed,
             None => {
-                eprintln!(
-                    "[guardian] response unparseable (model={model_id}) — falling through to human"
-                );
                 return (DecisionOutcome::Allowed, DecisionSource::FreshEvaluation);
             }
         };
 
         // Risk ceiling check: if risk exceeds ceiling, fall through.
         if risk_level > self.config.risk_ceiling {
-            eprintln!(
-                "[guardian] risk {:?} exceeds ceiling {:?} — falling through to human",
-                risk_level, self.config.risk_ceiling,
-            );
             return (DecisionOutcome::Allowed, DecisionSource::FreshEvaluation);
         }
 

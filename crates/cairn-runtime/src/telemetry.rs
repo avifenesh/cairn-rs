@@ -272,6 +272,7 @@ fn hash_id(s: &str) -> u64 {
 }
 
 /// Truncate a string to at most `max_bytes` (for attribute value size limits).
+#[allow(dead_code)]
 fn truncate(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         s.to_owned()
