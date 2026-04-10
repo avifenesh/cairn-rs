@@ -16,6 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cairn_domain::contexts::{PluginCategory, SignalCaptureOverride};
 use cairn_domain::ids::{CredentialId, OperatorId, SignalId};
 use cairn_domain::tenancy::ProjectKey;
+use cairn_plugin_catalog::CatalogEntry;
 use serde::{Deserialize, Serialize};
 
 // ── Plugin Descriptor (RFC 015 §"Plugin Descriptor") ─────────────────────────
@@ -440,6 +441,26 @@ impl<S> MarketplaceService<S> {
         self.records.values().collect()
     }
 
+    /// Load the bundled catalog at startup. Returns PluginListed events.
+    pub fn load_bundled_catalog(&mut self) -> Vec<MarketplaceEvent> {
+        let entries = match cairn_plugin_catalog::load_bundled_catalog() {
+            Ok(entries) => entries,
+            Err(_) => return Vec::new(),
+        };
+
+        // Collect new descriptors first to avoid borrow conflict.
+        let new_descriptors: Vec<PluginDescriptor> = entries
+            .into_iter()
+            .filter(|e| !self.records.contains_key(&e.id))
+            .map(catalog_entry_to_descriptor)
+            .collect();
+
+        new_descriptors
+            .into_iter()
+            .map(|desc| self.list_plugin(desc))
+            .collect()
+    }
+
     /// Query: is a plugin installed and available?
     pub fn get_record(&self, plugin_id: &str) -> Option<&MarketplaceRecord> {
         self.records.get(plugin_id)
@@ -690,6 +711,75 @@ impl<S> MarketplaceService<S> {
             at: now,
         };
         Ok(vec![event])
+    }
+}
+
+// ── Catalog Conversion ──────────────────────────────────────────────────────
+
+/// Convert a catalog TOML entry into a full PluginDescriptor.
+pub fn catalog_entry_to_descriptor(entry: CatalogEntry) -> PluginDescriptor {
+    let category = match entry.category.as_str() {
+        "issue_tracker" => PluginCategory::IssueTracker,
+        "chat_ops" => PluginCategory::ChatOps,
+        "calendar" => PluginCategory::Calendar,
+        "files" => PluginCategory::Files,
+        "customer_support" => PluginCategory::CustomerSupport,
+        "observability" => PluginCategory::Observability,
+        "data_source" => PluginCategory::DataSource,
+        "communication_channel" => PluginCategory::CommunicationChannel,
+        "eval_scorer" => PluginCategory::EvalScorer,
+        other => PluginCategory::Other(other.to_string()),
+    };
+
+    let required_credentials = entry
+        .required_credentials
+        .into_iter()
+        .map(|c| CredentialSpec {
+            key: c.key,
+            display_name: c.display_name,
+            kind: match c.kind.as_str() {
+                "oauth2" => CredentialKind::OAuth2,
+                "api_key" => CredentialKind::ApiKey,
+                "app_installation" => CredentialKind::AppInstallation,
+                "basic_auth" => CredentialKind::BasicAuth,
+                _ => CredentialKind::ApiKey,
+            },
+            help_url: c.help_url,
+            validation: None,
+            scope: match c.scope.as_str() {
+                "tenant" => CredentialScopeHint::Tenant,
+                "workspace" => CredentialScopeHint::Workspace,
+                "project" => CredentialScopeHint::Project,
+                _ => CredentialScopeHint::Tenant,
+            },
+            generated: c.generated,
+        })
+        .collect();
+
+    let post_install_health_check = entry.health_check.map(|hc| HealthCheckSpec {
+        method: hc.method,
+        timeout_ms: hc.timeout_ms,
+        success_criteria: serde_json::Value::Null,
+    });
+
+    PluginDescriptor {
+        id: entry.id,
+        name: entry.name,
+        version: entry.version,
+        description: entry.description,
+        category,
+        icon_url: entry.icon_url,
+        vendor: entry.vendor,
+        command: entry.command,
+        tools: entry.tools,
+        signal_sources: entry.signal_sources,
+        channels: entry.channels,
+        required_credentials,
+        required_network_egress: entry.network_egress,
+        post_install_health_check,
+        source: DescriptorSource::BundledCatalog,
+        download_url: entry.download_url,
+        has_signal_source: entry.has_signal_source,
     }
 }
 
@@ -1047,6 +1137,33 @@ mod tests {
         assert_eq!(back.key, "test_key");
         assert_eq!(back.kind, CredentialKind::ApiKey);
         assert_eq!(back.scope, CredentialScopeHint::Project);
+    }
+
+    #[test]
+    fn load_bundled_catalog_lists_github() {
+        let mut svc = MarketplaceService::new(test_store());
+        let events = svc.load_bundled_catalog();
+
+        // At least one event (GitHub), all are PluginListed
+        assert!(!events.is_empty());
+        assert!(events.iter().all(|e| matches!(e, MarketplaceEvent::PluginListed { .. })));
+
+        // GitHub is now listed
+        let github = svc.get_record("github").expect("github must be listed");
+        assert_eq!(github.state, MarketplaceState::Listed);
+        assert_eq!(github.descriptor.category, PluginCategory::IssueTracker);
+        assert_eq!(github.descriptor.tools.len(), 19);
+    }
+
+    #[test]
+    fn load_bundled_catalog_idempotent() {
+        let mut svc = MarketplaceService::new(test_store());
+        let events1 = svc.load_bundled_catalog();
+        let events2 = svc.load_bundled_catalog();
+
+        // Second load should not re-list already-known plugins
+        assert!(!events1.is_empty());
+        assert!(events2.is_empty());
     }
 
     #[test]
