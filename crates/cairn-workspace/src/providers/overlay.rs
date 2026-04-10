@@ -550,7 +550,8 @@ impl SandboxProvider for OverlayProvider {
 
         let root = self.sandbox_root_for(run_id);
         let metadata = self.load_metadata(run_id)?;
-        let resolved = self.resolve_base(run_id, &root, &metadata.project.tenant_id, &state.base)?;
+        let resolved =
+            self.resolve_base(run_id, &root, &metadata.project.tenant_id, &state.base)?;
         if matches!(state.base, SandboxBase::Repo { .. }) {
             if let (Some(expected), Some(actual)) = (
                 state.base_revision.as_deref(),
@@ -590,7 +591,8 @@ impl SandboxProvider for OverlayProvider {
             })?;
         let root = self.sandbox_root_for(run_id);
         let metadata = self.load_metadata(run_id)?;
-        let resolved = self.resolve_base(run_id, &root, &metadata.project.tenant_id, &state.base)?;
+        let resolved =
+            self.resolve_base(run_id, &root, &metadata.project.tenant_id, &state.base)?;
 
         self.maybe_unmount(run_id, &root)?;
         let snapshot = self.rotate_previous_layers(run_id, &root)?;
@@ -629,8 +631,7 @@ impl SandboxProvider for OverlayProvider {
 
         let root = self.sandbox_root_for(new_run_id);
         self.create_root_layout(new_run_id, &root)?;
-        let resolved =
-            self.resolve_base(new_run_id, &root, &project.tenant_id, &policy.base)?;
+        let resolved = self.resolve_base(new_run_id, &root, &project.tenant_id, &policy.base)?;
         self.prepare_mount_dirs(new_run_id, &root)?;
 
         let lower_dirs = vec![snapshot.clone(), resolved.lower_dir.clone()];
@@ -1089,7 +1090,11 @@ mod tests {
         let run = run_id("run-drift");
 
         provider
-            .provision(&run, &project(), &repo_policy(repo_id.clone(), Some("main")))
+            .provision(
+                &run,
+                &project(),
+                &repo_policy(repo_id.clone(), Some("main")),
+            )
             .await
             .unwrap();
         let root = base_dir.join("sbx-run-drift");

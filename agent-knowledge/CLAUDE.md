@@ -10,6 +10,7 @@
 | React Frontend for Rust/Axum Backends | react-rust-axum-frontend.md | 25 | deep | 2026-04-05 |
 | AI Observability & LLM Ops UX Patterns | ai-observability-ux-patterns.md | 25 | deep | 2026-04-05 |
 | Agent Control Plane Use Cases | agent-control-plane-use-cases.md | 12 | deep | 2026-04-08 |
+| Revenue Models for Open-Source Developer Infrastructure | infrastructure-revenue-models.md | 47 | deep | 2026-04-10 |
 
 ## Trigger Phrases
 
@@ -59,6 +60,25 @@ Use this knowledge when the user asks about:
 - "agent dogfooding scenario" → agent-control-plane-use-cases.md
 - "agent adoption patterns teams" → agent-control-plane-use-cases.md
 - "competitor analysis agent platforms" → agent-control-plane-use-cases.md
+- "how to make money from open source" → infrastructure-revenue-models.md
+- "open core vs fully open source" → infrastructure-revenue-models.md
+- "BSL business source license" → infrastructure-revenue-models.md
+- "open source revenue model" → infrastructure-revenue-models.md
+- "what features to put behind paywall" → infrastructure-revenue-models.md
+- "SSO tax open source" → infrastructure-revenue-models.md
+- "self-hosted enterprise licensing" → infrastructure-revenue-models.md
+- "Temporal pricing model" → infrastructure-revenue-models.md
+- "LangSmith monetization" → infrastructure-revenue-models.md
+- "usage-based pricing infrastructure" → infrastructure-revenue-models.md
+- "open source to SaaS conversion" → infrastructure-revenue-models.md
+- "Dagster Prefect Temporal business model" → infrastructure-revenue-models.md
+- "n8n Windmill pricing" → infrastructure-revenue-models.md
+- "GitLab revenue model" → infrastructure-revenue-models.md
+- "HashiCorp license change" → infrastructure-revenue-models.md
+- "agent infrastructure monetization" → infrastructure-revenue-models.md
+- "early stage open source revenue" → infrastructure-revenue-models.md
+- "CrewAI LangChain business model" → infrastructure-revenue-models.md
+- "developer infrastructure pricing tiers" → infrastructure-revenue-models.md
 
 ## Quick Lookup
 
@@ -87,6 +107,16 @@ Use this knowledge when the user asks about:
 | RAG quality, retrieval metrics, embedding drift | ai-observability-ux-patterns.md |
 | Langfuse, Helicone, LangSmith, Arize Phoenix | ai-observability-ux-patterns.md |
 | enterprise AI platform, RBAC, audit trail | ai-observability-ux-patterns.md |
+| open core, open source, monetization | infrastructure-revenue-models.md |
+| BSL, SSPL, Sustainable Use License, source-available | infrastructure-revenue-models.md |
+| SSO tax, SAML, OIDC, enterprise paywall | infrastructure-revenue-models.md |
+| usage-based pricing, consumption, actions, executions | infrastructure-revenue-models.md |
+| self-hosted enterprise, air-gapped, on-prem license | infrastructure-revenue-models.md |
+| NRR, ARR, conversion rate, developer-led growth | infrastructure-revenue-models.md |
+| Temporal, Dagster, Prefect, Hatchet, Inngest | infrastructure-revenue-models.md |
+| LangSmith, Langfuse, CrewAI, LlamaIndex pricing | infrastructure-revenue-models.md |
+| GitLab, Grafana, HashiCorp, Airbyte, Mattermost | infrastructure-revenue-models.md |
+| open source startup pricing, pre-revenue, seed stage | infrastructure-revenue-models.md |
 
 ## How to Use
 

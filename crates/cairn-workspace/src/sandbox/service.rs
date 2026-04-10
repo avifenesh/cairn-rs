@@ -587,7 +587,10 @@ impl SandboxService {
         let mut summary = SandboxRecoverySummary::default();
         for handle in handles {
             let mut metadata = handle.metadata;
-            if matches!(metadata.state, SandboxState::Destroyed | SandboxState::Failed) {
+            if matches!(
+                metadata.state,
+                SandboxState::Destroyed | SandboxState::Failed
+            ) {
                 continue;
             }
 
@@ -608,18 +611,21 @@ impl SandboxService {
                     summary.reconnected += 1;
                 }
                 Ok(None) => {}
-                Err(WorkspaceError::BaseRevisionDrift { expected, actual, .. }) => {
+                Err(WorkspaceError::BaseRevisionDrift {
+                    expected, actual, ..
+                }) => {
                     let detected_at = self.clock.now_millis();
                     if let Some(repo_id) = metadata.repo_id.clone() {
-                        self.event_sink.publish(SandboxEvent::SandboxBaseRevisionDrift {
-                            sandbox_id: metadata.sandbox_id.clone(),
-                            run_id: run_id.clone(),
-                            project: metadata.project.clone(),
-                            repo_id,
-                            expected: expected.clone(),
-                            actual: actual.clone(),
-                            detected_at,
-                        });
+                        self.event_sink
+                            .publish(SandboxEvent::SandboxBaseRevisionDrift {
+                                sandbox_id: metadata.sandbox_id.clone(),
+                                run_id: run_id.clone(),
+                                project: metadata.project.clone(),
+                                repo_id,
+                                expected: expected.clone(),
+                                actual: actual.clone(),
+                                detected_at,
+                            });
                     }
 
                     metadata.state = SandboxState::Preserved;
@@ -649,13 +655,14 @@ impl SandboxService {
                         None,
                         recovery_policy(&metadata),
                     );
-                    self.event_sink.publish(SandboxEvent::SandboxProvisioningFailed {
-                        sandbox_id: metadata.sandbox_id.clone(),
-                        run_id: run_id.clone(),
-                        error_kind: SandboxErrorKind::Recovery,
-                        error: error.to_string(),
-                        failed_at,
-                    });
+                    self.event_sink
+                        .publish(SandboxEvent::SandboxProvisioningFailed {
+                            sandbox_id: metadata.sandbox_id.clone(),
+                            run_id: run_id.clone(),
+                            error_kind: SandboxErrorKind::Recovery,
+                            error: error.to_string(),
+                            failed_at,
+                        });
                     summary.failed += 1;
                 }
             }

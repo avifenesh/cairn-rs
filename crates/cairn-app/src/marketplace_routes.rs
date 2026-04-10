@@ -336,7 +336,7 @@ pub async fn enable_plugin_handler(
                         capabilities: Vec::new(),
                         permissions: cairn_tools::DeclaredPermissions::default(),
                         limits: None,
-                        execution_class: cairn_domain::policy::ExecutionClass::Sandboxed,
+                        execution_class: cairn_domain::policy::ExecutionClass::SandboxedProcess,
                         description: record.descriptor.description.clone(),
                         homepage: None,
                     };

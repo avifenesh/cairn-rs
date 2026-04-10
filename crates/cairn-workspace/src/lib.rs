@@ -16,8 +16,8 @@ pub use sandbox::{
     HostCapabilityRequirements, InvalidRepoId, ProvisionedSandbox, RepoId, SandboxBase,
     SandboxCheckpoint, SandboxCheckpointKind, SandboxErrorKind, SandboxEvent, SandboxEventSink,
     SandboxHandle, SandboxId, SandboxMetadata, SandboxPolicy, SandboxPolicySnapshot,
-    SandboxRecoverySummary, SandboxService, SandboxState, SandboxStrategy,
-    SandboxStrategyRequest, SystemClock,
+    SandboxRecoverySummary, SandboxService, SandboxState, SandboxStrategy, SandboxStrategyRequest,
+    SystemClock,
 };
 
 #[cfg(test)]

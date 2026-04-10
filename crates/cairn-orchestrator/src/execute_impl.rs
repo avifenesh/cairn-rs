@@ -234,7 +234,10 @@ impl RuntimeExecutePhase {
                         },
                         subject: DecisionSubject::ToolCall {
                             tool_name: tool_name.clone(),
-                            args: proposal.tool_args.clone().unwrap_or(serde_json::Value::Null),
+                            args: proposal
+                                .tool_args
+                                .clone()
+                                .unwrap_or(serde_json::Value::Null),
                         },
                         scope: ctx.project.clone(),
                         cost_estimate: None,
@@ -243,7 +246,8 @@ impl RuntimeExecutePhase {
                             .unwrap_or_default()
                             .as_millis() as u64,
                         correlation_id: cairn_domain::CorrelationId::new(format!(
-                            "tool_{}_{}", ctx.run_id, ctx.iteration
+                            "tool_{}_{}",
+                            ctx.run_id, ctx.iteration
                         )),
                     };
                     match ds.evaluate(dreq).await {

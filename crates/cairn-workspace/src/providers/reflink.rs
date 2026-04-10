@@ -528,8 +528,7 @@ impl SandboxProvider for ReflinkProvider {
                 WorkspaceError::sandbox_op(new_run_id, "restore_reflink_root", error)
             })?;
 
-        let resolved =
-            self.resolve_base(new_run_id, &root, &project.tenant_id, &policy.base)?;
+        let resolved = self.resolve_base(new_run_id, &root, &project.tenant_id, &policy.base)?;
         let state = ReflinkState {
             sandbox_id: Self::sandbox_id_for(new_run_id),
             run_id: new_run_id.clone(),

@@ -1,6 +1,6 @@
 pub mod overlay;
-pub mod repo_source;
 pub mod reflink;
+pub mod repo_source;
 
 use async_trait::async_trait;
 use cairn_domain::{CheckpointKind, ProjectKey, RunId};
@@ -12,8 +12,8 @@ use crate::sandbox::{
 };
 
 pub use overlay::OverlayProvider;
-pub use repo_source::RepoCloneCacheSource;
 pub use reflink::ReflinkProvider;
+pub use repo_source::RepoCloneCacheSource;
 
 #[async_trait]
 pub trait SandboxProvider: Send + Sync + 'static {
