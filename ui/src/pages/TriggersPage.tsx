@@ -177,7 +177,8 @@ export function TriggersPage() {
     queryKey: ["triggers"],
     queryFn: async () => {
       const res = await fetch("/v1/projects/default/triggers", { headers: authHeaders() });
-      return res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.items ?? []);
     },
     refetchInterval: refreshMs,
   });
@@ -186,7 +187,8 @@ export function TriggersPage() {
     queryKey: ["run-templates"],
     queryFn: async () => {
       const res = await fetch("/v1/projects/default/run-templates", { headers: authHeaders() });
-      return res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.items ?? []);
     },
     refetchInterval: refreshMs,
   });
