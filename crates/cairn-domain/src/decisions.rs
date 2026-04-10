@@ -744,7 +744,7 @@ mod tests {
     fn decision_event_recorded_serde() {
         let event = DecisionEvent::DecisionRecorded {
             decision_id: DecisionId::new("dec_1"),
-            request: sample_request(),
+            request: Box::new(sample_request()),
             outcome: DecisionOutcome::Allowed,
             reasoning_chain: vec![StepResult {
                 step: 1,
