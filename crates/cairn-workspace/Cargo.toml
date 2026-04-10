@@ -1,0 +1,17 @@
+[package]
+name = "cairn-workspace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+cairn-domain = { path = "../cairn-domain" }
+async-trait = "0.1"
+
+[lints]
+workspace = true

@@ -15,6 +15,7 @@ members = [
     "crates/cairn-plugin-proto",
     "crates/cairn-app",
     "crates/cairn-orchestrator",
+    "crates/cairn-workspace",
 ]
 resolver = "2"
 
@@ -27,4 +28,3 @@ rust-version = "1.78"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-
