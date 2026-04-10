@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ErrorFallback } from '../components/ErrorFallback';
 import {
   User,
   KeyRound,
