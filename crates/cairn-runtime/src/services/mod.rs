@@ -122,8 +122,10 @@ pub use provider_health_tracker::ProviderHealthTracker;
 
 pub mod marketplace_service;
 pub use marketplace_service::{
-    MarketplaceCommand, MarketplaceError, MarketplaceEvent, MarketplaceService,
-    MarketplaceState, PluginEnablement,
+    CredentialKind, CredentialScopeHint, CredentialScopeKey, CredentialSpec,
+    DescriptorSource, HealthCheckSpec, MarketplaceCommand, MarketplaceError,
+    MarketplaceEvent, MarketplaceRecord, MarketplaceService, MarketplaceState,
+    PluginDescriptor, PluginEnablement,
 };
 
 pub mod plugin_health_monitor;
