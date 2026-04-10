@@ -177,7 +177,7 @@ export function CostsPage() {
     : 0;
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="h-full overflow-y-auto p-6 pb-8 space-y-5">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Cost Tracking</p>
