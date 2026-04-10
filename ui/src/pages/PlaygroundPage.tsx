@@ -714,10 +714,9 @@ function EmptyChat({ model, noProviders }: { model: string; noProviders?: boolea
         <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-4 py-3 text-left max-w-xs space-y-1.5">
           <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Options</p>
           {[
-            '1. Set OPENROUTER_API_KEY for OpenRouter',
-            '2. Configure Bedrock via CAIRN_BRAIN_URL',
-            '3. Add any OpenAI-compatible provider',
-            '4. Add provider connections via the Providers page',
+            '1. Set CAIRN_BRAIN_URL to any OpenAI-compatible endpoint',
+            '2. Add provider connections via the Providers page',
+            '3. Supports OpenRouter, Bedrock, Vertex, and more',
           ].map(step => (
             <p key={step} className="text-[11px] text-gray-500 dark:text-zinc-400 font-mono">{step}</p>
           ))}
