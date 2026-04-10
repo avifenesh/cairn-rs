@@ -1,26 +1,30 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Inbox, Scale, Trash2, XCircle } from "lucide-react";
-import { clsx } from "clsx";
+import { RefreshCw, Trash2, XCircle } from "lucide-react";
+import { DataTable } from "../components/DataTable";
+import { CopyButton } from "../components/CopyButton";
+import { HelpTooltip } from "../components/HelpTooltip";
+import { ErrorFallback } from "../components/ErrorFallback";
 import { useToast } from "../components/Toast";
-import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
-import type { RefreshOption } from "../hooks/useAutoRefresh";
-import { useScope } from "../hooks/useScope";
+import { clsx } from "clsx";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("cairn_token") || ""}` });
 
-async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
-  const data = await res.json().catch(() => ({}));
-  return typeof data?.error === "string" ? data.error : fallback;
+function fmtRelative(ms: number): string {
+  const d = Date.now() - ms;
+  if (d < 60_000) return "just now";
+  if (d < 3_600_000) return `${Math.floor(d / 60_000)}m ago`;
+  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h ago`;
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-const shortId = (id: string) =>
-  id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
+function mono(s: string, max = 18): string {
+  return s.length > max ? `${s.slice(0, max - 3)}…` : s;
+}
 
-const fmtTime = (ms: number) =>
-  new Date(ms).toLocaleString(undefined, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-  });
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface Decision {
   decision_id: string;
@@ -39,231 +43,175 @@ interface CacheEntry {
   hit_count: number;
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
+// ── Outcome pill (matches session/run state pill pattern) ────────────────────
+
+const OUTCOME_PILL: Record<string, string> = {
+  allowed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  denied:  "bg-red-500/10 text-red-400 border-red-500/20",
+};
+const OUTCOME_DOT: Record<string, string> = {
+  allowed: "bg-emerald-400",
+  denied:  "bg-red-400",
+};
+
+function OutcomePill({ outcome }: { outcome: string }) {
   return (
-    <div className={clsx("border-l-2 pl-3 py-0.5", accent ?? "border-indigo-500")}>
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[22px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+    <span className={clsx(
+      "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium border whitespace-nowrap",
+      OUTCOME_PILL[outcome] ?? OUTCOME_PILL.denied,
+    )}>
+      <span className={clsx("w-1 h-1 rounded-full shrink-0", OUTCOME_DOT[outcome] ?? OUTCOME_DOT.denied)} />
+      {outcome}
+    </span>
+  );
+}
+
+// ── Stat card ────────────────────────────────────────────────────────────────
+
+function StatCard({ label, value, accent = "default" }: {
+  label: string; value: string | number;
+  accent?: "default" | "emerald" | "red" | "amber";
+}) {
+  const border = { default: "border-l-zinc-700", emerald: "border-l-emerald-500", red: "border-l-red-500", amber: "border-l-amber-500" }[accent];
+  const val = { default: "text-gray-900 dark:text-zinc-100", emerald: "text-emerald-400", red: "text-red-400", amber: "text-amber-400" }[accent];
+  return (
+    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4", border)}>
+      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
+      <p className={clsx("text-2xl font-semibold tabular-nums", val)}>{value}</p>
     </div>
   );
 }
 
-function OutcomeBadge({ outcome }: { outcome: string }) {
-  if (outcome === "allowed") return (
-    <span className="text-[11px] font-medium text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 rounded px-2 py-0.5">Allowed</span>
-  );
-  return (
-    <span className="text-[11px] font-medium text-red-400 bg-red-950/50 border border-red-800/40 rounded px-2 py-0.5">Denied</span>
-  );
-}
+// ── Main page ────────────────────────────────────────────────────────────────
 
-const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
-  <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-gray-200 dark:border-zinc-800",
-    right ? "text-right" : "text-left", hide,
-  )}>{ch}</th>
-);
-
-function DecisionsTable({ decisions }: { decisions: Decision[] }) {
-  if (decisions.length === 0) return (
-    <div className="flex flex-col items-center justify-center py-16 gap-2 text-center px-6">
-      <Inbox size={26} className="text-gray-300 dark:text-zinc-600" />
-      <p className="text-[13px] text-gray-400 dark:text-zinc-600 font-medium">No decisions yet</p>
-      <p className="text-[11px] text-gray-300 dark:text-zinc-600 max-w-xs">
-        Decisions appear when the unified decision layer evaluates tool invocations, trigger fires, or plugin enablements.
-      </p>
-    </div>
-  );
-
-  return (
-    <table className="min-w-full text-[13px]">
-      <thead className="bg-gray-50 dark:bg-zinc-900 sticky top-0 z-10">
-        <tr><TH ch="ID" /><TH ch="Kind" /><TH ch="Outcome" /><TH ch="Created" hide="hidden md:table-cell" /></tr>
-      </thead>
-      <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
-        {decisions.map(d => (
-          <tr key={d.decision_id} className="group hover:bg-gray-50/50 dark:hover:bg-zinc-800/30 transition-colors">
-            <td className="px-3 py-2.5 font-mono text-[11px] text-gray-500 dark:text-zinc-500">{shortId(d.decision_id)}</td>
-            <td className="px-3 py-2.5">
-              <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
-                {typeof d.kind === "object" && d.kind !== null ? String((d.kind as Record<string, unknown>).type ?? "unknown") : String(d.kind)}
-              </code>
-            </td>
-            <td className="px-3 py-2.5"><OutcomeBadge outcome={d.outcome.outcome} /></td>
-            <td className="px-3 py-2.5 hidden md:table-cell text-gray-400 dark:text-zinc-600 text-[11px]">{fmtTime(d.created_at)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function CacheTable({ entries, scope }: { entries: CacheEntry[]; scope: { tenant_id: string; workspace_id: string; project_id: string } }) {
+export function DecisionsPage() {
+  const [tab, setTab] = useState<"recent" | "cache">("recent");
   const qc = useQueryClient();
   const toast = useToast();
 
-  const invalidateMut = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/v1/decisions/${id}/invalidate`, {
-        method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "operator-invalidated" }),
-      });
-      if (!res.ok) {
-        throw new Error(await parseErrorMessage(res, "Failed to invalidate cache entry."));
-      }
-    },
-    onSuccess: () => { toast.success("Cache entry invalidated."); void qc.invalidateQueries({ queryKey: ["decisions-cache"] }); },
-    onError: (error: unknown) => {
-      toast.error(error instanceof Error ? error.message : "Failed to invalidate cache entry.");
-    },
-  });
-
-  const bulkMut = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/v1/decisions/invalidate", {
-        method: "POST",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scope: {
-            level: "project",
-            tenant_id: scope.tenant_id,
-            workspace_id: scope.workspace_id,
-            project_id: scope.project_id,
-          },
-          reason: "operator-bulk-clear",
-        }),
-      });
-      if (!res.ok) {
-        throw new Error(await parseErrorMessage(res, "Failed to bulk invalidate cache."));
-      }
-    },
-    onSuccess: () => { toast.success("All cache entries invalidated."); void qc.invalidateQueries({ queryKey: ["decisions-cache"] }); },
-    onError: (error: unknown) => {
-      toast.error(error instanceof Error ? error.message : "Failed to bulk invalidate cache.");
-    },
-  });
-
-  if (entries.length === 0) return (
-    <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
-      <p className="text-[12px] text-gray-400 dark:text-zinc-600">Cache is empty — no learned rules yet.</p>
-    </div>
-  );
-
-  return (
-    <div>
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-zinc-800">
-        <span className="text-[11px] text-gray-400 dark:text-zinc-600">{entries.length} cached rules</span>
-        <button onClick={() => { if (window.confirm("Invalidate ALL cached decisions?")) bulkMut.mutate(); }}
-          className="px-2 py-0.5 rounded text-[11px] font-medium bg-red-900/30 text-red-400 hover:bg-red-900/60 border border-red-800/40 flex items-center gap-1">
-          <XCircle size={10} /> Bulk Invalidate
-        </button>
-      </div>
-      <table className="min-w-full text-[13px]">
-        <thead className="bg-gray-50 dark:bg-zinc-900 sticky top-0 z-10">
-          <tr><TH ch="Kind" /><TH ch="Outcome" /><TH ch="Scope" hide="hidden sm:table-cell" /><TH ch="Hits" /><TH ch="Expires" hide="hidden md:table-cell" /><TH ch="" right /></tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
-          {entries.map(e => (
-            <tr key={e.key} className="group hover:bg-gray-50/50 dark:hover:bg-zinc-800/30 transition-colors">
-              <td className="px-3 py-2.5"><code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">{e.kind_tag}</code></td>
-              <td className="px-3 py-2.5"><OutcomeBadge outcome={e.outcome} /></td>
-              <td className="px-3 py-2.5 hidden sm:table-cell text-gray-500 dark:text-zinc-500 text-[11px]">{e.scope}</td>
-              <td className="px-3 py-2.5 tabular-nums text-gray-500 dark:text-zinc-500">{e.hit_count}</td>
-              <td className="px-3 py-2.5 hidden md:table-cell text-gray-400 dark:text-zinc-600 text-[11px]">{fmtTime(e.expires_at)}</td>
-              <td className="px-3 py-2.5 text-right">
-                <button onClick={() => invalidateMut.mutate(e.decision_id)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 rounded text-[11px] bg-red-900/30 text-red-400 hover:bg-red-900/60 border border-red-800/40">
-                  <Trash2 size={11} />
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-export function DecisionsPage() {
-  const [scope] = useScope();
-  const [tab, setTab] = useState<"recent" | "cache">("recent");
-  const { ms: refreshMs, setOption: setRefreshOption } = useAutoRefresh("decisions", "15s");
-
-  const scopeQs = `tenant_id=${encodeURIComponent(scope.tenant_id)}&workspace_id=${encodeURIComponent(scope.workspace_id)}&project_id=${encodeURIComponent(scope.project_id)}`;
-
   const decisionsQ = useQuery<Decision[]>({
-    queryKey: ["decisions", scope.tenant_id, scope.workspace_id, scope.project_id],
+    queryKey: ["decisions"],
     queryFn: async () => {
-      const res = await fetch(`/v1/decisions?${scopeQs}`, { headers: authHeaders() });
-      if (!res.ok) {
-        throw new Error(await parseErrorMessage(res, "Failed to load decisions."));
-      }
+      const res = await fetch("/v1/decisions", { headers: authHeaders() });
       const data = await res.json();
       return Array.isArray(data) ? data : (data.items ?? []);
     },
-    refetchInterval: refreshMs,
+    refetchInterval: 30_000,
   });
 
   const cacheQ = useQuery<CacheEntry[]>({
-    queryKey: ["decisions-cache", scope.tenant_id, scope.workspace_id, scope.project_id],
+    queryKey: ["decisions-cache"],
     queryFn: async () => {
-      const res = await fetch(`/v1/decisions/cache?${scopeQs}`, { headers: authHeaders() });
-      if (!res.ok) {
-        throw new Error(await parseErrorMessage(res, "Failed to load decision cache."));
-      }
+      const res = await fetch("/v1/decisions/cache", { headers: authHeaders() });
       const data = await res.json();
       return Array.isArray(data) ? data : (data.items ?? []);
     },
-    refetchInterval: refreshMs,
+    refetchInterval: 30_000,
   });
 
-  const decisions = (decisionsQ.data ?? []) as Decision[];
-  const cacheEntries = (cacheQ.data ?? []) as CacheEntry[];
+  const invalidateMut = useMutation({
+    mutationFn: (id: string) => fetch(`/v1/decisions/${id}/invalidate`, {
+      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "operator-invalidated" }),
+    }),
+    onSuccess: () => { toast.success("Cache entry invalidated."); void qc.invalidateQueries({ queryKey: ["decisions-cache"] }); },
+  });
+
+  const bulkMut = useMutation({
+    mutationFn: () => fetch("/v1/decisions/cache/invalidate-all", {
+      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "operator-bulk-clear" }),
+    }),
+    onSuccess: () => { toast.success("All cache entries invalidated."); void qc.invalidateQueries({ queryKey: ["decisions-cache"] }); },
+  });
+
+  const decisions = decisionsQ.data ?? [];
+  const cacheEntries = cacheQ.data ?? [];
   const allowed = decisions.filter(d => d.outcome.outcome === "allowed").length;
   const denied = decisions.filter(d => d.outcome.outcome === "denied").length;
 
+  if (decisionsQ.isError) return <ErrorFallback error={decisionsQ.error} resource="decisions" onRetry={() => void decisionsQ.refetch()} />;
+
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-5">
+      {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-zinc-100 flex items-center gap-2">
-            <Scale size={18} className="text-indigo-400" /> Decisions
-          </h1>
-          <p className="text-[12px] text-gray-400 dark:text-zinc-600 mt-0.5">Unified decision layer (RFC 019)</p>
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Decisions</p>
+          <HelpTooltip text="Unified decision layer (RFC 019). Every tool invocation, trigger fire, and plugin enablement goes through policy evaluation before proceeding." placement="right" />
         </div>
-        <select
-          className="text-[11px] bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 py-1 text-gray-600 dark:text-zinc-400"
-          onChange={e => setRefreshOption(e.target.value as RefreshOption)}
-        >
-          {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          {tab === "cache" && cacheEntries.length > 0 && (
+            <button onClick={() => { if (window.confirm("Invalidate ALL cached decisions? Operators will be re-prompted.")) bulkMut.mutate(); }}
+              className="flex items-center gap-1.5 rounded-md bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 text-[11px] text-red-400 hover:bg-red-500/20 transition-colors">
+              <XCircle size={11} /> Bulk Invalidate
+            </button>
+          )}
+          <button onClick={() => decisionsQ.refetch()} className="flex items-center gap-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:bg-white/5 transition-colors">
+            <RefreshCw size={11} className={clsx(decisionsQ.isFetching && "animate-spin")} /> Refresh
+          </button>
+        </div>
       </div>
 
-      <div className="flex gap-6">
-        <StatCard label="Total" value={decisions.length} />
-        <StatCard label="Allowed" value={allowed} accent="border-emerald-500" />
-        <StatCard label="Denied" value={denied} accent="border-red-500" />
-        <StatCard label="Cached" value={cacheEntries.length} accent="border-amber-500" />
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard label="Total Decisions" value={decisions.length} />
+        <StatCard label="Allowed" value={allowed} accent="emerald" />
+        <StatCard label="Denied" value={denied} accent="red" />
+        <StatCard label="Cached Rules" value={cacheEntries.length} accent="amber" />
       </div>
 
-      <div className="flex gap-2 border-b border-gray-200 dark:border-zinc-800">
-        <button onClick={() => setTab("recent")}
-          className={clsx("px-3 py-1.5 text-[12px] font-medium border-b-2 transition-colors", tab === "recent" ? "border-indigo-500 text-indigo-400" : "border-transparent text-gray-400 hover:text-gray-300")}>
-          Recent ({decisions.length})
-        </button>
-        <button onClick={() => setTab("cache")}
-          className={clsx("px-3 py-1.5 text-[12px] font-medium border-b-2 transition-colors", tab === "cache" ? "border-indigo-500 text-indigo-400" : "border-transparent text-gray-400 hover:text-gray-300")}>
-          Cache ({cacheEntries.length})
-        </button>
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 border-b border-gray-200 dark:border-zinc-800">
+        {([["recent", `Recent (${decisions.length})`], ["cache", `Cache (${cacheEntries.length})`]] as const).map(([t, label]) => (
+          <button key={t} onClick={() => setTab(t as "recent" | "cache")}
+            className={clsx(
+              "px-3 py-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors",
+              tab === t ? "text-gray-900 dark:text-zinc-100 border-indigo-500" : "text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:hover:text-zinc-300",
+            )}>
+            {label}
+          </button>
+        ))}
       </div>
 
-      <div className="bg-white dark:bg-zinc-900/50 rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
-        {tab === "recent" ? (
-          decisionsQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <DecisionsTable decisions={decisions} />
-        ) : (
-          cacheQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <CacheTable entries={cacheEntries} scope={scope} />
-        )}
-      </div>
+      {/* Content */}
+      {tab === "recent" ? (
+        <DataTable<Decision>
+          data={decisions}
+          getRowId={d => d.decision_id}
+          columns={[
+            { key: "id", header: "ID", render: r => <span className="flex items-center gap-1 font-mono text-[11px] text-gray-500 dark:text-zinc-400 whitespace-nowrap group/id">{mono(r.decision_id)}<CopyButton text={r.decision_id} label="Copy decision ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>, sortValue: r => r.decision_id },
+            { key: "kind", header: "Kind", render: r => { const k = typeof r.kind === "object" && r.kind !== null ? String((r.kind as Record<string, unknown>).type ?? "unknown") : String(r.kind); return <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{k}</code>; } },
+            { key: "outcome", header: "Outcome", render: r => <OutcomePill outcome={r.outcome.outcome} />, sortValue: r => r.outcome.outcome },
+            { key: "created", header: "Created", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
+          ]}
+          filterFn={(r, q) => r.decision_id.includes(q) || String(r.kind).includes(q) || r.outcome.outcome.includes(q)}
+          csvRow={r => [r.decision_id, String(r.kind), r.outcome.outcome, r.created_at]}
+          csvHeaders={["ID", "Kind", "Outcome", "Created"]}
+          filename="decisions"
+          emptyText="No decisions yet — decisions appear when the unified decision layer evaluates tool invocations, trigger fires, or plugin enablements."
+        />
+      ) : (
+        <DataTable<CacheEntry>
+          data={cacheEntries}
+          getRowId={e => e.key}
+          columns={[
+            { key: "kind", header: "Kind", render: r => <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{r.kind_tag}</code> },
+            { key: "outcome", header: "Outcome", render: r => <OutcomePill outcome={r.outcome} />, sortValue: r => r.outcome },
+            { key: "scope", header: "Scope", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500">{r.scope}</span> },
+            { key: "hits", header: "Hits", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{r.hit_count}</span>, sortValue: r => r.hit_count },
+            { key: "expires", header: "Expires", render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{fmtRelative(r.expires_at)}</span>, sortValue: r => r.expires_at },
+            { key: "actions", header: "", render: r => (
+              <button onClick={() => invalidateMut.mutate(r.decision_id)} title="Invalidate" className="p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 text-red-400 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12} /></button>
+            )},
+          ]}
+          filterFn={(r, q) => r.kind_tag.includes(q) || r.outcome.includes(q) || r.scope.includes(q)}
+          csvRow={r => [r.key, r.kind_tag, r.outcome, r.scope, r.hit_count, r.expires_at]}
+          csvHeaders={["Key", "Kind", "Outcome", "Scope", "Hits", "Expires"]}
+          filename="decision-cache"
+          emptyText="Cache is empty — no learned rules yet. Cached decisions reduce operator re-prompts."
+        />
+      )}
     </div>
   );
 }
