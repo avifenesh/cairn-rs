@@ -130,6 +130,7 @@ use std::{
     future::Future,
     io::BufReader,
     net::SocketAddr,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
@@ -668,6 +669,48 @@ impl RequestLogBuffer {
     }
 }
 
+#[derive(Debug, Default)]
+struct NoopSandboxEventSink;
+
+impl cairn_workspace::SandboxEventSink for NoopSandboxEventSink {
+    fn publish(&self, _event: cairn_workspace::SandboxEvent) {}
+}
+
+fn default_sandbox_base_dir() -> PathBuf {
+    std::env::temp_dir().join("cairn-workspace-sandboxes")
+}
+
+fn default_sandbox_strategy() -> cairn_workspace::SandboxStrategyRequest {
+    #[cfg(target_os = "linux")]
+    {
+        cairn_workspace::SandboxStrategyRequest::Preferred(cairn_workspace::SandboxStrategy::Overlay)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        cairn_workspace::SandboxStrategyRequest::Preferred(cairn_workspace::SandboxStrategy::Reflink)
+    }
+}
+
+fn default_repo_sandbox_policy(repo_id: cairn_workspace::RepoId) -> cairn_workspace::SandboxPolicy {
+    cairn_workspace::SandboxPolicy {
+        strategy: default_sandbox_strategy(),
+        base: cairn_workspace::SandboxBase::Repo {
+            repo_id,
+            starting_ref: None,
+        },
+        credentials: Vec::new(),
+        network_egress: None,
+        memory_limit_bytes: None,
+        cpu_weight: None,
+        disk_quota_bytes: None,
+        wall_clock_limit: None,
+        on_resource_exhaustion: cairn_domain::OnExhaustion::Destroy,
+        preserve_on_failure: true,
+        required_host_caps: cairn_workspace::HostCapabilityRequirements::default(),
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: BootstrapConfig,
@@ -711,6 +754,7 @@ pub struct AppState {
     pub triggers: Arc<Mutex<TriggerService>>,
     pub repo_clone_cache: Arc<cairn_workspace::RepoCloneCache>,
     pub project_repo_access: Arc<cairn_workspace::ProjectRepoAccessService>,
+    pub sandbox_service: Arc<cairn_workspace::SandboxService>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
     pub metrics: Arc<AppMetrics>,
     #[allow(dead_code)]
@@ -876,6 +920,30 @@ impl AppState {
         let plugin_host = Arc::new(Mutex::new(StdioPluginHost::new()));
         let repo_clone_cache = Arc::new(cairn_workspace::RepoCloneCache::default());
         let project_repo_access = Arc::new(cairn_workspace::ProjectRepoAccessService::new());
+        let sandbox_repo_source = Arc::new(cairn_workspace::RepoCloneCacheSource::new(
+            repo_clone_cache.clone(),
+        ));
+        let sandbox_service = Arc::new(cairn_workspace::SandboxService::new(
+            HashMap::from([
+                (
+                    cairn_workspace::SandboxStrategy::Overlay,
+                    Box::new(cairn_workspace::OverlayProvider::with_repo_source(
+                        default_sandbox_base_dir(),
+                        sandbox_repo_source.clone(),
+                    )) as Box<dyn cairn_workspace::SandboxProvider>,
+                ),
+                (
+                    cairn_workspace::SandboxStrategy::Reflink,
+                    Box::new(cairn_workspace::ReflinkProvider::with_repo_source(
+                        default_sandbox_base_dir(),
+                        sandbox_repo_source,
+                    )) as Box<dyn cairn_workspace::SandboxProvider>,
+                ),
+            ]),
+            Arc::new(NoopSandboxEventSink),
+            default_sandbox_base_dir(),
+            Arc::new(cairn_workspace::SystemClock),
+        ));
         // RFC 015: marketplace service wrapping the plugin host.
         let marketplace = {
             let mut svc = MarketplaceService::new(runtime.store.clone());
@@ -954,6 +1022,7 @@ impl AppState {
             triggers: Arc::new(Mutex::new(TriggerService::new())),
             repo_clone_cache,
             project_repo_access,
+            sandbox_service,
             rate_limits,
             metrics,
             memory_proposal_hook,
@@ -2290,6 +2359,7 @@ struct CreateRunRequest {
     parent_run_id: Option<String>,
     /// RFC 018: execution mode (direct/plan/execute).
     #[serde(default)]
+    #[schema(value_type = Option<String>)]
     mode: Option<cairn_domain::decisions::RunMode>,
 }
 
