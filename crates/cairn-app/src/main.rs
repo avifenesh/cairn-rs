@@ -3380,16 +3380,17 @@ async fn ollama_embed_handler(
     }
 }
 
-/// `POST /v1/providers/ollama/stream` — stream tokens from Ollama via SSE.
+/// `POST /v1/chat/stream` — stream tokens from any configured LLM provider via SSE.
 ///
-/// Body: `{ "model": "qwen3:8b", "prompt": "..." }`
+/// Routes to the first available provider: Bedrock → Ollama → OpenAI-compat brain → worker → OpenRouter.
+/// Body: `{ "model": "qwen3:8b", "prompt": "...", "messages": [...] }`
 /// Emits SSE events:
 ///   - `event: token`  data: `{"text": "word "}`
 ///   - `event: done`   data: `{"latency_ms": N, "model": "..."}`
 ///   - `event: error`  data: `{"error": "..."}`
 ///
 /// Clients read via `fetch()` + `ReadableStream` — no EventSource needed.
-async fn ollama_stream_handler(
+async fn chat_stream_handler(
     State(state): State<AppState>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
@@ -5359,7 +5360,9 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
             "/v1/providers/ollama/generate",
             post(ollama_generate_handler),
         )
-        .route("/v1/providers/ollama/stream", post(ollama_stream_handler))
+        .route("/v1/chat/stream", post(chat_stream_handler))
+        // Keep the old route as an alias for backwards compatibility
+        .route("/v1/providers/ollama/stream", post(chat_stream_handler))
         .route("/v1/providers/ollama/pull", post(ollama_pull_handler))
         .route(
             "/v1/providers/ollama/delete",

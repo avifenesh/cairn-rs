@@ -106,7 +106,7 @@ function streamGenerate(
   const controller = new AbortController();
   (async () => {
     try {
-      const resp = await fetch(`${API_BASE}/v1/providers/ollama/stream`, {
+      const resp = await fetch(`${API_BASE}/v1/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(params),

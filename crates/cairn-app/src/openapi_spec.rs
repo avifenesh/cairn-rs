@@ -616,11 +616,12 @@ pub const OPENAPI_JSON: &str = r##"{
         "responses": { "200": { "description": "Generated text + metadata" } }
       }
     },
-    "/v1/providers/ollama/stream": {
+    "/v1/chat/stream": {
       "post": {
-        "tags": ["Providers"],
-        "summary": "Stream tokens from Ollama via SSE",
-        "operationId": "ollamaStream",
+        "tags": ["Chat"],
+        "summary": "Stream tokens from any configured LLM provider via SSE",
+        "operationId": "chatStream",
+        "description": "Routes to the first available provider: Bedrock, Ollama, OpenAI-compat brain, worker, or OpenRouter.",
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
         "responses": { "200": { "description": "SSE stream: token / done / error events" } }
       }
