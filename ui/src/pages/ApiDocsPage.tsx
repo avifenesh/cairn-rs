@@ -56,7 +56,7 @@ const DOMAINS: DomainGroup[] = [
       { id: "get-health",  method: "GET", path: "/health",    description: "Liveness probe. Returns immediately with ok=true when the server is up.", responseDesc: '{ "ok": true }', auth: false },
       { id: "get-status",  method: "GET", path: "/v1/status", description: "Runtime and store health with uptime in seconds.", responseDesc: '{ "runtime_ok": true, "store_ok": true, "uptime_secs": 3600 }' },
       { id: "get-sysinfo", method: "GET", path: "/v1/system/info", description: "Comprehensive build metadata, feature flags, and environment configuration.", responseDesc: '{ version, os, arch, git_commit, features: {...}, environment: {...} }' },
-      { id: "get-detailed-health", method: "GET", path: "/v1/health/detailed", description: "Per-subsystem health: store latency, Ollama models, process memory.", responseDesc: '{ status, checks: { store, ollama, memory }, uptime_seconds }' },
+      { id: "get-detailed-health", method: "GET", path: "/v1/health/detailed", description: "Per-subsystem health: store latency, process memory, event buffer.", responseDesc: '{ status, checks: { store, event_buffer, memory }, uptime_seconds }' },
     ],
   },
   {
@@ -154,8 +154,9 @@ const DOMAINS: DomainGroup[] = [
     id: "providers", label: "Providers", dot: "bg-orange-500",
     endpoints: [
       { id: "get-provider-health",  method: "GET",  path: "/v1/providers/health",                    description: "Health records for all registered LLM providers.", responseDesc: "Array of provider health records" },
-      { id: "get-ollama-models",    method: "GET",  path: "/v1/providers/ollama/models",             description: "List locally available Ollama models.", responseDesc: '{ host, models: string[], count }' },
-      { id: "ollama-generate",      method: "POST", path: "/v1/providers/ollama/generate",           description: "Non-streaming single-turn generation via Ollama.", bodyExample: '{ "prompt": "Hello!", "model": "llama3.2:latest" }', responseDesc: '{ text, model, tokens_in, tokens_out, latency_ms }' },
+      { id: "get-provider-registry",method: "GET",  path: "/v1/providers/registry",                  description: "Static provider registry with availability and known models.", responseDesc: "Array of provider registry entries" },
+      { id: "list-connections",     method: "GET",  path: "/v1/providers/connections",                description: "List registered provider connections.", responseDesc: '{ items: ProviderConnection[], has_more }' },
+      { id: "create-connection",    method: "POST", path: "/v1/providers/connections",                description: "Register a new provider connection (any OpenAI-compatible endpoint).", bodyExample: '{ "name": "my-provider", "base_url": "https://api.example.com/v1", "api_key": "sk-..." }', responseDesc: '{ provider_connection_id, ... }' },
     ],
   },
   {

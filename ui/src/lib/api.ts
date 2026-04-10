@@ -300,7 +300,7 @@ export function createApiClient(config: ApiClientConfig) {
     /** GET /v1/status — runtime + store health with uptime. */
     getStatus: (): Promise<SystemStatus> => get("/v1/status"),
 
-    /** GET /v1/health/detailed — per-subsystem health with latency, memory, Ollama info. */
+    /** GET /v1/health/detailed — per-subsystem health with latency and memory. */
     getDetailedHealth: (): Promise<import("./types").DetailedHealth> => get("/v1/health/detailed"),
 
     /** GET /v1/system/info — version, build metadata, features, environment. */
@@ -585,52 +585,6 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/providers/registry — static provider registry with availability and known models. */
     getProviderRegistry: (): Promise<import("./types").ProviderRegistryEntry[]> => get("/v1/providers/registry"),
-
-    /** GET /v1/providers/ollama/models — list locally available Ollama models.
-     *  Returns null when Ollama is not configured (503) or unreachable (502)
-     *  so callers can treat absence silently without console errors. */
-    getOllamaModels: async (): Promise<{ host: string; models: string[]; count: number } | null> => {
-      try {
-        return await get("/v1/providers/ollama/models");
-      } catch (e) {
-        if (e instanceof ApiError && (e.status === 503 || e.status === 502)) return null;
-        throw e;
-      }
-    },
-
-    /** GET /v1/providers/ollama/models/:name/info — detailed info for one model. */
-    getOllamaModelInfo: (name: string): Promise<{
-      name: string;
-      family: string;
-      format: string;
-      parameter_size: string;
-      parameter_count: number | null;
-      quantization_level: string;
-      context_length: number | null;
-      embedding_length: number | null;
-      size_bytes: number | null;
-      size_human: string;
-    }> => get(`/v1/providers/ollama/models/${encodeURIComponent(name)}/info`),
-
-    /** POST /v1/providers/ollama/pull — download a model into Ollama. */
-    pullOllamaModel: (model: string): Promise<{ status: string; model: string }> =>
-      post("/v1/providers/ollama/pull", { model }),
-
-    /** POST /v1/providers/ollama/delete — remove a model from the local registry. */
-    deleteOllamaModel: (model: string): Promise<{ status: string; model: string }> =>
-      post("/v1/providers/ollama/delete", { model }),
-
-    /** POST /v1/providers/ollama/generate — run a prompt through Ollama. */
-    ollamaGenerate: (body: {
-      prompt: string;
-      model?: string;
-    }): Promise<{
-      text: string;
-      model: string;
-      tokens_in: number | null;
-      tokens_out: number | null;
-      latency_ms: number;
-    }> => post("/v1/providers/ollama/generate", body),
 
     // ── Provider connections ─────────────────────────────────────────────────
 

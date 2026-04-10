@@ -292,45 +292,6 @@ const SCENARIOS: ScenarioDef[] = [
     ],
   },
 
-  // ── 4. Ollama integration ───────────────────────────────────────────────────
-  {
-    id:          "ollama",
-    label:       "Ollama Integration",
-    description: "Checks Ollama connectivity and runs a short generation if a model is available.",
-    group:       "Integrations",
-    steps: [
-      {
-        id: "list_models",
-        label: "List models",
-        description: "GET /v1/providers/ollama/models",
-        run: async (ctx) => {
-          const r = await defaultApi.getOllamaModels();
-          if (!r) throw new Error("Ollama not configured — set OLLAMA_HOST");
-          ctx["ollama_models"] = r.models;
-          ctx["ollama_host"]   = r.host;
-          if (r.count === 0) throw new Error("no Ollama models available");
-          return r;
-        },
-      },
-      {
-        id: "generate",
-        label: "Generate (single token test)",
-        description: "POST /v1/providers/ollama/generate — short prompt",
-        run: async (ctx) => {
-          const models = ctx["ollama_models"] as string[] | undefined;
-          // Prefer free-tier models (":free" suffix) to avoid paid-model errors
-          const model  = models?.find(m => m.includes(':free')) ?? models?.[0];
-          if (!model) throw new Error("no model available (skipped by prior step failure)");
-          const r = await defaultApi.ollamaGenerate({
-            model,
-            prompt: "Reply with only the word: ok",
-          });
-          if (!r.text) throw new Error("empty response text");
-          return { model: r.model, latency_ms: r.latency_ms, text: r.text.slice(0, 60) };
-        },
-      },
-    ],
-  },
 
 ];
 

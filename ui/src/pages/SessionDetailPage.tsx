@@ -34,7 +34,7 @@ function inferProvider(modelId: string): string {
   if (m.startsWith("claude"))  return "Anthropic";
   if (m.startsWith("gemini"))  return "Google";
   if (m.startsWith("llama") || m.startsWith("qwen") || m.startsWith("mistral") ||
-      m.startsWith("nomic"))   return "Ollama";
+      m.startsWith("nomic"))   return "Open-Weight";
   if (m.startsWith("titan") || m.startsWith("nova")) return "Bedrock";
   return "—";
 }

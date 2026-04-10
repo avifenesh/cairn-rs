@@ -2,7 +2,7 @@ import { useState, type FormEvent, useId } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw, ServerCrash, Loader2, Plus, Trash2, ChevronDown, ChevronRight,
-  HardDrive,
+  HardDrive, Zap, XCircle,
   Globe, Server, Check, X, Settings, Tag,
 } from "lucide-react";
 import { clsx } from "clsx";
@@ -936,191 +936,8 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-// ── Ollama section (preserved from original, minimal changes) ─────────────────
-
-function ModelInfoPanel({ name, onClose }: { name: string; onClose: () => void }) {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["ollama-model-info", name],
-    queryFn:  () => defaultApi.getOllamaModelInfo(name),
-    staleTime: 300_000,
-    gcTime:    Infinity,
-    enabled:   !!name,
-    retry: false,
-  });
-
-  function fmt(n: number | null | undefined): string {
-    if (!n) return "—";
-    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
-    if (n >= 1_000_000)     return `${(n / 1_000_000).toFixed(0)}M`;
-    return String(n);
-  }
-
-  return (
-    <div className="bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-md p-3 mt-1 space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-mono text-gray-500 dark:text-zinc-400">{name}</span>
-        <button onClick={onClose} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"><XCircle size={12} /></button>
-      </div>
-      {isLoading && <p className="text-[11px] text-gray-400 dark:text-zinc-600 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading…</p>}
-      {isError   && <p className="text-[11px] text-red-400">Could not load model info.</p>}
-      {data && (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-          {[
-            { Icon: Hash,      label: "Parameters",   value: data.parameter_size },
-            { Icon: CpuIcon,   label: "Quantization", value: data.quantization_level },
-            { Icon: HardDrive, label: "Size on disk",  value: data.size_human },
-            { Icon: FileType,  label: "Family/Format", value: `${data.family} · ${data.format.toUpperCase()}` },
-            ...(data.context_length  ? [{ Icon: Layers, label: "Context",    value: `${(data.context_length / 1024).toFixed(0)}K` }] : []),
-            ...(data.parameter_count ? [{ Icon: Hash,   label: "Param count", value: fmt(data.parameter_count) }] : []),
-          ].map(({ Icon, label, value }) => (
-            <div key={label} className="flex items-start gap-1.5">
-              <Icon size={10} className="text-gray-400 dark:text-zinc-600 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-[10px] text-gray-400 dark:text-zinc-600">{label}</p>
-                <p className="text-[11px] text-gray-700 dark:text-zinc-300 font-mono">{value}</p>
-              </div>
-            </div>
-          ))}
-        </dl>
-      )}
-    </div>
-  );
-}
-
-function OllamaSection() {
-  const toast = useToast();
-  const [expandedInfo, setExpandedInfo] = useState<string | null>(null);
-  const [pullName, setPullName]         = useState("");
-
-  // Only probe Ollama when the provider registry reports it as available (OLLAMA_HOST set).
-  const { data: registryData } = useQuery({
-    queryKey: ["provider-registry"],
-    queryFn: () => defaultApi.getProviderRegistry(),
-    staleTime: 120_000,
-  });
-  const ollamaConfigured = (registryData ?? []).some(p => p.id === "ollama" && p.available);
-
-  const { data: ollamaData, isLoading: ollamaLoading, error: ollamaError, refetch } = useQuery({
-    queryKey: ["ollama-models"],
-    queryFn:  () => defaultApi.getOllamaModels(),
-    retry: false, staleTime: 30_000,
-    enabled: ollamaConfigured,
-  });
-
-  const connected = !!ollamaData && !ollamaError;
-  const models: string[] = ollamaData?.models ?? [];
-
-  const pullModel = useMutation({
-    mutationFn: (model: string) => defaultApi.pullOllamaModel(model),
-    onSuccess: (_, model) => { toast.success(`"${model}" downloaded.`); setPullName(""); void refetch(); },
-    onError:   (e, model) => toast.error(`Failed to pull "${model}": ${e instanceof Error ? e.message : "error"}`),
-  });
-
-  const deleteModel = useMutation({
-    mutationFn: (model: string) => defaultApi.deleteOllamaModel(model),
-    onSuccess: (_, model) => { toast.success(`"${model}" deleted.`); void refetch(); },
-    onError:   (e, model) => toast.error(`Failed to delete "${model}": ${e instanceof Error ? e.message : "error"}`),
-  });
-
-  const embedModel   = models.find(m => m.includes("embed")) ?? null;
-  const ollamaStatus = ollamaLoading ? "checking" : connected ? "connected" : "offline";
-  const statusAccent = ollamaStatus === "connected" ? "emerald" : ollamaStatus === "checking" ? "default" : "red";
-
-  return (
-    <section className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Ollama — Local Inference (optional)</p>
-        <button onClick={() => refetch()}
-          className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors">
-          <RefreshCw size={11} /> Refresh
-        </button>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Ollama Status"    value={ollamaStatus}     accent={statusAccent as "default" | "emerald" | "blue" | "red"} sub={connected ? ollamaData.host : "not configured"} />
-        <StatCard label="Models Available" value={models.length}    accent={models.length > 0 ? "blue" : "default"} />
-        <StatCard label="Embedding Model"  value={embedModel ? "yes" : "none"} accent={embedModel ? "emerald" : "default"} sub={embedModel ?? "no embed model"} />
-      </div>
-
-      <div className={clsx(
-        "bg-gray-50 dark:bg-zinc-900 border rounded-lg px-4 h-10 flex items-center justify-between",
-        connected ? "border-gray-200 dark:border-zinc-800" : "border-gray-200/50 dark:border-zinc-800/50",
-      )}>
-        <div className="flex items-center gap-2">
-          <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", connected ? "bg-emerald-400" : "bg-red-400")} />
-          <span className="text-xs text-gray-500 dark:text-zinc-400 font-medium">{connected ? "Connected" : "Not available"}</span>
-          {connected && <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-600 ml-1">{ollamaData.host}</span>}
-        </div>
-        {connected && <span className="text-[11px] text-gray-400 dark:text-zinc-600">{models.length} model{models.length !== 1 ? "s" : ""} installed</span>}
-        {!connected && !ollamaLoading && <span className="text-[11px] text-gray-400 dark:text-zinc-600">Optional — set OLLAMA_HOST to enable local models</span>}
-      </div>
-
-      {connected && (
-        <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-          <div className="flex items-center justify-between px-4 h-9 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
-            <p className="text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Installed Models</p>
-            <p className="text-[10px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider">Info · Delete</p>
-          </div>
-          {models.length === 0 ? (
-            <p className="px-4 py-3 text-[11px] text-gray-400 dark:text-zinc-600 italic">No models installed.</p>
-          ) : (
-            <div>
-              {models.map((m, i) => {
-                const isDeleting = deleteModel.isPending && deleteModel.variables === m;
-                const isExpanded = expandedInfo === m;
-                return (
-                  <div key={m} className={clsx("border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0", i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50")}>
-                    <div className="flex items-center justify-between px-4 h-9 hover:bg-white/5 transition-colors">
-                      <span className="text-xs font-mono text-gray-700 dark:text-zinc-300 truncate flex-1">{m}</span>
-                      <button onClick={() => setExpandedInfo(isExpanded ? null : m)} className="text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors ml-3" title="Show model info">
-                        {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                      </button>
-                      <button
-                        onClick={() => { if (confirm(`Delete "${m}"?`)) deleteModel.mutate(m); }}
-                        disabled={isDeleting || deleteModel.isPending}
-                        className="text-gray-400 dark:text-zinc-600 hover:text-red-400 disabled:opacity-30 transition-colors ml-2"
-                      >
-                        {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                      </button>
-                    </div>
-                    {isExpanded && (
-                      <div className="px-4 pb-3">
-                        <ModelInfoPanel name={m} onClose={() => setExpandedInfo(null)} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div className="border-t border-gray-200 dark:border-zinc-800 px-4 py-3">
-            <form onSubmit={(e: FormEvent) => { e.preventDefault(); const name = pullName.trim(); if (name) pullModel.mutate(name); }} className="flex gap-2">
-              <div className="relative flex-1">
-                <Plus size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-zinc-600 pointer-events-none" />
-                <input value={pullName} onChange={e => setPullName(e.target.value)} placeholder="Pull model, e.g. llama3.2"
-                  disabled={pullModel.isPending}
-                  className="w-full rounded-md bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 pl-7 pr-3 h-8 text-xs text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 transition-colors"
-                />
-              </div>
-              <button type="submit" disabled={!pullName.trim() || pullModel.isPending}
-                className="flex items-center gap-1.5 px-3 h-8 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 text-white text-xs font-medium transition-colors whitespace-nowrap">
-                {pullModel.isPending ? <><Loader2 size={11} className="animate-spin" /> Pulling…</> : <><Download size={11} /> Pull</>}
-              </button>
-            </form>
-            {pullModel.isPending && (
-              <p className="mt-1.5 text-[11px] text-indigo-400 flex items-center gap-1.5 animate-pulse">
-                <Loader2 size={10} className="animate-spin" />
-                Downloading "{pullModel.variables}" — may take several minutes…
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
+
 
 export function ProvidersPage() {
   const qc = useQueryClient();
@@ -1137,7 +954,7 @@ export function ProvidersPage() {
     queryFn: () => defaultApi.getProviderRegistry(),
     staleTime: 120_000,
   });
-  const envProviders = (registryData ?? []).filter(p => p.available && p.id !== "ollama");
+  const envProviders = (registryData ?? []).filter(p => p.available);
 
   return (
     <div className="p-6 space-y-6">
@@ -1171,9 +988,6 @@ export function ProvidersPage() {
 
       {/* User-created connections with Add Provider button */}
       <ConnectionsSection onAdd={() => setShowAddModal(true)} />
-
-      {/* Ollama local LLM — only show when OLLAMA_HOST is configured */}
-      {(registryData ?? []).some(p => p.id === "ollama" && p.available) && <OllamaSection />}
 
       {/* Add Provider slide-over */}
       {showAddModal && (

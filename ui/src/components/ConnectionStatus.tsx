@@ -2,7 +2,7 @@
  * ConnectionStatus — fixed bottom-right connection health indicator.
  *
  * Collapsed: single colored dot (green/yellow/red).
- * Expanded:  three rows — API, SSE stream, Ollama — each with status + latency.
+ * Expanded:  two rows — API and SSE stream — each with status + latency.
  *
  * Health checks run every 30 s via useQuery.  The SSE status comes from the
  * existing useEventStream hook so we don't open a second SSE connection.
@@ -120,34 +120,6 @@ export function ConnectionStatus() {
     staleTime:       25_000,
   });
 
-  // ── Detailed health (for Ollama configured check) ───────────────────────────
-  // Shares the same queryKey as DashboardPage so caches are unified.
-  const { data: detailedHealth } = useQuery({
-    queryKey:       ['detailed-health'],
-    queryFn:        () => defaultApi.getDetailedHealth(),
-    refetchInterval: 30_000,
-    retry:           false,
-    staleTime:       25_000,
-  });
-  const ollamaConfigured = !!detailedHealth && detailedHealth.checks?.ollama?.status !== 'unconfigured';
-
-  // ── Ollama health ───────────────────────────────────────────────────────────
-  // Only query Ollama when the detailed health check says it's configured,
-  // avoiding 503 console errors when Ollama is not wired.
-  const { data: ollamaData, isError: ollamaError } = useQuery({
-    queryKey:        ['ollama-health'],
-    queryFn:         async () => {
-      const t0 = Date.now();
-      const d = await defaultApi.getOllamaModels();
-      if (!d) throw new Error("Ollama not configured");
-      return { models: d.count, latency: Date.now() - t0 };
-    },
-    refetchInterval:  60_000,
-    retry:            0,
-    staleTime:        55_000,
-    enabled:          !!ollamaConfigured,
-  });
-
   // ── SSE stream status (reuses the singleton hook) ──────────────────────────
   const { status: sseStatus } = useEventStream({ enabled: true });
 
@@ -186,21 +158,9 @@ export function ConnectionStatus() {
     detail: sseStatus === 'connected' ? 'connected' : 'reconnecting',
   };
 
-  // Ollama is optional — only show it in the status bar when it's actually configured and responding.
-  const ollamaService: ServiceState | null = ollamaError
-    ? null  // Not configured or unreachable — don't show at all
-    : !ollamaData
-      ? null  // Still checking or not queried — omit
-      : {
-          status:    'ok',
-          label:     'Ollama',
-          detail:    `${ollamaData.models} model${ollamaData.models !== 1 ? 's' : ''}`,
-          latencyMs: ollamaData.latency,
-        };
-
-  const services = [apiService, sseService, ...(ollamaService ? [ollamaService] : [])];
-  // Overall status is based on API health only. SSE and Ollama are supplementary —
-  // the dashboard works via polling without SSE, and Ollama is optional.
+  const services = [apiService, sseService];
+  // Overall status is based on API health only. SSE is supplementary —
+  // the dashboard works via polling without SSE.
   const overall  = overallStatus([apiService]);
 
   // Don't render after explicit dismiss (until page refresh).

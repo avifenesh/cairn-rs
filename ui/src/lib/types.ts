@@ -93,7 +93,7 @@ export interface HealthCheckEntry {
 
 export interface DetailedHealthChecks {
   store: HealthCheckEntry;
-  ollama: HealthCheckEntry;
+  ollama?: HealthCheckEntry;
   event_buffer: HealthCheckEntry;
   memory: HealthCheckEntry;
 }
@@ -735,7 +735,7 @@ export interface SystemInfoFeatures {
   ip_rate_limit_per_minute:  number;
   max_body_size_mb:          number;
   websocket_enabled:         boolean;
-  ollama_connected:          boolean;
+  ollama_connected?:         boolean;
   store_type:                string;
   postgres_enabled:          boolean;
   sqlite_enabled:            boolean;
@@ -744,7 +744,7 @@ export interface SystemInfoFeatures {
 
 export interface SystemInfoEnvironment {
   admin_token_set:   boolean;
-  ollama_host:       string;
+  ollama_host?:      string;
   listen_addr:       string;
   deployment_mode:   string;
   uptime_seconds:    number;

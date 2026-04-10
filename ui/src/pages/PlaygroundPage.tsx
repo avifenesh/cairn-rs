@@ -717,7 +717,7 @@ function EmptyChat({ model, noProviders }: { model: string; noProviders?: boolea
             '1. Set OPENROUTER_API_KEY for OpenRouter',
             '2. Configure Bedrock via CAIRN_BRAIN_URL',
             '3. Add any OpenAI-compatible provider',
-            '4. Optionally set OLLAMA_HOST for local models',
+            '4. Add provider connections via the Providers page',
           ].map(step => (
             <p key={step} className="text-[11px] text-gray-500 dark:text-zinc-400 font-mono">{step}</p>
           ))}
@@ -955,25 +955,15 @@ export function PlaygroundPage() {
   useEffect(() => { bottomRef2.current?.scrollIntoView({ behavior: "smooth" }); }, [secondary.messages]);
 
   // ── Model discovery ─────────────────────────────────────────────────────
-  // 1. Always fetch the provider registry FIRST — it reports which providers
-  //    are available (env var configured) and their known models.
-  // 2. Only query Ollama when the registry marks it as available.
-  // 3. As a last resort, check provider connections for supported_models.
+  // 1. Fetch the provider registry — reports which providers are available
+  //    (env var configured) and their known models.
+  // 2. Check provider connections for supported_models.
+  // 3. Configured defaults from runtime settings.
 
   const { data: registryData, isLoading: registryLoading } = useQuery({
     queryKey: ["provider-registry"],
     queryFn: () => defaultApi.getProviderRegistry(),
     retry: false, staleTime: 120_000, refetchOnWindowFocus: false,
-  });
-
-  // Only query Ollama if the registry says it's available (OLLAMA_HOST set).
-  const ollamaAvailable = (registryData ?? []).some(p => p.id === "ollama" && p.available);
-
-  const { data: modelsData, isLoading: ollamaLoading } = useQuery({
-    queryKey: ["ollama-models"],
-    queryFn: () => defaultApi.getOllamaModels(),
-    retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
-    enabled: ollamaAvailable,
   });
 
   // Fetch configured default models from the runtime settings.
@@ -1005,8 +995,6 @@ export function PlaygroundPage() {
     retry: false, staleTime: 60_000, refetchOnWindowFocus: false,
   });
 
-  const ollamaModels: string[] = modelsData?.models ?? [];
-
   // Configured models from runtime settings (e.g. CAIRN_DEFAULT_STREAM_MODEL,
   // CAIRN_BRAIN_MODEL).  These are the models the operator chose for this
   // deployment and should appear first in the selector.
@@ -1017,9 +1005,9 @@ export function PlaygroundPage() {
   ].filter((v): v is string => typeof v === "string" && v.length > 0);
 
   // Build model list from available providers in the registry.
-  // Skip "ollama" (handled separately) and "anthropic" (non-OpenAI wire format).
+  // Skip "anthropic" (non-OpenAI wire format — needs native adapter).
   const registryModels: string[] = (registryData ?? [])
-    .filter(p => p.available && p.id !== "ollama" && p.api_format !== "anthropic")
+    .filter(p => p.available && p.api_format !== "anthropic")
     .flatMap(p => {
       // If the provider has known models, list them. Otherwise expose the default.
       if (p.models.length > 0) return p.models.map(m => m.id);
@@ -1028,10 +1016,9 @@ export function PlaygroundPage() {
 
   const connectionModels: string[] = (connectionsData?.items ?? []).flatMap(c => c.supported_models ?? []);
 
-  // Merge: configured models first, then Ollama, then registry, then connections.
+  // Merge: configured models first, then registry, then connections.
   const allModels = [
     ...configuredModels,
-    ...ollamaModels,
     ...registryModels,
     ...connectionModels,
   ];
@@ -1055,7 +1042,7 @@ export function PlaygroundPage() {
     return 0;
   });
 
-  const modelsLoading = registryLoading || ollamaLoading;
+  const modelsLoading = registryLoading;
 
   // "No providers" only when there are zero models from any source.
   const noProviders = !modelsLoading && models.length === 0;
