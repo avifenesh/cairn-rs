@@ -104,7 +104,6 @@ where
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_store::projections::PromptAssetRecord>, crate::error::RuntimeError> {
-        use cairn_store::projections::PromptAssetReadModel;
         // Query with default project_id to match the standard scope.
         let project = cairn_domain::ProjectKey::new(
             tenant_id.as_str(),
