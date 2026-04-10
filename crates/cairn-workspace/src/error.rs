@@ -24,6 +24,11 @@ pub enum WorkspaceError {
         run_id: RunId,
         dimension: ResourceDimension,
     },
+    BaseRevisionDrift {
+        run_id: RunId,
+        expected: String,
+        actual: String,
+    },
     SandboxOperation {
         run_id: RunId,
         operation: &'static str,
@@ -67,6 +72,14 @@ impl Display for WorkspaceError {
             WorkspaceError::ResourceLimitMissing { run_id, dimension } => write!(
                 f,
                 "sandbox for run {run_id} has no configured limit for {dimension:?}"
+            ),
+            WorkspaceError::BaseRevisionDrift {
+                run_id,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "sandbox base revision drift detected for run {run_id}: expected {expected}, actual {actual}"
             ),
             WorkspaceError::SandboxOperation {
                 run_id,
