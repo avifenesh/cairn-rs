@@ -331,6 +331,236 @@ impl Default for ToolCallResultCache {
     }
 }
 
+// ── Dispatch Recovery (RFC 020 §"Tool-Call Idempotency") ────────────────────
+
+use cairn_domain::recovery::RetrySafety;
+
+/// Result of checking whether a tool call should be dispatched on recovery.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RecoveryDispatchDecision {
+    /// Tool result found in cache — return cached result, do not re-dispatch.
+    CacheHit,
+    /// Safe to re-dispatch (IdempotentSafe or AuthorResponsible).
+    Dispatch,
+    /// Must pause for operator confirmation (DangerousPause).
+    Pause {
+        tool_name: String,
+        reason: String,
+    },
+}
+
+/// Decide whether to dispatch a tool call during recovery.
+///
+/// On recovery with no cached result, the decision depends on RetrySafety:
+/// - IdempotentSafe: re-dispatch silently
+/// - AuthorResponsible: re-dispatch with same tool_call_id (tool handles dedup)
+/// - DangerousPause: pause the run and ask the operator
+pub fn recovery_dispatch_decision(
+    cache: &ToolCallResultCache,
+    tool_call_id: &ToolCallId,
+    tool_name: &str,
+    retry_safety: RetrySafety,
+    is_recovery: bool,
+) -> RecoveryDispatchDecision {
+    // Always check cache first
+    if cache.get(tool_call_id).is_some() {
+        return RecoveryDispatchDecision::CacheHit;
+    }
+
+    // If not recovery, always dispatch fresh
+    if !is_recovery {
+        return RecoveryDispatchDecision::Dispatch;
+    }
+
+    // Recovery with no cached result — branch on RetrySafety
+    match retry_safety {
+        RetrySafety::IdempotentSafe | RetrySafety::AuthorResponsible => {
+            RecoveryDispatchDecision::Dispatch
+        }
+        RetrySafety::DangerousPause => RecoveryDispatchDecision::Pause {
+            tool_name: tool_name.to_string(),
+            reason: "DangerousPause tool with no cached result on recovery".into(),
+        },
+    }
+}
+
+// ── Dual Checkpoint (RFC 020 §"Checkpoint recovery rules") ──────────────────
+
+use cairn_domain::recovery::CheckpointKind;
+
+/// Metadata for a dual checkpoint (Intent or Result).
+#[derive(Clone, Debug, Serialize)]
+pub struct CheckpointMeta {
+    pub run_id: String,
+    pub step_number: u32,
+    pub kind: CheckpointKind,
+    pub message_history_size: u32,
+    pub tool_calls_snapshot: Vec<ToolCallId>,
+    pub saved_at: u64,
+}
+
+impl CheckpointMeta {
+    /// Create an Intent checkpoint (after decide, before execute).
+    pub fn intent(
+        run_id: impl Into<String>,
+        step_number: u32,
+        message_history_size: u32,
+        planned_calls: Vec<ToolCallId>,
+    ) -> Self {
+        Self {
+            run_id: run_id.into(),
+            step_number,
+            kind: CheckpointKind::Intent,
+            message_history_size,
+            tool_calls_snapshot: planned_calls,
+            saved_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        }
+    }
+
+    /// Create a Result checkpoint (after execute completes).
+    pub fn result(
+        run_id: impl Into<String>,
+        step_number: u32,
+        message_history_size: u32,
+        completed_calls: Vec<ToolCallId>,
+    ) -> Self {
+        Self {
+            run_id: run_id.into(),
+            step_number,
+            kind: CheckpointKind::Result,
+            message_history_size,
+            tool_calls_snapshot: completed_calls,
+            saved_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        }
+    }
+}
+
+// ── Projection Warmup Enumeration (RFC 020 §"Startup order" step 2) ─────────
+
+/// All projections that MUST be warmed before readiness flips to 200.
+///
+/// The startup graph (step 2) replays the event log into each of these.
+/// They are listed here so the startup runner can enumerate them,
+/// report per-projection progress, and verify completeness.
+pub static REQUIRED_PROJECTIONS: &[&str] = &[
+    // Core runtime projections
+    "run",
+    "task",
+    "approval",
+    "session",
+    "mailbox",
+    // Knowledge-layer projections
+    "memory_index",
+    "graph",
+    "eval_scorecard",
+    // Decision layer (RFC 019)
+    "decision_cache",
+    // Tool idempotency (RFC 020)
+    "tool_result_cache",
+    // Webhook dedup (sealed RFC 017)
+    "webhook_dedup",
+];
+
+/// Progress tracker for projection warmup.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct ProjectionWarmupProgress {
+    pub projections_complete: u32,
+    pub projections_total: u32,
+    pub events_replayed: u64,
+    pub per_projection: std::collections::HashMap<String, ProjectionStatus>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ProjectionStatus {
+    pub state: BranchState,
+    pub entries: u64,
+}
+
+impl ProjectionWarmupProgress {
+    pub fn new() -> Self {
+        let mut per = std::collections::HashMap::new();
+        for name in REQUIRED_PROJECTIONS {
+            per.insert(
+                name.to_string(),
+                ProjectionStatus { state: BranchState::Pending, entries: 0 },
+            );
+        }
+        Self {
+            projections_total: REQUIRED_PROJECTIONS.len() as u32,
+            per_projection: per,
+            ..Default::default()
+        }
+    }
+
+    pub fn mark_complete(&mut self, name: &str, entries: u64) {
+        self.projections_complete += 1;
+        if let Some(status) = self.per_projection.get_mut(name) {
+            status.state = BranchState::Complete;
+            status.entries = entries;
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.projections_complete >= self.projections_total
+    }
+}
+
+// ── Batched Append Helper (RFC 020 §"Tool-Call Idempotency" invariant 11) ──
+
+use cairn_domain::{EventEnvelope, RuntimeEvent};
+
+/// Collects events buffered by a tool during invocation and the final
+/// `ToolInvocationCompleted` event into a single `EventLog::append` batch.
+///
+/// This enforces RFC 020 invariant 11: either ALL events (tool side-effects
+/// + completion marker) are durable, or NONE are. No partial state where the
+/// projection saw the side-effect but the cache did not.
+pub struct ToolDispatchBatch {
+    events: Vec<EventEnvelope<RuntimeEvent>>,
+}
+
+impl ToolDispatchBatch {
+    pub fn new() -> Self {
+        Self { events: Vec::new() }
+    }
+
+    /// Add a buffered tool event (e.g. IngestEvent, RepoAllowlistExpanded).
+    pub fn push(&mut self, event: EventEnvelope<RuntimeEvent>) {
+        self.events.push(event);
+    }
+
+    /// Add the final ToolInvocationCompleted event.
+    pub fn push_completion(&mut self, event: EventEnvelope<RuntimeEvent>) {
+        self.events.push(event);
+    }
+
+    /// Consume the batch into a Vec for `EventLog::append`.
+    pub fn into_batch(self) -> Vec<EventEnvelope<RuntimeEvent>> {
+        self.events
+    }
+
+    /// Number of events in the batch.
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+}
+
+impl Default for ToolDispatchBatch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -436,5 +666,188 @@ mod tests {
         assert_eq!(summary.recovered_runs, 0);
         assert_eq!(summary.recovered_tasks, 0);
         assert_eq!(summary.startup_ms, 0);
+    }
+
+    // ── Recovery Dispatch Tests ──────────────────────────────────────
+
+    #[test]
+    fn recovery_dispatch_cache_hit_returns_cached() {
+        let mut cache = ToolCallResultCache::new();
+        let tcid = ToolCallId::derive("run-1", 0, 0, "memory_search", "{}");
+        cache.insert(CachedToolResult {
+            tool_call_id: tcid.clone(),
+            tool_name: "memory_search".into(),
+            result_json: serde_json::json!({}),
+            completed_at: 0,
+        });
+
+        let decision = recovery_dispatch_decision(
+            &cache,
+            &tcid,
+            "memory_search",
+            RetrySafety::DangerousPause,
+            true,
+        );
+        assert_eq!(decision, RecoveryDispatchDecision::CacheHit);
+    }
+
+    #[test]
+    fn recovery_dispatch_idempotent_safe_redispatches() {
+        let cache = ToolCallResultCache::new();
+        let tcid = ToolCallId::derive("run-1", 0, 0, "memory_search", "{}");
+
+        let decision = recovery_dispatch_decision(
+            &cache,
+            &tcid,
+            "memory_search",
+            RetrySafety::IdempotentSafe,
+            true,
+        );
+        assert_eq!(decision, RecoveryDispatchDecision::Dispatch);
+    }
+
+    #[test]
+    fn recovery_dispatch_author_responsible_redispatches() {
+        let cache = ToolCallResultCache::new();
+        let tcid = ToolCallId::derive("run-1", 0, 0, "memory_store", "{}");
+
+        let decision = recovery_dispatch_decision(
+            &cache,
+            &tcid,
+            "memory_store",
+            RetrySafety::AuthorResponsible,
+            true,
+        );
+        assert_eq!(decision, RecoveryDispatchDecision::Dispatch);
+    }
+
+    #[test]
+    fn recovery_dispatch_dangerous_pause_pauses() {
+        let cache = ToolCallResultCache::new();
+        let tcid = ToolCallId::derive("run-1", 0, 0, "shell_exec", "{}");
+
+        let decision = recovery_dispatch_decision(
+            &cache,
+            &tcid,
+            "shell_exec",
+            RetrySafety::DangerousPause,
+            true,
+        );
+        assert!(matches!(decision, RecoveryDispatchDecision::Pause { .. }));
+    }
+
+    #[test]
+    fn non_recovery_always_dispatches() {
+        let cache = ToolCallResultCache::new();
+        let tcid = ToolCallId::derive("run-1", 0, 0, "shell_exec", "{}");
+
+        // Even DangerousPause dispatches when not in recovery
+        let decision = recovery_dispatch_decision(
+            &cache,
+            &tcid,
+            "shell_exec",
+            RetrySafety::DangerousPause,
+            false,
+        );
+        assert_eq!(decision, RecoveryDispatchDecision::Dispatch);
+    }
+
+    // ── Dual Checkpoint Tests ───────────────────────────────────────
+
+    #[test]
+    fn checkpoint_intent_has_correct_kind() {
+        let calls = vec![ToolCallId::derive("run-1", 0, 0, "memory_search", "{}")];
+        let cp = CheckpointMeta::intent("run-1", 0, 10, calls.clone());
+        assert_eq!(cp.kind, CheckpointKind::Intent);
+        assert_eq!(cp.step_number, 0);
+        assert_eq!(cp.message_history_size, 10);
+        assert_eq!(cp.tool_calls_snapshot.len(), 1);
+    }
+
+    #[test]
+    fn checkpoint_result_has_correct_kind() {
+        let calls = vec![ToolCallId::derive("run-1", 0, 0, "memory_search", "{}")];
+        let cp = CheckpointMeta::result("run-1", 0, 12, calls);
+        assert_eq!(cp.kind, CheckpointKind::Result);
+        assert_eq!(cp.message_history_size, 12);
+    }
+
+    #[test]
+    fn dual_checkpoints_per_iteration() {
+        // Simulate one full iteration with Intent then Result checkpoint
+        let planned = vec![
+            ToolCallId::derive("run-1", 0, 0, "memory_search", r#"{"query":"foo"}"#),
+            ToolCallId::derive("run-1", 0, 1, "grep_search", r#"{"pattern":"bar"}"#),
+        ];
+        let intent = CheckpointMeta::intent("run-1", 0, 10, planned.clone());
+
+        // After execute, same tools are in the completed snapshot
+        let completed = planned;
+        let result = CheckpointMeta::result("run-1", 0, 12, completed);
+
+        // Intent checkpoint is the safe rollback point
+        assert_eq!(intent.kind, CheckpointKind::Intent);
+        // Result checkpoint is the progress commit point
+        assert_eq!(result.kind, CheckpointKind::Result);
+        // Message history grew after tool results were appended
+        assert!(result.message_history_size >= intent.message_history_size);
+    }
+
+    // ── Projection warmup tests ─────────────────────────────────────────
+
+    #[test]
+    fn required_projections_includes_core_set() {
+        assert!(REQUIRED_PROJECTIONS.contains(&"run"));
+        assert!(REQUIRED_PROJECTIONS.contains(&"task"));
+        assert!(REQUIRED_PROJECTIONS.contains(&"decision_cache"));
+        assert!(REQUIRED_PROJECTIONS.contains(&"tool_result_cache"));
+        assert!(REQUIRED_PROJECTIONS.contains(&"graph"));
+    }
+
+    #[test]
+    fn warmup_progress_tracks_completion() {
+        let mut progress = ProjectionWarmupProgress::new();
+        assert!(!progress.is_complete());
+        assert_eq!(progress.projections_total, REQUIRED_PROJECTIONS.len() as u32);
+
+        for name in REQUIRED_PROJECTIONS {
+            progress.mark_complete(name, 100);
+        }
+        assert!(progress.is_complete());
+    }
+
+    // ── Batched append tests ────────────────────────────────────────────
+
+    #[test]
+    fn tool_dispatch_batch_collects_events() {
+        use cairn_domain::{EventEnvelope, EventId, EventSource};
+        let mut batch = ToolDispatchBatch::new();
+        assert!(batch.is_empty());
+
+        // Simulate two buffered events + completion.
+        let make_env = |payload: RuntimeEvent| -> EventEnvelope<RuntimeEvent> {
+            EventEnvelope::for_runtime_event(
+                EventId::new("evt_test"),
+                EventSource::Runtime,
+                payload,
+            )
+        };
+
+        batch.push(make_env(RuntimeEvent::SessionCreated(
+            cairn_domain::events::SessionCreated {
+                project: cairn_domain::ProjectKey::new("t", "w", "p"),
+                session_id: cairn_domain::SessionId::new("s1"),
+            },
+        )));
+        batch.push_completion(make_env(RuntimeEvent::SessionCreated(
+            cairn_domain::events::SessionCreated {
+                project: cairn_domain::ProjectKey::new("t", "w", "p"),
+                session_id: cairn_domain::SessionId::new("s2"),
+            },
+        )));
+
+        assert_eq!(batch.len(), 2);
+        let events = batch.into_batch();
+        assert_eq!(events.len(), 2);
     }
 }
