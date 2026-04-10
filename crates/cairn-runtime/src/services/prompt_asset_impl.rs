@@ -96,7 +96,7 @@ impl<S> PromptAssetServiceImpl<S>
 where
     S: cairn_store::EventLog + cairn_store::projections::PromptAssetReadModel + 'static,
 {
-    /// List prompt assets by workspace (returns all assets for the workspace's tenant).
+    /// List prompt assets by workspace scope.
     pub async fn list_by_workspace(
         &self,
         tenant_id: &cairn_domain::TenantId,
@@ -104,9 +104,16 @@ where
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_store::projections::PromptAssetRecord>, crate::error::RuntimeError> {
-        // PromptAssetReadModel only exposes list_by_project; tenant-level listing is not yet
-        // implemented. Return empty until a tenant-scoped method is added to the store trait.
-        let _ = (tenant_id, workspace_id, limit, offset);
-        Ok(vec![])
+        use cairn_store::projections::PromptAssetReadModel;
+        // Query with default project_id to match the standard scope.
+        let project = cairn_domain::ProjectKey::new(
+            tenant_id.as_str(),
+            workspace_id.as_str(),
+            "default_project",
+        );
+        self.store
+            .list_by_project(&project, limit, offset)
+            .await
+            .map_err(crate::error::RuntimeError::Store)
     }
 }
