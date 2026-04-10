@@ -21,6 +21,7 @@ import { defaultApi } from '../lib/api';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { ErrorFallback } from '../components/ErrorFallback';
 import type { NotificationChannel, NotificationRecord } from '../lib/types';
+import { useScope } from '../hooks/useScope';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -603,7 +604,8 @@ function DeleteDialog({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function ChannelsPage() {
-  const [tenantId,   setTenantId]   = useState('default');
+  const [globalScope] = useScope();
+  const [tenantId,   setTenantId]   = useState(globalScope.tenant_id);
   const [operatorId, setOperatorId] = useState('admin');
   const [expanded,   setExpanded]   = useState<string | null>(null);
   const [showAdd,    setShowAdd]    = useState(false);

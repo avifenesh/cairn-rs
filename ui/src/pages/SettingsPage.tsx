@@ -607,6 +607,7 @@ function PreferenceRow({
   ) => React.ReactNode;
 }) {
   const qc = useQueryClient();
+  const [scope] = useScope();
   const [local, setLocal]     = useState<string>("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -641,7 +642,7 @@ function PreferenceRow({
       } else if (settingKey === "temperature") {
         value = parseFloat(local);
       }
-      return defaultApi.setDefaultSetting("tenant", "default", settingKey, value);
+      return defaultApi.setDefaultSetting("tenant", scope.tenant_id, settingKey, value);
     },
     onSuccess: () => {
       setSaveState("saved");

@@ -20,6 +20,7 @@ import { EventLog } from "../components/EventLog";
 import { StatCard } from "../components/StatCard";
 import { MiniChart } from "../components/MiniChart";
 import type { RunRecord, RunState, TaskRecord } from "../lib/types";
+import { useScope } from "../hooks/useScope";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -182,8 +183,9 @@ export interface ProjectDashboardPageProps {
 }
 
 export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
-  const [tenantId,    setTenantId]    = useState("default");
-  const [workspaceId, setWorkspaceId] = useState("default");
+  const [globalScope] = useScope();
+  const [tenantId,    setTenantId]    = useState(globalScope.tenant_id);
+  const [workspaceId, setWorkspaceId] = useState(globalScope.workspace_id);
 
   const scope = { tenant_id: tenantId, workspace_id: workspaceId, project_id: projectId };
 
