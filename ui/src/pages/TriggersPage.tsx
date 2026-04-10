@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2, Inbox, Play, Pause, Trash2, Plus, Zap } from "lucide-react";
+import { Loader2, Inbox, Play, Pause, Trash2, Zap } from "lucide-react";
 import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
-import { defaultApi } from "../lib/api";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
+import type { RefreshOption } from "../hooks/useAutoRefresh";
+
+const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("cairn_token") || ""}` });
 
 const shortId = (id: string) =>
   id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
@@ -14,8 +16,6 @@ const fmtTime = (ms: number) =>
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
 interface Trigger {
   id: string;
   name: string;
@@ -23,7 +23,7 @@ interface Trigger {
   signal_pattern: { signal_type: string; plugin_id?: string };
   conditions: unknown[];
   run_template_id: string;
-  state: { state: string; reason?: string; since?: number };
+  state: { state: string; reason?: string; since?: number } | string;
   rate_limit: { max_per_minute: number; max_burst: number };
   max_chain_depth: number;
   created_at: number;
@@ -39,7 +39,9 @@ interface RunTemplate {
   created_at: number;
 }
 
-// ── Stat card ────────────────────────────────────────────────────────────────
+function stateStr(state: Trigger["state"]): string {
+  return typeof state === "string" ? state : state.state;
+}
 
 function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
@@ -50,10 +52,8 @@ function StatCard({ label, value, accent }: { label: string; value: string | num
   );
 }
 
-// ── State badge ──────────────────────────────────────────────────────────────
-
 function StateBadge({ state }: { state: Trigger["state"] }) {
-  const s = typeof state === "string" ? state : state.state;
+  const s = stateStr(state);
   if (s === "enabled") return (
     <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 rounded px-2 py-0.5">
       <Play size={9} /> Enabled
@@ -65,13 +65,11 @@ function StateBadge({ state }: { state: Trigger["state"] }) {
     </span>
   );
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-400 bg-amber-950/50 border border-amber-800/40 rounded px-2 py-0.5">
+    <span className="text-[11px] font-medium text-amber-400 bg-amber-950/50 border border-amber-800/40 rounded px-2 py-0.5">
       Suspended
     </span>
   );
 }
-
-// ── Table header ─────────────────────────────────────────────────────────────
 
 const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
   <th className={clsx(
@@ -80,22 +78,20 @@ const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: 
   )}>{ch}</th>
 );
 
-// ── Triggers table ───────────────────────────────────────────────────────────
-
 function TriggersTable({ triggers }: { triggers: Trigger[] }) {
   const qc = useQueryClient();
   const toast = useToast();
 
   const enableMut = useMutation({
-    mutationFn: (id: string) => defaultApi.post(`/v1/projects/default/triggers/${id}/enable`, {}),
+    mutationFn: (id: string) => fetch(`/v1/projects/default/triggers/${id}/enable`, { method: "POST", headers: authHeaders() }),
     onSuccess: () => { toast.success("Trigger enabled."); void qc.invalidateQueries({ queryKey: ["triggers"] }); },
   });
   const disableMut = useMutation({
-    mutationFn: (id: string) => defaultApi.post(`/v1/projects/default/triggers/${id}/disable`, {}),
+    mutationFn: (id: string) => fetch(`/v1/projects/default/triggers/${id}/disable`, { method: "POST", headers: authHeaders() }),
     onSuccess: () => { toast.success("Trigger disabled."); void qc.invalidateQueries({ queryKey: ["triggers"] }); },
   });
   const deleteMut = useMutation({
-    mutationFn: (id: string) => defaultApi.del(`/v1/projects/default/triggers/${id}`),
+    mutationFn: (id: string) => fetch(`/v1/projects/default/triggers/${id}`, { method: "DELETE", headers: authHeaders() }),
     onSuccess: () => { toast.success("Trigger deleted."); void qc.invalidateQueries({ queryKey: ["triggers"] }); },
   });
 
@@ -138,14 +134,10 @@ function TriggersTable({ triggers }: { triggers: Trigger[] }) {
             <td className="px-3 py-2.5 hidden md:table-cell text-gray-400 dark:text-zinc-600 text-[11px]">{fmtTime(t.created_at)}</td>
             <td className="px-3 py-2.5 text-right">
               <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                {(typeof t.state === "object" ? t.state.state : t.state) === "enabled" ? (
-                  <button onClick={() => disableMut.mutate(t.id)} className="px-2 py-0.5 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700">
-                    Disable
-                  </button>
+                {stateStr(t.state) === "enabled" ? (
+                  <button onClick={() => disableMut.mutate(t.id)} className="px-2 py-0.5 rounded text-[11px] bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700">Disable</button>
                 ) : (
-                  <button onClick={() => enableMut.mutate(t.id)} className="px-2 py-0.5 rounded text-[11px] bg-emerald-900/50 text-emerald-300 hover:bg-emerald-900 border border-emerald-800/50">
-                    Enable
-                  </button>
+                  <button onClick={() => enableMut.mutate(t.id)} className="px-2 py-0.5 rounded text-[11px] bg-emerald-900/50 text-emerald-300 hover:bg-emerald-900 border border-emerald-800/50">Enable</button>
                 )}
                 <button onClick={() => { if (window.confirm("Delete this trigger?")) deleteMut.mutate(t.id); }}
                   className="px-1.5 py-0.5 rounded text-[11px] bg-red-900/30 text-red-400 hover:bg-red-900/60 border border-red-800/40">
@@ -160,13 +152,10 @@ function TriggersTable({ triggers }: { triggers: Trigger[] }) {
   );
 }
 
-// ── Templates section ────────────────────────────────────────────────────────
-
 function TemplatesSection({ templates }: { templates: RunTemplate[] }) {
   if (templates.length === 0) return (
     <p className="text-[12px] text-gray-400 dark:text-zinc-600 py-4 text-center">No run templates yet.</p>
   );
-
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {templates.map(t => (
@@ -180,29 +169,32 @@ function TemplatesSection({ templates }: { templates: RunTemplate[] }) {
   );
 }
 
-// ── Main page ────────────────────────────────────────────────────────────────
-
 export function TriggersPage() {
   const [tab, setTab] = useState<"triggers" | "templates">("triggers");
-  const { interval, RefreshSelect } = useAutoRefresh("triggers-refresh");
+  const { ms: refreshMs, setOption: setRefreshOption } = useAutoRefresh("triggers", "15s");
 
   const triggersQ = useQuery<Trigger[]>({
     queryKey: ["triggers"],
-    queryFn: () => defaultApi.get("/v1/projects/default/triggers"),
-    refetchInterval: interval,
+    queryFn: async () => {
+      const res = await fetch("/v1/projects/default/triggers", { headers: authHeaders() });
+      return res.json();
+    },
+    refetchInterval: refreshMs,
   });
 
   const templatesQ = useQuery<RunTemplate[]>({
     queryKey: ["run-templates"],
-    queryFn: () => defaultApi.get("/v1/projects/default/run-templates"),
-    refetchInterval: interval,
+    queryFn: async () => {
+      const res = await fetch("/v1/projects/default/run-templates", { headers: authHeaders() });
+      return res.json();
+    },
+    refetchInterval: refreshMs,
   });
 
-  const triggers = triggersQ.data ?? [];
-  const templates = templatesQ.data ?? [];
-
-  const enabled  = triggers.filter(t => (typeof t.state === "object" ? t.state.state : t.state) === "enabled").length;
-  const disabled = triggers.filter(t => (typeof t.state === "object" ? t.state.state : t.state) !== "enabled").length;
+  const triggers = (triggersQ.data ?? []) as Trigger[];
+  const templates = (templatesQ.data ?? []) as RunTemplate[];
+  const enabled = triggers.filter(t => stateStr(t.state) === "enabled").length;
+  const disabled = triggers.length - enabled;
 
   return (
     <div className="space-y-6">
@@ -213,11 +205,16 @@ export function TriggersPage() {
           </h1>
           <p className="text-[12px] text-gray-400 dark:text-zinc-600 mt-0.5">Signal-to-run bindings (RFC 022)</p>
         </div>
-        <RefreshSelect />
+        <select
+          className="text-[11px] bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 py-1 text-gray-600 dark:text-zinc-400"
+          onChange={e => setRefreshOption(e.target.value as RefreshOption)}
+        >
+          {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
+        </select>
       </div>
 
       <div className="flex gap-6">
-        <StatCard label="Total Triggers" value={triggers.length} />
+        <StatCard label="Total" value={triggers.length} />
         <StatCard label="Enabled" value={enabled} accent="border-emerald-500" />
         <StatCard label="Disabled" value={disabled} accent="border-gray-500" />
         <StatCard label="Templates" value={templates.length} accent="border-blue-500" />
@@ -236,17 +233,9 @@ export function TriggersPage() {
 
       <div className="bg-white dark:bg-zinc-900/50 rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
         {tab === "triggers" ? (
-          triggersQ.isLoading ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div>
-          ) : (
-            <TriggersTable triggers={triggers} />
-          )
+          triggersQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <TriggersTable triggers={triggers} />
         ) : (
-          templatesQ.isLoading ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div>
-          ) : (
-            <div className="p-4"><TemplatesSection templates={templates} /></div>
-          )
+          templatesQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <div className="p-4"><TemplatesSection templates={templates} /></div>
         )}
       </div>
     </div>

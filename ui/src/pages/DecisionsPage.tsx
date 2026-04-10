@@ -3,8 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Inbox, Scale, Trash2, XCircle } from "lucide-react";
 import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
-import { defaultApi } from "../lib/api";
-import { useAutoRefresh } from "../hooks/useAutoRefresh";
+import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
+import type { RefreshOption } from "../hooks/useAutoRefresh";
+
+const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("cairn_token") || ""}` });
 
 const shortId = (id: string) =>
   id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
@@ -14,16 +16,11 @@ const fmtTime = (ms: number) =>
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
 interface Decision {
   decision_id: string;
-  kind: unknown;
+  kind: Record<string, unknown> | string;
   outcome: { outcome: string; deny_reason?: string };
-  scope_ref: unknown;
   created_at: number;
-  expires_at?: number;
-  hit_count?: number;
 }
 
 interface CacheEntry {
@@ -36,8 +33,6 @@ interface CacheEntry {
   hit_count: number;
 }
 
-// ── Stat card ────────────────────────────────────────────────────────────────
-
 function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
   return (
     <div className={clsx("border-l-2 pl-3 py-0.5", accent ?? "border-indigo-500")}>
@@ -47,22 +42,14 @@ function StatCard({ label, value, accent }: { label: string; value: string | num
   );
 }
 
-// ── Outcome badge ────────────────────────────────────────────────────────────
-
 function OutcomeBadge({ outcome }: { outcome: string }) {
   if (outcome === "allowed") return (
-    <span className="text-[11px] font-medium text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 rounded px-2 py-0.5">
-      Allowed
-    </span>
+    <span className="text-[11px] font-medium text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 rounded px-2 py-0.5">Allowed</span>
   );
   return (
-    <span className="text-[11px] font-medium text-red-400 bg-red-950/50 border border-red-800/40 rounded px-2 py-0.5">
-      Denied
-    </span>
+    <span className="text-[11px] font-medium text-red-400 bg-red-950/50 border border-red-800/40 rounded px-2 py-0.5">Denied</span>
   );
 }
-
-// ── Table header ─────────────────────────────────────────────────────────────
 
 const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
   <th className={clsx(
@@ -71,15 +58,13 @@ const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: 
   )}>{ch}</th>
 );
 
-// ── Decisions table ──────────────────────────────────────────────────────────
-
 function DecisionsTable({ decisions }: { decisions: Decision[] }) {
   if (decisions.length === 0) return (
     <div className="flex flex-col items-center justify-center py-16 gap-2 text-center px-6">
       <Inbox size={26} className="text-gray-300 dark:text-zinc-700" />
       <p className="text-[13px] text-gray-400 dark:text-zinc-600 font-medium">No decisions yet</p>
       <p className="text-[11px] text-gray-300 dark:text-zinc-700 max-w-xs">
-        Decisions appear when the unified decision layer (RFC 019) evaluates tool invocations, trigger fires, or plugin enablements.
+        Decisions appear when the unified decision layer evaluates tool invocations, trigger fires, or plugin enablements.
       </p>
     </div>
   );
@@ -87,12 +72,7 @@ function DecisionsTable({ decisions }: { decisions: Decision[] }) {
   return (
     <table className="min-w-full text-[13px]">
       <thead className="bg-gray-50 dark:bg-zinc-900 sticky top-0 z-10">
-        <tr>
-          <TH ch="ID" />
-          <TH ch="Kind" />
-          <TH ch="Outcome" />
-          <TH ch="Created" hide="hidden md:table-cell" />
-        </tr>
+        <tr><TH ch="ID" /><TH ch="Kind" /><TH ch="Outcome" /><TH ch="Created" hide="hidden md:table-cell" /></tr>
       </thead>
       <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
         {decisions.map(d => (
@@ -100,7 +80,7 @@ function DecisionsTable({ decisions }: { decisions: Decision[] }) {
             <td className="px-3 py-2.5 font-mono text-[11px] text-gray-500 dark:text-zinc-500">{shortId(d.decision_id)}</td>
             <td className="px-3 py-2.5">
               <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
-                {typeof d.kind === "object" && d.kind !== null ? (d.kind as Record<string, unknown>).type as string ?? "unknown" : String(d.kind)}
+                {typeof d.kind === "object" && d.kind !== null ? String((d.kind as Record<string, unknown>).type ?? "unknown") : String(d.kind)}
               </code>
             </td>
             <td className="px-3 py-2.5"><OutcomeBadge outcome={d.outcome.outcome} /></td>
@@ -112,22 +92,24 @@ function DecisionsTable({ decisions }: { decisions: Decision[] }) {
   );
 }
 
-// ── Cache table ──────────────────────────────────────────────────────────────
-
 function CacheTable({ entries }: { entries: CacheEntry[] }) {
   const qc = useQueryClient();
   const toast = useToast();
 
   const invalidateMut = useMutation({
-    mutationFn: (id: string) => defaultApi.post(`/v1/decisions/${id}/invalidate`, { reason: "operator-invalidated" }),
+    mutationFn: (id: string) => fetch(`/v1/decisions/${id}/invalidate`, {
+      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "operator-invalidated" }),
+    }),
     onSuccess: () => { toast.success("Cache entry invalidated."); void qc.invalidateQueries({ queryKey: ["decisions-cache"] }); },
-    onError: () => toast.error("Failed to invalidate."),
   });
 
-  const bulkInvalidateMut = useMutation({
-    mutationFn: () => defaultApi.post("/v1/decisions/cache/invalidate-all", { reason: "operator-bulk-clear" }),
+  const bulkMut = useMutation({
+    mutationFn: () => fetch("/v1/decisions/cache/invalidate-all", {
+      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "operator-bulk-clear" }),
+    }),
     onSuccess: () => { toast.success("All cache entries invalidated."); void qc.invalidateQueries({ queryKey: ["decisions-cache"] }); },
-    onError: () => toast.error("Failed to bulk invalidate."),
   });
 
   if (entries.length === 0) return (
@@ -140,28 +122,19 @@ function CacheTable({ entries }: { entries: CacheEntry[] }) {
     <div>
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-zinc-800">
         <span className="text-[11px] text-gray-400 dark:text-zinc-600">{entries.length} cached rules</span>
-        <button onClick={() => { if (window.confirm("Invalidate ALL cached decisions? Operators will be re-prompted.")) bulkInvalidateMut.mutate(); }}
+        <button onClick={() => { if (window.confirm("Invalidate ALL cached decisions?")) bulkMut.mutate(); }}
           className="px-2 py-0.5 rounded text-[11px] font-medium bg-red-900/30 text-red-400 hover:bg-red-900/60 border border-red-800/40 flex items-center gap-1">
           <XCircle size={10} /> Bulk Invalidate
         </button>
       </div>
       <table className="min-w-full text-[13px]">
         <thead className="bg-gray-50 dark:bg-zinc-900 sticky top-0 z-10">
-          <tr>
-            <TH ch="Kind" />
-            <TH ch="Outcome" />
-            <TH ch="Scope" hide="hidden sm:table-cell" />
-            <TH ch="Hits" />
-            <TH ch="Expires" hide="hidden md:table-cell" />
-            <TH ch="" right />
-          </tr>
+          <tr><TH ch="Kind" /><TH ch="Outcome" /><TH ch="Scope" hide="hidden sm:table-cell" /><TH ch="Hits" /><TH ch="Expires" hide="hidden md:table-cell" /><TH ch="" right /></tr>
         </thead>
         <tbody className="divide-y divide-gray-200 dark:divide-zinc-800/50">
           {entries.map(e => (
             <tr key={e.key} className="group hover:bg-gray-50/50 dark:hover:bg-zinc-800/30 transition-colors">
-              <td className="px-3 py-2.5">
-                <code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">{e.kind_tag}</code>
-              </td>
+              <td className="px-3 py-2.5"><code className="text-[11px] bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">{e.kind_tag}</code></td>
               <td className="px-3 py-2.5"><OutcomeBadge outcome={e.outcome} /></td>
               <td className="px-3 py-2.5 hidden sm:table-cell text-gray-500 dark:text-zinc-500 text-[11px]">{e.scope}</td>
               <td className="px-3 py-2.5 tabular-nums text-gray-500 dark:text-zinc-500">{e.hit_count}</td>
@@ -180,26 +153,30 @@ function CacheTable({ entries }: { entries: CacheEntry[] }) {
   );
 }
 
-// ── Main page ────────────────────────────────────────────────────────────────
-
 export function DecisionsPage() {
   const [tab, setTab] = useState<"recent" | "cache">("recent");
-  const { interval, RefreshSelect } = useAutoRefresh("decisions-refresh");
+  const { ms: refreshMs, setOption: setRefreshOption } = useAutoRefresh("decisions", "15s");
 
   const decisionsQ = useQuery<Decision[]>({
     queryKey: ["decisions"],
-    queryFn: () => defaultApi.get("/v1/decisions"),
-    refetchInterval: interval,
+    queryFn: async () => {
+      const res = await fetch("/v1/decisions", { headers: authHeaders() });
+      return res.json();
+    },
+    refetchInterval: refreshMs,
   });
 
   const cacheQ = useQuery<CacheEntry[]>({
     queryKey: ["decisions-cache"],
-    queryFn: () => defaultApi.get("/v1/decisions/cache"),
-    refetchInterval: interval,
+    queryFn: async () => {
+      const res = await fetch("/v1/decisions/cache", { headers: authHeaders() });
+      return res.json();
+    },
+    refetchInterval: refreshMs,
   });
 
-  const decisions = decisionsQ.data ?? [];
-  const cacheEntries = cacheQ.data ?? [];
+  const decisions = (decisionsQ.data ?? []) as Decision[];
+  const cacheEntries = (cacheQ.data ?? []) as CacheEntry[];
   const allowed = decisions.filter(d => d.outcome.outcome === "allowed").length;
   const denied = decisions.filter(d => d.outcome.outcome === "denied").length;
 
@@ -212,14 +189,19 @@ export function DecisionsPage() {
           </h1>
           <p className="text-[12px] text-gray-400 dark:text-zinc-600 mt-0.5">Unified decision layer (RFC 019)</p>
         </div>
-        <RefreshSelect />
+        <select
+          className="text-[11px] bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-2 py-1 text-gray-600 dark:text-zinc-400"
+          onChange={e => setRefreshOption(e.target.value as RefreshOption)}
+        >
+          {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
+        </select>
       </div>
 
       <div className="flex gap-6">
-        <StatCard label="Total Decisions" value={decisions.length} />
+        <StatCard label="Total" value={decisions.length} />
         <StatCard label="Allowed" value={allowed} accent="border-emerald-500" />
         <StatCard label="Denied" value={denied} accent="border-red-500" />
-        <StatCard label="Cached Rules" value={cacheEntries.length} accent="border-amber-500" />
+        <StatCard label="Cached" value={cacheEntries.length} accent="border-amber-500" />
       </div>
 
       <div className="flex gap-2 border-b border-gray-200 dark:border-zinc-800">
@@ -235,17 +217,9 @@ export function DecisionsPage() {
 
       <div className="bg-white dark:bg-zinc-900/50 rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
         {tab === "recent" ? (
-          decisionsQ.isLoading ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div>
-          ) : (
-            <DecisionsTable decisions={decisions} />
-          )
+          decisionsQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <DecisionsTable decisions={decisions} />
         ) : (
-          cacheQ.isLoading ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div>
-          ) : (
-            <CacheTable entries={cacheEntries} />
-          )
+          cacheQ.isLoading ? <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-gray-400" /></div> : <CacheTable entries={cacheEntries} />
         )}
       </div>
     </div>
