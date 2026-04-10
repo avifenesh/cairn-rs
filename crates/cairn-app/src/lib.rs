@@ -2285,6 +2285,9 @@ struct CreateRunRequest {
     session_id: String,
     run_id: String,
     parent_run_id: Option<String>,
+    /// RFC 018: execution mode (direct/plan/execute).
+    #[serde(default)]
+    mode: Option<cairn_domain::decisions::RunMode>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -9468,6 +9471,9 @@ struct OrchestrateRequest {
     max_iterations: Option<u32>,
     #[serde(default)]
     timeout_ms: Option<u64>,
+    /// RFC 018: execution mode override for this orchestration.
+    #[serde(default)]
+    mode: Option<cairn_domain::decisions::RunMode>,
 }
 
 /// POST /v1/runs/:id/orchestrate — trigger the GATHER → DECIDE → EXECUTE loop.
@@ -9583,7 +9589,7 @@ async fn orchestrate_run_handler(
             .agent_role_id
             .unwrap_or_else(|| "orchestrator".to_owned()),
         run_started_at_ms: now_ms,
-        run_mode: cairn_domain::decisions::RunMode::Direct,
+        run_mode: body.mode.clone().unwrap_or_default(),
         discovered_tool_names: vec![],
     };
 
