@@ -242,6 +242,22 @@ where
             );
             self.emitter.on_decide_completed(ctx, &decide_output).await;
 
+            // ── (3b) Plan artifact detection (RFC 018) ───────────────────────
+            // In Plan mode, check if the LLM response contains a <proposed_plan>
+            // block. If so, extract the plan markdown and terminate the run.
+            if matches!(ctx.run_mode, cairn_domain::decisions::RunMode::Plan) {
+                if let Some(plan_md) = extract_proposed_plan(&decide_output.raw_response) {
+                    tracing::info!(
+                        run_id    = %ctx.run_id,
+                        iteration = ctx.iteration,
+                        plan_len  = plan_md.len(),
+                        "plan artifact detected — terminating Plan-mode run"
+                    );
+                    self.emitter.on_plan_proposed(ctx, &plan_md).await;
+                    return Ok(LoopTermination::PlanProposed { plan_markdown: plan_md });
+                }
+            }
+
             // ── (4) Approval pre-check ────────────────────────────────────────
             // When requires_approval is true, the execute phase emits an
             // ApprovalRequested event and transitions the run to waiting_approval.
@@ -412,6 +428,15 @@ where
                     return Ok(LoopTermination::WaitingSubagent { child_task_id });
                 }
 
+                LoopSignal::PlanProposed { plan_markdown } => {
+                    tracing::info!(
+                        run_id    = %ctx.run_id,
+                        iteration = ctx.iteration,
+                        "plan proposed via loop signal"
+                    );
+                    return Ok(LoopTermination::PlanProposed { plan_markdown });
+                }
+
                 LoopSignal::Continue => {
                     // Extract any tools discovered via tool_search this iteration
                     // and carry them into the next iteration's context so that
@@ -477,6 +502,24 @@ fn extract_tool_search_discoveries(outcome: &ExecuteOutcome) -> Vec<String> {
         }
     }
     names
+}
+
+/// Extract the `<proposed_plan>` block from an LLM response (RFC 018).
+///
+/// Returns `Some(plan_markdown)` if the response contains a `<proposed_plan>`
+/// block, `None` otherwise. Strips the XML tags.
+fn extract_proposed_plan(response: &str) -> Option<String> {
+    let start_tag = "<proposed_plan>";
+    let end_tag = "</proposed_plan>";
+    let start = response.find(start_tag)?;
+    let content_start = start + start_tag.len();
+    let end = response[content_start..].find(end_tag)?;
+    let plan = response[content_start..content_start + end].trim();
+    if plan.is_empty() {
+        None
+    } else {
+        Some(plan.to_owned())
+    }
 }
 
 /// Build a `StepSummary` from the completed iteration.
@@ -618,6 +661,7 @@ mod tests {
             goal: "test goal".to_owned(),
             agent_type: "test_agent".to_owned(),
             run_started_at_ms: now_millis(),
+            run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }
     }
@@ -1192,5 +1236,35 @@ mod tests {
             snapshots[1].contains(&"shell_exec".to_owned()),
             "iteration 1 must see shell_exec from prior tool_search result"
         );
+    }
+
+    // ── Plan extraction tests (RFC 018) ─────────────────────────────────
+
+    #[test]
+    fn extract_proposed_plan_parses_block() {
+        let response = "Here's my analysis.\n\n<proposed_plan>\n# Plan: Fix the bug\n\n## What I found\nThe bug is in foo.rs line 42.\n\n## What I propose\n1. Fix foo.rs\n</proposed_plan>\n\nDone.";
+        let plan = extract_proposed_plan(response);
+        assert!(plan.is_some());
+        let md = plan.unwrap();
+        assert!(md.contains("# Plan: Fix the bug"));
+        assert!(md.contains("Fix foo.rs"));
+    }
+
+    #[test]
+    fn extract_proposed_plan_returns_none_when_absent() {
+        let response = "I need more information before I can propose a plan.";
+        assert!(extract_proposed_plan(response).is_none());
+    }
+
+    #[test]
+    fn extract_proposed_plan_returns_none_for_empty_block() {
+        let response = "<proposed_plan>\n\n</proposed_plan>";
+        assert!(extract_proposed_plan(response).is_none());
+    }
+
+    #[test]
+    fn extract_proposed_plan_handles_unclosed_tag() {
+        let response = "<proposed_plan>\nPartial plan without closing tag";
+        assert!(extract_proposed_plan(response).is_none());
     }
 }

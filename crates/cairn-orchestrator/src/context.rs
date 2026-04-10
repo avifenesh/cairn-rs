@@ -4,8 +4,8 @@
 //! → ExecutePhase, plus the loop control signals and configuration.
 
 use cairn_domain::{
-    ActionProposal, ApprovalId, DefaultSetting, ProjectKey, RunId, SessionId, TaskId,
-    ToolInvocationId,
+    decisions::RunMode, ActionProposal, ApprovalId, DefaultSetting, ProjectKey, RunId, SessionId,
+    TaskId, ToolInvocationId,
 };
 use cairn_graph::GraphNode;
 use cairn_memory::retrieval::RetrievalResult;
@@ -35,6 +35,13 @@ pub struct OrchestrationContext {
     pub agent_type: String,
     /// Wall-clock millisecond timestamp when this run began (for timeout checks).
     pub run_started_at_ms: u64,
+    /// Execution mode for this run (RFC 018).
+    ///
+    /// - `Direct` — all tools visible, agent acts freely.
+    /// - `Plan` — only Observational + Internal tools visible; run terminates
+    ///   with `plan_proposed` when agent emits `<proposed_plan>`.
+    /// - `Execute { plan_run_id }` — seeded with an approved plan artifact.
+    pub run_mode: RunMode,
     /// Deferred tool names discovered via `tool_search` in previous iterations.
     ///
     /// The loop runner populates this after execute when it detects a
@@ -169,6 +176,8 @@ pub enum LoopSignal {
     WaitApproval { approval_id: ApprovalId },
     /// Run is blocked waiting for a spawned subagent to finish.
     WaitSubagent { child_task_id: TaskId },
+    /// Plan-mode run: agent emitted a `<proposed_plan>` block (RFC 018).
+    PlanProposed { plan_markdown: String },
 }
 
 // ── LoopTermination ──────────────────────────────────────────────────────────
@@ -193,6 +202,9 @@ pub enum LoopTermination {
     /// Run is waiting for a child subagent.  Loop suspended.
     /// Resume when the child task completes (dependency sweep).
     WaitingSubagent { child_task_id: TaskId },
+    /// Plan-mode run completed with a plan artifact (RFC 018).
+    /// The run is Completed with outcome `plan_proposed`.
+    PlanProposed { plan_markdown: String },
 }
 
 // ── LoopConfig ───────────────────────────────────────────────────────────────

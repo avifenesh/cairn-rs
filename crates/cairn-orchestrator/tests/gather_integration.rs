@@ -35,6 +35,7 @@ fn base_ctx() -> OrchestrationContext {
         goal: "Analyse cairn-rs event-sourcing architecture".to_owned(),
         agent_type: "orchestrator".to_owned(),
         run_started_at_ms: 1_000_000,
+        run_mode: cairn_domain::decisions::RunMode::Direct,
         discovered_tool_names: vec![],
     }
 }

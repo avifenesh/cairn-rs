@@ -96,14 +96,13 @@ use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, R
 use cairn_runtime::{
     set_current_trace_id, ApprovalPolicyService, ApprovalService, AuditService, BudgetService,
     ChannelService, CheckpointService, CredentialService, DecisionService, DefaultsService,
-    ExternalWorkerService,
-    GuardrailService, InMemoryServices, IngestJobService, LicenseService, MailboxService,
-    NotificationService, OperatorProfileService, ProjectService, PromptAssetService,
-    PromptReleaseService, PromptVersionService, ProviderBindingService, ProviderConnectionConfig,
-    ProviderConnectionService, ProviderHealthService, QuotaService, RecoveryService,
-    RetentionService, RoutePolicyService, RunCostAlertService, RunService, RunSlaService,
-    RuntimeError, SessionService, SignalRouterService, SignalService, TaskService, TenantService,
-    ToolInvocationService, WorkspaceMembershipService, WorkspaceService,
+    ExternalWorkerService, GuardrailService, InMemoryServices, IngestJobService, LicenseService,
+    MailboxService, NotificationService, OperatorProfileService, ProjectService,
+    PromptAssetService, PromptReleaseService, PromptVersionService, ProviderBindingService,
+    ProviderConnectionConfig, ProviderConnectionService, ProviderHealthService, QuotaService,
+    RecoveryService, RetentionService, RoutePolicyService, RunCostAlertService, RunService,
+    RunSlaService, RuntimeError, SessionService, SignalRouterService, SignalService, TaskService,
+    TenantService, ToolInvocationService, WorkspaceMembershipService, WorkspaceService,
 };
 use cairn_store::projections::{
     ApprovalReadModel, AuditLogReadModel, CheckpointReadModel, CheckpointStrategyReadModel,
@@ -9388,6 +9387,7 @@ async fn orchestrate_run_handler(
             .agent_role_id
             .unwrap_or_else(|| "orchestrator".to_owned()),
         run_started_at_ms: now_ms,
+        run_mode: cairn_domain::decisions::RunMode::Direct,
         discovered_tool_names: vec![],
     };
 
@@ -9809,6 +9809,15 @@ async fn orchestrate_run_handler(
             StatusCode::ACCEPTED,
             Json(serde_json::json!({
                 "termination": "waiting_subagent", "child_task_id": child_task_id.as_str(),
+            })),
+        )
+            .into_response(),
+        Ok(LoopTermination::PlanProposed { plan_markdown }) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "termination": "plan_proposed",
+                "outcome": "plan_proposed",
+                "plan_markdown": plan_markdown,
             })),
         )
             .into_response(),
@@ -12918,7 +12927,12 @@ async fn get_decision_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     use cairn_domain::DecisionId;
-    match state.runtime.decisions.get_decision(&DecisionId::new(id)).await {
+    match state
+        .runtime
+        .decisions
+        .get_decision(&DecisionId::new(id))
+        .await
+    {
         Ok(Some(event)) => (StatusCode::OK, Json(event)).into_response(),
         Ok(None) => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "decision not found")
             .into_response(),
@@ -12951,7 +12965,11 @@ async fn invalidate_decision_handler(
         )
         .await
     {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "invalidated": true }))).into_response(),
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "invalidated": true })),
+        )
+            .into_response(),
         Err(e) => decision_error_response(e),
     }
 }
@@ -13025,11 +13043,7 @@ async fn invalidate_by_rule_handler(
     match state
         .runtime
         .decisions
-        .invalidate_by_rule(
-            &rule_id,
-            &reason,
-            ActorRef::SystemPolicyChange,
-        )
+        .invalidate_by_rule(&rule_id, &reason, ActorRef::SystemPolicyChange)
         .await
     {
         Ok(count) => (
@@ -13058,9 +13072,18 @@ fn decision_error_response(err: cairn_runtime::DecisionError) -> axum::response:
 
 fn default_project_scope(params: &HashMap<String, String>) -> cairn_domain::ProjectKey {
     cairn_domain::ProjectKey::new(
-        params.get("tenant_id").map(|s| s.as_str()).unwrap_or("default"),
-        params.get("workspace_id").map(|s| s.as_str()).unwrap_or("default"),
-        params.get("project_id").map(|s| s.as_str()).unwrap_or("default"),
+        params
+            .get("tenant_id")
+            .map(|s| s.as_str())
+            .unwrap_or("default"),
+        params
+            .get("workspace_id")
+            .map(|s| s.as_str())
+            .unwrap_or("default"),
+        params
+            .get("project_id")
+            .map(|s| s.as_str())
+            .unwrap_or("default"),
     )
 }
 

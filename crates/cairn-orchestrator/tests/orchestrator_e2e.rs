@@ -104,6 +104,7 @@ fn base_ctx() -> OrchestrationContext {
         goal: "List 3 facts about Rust programming language".to_owned(),
         agent_type: "test_agent".to_owned(),
         run_started_at_ms: now_ms(),
+        run_mode: cairn_domain::decisions::RunMode::Direct,
         discovered_tool_names: vec![],
     }
 }

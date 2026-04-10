@@ -330,6 +330,9 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
             cairn_orchestrator::LoopTermination::WaitingSubagent { .. } => {
                 ("waiting_subagent", None)
             }
+            cairn_orchestrator::LoopTermination::PlanProposed { .. } => {
+                ("plan_proposed", None)
+            }
         };
         self.emit(serde_json::json!({
             "event":       "orchestrate_finished",
@@ -363,6 +366,7 @@ mod sse_orchestrator_tests {
             goal: "do the thing".to_owned(),
             agent_type: "orchestrator".to_owned(),
             run_started_at_ms: 0,
+            run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }
     }

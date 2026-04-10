@@ -85,6 +85,13 @@ pub enum OrchestratorEvent {
         succeeded: usize,
         failed: usize,
     },
+    /// A Plan-mode run has emitted a `<proposed_plan>` block (RFC 018).
+    PlanProposed {
+        run_id: RunId,
+        iteration: u32,
+        /// The extracted plan markdown.
+        plan_markdown: String,
+    },
     /// The loop has finished (terminal or suspended).
     Finished {
         run_id: RunId,
@@ -141,6 +148,9 @@ pub trait OrchestratorEventEmitter: Send + Sync {
         _execute: &ExecuteOutcome,
     ) {
     }
+
+    /// Called when a Plan-mode run detects a `<proposed_plan>` block (RFC 018).
+    async fn on_plan_proposed(&self, _ctx: &OrchestrationContext, _plan_markdown: &str) {}
 
     /// Called once after the loop terminates (terminal or suspended).
     async fn on_finished(&self, _ctx: &OrchestrationContext, _termination: &LoopTermination) {}
@@ -278,6 +288,14 @@ impl OrchestratorEventEmitter for ChannelEmitter {
         });
     }
 
+    async fn on_plan_proposed(&self, ctx: &OrchestrationContext, plan_markdown: &str) {
+        self.send(OrchestratorEvent::PlanProposed {
+            run_id: ctx.run_id.clone(),
+            iteration: ctx.iteration,
+            plan_markdown: plan_markdown.to_owned(),
+        });
+    }
+
     async fn on_finished(&self, ctx: &OrchestrationContext, termination: &LoopTermination) {
         let (term_str, detail) = match termination {
             LoopTermination::Completed { summary } => {
@@ -292,6 +310,10 @@ impl OrchestratorEventEmitter for ChannelEmitter {
             LoopTermination::WaitingSubagent { child_task_id } => (
                 "waiting_subagent".to_owned(),
                 Some(child_task_id.to_string()),
+            ),
+            LoopTermination::PlanProposed { plan_markdown } => (
+                "plan_proposed".to_owned(),
+                Some(format!("plan ({} chars)", plan_markdown.len())),
             ),
         };
         self.send(OrchestratorEvent::Finished {
@@ -324,6 +346,7 @@ mod tests {
             goal: "test".to_owned(),
             agent_type: "test_agent".to_owned(),
             run_started_at_ms: 0,
+            run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }
     }

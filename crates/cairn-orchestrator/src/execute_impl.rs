@@ -564,6 +564,7 @@ mod tests {
             goal: "test goal".to_owned(),
             agent_type: "test_agent".to_owned(),
             run_started_at_ms: 0,
+            run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }
     }

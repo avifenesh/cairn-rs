@@ -200,6 +200,15 @@ impl DecidePhase for LlmDecidePhase {
             }
         }
 
+        // RFC 018: Plan mode filters out External tools so the agent can only
+        // observe and work internally. Execute/Direct see all tools.
+        if matches!(ctx.run_mode, cairn_domain::decisions::RunMode::Plan) {
+            use cairn_domain::decisions::ToolEffect;
+            tool_descs.retain(|d| {
+                matches!(d.tool_effect, ToolEffect::Observational | ToolEffect::Internal)
+            });
+        }
+
         let system = build_system_prompt(&ctx.agent_type, &tool_descs);
         let user = build_user_message(ctx, gather, self.token_budget.as_ref());
         let messages = vec![
@@ -744,6 +753,7 @@ mod tests {
             goal: "Summarise the cairn-rs architecture document.".to_owned(),
             agent_type: "orchestrator".to_owned(),
             run_started_at_ms: 0,
+            run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }
     }
@@ -1115,5 +1125,75 @@ mod tests {
         let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
         // Should work normally — the budget is generous enough that nothing is truncated
         assert_eq!(out.proposals[0].action_type, ActionType::CompleteRun);
+    }
+
+    // ── Plan mode tool filtering (RFC 018) ──────────────────────────────
+
+    #[test]
+    fn plan_mode_ctx_has_run_mode() {
+        let mut c = ctx();
+        c.run_mode = cairn_domain::decisions::RunMode::Plan;
+        assert!(matches!(c.run_mode, cairn_domain::decisions::RunMode::Plan));
+    }
+
+    #[tokio::test]
+    async fn plan_mode_filters_external_tools_from_prompt() {
+        use cairn_domain::decisions::{RunMode, ToolEffect};
+        use cairn_tools::builtins::BuiltinToolDescriptor;
+
+        // Create a mock provider that captures the system prompt.
+        let captured_prompt = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let prompt_ref = captured_prompt.clone();
+        struct CapturingProvider {
+            captured: std::sync::Arc<std::sync::Mutex<String>>,
+        }
+        #[async_trait]
+        impl GenerationProvider for CapturingProvider {
+            async fn generate(
+                &self,
+                _model: &str,
+                messages: Vec<serde_json::Value>,
+                _settings: &ProviderBindingSettings,
+            ) -> Result<GenerationResponse, ProviderAdapterError> {
+                if let Some(system) = messages.first().and_then(|m| m["content"].as_str()) {
+                    *self.captured.lock().unwrap() = system.to_owned();
+                }
+                Ok(GenerationResponse {
+                    text: r#"[{"action_type":"complete_run","description":"done","confidence":0.9,"requires_approval":false}]"#.to_owned(),
+                    input_tokens: Some(100),
+                    output_tokens: Some(50),
+                    model_id: "test-model".to_owned(),
+                    tool_calls: vec![],
+                })
+            }
+        }
+
+        // Build a registry with both Observational and External tools.
+        let registry = std::sync::Arc::new(
+            cairn_tools::builtins::BuiltinToolRegistry::new()
+                .register(std::sync::Arc::new(cairn_tools::GrepSearchTool::default()))   // Observational
+                .register(std::sync::Arc::new(cairn_tools::CalculateTool::default()))     // Observational
+                .register(std::sync::Arc::new(cairn_tools::ShellExecTool))                // External
+        );
+
+        let phase = LlmDecidePhase::new(
+            std::sync::Arc::new(CapturingProvider { captured: prompt_ref }),
+            "test-model",
+        )
+        .with_tools(registry);
+
+        // Plan mode context
+        let mut plan_ctx = ctx();
+        plan_ctx.run_mode = RunMode::Plan;
+
+        let _ = phase.decide(&plan_ctx, &empty_gather()).await.unwrap();
+        let prompt = captured_prompt.lock().unwrap().clone();
+
+        // The prompt tool descriptor lines use the format "tool_name(params) — desc".
+        // Check for descriptor lines, not arbitrary mentions of tool names in prose.
+        assert!(prompt.contains("  - grep_search("), "Observational tool descriptor should be in Plan mode prompt");
+        assert!(prompt.contains("  - calculate("), "Observational tool descriptor should be in Plan mode prompt");
+        // External tools should not have descriptor lines in Plan mode.
+        assert!(!prompt.contains("  - shell_exec("), "External tool descriptor must NOT be in Plan mode prompt");
     }
 }
