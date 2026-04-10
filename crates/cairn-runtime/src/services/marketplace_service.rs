@@ -495,17 +495,16 @@ impl<S> MarketplaceService<S> {
     ) -> VisibilityContext {
         let enablements = self.enablements_for_project(project);
 
-        let enabled_plugins: HashSet<String> = enablements
-            .iter()
-            .map(|e| e.plugin_id.clone())
-            .collect();
+        let enabled_plugins: HashSet<String> =
+            enablements.iter().map(|e| e.plugin_id.clone()).collect();
 
         let allowlisted_tools: HashMap<String, Option<HashSet<String>>> = enablements
             .iter()
             .map(|e| {
-                let tools = e.tool_allowlist.as_ref().map(|list| {
-                    list.iter().cloned().collect::<HashSet<String>>()
-                });
+                let tools = e
+                    .tool_allowlist
+                    .as_ref()
+                    .map(|list| list.iter().cloned().collect::<HashSet<String>>());
                 (e.plugin_id.clone(), tools)
             })
             .collect();
@@ -818,6 +817,40 @@ pub fn catalog_entry_to_descriptor(entry: CatalogEntry) -> PluginDescriptor {
         source: DescriptorSource::BundledCatalog,
         download_url: entry.download_url,
         has_signal_source: entry.has_signal_source,
+    }
+}
+
+// ── Visibility Filtering (RFC 015 §"Per-Run Tool Visibility") ────────────────
+
+/// Check whether a plugin tool is visible in the given VisibilityContext.
+///
+/// A tool is visible if:
+/// 1. Its plugin is in the context's enabled_plugins set
+/// 2. Either the plugin has no tool allowlist (None = all tools visible)
+///    or the tool name is in the allowlist
+///
+/// Built-in cairn tools (not from plugins) are always visible — this function
+/// only gates plugin-provided tools.
+pub fn is_plugin_tool_visible(ctx: &VisibilityContext, plugin_id: &str, tool_name: &str) -> bool {
+    if !ctx.enabled_plugins.contains(plugin_id) {
+        return false;
+    }
+    match ctx.allowlisted_tools.get(plugin_id) {
+        Some(Some(allowed)) => allowed.contains(tool_name),
+        Some(None) => true, // None = all tools allowed
+        None => false,      // plugin not in allowlist map at all
+    }
+}
+
+/// Check whether a signal type is allowed for a project's enablement.
+///
+/// A signal type passes if the project's enablement for the source plugin
+/// either has no signal_allowlist (None = all signals) or the signal type
+/// is in the allowlist.
+pub fn is_signal_allowed(enablement: &PluginEnablement, signal_type: &str) -> bool {
+    match &enablement.signal_allowlist {
+        None => true, // None = all signal types allowed
+        Some(list) => list.iter().any(|s| s == signal_type),
     }
 }
 
@@ -1274,10 +1307,7 @@ mod tests {
         svc.handle_command(MarketplaceCommand::EnablePluginForProject {
             plugin_id: "github".into(),
             project: p1.clone(),
-            tool_allowlist: Some(vec![
-                "github.get_issue".into(),
-                "github.list_issues".into(),
-            ]),
+            tool_allowlist: Some(vec!["github.get_issue".into(), "github.list_issues".into()]),
             signal_allowlist: None,
             signal_capture_override: None,
             enabled_by: operator(),
@@ -1342,5 +1372,86 @@ mod tests {
 
         assert!(ctx.enabled_plugins.is_empty());
         assert!(ctx.allowlisted_tools.is_empty());
+    }
+
+    #[test]
+    fn is_plugin_tool_visible_with_allowlist() {
+        let mut svc = MarketplaceService::new(test_store());
+        svc.list_plugin(github_descriptor());
+        svc.handle_command(MarketplaceCommand::InstallPlugin {
+            plugin_id: "github".into(),
+            initiated_by: operator(),
+        })
+        .unwrap();
+
+        svc.handle_command(MarketplaceCommand::EnablePluginForProject {
+            plugin_id: "github".into(),
+            project: project_p1(),
+            tool_allowlist: Some(vec!["github.get_issue".into()]),
+            signal_allowlist: None,
+            signal_capture_override: None,
+            enabled_by: operator(),
+        })
+        .unwrap();
+
+        let ctx = svc.build_visibility_context(&project_p1(), None);
+
+        // Allowed tool is visible
+        assert!(is_plugin_tool_visible(&ctx, "github", "github.get_issue"));
+        // Non-allowed tool is not visible
+        assert!(!is_plugin_tool_visible(
+            &ctx,
+            "github",
+            "github.create_pull_request"
+        ));
+        // Tool from a non-enabled plugin is not visible
+        assert!(!is_plugin_tool_visible(&ctx, "slack", "slack.send_message"));
+    }
+
+    #[test]
+    fn is_signal_allowed_with_allowlist() {
+        let enablement = PluginEnablement {
+            plugin_id: "github".into(),
+            project: project_p1(),
+            enabled: true,
+            enabled_at: 0,
+            enabled_by: operator(),
+            tool_allowlist: None,
+            signal_allowlist: Some(vec![
+                "github.issue.opened".into(),
+                "github.issue.labeled".into(),
+            ]),
+            signal_capture_override: None,
+        };
+
+        // Allowed signal types pass
+        assert!(is_signal_allowed(&enablement, "github.issue.opened"));
+        assert!(is_signal_allowed(&enablement, "github.issue.labeled"));
+        // Non-allowed signal types are dropped
+        assert!(!is_signal_allowed(
+            &enablement,
+            "github.pull_request.opened"
+        ));
+    }
+
+    #[test]
+    fn is_signal_allowed_none_means_all() {
+        let enablement = PluginEnablement {
+            plugin_id: "github".into(),
+            project: project_p1(),
+            enabled: true,
+            enabled_at: 0,
+            enabled_by: operator(),
+            tool_allowlist: None,
+            signal_allowlist: None, // None = all signals allowed
+            signal_capture_override: None,
+        };
+
+        assert!(is_signal_allowed(&enablement, "github.issue.opened"));
+        assert!(is_signal_allowed(
+            &enablement,
+            "github.pull_request.synchronize"
+        ));
+        assert!(is_signal_allowed(&enablement, "github.rate_limit.warning"));
     }
 }
