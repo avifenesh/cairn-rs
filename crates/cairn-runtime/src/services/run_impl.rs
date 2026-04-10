@@ -70,6 +70,28 @@ impl<S> RunServiceImpl<S>
 where
     S: EventLog + RunReadModel + SessionReadModel + QuotaReadModel + 'static,
 {
+    pub async fn start(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+    ) -> Result<RunRecord, RuntimeError> {
+        self.start_internal(project, session_id, run_id, parent_run_id, None)
+            .await
+    }
+
+    pub async fn start_command(&self, command: StartRun) -> Result<RunRecord, RuntimeError> {
+        self.start_internal(
+            &command.project,
+            &command.session_id,
+            command.run_id,
+            command.parent_run_id,
+            None,
+        )
+        .await
+    }
+
     async fn start_internal(
         &self,
         project: &ProjectKey,

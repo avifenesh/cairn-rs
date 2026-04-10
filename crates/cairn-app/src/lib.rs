@@ -812,6 +812,165 @@ async fn working_dir_for_run(
     Ok(sandbox.path)
 }
 
+fn run_default_key(run_id: &RunId, suffix: &str) -> String {
+    format!("run:{}:{suffix}", run_id.as_str())
+}
+
+async fn resolve_run_string_default(
+    state: &AppState,
+    project: &ProjectKey,
+    run_id: &RunId,
+    suffix: &str,
+) -> Option<String> {
+    let key = run_default_key(run_id, suffix);
+    state
+        .runtime
+        .defaults
+        .resolve(project, &key)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+}
+
+async fn build_run_record_view(state: &AppState, run: RunRecord) -> RunRecordView {
+    let created_by_trigger_id =
+        resolve_run_string_default(state, &run.project, &run.run_id, "created_by_trigger_id").await;
+    let sandbox_id =
+        resolve_run_string_default(state, &run.project, &run.run_id, "sandbox_id").await;
+    let sandbox_path =
+        resolve_run_string_default(state, &run.project, &run.run_id, "sandbox_path").await;
+
+    RunRecordView {
+        run,
+        created_by_trigger_id,
+        sandbox_id,
+        sandbox_path,
+    }
+}
+
+#[derive(Clone)]
+struct PendingTriggeredRun {
+    trigger_id: cairn_domain::TriggerId,
+    run_id: RunId,
+    template: cairn_runtime::RunTemplate,
+}
+
+async fn persist_trigger_run_defaults(
+    state: &AppState,
+    project: &ProjectKey,
+    run_id: &RunId,
+    trigger_id: &cairn_domain::TriggerId,
+    template: &cairn_runtime::RunTemplate,
+) -> Result<(), cairn_runtime::RuntimeError> {
+    let scope = cairn_domain::tenancy::Scope::Tenant;
+    let scope_id = project.tenant_id.as_str().to_owned();
+    let goal = template
+        .initial_user_message
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("Triggered run from template {}", template.name));
+    let mut settings = vec![
+        (
+            run_default_key(run_id, "created_by_trigger_id"),
+            serde_json::json!(trigger_id.as_str()),
+        ),
+        (
+            run_default_key(run_id, "run_template_id"),
+            serde_json::json!(template.id.as_str()),
+        ),
+        (run_default_key(run_id, "goal"), serde_json::json!(goal)),
+        (
+            run_default_key(run_id, "run_mode"),
+            serde_json::to_value(&template.default_mode).unwrap_or(serde_json::Value::Null),
+        ),
+        (
+            run_default_key(run_id, "system_prompt"),
+            serde_json::json!(template.system_prompt.clone()),
+        ),
+        (
+            run_default_key(run_id, "required_fields"),
+            serde_json::json!(template.required_fields.clone()),
+        ),
+        (
+            run_default_key(run_id, "template_budget"),
+            serde_json::to_value(&template.budget).unwrap_or(serde_json::Value::Null),
+        ),
+    ];
+
+    if let Some(initial_user_message) = template.initial_user_message.as_ref() {
+        settings.push((
+            run_default_key(run_id, "initial_user_message"),
+            serde_json::json!(initial_user_message),
+        ));
+    }
+    if let Some(plugin_allowlist) = template.plugin_allowlist.as_ref() {
+        settings.push((
+            run_default_key(run_id, "plugin_allowlist"),
+            serde_json::json!(plugin_allowlist),
+        ));
+    }
+    if let Some(tool_allowlist) = template.tool_allowlist.as_ref() {
+        settings.push((
+            run_default_key(run_id, "tool_allowlist"),
+            serde_json::json!(tool_allowlist),
+        ));
+    }
+    if let Some(sandbox_hint) = template.sandbox_hint.as_ref() {
+        settings.push((
+            run_default_key(run_id, "sandbox_hint"),
+            serde_json::json!(sandbox_hint),
+        ));
+    }
+
+    for (key, value) in settings {
+        state
+            .runtime
+            .defaults
+            .set(scope, scope_id.clone(), key, value)
+            .await?;
+    }
+
+    Ok(())
+}
+
+async fn materialize_triggered_run(
+    state: &AppState,
+    project: &ProjectKey,
+    triggered: PendingTriggeredRun,
+) -> Result<RunRecord, cairn_runtime::RuntimeError> {
+    let session_id = SessionId::new(format!("sess_trigger_{}", triggered.run_id.as_str()));
+    match state
+        .runtime
+        .sessions
+        .create(project, session_id.clone())
+        .await
+    {
+        Ok(_) => {}
+        Err(cairn_runtime::RuntimeError::Conflict { .. }) => {}
+        Err(err) => return Err(err),
+    }
+
+    let command = cairn_domain::commands::StartRun {
+        project: project.clone(),
+        session_id,
+        run_id: triggered.run_id,
+        parent_run_id: None,
+    };
+    let run = state.runtime.runs.start_command(command).await?;
+    persist_trigger_run_defaults(
+        state,
+        project,
+        &run.run_id,
+        &triggered.trigger_id,
+        &triggered.template,
+    )
+    .await?;
+    Ok(run)
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: BootstrapConfig,
@@ -1370,9 +1529,8 @@ async fn load_run_visible_to_tenant(
         }
     }
 
-    Ok(reconstructed.filter(|run| {
-        tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id()
-    }))
+    Ok(reconstructed
+        .filter(|run| tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id()))
 }
 
 fn forbidden_api_error(message: impl Into<String>) -> AppApiError {
@@ -3011,8 +3169,20 @@ struct SetCheckpointStrategyRequest {
 
 #[derive(Clone, Debug, serde::Serialize)]
 struct RunDetailResponse {
-    run: RunRecord,
+    run: RunRecordView,
     tasks: Vec<TaskRecord>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+struct RunRecordView {
+    #[serde(flatten)]
+    run: RunRecord,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    created_by_trigger_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sandbox_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sandbox_path: Option<String>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -8716,6 +8886,7 @@ async fn ingest_signal_handler(
 ) -> impl IntoResponse {
     let project = body.project();
     let timestamp_ms = body.timestamp_ms.unwrap_or_else(now_ms);
+    let before = current_event_head(&state).await;
     match state
         .runtime
         .signals
@@ -8751,7 +8922,7 @@ async fn ingest_signal_handler(
             }
 
             // RFC 022: evaluate triggers for this signal
-            {
+            let pending_runs = {
                 let mut triggers = state.triggers.lock().unwrap();
                 let trigger_events = triggers.evaluate_signal(
                     &project,
@@ -8767,6 +8938,41 @@ async fn ingest_signal_handler(
                     &project,
                     &trigger_events,
                 );
+                let pending_runs: Vec<PendingTriggeredRun> = trigger_events
+                    .iter()
+                    .filter_map(|event| {
+                        let cairn_runtime::services::trigger_service::TriggerEvent::TriggerFired {
+                            trigger_id,
+                            run_id,
+                            ..
+                        } = event
+                        else {
+                            return None;
+                        };
+                        let Some(trigger) = triggers.get_trigger(trigger_id).cloned() else {
+                            tracing::warn!(
+                                trigger_id = %trigger_id,
+                                "trigger fired but trigger definition was unavailable during materialization"
+                            );
+                            return None;
+                        };
+                        let Some(template) =
+                            triggers.get_template(&trigger.run_template_id).cloned()
+                        else {
+                            tracing::warn!(
+                                trigger_id = %trigger_id,
+                                run_template_id = %trigger.run_template_id,
+                                "trigger fired but run template was unavailable during materialization"
+                            );
+                            return None;
+                        };
+                        Some(PendingTriggeredRun {
+                            trigger_id: trigger_id.clone(),
+                            run_id: run_id.clone(),
+                            template,
+                        })
+                    })
+                    .collect();
                 for event in &trigger_events {
                     if let cairn_runtime::services::trigger_service::TriggerEvent::TriggerFired {
                         trigger_id,
@@ -8781,8 +8987,22 @@ async fn ingest_signal_handler(
                         );
                     }
                 }
+                pending_runs
+            };
+
+            for pending_run in pending_runs {
+                if let Err(err) =
+                    materialize_triggered_run(state.as_ref(), &project, pending_run).await
+                {
+                    tracing::warn!(
+                        project = ?project,
+                        error = %err,
+                        "failed to materialize trigger-fired run"
+                    );
+                }
             }
 
+            publish_runtime_frames_since(&state, before).await;
             (StatusCode::CREATED, Json(record)).into_response()
         }
         Err(err) => runtime_error_response(err),
@@ -9180,8 +9400,13 @@ async fn get_run_handler(
     let run_id = RunId::new(id);
     match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
         Ok(Some(run)) => {
-            match TaskReadModel::list_by_parent_run(state.runtime.store.as_ref(), &run.run_id, 200)
-                .await
+            let run = build_run_record_view(state.as_ref(), run).await;
+            match TaskReadModel::list_by_parent_run(
+                state.runtime.store.as_ref(),
+                &run.run.run_id,
+                200,
+            )
+            .await
             {
                 Ok(tasks) => {
                     (StatusCode::OK, Json(RunDetailResponse { run, tasks })).into_response()
@@ -9875,6 +10100,10 @@ async fn orchestrate_run_handler(
         Ok(path) => path,
         Err(err) => return workspace_error_response(err),
     };
+    let default_goal =
+        resolve_run_string_default(state.as_ref(), &run.project, &run.run_id, "goal").await;
+    let default_agent_role =
+        resolve_run_string_default(state.as_ref(), &run.project, &run.run_id, "agent_role").await;
 
     let ctx = OrchestrationContext {
         project: run.project.clone(),
@@ -9884,9 +10113,11 @@ async fn orchestrate_run_handler(
         iteration: 0,
         goal: body
             .goal
+            .or(default_goal)
             .unwrap_or_else(|| "Execute the run objective.".to_owned()),
         agent_type: run
             .agent_role_id
+            .or(default_agent_role)
             .unwrap_or_else(|| "orchestrator".to_owned()),
         run_started_at_ms: now_ms,
         working_dir: working_dir.clone(),
@@ -11716,10 +11947,12 @@ async fn list_tool_invocations_handler(
     let Some(run_id) = query.run_id.as_deref() else {
         return (
             StatusCode::OK,
-            Json(ListResponse::<cairn_domain::tool_invocation::ToolInvocationRecord> {
-                items: Vec::new(),
-                has_more: false,
-            }),
+            Json(
+                ListResponse::<cairn_domain::tool_invocation::ToolInvocationRecord> {
+                    items: Vec::new(),
+                    has_more: false,
+                },
+            ),
         )
             .into_response();
     };
@@ -20296,6 +20529,137 @@ mod tests {
         );
         assert!(first["stored_at"].is_number(), "stored_at must be a number");
         assert!(first["position"].is_number(), "position must be a number");
+    }
+
+    #[tokio::test]
+    async fn ingest_signal_materializes_real_trigger_run_with_origin_badge() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "trigger-origin-token");
+
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+        let trigger_id = cairn_domain::TriggerId::new("trigger_origin_badge");
+        let template_id = cairn_domain::RunTemplateId::new("tmpl_trigger_origin");
+
+        {
+            let mut triggers = state.triggers.lock().unwrap();
+            triggers.create_template(cairn_runtime::RunTemplate {
+                id: template_id.clone(),
+                project: project.clone(),
+                name: "Incident responder".to_owned(),
+                description: Some("Investigate incoming alerts".to_owned()),
+                default_mode: cairn_domain::decisions::RunMode::Plan,
+                system_prompt: "Investigate the triggering signal and propose a plan.".to_owned(),
+                initial_user_message: Some("Investigate the labeled incident.".to_owned()),
+                plugin_allowlist: Some(vec!["github".to_owned()]),
+                tool_allowlist: Some(vec!["cairn.searchEvents".to_owned()]),
+                budget: cairn_runtime::TemplateBudget::default(),
+                sandbox_hint: Some("repo".to_owned()),
+                required_fields: Vec::new(),
+                created_by: cairn_domain::OperatorId::new("operator"),
+                created_at: 1,
+                updated_at: 1,
+            });
+            triggers
+                .create_trigger(cairn_runtime::Trigger {
+                    id: trigger_id.clone(),
+                    project: project.clone(),
+                    name: "Incident labeled".to_owned(),
+                    description: None,
+                    signal_pattern: cairn_runtime::SignalPattern {
+                        signal_type: "github.issue.labeled".to_owned(),
+                        plugin_id: None,
+                    },
+                    conditions: Vec::new(),
+                    run_template_id: template_id,
+                    state: cairn_runtime::TriggerState::Enabled,
+                    rate_limit: cairn_runtime::RateLimitConfig::default(),
+                    max_chain_depth: 5,
+                    created_by: cairn_domain::OperatorId::new("operator"),
+                    created_at: 1,
+                    updated_at: 1,
+                })
+                .unwrap();
+        }
+
+        let ingest = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/signals",
+            "trigger-origin-token",
+            serde_json::json!({
+                "tenant_id": DEFAULT_TENANT_ID,
+                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "project_id": DEFAULT_PROJECT_ID,
+                "signal_id": "sig_trigger_origin",
+                "source": "github.issue.labeled",
+                "payload": { "action": "labeled" }
+            }),
+        )
+        .await;
+        assert_eq!(ingest.status(), StatusCode::CREATED);
+
+        let mut runs = cairn_store::projections::RunReadModel::list_active_by_project(
+            state.runtime.store.as_ref(),
+            &project,
+            10,
+        )
+        .await
+        .unwrap();
+        assert_eq!(runs.len(), 1, "trigger fire must create one real run");
+        let run = runs.pop().unwrap();
+
+        let session = state
+            .runtime
+            .sessions
+            .get(&run.session_id)
+            .await
+            .unwrap()
+            .expect("trigger fire must create a session");
+        assert_eq!(session.project, project);
+
+        let origin_key = run_default_key(&run.run_id, "created_by_trigger_id");
+        let goal_key = run_default_key(&run.run_id, "goal");
+        let mode_key = run_default_key(&run.run_id, "run_mode");
+
+        let origin = state
+            .runtime
+            .defaults
+            .resolve(&project, &origin_key)
+            .await
+            .unwrap()
+            .expect("trigger origin must be stored");
+        assert_eq!(origin.as_str(), Some(trigger_id.as_str()));
+
+        let goal = state
+            .runtime
+            .defaults
+            .resolve(&project, &goal_key)
+            .await
+            .unwrap()
+            .expect("trigger goal must be stored");
+        assert_eq!(goal.as_str(), Some("Investigate the labeled incident."));
+
+        let mode = state
+            .runtime
+            .defaults
+            .resolve(&project, &mode_key)
+            .await
+            .unwrap()
+            .expect("trigger run mode must be stored");
+        let mode: cairn_domain::decisions::RunMode = serde_json::from_value(mode).unwrap();
+        assert!(matches!(mode, cairn_domain::decisions::RunMode::Plan));
+
+        let detail = get_json(
+            AppBootstrap::build_router(state),
+            &format!("/v1/runs/{}", run.run_id.as_str()),
+            "trigger-origin-token",
+        )
+        .await;
+        assert_eq!(detail["run"]["run_id"], run.run_id.as_str());
+        assert_eq!(
+            detail["run"]["created_by_trigger_id"],
+            trigger_id.as_str(),
+            "RunDetail must expose trigger provenance for the badge"
+        );
     }
 
     #[tokio::test]
