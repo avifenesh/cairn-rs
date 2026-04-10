@@ -8456,6 +8456,35 @@ async fn ingest_signal_handler(
                     }
                 }
             }
+
+            // RFC 022: evaluate triggers for this signal
+            {
+                let mut triggers = state.triggers.lock().unwrap();
+                let trigger_events = triggers.evaluate_signal(
+                    &project,
+                    &record.id,
+                    &record.source,
+                    "",  // plugin_id — empty for direct API signals
+                    &record.payload,
+                    None, // source_run_chain_depth
+                    &cairn_runtime::services::trigger_service::auto_approve_decision,
+                );
+                for event in &trigger_events {
+                    if let cairn_runtime::services::trigger_service::TriggerEvent::TriggerFired {
+                        trigger_id,
+                        run_id,
+                        ..
+                    } = event
+                    {
+                        tracing::info!(
+                            trigger_id = %trigger_id,
+                            run_id = %run_id,
+                            "trigger fired — run created from signal"
+                        );
+                    }
+                }
+            }
+
             (StatusCode::CREATED, Json(record)).into_response()
         }
         Err(err) => runtime_error_response(err),
