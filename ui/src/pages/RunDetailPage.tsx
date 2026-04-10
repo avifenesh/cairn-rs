@@ -531,13 +531,11 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  // Keep using the runs list until GET /v1/runs/:id is fixed server-side.
-  const { data: runs } = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => defaultApi.getRuns({ limit: 200 }),
-    staleTime: 30_000,
+  const { data: run } = useQuery({
+    queryKey: ["run-detail", runId],
+    queryFn: () => defaultApi.getRun(runId),
+    staleTime: 10_000,
   });
-  const run = runs?.find(r => r.run_id === runId);
 
   const { data: tasks, isLoading: tasksLoading } = useQuery({
     queryKey: ["run-tasks", runId],
