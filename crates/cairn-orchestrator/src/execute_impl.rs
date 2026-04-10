@@ -25,6 +25,7 @@ use cairn_domain::{
     ActionType, ApprovalId, CheckpointId, ExecutionClass, SessionId, TaskId, ToolInvocationId,
 };
 use cairn_runtime::{
+    decisions::DecisionService,
     mailbox::MailboxService,
     services::{TaskServiceImpl, ToolInvocationService},
     ApprovalService, CheckpointService, RunService,
@@ -57,6 +58,8 @@ pub struct RuntimeExecutePhase {
     /// When `Some`, tool names are looked up here before falling back to the
     /// stub dispatcher.
     tool_registry: Option<Arc<BuiltinToolRegistry>>,
+    /// Decision service for pre-dispatch policy evaluation (RFC 019).
+    decision_service: Option<Arc<dyn DecisionService>>,
     /// Save a checkpoint after every N-th successful tool call (1 = every call).
     checkpoint_every_n_tool_calls: u32,
 }
@@ -78,6 +81,7 @@ pub struct RuntimeExecutePhaseBuilder {
     mailbox_service: Option<Arc<dyn MailboxService>>,
     tool_invocation_service: Option<Arc<dyn ToolInvocationService>>,
     tool_registry: Option<Arc<BuiltinToolRegistry>>,
+    decision_service: Option<Arc<dyn DecisionService>>,
     checkpoint_every_n_tool_calls: u32,
 }
 
@@ -114,6 +118,10 @@ impl RuntimeExecutePhaseBuilder {
         self.checkpoint_every_n_tool_calls = n;
         self
     }
+    pub fn decision_service(mut self, ds: Arc<dyn DecisionService>) -> Self {
+        self.decision_service = Some(ds);
+        self
+    }
     pub fn build(self) -> RuntimeExecutePhase {
         RuntimeExecutePhase {
             run_service: self.run_service.expect("run_service required"),
@@ -127,6 +135,7 @@ impl RuntimeExecutePhaseBuilder {
                 .tool_invocation_service
                 .expect("tool_invocation_service required"),
             tool_registry: self.tool_registry,
+            decision_service: self.decision_service,
             checkpoint_every_n_tool_calls: self.checkpoint_every_n_tool_calls.max(1),
         }
     }
@@ -203,6 +212,57 @@ impl RuntimeExecutePhase {
                     )
                     .await
                     .map_err(OrchestratorError::Runtime)?;
+
+                // ── Decision check (RFC 019): evaluate before dispatch ────
+                if let Some(ref ds) = self.decision_service {
+                    use cairn_domain::decisions::*;
+                    let tool_effect = if let Some(ref reg) = self.tool_registry {
+                        reg.get(&tool_name)
+                            .map(|h| h.tool_effect())
+                            .unwrap_or(ToolEffect::External)
+                    } else {
+                        ToolEffect::External
+                    };
+                    let dreq = DecisionRequest {
+                        kind: DecisionKind::ToolInvocation {
+                            tool_name: tool_name.clone(),
+                            effect: tool_effect,
+                        },
+                        principal: Principal::Run {
+                            run_id: ctx.run_id.clone(),
+                        },
+                        subject: DecisionSubject::ToolCall {
+                            tool_name: tool_name.clone(),
+                            args: proposal.tool_args.clone().unwrap_or(serde_json::Value::Null),
+                        },
+                        scope: ctx.project.clone(),
+                        cost_estimate: None,
+                        requested_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                        correlation_id: cairn_domain::CorrelationId::new(format!(
+                            "tool_{}_{}", ctx.run_id, ctx.iteration
+                        )),
+                    };
+                    match ds.evaluate(dreq).await {
+                        Ok(decision) => {
+                            if let DecisionOutcome::Denied { deny_reason, .. } = &decision.outcome {
+                                return Ok(ActionResult {
+                                    proposal: proposal.clone(),
+                                    status: ActionStatus::Failed {
+                                        reason: format!("decision_denied: {deny_reason}"),
+                                    },
+                                    tool_output: None,
+                                    invocation_id: Some(inv_id),
+                                });
+                            }
+                        }
+                        Err(_) => {
+                            // Decision service error — fail open (allow).
+                        }
+                    }
+                }
 
                 // ── Tool dispatch: registry first, stub fallback ────────────
                 let mut tool_ctx = cairn_tools::builtins::ToolContext::default();

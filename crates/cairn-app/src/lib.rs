@@ -9828,6 +9828,7 @@ async fn orchestrate_run_handler(
         .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
         .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
         .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
+        .decision_service(state.runtime.decision_service.clone())
         .checkpoint_every_n_tool_calls(cfg.checkpoint_every_n_tool_calls)
         .build();
 

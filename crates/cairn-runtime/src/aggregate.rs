@@ -99,6 +99,8 @@ pub struct InMemoryServices {
 
     // ── Decision layer (RFC 019) ─────────────────────────────────────────
     pub decisions: crate::decisions::DecisionServiceImpl,
+    /// Arc-wrapped decision service for injection into the execute phase.
+    pub decision_service: std::sync::Arc<dyn crate::decisions::DecisionService>,
 
     // ── Hot-reloadable configuration ──────────────────────────────────────
     /// Typed accessors for model settings and operational knobs.
@@ -161,6 +163,7 @@ impl InMemoryServices {
             tool_invocations: ToolInvocationServiceImpl::new(store.clone()),
             resource_sharing: ResourceSharingServiceImpl::new(store.clone()),
             decisions: crate::decisions::DecisionServiceImpl::new(),
+            decision_service: std::sync::Arc::new(crate::decisions::DecisionServiceImpl::new()),
             runtime_config: std::sync::Arc::new(crate::runtime_config::RuntimeConfig::new(
                 store.clone(),
             )),
