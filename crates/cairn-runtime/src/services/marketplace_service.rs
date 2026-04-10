@@ -854,6 +854,48 @@ pub fn is_signal_allowed(enablement: &PluginEnablement, signal_type: &str) -> bo
     }
 }
 
+// ── Signal Knowledge Capture (RFC 015 §"Signal Knowledge Capture") ──────────
+
+/// Resolved capture policy for a signal delivered to a specific project.
+///
+/// Combines the plugin's declared defaults with the project's per-enablement
+/// `SignalCaptureOverride`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedCapturePolicy {
+    /// Whether to project this signal into cairn-graph as a GraphNode(Signal).
+    pub graph_project: bool,
+    /// Whether to ingest signal payload into cairn-memory.
+    pub memory_ingest: bool,
+}
+
+/// Resolve the capture policy for a signal in a project.
+///
+/// Default behaviour (per RFC 015):
+/// - graph_project defaults to `true` (cheap, useful for provenance)
+/// - memory_ingest defaults to `false` (expensive, opt-in per plugin)
+///
+/// The plugin descriptor's `has_signal_source` and the per-enablement
+/// `SignalCaptureOverride` compose: override takes precedence over default.
+pub fn resolve_capture_policy(
+    enablement: &PluginEnablement,
+    plugin_declares_memory_ingest: bool,
+) -> ResolvedCapturePolicy {
+    let override_cfg = enablement.signal_capture_override.as_ref();
+
+    let graph_project = override_cfg
+        .and_then(|o| o.graph_project)
+        .unwrap_or(true); // default ON
+
+    let memory_ingest = override_cfg
+        .and_then(|o| o.memory_ingest)
+        .unwrap_or(plugin_declares_memory_ingest); // default from plugin
+
+    ResolvedCapturePolicy {
+        graph_project,
+        memory_ingest,
+    }
+}
+
 // ── Errors ──────────────────────────────────────────────────────────────────
 
 /// Marketplace-specific errors.
@@ -1453,5 +1495,86 @@ mod tests {
             "github.pull_request.synchronize"
         ));
         assert!(is_signal_allowed(&enablement, "github.rate_limit.warning"));
+    }
+
+    // ── Signal Capture Policy Tests ──────────────────────────────────
+
+    #[test]
+    fn capture_policy_defaults_graph_on_memory_off() {
+        let enablement = PluginEnablement {
+            plugin_id: "github".into(),
+            project: project_p1(),
+            enabled: true,
+            enabled_at: 0,
+            enabled_by: operator(),
+            tool_allowlist: None,
+            signal_allowlist: None,
+            signal_capture_override: None,
+        };
+
+        let policy = resolve_capture_policy(&enablement, false);
+        assert!(policy.graph_project); // default ON
+        assert!(!policy.memory_ingest); // default OFF (plugin doesn't declare)
+    }
+
+    #[test]
+    fn capture_policy_plugin_declares_memory_ingest() {
+        let enablement = PluginEnablement {
+            plugin_id: "github".into(),
+            project: project_p1(),
+            enabled: true,
+            enabled_at: 0,
+            enabled_by: operator(),
+            tool_allowlist: None,
+            signal_allowlist: None,
+            signal_capture_override: None,
+        };
+
+        let policy = resolve_capture_policy(&enablement, true);
+        assert!(policy.graph_project); // still default ON
+        assert!(policy.memory_ingest); // ON because plugin declares it
+    }
+
+    #[test]
+    fn capture_policy_override_disables_both() {
+        let enablement = PluginEnablement {
+            plugin_id: "github".into(),
+            project: project_p1(),
+            enabled: true,
+            enabled_at: 0,
+            enabled_by: operator(),
+            tool_allowlist: None,
+            signal_allowlist: None,
+            signal_capture_override: Some(SignalCaptureOverride {
+                graph_project: Some(false),
+                memory_ingest: Some(false),
+            }),
+        };
+
+        // Override takes precedence — both OFF
+        let policy = resolve_capture_policy(&enablement, true);
+        assert!(!policy.graph_project);
+        assert!(!policy.memory_ingest);
+    }
+
+    #[test]
+    fn capture_policy_override_enables_memory_when_plugin_doesnt() {
+        let enablement = PluginEnablement {
+            plugin_id: "github".into(),
+            project: project_p1(),
+            enabled: true,
+            enabled_at: 0,
+            enabled_by: operator(),
+            tool_allowlist: None,
+            signal_allowlist: None,
+            signal_capture_override: Some(SignalCaptureOverride {
+                graph_project: None,       // inherit default (ON)
+                memory_ingest: Some(true), // force ON even though plugin says no
+            }),
+        };
+
+        let policy = resolve_capture_policy(&enablement, false);
+        assert!(policy.graph_project); // inherited default
+        assert!(policy.memory_ingest); // overridden to ON
     }
 }
