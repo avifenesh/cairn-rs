@@ -258,6 +258,11 @@ pub struct CompactionConfig {
     pub keep_last: usize,
     /// Maximum tokens for the compacted summary.
     pub summary_token_budget: usize,
+    /// Minimum number of iterations between compaction passes.
+    ///
+    /// This prevents runaway compaction on every turn when the threshold is
+    /// set aggressively low.
+    pub cooldown_iterations: u32,
 }
 
 impl Default for CompactionConfig {
@@ -268,6 +273,7 @@ impl Default for CompactionConfig {
             min_steps: 10,
             keep_last: 4,
             summary_token_budget: 2000,
+            cooldown_iterations: 5,
         }
     }
 }

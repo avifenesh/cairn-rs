@@ -704,8 +704,20 @@ fn is_fallback_escalation(proposals: &[ActionProposal]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cairn_domain::contexts::PluginCategory;
+    use cairn_domain::OperatorId;
     use cairn_domain::providers::{GenerationResponse, ProviderAdapterError};
+    use cairn_runtime::services::{
+        DescriptorSource, MarketplaceCommand, MarketplaceService, PluginDescriptor,
+        is_plugin_tool_visible,
+    };
+    use cairn_store::InMemoryStore;
+    use cairn_tools::builtins::{
+        BuiltinToolRegistry, ToolEffect, ToolError, ToolHandler, ToolResult, ToolSearchTool,
+        ToolTier,
+    };
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     // ── Mock provider ─────────────────────────────────────────────────────────
 
@@ -765,6 +777,127 @@ mod tests {
 
     fn empty_gather() -> GatherOutput {
         GatherOutput::default()
+    }
+
+    fn plugin_descriptor() -> PluginDescriptor {
+        PluginDescriptor {
+            id: "github".to_owned(),
+            name: "GitHub".to_owned(),
+            version: "0.1.0".to_owned(),
+            description: Some("GitHub integration".to_owned()),
+            category: PluginCategory::IssueTracker,
+            vendor: "cairn".to_owned(),
+            icon_url: None,
+            command: vec!["echo".to_owned(), "github".to_owned()],
+            tools: vec!["github.issue_brief".to_owned(), "github.issue_search".to_owned()],
+            signal_sources: vec![],
+            channels: vec![],
+            required_credentials: vec![],
+            required_network_egress: vec![],
+            post_install_health_check: None,
+            source: DescriptorSource::BundledCatalog,
+            download_url: None,
+            has_signal_source: false,
+        }
+    }
+
+    fn operator() -> OperatorId {
+        OperatorId::new("op_test")
+    }
+
+    struct FakePluginTool {
+        name: &'static str,
+        description: &'static str,
+        tier: ToolTier,
+    }
+
+    #[async_trait]
+    impl ToolHandler for FakePluginTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn tier(&self) -> ToolTier {
+            self.tier
+        }
+
+        fn tool_effect(&self) -> ToolEffect {
+            ToolEffect::Observational
+        }
+
+        fn description(&self) -> &str {
+            self.description
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
+            })
+        }
+
+        async fn execute(
+            &self,
+            _: &cairn_domain::ProjectKey,
+            _: serde_json::Value,
+        ) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult::ok(serde_json::json!({ "ok": true })))
+        }
+    }
+
+    fn registry_for_project(project: &cairn_domain::ProjectKey) -> Arc<BuiltinToolRegistry> {
+        let mut marketplace = MarketplaceService::new(Arc::new(InMemoryStore::new()));
+        marketplace.list_plugin(plugin_descriptor());
+        marketplace
+            .handle_command(MarketplaceCommand::InstallPlugin {
+                plugin_id: "github".to_owned(),
+                initiated_by: operator(),
+            })
+            .unwrap();
+        marketplace
+            .handle_command(MarketplaceCommand::EnablePluginForProject {
+                plugin_id: "github".to_owned(),
+                project: cairn_domain::ProjectKey::new("tenant", "workspace", "project-a"),
+                tool_allowlist: Some(vec![
+                    "github.issue_brief".to_owned(),
+                    "github.issue_search".to_owned(),
+                ]),
+                signal_allowlist: None,
+                signal_capture_override: None,
+                enabled_by: operator(),
+            })
+            .unwrap();
+
+        let visibility = marketplace.build_visibility_context(project, None);
+        let registered = Arc::new(FakePluginTool {
+            name: "github.issue_brief",
+            description: "Summarise a GitHub issue for the operator.",
+            tier: ToolTier::Registered,
+        });
+        let deferred = Arc::new(FakePluginTool {
+            name: "github.issue_search",
+            description: "Search GitHub issues by title or label.",
+            tier: ToolTier::Deferred,
+        });
+
+        let mut inner = BuiltinToolRegistry::new();
+        if is_plugin_tool_visible(&visibility, "github", registered.name()) {
+            inner = inner.register(registered.clone());
+        }
+        if is_plugin_tool_visible(&visibility, "github", deferred.name()) {
+            inner = inner.register(deferred.clone());
+        }
+        let inner = Arc::new(inner);
+
+        let mut outer = BuiltinToolRegistry::new();
+        if is_plugin_tool_visible(&visibility, "github", registered.name()) {
+            outer = outer.register(registered);
+        }
+        if is_plugin_tool_visible(&visibility, "github", deferred.name()) {
+            outer = outer.register(deferred);
+        }
+        outer = outer.register(Arc::new(ToolSearchTool::new(inner)));
+        Arc::new(outer)
     }
 
     // ── Prompt builder tests ──────────────────────────────────────────────────
@@ -979,7 +1112,7 @@ mod tests {
         g.memory_chunks = (0..5)
             .map(|i| cairn_memory::retrieval::RetrievalResult {
                 chunk: {
-                    let mut c = cairn_memory::ingest::ChunkRecord {
+                    let c = cairn_memory::ingest::ChunkRecord {
                         chunk_id: cairn_domain::ChunkId::new(format!("c{i}")),
                         document_id: cairn_domain::KnowledgeDocumentId::new("doc"),
                         source_id: cairn_domain::SourceId::new("src"),
@@ -1143,8 +1276,7 @@ mod tests {
 
     #[tokio::test]
     async fn plan_mode_filters_external_tools_from_prompt() {
-        use cairn_domain::decisions::{RunMode, ToolEffect};
-        use cairn_tools::builtins::BuiltinToolDescriptor;
+        use cairn_domain::decisions::RunMode;
 
         // Create a mock provider that captures the system prompt.
         let captured_prompt = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
@@ -1210,6 +1342,113 @@ mod tests {
         assert!(
             !prompt.contains("  - shell_exec("),
             "External tool descriptor must NOT be in Plan mode prompt"
+        );
+    }
+
+    #[tokio::test]
+    async fn enabled_plugin_tool_appears_in_project_prompt_but_not_other_projects() {
+        struct CapturingProvider {
+            captured: Arc<std::sync::Mutex<String>>,
+        }
+
+        #[async_trait]
+        impl GenerationProvider for CapturingProvider {
+            async fn generate(
+                &self,
+                _model: &str,
+                messages: Vec<serde_json::Value>,
+                _settings: &ProviderBindingSettings,
+            ) -> Result<GenerationResponse, ProviderAdapterError> {
+                if let Some(system) = messages.first().and_then(|m| m["content"].as_str()) {
+                    *self.captured.lock().unwrap() = system.to_owned();
+                }
+                Ok(GenerationResponse {
+                    text: r#"[{"action_type":"complete_run","description":"done","confidence":0.9,"requires_approval":false}]"#.to_owned(),
+                    input_tokens: Some(100),
+                    output_tokens: Some(20),
+                    model_id: "test-model".to_owned(),
+                    tool_calls: vec![],
+                })
+            }
+        }
+
+        let prompt_a = Arc::new(std::sync::Mutex::new(String::new()));
+        let phase_a = LlmDecidePhase::new(
+            Arc::new(CapturingProvider {
+                captured: prompt_a.clone(),
+            }),
+            "test-model",
+        )
+        .with_tools(registry_for_project(&cairn_domain::ProjectKey::new(
+            "tenant",
+            "workspace",
+            "project-a",
+        )));
+        let mut ctx_a = ctx();
+        ctx_a.project = cairn_domain::ProjectKey::new("tenant", "workspace", "project-a");
+        phase_a.decide(&ctx_a, &empty_gather()).await.unwrap();
+
+        let prompt_b = Arc::new(std::sync::Mutex::new(String::new()));
+        let phase_b = LlmDecidePhase::new(
+            Arc::new(CapturingProvider {
+                captured: prompt_b.clone(),
+            }),
+            "test-model",
+        )
+        .with_tools(registry_for_project(&cairn_domain::ProjectKey::new(
+            "tenant",
+            "workspace",
+            "project-b",
+        )));
+        let mut ctx_b = ctx();
+        ctx_b.project = cairn_domain::ProjectKey::new("tenant", "workspace", "project-b");
+        phase_b.decide(&ctx_b, &empty_gather()).await.unwrap();
+
+        assert!(
+            prompt_a.lock().unwrap().contains("  - github.issue_brief("),
+            "enabled project should see its plugin tool in the prompt"
+        );
+        assert!(
+            !prompt_b.lock().unwrap().contains("  - github.issue_brief("),
+            "disabled project must not see the plugin tool in the prompt"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_search_respects_plugin_visibility() {
+        let enabled_project = cairn_domain::ProjectKey::new("tenant", "workspace", "project-a");
+        let disabled_project = cairn_domain::ProjectKey::new("tenant", "workspace", "project-b");
+
+        let enabled_registry = registry_for_project(&enabled_project);
+        let enabled_tool = ToolSearchTool::new(enabled_registry);
+        let enabled = enabled_tool
+            .execute(&enabled_project, serde_json::json!({ "query": "search github issues" }))
+            .await
+            .unwrap();
+        let enabled_names: Vec<&str> = enabled.output["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|entry| entry["name"].as_str())
+            .collect();
+        assert!(
+            enabled_names.contains(&"github.issue_search"),
+            "enabled project should be able to discover the deferred plugin tool"
+        );
+
+        let disabled_registry = registry_for_project(&disabled_project);
+        let disabled_tool = ToolSearchTool::new(disabled_registry);
+        let disabled = disabled_tool
+            .execute(
+                &disabled_project,
+                serde_json::json!({ "query": "search github issues" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            disabled.output["total"],
+            0,
+            "disabled project must not discover tools from an unenabled plugin"
         );
     }
 }

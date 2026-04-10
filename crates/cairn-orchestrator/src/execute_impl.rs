@@ -63,6 +63,8 @@ pub struct RuntimeExecutePhase {
     decision_service: Option<Arc<dyn DecisionService>>,
     /// Save a checkpoint after every N-th successful tool call (1 = every call).
     checkpoint_every_n_tool_calls: u32,
+    /// Maximum size of tool output copied back into the LLM context.
+    tool_output_token_limit: usize,
 }
 
 impl RuntimeExecutePhase {
@@ -84,6 +86,7 @@ pub struct RuntimeExecutePhaseBuilder {
     tool_registry: Option<Arc<BuiltinToolRegistry>>,
     decision_service: Option<Arc<dyn DecisionService>>,
     checkpoint_every_n_tool_calls: u32,
+    tool_output_token_limit: Option<usize>,
 }
 
 impl RuntimeExecutePhaseBuilder {
@@ -119,6 +122,10 @@ impl RuntimeExecutePhaseBuilder {
         self.checkpoint_every_n_tool_calls = n;
         self
     }
+    pub fn tool_output_token_limit(mut self, limit: usize) -> Self {
+        self.tool_output_token_limit = Some(limit.max(1));
+        self
+    }
     pub fn decision_service(mut self, ds: Arc<dyn DecisionService>) -> Self {
         self.decision_service = Some(ds);
         self
@@ -138,6 +145,7 @@ impl RuntimeExecutePhaseBuilder {
             tool_registry: self.tool_registry,
             decision_service: self.decision_service,
             checkpoint_every_n_tool_calls: self.checkpoint_every_n_tool_calls.max(1),
+            tool_output_token_limit: self.tool_output_token_limit.unwrap_or(2000),
         }
     }
 }
@@ -318,10 +326,13 @@ impl RuntimeExecutePhase {
                                 .map_err(OrchestratorError::Runtime)?;
                         }
 
+                        let context_output =
+                            truncate_tool_output_for_context(output, self.tool_output_token_limit);
+
                         Ok(ActionResult {
                             proposal: proposal.clone(),
                             status: ActionStatus::Succeeded,
-                            tool_output: Some(output),
+                            tool_output: Some(context_output),
                             invocation_id: Some(inv_id),
                         })
                     }
@@ -590,6 +601,58 @@ fn tool_args_with_working_dir(
     }
 }
 
+fn truncate_tool_output_for_context(
+    output: serde_json::Value,
+    token_limit: usize,
+) -> serde_json::Value {
+    let serialized = output.to_string();
+    if crate::decide_impl::estimate_tokens(&serialized) <= token_limit {
+        return output;
+    }
+
+    match output {
+        serde_json::Value::String(text) => serde_json::Value::String(truncate_text_for_context(
+            &text,
+            token_limit,
+        )),
+        serde_json::Value::Object(mut map) => {
+            for key in ["stdout", "stderr", "output", "text", "result", "content"] {
+                if let Some(serde_json::Value::String(text)) = map.get(key) {
+                    let truncated = truncate_text_for_context(text, token_limit);
+                    map.insert(key.to_owned(), serde_json::Value::String(truncated));
+                    return serde_json::Value::Object(map);
+                }
+            }
+
+            serde_json::Value::String(truncate_text_for_context(&serialized, token_limit))
+        }
+        other => serde_json::Value::String(truncate_text_for_context(&other.to_string(), token_limit)),
+    }
+}
+
+fn truncate_text_for_context(text: &str, token_limit: usize) -> String {
+    if crate::decide_impl::estimate_tokens(text) <= token_limit {
+        return text.to_owned();
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    let keep = chars.len().min((token_limit.saturating_mul(4)).max(16));
+    let head = keep / 2;
+    let tail = keep.saturating_sub(head);
+    let omitted = chars.len().saturating_sub(head + tail);
+    let prefix: String = chars.iter().take(head).collect();
+    let suffix: String = chars
+        .iter()
+        .rev()
+        .take(tail)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    format!("{prefix}... [truncated: {omitted} chars omitted] ...{suffix}")
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -607,6 +670,8 @@ mod tests {
         InMemoryServices, RunService, SessionService,
     };
     use cairn_store::EventLog;
+    use cairn_tools::builtins::{BuiltinToolRegistry, ToolError, ToolHandler, ToolResult, ToolTier};
+    use serde_json::Value;
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -672,6 +737,36 @@ mod tests {
             latency_ms: 0,
             input_tokens: None,
             output_tokens: None,
+        }
+    }
+
+    struct LargeOutputTool;
+
+    #[async_trait::async_trait]
+    impl ToolHandler for LargeOutputTool {
+        fn name(&self) -> &str {
+            "large_output"
+        }
+
+        fn tier(&self) -> ToolTier {
+            ToolTier::Registered
+        }
+
+        fn description(&self) -> &str {
+            "Return an intentionally large stdout payload."
+        }
+
+        fn parameters_schema(&self) -> Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
+            })
+        }
+
+        async fn execute(&self, _: &ProjectKey, _: Value) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult::ok(serde_json::json!({
+                "stdout": "abcdefghij".repeat(400),
+            })))
         }
     }
 
@@ -981,6 +1076,51 @@ mod tests {
             .unwrap();
         let cp = svc.checkpoints.latest_for_run(&run_id()).await.unwrap();
         assert!(cp.is_none(), "no checkpoint after 2 of 3 required calls");
+    }
+
+    #[tokio::test]
+    async fn tool_output_is_truncated_to_context_token_limit() {
+        let svc = make_services();
+        setup_run(&svc).await;
+
+        let store = svc.store.clone();
+        let registry = Arc::new(BuiltinToolRegistry::new().register(Arc::new(LargeOutputTool)));
+        let phase = RuntimeExecutePhase::builder()
+            .run_service(Arc::new(RunServiceImpl::new(store.clone())))
+            .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
+            .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
+            .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
+            .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
+            .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
+            .tool_registry(registry)
+            .tool_output_token_limit(32)
+            .build();
+
+        let outcome = phase
+            .execute(
+                &ctx(),
+                &decide_with(vec![ActionProposal::invoke_tool(
+                    "large_output",
+                    serde_json::json!({}),
+                    "emit a large payload",
+                    0.9,
+                    false,
+                )]),
+            )
+            .await
+            .unwrap();
+
+        let stdout = outcome.results[0].tool_output.as_ref().unwrap()["stdout"]
+            .as_str()
+            .unwrap();
+        assert!(
+            stdout.contains("[truncated:"),
+            "large tool output should include a truncation marker"
+        );
+        assert!(
+            crate::decide_impl::estimate_tokens(stdout) <= 64,
+            "context-facing tool output should be materially smaller after truncation"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────

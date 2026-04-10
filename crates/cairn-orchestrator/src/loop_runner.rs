@@ -175,6 +175,7 @@ where
         // On resume from a checkpoint the gather phase rebuilds history from the
         // store; this vec accumulates steps taken during the *current* invocation.
         let mut step_history: Vec<StepSummary> = Vec::new();
+        let mut last_compaction_iteration: Option<u32> = None;
 
         tracing::info!(
             run_id    = %ctx.run_id,
@@ -223,85 +224,31 @@ where
             // ── (2b) COMPACTION CHECK (RFC 018) ──────────────────────────────
             // If step history exceeds the compaction threshold, compress older
             // steps into a summary, keeping the most recent N steps verbatim.
-            if self.config.compaction.enabled
-                && step_history.len() >= self.config.compaction.min_steps
-            {
-                let history_text: String = step_history
-                    .iter()
-                    .map(|s| format!("[iter {}] {}: {}", s.iteration, s.action_kind, s.summary))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let history_tokens = crate::decide_impl::estimate_tokens(&history_text);
-                // Use a rough context budget estimate (default 16K if no budget set).
-                let context_budget = 16_384_usize;
-                let threshold_tokens = (context_budget as u64
-                    * self.config.compaction.threshold_pct as u64
-                    / 100) as usize;
+            if let Some(compaction) = maybe_compact_history(
+                &mut step_history,
+                ctx.iteration,
+                &self.config.compaction,
+                &mut last_compaction_iteration,
+            ) {
+                tracing::info!(
+                    run_id         = %ctx.run_id,
+                    iteration      = ctx.iteration,
+                    before_steps   = compaction.before_steps,
+                    after_steps    = compaction.after_steps,
+                    before_tokens  = compaction.before_tokens_est,
+                    after_tokens   = compaction.after_tokens_est,
+                    "context compacted"
+                );
 
-                if history_tokens > threshold_tokens {
-                    let keep = self.config.compaction.keep_last;
-                    let to_compact = if step_history.len() > keep {
-                        step_history.len() - keep
-                    } else {
-                        0
-                    };
-
-                    if to_compact > 0 {
-                        let before_steps = step_history.len();
-                        let before_tokens = history_tokens;
-
-                        // Build a compact summary of the older steps.
-                        let compacted_text: String = step_history[..to_compact]
-                            .iter()
-                            .map(|s| {
-                                let status = if s.succeeded { "ok" } else { "fail" };
-                                format!("  iter {}: {} [{}]", s.iteration, s.action_kind, status)
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-
-                        let summary = StepSummary {
-                            iteration: step_history[to_compact - 1].iteration,
-                            action_kind: "compacted_summary".to_owned(),
-                            summary: format!(
-                                "Compacted {} prior steps:\n{}",
-                                to_compact, compacted_text
-                            ),
-                            succeeded: true,
-                        };
-
-                        // Replace: [compacted summary] + [keep_last recent steps]
-                        let recent: Vec<StepSummary> = step_history[to_compact..].to_vec();
-                        step_history.clear();
-                        step_history.push(summary);
-                        step_history.extend(recent);
-
-                        let after_tokens = step_history
-                            .iter()
-                            .map(|s| crate::decide_impl::estimate_tokens(&s.summary))
-                            .sum::<usize>();
-
-                        tracing::info!(
-                            run_id         = %ctx.run_id,
-                            iteration      = ctx.iteration,
-                            before_steps   = before_steps,
-                            after_steps    = step_history.len(),
-                            before_tokens  = before_tokens,
-                            after_tokens   = after_tokens,
-                            "context compacted"
-                        );
-
-                        self.emitter
-                            .on_context_compacted(
-                                ctx,
-                                before_steps,
-                                step_history.len(),
-                                before_tokens,
-                                after_tokens,
-                            )
-                            .await;
-                    }
-                }
+                self.emitter
+                    .on_context_compacted(
+                        ctx,
+                        compaction.before_steps,
+                        compaction.after_steps,
+                        compaction.before_tokens_est,
+                        compaction.after_tokens_est,
+                    )
+                    .await;
             }
 
             // ── (3) DECIDE ────────────────────────────────────────────────────
@@ -559,6 +506,94 @@ where
         );
         Ok(LoopTermination::MaxIterationsReached)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CompactionResult {
+    before_steps: usize,
+    after_steps: usize,
+    before_tokens_est: usize,
+    after_tokens_est: usize,
+}
+
+fn maybe_compact_history(
+    step_history: &mut Vec<StepSummary>,
+    iteration: u32,
+    config: &crate::CompactionConfig,
+    last_compaction_iteration: &mut Option<u32>,
+) -> Option<CompactionResult> {
+    if !config.enabled || step_history.len() < config.min_steps {
+        return None;
+    }
+
+    if let Some(last_iteration) = *last_compaction_iteration {
+        let cooldown = config.cooldown_iterations;
+        if cooldown > 0 && iteration.saturating_sub(last_iteration) < cooldown {
+            return None;
+        }
+    }
+
+    let history_text: String = step_history
+        .iter()
+        .map(|s| format!("[iter {}] {}: {}", s.iteration, s.action_kind, s.summary))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let history_tokens = crate::decide_impl::estimate_tokens(&history_text);
+    // Use a rough context budget estimate (default 16K if no budget set).
+    let context_budget = 16_384_usize;
+    let threshold_tokens = (context_budget as u64 * config.threshold_pct as u64 / 100) as usize;
+
+    if history_tokens <= threshold_tokens {
+        return None;
+    }
+
+    let keep = config.keep_last;
+    let to_compact = if step_history.len() > keep {
+        step_history.len() - keep
+    } else {
+        0
+    };
+
+    if to_compact == 0 {
+        return None;
+    }
+
+    let before_steps = step_history.len();
+
+    let compacted_text: String = step_history[..to_compact]
+        .iter()
+        .map(|s| {
+            let status = if s.succeeded { "ok" } else { "fail" };
+            format!("  iter {}: {} [{}]", s.iteration, s.action_kind, status)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let summary = StepSummary {
+        iteration: step_history[to_compact - 1].iteration,
+        action_kind: "compacted_summary".to_owned(),
+        summary: format!("Compacted {} prior steps:\n{}", to_compact, compacted_text),
+        succeeded: true,
+    };
+
+    let recent: Vec<StepSummary> = step_history[to_compact..].to_vec();
+    step_history.clear();
+    step_history.push(summary);
+    step_history.extend(recent);
+
+    let after_tokens = step_history
+        .iter()
+        .map(|s| crate::decide_impl::estimate_tokens(&s.summary))
+        .sum::<usize>();
+
+    *last_compaction_iteration = Some(iteration);
+
+    Some(CompactionResult {
+        before_steps,
+        after_steps: step_history.len(),
+        before_tokens_est: history_tokens,
+        after_tokens_est: after_tokens,
+    })
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1366,6 +1401,7 @@ mod tests {
         assert_eq!(cfg.min_steps, 10);
         assert_eq!(cfg.keep_last, 4);
         assert_eq!(cfg.summary_token_budget, 2000);
+        assert_eq!(cfg.cooldown_iterations, 5);
     }
 
     #[tokio::test]
@@ -1431,6 +1467,7 @@ mod tests {
             keep_last: 4,
             threshold_pct: 70,
             summary_token_budget: 2000,
+            cooldown_iterations: 5,
         };
 
         let history_len = 5; // below min_steps
@@ -1445,5 +1482,52 @@ mod tests {
             ..Default::default()
         };
         assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn compaction_is_throttled_within_cooldown_window() {
+        let config = crate::CompactionConfig {
+            enabled: true,
+            threshold_pct: 1,
+            min_steps: 3,
+            keep_last: 2,
+            summary_token_budget: 2000,
+            cooldown_iterations: 5,
+        };
+        let mut history: Vec<StepSummary> = (0..8)
+            .map(|i| StepSummary {
+                iteration: i,
+                action_kind: "tool_call".to_owned(),
+                summary: format!(
+                    "Iteration {i} returned a very large diagnostic payload that should trigger compaction."
+                ),
+                succeeded: true,
+            })
+            .collect();
+        let mut last_compaction_iteration = None;
+
+        let first = maybe_compact_history(&mut history, 0, &config, &mut last_compaction_iteration);
+        assert!(first.is_some(), "first over-threshold compaction should run");
+
+        history.extend((8..11).map(|i| StepSummary {
+            iteration: i,
+            action_kind: "tool_call".to_owned(),
+            summary: format!(
+                "Iteration {i} also returned a large payload but falls inside cooldown."
+            ),
+            succeeded: true,
+        }));
+
+        let second =
+            maybe_compact_history(&mut history, 1, &config, &mut last_compaction_iteration);
+        assert!(
+            second.is_none(),
+            "second compaction attempt inside cooldown must be throttled"
+        );
+        assert_eq!(
+            last_compaction_iteration,
+            Some(0),
+            "cooldown should preserve the original compaction iteration"
+        );
     }
 }
