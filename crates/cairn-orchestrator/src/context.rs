@@ -3,6 +3,8 @@
 //! These types represent the data flowing between GatherPhase → DecidePhase
 //! → ExecutePhase, plus the loop control signals and configuration.
 
+use std::path::PathBuf;
+
 use cairn_domain::{
     decisions::RunMode, ActionProposal, ApprovalId, DefaultSetting, ProjectKey, RunId, SessionId,
     TaskId, ToolInvocationId,
@@ -35,6 +37,8 @@ pub struct OrchestrationContext {
     pub agent_type: String,
     /// Wall-clock millisecond timestamp when this run began (for timeout checks).
     pub run_started_at_ms: u64,
+    /// Working directory used for filesystem and process-oriented tools.
+    pub working_dir: PathBuf,
     /// Execution mode for this run (RFC 018).
     ///
     /// - `Direct` — all tools visible, agent acts freely.

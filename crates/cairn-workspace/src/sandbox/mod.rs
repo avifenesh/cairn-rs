@@ -10,7 +10,10 @@ pub use policy::{
     CredentialReference, HostCapabilityRequirements, InvalidRepoId, RepoId, SandboxBase,
     SandboxPolicy, SandboxStrategy, SandboxStrategyRequest,
 };
-pub use service::{BufferedSandboxEventSink, Clock, SandboxEventSink, SandboxService, SystemClock};
+pub use service::{
+    BufferedSandboxEventSink, Clock, SandboxEventSink, SandboxRecoverySummary, SandboxService,
+    SystemClock,
+};
 pub use types::{
     DestroyResult, ProvisionedSandbox, SandboxCheckpoint, SandboxHandle, SandboxId, SandboxState,
 };

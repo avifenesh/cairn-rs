@@ -1,8 +1,9 @@
 pub mod overlay;
+pub mod repo_source;
 pub mod reflink;
 
 use async_trait::async_trait;
-use cairn_domain::{CheckpointKind, RunId};
+use cairn_domain::{CheckpointKind, ProjectKey, RunId};
 
 use crate::error::WorkspaceError;
 use crate::sandbox::{
@@ -11,6 +12,7 @@ use crate::sandbox::{
 };
 
 pub use overlay::OverlayProvider;
+pub use repo_source::RepoCloneCacheSource;
 pub use reflink::ReflinkProvider;
 
 #[async_trait]
@@ -20,6 +22,7 @@ pub trait SandboxProvider: Send + Sync + 'static {
     async fn provision(
         &self,
         run_id: &RunId,
+        project: &ProjectKey,
         policy: &SandboxPolicy,
     ) -> Result<ProvisionedSandbox, WorkspaceError>;
 
@@ -36,6 +39,7 @@ pub trait SandboxProvider: Send + Sync + 'static {
         &self,
         from_checkpoint: &SandboxCheckpoint,
         new_run_id: &RunId,
+        project: &ProjectKey,
         policy: &SandboxPolicy,
     ) -> Result<ProvisionedSandbox, WorkspaceError>;
 

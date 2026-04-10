@@ -662,6 +662,7 @@ mod tests {
     use cairn_domain::{
         ActionProposal, ActionType, ApprovalId, ProjectKey, RunId, SessionId, TaskId,
     };
+    use std::path::PathBuf;
 
     // ── Minimal stubs ─────────────────────────────────────────────────────────
 
@@ -747,6 +748,7 @@ mod tests {
             goal: "test goal".to_owned(),
             agent_type: "test_agent".to_owned(),
             run_started_at_ms: now_millis(),
+            working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }

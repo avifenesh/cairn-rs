@@ -711,6 +711,97 @@ fn default_repo_sandbox_policy(repo_id: cairn_workspace::RepoId) -> cairn_worksp
     }
 }
 
+fn workspace_error_response(err: cairn_workspace::WorkspaceError) -> axum::response::Response {
+    use cairn_workspace::{RepoStoreError, WorkspaceError};
+
+    match err {
+        WorkspaceError::RepoStore(error) => {
+            let status = match &error {
+                RepoStoreError::InvalidRepoId(_) | RepoStoreError::InvalidPathSegment { .. } => {
+                    StatusCode::BAD_REQUEST
+                }
+                RepoStoreError::NotAllowedForProject { .. } => StatusCode::FORBIDDEN,
+                RepoStoreError::CloneMissing { .. } => StatusCode::NOT_FOUND,
+                RepoStoreError::Io { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+                RepoStoreError::Unimplemented(_) => StatusCode::NOT_IMPLEMENTED,
+            };
+            AppApiError::new(status, "repo_store_error", error.client_message()).into_response()
+        }
+        WorkspaceError::ProviderUnavailable { .. } => AppApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "sandbox_provider_unavailable",
+            err.to_string(),
+        )
+        .into_response(),
+        WorkspaceError::SandboxNotFound { .. } => {
+            AppApiError::new(StatusCode::NOT_FOUND, "sandbox_not_found", err.to_string())
+                .into_response()
+        }
+        WorkspaceError::InvalidSandboxStateTransition { .. }
+        | WorkspaceError::ResourceLimitMissing { .. } => AppApiError::new(
+            StatusCode::CONFLICT,
+            "sandbox_state_conflict",
+            err.to_string(),
+        )
+        .into_response(),
+        WorkspaceError::BaseRevisionDrift { .. } => {
+            AppApiError::new(StatusCode::CONFLICT, "sandbox_base_revision_drift", err.to_string())
+                .into_response()
+        }
+        WorkspaceError::SandboxOperation { operation, .. } => AppApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "sandbox_operation_failed",
+            format!("sandbox {operation} failed"),
+        )
+        .into_response(),
+        WorkspaceError::Unimplemented(message) => {
+            AppApiError::new(StatusCode::NOT_IMPLEMENTED, "unimplemented", message)
+                .into_response()
+        }
+    }
+}
+
+async fn working_dir_for_run(
+    state: &AppState,
+    run: &RunRecord,
+) -> Result<PathBuf, cairn_workspace::WorkspaceError> {
+    let repo_ctx = cairn_domain::RepoAccessContext {
+        project: run.project.clone(),
+    };
+    let repo_ids = state.project_repo_access.list_for_project(&repo_ctx).await;
+    let Some(repo_id) = repo_ids.first().cloned() else {
+        return Ok(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    };
+
+    if repo_ids.len() > 1 {
+        tracing::warn!(
+            run_id = %run.run_id,
+            project = ?run.project,
+            selected_repo = %repo_id,
+            repo_count = repo_ids.len(),
+            "multiple repos allowlisted for run; provisioning sandbox from the first sorted repo"
+        );
+    }
+
+    state
+        .repo_clone_cache
+        .ensure_cloned(&run.project.tenant_id, &repo_id)
+        .await?;
+
+    state
+        .sandbox_service
+        .provision_or_reconnect(
+            &run.run_id,
+            None,
+            run.project.clone(),
+            default_repo_sandbox_policy(repo_id),
+        )
+        .await?;
+
+    let sandbox = state.sandbox_service.activate(&run.run_id, None).await?;
+    Ok(sandbox.path)
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: BootstrapConfig,
@@ -920,7 +1011,7 @@ impl AppState {
         let plugin_host = Arc::new(Mutex::new(StdioPluginHost::new()));
         let repo_clone_cache = Arc::new(cairn_workspace::RepoCloneCache::default());
         let project_repo_access = Arc::new(cairn_workspace::ProjectRepoAccessService::new());
-        let sandbox_repo_source = Arc::new(cairn_workspace::RepoCloneCacheSource::new(
+        let sandbox_repo_source = Arc::new(cairn_workspace::providers::RepoCloneCacheSource::new(
             repo_clone_cache.clone(),
         ));
         let sandbox_service = Arc::new(cairn_workspace::SandboxService::new(
@@ -9651,6 +9742,10 @@ async fn orchestrate_run_handler(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
+    let working_dir = match working_dir_for_run(state.as_ref(), &run).await {
+        Ok(path) => path,
+        Err(err) => return workspace_error_response(err),
+    };
 
     let ctx = OrchestrationContext {
         project: run.project.clone(),
@@ -9665,6 +9760,7 @@ async fn orchestrate_run_handler(
             .agent_role_id
             .unwrap_or_else(|| "orchestrator".to_owned()),
         run_started_at_ms: now_ms,
+        working_dir: working_dir.clone(),
         run_mode: body.mode.clone().unwrap_or_default(),
         discovered_tool_names: vec![],
     };
@@ -9763,8 +9859,7 @@ async fn orchestrate_run_handler(
 
         // Shared services needed by tool constructors
         let store_ref = state.runtime.store.clone();
-        let workspace_root =
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let workspace_root = working_dir.clone();
         let task_svc: Arc<dyn cairn_runtime::tasks::TaskService> =
             Arc::new(TaskServiceImpl::new(store_ref.clone()));
         let approval_svc: Arc<dyn cairn_runtime::ApprovalService> =

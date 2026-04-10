@@ -16,6 +16,7 @@ use cairn_orchestrator::gather::GatherPhase;
 use cairn_orchestrator::StandardGatherPhase;
 use cairn_store::error::StoreError;
 use cairn_store::{EntityRef, EventLog, EventPosition, InMemoryStore, StoredEvent};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 fn project() -> ProjectKey {
@@ -35,6 +36,7 @@ fn base_ctx() -> OrchestrationContext {
         goal: "Analyse cairn-rs event-sourcing architecture".to_owned(),
         agent_type: "orchestrator".to_owned(),
         run_started_at_ms: 1_000_000,
+        working_dir: PathBuf::from("."),
         run_mode: cairn_domain::decisions::RunMode::Direct,
         discovered_tool_names: vec![],
     }

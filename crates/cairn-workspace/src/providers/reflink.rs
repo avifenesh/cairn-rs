@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::{CheckpointKind, RunId};
+use cairn_domain::{CheckpointKind, ProjectKey, RunId, TenantId};
 use serde::{Deserialize, Serialize};
 
 use crate::error::WorkspaceError;
@@ -29,6 +29,7 @@ pub trait ReflinkCloneDriver: Send + Sync + 'static {
 pub trait ReflinkRepoSource: Send + Sync + 'static {
     fn resolve_repo(
         &self,
+        tenant: &TenantId,
         repo_id: &RepoId,
         starting_ref: Option<&str>,
     ) -> Result<ResolvedReflinkBase, WorkspaceError>;
@@ -47,6 +48,7 @@ struct UnsupportedRepoSource;
 impl ReflinkRepoSource for UnsupportedRepoSource {
     fn resolve_repo(
         &self,
+        _tenant: &TenantId,
         _repo_id: &RepoId,
         _starting_ref: Option<&str>,
     ) -> Result<ResolvedReflinkBase, WorkspaceError> {
@@ -135,6 +137,13 @@ impl ReflinkProvider {
         )
     }
 
+    pub fn with_repo_source(
+        base_dir: impl Into<PathBuf>,
+        repo_source: Arc<dyn ReflinkRepoSource>,
+    ) -> Self {
+        Self::with_dependencies(base_dir, Arc::new(SystemReflinkCloneDriver), repo_source)
+    }
+
     pub fn with_dependencies(
         base_dir: impl Into<PathBuf>,
         clone_driver: Arc<dyn ReflinkCloneDriver>,
@@ -184,6 +193,7 @@ impl ReflinkProvider {
         &self,
         run_id: &RunId,
         root: &Path,
+        tenant: &TenantId,
         base: &SandboxBase,
     ) -> Result<ResolvedReflinkBase, WorkspaceError> {
         match base {
@@ -192,7 +202,7 @@ impl ReflinkProvider {
                 starting_ref,
             } => self
                 .repo_source
-                .resolve_repo(repo_id, starting_ref.as_deref()),
+                .resolve_repo(tenant, repo_id, starting_ref.as_deref()),
             SandboxBase::Directory { path } => Ok(ResolvedReflinkBase {
                 source_dir: path.clone(),
                 base_revision: None,
@@ -240,6 +250,14 @@ impl ReflinkProvider {
         let state = serde_json::from_slice(&bytes)
             .map_err(|error| WorkspaceError::sandbox_op(run_id, "decode_reflink_state", error))?;
         Ok(Some(state))
+    }
+
+    fn load_metadata(&self, run_id: &RunId) -> Result<SandboxMetadata, WorkspaceError> {
+        let path = Self::metadata_path(&self.sandbox_root_for(run_id));
+        let bytes = fs::read(&path)
+            .map_err(|error| WorkspaceError::sandbox_op(run_id, "read_reflink_metadata", error))?;
+        serde_json::from_slice(&bytes)
+            .map_err(|error| WorkspaceError::sandbox_op(run_id, "decode_reflink_metadata", error))
     }
 
     fn previous_snapshot_dirs(
@@ -399,6 +417,7 @@ impl SandboxProvider for ReflinkProvider {
     async fn provision(
         &self,
         run_id: &RunId,
+        project: &ProjectKey,
         policy: &SandboxPolicy,
     ) -> Result<ProvisionedSandbox, WorkspaceError> {
         if let Some(existing) = self.reconnect(run_id).await? {
@@ -407,7 +426,7 @@ impl SandboxProvider for ReflinkProvider {
 
         let root = self.sandbox_root_for(run_id);
         self.prepare_sandbox_root(run_id, &root)?;
-        let resolved = self.resolve_base(run_id, &root, &policy.base)?;
+        let resolved = self.resolve_base(run_id, &root, &project.tenant_id, &policy.base)?;
         self.clone_driver
             .clone_tree(&resolved.source_dir, &Self::root_dir(&root))
             .map_err(|error| WorkspaceError::sandbox_op(run_id, "clone_reflink_root", error))?;
@@ -434,6 +453,8 @@ impl SandboxProvider for ReflinkProvider {
         };
 
         let root = self.sandbox_root_for(run_id);
+        let metadata = self.load_metadata(run_id)?;
+        let _ = self.resolve_base(run_id, &root, &metadata.project.tenant_id, &state.base)?;
         let sandbox_root = Self::root_dir(&root);
         if !sandbox_root.is_dir() {
             return Err(WorkspaceError::sandbox_op(
@@ -477,6 +498,7 @@ impl SandboxProvider for ReflinkProvider {
         &self,
         from_checkpoint: &SandboxCheckpoint,
         new_run_id: &RunId,
+        project: &ProjectKey,
         policy: &SandboxPolicy,
     ) -> Result<ProvisionedSandbox, WorkspaceError> {
         if let Some(existing) = self.reconnect(new_run_id).await? {
@@ -506,7 +528,8 @@ impl SandboxProvider for ReflinkProvider {
                 WorkspaceError::sandbox_op(new_run_id, "restore_reflink_root", error)
             })?;
 
-        let resolved = self.resolve_base(new_run_id, &root, &policy.base)?;
+        let resolved =
+            self.resolve_base(new_run_id, &root, &project.tenant_id, &policy.base)?;
         let state = ReflinkState {
             sandbox_id: Self::sandbox_id_for(new_run_id),
             run_id: new_run_id.clone(),
@@ -608,7 +631,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use cairn_domain::{CheckpointKind, RunId};
+    use cairn_domain::{CheckpointKind, ProjectKey, RunId, TenantId};
 
     use super::{ReflinkCloneDriver, ReflinkProvider, ReflinkRepoSource, ResolvedReflinkBase};
     use crate::error::WorkspaceError;
@@ -705,6 +728,7 @@ mod tests {
     impl ReflinkRepoSource for TestRepoSource {
         fn resolve_repo(
             &self,
+            _tenant: &TenantId,
             repo_id: &RepoId,
             starting_ref: Option<&str>,
         ) -> Result<ResolvedReflinkBase, WorkspaceError> {
@@ -743,6 +767,10 @@ mod tests {
 
     fn run_id(value: &str) -> RunId {
         RunId::new(value)
+    }
+
+    fn project() -> ProjectKey {
+        ProjectKey::new("tenant-a", "workspace-a", "project-a")
     }
 
     fn directory_policy(path: PathBuf) -> SandboxPolicy {
@@ -852,7 +880,7 @@ mod tests {
         let run = run_id("run-reflink-provision");
 
         let sandbox = provider
-            .provision(&run, &directory_policy(source_dir.clone()))
+            .provision(&run, &project(), &directory_policy(source_dir.clone()))
             .await
             .unwrap();
 
@@ -887,11 +915,16 @@ mod tests {
         let run = run_id("run-reflink-reconnect");
 
         provider
-            .provision(&run, &repo_policy(repo_id, Some("main")))
+            .provision(&run, &project(), &repo_policy(repo_id, Some("main")))
             .await
             .unwrap();
 
         let sandbox_root = base_dir.join("sbx-run-reflink-reconnect").join("root");
+        write_reflink_metadata(
+            &base_dir.join("sbx-run-reflink-reconnect"),
+            &run,
+            SandboxStrategy::Reflink,
+        );
         assert_eq!(
             fs::read_to_string(sandbox_root.join("README.md")).unwrap(),
             "hello from repo"
@@ -924,7 +957,7 @@ mod tests {
         let run = run_id("run-reflink-checkpoint");
 
         provider
-            .provision(&run, &directory_policy(source_dir))
+            .provision(&run, &project(), &directory_policy(source_dir))
             .await
             .unwrap();
         let root = base_dir.join("sbx-run-reflink-checkpoint");
@@ -937,7 +970,12 @@ mod tests {
         assert_eq!(checkpoint.upper_snapshot, Some(root.join("root.prev.0")));
 
         let restored = provider
-            .restore(&checkpoint, &run_id("run-reflink-restore"), &empty_policy())
+            .restore(
+                &checkpoint,
+                &run_id("run-reflink-restore"),
+                &project(),
+                &empty_policy(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -957,7 +995,10 @@ mod tests {
         );
         let run = run_id("run-reflink-destroy");
 
-        provider.provision(&run, &empty_policy()).await.unwrap();
+        provider
+            .provision(&run, &project(), &empty_policy())
+            .await
+            .unwrap();
         let root = base_dir.join("sbx-run-reflink-destroy");
         fs::write(root.join("root").join("a.txt"), "one").unwrap();
         fs::write(root.join("root").join("b.txt"), "two").unwrap();

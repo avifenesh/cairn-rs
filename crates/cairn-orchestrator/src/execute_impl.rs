@@ -16,6 +16,7 @@
 //! the tool call count meets the configured `checkpoint_every_n_tool_calls`
 //! threshold (default: save after every tool call).
 
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -268,6 +269,12 @@ impl RuntimeExecutePhase {
                 let mut tool_ctx = cairn_tools::builtins::ToolContext::default();
                 tool_ctx.session_id = Some(ctx.session_id.to_string());
                 tool_ctx.run_id = Some(ctx.run_id.to_string());
+                tool_ctx.working_dir = ctx.working_dir.clone();
+                let tool_args = tool_args_with_working_dir(
+                    &tool_name,
+                    &ctx.working_dir,
+                    proposal.tool_args.clone(),
+                );
                 let tool_output_result = if let Some(ref registry) = self.tool_registry {
                     // Look up the tool in the built-in registry.
                     // `execute_with_context()` returns Result<ToolResult, ToolError>; map to
@@ -276,17 +283,14 @@ impl RuntimeExecutePhase {
                         .execute_with_context(
                             &tool_name,
                             &ctx.project,
-                            proposal
-                                .tool_args
-                                .clone()
-                                .unwrap_or(serde_json::Value::Null),
+                            tool_args.clone(),
                             &tool_ctx,
                         )
                         .await
                         .map(|r| r.output)
                         .map_err(|e| e.to_string())
                 } else {
-                    dispatch_tool(&tool_name, proposal.tool_args.as_ref())
+                    dispatch_tool(&tool_name, Some(&tool_args))
                 };
 
                 match tool_output_result {
@@ -559,6 +563,29 @@ fn new_id(prefix: &str) -> String {
     format!("{prefix}_{ts}_{n}")
 }
 
+fn tool_args_with_working_dir(
+    tool_name: &str,
+    working_dir: &Path,
+    args: Option<serde_json::Value>,
+) -> serde_json::Value {
+    let mut args = args.unwrap_or(serde_json::Value::Null);
+    if tool_name != "shell_exec" {
+        return args;
+    }
+
+    match &mut args {
+        serde_json::Value::Object(map) => {
+            map.entry("working_dir".to_string())
+                .or_insert_with(|| serde_json::Value::String(working_dir.display().to_string()));
+            args
+        }
+        serde_json::Value::Null => serde_json::json!({
+            "working_dir": working_dir.display().to_string(),
+        }),
+        _ => args,
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -576,6 +603,7 @@ mod tests {
         InMemoryServices, RunService, SessionService,
     };
     use cairn_store::EventLog;
+    use std::path::PathBuf;
     use std::sync::Arc;
 
     use crate::context::{DecideOutput, LoopSignal, OrchestrationContext};
@@ -624,6 +652,7 @@ mod tests {
             goal: "test goal".to_owned(),
             agent_type: "test_agent".to_owned(),
             run_started_at_ms: 0,
+            working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }

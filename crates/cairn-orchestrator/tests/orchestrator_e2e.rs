@@ -25,13 +25,13 @@
 //! any modification — just point `base_url` at `https://openrouter.ai/api/v1`
 //! and supply the bearer token.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use cairn_domain::{ActionProposal, ActionType, ProjectKey, RunId, SessionId};
 use cairn_orchestrator::{
-    DecideOutput, ExecuteOutcome, GatherOutput, LoopConfig, LoopSignal, LoopTermination,
-    OrchestrationContext, OrchestratorError, OrchestratorLoop, RuntimeExecutePhase,
-    StandardGatherPhase,
+    DecideOutput, GatherOutput, LoopConfig, LoopTermination, OrchestrationContext,
+    OrchestratorError, OrchestratorLoop, RuntimeExecutePhase, StandardGatherPhase,
 };
 use cairn_runtime::{
     services::{
@@ -104,6 +104,7 @@ fn base_ctx() -> OrchestrationContext {
         goal: "List 3 facts about Rust programming language".to_owned(),
         agent_type: "test_agent".to_owned(),
         run_started_at_ms: now_ms(),
+        working_dir: PathBuf::from("."),
         run_mode: cairn_domain::decisions::RunMode::Direct,
         discovered_tool_names: vec![],
     }

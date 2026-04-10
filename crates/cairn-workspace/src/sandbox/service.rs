@@ -96,6 +96,13 @@ struct StrategyResolution {
     degrade_reason: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SandboxRecoverySummary {
+    pub reconnected: u32,
+    pub preserved: u32,
+    pub failed: u32,
+}
+
 pub struct SandboxService {
     providers: HashMap<SandboxStrategy, Box<dyn SandboxProvider>>,
     event_sink: Arc<dyn SandboxEventSink>,
@@ -191,7 +198,7 @@ impl SandboxService {
         }
 
         let provider = self.provider(resolution.actual)?;
-        match provider.provision(run_id, &policy).await {
+        match provider.provision(run_id, &project, &policy).await {
             Ok(sandbox) => {
                 let provisioned_at = self.clock.now_millis();
                 let metadata = SandboxMetadata {
@@ -565,11 +572,127 @@ impl SandboxService {
         Ok(())
     }
 
+    pub async fn recover_all(&self) -> Result<SandboxRecoverySummary, WorkspaceError> {
+        let mut handles = Vec::new();
+        for provider in self.providers.values() {
+            handles.extend(provider.list().await?);
+        }
+        handles.sort_by(|left, right| {
+            left.metadata
+                .sandbox_id
+                .as_str()
+                .cmp(right.metadata.sandbox_id.as_str())
+        });
+
+        let mut summary = SandboxRecoverySummary::default();
+        for handle in handles {
+            let mut metadata = handle.metadata;
+            if matches!(metadata.state, SandboxState::Destroyed | SandboxState::Failed) {
+                continue;
+            }
+
+            let run_id = metadata.run_id.clone();
+            match self.provider(metadata.strategy)?.reconnect(&run_id).await {
+                Ok(Some(sandbox)) => {
+                    metadata.state = recovered_state(metadata.state);
+                    metadata.path = sandbox.path.clone();
+                    metadata.base_rev = sandbox.base_revision.clone();
+                    metadata.pid = None;
+                    metadata.heartbeat_at = self.clock.now_millis();
+                    self.persist_metadata(&metadata)?;
+                    self.remember_recovered_session(
+                        metadata.clone(),
+                        Some(sandbox),
+                        recovery_policy(&metadata),
+                    );
+                    summary.reconnected += 1;
+                }
+                Ok(None) => {}
+                Err(WorkspaceError::BaseRevisionDrift { expected, actual, .. }) => {
+                    let detected_at = self.clock.now_millis();
+                    if let Some(repo_id) = metadata.repo_id.clone() {
+                        self.event_sink.publish(SandboxEvent::SandboxBaseRevisionDrift {
+                            sandbox_id: metadata.sandbox_id.clone(),
+                            run_id: run_id.clone(),
+                            project: metadata.project.clone(),
+                            repo_id,
+                            expected: expected.clone(),
+                            actual: actual.clone(),
+                            detected_at,
+                        });
+                    }
+
+                    metadata.state = SandboxState::Preserved;
+                    metadata.pid = None;
+                    metadata.heartbeat_at = detected_at;
+                    self.persist_metadata(&metadata)?;
+                    self.remember_recovered_session(
+                        metadata.clone(),
+                        None,
+                        recovery_policy(&metadata),
+                    );
+                    self.event_sink.publish(SandboxEvent::SandboxPreserved {
+                        sandbox_id: metadata.sandbox_id.clone(),
+                        run_id: run_id.clone(),
+                        reason: PreservationReason::BaseRevisionDrift { expected, actual },
+                        preserved_at: detected_at,
+                    });
+                    summary.preserved += 1;
+                }
+                Err(error) => {
+                    let failed_at = self.clock.now_millis();
+                    metadata.state = SandboxState::Failed;
+                    metadata.pid = None;
+                    self.persist_metadata(&metadata)?;
+                    self.remember_recovered_session(
+                        metadata.clone(),
+                        None,
+                        recovery_policy(&metadata),
+                    );
+                    self.event_sink.publish(SandboxEvent::SandboxProvisioningFailed {
+                        sandbox_id: metadata.sandbox_id.clone(),
+                        run_id: run_id.clone(),
+                        error_kind: SandboxErrorKind::Recovery,
+                        error: error.to_string(),
+                        failed_at,
+                    });
+                    summary.failed += 1;
+                }
+            }
+        }
+
+        Ok(summary)
+    }
+
     fn provider(&self, strategy: SandboxStrategy) -> Result<&dyn SandboxProvider, WorkspaceError> {
         self.providers
             .get(&strategy)
             .map(|provider| provider.as_ref())
             .ok_or(WorkspaceError::ProviderUnavailable { strategy })
+    }
+
+    fn remember_recovered_session(
+        &self,
+        metadata: SandboxMetadata,
+        sandbox: Option<ProvisionedSandbox>,
+        policy: SandboxPolicy,
+    ) {
+        self.sessions
+            .write()
+            .expect("sandbox session lock poisoned")
+            .insert(
+                metadata.run_id.clone(),
+                SandboxSession {
+                    sandbox_id: metadata.sandbox_id.clone(),
+                    run_id: metadata.run_id.clone(),
+                    task_id: metadata.task_id.clone(),
+                    project: metadata.project.clone(),
+                    policy,
+                    state: metadata.state,
+                    sandbox,
+                    metadata: Some(metadata),
+                },
+            );
     }
 
     fn resolve_strategy(
@@ -720,6 +843,39 @@ fn policy_hash(policy: &SandboxPolicy) -> String {
     format!("policy:{:016x}", hasher.finish())
 }
 
+fn recovered_state(state: SandboxState) -> SandboxState {
+    match state {
+        SandboxState::Initial | SandboxState::Provisioning | SandboxState::Active => {
+            SandboxState::Ready
+        }
+        other => other,
+    }
+}
+
+fn recovery_policy(metadata: &SandboxMetadata) -> SandboxPolicy {
+    let base = match &metadata.repo_id {
+        Some(repo_id) => crate::sandbox::SandboxBase::Repo {
+            repo_id: repo_id.clone(),
+            starting_ref: metadata.base_rev.clone(),
+        },
+        None => crate::sandbox::SandboxBase::Empty,
+    };
+
+    SandboxPolicy {
+        strategy: crate::sandbox::SandboxStrategyRequest::Force(metadata.strategy),
+        base,
+        credentials: Vec::new(),
+        network_egress: None,
+        memory_limit_bytes: None,
+        cpu_weight: None,
+        disk_quota_bytes: None,
+        wall_clock_limit: None,
+        on_resource_exhaustion: OnExhaustion::Destroy,
+        preserve_on_failure: true,
+        required_host_caps: crate::sandbox::HostCapabilityRequirements::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -781,6 +937,28 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct RecoveryProvider {
+        strategy: SandboxStrategy,
+        handles: Vec<SandboxHandle>,
+        reconnect_results:
+            Mutex<HashMap<String, Result<Option<ProvisionedSandbox>, WorkspaceError>>>,
+    }
+
+    impl RecoveryProvider {
+        fn new(
+            strategy: SandboxStrategy,
+            handles: Vec<SandboxHandle>,
+            reconnect_results: HashMap<String, Result<Option<ProvisionedSandbox>, WorkspaceError>>,
+        ) -> Self {
+            Self {
+                strategy,
+                handles,
+                reconnect_results: Mutex::new(reconnect_results),
+            }
+        }
+    }
+
     #[async_trait]
     impl SandboxProvider for TestProvider {
         fn strategy(&self) -> SandboxStrategy {
@@ -790,6 +968,7 @@ mod tests {
         async fn provision(
             &self,
             run_id: &RunId,
+            _project: &ProjectKey,
             policy: &SandboxPolicy,
         ) -> Result<ProvisionedSandbox, WorkspaceError> {
             *self
@@ -843,6 +1022,7 @@ mod tests {
             &self,
             _from_checkpoint: &SandboxCheckpoint,
             _new_run_id: &RunId,
+            _project: &ProjectKey,
             _policy: &SandboxPolicy,
         ) -> Result<ProvisionedSandbox, WorkspaceError> {
             Err(WorkspaceError::unimplemented(
@@ -868,6 +1048,76 @@ mod tests {
 
         async fn heartbeat(&self, _run_id: &RunId) -> Result<(), WorkspaceError> {
             *self.heartbeats.lock().expect("heartbeat counter poisoned") += 1;
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl SandboxProvider for RecoveryProvider {
+        fn strategy(&self) -> SandboxStrategy {
+            self.strategy
+        }
+
+        async fn provision(
+            &self,
+            _run_id: &RunId,
+            _project: &ProjectKey,
+            _policy: &SandboxPolicy,
+        ) -> Result<ProvisionedSandbox, WorkspaceError> {
+            Err(WorkspaceError::unimplemented(
+                "recovery provider does not provision in tests",
+            ))
+        }
+
+        async fn reconnect(
+            &self,
+            run_id: &RunId,
+        ) -> Result<Option<ProvisionedSandbox>, WorkspaceError> {
+            self.reconnect_results
+                .lock()
+                .expect("reconnect results lock poisoned")
+                .get(run_id.as_str())
+                .cloned()
+                .unwrap_or(Ok(None))
+        }
+
+        async fn checkpoint(
+            &self,
+            _run_id: &RunId,
+            _kind: CheckpointKind,
+        ) -> Result<SandboxCheckpoint, WorkspaceError> {
+            Err(WorkspaceError::unimplemented(
+                "recovery provider does not checkpoint in tests",
+            ))
+        }
+
+        async fn restore(
+            &self,
+            _from_checkpoint: &SandboxCheckpoint,
+            _new_run_id: &RunId,
+            _project: &ProjectKey,
+            _policy: &SandboxPolicy,
+        ) -> Result<ProvisionedSandbox, WorkspaceError> {
+            Err(WorkspaceError::unimplemented(
+                "recovery provider does not restore in tests",
+            ))
+        }
+
+        async fn destroy(
+            &self,
+            _run_id: &RunId,
+            _preserve: bool,
+        ) -> Result<DestroyResult, WorkspaceError> {
+            Err(WorkspaceError::unimplemented(
+                "recovery provider does not destroy in tests",
+            ))
+        }
+
+        async fn list(&self) -> Result<Vec<SandboxHandle>, WorkspaceError> {
+            Ok(self.handles.clone())
+        }
+
+        async fn heartbeat(&self, _run_id: &RunId) -> Result<(), WorkspaceError> {
             Ok(())
         }
     }
@@ -929,6 +1179,41 @@ mod tests {
 
     fn project() -> ProjectKey {
         ProjectKey::new("tenant-a", "workspace-a", "project-a")
+    }
+
+    fn recovery_metadata(run_id: &RunId, state: SandboxState) -> SandboxMetadata {
+        SandboxMetadata {
+            sandbox_id: crate::sandbox::SandboxId::new(format!("sbx-{}", run_id.as_str())),
+            run_id: run_id.clone(),
+            task_id: None,
+            project: project(),
+            strategy: SandboxStrategy::Overlay,
+            state,
+            base_rev: Some("abc123".to_string()),
+            repo_id: Some(crate::sandbox::RepoId::new("octocat/hello")),
+            path: PathBuf::from(format!("/tmp/{}", run_id.as_str())),
+            pid: Some(42),
+            created_at: 1_000,
+            heartbeat_at: 1_010,
+            policy_hash: "policy:test".to_string(),
+        }
+    }
+
+    fn reconnected_sandbox(run_id: &RunId) -> ProvisionedSandbox {
+        ProvisionedSandbox {
+            sandbox_id: crate::sandbox::SandboxId::new(format!("sbx-{}", run_id.as_str())),
+            run_id: run_id.clone(),
+            path: PathBuf::from(format!("/tmp/{}/merged", run_id.as_str())),
+            base: SandboxBase::Repo {
+                repo_id: crate::sandbox::RepoId::new("octocat/hello"),
+                starting_ref: Some("abc123".to_string()),
+            },
+            strategy: SandboxStrategy::Overlay,
+            base_revision: Some("abc123".to_string()),
+            branch: Some("main".to_string()),
+            is_resumed: true,
+            env: HashMap::new(),
+        }
     }
 
     #[tokio::test]
@@ -1246,5 +1531,77 @@ mod tests {
             serde_json::from_slice(&fs::read(&metadata_path).unwrap()).unwrap();
         assert_eq!(metadata.state, SandboxState::Preserved);
         assert_eq!(metadata.pid, None);
+    }
+
+    #[tokio::test]
+    async fn recover_all_reconnects_sandbox_and_normalizes_active_state() {
+        let run = RunId::new("run-recover-ok");
+        let provider = RecoveryProvider::new(
+            SandboxStrategy::Overlay,
+            vec![SandboxHandle {
+                metadata: recovery_metadata(&run, SandboxState::Active),
+            }],
+            HashMap::from([(run.to_string(), Ok(Some(reconnected_sandbox(&run))))]),
+        );
+        let (service, _sink) =
+            service_with_providers(vec![(SandboxStrategy::Overlay, Box::new(provider))]);
+
+        let summary = service.recover_all().await.unwrap();
+
+        assert_eq!(summary.reconnected, 1);
+        assert_eq!(summary.preserved, 0);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(service.state_for(&run), Some(SandboxState::Ready));
+
+        let recovered = service.metadata_for(&run).unwrap();
+        assert_eq!(recovered.state, SandboxState::Ready);
+        assert_eq!(recovered.pid, None);
+        assert_eq!(recovered.base_rev.as_deref(), Some("abc123"));
+        assert_eq!(recovered.path, PathBuf::from("/tmp/run-recover-ok/merged"));
+    }
+
+    #[tokio::test]
+    async fn recover_all_preserves_sandbox_on_base_revision_drift() {
+        let run = RunId::new("run-recover-drift");
+        let provider = RecoveryProvider::new(
+            SandboxStrategy::Overlay,
+            vec![SandboxHandle {
+                metadata: recovery_metadata(&run, SandboxState::Ready),
+            }],
+            HashMap::from([(
+                run.to_string(),
+                Err(WorkspaceError::BaseRevisionDrift {
+                    run_id: run.clone(),
+                    expected: "abc123".to_string(),
+                    actual: "def456".to_string(),
+                }),
+            )]),
+        );
+        let (service, sink) =
+            service_with_providers(vec![(SandboxStrategy::Overlay, Box::new(provider))]);
+
+        let summary = service.recover_all().await.unwrap();
+
+        assert_eq!(summary.reconnected, 0);
+        assert_eq!(summary.preserved, 1);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(service.state_for(&run), Some(SandboxState::Preserved));
+
+        let events = sink.drain();
+        assert!(matches!(
+            &events[0],
+            SandboxEvent::SandboxBaseRevisionDrift {
+                expected,
+                actual,
+                ..
+            } if expected == "abc123" && actual == "def456"
+        ));
+        assert!(matches!(
+            &events[1],
+            SandboxEvent::SandboxPreserved {
+                reason: PreservationReason::BaseRevisionDrift { expected, actual },
+                ..
+            } if expected == "abc123" && actual == "def456"
+        ));
     }
 }

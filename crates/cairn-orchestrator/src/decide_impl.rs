@@ -705,6 +705,7 @@ fn is_fallback_escalation(proposals: &[ActionProposal]) -> bool {
 mod tests {
     use super::*;
     use cairn_domain::providers::{GenerationResponse, ProviderAdapterError};
+    use std::path::PathBuf;
 
     // ── Mock provider ─────────────────────────────────────────────────────────
 
@@ -756,6 +757,7 @@ mod tests {
             goal: "Summarise the cairn-rs architecture document.".to_owned(),
             agent_type: "orchestrator".to_owned(),
             run_started_at_ms: 0,
+            working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }

@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cairn_domain::{CheckpointKind, RunId};
+use cairn_domain::{CheckpointKind, ProjectKey, RunId, TenantId};
 use serde::{Deserialize, Serialize};
 
 use crate::error::WorkspaceError;
@@ -39,6 +39,7 @@ pub trait OverlayMountDriver: Send + Sync + 'static {
 pub trait OverlayRepoSource: Send + Sync + 'static {
     fn resolve_repo(
         &self,
+        tenant: &TenantId,
         repo_id: &RepoId,
         starting_ref: Option<&str>,
     ) -> Result<ResolvedOverlayBase, WorkspaceError>;
@@ -57,6 +58,7 @@ struct UnsupportedRepoSource;
 impl OverlayRepoSource for UnsupportedRepoSource {
     fn resolve_repo(
         &self,
+        _tenant: &TenantId,
         _repo_id: &RepoId,
         _starting_ref: Option<&str>,
     ) -> Result<ResolvedOverlayBase, WorkspaceError> {
@@ -176,6 +178,13 @@ impl OverlayProvider {
         )
     }
 
+    pub fn with_repo_source(
+        base_dir: impl Into<PathBuf>,
+        repo_source: Arc<dyn OverlayRepoSource>,
+    ) -> Self {
+        Self::with_dependencies(base_dir, Arc::new(SystemOverlayMountDriver), repo_source)
+    }
+
     pub fn with_dependencies(
         base_dir: impl Into<PathBuf>,
         mount_driver: Arc<dyn OverlayMountDriver>,
@@ -246,6 +255,7 @@ impl OverlayProvider {
         &self,
         run_id: &RunId,
         root: &Path,
+        tenant: &TenantId,
         base: &SandboxBase,
     ) -> Result<ResolvedOverlayBase, WorkspaceError> {
         match base {
@@ -254,7 +264,7 @@ impl OverlayProvider {
                 starting_ref,
             } => self
                 .repo_source
-                .resolve_repo(repo_id, starting_ref.as_deref()),
+                .resolve_repo(tenant, repo_id, starting_ref.as_deref()),
             SandboxBase::Directory { path } => Ok(ResolvedOverlayBase {
                 lower_dir: path.clone(),
                 base_revision: None,
@@ -390,6 +400,14 @@ impl OverlayProvider {
         Ok(Some(state))
     }
 
+    fn load_metadata(&self, run_id: &RunId) -> Result<SandboxMetadata, WorkspaceError> {
+        let path = Self::metadata_path(&self.sandbox_root_for(run_id));
+        let bytes = fs::read(&path)
+            .map_err(|error| WorkspaceError::sandbox_op(run_id, "read_overlay_metadata", error))?;
+        serde_json::from_slice(&bytes)
+            .map_err(|error| WorkspaceError::sandbox_op(run_id, "decode_overlay_metadata", error))
+    }
+
     fn rotate_previous_layers(
         &self,
         run_id: &RunId,
@@ -497,6 +515,7 @@ impl SandboxProvider for OverlayProvider {
     async fn provision(
         &self,
         run_id: &RunId,
+        project: &ProjectKey,
         policy: &SandboxPolicy,
     ) -> Result<ProvisionedSandbox, WorkspaceError> {
         if let Some(existing) = self.reconnect(run_id).await? {
@@ -505,7 +524,7 @@ impl SandboxProvider for OverlayProvider {
 
         let root = self.sandbox_root_for(run_id);
         self.create_root_layout(run_id, &root)?;
-        let resolved = self.resolve_base(run_id, &root, &policy.base)?;
+        let resolved = self.resolve_base(run_id, &root, &project.tenant_id, &policy.base)?;
         self.mount_overlay(run_id, &root, &resolved.lower_dir)?;
 
         let state = OverlayState {
@@ -530,7 +549,8 @@ impl SandboxProvider for OverlayProvider {
         };
 
         let root = self.sandbox_root_for(run_id);
-        let resolved = self.resolve_base(run_id, &root, &state.base)?;
+        let metadata = self.load_metadata(run_id)?;
+        let resolved = self.resolve_base(run_id, &root, &metadata.project.tenant_id, &state.base)?;
         if matches!(state.base, SandboxBase::Repo { .. }) {
             if let (Some(expected), Some(actual)) = (
                 state.base_revision.as_deref(),
@@ -569,7 +589,8 @@ impl SandboxProvider for OverlayProvider {
                 run_id: run_id.clone(),
             })?;
         let root = self.sandbox_root_for(run_id);
-        let resolved = self.resolve_base(run_id, &root, &state.base)?;
+        let metadata = self.load_metadata(run_id)?;
+        let resolved = self.resolve_base(run_id, &root, &metadata.project.tenant_id, &state.base)?;
 
         self.maybe_unmount(run_id, &root)?;
         let snapshot = self.rotate_previous_layers(run_id, &root)?;
@@ -588,6 +609,7 @@ impl SandboxProvider for OverlayProvider {
         &self,
         from_checkpoint: &SandboxCheckpoint,
         new_run_id: &RunId,
+        project: &ProjectKey,
         policy: &SandboxPolicy,
     ) -> Result<ProvisionedSandbox, WorkspaceError> {
         if let Some(existing) = self.reconnect(new_run_id).await? {
@@ -607,7 +629,8 @@ impl SandboxProvider for OverlayProvider {
 
         let root = self.sandbox_root_for(new_run_id);
         self.create_root_layout(new_run_id, &root)?;
-        let resolved = self.resolve_base(new_run_id, &root, &policy.base)?;
+        let resolved =
+            self.resolve_base(new_run_id, &root, &project.tenant_id, &policy.base)?;
         self.prepare_mount_dirs(new_run_id, &root)?;
 
         let lower_dirs = vec![snapshot.clone(), resolved.lower_dir.clone()];
@@ -726,7 +749,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use cairn_domain::{CheckpointKind, RunId};
+    use cairn_domain::{CheckpointKind, ProjectKey, RunId, TenantId};
 
     use super::{OverlayMountDriver, OverlayProvider, OverlayRepoSource, ResolvedOverlayBase};
     use crate::error::WorkspaceError;
@@ -827,6 +850,7 @@ mod tests {
     impl OverlayRepoSource for TestRepoSource {
         fn resolve_repo(
             &self,
+            _tenant: &TenantId,
             repo_id: &RepoId,
             starting_ref: Option<&str>,
         ) -> Result<ResolvedOverlayBase, WorkspaceError> {
@@ -865,6 +889,10 @@ mod tests {
 
     fn run_id(value: &str) -> RunId {
         RunId::new(value)
+    }
+
+    fn project() -> ProjectKey {
+        ProjectKey::new("tenant-a", "workspace-a", "project-a")
     }
 
     fn directory_policy(path: PathBuf) -> SandboxPolicy {
@@ -954,7 +982,7 @@ mod tests {
         let run = run_id("run-provision");
 
         let sandbox = provider
-            .provision(&run, &directory_policy(source_dir.clone()))
+            .provision(&run, &project(), &directory_policy(source_dir.clone()))
             .await
             .unwrap();
 
@@ -989,10 +1017,11 @@ mod tests {
         let run = run_id("run-checkpoint");
 
         provider
-            .provision(&run, &directory_policy(source_dir.clone()))
+            .provision(&run, &project(), &directory_policy(source_dir.clone()))
             .await
             .unwrap();
         let root = base_dir.join("sbx-run-checkpoint");
+        write_overlay_metadata(&root, &run, SandboxStrategy::Overlay);
         fs::write(root.join("upper").join("draft.txt"), "draft-v1").unwrap();
 
         let checkpoint = provider
@@ -1025,10 +1054,11 @@ mod tests {
         let run = run_id("run-reconnect");
 
         provider
-            .provision(&run, &directory_policy(source_dir.clone()))
+            .provision(&run, &project(), &directory_policy(source_dir.clone()))
             .await
             .unwrap();
         let root = base_dir.join("sbx-run-reconnect");
+        write_overlay_metadata(&root, &run, SandboxStrategy::Overlay);
         fs::write(root.join("upper").join("draft.txt"), "draft-v1").unwrap();
         provider
             .checkpoint(&run, CheckpointKind::Result)
@@ -1059,9 +1089,11 @@ mod tests {
         let run = run_id("run-drift");
 
         provider
-            .provision(&run, &repo_policy(repo_id.clone(), Some("main")))
+            .provision(&run, &project(), &repo_policy(repo_id.clone(), Some("main")))
             .await
             .unwrap();
+        let root = base_dir.join("sbx-run-drift");
+        write_overlay_metadata(&root, &run, SandboxStrategy::Overlay);
         fs::write(repo_dir.join(".git").join("HEAD"), "def456\n").unwrap();
 
         let error = provider.reconnect(&run).await.unwrap_err();
@@ -1090,10 +1122,11 @@ mod tests {
         let run = run_id("run-destroy");
 
         provider
-            .provision(&run, &directory_policy(source_dir))
+            .provision(&run, &project(), &directory_policy(source_dir))
             .await
             .unwrap();
         let root = base_dir.join("sbx-run-destroy");
+        write_overlay_metadata(&root, &run, SandboxStrategy::Overlay);
         fs::write(root.join("upper").join("draft.txt"), "draft-v1").unwrap();
         provider
             .checkpoint(&run, CheckpointKind::Intent)

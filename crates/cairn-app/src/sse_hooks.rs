@@ -344,6 +344,7 @@ impl cairn_orchestrator::OrchestratorEventEmitter for SseOrchestratorEmitter {
 #[cfg(test)]
 mod sse_orchestrator_tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::atomic::AtomicU64;
 
     fn make_emitter() -> (SseOrchestratorEmitter, broadcast::Receiver<SseFrame>) {
@@ -364,6 +365,7 @@ mod sse_orchestrator_tests {
             goal: "do the thing".to_owned(),
             agent_type: "orchestrator".to_owned(),
             run_started_at_ms: 0,
+            working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }

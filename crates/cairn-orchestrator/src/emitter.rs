@@ -374,6 +374,7 @@ mod tests {
         OrchestrationContext,
     };
     use cairn_domain::{ProjectKey, RunId, SessionId};
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
     fn ctx() -> OrchestrationContext {
@@ -386,6 +387,7 @@ mod tests {
             goal: "test".to_owned(),
             agent_type: "test_agent".to_owned(),
             run_started_at_ms: 0,
+            working_dir: PathBuf::from("."),
             run_mode: cairn_domain::decisions::RunMode::Direct,
             discovered_tool_names: vec![],
         }
