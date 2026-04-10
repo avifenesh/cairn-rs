@@ -112,7 +112,7 @@ export function MemoryPage() {
   const [submitted, setSubmitted] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { data: searchData, isFetching, isError: isSearchError, error: searchError } = useQuery({
+  const { data: searchData, isFetching, isError: isSearchError, error: _searchError } = useQuery({
     queryKey: ['memory-search', submitted],
     queryFn: () => defaultApi.searchMemory({ query_text: submitted, limit: 20 }),
     enabled: submitted.length > 0,
@@ -205,8 +205,9 @@ export function MemoryPage() {
               <Loader2 size={12} className="animate-spin" /> Searching…
             </div>
           ) : isSearchError ? (
-            <div className="px-4 py-3 text-xs text-red-400">
-              {searchError instanceof Error ? searchError.message : 'Search failed'}
+            <div className="px-4 py-6 text-center text-xs text-gray-400 dark:text-zinc-500">
+              <p className="font-medium text-amber-400 mb-1">Memory search unavailable</p>
+              <p>This feature requires an embedding provider. Configure one in Settings → Providers.</p>
             </div>
           ) : results.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-gray-400 dark:text-zinc-600">
@@ -251,7 +252,10 @@ export function MemoryPage() {
         </div>
 
         {isSourcesError ? (
-          <div className="px-4 py-3 text-xs text-gray-400 dark:text-zinc-600 italic">Could not load sources.</div>
+          <div className="px-4 py-6 text-center text-xs text-gray-400 dark:text-zinc-500">
+            <p className="font-medium text-amber-400 mb-1">Sources unavailable</p>
+            <p>Configure an embedding provider to enable memory features.</p>
+          </div>
         ) : !sources || sources.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-gray-400 dark:text-zinc-600">
             No sources registered — POST to /v1/memory/ingest to add documents
