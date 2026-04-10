@@ -22,16 +22,54 @@ cairn-rs is designed for teams that want the reliability of purpose-built infras
 
 ## Key features
 
-- **Event-sourced runtime** — 56+ domain event types; append-only log with monotonically increasing positions; idempotent command dispatch via causation-id deduplication
-- **Real-time SSE streaming** — live event feed at `GET /v1/stream`; reconnecting clients replay up to 1 000 missed events via `Last-Event-ID`; no polling required
-- **Multi-tenant isolation** — tenant / workspace / project hierarchy; RBAC (Viewer, Member, Admin, Owner) per workspace; every query scoped by tenant
-- **Approval workflows** — human-in-the-loop gates that block run or task progression until an operator resolves; full decision audit trail
+### Core Runtime
+- **Event-sourced runtime** — 120+ domain event types; append-only log with monotonically increasing positions; idempotent command dispatch via causation-id deduplication
+- **Real-time SSE streaming** — live event feed at `GET /v1/stream`; reconnecting clients replay via `Last-Event-ID`; no polling required
+- **Multi-tenant isolation** — tenant / workspace / project hierarchy; RBAC per workspace; every query scoped by `ProjectKey`
+- **Durable recovery** — dual checkpoint (Intent/Result) per orchestrator iteration; deterministic `ToolCallId` with call_index for parallel dispatch; `RetrySafety` three-tier classification (IdempotentSafe / DangerousPause / AuthorResponsible); parallel-where-independent startup dependency graph with per-branch readiness at `/health/ready`
+
+### Plugin Marketplace
+- **One-click plugin activation** — discover, install, credential wizard, enable per project; no code changes to cairn-rs core
+- **Per-project scoping** — plugins enabled per project; tool visibility and signal routing filtered by `VisibilityContext`; agents only see what their project has turned on
+- **Signal Knowledge Capture** — plugin signals auto-projected into cairn-graph (default on) and optionally ingested into cairn-memory (opt-in per signal type)
+- **External binary model** — plugins are independent executables speaking JSON-RPC over stdio; not bundled, not embedded, not arg0
+
+### Sandbox Workspace
+- **Per-run isolated environments** — `cairn-workspace` crate with OverlayFS (Linux) and reflink-copy (macOS/Windows) providers
+- **Immutable repo cache** — `RepoCloneCache` (tenant-scoped) + `ProjectRepoAccessService` (project-scoped access allowlist); disk-efficient sharing with per-project isolation
+- **Resource limits** — disk, memory, wall-clock caps with three exhaustion modes (Destroy / PauseAwaitOperator / ReportOnly)
+- **Drift detection** — overlay sandboxes check base_revision on recovery; reflink sandboxes are physically independent
+
+### Agent Loop
+- **Plan / Execute / Direct modes** — Plan mode restricts agents to Observational + Internal tools; produces a markdown plan artifact for human review before any external action
+- **Guardian resolver** — LLM-based approval resolver with structured output, risk ceiling, fail-closed timeout; configurable per project with tenant inheritance
+- **Inline context compaction** — automatic history summarization when context exceeds threshold; preserves recent steps, compresses older ones
+- **30+ built-in tools** — all classified by ToolEffect (Observational/Internal/External) and RetrySafety; wired into the orchestrate registry with `tool_search` for deferred-tier discovery
+
+### Unified Decision Layer
+- **One truth per decision** — single `DecisionRecorded` event for both Allowed and Denied; 8-step evaluation (scope → visibility → guardrail → budget → cache → resolver → write → return)
+- **Learned rules** — singleflight cache with Miss/Pending/Resolved states; operator-approved decisions auto-apply to future equivalent requests within TTL
+- **Selective invalidation** — policy-rule reference index; editing a guardrail rule invalidates only decisions that referenced it
+
+### Triggers
+- **Signal-to-run binding** — declarative `Trigger` entity with condition DSL (Equals/Contains/Exists/Not) and `RunTemplate` for reusable run configuration
+- **Durable fire ledger** — prevents duplicate runs on webhook retry or signal replay; separate from ingress dedup
+- **Loop prevention** — `source_run_id` on signal envelope; chain-depth tracking with configurable cap
+- **Runaway protection** — per-trigger rate limits + per-project trigger budgets, both backed by durable projections
+
+### Protocols & Observability
+- **SQ/EQ protocol** — versioned REST + SSE for external clients (IDE extensions, scripts, alternate dashboards); scope-bound transport sessions with `correlation_id` threading
+- **A2A Agent Card** — `GET /.well-known/agent.json` per A2A v0.3; task submission at `POST /v1/a2a/tasks`
+- **OTLP GenAI export** — every LLM call, tool invocation, and run exported as OTel spans with 2025 GenAI semantic conventions; works with Langfuse, Phoenix, Grafana Tempo, Jaeger, Datadog
+- **Dynamic provider discovery** — `PluginCapability::GenerationProvider` lets plugins register as LLM providers at runtime
+
+### Foundation (Phase 1)
 - **LLM provider abstraction** — unified generation interface over OpenAI, Anthropic, Bedrock, OpenRouter, Azure, and any OpenAI-compatible endpoint; priority-ranked fallback chains
-- **Built-in eval framework** — eval runs, scoring rubrics, locked baselines, regression detection, multi-armed bandit (EpsilonGreedy / UCB1) for live traffic steering
-- **Operator dashboard** — embedded React + TypeScript UI served from the binary; sessions, runs, tasks, approvals, traces, costs, memory, and playground views
-- **Local LLM support** — first-class Ollama integration; `OLLAMA_HOST` env var; `options.think=false` for Qwen3 chain-of-thought suppression
-- **Cost tracking and token metering** — per-call token counts and USD micros; run-level and session-level aggregation; `GET /v1/costs` for operator-facing totals
-- **Knowledge and memory retrieval** — document ingestion pipeline with chunking, deduplication, and multi-factor scoring (lexical relevance, freshness, credibility, graph proximity)
+- **Approval workflows** — human-in-the-loop gates that block run or task progression until an operator resolves; full decision audit trail
+- **Built-in eval framework** — eval runs, scoring rubrics, locked baselines, regression detection, multi-armed bandit for live traffic steering
+- **Operator dashboard** — embedded React + TypeScript UI; sessions, runs, tasks, approvals, traces, costs, memory, and playground views
+- **Cost tracking** — per-call token counts and USD micros; run-level and session-level aggregation
+- **Knowledge and memory** — document ingestion pipeline with chunking, deduplication, and multi-factor scoring
 
 ---
 

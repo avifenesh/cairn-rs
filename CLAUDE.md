@@ -60,7 +60,7 @@ After `npm run build`, `cargo build -p cairn-app` embeds the new UI assets.
 
 ## Architecture
 
-14-crate Rust workspace. Each crate owns one bounded context. No circular dependencies.
+17-crate Rust workspace. Each crate owns one bounded context. No circular dependencies.
 
 ```
 domain → store → runtime → {memory, graph, evals, tools, agent, signal, channels} → api/plugin-proto → app
