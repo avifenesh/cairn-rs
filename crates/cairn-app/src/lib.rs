@@ -10,6 +10,7 @@ pub mod marketplace_routes;
 pub mod repo_routes;
 pub mod sse_hooks;
 pub mod tool_impls;
+pub mod trigger_routes;
 
 use async_trait::async_trait;
 use axum::{
@@ -699,6 +700,8 @@ pub struct AppState {
     pub plugin_host: Arc<Mutex<StdioPluginHost>>,
     /// RFC 015: plugin marketplace service — manages discover/install/enable lifecycle.
     pub marketplace: Arc<Mutex<cairn_runtime::services::MarketplaceService<cairn_store::InMemoryStore>>>,
+    /// RFC 022: trigger service — manages triggers and run templates.
+    pub triggers: Arc<Mutex<cairn_runtime::services::TriggerService>>,
     pub repo_clone_cache: Arc<cairn_workspace::RepoCloneCache>,
     pub project_repo_access: Arc<cairn_workspace::ProjectRepoAccessService>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
@@ -940,6 +943,7 @@ impl AppState {
             plugin_registry,
             plugin_host,
             marketplace,
+            triggers: Arc::new(Mutex::new(cairn_runtime::services::TriggerService::new())),
             repo_clone_cache,
             project_repo_access,
             rate_limits,
@@ -4536,6 +4540,15 @@ impl AppBootstrap {
                     .delete(repo_routes::delete_project_repo_handler),
             )
             .route("/v1/plugins/:id/uninstall", delete(marketplace_routes::uninstall_plugin_handler))
+            // ── Triggers (RFC 022) ────────────────────────────────────────────
+            .route("/v1/projects/:project/triggers", get(trigger_routes::list_triggers_handler).post(trigger_routes::create_trigger_handler))
+            .route("/v1/projects/:project/triggers/:trigger_id", get(trigger_routes::get_trigger_handler).delete(trigger_routes::delete_trigger_handler))
+            .route("/v1/projects/:project/triggers/:trigger_id/enable", post(trigger_routes::enable_trigger_handler))
+            .route("/v1/projects/:project/triggers/:trigger_id/disable", post(trigger_routes::disable_trigger_handler))
+            .route("/v1/projects/:project/triggers/:trigger_id/resume", post(trigger_routes::resume_trigger_handler))
+            // ── Run Templates (RFC 022) ───────────────────────────────────────
+            .route("/v1/projects/:project/run-templates", get(trigger_routes::list_run_templates_handler).post(trigger_routes::create_run_template_handler))
+            .route("/v1/projects/:project/run-templates/:template_id", get(trigger_routes::get_run_template_handler).delete(trigger_routes::delete_run_template_handler))
     }
 
     /// Apply the standard middleware stack (auth, CORS, rate-limit, tracing)
