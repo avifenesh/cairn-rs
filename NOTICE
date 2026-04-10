@@ -1,0 +1,10 @@
+cairn-rs
+Copyright 2026 Avi Fenesh
+
+This product is licensed under the Business Source License 1.1.
+See the LICENSE file for the full license text.
+
+The Licensed Work converts to Apache License, Version 2.0 on 2030-04-10.
+
+Third-party components are licensed under their respective licenses.
+See individual crate Cargo.toml files for dependency details.

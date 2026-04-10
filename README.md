@@ -3,14 +3,14 @@
 **Self-hostable Rust control plane for production AI agent deployments.**
 
 ![Rust](https://img.shields.io/badge/rust-1.83%2B-orange?logo=rust)
-![License](https://img.shields.io/badge/license-MIT-blue)
+![License](https://img.shields.io/badge/license-BSL--1.1-blue)
 ![Status](https://img.shields.io/badge/status-active-brightgreen)
 
 ---
 
 ## What is cairn-rs
 
-cairn-rs is an open-source operator control plane that sits between your AI agents and your infrastructure. It handles the operational concerns — event sourcing, task orchestration, approval gates, provider routing, cost metering, and real-time observability — so your agent code stays focused on product logic.
+cairn-rs is a source-available operator control plane that sits between your AI agents and your infrastructure. It handles the operational concerns — event sourcing, task orchestration, approval gates, provider routing, cost metering, and real-time observability — so your agent code stays focused on product logic.
 
 The architecture is fully event-sourced: every agent action, LLM call, approval decision, and checkpoint is appended to an immutable log. The current state of any entity is derived by replaying its events. This gives you a complete audit trail, deterministic replay, and idempotent command handling out of the box.
 
