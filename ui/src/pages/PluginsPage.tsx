@@ -501,7 +501,7 @@ function CatalogCard({ entry }: { entry: CatalogEntry }) {
                 <button
                   onClick={() => verifyMut.mutate()}
                   disabled={verifyMut.isPending}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded bg-zinc-700 text-zinc-200 text-[11px] hover:bg-zinc-600 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-1 px-2 py-1.5 rounded bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-200 text-[11px] hover:bg-gray-300 dark:hover:bg-zinc-600 disabled:opacity-50 transition-colors"
                   title="Verify credentials"
                 >
                   {verifyMut.isPending ? <Loader2 size={10} className="animate-spin" /> : <ShieldCheck size={10} />}
@@ -534,7 +534,7 @@ function CatalogCard({ entry }: { entry: CatalogEntry }) {
               <button
                 onClick={() => enableProject.trim() && disableMut.mutate(enableProject.trim())}
                 disabled={disableMut.isPending || !enableProject.trim()}
-                className="flex items-center gap-1 px-2 py-1.5 rounded bg-zinc-700 text-zinc-300 text-[11px] hover:bg-zinc-600 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1 px-2 py-1.5 rounded bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300 text-[11px] hover:bg-gray-300 dark:hover:bg-zinc-600 disabled:opacity-50 transition-colors"
               >
                 <PowerOff size={10} /> Disable
               </button>

@@ -163,6 +163,17 @@ export interface ProjectKey {
   project_id: string;
 }
 
+// ── Workspaces ────────────────────────────────────────────────────────────────
+
+/** GET /v1/admin/tenants/:tenant_id/workspaces — persisted workspace record. */
+export interface WorkspaceRecord {
+  workspace_id: string;
+  tenant_id: string;
+  name: string;
+  created_at: number; // unix ms
+  updated_at: number; // unix ms
+}
+
 // ── Sessions ──────────────────────────────────────────────────────────────────
 
 /** Session lifecycle state — mirrors cairn_domain::SessionState */

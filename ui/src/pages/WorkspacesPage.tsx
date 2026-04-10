@@ -1,16 +1,12 @@
 /**
  * WorkspacesPage — discover and switch between workspaces for the current tenant.
  *
- * Workspaces are derived client-side from sessions and runs data
- * (no dedicated backend endpoint exists — workspace membership is implicit
- * in every entity's project.workspace_id field).
- *
- * Switching a workspace updates the global scope via useScope() so that
- * all subsequent API calls are scoped to the new workspace.
+ * Workspaces are persisted server-side and fetched from the admin API.
+ * Session/run data is layered on top to provide activity counts.
  */
 
 import { useState, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Layers, Plus, Check, RefreshCw, ArrowRight,
   FolderOpen, Play, MonitorPlay, Clock,
@@ -18,12 +14,14 @@ import {
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import { useScope, DEFAULT_SCOPE } from '../hooks/useScope';
+import { ErrorFallback } from '../components/ErrorFallback';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface WorkspaceInfo {
   workspace_id: string;
   tenant_id:    string;
+  name:         string;
   project_ids:  Set<string>;
   sessions:     number;
   runs:         number;
@@ -136,28 +134,34 @@ function NewWorkspaceForm({
   tenantId,
   onCreated,
   onCancel,
+  creating,
 }: {
   tenantId: string;
-  onCreated: (wsId: string) => void;
+  onCreated: (wsId: string) => Promise<void>;
   onCancel: () => void;
+  creating: boolean;
 }) {
   const [wsId,  setWsId]  = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = wsId.trim();
     const err = validateWsId(trimmed);
     if (err) { setError(err); return; }
-    onCreated(trimmed);
+    try {
+      await onCreated(trimmed);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Failed to create workspace.');
+    }
   }
 
   return (
     <form onSubmit={handleSubmit} className="rounded-xl border border-indigo-700/40 bg-gray-50 dark:bg-zinc-900 p-4 space-y-3">
       <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">New Workspace</p>
       <p className="text-[11px] text-gray-400 dark:text-zinc-500">
-        Workspace IDs are implicit in cairn — creating a new one just activates that scope.
-        Data will be automatically scoped to tenant <code className="text-gray-500 dark:text-zinc-400 font-mono">{tenantId}</code>.
+        Creates a persisted workspace in tenant <code className="text-gray-500 dark:text-zinc-400 font-mono">{tenantId}</code>
+        {' '}and then switches the operator scope into it.
       </p>
 
       <div>
@@ -194,13 +198,13 @@ function NewWorkspaceForm({
         </button>
         <button
           type="submit"
-          disabled={!wsId.trim()}
+          disabled={!wsId.trim() || creating}
           className="flex items-center gap-1.5 rounded px-3 py-1.5 text-[12px] font-medium
                      bg-indigo-600 hover:bg-indigo-500 text-white
                      disabled:bg-gray-100 dark:bg-zinc-800 disabled:text-gray-400 dark:text-zinc-600 disabled:cursor-not-allowed
                      transition-colors"
         >
-          <Check size={11} /> Activate Workspace
+          <Check size={11} /> {creating ? 'Creating…' : 'Create Workspace'}
         </button>
       </div>
     </form>
@@ -215,40 +219,70 @@ export function WorkspacesPage() {
   const [showNew, setShowNew] = useState(false);
   const [filter, setFilter]   = useState('');
 
-  // Fetch sessions and runs with a wide limit so we can discover all workspaces.
-  const { data: sessions, isLoading: sessLoading, refetch: refetchSess, isFetching: sessFetching } = useQuery({
-    queryKey: ['sessions', 'all-tenants'],
-    queryFn:  () => defaultApi.getSessions({ limit: 500 }),
+  const {
+    data: workspaceRecords,
+    isLoading: wsLoading,
+    isError: wsError,
+    error: workspaceError,
+    refetch: refetchWorkspaces,
+    isFetching: wsFetching,
+  } = useQuery({
+    queryKey: ['workspaces', scope.tenant_id],
+    queryFn:  () => defaultApi.getWorkspaces(scope.tenant_id, { limit: 200 }),
     staleTime: 60_000,
-    // Override scope injection — we want ALL workspaces, not just the active one.
+  });
+
+  // Fetch sessions and runs with tenant-only scope so stats reflect all workspaces.
+  const { data: sessions, isLoading: sessLoading, refetch: refetchSess, isFetching: sessFetching } = useQuery({
+    queryKey: ['sessions', 'workspace-catalog', scope.tenant_id],
+    queryFn:  () => defaultApi.getSessions({ tenant_id: scope.tenant_id, limit: 500, inherit_scope: false }),
+    staleTime: 60_000,
   });
 
   const { data: runs, isLoading: runsLoading, refetch: refetchRuns, isFetching: runsFetching } = useQuery({
-    queryKey: ['runs', 'all-tenants'],
-    queryFn:  () => defaultApi.getRuns({ limit: 500 }),
+    queryKey: ['runs', 'workspace-catalog', scope.tenant_id],
+    queryFn:  () => defaultApi.getRuns({ tenant_id: scope.tenant_id, limit: 500, inherit_scope: false }),
     staleTime: 60_000,
   });
 
-  const isLoading  = sessLoading || runsLoading;
-  const isFetching = sessFetching || runsFetching;
+  const createWorkspace = useMutation({
+    mutationFn: (workspaceId: string) =>
+      defaultApi.createWorkspace(scope.tenant_id, {
+        workspace_id: workspaceId,
+        name: workspaceId,
+      }),
+  });
 
-  // Build workspace map from entity data.
+  const isLoading  = wsLoading || sessLoading || runsLoading;
+  const isFetching = wsFetching || sessFetching || runsFetching;
+
+  // Build workspace map from persisted records, then overlay runtime activity.
   const workspaces = useMemo((): WorkspaceInfo[] => {
     const map = new Map<string, WorkspaceInfo>();
 
-    function ensureWs(tenantId: string, wsId: string) {
+    function ensureWs(tenantId: string, wsId: string, name = wsId, latestAt = 0) {
       const key = `${tenantId}::${wsId}`;
       if (!map.has(key)) {
         map.set(key, {
           workspace_id: wsId,
           tenant_id:    tenantId,
+          name,
           project_ids:  new Set(),
           sessions:     0,
           runs:         0,
-          latest_at:    0,
+          latest_at:    latestAt,
         });
       }
       return map.get(key)!;
+    }
+
+    for (const workspace of workspaceRecords ?? []) {
+      ensureWs(
+        workspace.tenant_id,
+        workspace.workspace_id,
+        workspace.name,
+        Math.max(workspace.updated_at, workspace.created_at),
+      );
     }
 
     for (const s of sessions ?? []) {
@@ -272,7 +306,7 @@ export function WorkspacesPage() {
     ensureWs(DEFAULT_SCOPE.tenant_id, DEFAULT_SCOPE.workspace_id);
 
     return Array.from(map.values()).sort((a, b) => b.latest_at - a.latest_at);
-  }, [sessions, runs, scope.tenant_id, scope.workspace_id]);
+  }, [workspaceRecords, sessions, runs, scope.tenant_id, scope.workspace_id]);
 
   const filtered = filter.trim()
     ? workspaces.filter(ws =>
@@ -290,14 +324,24 @@ export function WorkspacesPage() {
     void qc.invalidateQueries();
   }
 
-  function handleNewWorkspace(wsId: string) {
+  async function handleNewWorkspace(wsId: string) {
+    const created = await createWorkspace.mutateAsync(wsId);
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ['workspaces', scope.tenant_id] }),
+      qc.invalidateQueries({ queryKey: ['sessions', 'workspace-catalog', scope.tenant_id] }),
+      qc.invalidateQueries({ queryKey: ['runs', 'workspace-catalog', scope.tenant_id] }),
+    ]);
     setScope({
-      tenant_id:    scope.tenant_id,
-      workspace_id: wsId,
+      tenant_id:    created.tenant_id,
+      workspace_id: created.workspace_id,
       project_id:   DEFAULT_SCOPE.project_id,
     });
     setShowNew(false);
     void qc.invalidateQueries();
+  }
+
+  if (wsError) {
+    return <ErrorFallback error={workspaceError} resource="workspaces" onRetry={() => void refetchWorkspaces()} />;
   }
 
   // Aggregate stats across all discovered workspaces.
@@ -326,7 +370,11 @@ export function WorkspacesPage() {
 
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => { void refetchSess(); void refetchRuns(); }}
+              onClick={() => {
+                void refetchWorkspaces();
+                void refetchSess();
+                void refetchRuns();
+              }}
               disabled={isFetching}
               className="p-1.5 rounded text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors disabled:opacity-40"
               title="Refresh"
@@ -370,6 +418,7 @@ export function WorkspacesPage() {
             tenantId={scope.tenant_id}
             onCreated={handleNewWorkspace}
             onCancel={() => setShowNew(false)}
+            creating={createWorkspace.isPending}
           />
         )}
 

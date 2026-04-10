@@ -381,8 +381,8 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
       {planProposed && (
         <div className="px-4 py-3">
           <p className="text-[11px] text-indigo-400/70 uppercase tracking-wider mb-2">Plan Artifact</p>
-          <div className="bg-zinc-950/60 rounded-md p-3 max-h-64 overflow-y-auto">
-            <pre className="text-[12px] text-zinc-300 font-mono whitespace-pre-wrap leading-relaxed">
+          <div className="bg-gray-100 dark:bg-zinc-950/60 rounded-md p-3 max-h-64 overflow-y-auto">
+            <pre className="text-[12px] text-gray-700 dark:text-zinc-300 font-mono whitespace-pre-wrap leading-relaxed">
               {(() => {
                 const ev = planProposed as unknown as Record<string, unknown>;
                 return typeof ev.plan_markdown === "string"
@@ -415,7 +415,7 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
               </button>
               <button
                 onClick={() => setShowRevise(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-zinc-700 text-zinc-200 text-[12px] font-medium hover:bg-zinc-600 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-200 text-[12px] font-medium hover:bg-zinc-600 transition-colors"
               >
                 <RotateCcw size={11} /> Request Revision
               </button>
@@ -429,7 +429,7 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
                 value={rejectReason}
                 onChange={e => setRejectReason(e.target.value)}
                 placeholder="Reason for rejection…"
-                className="w-full h-20 bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-[12px] text-zinc-300 resize-none focus:outline-none focus:border-red-500"
+                className="w-full h-20 bg-gray-100 dark:bg-zinc-950 border border-gray-300 dark:border-zinc-700 rounded-md px-3 py-2 text-[12px] text-gray-700 dark:text-zinc-300 resize-none focus:outline-none focus:border-red-500"
               />
               <div className="flex items-center gap-2">
                 <button
@@ -456,7 +456,7 @@ function PlanArtifactPanel({ runId, run }: { runId: string; run?: import("../lib
                 value={reviseComments}
                 onChange={e => setReviseComments(e.target.value)}
                 placeholder="What should be changed in the plan?"
-                className="w-full h-20 bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-[12px] text-zinc-300 resize-none focus:outline-none focus:border-indigo-500"
+                className="w-full h-20 bg-gray-100 dark:bg-zinc-950 border border-gray-300 dark:border-zinc-700 rounded-md px-3 py-2 text-[12px] text-gray-700 dark:text-zinc-300 resize-none focus:outline-none focus:border-indigo-500"
               />
               <div className="flex items-center gap-2">
                 <button

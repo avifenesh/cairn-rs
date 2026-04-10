@@ -738,7 +738,7 @@ function ModelUsageWidget() {
 const ONBOARDED_KEY = 'cairn_onboarded';
 
 const STEPS = [
-  { n: 1, title: 'Connect an LLM', body: 'Configure a provider under Settings \u2014 any OpenAI-compatible endpoint, Bedrock, Vertex, or OpenRouter.' },
+  { n: 1, title: 'Connect an LLM', body: 'Go to Providers and add a connection \u2014 any OpenAI-compatible endpoint, Bedrock, Vertex, or other LLM provider. Cairn is provider-agnostic.' },
   { n: 2, title: 'Create a Session', body: 'Go to the Sessions page and click New Session to create a conversation context for your agent.' },
   { n: 3, title: 'Start a Run', body: 'Create a run within a session to kick off agent execution. Runs, tasks, and costs appear here in real time.' },
 ];

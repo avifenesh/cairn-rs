@@ -1786,11 +1786,11 @@ impl CreateChannelRequest {
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize)]
 struct ChannelListQuery {
-    tenant_id: String,
-    workspace_id: String,
-    project_id: String,
+    tenant_id: Option<String>,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
     limit: Option<usize>,
     offset: Option<usize>,
 }
@@ -1798,9 +1798,9 @@ struct ChannelListQuery {
 impl ChannelListQuery {
     fn project(&self) -> ProjectKey {
         ProjectKey::new(
-            self.tenant_id.as_str(),
-            self.workspace_id.as_str(),
-            self.project_id.as_str(),
+            self.tenant_id.as_deref().unwrap_or("default"),
+            self.workspace_id.as_deref().unwrap_or("default"),
+            self.project_id.as_deref().unwrap_or("default"),
         )
     }
 
@@ -4046,6 +4046,15 @@ impl AppBootstrap {
                     }
                     (HttpMethod::Get, "/v1/channels/:id/messages") => {
                         router.route(&path, get(list_channel_messages_handler))
+                    }
+                    (HttpMethod::Get, "/v1/memories") => {
+                        router.route(&path, get(list_memories_preserved_handler))
+                    }
+                    (HttpMethod::Get, "/v1/graph/trace") => {
+                        router.route(&path, get(graph_trace_preserved_handler))
+                    }
+                    (HttpMethod::Get, "/v1/skills") => {
+                        router.route(&path, get(list_skills_preserved_handler))
                     }
                     (HttpMethod::Get, "/v1/memory/search") => {
                         router.route(&path, get(memory_search_handler))
@@ -11639,7 +11648,14 @@ async fn list_tool_invocations_handler(
     Query(query): Query<ToolInvocationListQuery>,
 ) -> impl IntoResponse {
     let Some(run_id) = query.run_id.as_deref() else {
-        return validation_error_response("run_id is required");
+        return (
+            StatusCode::OK,
+            Json(ListResponse::<cairn_domain::tool_invocation::ToolInvocationRecord> {
+                items: Vec::new(),
+                has_more: false,
+            }),
+        )
+            .into_response();
     };
 
     let mut items = match ToolInvocationReadModel::list_by_run(
@@ -11674,6 +11690,47 @@ async fn list_tool_invocations_handler(
             items,
             has_more: false,
         }),
+    )
+        .into_response()
+}
+
+async fn list_memories_preserved_handler() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "items": [],
+            "hasMore": false,
+            "has_more": false,
+        })),
+    )
+        .into_response()
+}
+
+async fn graph_trace_preserved_handler() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "nodes": [],
+            "edges": [],
+            "root": null,
+        })),
+    )
+        .into_response()
+}
+
+async fn list_skills_preserved_handler() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "items": [],
+            "summary": {
+                "total": 0,
+                "enabled": 0,
+                "disabled": 0,
+            },
+            "currentlyActive": [],
+            "currently_active": [],
+        })),
     )
         .into_response()
 }

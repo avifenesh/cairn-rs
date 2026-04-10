@@ -319,8 +319,15 @@ export function createApiClient(config: ApiClientConfig) {
     // ── Sessions ──────────────────────────────────────────────────────────────
 
     /** GET /v1/sessions — list active sessions, most recent first. */
-    getSessions: (params?: { limit?: number; offset?: number; tenant_id?: string; workspace_id?: string; project_id?: string }): Promise<SessionRecord[]> => {
-      const merged = withScope(params);
+    getSessions: (params?: {
+      limit?: number;
+      offset?: number;
+      tenant_id?: string;
+      workspace_id?: string;
+      project_id?: string;
+      inherit_scope?: boolean;
+    }): Promise<SessionRecord[]> => {
+      const merged = params?.inherit_scope === false ? (params ?? {}) : withScope(params);
       const qs = new URLSearchParams();
       if (merged.tenant_id)                  qs.set("tenant_id",    merged.tenant_id);
       if (merged.workspace_id)               qs.set("workspace_id", merged.workspace_id);
@@ -348,8 +355,9 @@ export function createApiClient(config: ApiClientConfig) {
       project_id?: string;
       limit?: number;
       offset?: number;
+      inherit_scope?: boolean;
     }): Promise<RunRecord[]> => {
-      const merged = withScope(params);
+      const merged = params?.inherit_scope === false ? (params ?? {}) : withScope(params);
       const qs = new URLSearchParams();
       if (merged.tenant_id)             qs.set("tenant_id",    merged.tenant_id);
       if (merged.workspace_id)          qs.set("workspace_id", merged.workspace_id);
@@ -362,6 +370,27 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** GET /v1/runs/:id — fetch a single run by ID. */
     getRun: (runId: string): Promise<RunRecord> => get(`/v1/runs/${runId}`),
+
+    // ── Workspaces ────────────────────────────────────────────────────────────
+
+    /** GET /v1/admin/tenants/:tenant_id/workspaces — list persisted workspaces for one tenant. */
+    getWorkspaces: (
+      tenantId: string,
+      params?: { limit?: number; offset?: number },
+    ): Promise<import("./types").WorkspaceRecord[]> => {
+      const qs = new URLSearchParams();
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      const query = qs.toString() ? `?${qs}` : "";
+      return getList(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/workspaces${query}`);
+    },
+
+    /** POST /v1/admin/tenants/:tenant_id/workspaces — create a persisted workspace. */
+    createWorkspace: (
+      tenantId: string,
+      body: { workspace_id: string; name: string },
+    ): Promise<import("./types").WorkspaceRecord> =>
+      post(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/workspaces`, body),
 
     /** GET /v1/runs/:id/events — event timeline for a run. */
     getRunEvents: async (runId: string, limit = 100): Promise<import("./types").RunEventSummary[]> => {
