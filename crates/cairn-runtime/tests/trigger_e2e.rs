@@ -462,6 +462,235 @@ fn rfc022_test14_run_carries_trigger_origin() {
     }
 }
 
+// ── RFC 022 Test: Decision layer denies trigger fire ───────────────────────
+
+#[test]
+fn rfc022_decision_layer_denies_trigger_fire() {
+    use cairn_domain::ids::DecisionId;
+    use cairn_runtime::services::trigger_service::TriggerDecisionOutcome;
+
+    let mut svc = TriggerService::new();
+    let p1 = project("p1");
+    svc.create_template(make_template("tmpl-deny", &p1));
+    svc.create_trigger(make_trigger("t-deny", "tmpl-deny", &p1))
+        .unwrap();
+
+    // Decision function that denies all trigger fires with a guardrail reason
+    let deny_all = |_trigger_id: &TriggerId, _signal_type: &str| -> TriggerDecisionOutcome {
+        TriggerDecisionOutcome::Denied {
+            decision_id: DecisionId::new("dec_guardrail_block_001"),
+            reason: "guardrail: external tool invocations blocked by policy".into(),
+        }
+    };
+
+    let events = svc.evaluate_signal(
+        &p1,
+        &SignalId::new("sig-denied"),
+        "github.issue.labeled",
+        "github",
+        &github_payload(),
+        None,
+        &deny_all,
+    );
+
+    assert_eq!(events.len(), 1, "should emit exactly one event");
+
+    if let TriggerEvent::TriggerDenied {
+        trigger_id,
+        signal_id,
+        decision_id,
+        reason,
+        ..
+    } = &events[0]
+    {
+        assert_eq!(trigger_id.as_str(), "t-deny");
+        assert_eq!(signal_id.as_str(), "sig-denied");
+        assert_eq!(decision_id.as_str(), "dec_guardrail_block_001");
+        assert!(reason.contains("guardrail"));
+    } else {
+        panic!("expected TriggerDenied, got {:?}", events[0]);
+    }
+
+    // The trigger should still be Enabled — denial doesn't suspend it
+    let trigger = svc.get_trigger(&TriggerId::new("t-deny")).unwrap();
+    assert!(
+        matches!(trigger.state, TriggerState::Enabled),
+        "denied trigger should remain Enabled"
+    );
+}
+
+// ── RFC 022 Test: Per-project budget suspension ────────────────────────────
+
+#[test]
+fn rfc022_per_project_budget_suspends_all_triggers() {
+    use cairn_runtime::services::trigger_service::SuspensionReason;
+
+    let mut svc = TriggerService::new();
+    let p1 = project("p-budget");
+
+    // Set a tiny budget: only 3 fires per hour per project
+    svc.default_project_budget = 3;
+
+    svc.create_template(make_template("tmpl-b1", &p1));
+    svc.create_template(make_template("tmpl-b2", &p1));
+
+    // Two triggers in the same project — each signal fires both
+    svc.create_trigger(make_trigger("t-b1", "tmpl-b1", &p1))
+        .unwrap();
+    svc.create_trigger(make_trigger("t-b2", "tmpl-b2", &p1))
+        .unwrap();
+
+    // Accumulate all events across multiple signals
+    let mut all_events = Vec::new();
+
+    // Fire signals until budget is exceeded. Budget=3, two triggers per signal:
+    // Signal 0: t-b1 fires (budget=1), t-b2 fires (budget=2) → 2 fires
+    // Signal 1: t-b1 fires (budget=3), t-b2 budget check → 3>=3 → Suspended
+    // Signal 2: t-b1 budget check → still 3 → Suspended. t-b2 already suspended.
+    for i in 0..4 {
+        let events = svc.evaluate_signal(
+            &p1,
+            &SignalId::new(format!("sig-budget-{i}")),
+            "github.issue.labeled",
+            "github",
+            &github_payload(),
+            None,
+            &auto_approve_decision,
+        );
+        all_events.extend(events);
+    }
+
+    // Must have TriggerSuspended events with BudgetExceeded reason
+    let suspended_events: Vec<_> = all_events
+        .iter()
+        .filter(|e| matches!(e, TriggerEvent::TriggerSuspended { .. }))
+        .collect();
+
+    assert!(
+        !suspended_events.is_empty(),
+        "should emit TriggerSuspended events when budget exceeded"
+    );
+
+    for event in &suspended_events {
+        if let TriggerEvent::TriggerSuspended { reason, .. } = event {
+            assert_eq!(
+                *reason,
+                SuspensionReason::BudgetExceeded,
+                "suspension reason should be BudgetExceeded"
+            );
+        }
+    }
+
+    // Both triggers should now be Suspended
+    for tid in ["t-b1", "t-b2"] {
+        let trigger = svc.get_trigger(&TriggerId::new(tid)).unwrap();
+        assert!(
+            matches!(
+                trigger.state,
+                TriggerState::Suspended {
+                    reason: SuspensionReason::BudgetExceeded,
+                    ..
+                }
+            ),
+            "trigger {tid} should be Suspended with BudgetExceeded, got {:?}",
+            trigger.state
+        );
+    }
+
+    // After budget suspension, no more fires are possible
+    let final_events = svc.evaluate_signal(
+        &p1,
+        &SignalId::new("sig-budget-final"),
+        "github.issue.labeled",
+        "github",
+        &github_payload(),
+        None,
+        &auto_approve_decision,
+    );
+    assert!(
+        final_events.is_empty(),
+        "no events should fire when all triggers are suspended"
+    );
+}
+
+// ── RFC 022 Test: Recovery preserves trigger state ─────────────────────────
+
+#[test]
+fn rfc022_recovery_preserves_fire_ledger() {
+    let mut svc = TriggerService::new();
+    let p1 = project("p-recovery");
+    svc.create_template(make_template("tmpl-r1", &p1));
+    svc.create_trigger(make_trigger("t-r1", "tmpl-r1", &p1))
+        .unwrap();
+
+    // Fire a signal
+    let events = svc.evaluate_signal(
+        &p1,
+        &SignalId::new("sig-pre-crash"),
+        "github.issue.labeled",
+        "github",
+        &github_payload(),
+        None,
+        &auto_approve_decision,
+    );
+    assert!(matches!(&events[0], TriggerEvent::TriggerFired { .. }));
+
+    // Snapshot the fire ledger (simulates durable persistence before crash)
+    let ledger_snapshot = svc.fire_ledger_snapshot();
+    assert!(
+        !ledger_snapshot.is_empty(),
+        "fire ledger should have entries after firing"
+    );
+
+    // Simulate crash + restart: create a new TriggerService
+    let mut svc2 = TriggerService::new();
+    svc2.create_template(make_template("tmpl-r1", &p1));
+    svc2.create_trigger(make_trigger("t-r1", "tmpl-r1", &p1))
+        .unwrap();
+
+    // Restore fire ledger from snapshot
+    svc2.restore_fire_ledger(ledger_snapshot);
+
+    // Replay the same signal — should be deduped by the restored fire ledger
+    let events = svc2.evaluate_signal(
+        &p1,
+        &SignalId::new("sig-pre-crash"),
+        "github.issue.labeled",
+        "github",
+        &github_payload(),
+        None,
+        &auto_approve_decision,
+    );
+
+    assert_eq!(events.len(), 1);
+    assert!(
+        matches!(
+            &events[0],
+            TriggerEvent::TriggerSkipped {
+                reason: SkipReason::AlreadyFired,
+                ..
+            }
+        ),
+        "replayed signal should be deduped after recovery, got {:?}",
+        events[0]
+    );
+
+    // A genuinely new signal fires normally
+    let events = svc2.evaluate_signal(
+        &p1,
+        &SignalId::new("sig-post-crash"),
+        "github.issue.labeled",
+        "github",
+        &github_payload(),
+        None,
+        &auto_approve_decision,
+    );
+    assert!(
+        matches!(&events[0], TriggerEvent::TriggerFired { .. }),
+        "new signal should fire normally after recovery"
+    );
+}
+
 // ── Trigger enable/disable lifecycle ────────────────────────────────────────
 
 #[test]

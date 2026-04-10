@@ -712,6 +712,20 @@ impl TriggerService {
             .collect()
     }
 
+    // ── Fire Ledger Snapshot / Restore (for recovery — RFC 020) ──────
+
+    /// Snapshot the fire ledger for durable persistence.
+    /// Returns all (trigger_id, signal_id) → fired_at entries.
+    pub fn fire_ledger_snapshot(&self) -> HashMap<(TriggerId, SignalId), u64> {
+        self.fire_ledger.clone()
+    }
+
+    /// Restore the fire ledger from a persisted snapshot.
+    /// Used during recovery to prevent duplicate fires after restart.
+    pub fn restore_fire_ledger(&mut self, ledger: HashMap<(TriggerId, SignalId), u64>) {
+        self.fire_ledger = ledger;
+    }
+
     // ── Trigger Evaluation ──────────────────────────────────────────
 
     /// Evaluate a signal against all enabled triggers in the project.
@@ -814,6 +828,30 @@ impl TriggerService {
                     rate_limited_at: now,
                 });
                 continue;
+            }
+
+            // Per-project budget check: if project has exceeded its hourly budget,
+            // skip the fire and suspend the trigger.
+            {
+                let budget_entries = self.project_budgets.entry(project.clone()).or_default();
+                let hour_ago = now.saturating_sub(3_600_000);
+                budget_entries.retain(|&ts| ts > hour_ago);
+                if budget_entries.len() as u32 >= self.default_project_budget {
+                    // Suspend this trigger
+                    if let Some(t) = self.triggers.get_mut(&trigger_id) {
+                        t.state = TriggerState::Suspended {
+                            reason: SuspensionReason::BudgetExceeded,
+                            since: now,
+                        };
+                        t.updated_at = now;
+                    }
+                    events.push(TriggerEvent::TriggerSuspended {
+                        trigger_id,
+                        reason: SuspensionReason::BudgetExceeded,
+                        at: now,
+                    });
+                    continue;
+                }
             }
 
             // Required fields check (from template)
