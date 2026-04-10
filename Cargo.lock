@@ -495,6 +495,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cairn-plugin-catalog"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "cairn-plugin-proto"
 version = "0.1.0"
 dependencies = [
@@ -571,6 +579,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "cairn-workspace"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cairn-domain",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

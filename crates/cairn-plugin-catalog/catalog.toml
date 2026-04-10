@@ -1,0 +1,94 @@
+# Bundled plugin catalog — descriptor-only, no binaries.
+#
+# Each entry describes a curated known-good plugin. The binary itself
+# is NOT shipped inside cairn-app; the descriptor provides a download_url
+# for the independently published binary, or the operator provides a
+# local path during the install wizard.
+#
+# At startup, each entry is emitted as a PluginListed event. Plugins
+# are listed-but-not-installed on first boot.
+#
+# Per RFC 015: adding catalog entries does not require new RFCs — once
+# the marketplace mechanism is stable, adding a descriptor is
+# configuration, not architecture.
+
+[[plugin]]
+id           = "github"
+name         = "GitHub"
+version      = "0.1.0"
+description  = "Ingest GitHub issues, PRs, and events; expose GitHub API tools to agents"
+category     = "issue_tracker"
+icon_url     = "bundled://github.svg"
+vendor       = "cairn"
+download_url = "https://github.com/avifenesh/cairn-plugin-github/releases/latest/download/cairn-plugin-github-{arch}"
+command      = ["cairn-plugin-github"]
+has_signal_source = true
+
+tools = [
+  "github.get_issue",
+  "github.list_issues",
+  "github.create_issue",
+  "github.comment_on_issue",
+  "github.close_issue",
+  "github.list_issue_comments",
+  "github.get_pull_request",
+  "github.list_pull_requests",
+  "github.create_pull_request",
+  "github.comment_on_pull_request",
+  "github.get_pull_request_reviews",
+  "github.request_pull_request_review",
+  "github.get_pull_request_diff",
+  "github.merge_pull_request",
+  "github.list_commits",
+  "github.get_file_contents",
+  "github.list_files",
+  "github.get_workflow_run",
+  "github.get_rate_limit",
+]
+
+signal_sources = [
+  "github.issue.opened",
+  "github.issue.labeled",
+  "github.issue.commented",
+  "github.pull_request.opened",
+  "github.pull_request.labeled",
+  "github.pull_request.synchronize",
+  "github.pull_request.review_submitted",
+  "github.pull_request.review_comment",
+  "github.workflow_run.completed",
+  "github.check_run.completed",
+  "github.rate_limit.warning",
+]
+
+channels = []
+
+network_egress = ["api.github.com", "uploads.github.com"]
+
+[plugin.health_check]
+method       = "github.verify_app_auth"
+timeout_ms   = 5000
+
+[[plugin.required_credentials]]
+key          = "github_app_id"
+display_name = "GitHub App ID"
+kind         = "api_key"
+scope        = "tenant"
+
+[[plugin.required_credentials]]
+key          = "github_app_private_key"
+display_name = "GitHub App Private Key"
+kind         = "app_installation"
+scope        = "tenant"
+
+[[plugin.required_credentials]]
+key          = "github_webhook_secret"
+display_name = "Webhook Secret"
+kind         = "api_key"
+scope        = "tenant"
+generated    = true
+
+[[plugin.required_credentials]]
+key          = "github_installation_id"
+display_name = "Installation ID"
+kind         = "app_installation"
+scope        = "project"
