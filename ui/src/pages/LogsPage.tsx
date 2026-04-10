@@ -79,7 +79,7 @@ function LevelToggle({
     >
       <span className={clsx('h-1.5 w-1.5 rounded-full', active ? colors.dot : 'bg-zinc-700')} />
       {level}
-      <span className={clsx('tabular-nums', active ? '' : 'text-gray-300 dark:text-zinc-700')}>
+      <span className={clsx('tabular-nums', active ? '' : 'text-gray-300 dark:text-zinc-600')}>
         {count > 0 ? count : ''}
       </span>
     </button>
@@ -315,7 +315,7 @@ export function LogsPage() {
 
           {/* Refresh indicator */}
           <span className={clsx(
-            'flex items-center gap-1 text-[11px] text-gray-300 dark:text-zinc-700 transition-opacity',
+            'flex items-center gap-1 text-[11px] text-gray-300 dark:text-zinc-600 transition-opacity',
             isFetching ? 'opacity-100' : 'opacity-0',
           )}>
             <RefreshCw size={10} className="animate-spin" />
@@ -325,12 +325,12 @@ export function LogsPage() {
 
       {/* Column headers */}
       <div className="flex items-center gap-0 h-6 px-1 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
-        <span className="w-28 shrink-0 pl-2 text-[9px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider">Time</span>
+        <span className="w-28 shrink-0 pl-2 text-[9px] text-gray-300 dark:text-zinc-600 uppercase tracking-wider">Time</span>
         <span className="w-3 shrink-0" />
-        <span className="w-10 shrink-0 text-[9px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider">Method</span>
-        <span className="w-10 shrink-0 text-[9px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider">Status</span>
-        <span className="flex-1 text-[9px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider">Path</span>
-        <span className="w-16 shrink-0 text-right pr-2 text-[9px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider">Latency</span>
+        <span className="w-10 shrink-0 text-[9px] text-gray-300 dark:text-zinc-600 uppercase tracking-wider">Method</span>
+        <span className="w-10 shrink-0 text-[9px] text-gray-300 dark:text-zinc-600 uppercase tracking-wider">Status</span>
+        <span className="flex-1 text-[9px] text-gray-300 dark:text-zinc-600 uppercase tracking-wider">Path</span>
+        <span className="w-16 shrink-0 text-right pr-2 text-[9px] text-gray-300 dark:text-zinc-600 uppercase tracking-wider">Latency</span>
       </div>
 
       {/* Log list */}
@@ -383,7 +383,7 @@ export function LogsPage() {
           )} />
           {paused ? 'Paused' : 'Live (2s)'}
         </span>
-        <span className="text-[10px] text-gray-300 dark:text-zinc-700 ml-auto">
+        <span className="text-[10px] text-gray-300 dark:text-zinc-600 ml-auto">
           Ring buffer: last 2,000 requests
         </span>
       </div>

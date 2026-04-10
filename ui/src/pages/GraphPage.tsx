@@ -478,11 +478,11 @@ function ForceGraph({ maxNodes = 100 }: { maxNodes?: number }) {
             </svg>
             <span className="text-[11px] text-gray-400 dark:text-zinc-500 capitalize">{k}</span>
             {counts[k] != null && (
-              <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono">{counts[k]}</span>
+              <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono">{counts[k]}</span>
             )}
           </div>
         ))}
-        <span className="ml-auto text-[10px] text-gray-300 dark:text-zinc-700 hidden sm:block">
+        <span className="ml-auto text-[10px] text-gray-300 dark:text-zinc-600 hidden sm:block">
           scroll to zoom · drag to pan · click node to highlight connections
         </span>
       </div>
@@ -571,7 +571,7 @@ function NodeDetail({ node, onClose }: { node: NodeTypeDef; onClose: () => void 
         <div>
           <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">Connected via</p>
           {relevantEdges.length === 0 ? (
-            <p className="text-[11px] text-gray-300 dark:text-zinc-700 italic">No edges defined</p>
+            <p className="text-[11px] text-gray-300 dark:text-zinc-600 italic">No edges defined</p>
           ) : (
             <div className="space-y-1.5">
               {relevantEdges.map(e => (
@@ -635,7 +635,7 @@ export function GraphPage() {
         </div>
 
         <div className="ml-auto flex items-center gap-3">
-          <span className="text-[11px] text-gray-300 dark:text-zinc-700">RFC 004</span>
+          <span className="text-[11px] text-gray-300 dark:text-zinc-600">RFC 004</span>
         </div>
       </div>
 
@@ -719,7 +719,7 @@ export function GraphPage() {
                         <div key={group}>
                           <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">
                             {GROUP_LABELS[group]}
-                            <span className="ml-2 text-gray-300 dark:text-zinc-700 normal-case font-normal">{nodes.length} types</span>
+                            <span className="ml-2 text-gray-300 dark:text-zinc-600 normal-case font-normal">{nodes.length} types</span>
                           </p>
                           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                             {nodes.map(n => (
@@ -738,7 +738,7 @@ export function GraphPage() {
                 <div>
                   <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-3">
                     Edge Types
-                    <span className="ml-2 text-gray-300 dark:text-zinc-700 normal-case font-normal">{EDGE_TYPES.length} relationship kinds</span>
+                    <span className="ml-2 text-gray-300 dark:text-zinc-600 normal-case font-normal">{EDGE_TYPES.length} relationship kinds</span>
                   </p>
                   <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
                     <table className="min-w-full text-[12px]">

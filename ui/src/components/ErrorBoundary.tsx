@@ -99,7 +99,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 <RotateCcw size={12} />
                 Try again
               </button>
-              <p className="text-[11px] text-gray-300 dark:text-zinc-700 ml-auto">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-600 ml-auto">
                 Reload the page if the problem persists.
               </p>
             </div>

@@ -258,8 +258,8 @@ export function ConnectionStatus() {
           {/* Footer */}
           {lastChecked && (
             <div className="px-3 py-2 border-t border-gray-200/60 dark:border-zinc-800/60 flex items-center justify-between">
-              <span className="text-[10px] text-gray-300 dark:text-zinc-700">Last checked {lastChecked}</span>
-              <span className="text-[10px] text-gray-300 dark:text-zinc-700">auto every 30s</span>
+              <span className="text-[10px] text-gray-300 dark:text-zinc-600">Last checked {lastChecked}</span>
+              <span className="text-[10px] text-gray-300 dark:text-zinc-600">auto every 30s</span>
             </div>
           )}
         </div>

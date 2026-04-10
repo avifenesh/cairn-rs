@@ -106,7 +106,7 @@ export function BarChart({
             >
               {formatValue(item.value)}
               {item.sublabel && (
-                <span className="text-gray-300 dark:text-zinc-700 ml-1">{item.sublabel}</span>
+                <span className="text-gray-300 dark:text-zinc-600 ml-1">{item.sublabel}</span>
               )}
             </span>
           </div>
@@ -114,7 +114,7 @@ export function BarChart({
       })}
 
       {items.length > maxItems && (
-        <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-right pt-1">
+        <p className="text-[10px] text-gray-300 dark:text-zinc-600 text-right pt-1">
           +{items.length - maxItems} more
         </p>
       )}

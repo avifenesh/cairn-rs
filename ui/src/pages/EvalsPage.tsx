@@ -141,7 +141,7 @@ function ScoreTrends({ runs }: { runs: (EvalRunRecord & { _status: EvalRunStatus
                 </span>
               </div>
               <MiniChart data={scores} height={28} color={color} className="w-full" />
-              <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-1">{scores.length} runs</p>
+              <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-1">{scores.length} runs</p>
             </div>
           );
         })}
@@ -508,7 +508,7 @@ export function EvalsPage() {
       {/* Table hint */}
       {!isLoading && filtered.length > 0 && (
         <div className="px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800 shrink-0">
-          <p className="text-[10px] text-gray-300 dark:text-zinc-700">
+          <p className="text-[10px] text-gray-300 dark:text-zinc-600">
             Select up to 2 runs using the checkboxes, then click <strong className="text-gray-400 dark:text-zinc-600">Compare</strong>.
           </p>
         </div>
@@ -596,7 +596,7 @@ export function EvalsPage() {
                     </td>
                     <td className="px-4 py-0 text-right">
                       <span className="flex items-center justify-end gap-1 text-[11px] text-gray-400 dark:text-zinc-500">
-                        <Clock size={10} className="text-gray-300 dark:text-zinc-700" />
+                        <Clock size={10} className="text-gray-300 dark:text-zinc-600" />
                         {fmtDuration(run.started_at, run.completed_at)}
                       </span>
                     </td>

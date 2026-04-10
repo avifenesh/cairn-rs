@@ -336,7 +336,7 @@ function StepRow({
         className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-white/[0.02] transition-colors select-none"
         onClick={() => result && setExpanded(v => !v)}
       >
-        <span className="text-[10px] font-mono text-gray-300 dark:text-zinc-700 w-5 text-right shrink-0">{index + 1}</span>
+        <span className="text-[10px] font-mono text-gray-300 dark:text-zinc-600 w-5 text-right shrink-0">{index + 1}</span>
         {icon}
         <div className="flex-1 min-w-0">
           <p className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">{step.label}</p>
@@ -372,7 +372,7 @@ function StepRow({
               <p className="text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider mb-2">{label}</p>
               <pre className="text-[11px] font-mono text-gray-500 dark:text-zinc-400 overflow-x-auto max-h-40 leading-relaxed whitespace-pre-wrap break-words">
                 {data === undefined || data === null
-                  ? <span className="text-gray-300 dark:text-zinc-700">—</span>
+                  ? <span className="text-gray-300 dark:text-zinc-600">—</span>
                   : JSON.stringify(data, null, 2)}
               </pre>
             </div>
@@ -521,7 +521,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioDef }) {
                 {passCount}/{totalSteps} steps
               </span>
               {totalMs > 0 && (
-                <span className="flex items-center gap-1 text-[11px] text-gray-300 dark:text-zinc-700">
+                <span className="flex items-center gap-1 text-[11px] text-gray-300 dark:text-zinc-600">
                   <Clock size={10} />
                   {fmtMs(totalMs)}
                 </span>

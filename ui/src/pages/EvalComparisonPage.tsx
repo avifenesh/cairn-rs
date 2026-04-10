@@ -209,7 +209,7 @@ function RunPanel({
             <Clock size={11} className="text-gray-400 dark:text-zinc-600" />
             {fmtDuration(run.started_at, run.completed_at)}
             {dur !== null && (
-              <span className="text-[10px] font-mono text-gray-300 dark:text-zinc-700">({dur.toLocaleString()}ms)</span>
+              <span className="text-[10px] font-mono text-gray-300 dark:text-zinc-600">({dur.toLocaleString()}ms)</span>
             )}
           </span>
         </div>

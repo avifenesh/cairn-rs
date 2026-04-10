@@ -356,7 +356,7 @@ function ParamTable({ params }: { params: Param[] }) {
             <td className="py-1.5 pr-3 font-mono text-gray-400 dark:text-zinc-500">{p.type}</td>
             <td className="py-1.5 text-gray-400 dark:text-zinc-500">
               {p.description}
-              {p.example && <span className="ml-2 text-gray-300 dark:text-zinc-700">e.g. <code className="text-gray-400 dark:text-zinc-600">{p.example}</code></span>}
+              {p.example && <span className="ml-2 text-gray-300 dark:text-zinc-600">e.g. <code className="text-gray-400 dark:text-zinc-600">{p.example}</code></span>}
             </td>
           </tr>
         ))}
@@ -421,7 +421,7 @@ function TryItPanel({ ep }: { ep: Endpoint }) {
       {/* Header: endpoint URL + curl toggle */}
       <div className="px-3 py-2 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between gap-3">
         <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider shrink-0">Try it</span>
-        <code className="text-[10px] font-mono text-gray-300 dark:text-zinc-700 truncate flex-1">
+        <code className="text-[10px] font-mono text-gray-300 dark:text-zinc-600 truncate flex-1">
           {API_BASE || "http://localhost:3000"}{ep.path}
         </code>
         <button
@@ -525,7 +525,7 @@ function TryItPanel({ ep }: { ep: Endpoint }) {
             {loading ? <><Loader2 size={11} className="animate-spin" /> Sending…</> : <><Send size={11} /> Send</>}
           </button>
           {ep.sse && <span className="text-[11px] text-gray-400 dark:text-zinc-600 italic">SSE: use curl or the Playground page.</span>}
-          {!ep.sse && <span className="text-[10px] text-gray-300 dark:text-zinc-700"><Kbd>⌘</Kbd><Kbd>↵</Kbd> to send</span>}
+          {!ep.sse && <span className="text-[10px] text-gray-300 dark:text-zinc-600"><Kbd>⌘</Kbd><Kbd>↵</Kbd> to send</span>}
         </div>
 
         {/* Error */}
@@ -641,7 +641,7 @@ function RequestLogPanel() {
 
   if (entries.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-300 dark:text-zinc-700">
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-300 dark:text-zinc-600">
         <Clock size={24} />
         <p className="text-[13px]">No requests yet</p>
         <p className="text-[11px] text-center max-w-xs">
@@ -684,8 +684,8 @@ function RequestLogPanel() {
                 {e.latency !== null && (
                   <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono tabular-nums shrink-0">{e.latency}ms</span>
                 )}
-                <span className="text-[10px] text-gray-300 dark:text-zinc-700 shrink-0">{fmtRelative(e.timestamp)}</span>
-                {isOpen ? <ChevronDown size={11} className="text-gray-400 dark:text-zinc-600 shrink-0" /> : <ChevronRight size={11} className="text-gray-300 dark:text-zinc-700 shrink-0" />}
+                <span className="text-[10px] text-gray-300 dark:text-zinc-600 shrink-0">{fmtRelative(e.timestamp)}</span>
+                {isOpen ? <ChevronDown size={11} className="text-gray-400 dark:text-zinc-600 shrink-0" /> : <ChevronRight size={11} className="text-gray-300 dark:text-zinc-600 shrink-0" />}
               </button>
 
               {/* Expanded detail */}
@@ -717,7 +717,7 @@ function RequestLogPanel() {
                       <div className="flex items-center justify-between mb-1.5">
                         <p className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">
                           Response {e.status !== null && <span className={clsx("ml-1", STATUS_COLOR(e.status))}>{e.status}</span>}
-                          {e.latency !== null && <span className="ml-2 text-gray-300 dark:text-zinc-700">{e.latency}ms</span>}
+                          {e.latency !== null && <span className="ml-2 text-gray-300 dark:text-zinc-600">{e.latency}ms</span>}
                         </p>
                         {e.resBody != null && (
                           <button onClick={() => copyEntry(e.id, JSON.stringify(e.resBody as object, null, 2))}
@@ -787,7 +787,7 @@ export function ApiDocsPage() {
       <div className="flex items-center gap-3 px-5 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
         <FileCode2 size={13} className="text-indigo-400 shrink-0" />
         <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">API Reference</span>
-        <span className="text-[10px] text-gray-300 dark:text-zinc-700">{totalEndpoints} endpoints</span>
+        <span className="text-[10px] text-gray-300 dark:text-zinc-600">{totalEndpoints} endpoints</span>
 
         {/* Page tabs */}
         <div className="flex items-center gap-0 ml-4 border-b border-transparent -mb-px">
@@ -832,7 +832,7 @@ export function ApiDocsPage() {
                     )}>
                     <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", d.dot)} />
                     {d.label}
-                    <span className="ml-auto text-[10px] text-gray-300 dark:text-zinc-700">{d.endpoints.length}</span>
+                    <span className="ml-auto text-[10px] text-gray-300 dark:text-zinc-600">{d.endpoints.length}</span>
                   </button>
                 ))}
               </div>
@@ -848,7 +848,7 @@ export function ApiDocsPage() {
                   ) : (
                     filtered.map(ep => (
                       <div key={ep.id}>
-                        <p className="text-[10px] text-gray-300 dark:text-zinc-700 mb-1.5 font-medium uppercase tracking-wider">{(ep as typeof ep & {_domain: string})._domain}</p>
+                        <p className="text-[10px] text-gray-300 dark:text-zinc-600 mb-1.5 font-medium uppercase tracking-wider">{(ep as typeof ep & {_domain: string})._domain}</p>
                         <EndpointRow ep={ep} />
                       </div>
                     ))

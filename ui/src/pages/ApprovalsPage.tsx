@@ -132,9 +132,9 @@ const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: 
 function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
   if (approvals.length === 0) return (
     <div className="flex flex-col items-center justify-center py-16 gap-2 text-center px-6">
-      <Inbox size={26} className="text-gray-300 dark:text-zinc-700" />
+      <Inbox size={26} className="text-gray-300 dark:text-zinc-600" />
       <p className="text-[13px] text-gray-400 dark:text-zinc-600 font-medium">Inbox clear</p>
-      <p className="text-[11px] text-gray-300 dark:text-zinc-700 max-w-xs">
+      <p className="text-[11px] text-gray-300 dark:text-zinc-600 max-w-xs">
         No approvals match this filter. Approvals appear here when a run hits a human-in-the-loop gate
         that requires operator sign-off.
       </p>
@@ -166,10 +166,10 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
               <span className="flex items-center gap-1 group/id">{shortId(a.approval_id)}<CopyButton text={a.approval_id} label="Copy approval ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>
             </td>
             <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-500 whitespace-nowrap text-[12px] hidden sm:table-cell">
-              {a.run_id ? <span title={a.run_id}>{shortId(a.run_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
+              {a.run_id ? <span title={a.run_id}>{shortId(a.run_id)}</span> : <span className="text-gray-300 dark:text-zinc-600">—</span>}
             </td>
             <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-500 whitespace-nowrap text-[12px] hidden md:table-cell">
-              {a.task_id ? <span title={a.task_id}>{shortId(a.task_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
+              {a.task_id ? <span title={a.task_id}>{shortId(a.task_id)}</span> : <span className="text-gray-300 dark:text-zinc-600">—</span>}
             </td>
             <td className="px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">
               <span className={clsx(

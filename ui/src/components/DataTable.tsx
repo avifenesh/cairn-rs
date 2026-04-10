@@ -88,7 +88,7 @@ function triggerDownload(csv: string, filename: string) {
 // ── Sort icon ─────────────────────────────────────────────────────────────────
 
 function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) return <ChevronsUpDown size={11} className="text-gray-300 dark:text-zinc-700 ml-1 inline shrink-0" />;
+  if (!active) return <ChevronsUpDown size={11} className="text-gray-300 dark:text-zinc-600 ml-1 inline shrink-0" />;
   return dir === 'asc'
     ? <ChevronUp   size={11} className="text-indigo-400 ml-1 inline shrink-0" />
     : <ChevronDown size={11} className="text-indigo-400 ml-1 inline shrink-0" />;

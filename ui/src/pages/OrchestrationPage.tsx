@@ -162,7 +162,7 @@ function TaskRow({ task, fresh }: { task: TaskRecord; fresh: boolean }) {
       </div>
 
       {/* Duration + age */}
-      <div className="flex items-center gap-3 shrink-0 text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums">
+      <div className="flex items-center gap-3 shrink-0 text-[10px] text-gray-300 dark:text-zinc-600 tabular-nums">
         <span>{fmtDur(task.created_at, endMs)}</span>
         <span>{fmtAge(task.created_at)}</span>
       </div>
@@ -220,11 +220,11 @@ function RunRow({
         {/* State + task count */}
         <div className="flex items-center gap-2 shrink-0">
           <StatePill state={run.state} />
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700">{taskSummary}</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600">{taskSummary}</span>
         </div>
 
         {/* Timing */}
-        <div className="flex items-center gap-3 shrink-0 text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums">
+        <div className="flex items-center gap-3 shrink-0 text-[10px] text-gray-300 dark:text-zinc-600 tabular-nums">
           <span>{fmtDur(run.created_at, endMs)}</span>
           <span>{fmtAge(run.created_at)}</span>
         </div>
@@ -234,7 +234,7 @@ function RunRow({
       {expanded && (
         <div className="space-y-0.5 mt-0.5">
           {tasks.length === 0 ? (
-            <div className="ml-20 text-[10px] text-gray-300 dark:text-zinc-700 italic py-0.5">No tasks yet</div>
+            <div className="ml-20 text-[10px] text-gray-300 dark:text-zinc-600 italic py-0.5">No tasks yet</div>
           ) : (
             tasks.map(t => (
               <TaskRow key={t.task_id} task={t} fresh={freshTaskIds.has(t.task_id)} />
@@ -309,7 +309,7 @@ function SessionRow({
         </div>
 
         {/* Age */}
-        <span className="text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums shrink-0">
+        <span className="text-[10px] text-gray-300 dark:text-zinc-600 tabular-nums shrink-0">
           {fmtAge(session.created_at)}
         </span>
       </div>
@@ -318,7 +318,7 @@ function SessionRow({
       {expandedSession && (
         <div className="border-t border-gray-200/60 dark:border-zinc-800/60 px-3 py-2 space-y-0.5 bg-white dark:bg-zinc-950/30">
           {runs.length === 0 ? (
-            <p className="text-[11px] text-gray-300 dark:text-zinc-700 italic pl-7 py-1">No runs in this session</p>
+            <p className="text-[11px] text-gray-300 dark:text-zinc-600 italic pl-7 py-1">No runs in this session</p>
           ) : (
             runs.map(item => (
               <RunRow
@@ -604,7 +604,7 @@ export function OrchestrationPage() {
             {/* Legend */}
             {tree.length > 0 && (
               <div className="flex items-center gap-4 pt-1 flex-wrap">
-                <span className="text-[10px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider">States:</span>
+                <span className="text-[10px] text-gray-300 dark:text-zinc-600 uppercase tracking-wider">States:</span>
                 {[
                   { state: "running",  label: "running"  },
                   { state: "pending",  label: "pending"  },
@@ -627,7 +627,7 @@ export function OrchestrationPage() {
 
             {/* SSE event count */}
             {streamEvents.length > 0 && (
-              <div className="flex items-center gap-2 text-[10px] text-gray-300 dark:text-zinc-700">
+              <div className="flex items-center gap-2 text-[10px] text-gray-300 dark:text-zinc-600">
                 <CheckCircle2 size={10} className="text-emerald-700" />
                 {streamEvents.length} live event{streamEvents.length !== 1 ? "s" : ""} received this session
               </div>
@@ -637,7 +637,7 @@ export function OrchestrationPage() {
       </div>
 
       {/* Footer: update cadence */}
-      <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 shrink-0 text-[10px] text-gray-300 dark:text-zinc-700">
+      <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 shrink-0 text-[10px] text-gray-300 dark:text-zinc-600">
         <Clock size={10} />
         Polls every 10 s · SSE triggers immediate refetch on session, run, and task events
         {freshIds.size > 0 && (

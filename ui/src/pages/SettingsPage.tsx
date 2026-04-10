@@ -5,6 +5,7 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { usePreferences } from "../hooks/usePreferences";
+import { useScope } from "../hooks/useScope";
 import { useWebSocket } from "../hooks/useWebSocket";
 import type { DeploymentSettings, SystemInfo } from "../lib/types";
 
@@ -190,7 +191,7 @@ function SecretChip({ status }: { status: EnvSecret }) {
       not set
     </span>
   );
-  return <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>;
+  return <span className="text-[11px] text-gray-300 dark:text-zinc-600 font-mono">—</span>;
 }
 
 function EnvValue({ value }: { value: string }) {
@@ -226,7 +227,7 @@ function EnvVarsSection({
     },
     {
       name: 'CAIRN_BRAIN_URL',
-      current: <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono italic">not exposed</span>,
+      current: <span className="text-[11px] text-gray-300 dark:text-zinc-600 font-mono italic">not exposed</span>,
       default_:    '(none)',
       description: 'Base URL for the brain LLM provider (OpenAI-compatible). Used for orchestration and high-capability tasks.',
     },
@@ -234,7 +235,7 @@ function EnvVarsSection({
       name: 'CAIRN_STORAGE',
       current: settings
         ? <EnvValue value={settings.store_backend} />
-        : <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>,
+        : <span className="text-[11px] text-gray-300 dark:text-zinc-600 font-mono">—</span>,
       default_:    'in_memory',
       description: 'Persistence backend: in_memory (default), sqlite, or postgres.',
     },
@@ -242,19 +243,19 @@ function EnvVarsSection({
       name: 'CAIRN_MODE',
       current: info?.environment.deployment_mode
         ? <EnvValue value={info.environment.deployment_mode} />
-        : <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>,
+        : <span className="text-[11px] text-gray-300 dark:text-zinc-600 font-mono">—</span>,
       default_:    'local',
       description: 'Deployment mode: local (single user) or self_hosted_team (multi-tenant).',
     },
     {
       name: 'CAIRN_LISTEN_ADDR',
-      current: host ? <EnvValue value={host} /> : <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>,
+      current: host ? <EnvValue value={host} /> : <span className="text-[11px] text-gray-300 dark:text-zinc-600 font-mono">—</span>,
       default_:    '127.0.0.1',
       description: 'TCP address to bind. Set to 0.0.0.0 to listen on all interfaces.',
     },
     {
       name: 'CAIRN_LISTEN_PORT',
-      current: port ? <EnvValue value={port} /> : <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono">—</span>,
+      current: port ? <EnvValue value={port} /> : <span className="text-[11px] text-gray-300 dark:text-zinc-600 font-mono">—</span>,
       default_:    '3000',
       description: 'TCP port to listen on.',
     },
@@ -271,13 +272,13 @@ function EnvVarsSection({
     },
     {
       name: 'CAIRN_TLS_CERT',
-      current: <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono italic">not exposed</span>,
+      current: <span className="text-[11px] text-gray-300 dark:text-zinc-600 font-mono italic">not exposed</span>,
       default_:    '(none)',
       description: 'Path to PEM certificate file for HTTPS. Requires CAIRN_TLS_KEY.',
     },
     {
       name: 'CAIRN_TLS_KEY',
-      current: <span className="text-[11px] text-gray-300 dark:text-zinc-700 font-mono italic">not exposed</span>,
+      current: <span className="text-[11px] text-gray-300 dark:text-zinc-600 font-mono italic">not exposed</span>,
       default_:    '(none)',
       description: 'Path to PEM private key file for HTTPS. Requires CAIRN_TLS_CERT.',
       secret: true,
@@ -304,7 +305,7 @@ function EnvVarsSection({
                     {row.name}
                   </code>
                   {row.secret && (
-                    <span className="ml-1.5 text-[9px] text-gray-300 dark:text-zinc-700 uppercase tracking-wide">secret</span>
+                    <span className="ml-1.5 text-[9px] text-gray-300 dark:text-zinc-600 uppercase tracking-wide">secret</span>
                   )}
                 </td>
                 <td className="px-4 py-2.5 align-top text-right">
@@ -564,15 +565,15 @@ function CorsDiagnosticsSection({ deploymentMode }: { deploymentMode?: string })
           {CORS_HEADERS_OF_INTEREST.map(h => {
             const raw = result.headers[h];
             const display = h === "access-control-max-age"
-              ? (fmtMaxAge(raw) ?? <span className="text-gray-300 dark:text-zinc-700">absent</span>)
-              : raw ?? <span className="text-gray-300 dark:text-zinc-700">absent</span>;
+              ? (fmtMaxAge(raw) ?? <span className="text-gray-300 dark:text-zinc-600">absent</span>)
+              : raw ?? <span className="text-gray-300 dark:text-zinc-600">absent</span>;
             const present = raw !== undefined;
             return (
               <div key={h} className="flex items-start justify-between gap-4 text-[11px]">
                 <span className="font-mono text-gray-400 dark:text-zinc-600 shrink-0">{fmtHeader(h)}</span>
                 <span className={clsx(
                   "font-mono truncate text-right max-w-[260px]",
-                  present ? "text-gray-700 dark:text-zinc-300" : "text-gray-300 dark:text-zinc-700 italic",
+                  present ? "text-gray-700 dark:text-zinc-300" : "text-gray-300 dark:text-zinc-600 italic",
                 )} title={raw}>
                   {display}
                 </span>
@@ -665,13 +666,13 @@ function PreferenceRow({
         <p className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">{label}</p>
         <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5 leading-relaxed">{description}</p>
         {isLoading ? (
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono mt-1 block">loading…</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono mt-1 block">loading…</span>
         ) : stored !== undefined ? (
           <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono mt-1 block">
             stored: <span className="text-gray-400 dark:text-zinc-500">{String(stored)}</span>
           </span>
         ) : (
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700 italic mt-1 block">not set</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600 italic mt-1 block">not set</span>
         )}
       </div>
 
@@ -850,7 +851,7 @@ function PreferencesTab() {
       </div>
 
       {/* Hint about future per-project overrides */}
-      <p className="text-[11px] text-gray-300 dark:text-zinc-700 leading-relaxed px-1">
+      <p className="text-[11px] text-gray-300 dark:text-zinc-600 leading-relaxed px-1">
         These defaults apply at the tenant level.
         Project-level overrides will be configurable here once multi-tenant project isolation is enabled.
       </p>

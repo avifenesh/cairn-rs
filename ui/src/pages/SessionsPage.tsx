@@ -178,13 +178,13 @@ export function SessionsPage() {
         <DataTable<SessionRecord>
           data={list}
           columns={[
-            { key: 'arrow',      header: '',           render: _r => <ChevronRight size={13} className="text-gray-300 dark:text-zinc-700" /> },
+            { key: 'arrow',      header: '',           render: _r => <ChevronRight size={13} className="text-gray-300 dark:text-zinc-600" /> },
             { key: 'session_id', header: 'Session ID', render: r => <span className="font-mono text-xs text-gray-800 dark:text-zinc-200 whitespace-nowrap" title={r.session_id}>{mono(r.session_id, 22)}</span>, sortValue: r => r.session_id },
             { key: 'tenant',     header: 'Tenant',     render: r => <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap hidden md:block">{r.project.tenant_id}</span> },
             { key: 'workspace',  header: 'Workspace',  render: r => <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap hidden lg:block">{r.project.workspace_id}</span> },
             { key: 'project',    header: 'Project',    render: r => <span className="font-mono text-[11px] text-gray-500 dark:text-zinc-400 whitespace-nowrap">{mono(r.project.project_id, 16)}</span> },
             { key: 'state',      header: 'Status',     render: r => <SessionPill state={r.state} />,                      sortValue: r => r.state },
-            { key: 'runs',       header: 'Runs',       render: r => { const n = runCountFor(r.session_id); return n > 0 ? <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[10px] font-medium tabular-nums">{n}</span> : <span className="text-gray-300 dark:text-zinc-700 text-[11px]">—</span>; } },
+            { key: 'runs',       header: 'Runs',       render: r => { const n = runCountFor(r.session_id); return n > 0 ? <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 text-[10px] font-medium tabular-nums">{n}</span> : <span className="text-gray-300 dark:text-zinc-600 text-[11px]">—</span>; } },
             { key: 'created',    header: 'Created',    render: r => <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap" title={fmtTs(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
           ]}
           filterFn={(r, q) => r.session_id.includes(q) || r.project.project_id.includes(q) || r.project.tenant_id.includes(q) || r.state.includes(q)}

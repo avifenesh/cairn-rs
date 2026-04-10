@@ -283,7 +283,7 @@ function CostWidget() {
       <div className="flex items-center justify-between mb-2">
         <SectionLabel>Costs</SectionLabel>
         {dataUpdatedAt > 0 && (
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums">
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600 tabular-nums">
             {new Date(dataUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </span>
         )}
@@ -458,7 +458,7 @@ function CheckRow({
           <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono">{check.models} model{check.models !== 1 ? "s" : ""}</span>
         )}
         {check.latency_ms !== undefined && (
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono tabular-nums">{check.latency_ms}ms</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono tabular-nums">{check.latency_ms}ms</span>
         )}
         <span className="flex items-center gap-1.5 text-[11px] font-medium">
           <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", STATUS_DOT[check.status] ?? "bg-zinc-600")} />
@@ -549,8 +549,8 @@ function SystemHealthCard() {
           )}
 
           <div className="flex items-center justify-between pt-2 mt-1 border-t border-gray-200/60 dark:border-zinc-800/60">
-            <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono">v{data.version}</span>
-            <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono tabular-nums">
+            <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono">v{data.version}</span>
+            <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono tabular-nums">
               up {fmtUptime(data.uptime_seconds)}
             </span>
           </div>

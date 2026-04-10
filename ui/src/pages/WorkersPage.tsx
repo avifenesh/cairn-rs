@@ -303,7 +303,7 @@ function WorkerRow({
               )}
             </span>
           ) : (
-            <span className="text-[11px] text-gray-300 dark:text-zinc-700">—</span>
+            <span className="text-[11px] text-gray-300 dark:text-zinc-600">—</span>
           )}
         </div>
 
@@ -329,7 +329,7 @@ function WorkerRow({
 
         {/* Last heartbeat */}
         <div className="w-28 shrink-0 px-2 flex items-center gap-1">
-          <Clock size={10} className="text-gray-300 dark:text-zinc-700 shrink-0" />
+          <Clock size={10} className="text-gray-300 dark:text-zinc-600 shrink-0" />
           <span
             className={clsx(
               "text-[11px] tabular-nums",
@@ -350,7 +350,7 @@ function WorkerRow({
             <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
               Task History
             </span>
-            <span className="text-[10px] text-gray-300 dark:text-zinc-700">
+            <span className="text-[10px] text-gray-300 dark:text-zinc-600">
               ({worker.history.length} records)
             </span>
           </div>
@@ -534,8 +534,8 @@ export function WorkersPage() {
       {/* Data source note */}
       {!isLoading && totalWorkers > 0 && (
         <div className="flex items-center gap-1.5 px-4 py-2 border-t border-gray-200 dark:border-zinc-800 shrink-0">
-          <AlertTriangle size={10} className="text-gray-300 dark:text-zinc-700 shrink-0" />
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700">
+          <AlertTriangle size={10} className="text-gray-300 dark:text-zinc-600 shrink-0" />
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600">
             Worker data derived from task lease records — refreshes every 10 s.
             Only workers that have claimed at least one task appear here.
           </span>

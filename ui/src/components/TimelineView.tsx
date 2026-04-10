@@ -384,7 +384,7 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
         >
           {/* Axis header cell */}
           <div
-            className="flex items-end px-2 pb-1 text-[9px] text-gray-300 dark:text-zinc-700 uppercase tracking-wider border-b border-gray-200 dark:border-zinc-800"
+            className="flex items-end px-2 pb-1 text-[9px] text-gray-300 dark:text-zinc-600 uppercase tracking-wider border-b border-gray-200 dark:border-zinc-800"
             style={{ height: AXIS_H }}
           >
             Run
@@ -412,7 +412,7 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
                     {shortId(run.run_id)}
                   </p>
                   {hasTasks && (
-                    <p className="text-[9px] text-gray-300 dark:text-zinc-700 mt-0.5">
+                    <p className="text-[9px] text-gray-300 dark:text-zinc-600 mt-0.5">
                       {runTasks.length} task{runTasks.length !== 1 ? "s" : ""}
                     </p>
                   )}
@@ -487,7 +487,7 @@ export function TimelineView({ runs, tasks, zoom = "6h", singleRun: _singleRun }
         {tasks && tasks.length > 0 && (
           <>
             <span className="text-zinc-800 text-[10px]">|</span>
-            <span className="text-[10px] text-gray-300 dark:text-zinc-700 italic">smaller bars = tasks</span>
+            <span className="text-[10px] text-gray-300 dark:text-zinc-600 italic">smaller bars = tasks</span>
           </>
         )}
       </div>

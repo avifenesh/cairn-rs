@@ -85,6 +85,7 @@ function StatCard({ label, value, sub, accent = "default" }: {
 
 function ModelSettingsRow({ connectionId, modelId }: { connectionId: string; modelId: string }) {
   const toast       = useToast();
+  const [scope]     = useScope();
   const [open, setOpen] = useState(false);
 
   // ── Field state ───────────────────────────────────────────────────────────
@@ -144,10 +145,10 @@ function ModelSettingsRow({ connectionId, modelId }: { connectionId: string; mod
   const save = async () => {
     setSaving(true);
     const writes: Promise<unknown>[] = [];
-    if (contextWindow.trim())   writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:context_window`,   parseInt(contextWindow, 10)));
-    if (maxOutputTokens.trim()) writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:max_output_tokens`, parseInt(maxOutputTokens, 10)));
-    if (temperature.trim())     writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:temperature`,       parseFloat(temperature)));
-    writes.push(defaultApi.setDefaultSetting("tenant", "default", `${base}:thinking_mode`, thinking));
+    if (contextWindow.trim())   writes.push(defaultApi.setDefaultSetting("tenant", scope.tenant_id, `${base}:context_window`,   parseInt(contextWindow, 10)));
+    if (maxOutputTokens.trim()) writes.push(defaultApi.setDefaultSetting("tenant", scope.tenant_id, `${base}:max_output_tokens`, parseInt(maxOutputTokens, 10)));
+    if (temperature.trim())     writes.push(defaultApi.setDefaultSetting("tenant", scope.tenant_id, `${base}:temperature`,       parseFloat(temperature)));
+    writes.push(defaultApi.setDefaultSetting("tenant", scope.tenant_id, `${base}:thinking_mode`, thinking));
     try {
       await Promise.all(writes);
       toast.success(`Settings saved for ${modelId}`);
@@ -206,7 +207,7 @@ function ModelSettingsRow({ connectionId, modelId }: { connectionId: string; mod
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Max output tokens</span>
               {ctxNum > 0 && !maxOutputTokens && (
-                <span className="text-[10px] text-gray-300 dark:text-zinc-700 italic">default ≈ {fmtK(Math.round(ctxNum / 4))}</span>
+                <span className="text-[10px] text-gray-300 dark:text-zinc-600 italic">default ≈ {fmtK(Math.round(ctxNum / 4))}</span>
               )}
             </div>
             <input
@@ -383,7 +384,7 @@ function ConnectionRow({
         <td className="px-3 h-10">
           <div className="flex items-center gap-1 flex-wrap">
             {record.supported_models.length === 0 ? (
-              <span className="text-[10px] text-gray-300 dark:text-zinc-700 italic">none</span>
+              <span className="text-[10px] text-gray-300 dark:text-zinc-600 italic">none</span>
             ) : (
               record.supported_models.slice(0, 3).map(m => (
                 <span key={m} className="flex items-center gap-0.5 text-[10px] font-mono text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded px-1.5 py-0.5">
@@ -438,7 +439,7 @@ function ConnectionRow({
             <div className="bg-white dark:bg-zinc-950 rounded-md border border-gray-200 dark:border-zinc-800 overflow-hidden">
               <div className="px-3 py-1.5 border-b border-gray-200 dark:border-zinc-800 flex items-center gap-2">
                 <span className="text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Models</span>
-                <span className="text-[10px] text-gray-300 dark:text-zinc-700">· defaults are tenant-scoped</span>
+                <span className="text-[10px] text-gray-300 dark:text-zinc-600">· defaults are tenant-scoped</span>
               </div>
               {record.supported_models.map((m, i) => (
                 <div key={m} className={clsx(
@@ -466,6 +467,7 @@ interface AddProviderModalProps {
 
 function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
   const toast = useToast();
+  const [scope] = useScope();
   const formId = useId();
 
   // Step: 0=type, 1=form, 2=models
@@ -505,7 +507,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
   const createMutation = useMutation({
     mutationFn: () =>
       defaultApi.createProviderConnection({
-        tenant_id: "default",
+        tenant_id: scope.tenant_id,
         provider_connection_id: connectionId.trim(),
         provider_family: family.trim(),
         adapter_type: adapter.trim(),
@@ -546,7 +548,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                   ? "text-indigo-300"
                   : i < step
                     ? "text-gray-500 dark:text-zinc-400 cursor-pointer hover:text-gray-700 dark:hover:text-zinc-300"
-                    : "text-gray-300 dark:text-zinc-700",
+                    : "text-gray-300 dark:text-zinc-600",
               )}
                 onClick={() => i < step && setStep(i as 0 | 1 | 2)}
               >
@@ -745,7 +747,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
               )}
 
               {models.length === 0 && (
-                <p className="text-[11px] text-gray-300 dark:text-zinc-700 italic">
+                <p className="text-[11px] text-gray-300 dark:text-zinc-600 italic">
                   You can register models later from the connection row.
                 </p>
               )}
@@ -835,12 +837,12 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
             Provider Connections
           </p>
           {entries.length > 0 && (
-            <span className="text-[11px] text-gray-300 dark:text-zinc-700">({entries.length})</span>
+            <span className="text-[11px] text-gray-300 dark:text-zinc-600">({entries.length})</span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {dataUpdatedAt > 0 && (
-            <span className="text-[11px] font-mono text-gray-300 dark:text-zinc-700">
+            <span className="text-[11px] font-mono text-gray-300 dark:text-zinc-600">
               {new Date(dataUpdatedAt).toLocaleTimeString()}
             </span>
           )}
@@ -894,7 +896,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
           </div>
         ) : entries.length === 0 ? (
           <div className="px-4 py-10 text-center space-y-3">
-            <Server size={24} className="text-gray-300 dark:text-zinc-700 mx-auto" />
+            <Server size={24} className="text-gray-300 dark:text-zinc-600 mx-auto" />
             <p className="text-[12px] text-gray-400 dark:text-zinc-600">No provider connections registered.</p>
             <button
               onClick={onAdd}
@@ -922,7 +924,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
 
       {/* Legacy health table header note */}
       {entries.length > 0 && healthData && (
-        <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-right">
+        <p className="text-[10px] text-gray-300 dark:text-zinc-600 text-right">
           Health data auto-refreshes every 20 s · last check{" "}
           {Array.isArray(healthData) && healthData.length > 0
             ? fmtTime(Math.max(...healthData.map(h => h.last_checked_at)))
@@ -980,7 +982,7 @@ export function ProvidersPage() {
               </div>
             ))}
           </div>
-          <p className="text-[10px] text-gray-300 dark:text-zinc-700">
+          <p className="text-[10px] text-gray-300 dark:text-zinc-600">
             Activated via environment variables. Manage API keys in your .env file.
           </p>
         </section>

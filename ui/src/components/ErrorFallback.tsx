@@ -112,7 +112,7 @@ export function ErrorFallback({
       </div>
 
       {/* Error detail */}
-      <p className="text-[11px] font-mono text-gray-300 dark:text-zinc-700 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800
+      <p className="text-[11px] font-mono text-gray-300 dark:text-zinc-600 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800
                     rounded px-3 py-1.5 max-w-sm break-all">
         {message}
       </p>

@@ -198,7 +198,7 @@ function ChannelDetail({
         <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
           Recent Deliveries
           {myDeliveries.length > 0 && (
-            <span className="ml-1.5 font-normal normal-case text-gray-300 dark:text-zinc-700">({myDeliveries.length})</span>
+            <span className="ml-1.5 font-normal normal-case text-gray-300 dark:text-zinc-600">({myDeliveries.length})</span>
           )}
         </span>
 
@@ -342,7 +342,7 @@ function ChannelRow({
               <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums">{fmtRelative(lastTriggeredMs)}</span>
             </>
           ) : (
-            <span className="text-[11px] text-gray-300 dark:text-zinc-700">—</span>
+            <span className="text-[11px] text-gray-300 dark:text-zinc-600">—</span>
           )}
         </div>
 
@@ -499,7 +499,7 @@ function AddChannelModal({
           <div>
             <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-2">
               Event Subscriptions
-              <span className="ml-1.5 text-gray-300 dark:text-zinc-700 font-normal">(applies to all channels)</span>
+              <span className="ml-1.5 text-gray-300 dark:text-zinc-600 font-normal">(applies to all channels)</span>
             </label>
             <div className="rounded-md border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
               {ALL_EVENTS.map(({ value, label }) => (
@@ -519,7 +519,7 @@ function AddChannelModal({
                 </label>
               ))}
             </div>
-            <p className="mt-1.5 text-[10px] text-gray-300 dark:text-zinc-700">
+            <p className="mt-1.5 text-[10px] text-gray-300 dark:text-zinc-600">
               {form.selectedEvents.size} of {ALL_EVENTS.length} events selected
             </p>
           </div>

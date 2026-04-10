@@ -136,9 +136,9 @@ function TriggersTable({ triggers, projectPath }: { triggers: Trigger[]; project
 
   if (triggers.length === 0) return (
     <div className="flex flex-col items-center justify-center py-16 gap-2 text-center px-6">
-      <Inbox size={26} className="text-gray-300 dark:text-zinc-700" />
+      <Inbox size={26} className="text-gray-300 dark:text-zinc-600" />
       <p className="text-[13px] text-gray-400 dark:text-zinc-600 font-medium">No triggers</p>
-      <p className="text-[11px] text-gray-300 dark:text-zinc-700 max-w-xs">
+      <p className="text-[11px] text-gray-300 dark:text-zinc-600 max-w-xs">
         Triggers bind signals to runs. Create one to automate agent responses to external events.
       </p>
     </div>

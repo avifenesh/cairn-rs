@@ -167,7 +167,7 @@ function activePage(route: Route): NavPage {
 
 function PlaceholderPage({ page }: { page: NavPage }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-400 dark:text-zinc-700">
+    <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-400 dark:text-zinc-600">
       <span className="text-xl font-semibold text-gray-400 dark:text-zinc-600">{PAGE_TITLES[page]}</span>
       <p className="text-[13px]">Coming soon.</p>
     </div>

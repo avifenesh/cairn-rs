@@ -275,7 +275,7 @@ function LifecycleBanner() {
           Task Lifecycle
         </span>
         {!open && (
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700 ml-1">
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600 ml-1">
             queued → claimed → running → completed / failed
           </span>
         )}
@@ -328,7 +328,7 @@ function TaskCard({ task, cfg }: { task: TaskRecord; cfg: StateConfig }) {
 
       {/* Age */}
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-gray-300 dark:text-zinc-700 tabular-nums">
+        <span className="text-[10px] text-gray-300 dark:text-zinc-600 tabular-nums">
           {fmtAge(task.created_at)} old
         </span>
         {task.failure_class && (
@@ -380,7 +380,7 @@ function KanbanColumn({ state, tasks }: { state: TaskState; tasks: TaskRecord[] 
               <TaskCard key={t.task_id} task={t} cfg={cfg} />
             ))}
             {hidden > 0 && (
-              <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-center py-1">
+              <p className="text-[10px] text-gray-300 dark:text-zinc-600 text-center py-1">
                 +{hidden} more
               </p>
             )}
@@ -418,9 +418,9 @@ function BoardView({ tasks }: { tasks: TaskRecord[] }) {
     <div className="flex-1 overflow-x-auto overflow-y-hidden p-3">
       {totalVisible === 0 ? (
         <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-6">
-          <ListChecks size={28} className="text-gray-300 dark:text-zinc-700" />
+          <ListChecks size={28} className="text-gray-300 dark:text-zinc-600" />
           <p className="text-[13px] text-gray-400 dark:text-zinc-600 font-medium">No tasks yet</p>
-          <p className="text-[11px] text-gray-300 dark:text-zinc-700 max-w-xs">
+          <p className="text-[11px] text-gray-300 dark:text-zinc-600 max-w-xs">
             Tasks are created automatically when a run starts executing work.
             Start a run in the <a href="#runs" onClick={() => { window.location.hash = "runs"; }} className="text-indigo-500 hover:text-indigo-400">Runs</a> page to see tasks appear here.
           </p>
@@ -740,11 +740,11 @@ export function TasksPage() {
             getRowId={t => t.task_id}
             columns={[
               { key: "task_id",    header: "Task ID",    render: r => <span className="flex items-center gap-1 font-mono text-xs text-gray-700 dark:text-zinc-300 whitespace-nowrap group/id" title={r.task_id}>{shortId(r.task_id)}<CopyButton text={r.task_id} label="Copy task ID" size={10} className="opacity-0 group-hover/id:opacity-100" /></span>,                sortValue: r => r.task_id },
-              { key: "run",        header: "Run",         render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span> },
+              { key: "run",        header: "Run",         render: r => r.parent_run_id ? <span className="font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap" title={r.parent_run_id}>{shortId(r.parent_run_id)}</span> : <span className="text-gray-300 dark:text-zinc-600">—</span> },
               { key: "state",      header: "Status",      render: r => <StateBadge state={r.state as Parameters<typeof StateBadge>[0]["state"]} compact />, sortValue: r => r.state },
-              { key: "worker",     header: "Worker",      render: r => r.lease_owner ? <span className="font-mono text-[11px] text-gray-500 dark:text-zinc-400 whitespace-nowrap">{shortId(r.lease_owner)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span> },
+              { key: "worker",     header: "Worker",      render: r => r.lease_owner ? <span className="font-mono text-[11px] text-gray-500 dark:text-zinc-400 whitespace-nowrap">{shortId(r.lease_owner)}</span> : <span className="text-gray-300 dark:text-zinc-600">—</span> },
               { key: "queued_at",  header: "Queued",      render: r => <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums whitespace-nowrap" title={fmtTime(r.created_at)}>{fmtRelative(r.created_at)}</span>, sortValue: r => r.created_at },
-              { key: "started_at", header: "Started At",  render: r => r.lease_expires_at ? <span className="text-[11px] text-gray-500 dark:text-zinc-400 tabular-nums whitespace-nowrap">{fmtTime(r.updated_at)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>, sortValue: r => r.updated_at },
+              { key: "started_at", header: "Started At",  render: r => r.lease_expires_at ? <span className="text-[11px] text-gray-500 dark:text-zinc-400 tabular-nums whitespace-nowrap">{fmtTime(r.updated_at)}</span> : <span className="text-gray-300 dark:text-zinc-600">—</span>, sortValue: r => r.updated_at },
               { key: "actions",    header: "",             render: r => <RowActions task={r} /> },
             ]}
             filterFn={(r, q) => r.task_id.includes(q) || r.state.includes(q) || (r.parent_run_id ?? "").includes(q) || (r.lease_owner ?? "").includes(q)}

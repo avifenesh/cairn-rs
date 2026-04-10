@@ -101,7 +101,7 @@ function DiffPanel({ diff, onClose }: { diff: PromptVersionDiff; onClose: () => 
             — Removed ({diff.removed_lines.length})
           </p>
           {diff.removed_lines.length === 0
-            ? <p className="text-[11px] text-gray-300 dark:text-zinc-700 italic">None</p>
+            ? <p className="text-[11px] text-gray-300 dark:text-zinc-600 italic">None</p>
             : diff.removed_lines.map((l, i) => (
               <div key={i} className="flex items-start gap-1 text-[11px] font-mono text-red-400 bg-red-950/20 rounded px-1 mb-0.5 leading-relaxed">
                 <span className="text-red-700 shrink-0">−</span>
@@ -114,7 +114,7 @@ function DiffPanel({ diff, onClose }: { diff: PromptVersionDiff; onClose: () => 
             + Added ({diff.added_lines.length})
           </p>
           {diff.added_lines.length === 0
-            ? <p className="text-[11px] text-gray-300 dark:text-zinc-700 italic">None</p>
+            ? <p className="text-[11px] text-gray-300 dark:text-zinc-600 italic">None</p>
             : diff.added_lines.map((l, i) => (
               <div key={i} className="flex items-start gap-1 text-[11px] font-mono text-emerald-400 bg-emerald-950/20 rounded px-1 mb-0.5 leading-relaxed">
                 <span className="text-emerald-700 shrink-0">+</span>
@@ -170,10 +170,10 @@ function VersionRow({
           </span>
         )}
         {!version.content && (
-          <span className="flex-1 text-gray-300 dark:text-zinc-700 italic text-[11px]">content not loaded</span>
+          <span className="flex-1 text-gray-300 dark:text-zinc-600 italic text-[11px]">content not loaded</span>
         )}
 
-        <span className="shrink-0 text-gray-300 dark:text-zinc-700">{fmtTime(version.created_at)}</span>
+        <span className="shrink-0 text-gray-300 dark:text-zinc-600">{fmtTime(version.created_at)}</span>
 
         {/* Actions */}
         <div className="shrink-0 flex items-center gap-1">
@@ -402,7 +402,7 @@ function AssetItem({
           {assetReleases.length} release{assetReleases.length !== 1 ? "s" : ""}
         </span>
 
-        <span className="text-[11px] text-gray-300 dark:text-zinc-700 shrink-0 hidden sm:block">
+        <span className="text-[11px] text-gray-300 dark:text-zinc-600 shrink-0 hidden sm:block">
           {fmtTime(asset.updated_at ?? asset.created_at)}
         </span>
       </button>
@@ -426,7 +426,7 @@ function AssetItem({
                 <Loader2 size={12} className="animate-spin" /> Loading versions…
               </div>
             ) : versions.length === 0 ? (
-              <p className="text-[12px] text-gray-300 dark:text-zinc-700 italic py-2">No versions yet.</p>
+              <p className="text-[12px] text-gray-300 dark:text-zinc-600 italic py-2">No versions yet.</p>
             ) : (
               <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-x-auto divide-y divide-gray-200 dark:divide-zinc-800/50">
                 {versions.map((v, i) => (
@@ -455,7 +455,7 @@ function AssetItem({
                       <code className="text-[11px] font-mono text-gray-400 dark:text-zinc-500">
                         {shortId(rel.prompt_release_id)}
                       </code>
-                      <span className="text-[10px] text-gray-300 dark:text-zinc-700">{fmtTime(rel.updated_at)}</span>
+                      <span className="text-[10px] text-gray-300 dark:text-zinc-600">{fmtTime(rel.updated_at)}</span>
                     </div>
                     <ReleaseControls release={rel} />
                   </div>
@@ -616,7 +616,7 @@ export function PromptsPage() {
         </span>
 
         {!assetsLoading && (
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700">
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600">
             {assets.length} asset{assets.length !== 1 ? "s" : ""} · {releases.length} release{releases.length !== 1 ? "s" : ""}
           </span>
         )}
@@ -672,7 +672,7 @@ export function PromptsPage() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-            <FileText size={28} className="text-gray-300 dark:text-zinc-700" />
+            <FileText size={28} className="text-gray-300 dark:text-zinc-600" />
             <p className="text-[13px] text-gray-400 dark:text-zinc-600">
               {assets.length === 0
                 ? "No prompt assets yet — create one to get started."

@@ -257,7 +257,7 @@ export function CostsPage() {
           <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
             <div className="px-4 h-9 flex items-center justify-between border-b border-gray-200 dark:border-zinc-800">
               <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Daily Spend (7d)</p>
-              <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono">µUSD</span>
+              <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono">µUSD</span>
             </div>
             <div className="p-4 flex items-end gap-4">
               <div className="flex-1">
@@ -271,7 +271,7 @@ export function CostsPage() {
                 {/* Day labels */}
                 <div className="flex justify-between mt-1.5">
                   {["6d", "5d", "4d", "3d", "2d", "1d", "Now"].map((label) => (
-                    <span key={label} className="text-[9px] text-gray-300 dark:text-zinc-700 font-mono">{label}</span>
+                    <span key={label} className="text-[9px] text-gray-300 dark:text-zinc-600 font-mono">{label}</span>
                   ))}
                 </div>
               </div>

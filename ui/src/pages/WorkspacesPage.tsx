@@ -120,7 +120,7 @@ function WorkspaceCard({
 
       {/* Footer */}
       <div className="flex items-center gap-1.5 mt-3 pt-2.5 border-t border-gray-200/50 dark:border-zinc-800/50">
-        <Clock size={10} className="text-gray-300 dark:text-zinc-700 shrink-0" />
+        <Clock size={10} className="text-gray-300 dark:text-zinc-600 shrink-0" />
         <span className="text-[10px] text-gray-400 dark:text-zinc-600">
           {fmtRelative(ws.latest_at)}
         </span>
@@ -184,7 +184,7 @@ function NewWorkspaceForm({
           )}
         />
         {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
-        <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-1">
+        <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-1">
           Lowercase letters, digits, hyphens, underscores · max 63 chars
         </p>
       </div>
@@ -429,12 +429,12 @@ export function WorkspacesPage() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-            <Layers size={28} className="text-gray-300 dark:text-zinc-700" />
+            <Layers size={28} className="text-gray-300 dark:text-zinc-600" />
             <p className="text-[13px] text-gray-400 dark:text-zinc-600">
               {filter ? `No workspaces match "${filter}"` : 'No workspaces discovered yet.'}
             </p>
             {!filter && (
-              <p className="text-[11px] text-gray-300 dark:text-zinc-700">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-600">
                 Create sessions or runs to populate workspaces, or create one above.
               </p>
             )}
@@ -454,7 +454,7 @@ export function WorkspacesPage() {
 
         {/* Scope hint */}
         {!isLoading && workspaces.length > 0 && (
-          <p className="text-[11px] text-gray-300 dark:text-zinc-700 text-center pb-2">
+          <p className="text-[11px] text-gray-300 dark:text-zinc-600 text-center pb-2">
             Clicking a workspace updates the global scope — all data views filter to that workspace immediately.
           </p>
         )}

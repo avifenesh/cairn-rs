@@ -359,12 +359,12 @@ export function CostCalculatorPage() {
               <div className="px-4 py-2.5">
                 <p className="text-[10px] text-gray-400 dark:text-zinc-600 mb-1">Input: {fmtTokens(tokensIn)} tokens</p>
                 <p className="text-[13px] font-mono text-gray-700 dark:text-zinc-300 tabular-nums">{fmtUSD(inputCost)}</p>
-                <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-0.5">${selected.inputPer1M.toFixed(4)} / 1M</p>
+                <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-0.5">${selected.inputPer1M.toFixed(4)} / 1M</p>
               </div>
               <div className="px-4 py-2.5">
                 <p className="text-[10px] text-gray-400 dark:text-zinc-600 mb-1">Output: {fmtTokens(tokensOut)} tokens</p>
                 <p className="text-[13px] font-mono text-gray-700 dark:text-zinc-300 tabular-nums">{fmtUSD(outputCost)}</p>
-                <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-0.5">${selected.outputPer1M.toFixed(4)} / 1M</p>
+                <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-0.5">${selected.outputPer1M.toFixed(4)} / 1M</p>
               </div>
             </div>
 
@@ -448,7 +448,7 @@ export function CostCalculatorPage() {
                             </span>
                           )}
                           {m.configured === false && (
-                            <span className="text-[9px] text-gray-400 dark:text-zinc-700 bg-gray-100 dark:bg-zinc-800/60 rounded px-1 py-0.5 hidden sm:inline">
+                            <span className="text-[9px] text-gray-400 dark:text-zinc-600 bg-gray-100 dark:bg-zinc-800/60 rounded px-1 py-0.5 hidden sm:inline">
                               ref
                             </span>
                           )}
@@ -486,7 +486,7 @@ export function CostCalculatorPage() {
             </table>
           </div>
 
-          <p className="mt-2 text-[10px] text-gray-300 dark:text-zinc-700 text-center">
+          <p className="mt-2 text-[10px] text-gray-300 dark:text-zinc-600 text-center">
             Prices are approximate and subject to change. Always verify with the provider's official pricing page.
             {registry && " Models sourced from your cairn provider registry."}
           </p>

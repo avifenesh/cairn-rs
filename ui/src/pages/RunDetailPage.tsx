@@ -705,7 +705,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                         <StateBadge state={t.state as Parameters<typeof StateBadge>[0]["state"]} compact />
                       </td>
                       <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-500 text-[12px] whitespace-nowrap hidden sm:table-cell">
-                        {t.lease_owner ? <span title={t.lease_owner}>{shortId(t.lease_owner)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
+                        {t.lease_owner ? <span title={t.lease_owner}>{shortId(t.lease_owner)}</span> : <span className="text-gray-300 dark:text-zinc-600">—</span>}
                       </td>
                       <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-500 whitespace-nowrap tabular-nums hidden sm:table-cell">
                         {fmtTime(t.created_at)}
@@ -785,7 +785,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                       <span className="shrink-0 text-[11px] text-gray-400 dark:text-zinc-600 font-mono tabular-nums">
                         {fmtTimeShort(ev.stored_at)}
                       </span>
-                      <span className="shrink-0 text-[10px] text-gray-300 dark:text-zinc-700 font-mono tabular-nums">
+                      <span className="shrink-0 text-[10px] text-gray-300 dark:text-zinc-600 font-mono tabular-nums">
                         #{ev.position}
                       </span>
                     </div>

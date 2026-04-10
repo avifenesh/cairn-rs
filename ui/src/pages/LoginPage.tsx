@@ -120,7 +120,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
             {/* Dev shortcut */}
             {isDev && !token && !error && (
-              <p className="text-[11px] text-gray-300 dark:text-zinc-700">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-600">
                 Dev mode — try{' '}
                 <button
                   type="button"
@@ -150,7 +150,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         </div>
 
         {/* Server info */}
-        <p className="mt-5 text-[11px] text-gray-300 dark:text-zinc-700">
+        <p className="mt-5 text-[11px] text-gray-300 dark:text-zinc-600">
           {server}
         </p>
       </div>

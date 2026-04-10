@@ -216,10 +216,10 @@ export function NotificationCenter() {
           {/* List */}
           <div className="max-h-[360px] overflow-y-auto">
             {notifications.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 gap-2 text-gray-400 dark:text-zinc-700">
-                <Play size={20} className="text-gray-300 dark:text-zinc-800" />
+              <div className="flex flex-col items-center justify-center py-10 gap-2 text-gray-400 dark:text-zinc-600">
+                <Play size={20} className="text-gray-300 dark:text-zinc-600" />
                 <p className="text-[12px]">No notifications yet</p>
-                <p className="text-[11px] text-gray-300 dark:text-zinc-800">
+                <p className="text-[11px] text-gray-300 dark:text-zinc-600">
                   Approvals, run completions, and stuck tasks appear here.
                 </p>
               </div>
@@ -237,7 +237,7 @@ export function NotificationCenter() {
           {/* Footer */}
           {notifications.length > 0 && (
             <div className="px-4 py-2 border-t border-gray-200 dark:border-zinc-800 flex items-center justify-between">
-              <span className="text-[10px] text-gray-400 dark:text-zinc-700">
+              <span className="text-[10px] text-gray-400 dark:text-zinc-600">
                 {notifications.length} notification{notifications.length !== 1 ? 's' : ''}
               </span>
               <button

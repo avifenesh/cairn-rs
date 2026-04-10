@@ -156,11 +156,11 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
               {session && (
                 <p className="text-[12px] text-gray-400 dark:text-zinc-500 mt-1 font-mono">
                   {session.project.tenant_id}
-                  <span className="text-gray-300 dark:text-zinc-700 mx-1">/</span>
+                  <span className="text-gray-300 dark:text-zinc-600 mx-1">/</span>
                   {session.project.workspace_id}
-                  <span className="text-gray-300 dark:text-zinc-700 mx-1">/</span>
+                  <span className="text-gray-300 dark:text-zinc-600 mx-1">/</span>
                   {session.project.project_id}
-                  <span className="text-gray-300 dark:text-zinc-700 ml-2 mr-1">·</span>
+                  <span className="text-gray-300 dark:text-zinc-600 ml-2 mr-1">·</span>
                   {fmtTime(session.created_at)}
                 </p>
               )}
@@ -256,10 +256,10 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                         <StateBadge state={run.state} compact />
                       </td>
                       <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-600 text-[11px] whitespace-nowrap hidden sm:table-cell">
-                        {run.parent_run_id ? <span title={run.parent_run_id}>{shortId(run.parent_run_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
+                        {run.parent_run_id ? <span title={run.parent_run_id}>{shortId(run.parent_run_id)}</span> : <span className="text-gray-300 dark:text-zinc-600">—</span>}
                       </td>
                       <td className="px-3 py-1.5 font-mono text-gray-400 dark:text-zinc-600 text-[11px] whitespace-nowrap hidden md:table-cell">
-                        {run.prompt_release_id ? <span title={run.prompt_release_id}>{shortId(run.prompt_release_id)}</span> : <span className="text-gray-300 dark:text-zinc-700">—</span>}
+                        {run.prompt_release_id ? <span title={run.prompt_release_id}>{shortId(run.prompt_release_id)}</span> : <span className="text-gray-300 dark:text-zinc-600">—</span>}
                       </td>
                       <td className="px-3 py-1.5 text-gray-400 dark:text-zinc-500 whitespace-nowrap text-[12px] tabular-nums">
                         {fmtTime(run.created_at)}
@@ -282,7 +282,7 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
               <Loader2 size={14} className="animate-spin" /> Loading traces…
             </div>
           ) : traces.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 gap-2 text-gray-300 dark:text-zinc-700">
+            <div className="flex flex-col items-center justify-center py-12 gap-2 text-gray-300 dark:text-zinc-600">
               <Inbox size={22} />
               <p className="text-[13px]">No traces for this session</p>
             </div>

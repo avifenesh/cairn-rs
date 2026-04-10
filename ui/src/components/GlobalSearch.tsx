@@ -423,11 +423,11 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
           {!enabled ? (
             /* Prompt when query is too short */
             <div className="py-10 flex flex-col items-center gap-2 text-center">
-              <Search size={22} className="text-gray-300 dark:text-zinc-700" />
+              <Search size={22} className="text-gray-300 dark:text-zinc-600" />
               <p className="text-[13px] text-gray-400 dark:text-zinc-600">
                 Type at least 2 characters to search
               </p>
-              <p className="text-[11px] text-gray-300 dark:text-zinc-700">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-600">
                 Searches across runs, sessions, tasks, approvals, traces and prompts
               </p>
             </div>
@@ -441,7 +441,7 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
               <p className="text-[13px] text-gray-400 dark:text-zinc-600">
                 No results for &ldquo;{debouncedQuery}&rdquo;
               </p>
-              <p className="text-[11px] text-gray-300 dark:text-zinc-700">
+              <p className="text-[11px] text-gray-300 dark:text-zinc-600">
                 Try a shorter query or different entity type
               </p>
             </div>
@@ -462,7 +462,7 @@ export function GlobalSearch({ initialQuery = '', onClose, onBack }: GlobalSearc
                       <span className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-widest">
                         {cfg.label}
                       </span>
-                      <span className="text-[10px] text-gray-300 dark:text-zinc-700">{items.length}</span>
+                      <span className="text-[10px] text-gray-300 dark:text-zinc-600">{items.length}</span>
                     </div>
                     {/* Results */}
                     {items.map((result, i) => (

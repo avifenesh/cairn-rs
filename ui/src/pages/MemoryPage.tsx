@@ -45,7 +45,7 @@ function ResultRow({ result, rank, even }: { result: MemoryChunkResult; rank: nu
           <span className="text-[11px] font-mono text-gray-400 dark:text-zinc-500 truncate" title={result.chunk.source_id}>
             {truncate(result.chunk.source_id, 32)}
           </span>
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700 font-mono shrink-0">
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono shrink-0">
             ·pos {result.chunk.position}
           </span>
         </div>
@@ -186,14 +186,14 @@ export function MemoryPage() {
               <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
                 Results
               </p>
-              <span className="text-[11px] text-gray-300 dark:text-zinc-700">for</span>
+              <span className="text-[11px] text-gray-300 dark:text-zinc-600">for</span>
               <span className="text-[11px] font-mono text-gray-500 dark:text-zinc-400">"{submitted}"</span>
               {!isFetching && (
-                <span className="text-[11px] text-gray-300 dark:text-zinc-700">({results.length})</span>
+                <span className="text-[11px] text-gray-300 dark:text-zinc-600">({results.length})</span>
               )}
             </div>
             {searchData?.diagnostics && (
-              <span className="text-[10px] font-mono text-gray-300 dark:text-zinc-700">
+              <span className="text-[10px] font-mono text-gray-300 dark:text-zinc-600">
                 {searchData.diagnostics.latency_ms}ms · {searchData.diagnostics.mode_used}
               </span>
             )}
@@ -234,7 +234,7 @@ export function MemoryPage() {
           <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
             Sources
             {sources && sources.length > 0 && (
-              <span className="ml-1.5 text-gray-300 dark:text-zinc-700 normal-case tracking-normal font-normal">
+              <span className="ml-1.5 text-gray-300 dark:text-zinc-600 normal-case tracking-normal font-normal">
                 ({sources.length})
               </span>
             )}

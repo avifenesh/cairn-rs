@@ -185,7 +185,7 @@ export function EventLog({
         role="log"
       >
         {rows.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 gap-1.5 text-gray-300 dark:text-zinc-700">
+          <div className="flex flex-col items-center justify-center py-8 gap-1.5 text-gray-300 dark:text-zinc-600">
             {status === 'connected' ? (
               <><Inbox size={20} /><p className="text-[12px]">Waiting for events…</p></>
             ) : status === 'connecting' ? (

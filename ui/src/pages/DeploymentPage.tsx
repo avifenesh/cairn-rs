@@ -182,7 +182,7 @@ function RoleChip({ label, active, icon: Icon }: {
         <p className={clsx("text-[11px] font-medium", active ? "text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-600")}>
           {label}
         </p>
-        <p className={clsx("text-[10px]", active ? "text-emerald-600" : "text-gray-300 dark:text-zinc-700")}>
+        <p className={clsx("text-[10px]", active ? "text-emerald-600" : "text-gray-300 dark:text-zinc-600")}>
           {active ? "active" : "inactive"}
         </p>
       </div>
@@ -515,7 +515,7 @@ export function DeploymentPage() {
         </div>
 
         {/* Last updated footer */}
-        <div className="flex items-center gap-2 text-[10px] text-gray-300 dark:text-zinc-700 border-t border-gray-200 dark:border-zinc-800 pt-3">
+        <div className="flex items-center gap-2 text-[10px] text-gray-300 dark:text-zinc-600 border-t border-gray-200 dark:border-zinc-800 pt-3">
           <Clock size={10} />
           <span>
             Health refreshes every 30s · Settings and build info every 60s

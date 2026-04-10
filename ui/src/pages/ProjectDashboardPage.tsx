@@ -100,7 +100,7 @@ function RunRow({ run }: { run: RunRecord }) {
       <span className="text-[11px] text-gray-400 dark:text-zinc-600 tabular-nums shrink-0">
         {fmtDuration(run.created_at, isTerminal ? run.updated_at : undefined)}
       </span>
-      <ChevronRight size={11} className="text-gray-300 dark:text-zinc-700 shrink-0" />
+      <ChevronRight size={11} className="text-gray-300 dark:text-zinc-600 shrink-0" />
     </div>
   );
 }
@@ -143,7 +143,7 @@ function TaskRing({ tasks }: { tasks: TaskRecord[] }) {
           </div>
         );
       })}
-      <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-right pt-1">{total} total</p>
+      <p className="text-[10px] text-gray-300 dark:text-zinc-600 text-right pt-1">{total} total</p>
     </div>
   );
 }
@@ -375,7 +375,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
           <Panel>
             <div className="flex items-center justify-between mb-3">
               <SectionLabel>Run Volume (12 h)</SectionLabel>
-              <span className="flex items-center gap-1 text-[10px] text-gray-300 dark:text-zinc-700">
+              <span className="flex items-center gap-1 text-[10px] text-gray-300 dark:text-zinc-600">
                 <Radio size={9} className="text-indigo-500" />
                 hourly
               </span>
@@ -393,7 +393,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 />
                 <div className="flex justify-between mt-1">
                   {["12h", "10h", "8h", "6h", "4h", "2h", "now"].map(l => (
-                    <span key={l} className="text-[9px] text-gray-300 dark:text-zinc-700 font-mono">{l}</span>
+                    <span key={l} className="text-[9px] text-gray-300 dark:text-zinc-600 font-mono">{l}</span>
                   ))}
                 </div>
               </>
@@ -419,13 +419,13 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
             <SectionLabel>
               Active Runs
               {activeRuns.length > 0 && (
-                <span className="ml-1.5 text-gray-300 dark:text-zinc-700 font-normal normal-case tracking-normal">
+                <span className="ml-1.5 text-gray-300 dark:text-zinc-600 font-normal normal-case tracking-normal">
                   ({activeRuns.length})
                 </span>
               )}
             </SectionLabel>
             {allRuns.length > activeRuns.length && (
-              <span className="text-[10px] text-gray-300 dark:text-zinc-700">
+              <span className="text-[10px] text-gray-300 dark:text-zinc-600">
                 +{allRuns.length - activeRuns.length} completed/failed
               </span>
             )}
@@ -446,7 +446,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 <RunRow key={run.run_id} run={run} />
               ))}
               {activeRuns.length > 10 && (
-                <p className="text-[11px] text-gray-300 dark:text-zinc-700 text-center pt-2">
+                <p className="text-[11px] text-gray-300 dark:text-zinc-600 text-center pt-2">
                   +{activeRuns.length - 10} more — <button
                     onClick={() => { window.location.hash = "runs"; }}
                     className="text-indigo-500 hover:text-indigo-400 transition-colors"
@@ -525,7 +525,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                     </div>
                   ))}
                   {workers.size > 6 && (
-                    <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-right">+{workers.size - 6} more</p>
+                    <p className="text-[10px] text-gray-300 dark:text-zinc-600 text-right">+{workers.size - 6} more</p>
                   )}
                 </div>
               );
@@ -561,7 +561,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
         <Panel>
           <div className="flex items-center justify-between mb-3">
             <SectionLabel>Live Events</SectionLabel>
-            <span className="flex items-center gap-1 text-[10px] text-gray-300 dark:text-zinc-700">
+            <span className="flex items-center gap-1 text-[10px] text-gray-300 dark:text-zinc-600">
               <Radio size={9} className="text-emerald-500" /> SSE
             </span>
           </div>

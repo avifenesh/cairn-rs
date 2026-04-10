@@ -139,7 +139,7 @@ function ScopePopover({ current, onApply, onClose }: ScopePopoverProps) {
       </div>
 
       {/* Hint */}
-      <p className="px-3 pb-2.5 text-[10px] text-gray-400 dark:text-zinc-700">
+      <p className="px-3 pb-2.5 text-[10px] text-gray-400 dark:text-zinc-600">
         ⌘↵ to apply · Esc to cancel · Empty fields use defaults
       </p>
     </div>
@@ -195,9 +195,9 @@ export function TenantSelector() {
         {/* Scope breadcrumb: tenant / workspace / project */}
         <span className="truncate">
           <span className="text-gray-500 dark:text-zinc-500">{short(scope.tenant_id)}</span>
-          <span className="mx-0.5 text-gray-300 dark:text-zinc-700">/</span>
+          <span className="mx-0.5 text-gray-300 dark:text-zinc-600">/</span>
           <span className="text-gray-500 dark:text-zinc-500">{short(scope.workspace_id)}</span>
-          <span className="mx-0.5 text-gray-300 dark:text-zinc-700">/</span>
+          <span className="mx-0.5 text-gray-300 dark:text-zinc-600">/</span>
           <span className={isDefault ? 'text-gray-400 dark:text-zinc-600' : 'text-indigo-600 dark:text-indigo-400 font-medium'}>
             {short(scope.project_id)}
           </span>

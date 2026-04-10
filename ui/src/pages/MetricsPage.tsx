@@ -177,7 +177,7 @@ function ErrorBreakdown({ errors }: { errors: Record<string, number> }) {
           <Activity size={16} className="text-emerald-400" />
         </div>
         <p className="text-[12px] text-emerald-400 font-medium">No errors recorded</p>
-        <p className="text-[11px] text-gray-300 dark:text-zinc-700">All requests returned 2xx/3xx</p>
+        <p className="text-[11px] text-gray-300 dark:text-zinc-600">All requests returned 2xx/3xx</p>
       </div>
     );
   }
@@ -191,7 +191,7 @@ function ErrorBreakdown({ errors }: { errors: Record<string, number> }) {
         barHeight={7}
         rowGap={8}
       />
-      <p className="text-[10px] text-gray-300 dark:text-zinc-700 text-right">{total.toLocaleString()} total errors</p>
+      <p className="text-[10px] text-gray-300 dark:text-zinc-600 text-right">{total.toLocaleString()} total errors</p>
     </div>
   );
 }
@@ -473,7 +473,7 @@ export function MetricsPage() {
             </div>
 
             {/* Footer note */}
-            <p className="text-[10px] text-gray-300 dark:text-zinc-700 flex items-center gap-1.5">
+            <p className="text-[10px] text-gray-300 dark:text-zinc-600 flex items-center gap-1.5">
               <Activity size={10} />
               Metrics are stored in a fixed 1 000-entry ring buffer in cairn-app.
               Restarts reset the buffer. Refreshes every 10 s.

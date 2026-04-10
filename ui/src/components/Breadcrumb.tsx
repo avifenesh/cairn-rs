@@ -22,7 +22,7 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
         return (
           <Fragment key={i}>
             {i > 0 && (
-              <span className="text-gray-300 dark:text-zinc-700 select-none shrink-0" aria-hidden>
+              <span className="text-gray-300 dark:text-zinc-600 select-none shrink-0" aria-hidden>
                 /
               </span>
             )}

@@ -540,7 +540,7 @@ function ModelSettings({ temperature, onTemperature, maxTokens, onMaxTokens, dis
                      disabled:opacity-40 [appearance:textfield]
                      [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
       </div>
-      <div className="ml-auto text-[10px] text-gray-300 dark:text-zinc-700 hidden lg:block">
+      <div className="ml-auto text-[10px] text-gray-300 dark:text-zinc-600 hidden lg:block">
         passed to model as <code className="text-gray-400 dark:text-zinc-600">temperature</code> · <code className="text-gray-400 dark:text-zinc-600">max_tokens</code>
       </div>
     </div>
@@ -585,7 +585,7 @@ function SystemPromptPanel({ value, onChange, open, onToggle, disabled }: {
                 Reset to default
               </button>
             )}
-            <span className="ml-auto text-[11px] text-gray-300 dark:text-zinc-700">
+            <span className="ml-auto text-[11px] text-gray-300 dark:text-zinc-600">
               {value.length} chars · prepended as <code className="text-gray-400 dark:text-zinc-600">system</code> role
             </span>
           </div>
@@ -669,7 +669,7 @@ function ChatBubble({ msg }: { msg: Message }) {
         </div>
 
         {msg.meta && !msg.streaming && (
-          <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 px-1 text-[10px] text-gray-300 dark:text-zinc-700">
+          <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 px-1 text-[10px] text-gray-300 dark:text-zinc-600">
             <span className="flex items-center gap-1">
               <Clock size={9} />
               {msg.meta.latency_ms >= 1000
@@ -680,7 +680,7 @@ function ChatBubble({ msg }: { msg: Message }) {
               {msg.meta.model}
             </span>
             {(msg.meta.tokens_in !== undefined || msg.meta.tokens_out !== undefined) && (
-              <span className="text-gray-300 dark:text-zinc-700 font-mono">
+              <span className="text-gray-300 dark:text-zinc-600 font-mono">
                 {msg.meta.tokens_in ?? "—"}↑ {msg.meta.tokens_out ?? "—"}↓
               </span>
             )}
@@ -765,7 +765,7 @@ function ConversationSidebar({ conversations, activeId, onNew, onSelect, onDelet
 
       <div className="flex-1 overflow-y-auto py-1">
         {conversations.length === 0 ? (
-          <p className="px-3 py-6 text-[11px] text-gray-300 dark:text-zinc-700 text-center italic">No conversations yet</p>
+          <p className="px-3 py-6 text-[11px] text-gray-300 dark:text-zinc-600 text-center italic">No conversations yet</p>
         ) : (
           conversations.map((conv) => (
             <div
@@ -785,7 +785,7 @@ function ConversationSidebar({ conversations, activeId, onNew, onSelect, onDelet
                 )}>
                   {conv.title || "Untitled"}
                 </p>
-                <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-0.5">{fmtAgo(conv.timestamp)}</p>
+                <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-0.5">{fmtAgo(conv.timestamp)}</p>
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); onDelete(conv.id); }}
@@ -900,7 +900,7 @@ function InputBar({ onSubmit, disabled, placeholder, streaming, onStop }: {
           </button>
         )}
       </form>
-      <p className="text-[10px] text-gray-300 dark:text-zinc-700 mt-1.5 text-center">
+      <p className="text-[10px] text-gray-300 dark:text-zinc-600 mt-1.5 text-center">
         ⌘↵ to send · system prompt + full history sent with each message
       </p>
     </div>
@@ -1165,7 +1165,7 @@ export function PlaygroundPage() {
         <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">LLM Playground</span>
 
         {turnCount > 0 && !compareMode && (
-          <span className="text-[10px] text-gray-300 dark:text-zinc-700">{turnCount} turn{turnCount !== 1 ? "s" : ""}</span>
+          <span className="text-[10px] text-gray-300 dark:text-zinc-600">{turnCount} turn{turnCount !== 1 ? "s" : ""}</span>
         )}
 
         <div className="ml-auto flex items-center gap-3">

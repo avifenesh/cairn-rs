@@ -31,7 +31,7 @@ function DetailsCell({ metadata }: { metadata: Record<string, unknown> }) {
   const isEmpty = Object.keys(metadata).length === 0;
 
   if (isEmpty) {
-    return <span className="text-gray-300 dark:text-zinc-700 text-[11px]">—</span>;
+    return <span className="text-gray-300 dark:text-zinc-600 text-[11px]">—</span>;
   }
 
   return (
@@ -97,13 +97,13 @@ function SkeletonRows() {
 
 function EmptyState({ filtered }: { filtered: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 gap-2 text-gray-300 dark:text-zinc-700">
+    <div className="flex flex-col items-center justify-center py-20 gap-2 text-gray-300 dark:text-zinc-600">
       <Shield size={28} className="text-zinc-800" />
       <p className="text-[13px]">
         {filtered ? "No entries match this filter" : "No audit log entries yet"}
       </p>
       {!filtered && (
-        <p className="text-[11px] text-gray-300 dark:text-zinc-700">
+        <p className="text-[11px] text-gray-300 dark:text-zinc-600">
           Entries appear when actions like approvals, credential changes, or task cancellations occur.
         </p>
       )}
@@ -242,10 +242,10 @@ export function AuditLogPage() {
                     {entry.action}
                   </td>
                   <td className="px-4 py-0 text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap">
-                    {entry.resource_type || <span className="text-gray-300 dark:text-zinc-700">—</span>}
+                    {entry.resource_type || <span className="text-gray-300 dark:text-zinc-600">—</span>}
                   </td>
                   <td className="px-4 py-0 font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap">
-                    {entry.resource_id ? shortId(entry.resource_id) : <span className="text-gray-300 dark:text-zinc-700">—</span>}
+                    {entry.resource_id ? shortId(entry.resource_id) : <span className="text-gray-300 dark:text-zinc-600">—</span>}
                   </td>
                   <td className="px-4 py-0 whitespace-nowrap">
                     <OutcomeBadge outcome={entry.outcome} />
