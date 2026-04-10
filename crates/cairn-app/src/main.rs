@@ -43,6 +43,7 @@ use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::provider_health::ProviderHealthService;
+use cairn_runtime::RecoveryService;
 use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
@@ -4837,6 +4838,61 @@ async fn main() {
 
     if state.mode == DeploymentMode::Local && event_log_empty {
         seed_demo_data(&state).await;
+    }
+
+    match lib_state.sandbox_service.recover_all().await {
+        Ok(summary) => {
+            if summary.reconnected > 0 || summary.preserved > 0 || summary.failed > 0 {
+                eprintln!(
+                    "sandbox recovery: reconnected={} preserved={} failed={}",
+                    summary.reconnected, summary.preserved, summary.failed
+                );
+            }
+        }
+        Err(error) => eprintln!("sandbox recovery failed: {error}"),
+    }
+
+    let recovery_now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    match lib_state
+        .runtime
+        .recovery
+        .recover_expired_leases(recovery_now_ms, 1_000)
+        .await
+    {
+        Ok(summary) if summary.scanned > 0 || !summary.actions.is_empty() => {
+            eprintln!(
+                "lease recovery: scanned={} actions={}",
+                summary.scanned,
+                summary.actions.len()
+            );
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("lease recovery failed: {error}"),
+    }
+    match lib_state.runtime.recovery.recover_interrupted_runs(1_000).await {
+        Ok(summary) if summary.scanned > 0 || !summary.actions.is_empty() => {
+            eprintln!(
+                "run recovery: scanned={} actions={}",
+                summary.scanned,
+                summary.actions.len()
+            );
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("run recovery failed: {error}"),
+    }
+    match lib_state.runtime.recovery.resolve_stale_dependencies(1_000).await {
+        Ok(summary) if summary.scanned > 0 || !summary.actions.is_empty() => {
+            eprintln!(
+                "dependency recovery: scanned={} actions={}",
+                summary.scanned,
+                summary.actions.len()
+            );
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("dependency recovery failed: {error}"),
     }
 
     // ── Startup replays ────────────────────────────────────────────────────────
