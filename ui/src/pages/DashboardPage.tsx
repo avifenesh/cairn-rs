@@ -123,7 +123,7 @@ function ActiveRunRow({ run }: { run: RunRecord }) {
 
       {/* Run id + project */}
       <div className="flex-1 min-w-0">
-        <p className="text-[12px] font-mono text-gray-800 dark:text-zinc-200 truncate group-hover:text-gray-900 dark:text-zinc-100">
+        <p className="text-[12px] font-mono text-gray-800 dark:text-zinc-200 truncate group-hover:text-gray-900 dark:group-hover:text-zinc-100">
           {run.run_id}
         </p>
         <p className="text-[10px] text-gray-400 dark:text-zinc-600 truncate font-mono">
@@ -767,7 +767,7 @@ function OnboardingBanner() {
         <button
           onClick={() => dismiss(false)}
           aria-label="Dismiss onboarding"
-          className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors shrink-0"
+          className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors shrink-0"
         >
           ×
         </button>
@@ -790,7 +790,7 @@ function OnboardingBanner() {
       <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-200/60 dark:border-zinc-800/60">
         <button
           onClick={() => dismiss(true)}
-          className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors"
+          className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors"
         >
           Don&apos;t show again
         </button>
@@ -910,7 +910,7 @@ function ExportMenu({ onJson, onCsv, onPrint }: {
       <button
         onClick={() => setOpen(v => !v)}
         className="flex items-center gap-1.5 h-7 px-2.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900
-                   text-[11px] text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 transition-colors"
+                   text-[11px] text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600 transition-colors"
       >
         <Download size={11} />
         Export
@@ -1041,7 +1041,7 @@ export function DashboardPage() {
               </div>
               <button onClick={() => { void refetchStats(); void refetchDashboard(); }}
                 disabled={statsFetching || dashFetching}
-                className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+                className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
               >
                 <RefreshCw size={11} className={(statsFetching || dashFetching) ? "animate-spin" : ""} />
                 <span className="hidden sm:inline">Refresh</span>
@@ -1124,7 +1124,7 @@ export function DashboardPage() {
                 'px-4 h-9 text-[12px] font-medium transition-colors border-b-2 -mb-px',
                 activeTab === tab
                   ? 'text-gray-900 dark:text-zinc-100 border-indigo-500'
-                  : 'text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:text-zinc-300',
+                  : 'text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-700 dark:hover:text-zinc-300',
               )}
             >
               {tab}

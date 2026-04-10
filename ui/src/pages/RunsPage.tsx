@@ -62,7 +62,7 @@ function DetailPanel({ run, onClose }: { run: RunRecord; onClose: () => void }) 
         <span className="text-[13px] font-medium font-mono text-gray-800 dark:text-zinc-200 truncate flex-1">
           {shortId(run.run_id)}
         </span>
-        <button onClick={onClose} className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">
+        <button onClick={onClose} className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800 transition-colors">
           <X size={14} />
         </button>
       </div>
@@ -160,7 +160,7 @@ function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-zinc-800">
           <h2 className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">Batch Create Runs</h2>
-          <button onClick={onClose} className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:text-zinc-300 transition-colors">
+          <button onClick={onClose} className="p-1 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
             <X size={14} />
           </button>
         </div>
@@ -213,7 +213,7 @@ function BatchCreateModal({ onClose, onDone }: BatchCreateModalProps) {
         <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200 dark:border-zinc-800">
           <button
             onClick={onClose}
-            className="rounded border border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 text-[12px] px-3 py-1.5 hover:text-gray-800 dark:text-zinc-200 transition-colors"
+            className="rounded border border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 text-[12px] px-3 py-1.5 hover:text-gray-800 dark:hover:text-zinc-200 transition-colors"
           >
             Cancel
           </button>
@@ -303,12 +303,12 @@ export function RunsPage() {
         <div className="flex items-center rounded border border-gray-200 dark:border-zinc-700 overflow-hidden">
           <button onClick={() => setViewMode("table")} title="Table view"
             className={clsx("flex items-center gap-1 px-2.5 py-1 text-[11px] transition-colors",
-              viewMode === "table" ? "bg-zinc-700 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300")}>
+              viewMode === "table" ? "bg-zinc-700 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300")}>
             <LayoutList size={12} /> Table
           </button>
           <button onClick={() => setViewMode("timeline")} title="Timeline view"
             className={clsx("flex items-center gap-1 px-2.5 py-1 text-[11px] border-l border-gray-200 dark:border-zinc-700 transition-colors",
-              viewMode === "timeline" ? "bg-zinc-700 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:text-zinc-300")}>
+              viewMode === "timeline" ? "bg-zinc-700 text-gray-800 dark:text-zinc-200" : "text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300")}>
             <GanttChart size={12} /> Timeline
           </button>
         </div>
@@ -319,19 +319,19 @@ export function RunsPage() {
           {selCount > 0 && (
             <button
               onClick={exportSelected}
-              className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 transition-colors"
+              className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600 transition-colors"
             >
               <Download size={11} /> Export {selCount}
             </button>
           )}
           {selCount > 0 && (
-            <button onClick={kbd.clearSelection} className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:text-zinc-400 transition-colors px-1">
+            <button onClick={kbd.clearSelection} className="text-[11px] text-gray-400 dark:text-zinc-600 hover:text-gray-500 dark:hover:text-zinc-400 transition-colors px-1">
               Clear
             </button>
           )}
           <button
             onClick={() => setShowBatchCreate(true)}
-            className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:text-zinc-200 hover:border-indigo-600 transition-colors"
+            className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-indigo-600 transition-colors"
             title="Create multiple runs at once"
           >
             <Plus size={11} /> Batch Create
@@ -353,7 +353,7 @@ export function RunsPage() {
               }
             </div>
             <button onClick={() => refetch()} disabled={isFetching}
-              className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
               title="Refresh now"
             >
               <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
