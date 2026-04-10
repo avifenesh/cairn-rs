@@ -10,6 +10,7 @@ import { clsx } from "clsx";
 import { StateBadge } from "../components/StateBadge";
 import { GanttView } from "../components/TimelineView";
 import { CopyButton } from "../components/CopyButton";
+import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import { useEventStream } from "../hooks/useEventStream";
 
@@ -522,7 +523,10 @@ interface RunDetailPageProps {
 }
 
 export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
-  // Fetch run metadata from the runs list (no dedicated GET /v1/runs/:id in the main.rs client).
+  const queryClient = useQueryClient();
+  const toast = useToast();
+
+  // Keep using the runs list until GET /v1/runs/:id is fixed server-side.
   const { data: runs } = useQuery({
     queryKey: ["runs"],
     queryFn: () => defaultApi.getRuns({ limit: 200 }),
@@ -553,6 +557,18 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
   // Defensive: ensure list responses are arrays even if the API returns an unexpected shape.
   const safeTasks  = Array.isArray(tasks)  ? tasks  : undefined;
   const safeEvents = Array.isArray(events) ? events : undefined;
+
+  const cancelRunMut = useMutation({
+    mutationFn: () => defaultApi.cancelRun(runId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["run-events", runId] });
+      toast.success(`Run ${runId} canceled.`);
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Failed to cancel run.");
+    },
+  });
 
   const isTerminal = run && ["completed", "failed", "canceled"].includes(run.state);
   const duration = run ? fmtDuration(run.created_at, isTerminal ? run.updated_at : undefined) : "—";
@@ -585,6 +601,22 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
             </div>
             <div className="flex items-center gap-3 shrink-0">
               {run && <StateBadge state={run.state} />}
+              {run && !isTerminal && (
+                <button
+                  onClick={() => {
+                    if (!window.confirm(`Cancel run ${runId}?`)) return;
+                    cancelRunMut.mutate();
+                  }}
+                  disabled={cancelRunMut.isPending}
+                  title="Cancel this run"
+                  className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] font-medium
+                             border border-red-200 dark:border-red-800/60 text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-200
+                             bg-red-50 dark:bg-red-950/30 transition-colors disabled:opacity-50"
+                >
+                  {cancelRunMut.isPending ? <Loader2 size={12} className="animate-spin" /> : <AlertTriangle size={12} />}
+                  Cancel Run
+                </button>
+              )}
               <button
                 onClick={() => {
                   void defaultApi.exportRun(runId).then(data => {

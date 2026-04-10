@@ -1310,6 +1310,71 @@ fn query_rejection_error(message: impl Into<String>) -> AppApiError {
     )
 }
 
+async fn load_run_visible_to_tenant(
+    state: &AppState,
+    tenant_scope: &TenantScope,
+    run_id: &RunId,
+) -> Result<Option<RunRecord>, axum::response::Response> {
+    match state.runtime.runs.get(run_id).await {
+        Ok(Some(run))
+            if tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id() =>
+        {
+            return Ok(Some(run));
+        }
+        Ok(Some(_)) => return Ok(None),
+        Ok(None) => {}
+        Err(err) => return Err(runtime_error_response(err)),
+    }
+
+    let events = match state
+        .runtime
+        .store
+        .read_by_entity(&EntityRef::Run(run_id.clone()), None, 1_000)
+        .await
+    {
+        Ok(events) => events,
+        Err(err) => return Err(store_error_response(err)),
+    };
+
+    let mut reconstructed: Option<RunRecord> = None;
+    for stored in events {
+        match stored.envelope.payload {
+            RuntimeEvent::RunCreated(created) if created.run_id == *run_id => {
+                reconstructed = Some(RunRecord {
+                    run_id: created.run_id.clone(),
+                    session_id: created.session_id.clone(),
+                    parent_run_id: created.parent_run_id.clone(),
+                    project: created.project.clone(),
+                    state: RunState::Pending,
+                    prompt_release_id: created.prompt_release_id.clone(),
+                    agent_role_id: created.agent_role_id.clone(),
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
+                    version: 1,
+                    created_at: stored.stored_at,
+                    updated_at: stored.stored_at,
+                });
+            }
+            RuntimeEvent::RunStateChanged(change) if change.run_id == *run_id => {
+                if let Some(run) = reconstructed.as_mut() {
+                    run.state = change.transition.to;
+                    run.failure_class = change.failure_class.clone();
+                    run.pause_reason = change.pause_reason.clone();
+                    run.resume_trigger = change.resume_trigger.clone();
+                    run.version += 1;
+                    run.updated_at = stored.stored_at;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(reconstructed.filter(|run| {
+        tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id()
+    }))
+}
+
 fn forbidden_api_error(message: impl Into<String>) -> AppApiError {
     AppApiError::new(StatusCode::FORBIDDEN, "forbidden", message)
 }
@@ -9112,8 +9177,9 @@ async fn get_run_handler(
     tenant_scope: TenantScope,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    match state.runtime.runs.get(&RunId::new(id)).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => {
+    let run_id = RunId::new(id);
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(run)) => {
             match TaskReadModel::list_by_parent_run(state.runtime.store.as_ref(), &run.run_id, 200)
                 .await
             {
@@ -9123,10 +9189,10 @@ async fn get_run_handler(
                 Err(err) => store_error_response(err),
             }
         }
-        Ok(Some(_)) | Ok(None) => {
+        Ok(None) => {
             AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response()
         }
-        Err(err) => runtime_error_response(err),
+        Err(response) => response,
     }
 }
 
@@ -9214,13 +9280,13 @@ async fn diagnose_run_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
-    let run = match state.runtime.runs.get(&run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
-        Ok(Some(_)) | Ok(None) => {
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(run)) => run,
+        Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
-        Err(err) => return runtime_error_response(err),
+        Err(response) => return response,
     };
 
     match build_diagnosis_report(state.as_ref(), &run, 30 * 60_000).await {
@@ -9236,13 +9302,13 @@ async fn list_run_events_handler(
     Query(query): Query<EventsPageQuery>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id);
-    let run = match state.runtime.runs.get(&run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
-        Ok(Some(_)) | Ok(None) => {
+    let run = match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(run)) => run,
+        Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
-        Err(err) => return runtime_error_response(err),
+        Err(response) => return response,
     };
 
     let limit = query.limit.unwrap_or(50).clamp(1, 500);
@@ -10989,8 +11055,8 @@ async fn get_run_cost_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let run_id = RunId::new(id.clone());
-    match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
-        Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => {
+    match load_run_visible_to_tenant(state.as_ref(), &tenant_scope, &run_id).await {
+        Ok(Some(_run)) => {
             match RunCostReadModel::get_run_cost(state.runtime.store.as_ref(), &run_id).await {
                 Ok(Some(record)) => (StatusCode::OK, Json(record)).into_response(),
                 Ok(None) => {
@@ -11012,10 +11078,10 @@ async fn get_run_cost_handler(
                 Err(err) => store_error_response(err),
             }
         }
-        Ok(Some(_)) | Ok(None) => {
+        Ok(None) => {
             AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found").into_response()
         }
-        Err(err) => store_error_response(err),
+        Err(response) => response,
     }
 }
 
