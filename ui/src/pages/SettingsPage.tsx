@@ -1,13 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useCallback, useEffect, useRef } from "react";
-import { RefreshCw, Loader2, Check, X, Radio, Wifi, ShieldCheck, SlidersHorizontal, Server } from "lucide-react";
+import { RefreshCw, Loader2, Check, X, Radio, Wifi, ShieldCheck, SlidersHorizontal, Server, Plus, Trash2 } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { usePreferences } from "../hooks/usePreferences";
 import { useScope } from "../hooks/useScope";
 import { useWebSocket } from "../hooks/useWebSocket";
-import type { DeploymentSettings, SystemInfo } from "../lib/types";
+import type { DeploymentSettings, NotificationChannel, SystemInfo } from "../lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -589,6 +589,71 @@ function CorsDiagnosticsSection({ deploymentMode }: { deploymentMode?: string })
 // ── Preferences tab ───────────────────────────────────────────────────────────
 
 type SaveState = "idle" | "saving" | "saved" | "error";
+const DEFAULT_NOTIFICATION_OPERATOR = "admin";
+const NOTIFICATION_EVENT_OPTIONS = [
+  { value: "run.failed", label: "Run Failed" },
+  { value: "run.completed", label: "Run Completed" },
+  { value: "run.paused", label: "Run Paused" },
+  { value: "task.failed", label: "Task Failed" },
+  { value: "task.completed", label: "Task Completed" },
+  { value: "approval.required", label: "Approval Required" },
+  { value: "approval.resolved", label: "Approval Resolved" },
+  { value: "provider.error", label: "Provider Error" },
+  { value: "provider.degraded", label: "Provider Degraded" },
+  { value: "budget.alert", label: "Budget Alert" },
+  { value: "agent.progress", label: "Agent Progress" },
+  { value: "memory.ingested", label: "Memory Ingested" },
+  { value: "credential.rotated", label: "Credential Rotated" },
+] as const;
+
+const NOTIFICATION_CHANNEL_OPTIONS = [
+  { value: "webhook", label: "Webhook", placeholder: "https://hooks.example.com/…" },
+  { value: "slack", label: "Slack", placeholder: "https://hooks.slack.com/services/…" },
+  { value: "email", label: "Email", placeholder: "alerts@example.com" },
+  { value: "pagerduty", label: "PagerDuty", placeholder: "Routing key or service URL" },
+  { value: "telegram", label: "Telegram", placeholder: "Chat ID or bot webhook URL" },
+] as const;
+
+function normalizeNotificationEvents(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+function normalizeNotificationChannels(values: NotificationChannel[]): NotificationChannel[] {
+  return values
+    .map((channel) => ({
+      kind: channel.kind.trim(),
+      target: channel.target.trim(),
+    }))
+    .filter((channel) => channel.kind !== "" && channel.target !== "")
+    .sort((a, b) =>
+      `${a.kind}:${a.target}`.localeCompare(`${b.kind}:${b.target}`),
+    );
+}
+
+function notificationChannelPlaceholder(kind: string): string {
+  return (
+    NOTIFICATION_CHANNEL_OPTIONS.find((option) => option.value === kind)?.placeholder ??
+    "Notification target"
+  );
+}
+
+function PreferenceStatCard({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+}) {
+  return (
+    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
+      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
+      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
 
 /** A single tenant-level default setting row. */
 function PreferenceRow({
@@ -621,14 +686,15 @@ function PreferenceRow({
   });
 
   // Seed local from stored value on first load — but only if user hasn't started typing.
-  const storedStr = data?.value !== undefined ? String(data.value) : "";
+  const hasStoredValue = data?.value !== undefined && data?.value !== null;
+  const storedStr = hasStoredValue ? String(data.value) : "";
   const initialised = useRef(false);
   useEffect(() => {
-    if (!initialised.current && storedStr !== "") {
+    if (!initialised.current && hasStoredValue) {
       setLocal(storedStr);
       initialised.current = true;
     }
-  }, [storedStr]);
+  }, [hasStoredValue, storedStr]);
 
   const dirty = local !== storedStr && local !== "";
 
@@ -667,7 +733,7 @@ function PreferenceRow({
         <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5 leading-relaxed">{description}</p>
         {isLoading ? (
           <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono mt-1 block">loading…</span>
-        ) : stored !== undefined ? (
+        ) : hasStoredValue ? (
           <span className="text-[10px] text-gray-400 dark:text-zinc-600 font-mono mt-1 block">
             stored: <span className="text-gray-400 dark:text-zinc-500">{String(stored)}</span>
           </span>
@@ -794,6 +860,290 @@ function PrefToggle({ local, setLocal }: { local: string; setLocal: (v: string) 
   );
 }
 
+function NotificationPreferencesSection() {
+  const queryClient = useQueryClient();
+  const [scope] = useScope();
+  const tenantId = scope.tenant_id;
+  const [operatorId, setOperatorId] = useState(DEFAULT_NOTIFICATION_OPERATOR);
+  const effectiveOperatorId = operatorId.trim() || DEFAULT_NOTIFICATION_OPERATOR;
+  const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
+  const [channels, setChannels] = useState<NotificationChannel[]>([]);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const prefsQuery = useQuery({
+    queryKey: ["settings-notification-prefs", tenantId, effectiveOperatorId],
+    queryFn: () => defaultApi.getNotificationPreferences(effectiveOperatorId, tenantId),
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (!prefsQuery.data) {
+      if (prefsQuery.isSuccess) {
+        setSelectedEvents([]);
+        setChannels([]);
+      }
+      return;
+    }
+
+    setSelectedEvents(normalizeNotificationEvents(prefsQuery.data.event_types));
+    setChannels(prefsQuery.data.channels.map((channel) => ({ ...channel })));
+    setSaveState("idle");
+  }, [effectiveOperatorId, prefsQuery.data, prefsQuery.isSuccess, tenantId]);
+
+  useEffect(
+    () => () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    },
+    [],
+  );
+
+  const storedEvents = normalizeNotificationEvents(prefsQuery.data?.event_types ?? []);
+  const storedChannels = normalizeNotificationChannels(prefsQuery.data?.channels ?? []);
+  const localEvents = normalizeNotificationEvents(selectedEvents);
+  const localChannels = normalizeNotificationChannels(channels);
+  const dirty =
+    JSON.stringify({ event_types: localEvents, channels: localChannels }) !==
+    JSON.stringify({ event_types: storedEvents, channels: storedChannels });
+  const invalidChannel = channels.some((channel) => channel.target.trim() === "");
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      defaultApi.setNotificationPreferences(effectiveOperatorId, {
+        tenant_id: tenantId,
+        event_types: localEvents,
+        channels: localChannels,
+      }),
+    onMutate: () => setSaveState("saving"),
+    onSuccess: async () => {
+      setSaveState("saved");
+      await queryClient.invalidateQueries({
+        queryKey: ["settings-notification-prefs", tenantId, effectiveOperatorId],
+      });
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveState("idle"), 2_500);
+    },
+    onError: () => setSaveState("error"),
+  });
+
+  function toggleEvent(eventType: string) {
+    setSelectedEvents((current) =>
+      current.includes(eventType)
+        ? current.filter((candidate) => candidate !== eventType)
+        : [...current, eventType],
+    );
+    setSaveState("idle");
+  }
+
+  function addChannel() {
+    setChannels((current) => [...current, { kind: "email", target: "" }]);
+    setSaveState("idle");
+  }
+
+  function updateChannel(index: number, patch: Partial<NotificationChannel>) {
+    setChannels((current) =>
+      current.map((channel, currentIndex) =>
+        currentIndex === index ? { ...channel, ...patch } : channel,
+      ),
+    );
+    setSaveState("idle");
+  }
+
+  function removeChannel(index: number) {
+    setChannels((current) => current.filter((_, currentIndex) => currentIndex !== index));
+    setSaveState("idle");
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
+      <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
+        <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">
+          Notifications
+        </p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
+          Operator delivery preferences stored on the backend. These settings control which events
+          the selected operator receives and where they are delivered.
+        </p>
+      </div>
+
+      <div className="px-5 py-4 bg-gray-50/60 dark:bg-zinc-900/60 space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="w-full md:max-w-xs">
+            <label className="block text-[12px] font-medium text-gray-700 dark:text-zinc-300 mb-1.5">
+              Operator ID
+            </label>
+            <input
+              value={operatorId}
+              onChange={(event) => setOperatorId(event.target.value)}
+              placeholder={DEFAULT_NOTIFICATION_OPERATOR}
+              className="w-full rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-3 py-1.5 text-[13px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors font-mono"
+            />
+            <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-600">
+              Scoped to tenant <span className="font-mono text-gray-500 dark:text-zinc-400">{tenantId}</span>.
+            </p>
+          </div>
+
+          <div className="flex gap-6">
+            <PreferenceStatCard label="Events" value={localEvents.length} sub={storedEvents.length > 0 ? "stored" : "none stored"} />
+            <PreferenceStatCard label="Channels" value={localChannels.length} sub={invalidChannel ? "needs targets" : "configured"} />
+          </div>
+        </div>
+
+        {prefsQuery.isLoading ? (
+          <div className="flex items-center gap-2 py-3 text-gray-400 dark:text-zinc-600">
+            <Loader2 size={13} className="animate-spin" />
+            <span className="text-[12px]">Loading notification preferences…</span>
+          </div>
+        ) : prefsQuery.isError ? (
+          <div className="rounded-md border border-red-900/40 bg-red-950/20 px-3 py-2 text-[12px] text-red-300">
+            Failed to load notification preferences for <span className="font-mono">{effectiveOperatorId}</span>.
+          </div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">Subscribed events</p>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {NOTIFICATION_EVENT_OPTIONS.map((option) => {
+                  const enabled = selectedEvents.includes(option.value);
+                  return (
+                    <label
+                      key={option.value}
+                      className={clsx(
+                        "flex items-center gap-2 rounded-md border px-3 py-2 text-[12px] transition-colors cursor-pointer",
+                        enabled
+                          ? "border-indigo-500/50 bg-indigo-500/10 text-indigo-200"
+                          : "border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-gray-600 dark:text-zinc-400",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={() => toggleEvent(option.value)}
+                        className="accent-indigo-500"
+                      />
+                      <div className="min-w-0">
+                        <div>{option.label}</div>
+                        <div className="font-mono text-[10px] text-gray-400 dark:text-zinc-600">{option.value}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">Delivery channels</p>
+                <button
+                  type="button"
+                  onClick={addChannel}
+                  className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-700 px-2.5 py-1 text-[11px] text-gray-600 dark:text-zinc-300 hover:text-gray-900 dark:hover:text-zinc-100 hover:border-zinc-500 transition-colors"
+                >
+                  <Plus size={11} />
+                  Add Channel
+                </button>
+              </div>
+
+              {channels.length === 0 ? (
+                <div className="rounded-md border border-dashed border-gray-200 dark:border-zinc-700 px-3 py-3 text-[12px] text-gray-400 dark:text-zinc-600">
+                  No channels configured yet. Add an email, webhook, Slack, PagerDuty, or Telegram destination.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {channels.map((channel, index) => (
+                    <div
+                      key={`${channel.kind}:${index}`}
+                      className="flex flex-col gap-2 rounded-md border border-gray-200 dark:border-zinc-800 px-3 py-3 md:flex-row md:items-center"
+                    >
+                      <select
+                        value={channel.kind}
+                        onChange={(event) => updateChannel(index, { kind: event.target.value })}
+                        className="rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-3 py-1.5 text-[12px] text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors md:w-36"
+                      >
+                        {NOTIFICATION_CHANNEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      <input
+                        value={channel.target}
+                        onChange={(event) => updateChannel(index, { target: event.target.value })}
+                        placeholder={notificationChannelPlaceholder(channel.kind)}
+                        className="flex-1 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-3 py-1.5 text-[12px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => removeChannel(index)}
+                        className="flex items-center justify-center rounded-md border border-red-900/30 px-2.5 py-1.5 text-red-400 hover:bg-red-950/30 transition-colors"
+                        aria-label="Remove channel"
+                        title="Remove channel"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-gray-200 dark:border-zinc-800 pt-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <p className="text-[11px] text-gray-400 dark:text-zinc-600">
+                  Current operator: <span className="font-mono text-gray-500 dark:text-zinc-400">{effectiveOperatorId}</span>
+                </p>
+                {invalidChannel && (
+                  <p className="text-[11px] text-red-400">Each configured channel needs a non-empty target.</p>
+                )}
+                {saveMutation.error instanceof Error && (
+                  <p className="text-[11px] text-red-400">{saveMutation.error.message}</p>
+                )}
+              </div>
+
+              <button
+                onClick={() => saveMutation.mutate()}
+                disabled={!dirty || invalidChannel || saveState === "saving"}
+                className={clsx(
+                  "flex items-center gap-1.5 px-3 h-8 rounded-md text-[12px] font-medium transition-all shrink-0 min-w-24 justify-center",
+                  saveState === "saved"
+                    ? "bg-emerald-700/30 border border-emerald-700/50 text-emerald-400"
+                    : saveState === "error"
+                      ? "bg-red-900/30 border border-red-700/40 text-red-400"
+                      : dirty
+                        ? "bg-indigo-600 hover:bg-indigo-500 text-white border border-transparent"
+                        : "bg-gray-100/60 dark:bg-zinc-800/60 border border-gray-200 dark:border-zinc-700 text-gray-400 dark:text-zinc-600 cursor-default",
+                )}
+              >
+                {saveState === "saving" ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    Saving
+                  </>
+                ) : saveState === "saved" ? (
+                  <>
+                    <Check size={12} />
+                    Saved
+                  </>
+                ) : saveState === "error" ? (
+                  <>
+                    <X size={12} />
+                    Error
+                  </>
+                ) : (
+                  "Save"
+                )}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PreferencesTab() {
   return (
     <div className="max-w-3xl space-y-6">
@@ -849,6 +1199,8 @@ function PreferencesTab() {
           />
         </div>
       </div>
+
+      <NotificationPreferencesSection />
 
       {/* Hint about future per-project overrides */}
       <p className="text-[11px] text-gray-300 dark:text-zinc-600 leading-relaxed px-1">
