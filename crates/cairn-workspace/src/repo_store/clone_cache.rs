@@ -42,6 +42,8 @@ impl RepoCloneCache {
         tenant: &TenantId,
         repo_id: &RepoId,
     ) -> Result<(), crate::error::RepoStoreError> {
+        Self::validate_tenant_segment(tenant)?;
+        repo_id.validate()?;
         let clone_lock = self.clone_lock(tenant, repo_id);
         let _guard = clone_lock.lock().expect("clone lock poisoned");
         let path = self.path(tenant, repo_id);
@@ -80,6 +82,9 @@ impl RepoCloneCache {
     }
 
     pub async fn is_cloned(&self, tenant: &TenantId, repo_id: &RepoId) -> bool {
+        if Self::validate_tenant_segment(tenant).is_err() || repo_id.validate().is_err() {
+            return false;
+        }
         Self::is_clone_layout_present(&self.path(tenant, repo_id))
     }
 
@@ -88,6 +93,8 @@ impl RepoCloneCache {
         tenant: &TenantId,
         repo_id: &RepoId,
     ) -> Result<RefreshOutcome, crate::error::RepoStoreError> {
+        Self::validate_tenant_segment(tenant)?;
+        repo_id.validate()?;
         let clone_lock = self.clone_lock(tenant, repo_id);
         let _guard = clone_lock.lock().expect("clone lock poisoned");
         let path = self.path(tenant, repo_id);
@@ -170,8 +177,9 @@ impl RepoCloneCache {
 
                     if Self::is_clone_layout_present(&repo_entry.path()) {
                         let repo_name = repo_entry.file_name().to_string_lossy().into_owned();
-                        clones
-                            .insert((tenant.clone(), RepoId::new(format!("{owner}/{repo_name}"))));
+                        if let Ok(repo_id) = RepoId::parse(format!("{owner}/{repo_name}")) {
+                            clones.insert((tenant.clone(), repo_id));
+                        }
                     }
                 }
             }
@@ -185,6 +193,8 @@ impl RepoCloneCache {
         tenant: &TenantId,
         repo_id: &RepoId,
     ) -> Result<(), crate::error::RepoStoreError> {
+        Self::validate_tenant_segment(tenant)?;
+        repo_id.validate()?;
         let clone_lock = self.clone_lock(tenant, repo_id);
         let _guard = clone_lock.lock().expect("clone lock poisoned");
         let path = self.path(tenant, repo_id);
@@ -315,6 +325,25 @@ impl RepoCloneCache {
             .expect("system clock should be after unix epoch")
             .as_millis() as u64
     }
+
+    fn validate_tenant_segment(tenant: &TenantId) -> Result<(), crate::error::RepoStoreError> {
+        let segment = tenant.as_str();
+        let is_valid = !segment.is_empty()
+            && segment != "."
+            && segment != ".."
+            && segment
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
+
+        if is_valid {
+            Ok(())
+        } else {
+            Err(crate::error::RepoStoreError::InvalidPathSegment {
+                field: "tenant_id",
+                reason: "contains unsupported path characters",
+            })
+        }
+    }
 }
 
 impl Default for RepoCloneCache {
@@ -423,6 +452,22 @@ mod tests {
 
         assert!(!clone_path.exists());
         assert!(!owner_dir.exists());
+        assert!(!cache.is_cloned(&tenant, &repo).await);
+    }
+
+    #[tokio::test]
+    async fn ensure_cloned_rejects_invalid_repo_ids() {
+        let temp_dir = TestDir::new("clone-invalid");
+        let cache = RepoCloneCache::new(&temp_dir.path);
+        let tenant = TenantId::new("tenant-a");
+        let repo = RepoId::new("../escape");
+
+        let error = cache.ensure_cloned(&tenant, &repo).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            crate::error::RepoStoreError::InvalidRepoId(_)
+        ));
         assert!(!cache.is_cloned(&tenant, &repo).await);
     }
 }

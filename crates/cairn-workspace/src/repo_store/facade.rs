@@ -23,6 +23,7 @@ impl RepoStore {
         ctx: &RepoAccessContext,
         repo_id: &RepoId,
     ) -> Result<PathBuf, RepoStoreError> {
+        repo_id.validate()?;
         if !self.access.is_allowed(ctx, repo_id).await {
             return Err(RepoStoreError::NotAllowedForProject {
                 project: ctx.project.clone(),

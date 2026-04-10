@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -65,27 +65,62 @@ pub struct AddRepoRequest {
     pub repo_id: String,
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ListQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+impl ListQuery {
+    fn limit(&self) -> usize {
+        self.limit.unwrap_or(100).min(100)
+    }
+
+    fn offset(&self) -> usize {
+        self.offset.unwrap_or(0)
+    }
+}
+
 fn operator_id_from_state(_state: &AppState) -> OperatorId {
     // TODO: extract from auth context once wired.
     OperatorId::new("operator")
 }
 
-fn project_key_from_path(project: &str) -> ProjectKey {
+fn validate_project_segment(value: &str, field: &'static str) -> Result<(), String> {
+    let is_valid = !value.is_empty()
+        && value != "."
+        && value != ".."
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
+
+    if is_valid {
+        Ok(())
+    } else {
+        Err(format!("{field} contains unsupported path characters"))
+    }
+}
+
+fn project_key_from_path(project: &str) -> Result<ProjectKey, String> {
     if let Some((tenant_id, workspace_id, project_id)) = crate::parse_project_scope(project) {
-        return ProjectKey::new(tenant_id, workspace_id, project_id);
+        validate_project_segment(tenant_id, "tenant_id")?;
+        validate_project_segment(workspace_id, "workspace_id")?;
+        validate_project_segment(project_id, "project_id")?;
+        return Ok(ProjectKey::new(tenant_id, workspace_id, project_id));
     }
 
-    ProjectKey::new(
+    validate_project_segment(project, "project_id")?;
+    Ok(ProjectKey::new(
         crate::DEFAULT_TENANT_ID,
         crate::DEFAULT_WORKSPACE_ID,
         project,
-    )
+    ))
 }
 
-fn repo_access_context(project: &str) -> RepoAccessContext {
-    RepoAccessContext {
-        project: project_key_from_path(project),
-    }
+fn repo_access_context(project: &str) -> Result<RepoAccessContext, String> {
+    Ok(RepoAccessContext {
+        project: project_key_from_path(project)?,
+    })
 }
 
 fn clone_status(is_cloned: bool) -> String {
@@ -96,21 +131,29 @@ fn clone_status(is_cloned: bool) -> String {
     }
 }
 
+fn bad_request_response(message: impl Into<String>) -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
+        .into_response()
+}
+
 fn repo_store_error_response(error: RepoStoreError) -> axum::response::Response {
-    let status = match error {
+    let status = match &error {
+        RepoStoreError::InvalidRepoId(_) | RepoStoreError::InvalidPathSegment { .. } => {
+            StatusCode::BAD_REQUEST
+        }
         RepoStoreError::NotAllowedForProject { .. } => StatusCode::FORBIDDEN,
         RepoStoreError::CloneMissing { .. } => StatusCode::NOT_FOUND,
         RepoStoreError::Io { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         RepoStoreError::Unimplemented(_) => StatusCode::NOT_IMPLEMENTED,
     };
+    let error = error.client_message();
 
-    (
-        status,
-        Json(ErrorResponse {
-            error: error.to_string(),
-        }),
-    )
-        .into_response()
+    (status, Json(ErrorResponse { error })).into_response()
 }
 
 async fn repo_entry_response(
@@ -134,17 +177,30 @@ async fn repo_entry_response(
 
 pub async fn list_project_repos_handler(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<ListQuery>,
     Path(project): Path<String>,
 ) -> impl IntoResponse {
-    let ctx = repo_access_context(&project);
+    let ctx = match repo_access_context(&project) {
+        Ok(ctx) => ctx,
+        Err(message) => return bad_request_response(message),
+    };
     let repo_ids = state.project_repo_access.list_for_project(&ctx).await;
-    let mut repos = Vec::with_capacity(repo_ids.len());
+    let paged_repo_ids: Vec<_> = repo_ids
+        .into_iter()
+        .skip(query.offset())
+        .take(query.limit())
+        .collect();
+    let mut repos = Vec::with_capacity(paged_repo_ids.len());
 
-    for repo_id in repo_ids {
+    for repo_id in paged_repo_ids {
         repos.push(repo_entry_response(state.as_ref(), &ctx, &repo_id).await);
     }
 
-    Json(RepoAllowlistListResponse { project, repos })
+    (
+        StatusCode::OK,
+        Json(RepoAllowlistListResponse { project, repos }),
+    )
+        .into_response()
 }
 
 pub async fn add_project_repo_handler(
@@ -152,8 +208,14 @@ pub async fn add_project_repo_handler(
     Path(project): Path<String>,
     Json(body): Json<AddRepoRequest>,
 ) -> impl IntoResponse {
-    let ctx = repo_access_context(&project);
-    let repo_id = RepoId::new(body.repo_id);
+    let ctx = match repo_access_context(&project) {
+        Ok(ctx) => ctx,
+        Err(message) => return bad_request_response(message),
+    };
+    let repo_id = match RepoId::parse(body.repo_id) {
+        Ok(repo_id) => repo_id,
+        Err(error) => return bad_request_response(error.to_string()),
+    };
     let was_cloned = state
         .repo_clone_cache
         .is_cloned(&ctx.project.tenant_id, &repo_id)
@@ -194,8 +256,14 @@ pub async fn get_project_repo_handler(
     State(state): State<Arc<AppState>>,
     Path((project, owner, repo)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
-    let ctx = repo_access_context(&project);
-    let repo_id = RepoId::new(format!("{owner}/{repo}"));
+    let ctx = match repo_access_context(&project) {
+        Ok(ctx) => ctx,
+        Err(message) => return bad_request_response(message),
+    };
+    let repo_id = match RepoId::parse(format!("{owner}/{repo}")) {
+        Ok(repo_id) => repo_id,
+        Err(error) => return bad_request_response(error.to_string()),
+    };
     let allowlisted = state.project_repo_access.is_allowed(&ctx, &repo_id).await;
     let is_cloned = state
         .repo_clone_cache
@@ -213,14 +281,21 @@ pub async fn get_project_repo_handler(
         recent_sandbox_usage: Vec::new(),
         recent_register_repo_decisions: Vec::new(),
     })
+    .into_response()
 }
 
 pub async fn delete_project_repo_handler(
     State(state): State<Arc<AppState>>,
     Path((project, owner, repo)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
-    let ctx = repo_access_context(&project);
-    let repo_id = RepoId::new(format!("{owner}/{repo}"));
+    let ctx = match repo_access_context(&project) {
+        Ok(ctx) => ctx,
+        Err(message) => return bad_request_response(message),
+    };
+    let repo_id = match RepoId::parse(format!("{owner}/{repo}")) {
+        Ok(repo_id) => repo_id,
+        Err(error) => return bad_request_response(error.to_string()),
+    };
     let actor = ActorRef::Operator {
         operator_id: operator_id_from_state(&state),
     };
@@ -238,6 +313,7 @@ pub async fn delete_project_repo_handler(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -247,14 +323,14 @@ mod tests {
     use axum::Router;
     use cairn_api::bootstrap::BootstrapConfig;
     use cairn_domain::RepoAccessContext;
-    use cairn_workspace::RepoId;
+    use cairn_workspace::{RepoId, RepoStoreError};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
     use super::{
         add_project_repo_handler, delete_project_repo_handler, get_project_repo_handler,
-        list_project_repos_handler, AddRepoRequest, RepoAllowlistListResponse, RepoDetailResponse,
-        RepoMutationResponse,
+        list_project_repos_handler, AddRepoRequest, ListQuery, RepoAllowlistListResponse,
+        RepoDetailResponse, RepoMutationResponse,
     };
     use crate::AppState;
 
@@ -267,7 +343,7 @@ mod tests {
 
     fn project_ctx(project_id: &str) -> RepoAccessContext {
         RepoAccessContext {
-            project: super::project_key_from_path(project_id),
+            project: super::project_key_from_path(project_id).unwrap(),
         }
     }
 
@@ -380,14 +456,66 @@ mod tests {
 
     #[test]
     fn project_key_from_path_accepts_full_scope_or_project_id() {
-        let scoped = super::project_key_from_path("tenant-a/workspace-a/project-a");
+        let scoped = super::project_key_from_path("tenant-a/workspace-a/project-a").unwrap();
         assert_eq!(scoped.tenant_id.as_str(), "tenant-a");
         assert_eq!(scoped.workspace_id.as_str(), "workspace-a");
         assert_eq!(scoped.project_id.as_str(), "project-a");
 
-        let fallback = super::project_key_from_path("project-only");
+        let fallback = super::project_key_from_path("project-only").unwrap();
         assert_eq!(fallback.tenant_id.as_str(), crate::DEFAULT_TENANT_ID);
         assert_eq!(fallback.workspace_id.as_str(), crate::DEFAULT_WORKSPACE_ID);
         assert_eq!(fallback.project_id.as_str(), "project-only");
+    }
+
+    #[test]
+    fn list_query_caps_page_size() {
+        let query = ListQuery {
+            limit: Some(500),
+            offset: Some(7),
+        };
+
+        assert_eq!(query.limit(), 100);
+        assert_eq!(query.offset(), 7);
+    }
+
+    #[tokio::test]
+    async fn add_repo_rejects_invalid_repo_ids() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        let router = test_router(state);
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/projects/project-a/repos")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&AddRepoRequest {
+                            repo_id: "../escape".to_string(),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn io_errors_are_sanitized_for_clients() {
+        let response = super::repo_store_error_response(RepoStoreError::io(
+            "write clone head",
+            PathBuf::from("/tmp/secret/clone"),
+            "permission denied",
+        ));
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let error: super::ErrorResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(error.error, "write clone head failed");
+        assert!(!error.error.contains("/tmp/secret/clone"));
     }
 }

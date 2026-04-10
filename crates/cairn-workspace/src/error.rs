@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use cairn_domain::{ProjectKey, ResourceDimension, RunId, TenantId};
 
-use crate::sandbox::{RepoId, SandboxState, SandboxStrategy};
+use crate::sandbox::{InvalidRepoId, RepoId, SandboxState, SandboxStrategy};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorkspaceError {
@@ -103,6 +103,11 @@ impl From<RepoStoreError> for WorkspaceError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RepoStoreError {
+    InvalidRepoId(InvalidRepoId),
+    InvalidPathSegment {
+        field: &'static str,
+        reason: &'static str,
+    },
     NotAllowedForProject {
         project: ProjectKey,
         repo_id: RepoId,
@@ -122,6 +127,10 @@ pub enum RepoStoreError {
 impl Display for RepoStoreError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            RepoStoreError::InvalidRepoId(error) => write!(f, "{error}"),
+            RepoStoreError::InvalidPathSegment { field, reason } => {
+                write!(f, "invalid {field}: {reason}")
+            }
             RepoStoreError::NotAllowedForProject { project, repo_id } => {
                 write!(
                     f,
@@ -147,12 +156,38 @@ impl Display for RepoStoreError {
 impl std::error::Error for RepoStoreError {}
 
 impl RepoStoreError {
+    pub fn client_message(&self) -> String {
+        match self {
+            RepoStoreError::InvalidRepoId(error) => error.to_string(),
+            RepoStoreError::InvalidPathSegment { field, reason } => {
+                format!("invalid {field}: {reason}")
+            }
+            RepoStoreError::NotAllowedForProject { project, repo_id } => {
+                format!(
+                    "repo {repo_id} is not allowlisted for project {:?}",
+                    project
+                )
+            }
+            RepoStoreError::CloneMissing { tenant, repo_id } => {
+                format!("clone {repo_id} is missing for tenant {tenant}")
+            }
+            RepoStoreError::Io { action, .. } => format!("{action} failed"),
+            RepoStoreError::Unimplemented(message) => format!("unimplemented: {message}"),
+        }
+    }
+
     pub fn io(action: &'static str, path: PathBuf, error: impl std::fmt::Display) -> Self {
         Self::Io {
             action,
             path,
             message: error.to_string(),
         }
+    }
+}
+
+impl From<InvalidRepoId> for RepoStoreError {
+    fn from(value: InvalidRepoId) -> Self {
+        Self::InvalidRepoId(value)
     }
 }
 

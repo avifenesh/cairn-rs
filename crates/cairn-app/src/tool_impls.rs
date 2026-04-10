@@ -313,27 +313,10 @@ fn parse_repo_id(args: &Value) -> Result<RepoId, ToolError> {
         })?
         .trim();
 
-    let mut parts = repo_id.split('/');
-    let Some(owner) = parts.next() else {
-        return Err(ToolError::InvalidArgs {
-            field: "repo_id".into(),
-            message: "must be in owner/repo form".into(),
-        });
-    };
-    let Some(repo) = parts.next() else {
-        return Err(ToolError::InvalidArgs {
-            field: "repo_id".into(),
-            message: "must be in owner/repo form".into(),
-        });
-    };
-    if owner.is_empty() || repo.is_empty() || parts.next().is_some() {
-        return Err(ToolError::InvalidArgs {
-            field: "repo_id".into(),
-            message: "must be in owner/repo form".into(),
-        });
-    }
-
-    Ok(RepoId::new(repo_id))
+    RepoId::parse(repo_id).map_err(|error| ToolError::InvalidArgs {
+        field: "repo_id".into(),
+        message: error.reason().into(),
+    })
 }
 
 fn clone_status(is_cloned: bool) -> &'static str {
@@ -408,13 +391,18 @@ impl ToolHandler for ConcreteRegisterRepoTool {
             )
             .await
             .map_err(|error| {
-                ToolError::Permanent(format!("repo allowlist update failed: {error}"))
+                ToolError::Permanent(format!(
+                    "repo allowlist update failed: {}",
+                    error.client_message()
+                ))
             })?;
 
         self.cache
             .ensure_cloned(&project.tenant_id, &repo_id)
             .await
-            .map_err(|error| ToolError::Transient(format!("repo clone failed: {error}")))?;
+            .map_err(|error| {
+                ToolError::Transient(format!("repo clone failed: {}", error.client_message()))
+            })?;
 
         let is_cloned = self.cache.is_cloned(&project.tenant_id, &repo_id).await;
 

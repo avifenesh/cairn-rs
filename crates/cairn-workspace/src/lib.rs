@@ -13,10 +13,10 @@ pub use repo_store::{
 };
 pub use sandbox::{
     BufferedSandboxEventSink, Clock, CredentialReference, DestroyResult,
-    HostCapabilityRequirements, ProvisionedSandbox, RepoId, SandboxBase, SandboxCheckpoint,
-    SandboxCheckpointKind, SandboxErrorKind, SandboxEvent, SandboxEventSink, SandboxHandle,
-    SandboxId, SandboxMetadata, SandboxPolicy, SandboxPolicySnapshot, SandboxService, SandboxState,
-    SandboxStrategy, SandboxStrategyRequest, SystemClock,
+    HostCapabilityRequirements, InvalidRepoId, ProvisionedSandbox, RepoId, SandboxBase,
+    SandboxCheckpoint, SandboxCheckpointKind, SandboxErrorKind, SandboxEvent, SandboxEventSink,
+    SandboxHandle, SandboxId, SandboxMetadata, SandboxPolicy, SandboxPolicySnapshot,
+    SandboxService, SandboxState, SandboxStrategy, SandboxStrategyRequest, SystemClock,
 };
 
 #[cfg(test)]
@@ -25,6 +25,10 @@ mod tests {
 
     #[test]
     fn repo_id_preserves_owner_repo_shape() {
-        assert_eq!(RepoId::new("octocat/hello").as_str(), "octocat/hello");
+        assert_eq!(
+            RepoId::parse("octocat/hello").unwrap().as_str(),
+            "octocat/hello"
+        );
+        assert!(RepoId::parse("../escape").is_err());
     }
 }

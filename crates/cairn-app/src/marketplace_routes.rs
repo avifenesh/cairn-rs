@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -81,6 +81,22 @@ pub struct EnablePluginRequest {
     pub signal_capture_override: Option<SignalCaptureOverride>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ListQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+impl ListQuery {
+    fn limit(&self) -> usize {
+        self.limit.unwrap_or(100).min(100)
+    }
+
+    fn offset(&self) -> usize {
+        self.offset.unwrap_or(0)
+    }
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn record_to_response(record: &MarketplaceRecord) -> CatalogEntryResponse {
@@ -112,17 +128,70 @@ fn operator_id_from_state(_state: &AppState) -> cairn_domain::ids::OperatorId {
     cairn_domain::ids::OperatorId::new("operator")
 }
 
+fn validate_project_segment(value: &str, field: &'static str) -> Result<(), String> {
+    let is_valid = !value.is_empty()
+        && value != "."
+        && value != ".."
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
+
+    if is_valid {
+        Ok(())
+    } else {
+        Err(format!("{field} contains unsupported path characters"))
+    }
+}
+
+fn project_key_from_path(project: &str) -> Result<cairn_domain::tenancy::ProjectKey, String> {
+    if let Some((tenant_id, workspace_id, project_id)) = crate::parse_project_scope(project) {
+        validate_project_segment(tenant_id, "tenant_id")?;
+        validate_project_segment(workspace_id, "workspace_id")?;
+        validate_project_segment(project_id, "project_id")?;
+        return Ok(cairn_domain::tenancy::ProjectKey::new(
+            tenant_id,
+            workspace_id,
+            project_id,
+        ));
+    }
+
+    validate_project_segment(project, "project_id")?;
+    Ok(cairn_domain::tenancy::ProjectKey::new(
+        crate::DEFAULT_TENANT_ID,
+        crate::DEFAULT_WORKSPACE_ID,
+        project,
+    ))
+}
+
+fn bad_request_response(message: impl Into<String>) -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
+        .into_response()
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 /// GET /v1/plugins/catalog
 ///
 /// Lists all known plugin descriptors with their marketplace state.
-pub async fn list_catalog_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn list_catalog_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ListQuery>,
+) -> impl IntoResponse {
     let marketplace = state.marketplace.lock().unwrap();
-    let records = marketplace.list_all_records();
-    let plugins: Vec<CatalogEntryResponse> =
-        records.iter().map(|r| record_to_response(r)).collect();
-    Json(CatalogResponse { plugins })
+    let mut records = marketplace.list_all_records();
+    records.sort_by(|left, right| left.descriptor.id.cmp(&right.descriptor.id));
+    let plugins = records
+        .into_iter()
+        .skip(query.offset())
+        .take(query.limit())
+        .map(record_to_response)
+        .collect();
+    (StatusCode::OK, Json(CatalogResponse { plugins })).into_response()
 }
 
 /// POST /v1/plugins/:id/install
@@ -226,8 +295,10 @@ pub async fn enable_plugin_handler(
     let operator = operator_id_from_state(&state);
     let mut marketplace = state.marketplace.lock().unwrap();
 
-    // TODO: resolve full ProjectKey from project_id via project service
-    let project = cairn_domain::tenancy::ProjectKey::new("default", "default", project_id.as_str());
+    let project = match project_key_from_path(&project_id) {
+        Ok(project) => project,
+        Err(message) => return bad_request_response(message),
+    };
 
     let (tool_allowlist, signal_allowlist, signal_capture_override) = match body {
         Some(Json(b)) => (
@@ -267,7 +338,10 @@ pub async fn disable_plugin_handler(
     let operator = operator_id_from_state(&state);
     let mut marketplace = state.marketplace.lock().unwrap();
 
-    let project = cairn_domain::tenancy::ProjectKey::new("default", "default", project_id.as_str());
+    let project = match project_key_from_path(&project_id) {
+        Ok(project) => project,
+        Err(message) => return bad_request_response(message),
+    };
 
     match marketplace.handle_command(MarketplaceCommand::DisablePluginForProject {
         plugin_id,
@@ -282,6 +356,30 @@ pub async fn disable_plugin_handler(
             }),
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{project_key_from_path, ListQuery};
+
+    #[test]
+    fn project_key_from_path_accepts_full_scope() {
+        let scoped = project_key_from_path("tenant-a/workspace-a/project-a").unwrap();
+        assert_eq!(scoped.tenant_id.as_str(), "tenant-a");
+        assert_eq!(scoped.workspace_id.as_str(), "workspace-a");
+        assert_eq!(scoped.project_id.as_str(), "project-a");
+    }
+
+    #[test]
+    fn list_query_caps_page_size() {
+        let query = ListQuery {
+            limit: Some(500),
+            offset: Some(3),
+        };
+
+        assert_eq!(query.limit(), 100);
+        assert_eq!(query.offset(), 3);
     }
 }
 

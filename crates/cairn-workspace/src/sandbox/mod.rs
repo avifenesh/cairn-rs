@@ -7,8 +7,8 @@ pub mod types;
 pub use events::{SandboxCheckpointKind, SandboxErrorKind, SandboxEvent, SandboxPolicySnapshot};
 pub use metadata::SandboxMetadata;
 pub use policy::{
-    CredentialReference, HostCapabilityRequirements, RepoId, SandboxBase, SandboxPolicy,
-    SandboxStrategy, SandboxStrategyRequest,
+    CredentialReference, HostCapabilityRequirements, InvalidRepoId, RepoId, SandboxBase,
+    SandboxPolicy, SandboxStrategy, SandboxStrategyRequest,
 };
 pub use service::{BufferedSandboxEventSink, Clock, SandboxEventSink, SandboxService, SystemClock};
 pub use types::{

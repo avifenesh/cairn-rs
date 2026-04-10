@@ -17,6 +17,9 @@ impl ProjectRepoAccessService {
     }
 
     pub async fn is_allowed(&self, ctx: &RepoAccessContext, repo_id: &RepoId) -> bool {
+        if repo_id.validate().is_err() {
+            return false;
+        }
         self.allowed
             .read()
             .ok()
@@ -30,6 +33,7 @@ impl ProjectRepoAccessService {
         repo_id: &RepoId,
         _by: ActorRef,
     ) -> Result<(), RepoStoreError> {
+        repo_id.validate()?;
         let mut guard = self.allowed.write().expect("allowlist lock poisoned");
         guard
             .entry(ctx.project.clone())
@@ -44,6 +48,7 @@ impl ProjectRepoAccessService {
         repo_id: &RepoId,
         _by: ActorRef,
     ) -> Result<(), RepoStoreError> {
+        repo_id.validate()?;
         let mut guard = self.allowed.write().expect("allowlist lock poisoned");
         if let Some(repos) = guard.get_mut(&ctx.project) {
             repos.remove(repo_id);

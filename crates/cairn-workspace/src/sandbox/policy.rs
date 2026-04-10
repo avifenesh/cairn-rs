@@ -8,17 +8,125 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RepoId(String);
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidRepoId {
+    value: String,
+    reason: &'static str,
+}
+
+impl InvalidRepoId {
+    pub fn new(value: impl Into<String>, reason: &'static str) -> Self {
+        Self {
+            value: value.into(),
+            reason,
+        }
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub fn reason(&self) -> &'static str {
+        self.reason
+    }
+}
+
+impl Display for InvalidRepoId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid repo_id `{}`: {}", self.value, self.reason)
+    }
+}
+
+impl std::error::Error for InvalidRepoId {}
+
 impl RepoId {
+    pub const MAX_LENGTH: usize = 200;
+    pub const MAX_SEGMENT_LENGTH: usize = 100;
+
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
+    }
+
+    pub fn parse(value: impl Into<String>) -> Result<Self, InvalidRepoId> {
+        let value = value.into();
+        let normalized = value.trim();
+        Self::validate_str(normalized)?;
+        Ok(Self(normalized.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    pub fn validate(&self) -> Result<(), InvalidRepoId> {
+        Self::validate_str(self.as_str())
+    }
+
     pub fn owner_and_repo(&self) -> (&str, &str) {
-        self.0.split_once('/').unwrap_or(("_", self.0.as_str()))
+        self.0
+            .split_once('/')
+            .expect("RepoId must be validated before path use")
+    }
+
+    fn validate_str(value: &str) -> Result<(), InvalidRepoId> {
+        if value.is_empty() {
+            return Err(InvalidRepoId::new(value, "must not be empty"));
+        }
+
+        if value.len() > Self::MAX_LENGTH {
+            return Err(InvalidRepoId::new(value, "must be 200 characters or fewer"));
+        }
+
+        let Some((owner, repo)) = value.split_once('/') else {
+            return Err(InvalidRepoId::new(value, "must be in owner/repo form"));
+        };
+
+        if repo.contains('/') {
+            return Err(InvalidRepoId::new(value, "must be in owner/repo form"));
+        }
+
+        Self::validate_segment(value, owner, "owner")?;
+        Self::validate_segment(value, repo, "repo")?;
+        Ok(())
+    }
+
+    fn validate_segment(
+        value: &str,
+        segment: &str,
+        label: &'static str,
+    ) -> Result<(), InvalidRepoId> {
+        if segment.is_empty() {
+            return Err(InvalidRepoId::new(value, "must be in owner/repo form"));
+        }
+
+        if segment == "." || segment == ".." {
+            return Err(InvalidRepoId::new(
+                value,
+                "must not contain dot path segments",
+            ));
+        }
+
+        if segment.len() > Self::MAX_SEGMENT_LENGTH {
+            return Err(InvalidRepoId::new(
+                value,
+                "owner and repo segments must be 100 characters or fewer",
+            ));
+        }
+
+        if !segment
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+        {
+            return Err(InvalidRepoId::new(
+                value,
+                match label {
+                    "owner" => "owner contains unsupported characters",
+                    _ => "repo contains unsupported characters",
+                },
+            ));
+        }
+
+        Ok(())
     }
 }
 
