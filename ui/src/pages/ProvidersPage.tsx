@@ -6,6 +6,7 @@ import {
   Globe, Server, Check, X, Settings, Tag,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { StatCard } from "../components/StatCard";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
 import { useScope } from "../hooks/useScope";
@@ -63,23 +64,6 @@ function fmtTime(ms: number): string {
 function genConnectionId(family: string): string {
   const ts = Date.now().toString(36).slice(-4);
   return `conn_${family.replace(/[^a-z0-9]/gi, "_").toLowerCase()}_${ts}`;
-}
-
-// ── Stat card ─────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub, accent = "default" }: {
-  label: string; value: string | number; sub?: string;
-  accent?: "default" | "emerald" | "blue" | "red";
-}) {
-  const borders = { default: "border-l-zinc-700", emerald: "border-l-emerald-500", blue: "border-l-indigo-500", red: "border-l-red-500" };
-  const values  = { default: "text-gray-900 dark:text-zinc-100", emerald: "text-emerald-400", blue: "text-indigo-400", red: "text-red-400" };
-  return (
-    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4", borders[accent])}>
-      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
-      <p className={clsx("text-2xl font-semibold tabular-nums", values[accent])}>{value}</p>
-      {sub && <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-600">{sub}</p>}
-    </div>
-  );
 }
 
 // ── Model settings popover ────────────────────────────────────────────────────
@@ -880,8 +864,8 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
       {!isLoading && entries.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           <StatCard label="Total"    value={entries.length} />
-          <StatCard label="Healthy"  value={healthy}   accent="emerald" />
-          <StatCard label="Degraded" value={unhealthy}  accent={unhealthy > 0 ? "red" : "default"} />
+          <StatCard label="Healthy"  value={healthy}   variant="success" />
+          <StatCard label="Degraded" value={unhealthy}  variant={unhealthy > 0 ? "danger" : "default"} />
         </div>
       )}
 
