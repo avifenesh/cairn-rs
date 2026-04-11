@@ -12,8 +12,10 @@ import {
   Loader2,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { StatCard } from "../components/StatCard";
 import { defaultApi } from "../lib/api";
 import { useScope } from "../hooks/useScope";
+import { FeatureEmptyState } from "../components/FeatureEmptyState";
 import type { GraphNodeKind, GraphNodeRecord, GraphTraceResponse } from "../lib/types";
 
 // ── Node/edge schema — mirrors cairn_graph::projections exactly ───────────────
@@ -579,26 +581,6 @@ function ForceGraph({ graph }: { graph: { nodes: SimNode[]; edges: SimEdge[] } }
 
 // ── Small shared atoms (schema view) ─────────────────────────────────────────
 
-function StatCard({
-  label,
-  value,
-  sub,
-  accent = "border-l-zinc-700",
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-  accent?: string;
-}) {
-  return (
-    <div className={clsx("border-l-2 pl-3 py-0.5", accent)}>
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
-
 function NodeCard({
   node,
   selected,
@@ -832,16 +814,13 @@ export function GraphPage() {
                     </button>
                   </div>
                 ) : runtimeGraph.nodes.length === 0 ? (
-                  <div className="rounded-lg border border-amber-800/40 bg-amber-500/5 px-4 py-4 flex items-start gap-3">
-                    <Info size={14} className="text-amber-500 shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[12px] font-medium text-amber-400">No live runtime graph yet</p>
-                      <p className="text-[11px] text-amber-700 mt-0.5">
-                        This project has graph data available only after sessions, runs, or tasks have been created.
-                        Create a run or trigger execution, then refresh to see the live trace.
-                      </p>
-                    </div>
-                  </div>
+                  <FeatureEmptyState
+                    icon={<Network size={20} className="text-gray-400 dark:text-zinc-500" />}
+                    title="No graph data yet"
+                    description="Graph nodes are created automatically when sessions and runs execute. Create a session to get started."
+                    actionLabel="Go to Sessions"
+                    actionHref="#sessions"
+                  />
                 ) : (
                   <ForceGraph graph={runtimeGraph} />
                 )}
@@ -849,10 +828,10 @@ export function GraphPage() {
             ) : (
               <>
                 <div className="flex items-start gap-8 py-3 px-4 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60">
-                  <StatCard label="Node Types" value={NODE_TYPES.length} sub="defined in schema" accent="border-l-indigo-500" />
-                  <StatCard label="Edge Types" value={EDGE_TYPES.length} sub="relationship kinds" accent="border-l-indigo-500" />
-                  <StatCard label="Live Nodes" value={liveNodes.length} sub={isError ? "trace unavailable" : scope.project_id} accent="border-l-emerald-500" />
-                  <StatCard label="Live Edges" value={liveEdges.length} sub={isError ? "trace unavailable" : "current scope"} accent="border-l-sky-500" />
+                  <StatCard compact variant="info" label="Node Types" value={NODE_TYPES.length} description="defined in schema" />
+                  <StatCard compact variant="info" label="Edge Types" value={EDGE_TYPES.length} description="relationship kinds" />
+                  <StatCard compact variant="success" label="Live Nodes" value={liveNodes.length} description={isError ? "trace unavailable" : scope.project_id} />
+                  <StatCard compact variant="info" label="Live Edges" value={liveEdges.length} description={isError ? "trace unavailable" : "current scope"} />
                 </div>
 
                 {isError ? (
@@ -864,16 +843,13 @@ export function GraphPage() {
                     </div>
                   </div>
                 ) : liveNodes.length === 0 ? (
-                  <div className="rounded-lg border border-amber-800/40 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
-                    <Info size={14} className="text-amber-500 shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[12px] font-medium text-amber-400">No graph nodes in this scope yet</p>
-                      <p className="text-[11px] text-amber-700 mt-0.5">
-                        The schema browser is live-wired now, but this project has not produced any graph nodes yet.
-                        Once runs, tasks, traces, or memory activity exist, the counts below will update automatically.
-                      </p>
-                    </div>
-                  </div>
+                  <FeatureEmptyState
+                    icon={<Network size={20} className="text-gray-400 dark:text-zinc-500" />}
+                    title="No graph data yet"
+                    description="Graph nodes are created automatically when sessions and runs execute. Create a session to get started."
+                    actionLabel="Go to Sessions"
+                    actionHref="#sessions"
+                  />
                 ) : (
                   <div className="rounded-lg border border-emerald-800/30 bg-emerald-500/5 px-4 py-3 flex items-start gap-3">
                     <Info size={14} className="text-emerald-500 shrink-0 mt-0.5" />
