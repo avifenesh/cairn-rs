@@ -11,7 +11,7 @@ fi
 echo "  ✓ fmt"
 
 echo "  clippy..."
-if ! cargo clippy --workspace -- -D warnings 2>/dev/null | tail -1 | grep -q "Finished"; then
+if ! cargo clippy --workspace -- -D warnings >/dev/null 2>&1; then
   echo "  ❌ clippy warnings. Fix before pushing."
   cargo clippy --workspace -- -D warnings 2>&1 | grep "error" | head -5
   exit 1
@@ -19,10 +19,9 @@ fi
 echo "  ✓ clippy"
 
 echo "  rust tests..."
-RUST_OUT=$(cargo test --workspace --quiet 2>&1)
-if echo "$RUST_OUT" | grep -q "FAILED"; then
+if ! cargo test --workspace --quiet >/dev/null 2>&1; then
   echo "  ❌ rust tests failed."
-  echo "$RUST_OUT" | grep "FAILED\|failures" | head -10
+  cargo test --workspace 2>&1 | grep "FAILED\|failures" | head -10
   exit 1
 fi
 echo "  ✓ rust tests"
@@ -43,7 +42,7 @@ fi
 echo "  ✓ ui build"
 
 echo "  vitest..."
-if ! (cd ui && npx vitest run --reporter=dot) >/dev/null 2>&1; then
+if ! (cd ui && npx vitest run) >/dev/null 2>&1; then
   echo "  ❌ Component tests failed."
   (cd ui && npx vitest run) 2>&1 | grep "FAIL" | head -5
   exit 1
