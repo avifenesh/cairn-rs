@@ -22,6 +22,8 @@ import {
 import { ErrorFallback } from "../components/ErrorFallback";
 import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
+import { Card } from "../components/Card";
+import { sectionLabel, skeleton } from "../lib/design-system";
 import { EventLog } from "../components/EventLog";
 import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
@@ -77,23 +79,11 @@ function runStateColors(state: string): string {
 // ── Primitives ────────────────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
-      {children}
-    </p>
-  );
-}
-
-function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-4", className)}>
-      {children}
-    </div>
-  );
+  return <p className={sectionLabel}>{children}</p>;
 }
 
 function Skeleton({ className }: { className?: string }) {
-  return <div className={clsx("rounded bg-gray-100 dark:bg-zinc-800 animate-pulse", className)} />;
+  return <div className={clsx(skeleton.base, className)} />;
 }
 
 // ── Widget: Active Runs ───────────────────────────────────────────────────────
@@ -158,7 +148,7 @@ function ActiveRunsWidget() {
   });
 
   return (
-    <Panel className="flex flex-col min-h-[160px]">
+    <Card className="flex flex-col min-h-[160px]">
       <div className="flex items-center justify-between mb-2">
         <SectionLabel>Active Runs</SectionLabel>
         <span className="text-[10px] text-gray-400 dark:text-zinc-600 flex items-center gap-1">
@@ -190,7 +180,7 @@ function ActiveRunsWidget() {
           {runs.map(run => <ActiveRunRow key={run.run_id} run={run} />)}
         </div>
       )}
-    </Panel>
+    </Card>
   );
 }
 
@@ -279,7 +269,7 @@ function CostWidget() {
     : null;
 
   return (
-    <Panel>
+    <Card>
       <div className="flex items-center justify-between mb-2">
         <SectionLabel>Costs</SectionLabel>
         {dataUpdatedAt > 0 && (
@@ -331,7 +321,7 @@ function CostWidget() {
           </div>
         </div>
       )}
-    </Panel>
+    </Card>
   );
 }
 
@@ -386,7 +376,7 @@ function ProviderStatusWidget() {
   }
 
   return (
-    <Panel>
+    <Card>
       <div className="flex items-center justify-between mb-2">
         <SectionLabel>System Services</SectionLabel>
       </div>
@@ -422,7 +412,7 @@ function ProviderStatusWidget() {
 
         </div>
       )}
-    </Panel>
+    </Card>
   );
 }
 
@@ -498,7 +488,7 @@ function SystemHealthCard() {
   });
 
   return (
-    <Panel>
+    <Card>
       <div className="flex items-center justify-between mb-3">
         <SectionLabel>System Health</SectionLabel>
         {data && (
@@ -556,7 +546,7 @@ function SystemHealthCard() {
           </div>
         </div>
       )}
-    </Panel>
+    </Card>
   );
 }
 
@@ -564,7 +554,7 @@ function SystemHealthCard() {
 
 function CriticalEvents({ events }: { events: string[] }) {
   return (
-    <Panel>
+    <Card>
       <div className="flex items-center justify-between mb-3">
         <SectionLabel>Critical events</SectionLabel>
         <span className="text-[11px] text-gray-400 dark:text-zinc-600">{events.length}</span>
@@ -584,7 +574,7 @@ function CriticalEvents({ events }: { events: string[] }) {
           ))}
         </ul>
       )}
-    </Panel>
+    </Card>
   );
 }
 
@@ -708,7 +698,7 @@ function ModelUsageWidget() {
   }, [tracesData]);
 
   return (
-    <Panel>
+    <Card>
       <SectionLabel>Top Models · Token Usage</SectionLabel>
       {isLoading ? (
         <div className="space-y-2 animate-pulse">
@@ -727,7 +717,7 @@ function ModelUsageWidget() {
           rowGap={8}
         />
       )}
-    </Panel>
+    </Card>
   );
 }
 
@@ -1147,10 +1137,10 @@ export function DashboardPage() {
                   <CostWidget />
                   <ProviderStatusWidget />
                 </div>
-                <Panel className="flex flex-col">
+                <Card className="flex flex-col">
                   <SectionLabel>Recent Activity</SectionLabel>
                   <EventLog initialEvents={recentEventsData ?? []} maxEvents={50} />
-                </Panel>
+                </Card>
               </div>
               <ModelUsageWidget />
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -1161,14 +1151,14 @@ export function DashboardPage() {
           )}
 
           {activeTab === 'Runs' && (
-            <Panel>
+            <Card>
               <SectionLabel>Recent Runs</SectionLabel>
               <ActiveRunsWidget />
-            </Panel>
+            </Card>
           )}
 
           {activeTab === 'Tasks' && (
-            <Panel>
+            <Card>
               <SectionLabel>Recent Tasks</SectionLabel>
               <div className="space-y-1 pt-1">
                 {(stats?.total_tasks ?? 0) === 0 ? (
@@ -1179,14 +1169,14 @@ export function DashboardPage() {
                   </p>
                 )}
               </div>
-            </Panel>
+            </Card>
           )}
 
           {activeTab === 'Activity' && (
-            <Panel className="flex flex-col min-h-[320px]">
+            <Card className="flex flex-col min-h-[320px]">
               <SectionLabel>Live Event Stream</SectionLabel>
               <EventLog initialEvents={recentEventsData ?? []} maxEvents={100} />
-            </Panel>
+            </Card>
           )}
         </div>
 
