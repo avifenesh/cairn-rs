@@ -11,7 +11,7 @@ pub const OPENAPI_JSON: &str = r##"{
   "openapi": "3.0.3",
   "info": {
     "title": "Cairn API",
-    "description": "Self-hostable control plane for production AI agent deployments.\n\nAll `/v1/` endpoints require `Authorization: Bearer <token>`. `/health`, `/v1/stream`, and `/v1/docs` are public.",
+    "description": "Self-hostable control plane for production AI agent deployments.\n\nAll `/v1/` endpoints require `Authorization: Bearer <token>`. `/health`, `/v1/stream`, and `/v1/docs` are public.\n\n**Database:** Set `DATABASE_URL=postgres://user:pass@host/db` for persistent storage, or `--db memory` for ephemeral in-memory mode.\n\n**Rate limiting:** All responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers. Token-authenticated requests: 1000 req/min. IP-only: 100 req/min. Exceeded requests return `429` with `Retry-After`.",
     "version": "0.1.0",
     "contact": {
       "name": "cairn-rs",
@@ -953,6 +953,34 @@ pub const OPENAPI_JSON: &str = r##"{
         },
         "responses": {
           "200": { "description": "Restore result", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "event_count": { "type": "integer" }, "replayed": { "type": "integer" } } } } } }
+        }
+      }
+    },
+    "/v1/admin/rotate-token": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Rotate admin bearer token at runtime",
+        "description": "Replaces the active admin token with a new one. The old token is immediately revoked. Requires the current token in the Authorization header. The new token must be at least 16 characters.",
+        "operationId": "rotateAdminToken",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["new_token"], "properties": { "new_token": { "type": "string", "minLength": 16, "description": "New admin bearer token (min 16 chars)" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Token rotated", "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string", "example": "rotated" } } } } } },
+          "400": { "description": "new_token too short (min 16 chars)" }
+        }
+      }
+    },
+    "/v1/admin/backup": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Create SQLite database backup",
+        "description": "Copies the active SQLite database file to a timestamped backup. Only available when the SQLite backend is active (returns 404 otherwise).",
+        "operationId": "createBackup",
+        "responses": {
+          "200": { "description": "Backup created", "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string", "example": "backed_up" }, "path": { "type": "string" }, "size_bytes": { "type": "integer" } } } } } },
+          "404": { "description": "SQLite backend not active" }
         }
       }
     },

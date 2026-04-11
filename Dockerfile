@@ -32,7 +32,7 @@ COPY ui/ ./
 RUN npm run build
 
 # ── Stage 1: Rust builder ─────────────────────────────────────────────────────
-FROM rust:1.82-slim AS builder
+FROM rust:1.86-slim AS builder
 
 # Build dependencies needed by sqlx, openssl-sys, and rustls.
 RUN apt-get update && \
@@ -49,24 +49,30 @@ WORKDIR /build
 # the dependency graph can be resolved and pre-compiled without the real source.
 # This layer is reused on source-only changes.
 COPY Cargo.toml Cargo.lock ./
-COPY crates/cairn-domain/Cargo.toml       crates/cairn-domain/Cargo.toml
-COPY crates/cairn-store/Cargo.toml        crates/cairn-store/Cargo.toml
-COPY crates/cairn-runtime/Cargo.toml      crates/cairn-runtime/Cargo.toml
-COPY crates/cairn-tools/Cargo.toml        crates/cairn-tools/Cargo.toml
-COPY crates/cairn-memory/Cargo.toml       crates/cairn-memory/Cargo.toml
-COPY crates/cairn-graph/Cargo.toml        crates/cairn-graph/Cargo.toml
-COPY crates/cairn-agent/Cargo.toml        crates/cairn-agent/Cargo.toml
-COPY crates/cairn-evals/Cargo.toml        crates/cairn-evals/Cargo.toml
-COPY crates/cairn-signal/Cargo.toml       crates/cairn-signal/Cargo.toml
-COPY crates/cairn-channels/Cargo.toml     crates/cairn-channels/Cargo.toml
-COPY crates/cairn-api/Cargo.toml          crates/cairn-api/Cargo.toml
-COPY crates/cairn-plugin-proto/Cargo.toml crates/cairn-plugin-proto/Cargo.toml
-COPY crates/cairn-app/Cargo.toml          crates/cairn-app/Cargo.toml
+COPY crates/cairn-domain/Cargo.toml         crates/cairn-domain/Cargo.toml
+COPY crates/cairn-store/Cargo.toml          crates/cairn-store/Cargo.toml
+COPY crates/cairn-runtime/Cargo.toml        crates/cairn-runtime/Cargo.toml
+COPY crates/cairn-tools/Cargo.toml          crates/cairn-tools/Cargo.toml
+COPY crates/cairn-tools-derive/Cargo.toml   crates/cairn-tools-derive/Cargo.toml
+COPY crates/cairn-memory/Cargo.toml         crates/cairn-memory/Cargo.toml
+COPY crates/cairn-graph/Cargo.toml          crates/cairn-graph/Cargo.toml
+COPY crates/cairn-agent/Cargo.toml          crates/cairn-agent/Cargo.toml
+COPY crates/cairn-evals/Cargo.toml          crates/cairn-evals/Cargo.toml
+COPY crates/cairn-signal/Cargo.toml         crates/cairn-signal/Cargo.toml
+COPY crates/cairn-channels/Cargo.toml       crates/cairn-channels/Cargo.toml
+COPY crates/cairn-api/Cargo.toml            crates/cairn-api/Cargo.toml
+COPY crates/cairn-plugin-proto/Cargo.toml   crates/cairn-plugin-proto/Cargo.toml
+COPY crates/cairn-plugin-catalog/Cargo.toml crates/cairn-plugin-catalog/Cargo.toml
+COPY crates/cairn-providers/Cargo.toml      crates/cairn-providers/Cargo.toml
+COPY crates/cairn-orchestrator/Cargo.toml   crates/cairn-orchestrator/Cargo.toml
+COPY crates/cairn-workspace/Cargo.toml      crates/cairn-workspace/Cargo.toml
+COPY crates/cairn-app/Cargo.toml            crates/cairn-app/Cargo.toml
 
 # Stub all crate entry-points so cargo can resolve and fetch deps.
-RUN for d in cairn-domain cairn-store cairn-runtime cairn-tools cairn-memory \
-             cairn-graph cairn-agent cairn-evals cairn-signal cairn-channels \
-             cairn-api cairn-plugin-proto; do \
+RUN for d in cairn-domain cairn-store cairn-runtime cairn-tools cairn-tools-derive \
+             cairn-memory cairn-graph cairn-agent cairn-evals cairn-signal \
+             cairn-channels cairn-api cairn-plugin-proto cairn-plugin-catalog \
+             cairn-providers cairn-orchestrator cairn-workspace; do \
       mkdir -p crates/$d/src && echo "// stub" > crates/$d/src/lib.rs; \
     done && \
     mkdir -p crates/cairn-app/src && \

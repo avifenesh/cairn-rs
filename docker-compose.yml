@@ -1,4 +1,4 @@
-# cairn-rs — one-command local deployment
+# cairn-rs — production-ready deployment with Postgres
 #
 # Quick start:
 #   docker compose up --build
@@ -9,22 +9,46 @@
 # Stop:
 #   docker compose down
 #
-# Override the admin token via env file:
-#   echo 'CAIRN_ADMIN_TOKEN=my-secret-token' > .env
-#   docker compose up -d
+# Wipe everything (including database):
+#   docker compose down -v
 #
-# Connect an LLM provider (any OpenAI-compatible endpoint):
-#   echo 'CAIRN_BRAIN_URL=https://your-provider/v1' >> .env
-#   echo 'OPENAI_COMPAT_API_KEY=your-key' >> .env
+# Override settings via .env file:
+#   cp .env.example .env && $EDITOR .env
 #
-# Or configure providers at runtime via the dashboard (Providers page)
-# or via POST /v1/providers/connections.
+# Connect an LLM provider — set one of these in .env:
+#   CAIRN_BRAIN_URL + OPENAI_COMPAT_API_KEY   (OpenAI, Anthropic proxy, Groq, etc.)
+#   OPENROUTER_API_KEY                         (OpenRouter)
+#   OLLAMA_HOST                                (Ollama)
+#   BEDROCK_API_KEY + BEDROCK_MODEL_ID         (AWS Bedrock)
 #
-# For persistent team mode with PostgreSQL, see docker-compose.postgres.yml
+# Or configure providers at runtime via the dashboard or POST /v1/providers/connections.
+#
+# In-memory mode (dev only, no Postgres needed):
+#   docker compose up cairn --build   # skip postgres service
+#   # and set: command: ["--db", "memory"]
 
 services:
 
-  # ── Cairn control plane ───────────────────────────────────────────────────────
+  # ── Postgres ─────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cairn
+      POSTGRES_USER: cairn
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-cairn-dev-password}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cairn -d cairn"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Cairn control plane ──────────────────────────────────────────────────────
   cairn:
     build:
       context: .
@@ -33,30 +57,33 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Bearer token for the admin account — override in production.
+      # ── Database ───────────────────────────────────────────────────────────
+      DATABASE_URL: "postgres://cairn:${POSTGRES_PASSWORD:-cairn-dev-password}@postgres:5432/cairn"
+
+      # ── Auth ───────────────────────────────────────────────────────────────
       CAIRN_ADMIN_TOKEN: "${CAIRN_ADMIN_TOKEN:-dev-admin-token}"
-      # Mode: "local" (default) or "team" (requires token on every request).
-      CAIRN_MODE: "${CAIRN_MODE:-local}"
-      # LLM provider — Cairn is provider-agnostic. Connect any endpoint you prefer:
-      # OpenAI, Anthropic, Bedrock, Vertex AI, OpenRouter, Ollama, Groq, Together, etc.
+      CAIRN_MODE: "${CAIRN_MODE:-team}"
+
+      # ── LLM Providers (all optional — configure via env or dashboard) ──────
       CAIRN_BRAIN_URL: "${CAIRN_BRAIN_URL:-}"
       CAIRN_WORKER_URL: "${CAIRN_WORKER_URL:-}"
       OPENAI_COMPAT_API_KEY: "${OPENAI_COMPAT_API_KEY:-}"
       OPENAI_COMPAT_BASE_URL: "${OPENAI_COMPAT_BASE_URL:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       OLLAMA_HOST: "${OLLAMA_HOST:-}"
+      BEDROCK_API_KEY: "${BEDROCK_API_KEY:-}"
+      BEDROCK_MODEL_ID: "${BEDROCK_MODEL_ID:-}"
+      AWS_REGION: "${AWS_REGION:-}"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 30s
-    # Uncomment to persist state with SQLite:
-    # volumes:
-    #   - cairn_data:/data
-    # command: ["--db", "/data/cairn.db"]
 
-  # Uncomment if you enable SQLite persistence above.
-  # volumes:
-  #   cairn_data:
-  #     driver: local
+volumes:
+  pg_data:
+    driver: local

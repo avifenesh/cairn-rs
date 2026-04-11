@@ -3,18 +3,12 @@
 # docker-health-check.sh — verify Docker Compose stack is healthy
 #
 # Usage:
-#   ./scripts/docker-health-check.sh                     # default compose
-#   ./scripts/docker-health-check.sh postgres             # postgres compose
-#   COMPOSE_FILE=docker-compose.postgres.yml ./scripts/docker-health-check.sh
+#   ./scripts/docker-health-check.sh            # Postgres is the default
 # =============================================================================
 
 set -euo pipefail
 
-VARIANT="${1:-default}"
-case "$VARIANT" in
-  postgres|pg) COMPOSE_FILE="docker-compose.postgres.yml" ;;
-  *)           COMPOSE_FILE="docker-compose.yml" ;;
-esac
+COMPOSE_FILE="docker-compose.yml"
 
 GRN='\033[0;32m'; RED='\033[0;31m'; CYN='\033[0;36m'; BLD='\033[1m'; RST='\033[0m'
 PASS=0; FAIL=0
@@ -65,19 +59,15 @@ MODE=$(echo "$BODY" | python3 -c "import sys,json;print(json.load(sys.stdin).get
 echo -e "  Store backend: ${CYN}${BACKEND}${RST}"
 echo -e "  Mode: ${CYN}${MODE}${RST}"
 
-if [ "$VARIANT" = "postgres" ] || [ "$VARIANT" = "pg" ]; then
-  [ "$BACKEND" = "postgres" ] && ok "backend is postgres" || fail "expected postgres, got $BACKEND"
-  [ "$MODE" = "self_hosted_team" ] && ok "mode is team" || fail "expected team mode, got $MODE"
-fi
+# Postgres is the default backend in docker-compose
+[ "$BACKEND" = "postgres" ] && ok "backend is postgres" || fail "expected postgres, got $BACKEND"
 
-# ── Postgres connectivity (if applicable) ────────────────────────────────────
+# ── Postgres connectivity ────────────────────────────────────────────────────
 
-if [ "$VARIANT" = "postgres" ] || [ "$VARIANT" = "pg" ]; then
-  echo -e "\n${BLD}Postgres:${RST}"
-  HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
-    -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/db-status" 2>/dev/null || echo "000")
-  [[ "$HTTP" =~ ^(200|404)$ ]] && ok "GET /v1/admin/db-status ($HTTP)" || fail "GET /v1/admin/db-status ($HTTP)"
-fi
+echo -e "\n${BLD}Postgres:${RST}"
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+  -H "Authorization: Bearer $TOKEN" "$BASE/v1/admin/db-status" 2>/dev/null || echo "000")
+[[ "$HTTP" =~ ^(200|404)$ ]] && ok "GET /v1/admin/db-status ($HTTP)" || fail "GET /v1/admin/db-status ($HTTP)"
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 

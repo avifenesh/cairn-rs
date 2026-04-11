@@ -21,7 +21,6 @@ mod validate;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::PathBuf;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -85,7 +84,6 @@ struct PgBackend {
 #[derive(Clone)]
 struct SqliteBackend {
     event_log: Arc<SqliteEventLog>,
-    path: PathBuf,
     adapter: Arc<SqliteAdapter>,
     path: PathBuf,
 }
@@ -2434,39 +2432,6 @@ async fn admin_snapshot_handler(State(state): State<AppState>) -> impl IntoRespo
         .body(axum::body::Body::from(json))
         .unwrap()
         .into_response()
-async fn backup_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let Some(sqlite) = state.sqlite.as_ref() else {
-        return not_found("SQLite backup is only available when the SQLite backend is active")
-            .into_response();
-    };
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs());
-    let backup_path = PathBuf::from(format!("{}.backup-{timestamp}", sqlite.path.display()));
-
-    let size_bytes = match tokio::fs::copy(&sqlite.path, &backup_path).await {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            return internal_error(format!(
-                "failed to back up SQLite database {}: {error}",
-                sqlite.path.display()
-            ))
-            .into_response();
-        }
-    };
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "status": "backed_up",
-            "path": backup_path.to_string_lossy(),
-            "size_bytes": size_bytes,
-        })),
-    )
-        .into_response()
-}
-
 }
 
 async fn backup_handler(State(state): State<AppState>) -> impl IntoResponse {
@@ -4897,10 +4862,6 @@ async fn main() {
                     let migrator = PgMigrationRunner::new(pool.clone());
                     match migrator.run_pending().await {
                         Ok(applied) if applied.is_empty() => {
-            let sqlite_path = path
-                .strip_prefix("sqlite:")
-                .unwrap_or(path.as_str())
-                .to_owned();
                             eprintln!("store: Postgres schema is up to date");
                         }
                         Ok(applied) => {
@@ -4921,7 +4882,6 @@ async fn main() {
                     });
                     eprintln!("store: Postgres backend active (all service events dual-written)");
                     pg = Some(backend);
-                        path: PathBuf::from(sqlite_path),
                     sqlite = None;
                 }
                 Err(e) => {
@@ -5848,7 +5808,6 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
     // ── Binary-specific routes (not in the catalog) ──────────────────────
     let binary_routes: Router = Router::new()
         // WebSocket (catalog handles /v1/stream and /v1/streams/runtime)
-        .route("/v1/admin/backup", post(backup_handler))
         .route("/v1/ws", get(ws_handler))
         // System introspection
         .route("/v1/health/detailed", get(detailed_health_handler))
@@ -6217,31 +6176,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         String::from_utf8_lossy(&bytes).into_owned()
-    }
-
-    #[tokio::test]
-    async fn admin_backup_returns_404_when_sqlite_backend_is_disabled() {
-        let app = make_app(make_state());
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method(axum::http::Method::POST)
-                    .uri("/v1/admin/backup")
-                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["code"], "not_found");
-        assert_eq!(
-            payload["message"],
-            "SQLite backup is only available when the SQLite backend is active"
-        );
     }
 
     async fn spawn_openai_compat_mock(text: &'static str) -> String {

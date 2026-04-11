@@ -5280,11 +5280,19 @@ async fn auth_middleware(
     next.run(request).await
 }
 
+/// Per-token rate limit: 1 000 requests per 60-second window.
+const RL_TOKEN_LIMIT: u32 = 1_000;
+/// Per-IP rate limit (when no bearer token): 100 requests per 60-second window.
+const RL_IP_LIMIT: u32 = 100;
+/// Sliding-window duration in milliseconds.
+const RL_WINDOW_MS: u64 = 60_000;
+
 async fn rate_limit_middleware(
     State(rate_limits): State<Arc<Mutex<HashMap<String, RateLimitBucket>>>>,
     request: Request,
     next: Next,
 ) -> Response {
+    // Skip health/readiness probes — these must never be rate-limited.
     if matches!(
         request.uri().path(),
         "/health" | "/ready" | "/metrics" | "/version"
@@ -5292,18 +5300,24 @@ async fn rate_limit_middleware(
         return next.run(request).await;
     }
 
-    const WINDOW_MS: u64 = 10_000;
-    const MAX_REQUESTS: u32 = 100;
-
     let now = now_ms();
-    let Some(key) = request_rate_limit_key(&request) else {
+
+    // Derive rate-limit key + per-key limit.
+    // Token-authenticated requests get a higher allowance (1 000/min).
+    // Unauthenticated requests are keyed by IP (100/min).
+    let (key, limit) = if let Some(token) = bearer_token(&request) {
+        (format!("tok:{token}"), RL_TOKEN_LIMIT)
+    } else if let Some(ip) = request_rate_limit_key(&request) {
+        (format!("ip:{ip}"), RL_IP_LIMIT)
+    } else {
+        // No identifiable key — let the request through.
         return next.run(request).await;
     };
 
-    let retry_after = {
+    let (remaining, reset_secs, exceeded) = {
         let mut buckets = match rate_limits.lock() {
             Ok(guard) => guard,
-            Err(_) => return internal_middleware_error("rate limiter unavailable"),
+            Err(poisoned) => poisoned.into_inner(),
         };
 
         let bucket = buckets.entry(key).or_insert(RateLimitBucket {
@@ -5311,39 +5325,52 @@ async fn rate_limit_middleware(
             window_started_ms: now,
         });
 
-        if now.saturating_sub(bucket.window_started_ms) >= WINDOW_MS {
+        // Reset the window if it has elapsed.
+        if now.saturating_sub(bucket.window_started_ms) >= RL_WINDOW_MS {
             *bucket = RateLimitBucket {
                 count: 0,
                 window_started_ms: now,
             };
         }
 
-        if bucket.count >= MAX_REQUESTS {
-            Some(
-                (WINDOW_MS - now.saturating_sub(bucket.window_started_ms))
-                    .max(1)
-                    .div_ceil(1000),
-            )
+        let reset_secs = (RL_WINDOW_MS - now.saturating_sub(bucket.window_started_ms))
+            .max(1)
+            .div_ceil(1000);
+
+        if bucket.count >= limit {
+            (0u32, reset_secs, true)
         } else {
             bucket.count += 1;
-            None
+            (limit.saturating_sub(bucket.count), reset_secs, false)
         }
     };
 
-    if let Some(retry_after) = retry_after {
+    if exceeded {
         let mut response = AppApiError::new(
             StatusCode::TOO_MANY_REQUESTS,
             "rate_limited",
             "rate limit exceeded",
         )
         .into_response();
-        if let Ok(value) = HeaderValue::from_str(&retry_after.to_string()) {
-            response.headers_mut().insert(header::RETRY_AFTER, value);
+        let headers = response.headers_mut();
+        if let Ok(v) = HeaderValue::from_str(&reset_secs.to_string()) {
+            headers.insert(header::RETRY_AFTER, v);
         }
+        headers.insert("x-ratelimit-limit", HeaderValue::from(limit));
+        headers.insert("x-ratelimit-remaining", HeaderValue::from(0u32));
+        headers.insert("x-ratelimit-reset", HeaderValue::from(reset_secs));
         return response;
     }
 
-    next.run(request).await
+    let mut response = next.run(request).await;
+
+    // Attach rate-limit headers to every successful response.
+    let headers = response.headers_mut();
+    headers.insert("x-ratelimit-limit", HeaderValue::from(limit));
+    headers.insert("x-ratelimit-remaining", HeaderValue::from(remaining));
+    headers.insert("x-ratelimit-reset", HeaderValue::from(reset_secs));
+
+    response
 }
 
 async fn request_id_middleware(mut request: Request, next: Next) -> Response {
@@ -5596,10 +5623,6 @@ fn audit_actor_id(principal: &AuthPrincipal) -> String {
 
 fn unauthorized_response() -> Response {
     AppApiError::new(StatusCode::UNAUTHORIZED, "unauthorized", "unauthorized").into_response()
-}
-
-fn internal_middleware_error(message: &str) -> Response {
-    AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message).into_response()
 }
 
 async fn observability_middleware(
@@ -7269,7 +7292,7 @@ async fn instantiate_agent_template_handler(
                 "session_error",
                 e.to_string(),
             )
-            .into_response()
+            .into_response();
         }
     };
 
@@ -7287,7 +7310,7 @@ async fn instantiate_agent_template_handler(
                 "run_error",
                 e.to_string(),
             )
-            .into_response()
+            .into_response();
         }
     };
 
@@ -7812,7 +7835,7 @@ async fn restore_from_snapshot_handler(
                 "not_found",
                 "no snapshot found for tenant",
             )
-            .into_response()
+            .into_response();
         }
         Err(err) => return store_error_response(err),
     };
@@ -8609,7 +8632,7 @@ async fn delete_credential_handler(
         Ok(Some(record)) => record,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "credential not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -9539,7 +9562,7 @@ async fn get_run_audit_trail_handler(
         Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => {}
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     }
@@ -9703,7 +9726,7 @@ async fn list_session_events_handler(
         Ok(Some(session)) if session.project.tenant_id == *tenant_scope.tenant_id() => session,
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "session not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -9765,7 +9788,7 @@ async fn replay_run_handler(
         Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -9804,7 +9827,7 @@ async fn replay_run_to_checkpoint_handler(
         }
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -9819,7 +9842,7 @@ async fn replay_run_to_checkpoint_handler(
                     "not_found",
                     "checkpoint not found for run",
                 )
-                .into_response()
+                .into_response();
             }
             Err(err) => return store_error_response(err),
         };
@@ -9838,7 +9861,7 @@ async fn replay_run_to_checkpoint_handler(
                 "not_found",
                 "checkpoint event not found",
             )
-            .into_response()
+            .into_response();
         }
         Err(err) => return store_error_response(err),
     };
@@ -9867,7 +9890,7 @@ async fn list_run_interventions_handler(
         Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => {}
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     }
@@ -10010,7 +10033,7 @@ async fn spawn_subagent_run_handler(
         Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -10020,7 +10043,7 @@ async fn spawn_subagent_run_handler(
         Ok(Some(session)) if session.project == parent_run.project => {}
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "session not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     }
@@ -10071,7 +10094,7 @@ async fn list_child_runs_handler(
         Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -10141,7 +10164,7 @@ async fn orchestrate_run_handler(
         Ok(Some(r)) => r,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             return AppApiError::new(
@@ -10149,7 +10172,7 @@ async fn orchestrate_run_handler(
                 "store_error",
                 e.to_string(),
             )
-            .into_response()
+            .into_response();
         }
     };
 
@@ -10251,7 +10274,7 @@ async fn orchestrate_run_handler(
                             "no_bedrock_provider",
                             "Bedrock model requested but AWS credentials not configured.",
                         )
-                        .into_response()
+                        .into_response();
                     }
                 }
             } else {
@@ -10849,7 +10872,7 @@ async fn intervene_run_handler(
         Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -11215,7 +11238,7 @@ async fn get_session_activity_handler(
         Ok(Some(s)) if s.project.tenant_id == *tenant_scope.tenant_id() => {}
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "session not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     }
@@ -11313,7 +11336,7 @@ async fn get_session_active_runs_handler(
         Ok(Some(s)) if s.project.tenant_id == *tenant_scope.tenant_id() => {}
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "session not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     }
@@ -11954,7 +11977,7 @@ async fn release_task_lease_handler(
         Ok(Some(task)) if task.project.tenant_id == *tenant_scope.tenant_id() => {}
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     }
@@ -11979,7 +12002,7 @@ async fn cancel_task_handler(
         Ok(Some(t)) => t,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -12070,7 +12093,8 @@ async fn complete_task_handler(
                     }
                     Ok(true) => {}
                     Err(err) => {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+                        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                            .into_response();
                     }
                 }
             }
@@ -12286,7 +12310,7 @@ async fn complete_tool_invocation_handler(
                     "not_found",
                     "tool invocation not found",
                 )
-                .into_response()
+                .into_response();
             }
             Err(err) => return store_error_response(err),
         };
@@ -12338,7 +12362,7 @@ async fn cancel_tool_invocation_handler(
                     "not_found",
                     "tool invocation not found",
                 )
-                .into_response()
+                .into_response();
             }
             Err(err) => return store_error_response(err),
         };
@@ -12431,15 +12455,16 @@ async fn restore_checkpoint_handler(
     let checkpoint_id = CheckpointId::new(&checkpoint_id_str);
 
     // Resolve the checkpoint → run_id.
-    let checkpoint =
-        match CheckpointReadModel::get(state.runtime.store.as_ref(), &checkpoint_id).await {
-            Ok(Some(c)) => c,
-            Ok(None) => {
-                return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "checkpoint not found")
-                    .into_response()
-            }
-            Err(err) => return store_error_response(err),
-        };
+    let checkpoint = match CheckpointReadModel::get(state.runtime.store.as_ref(), &checkpoint_id)
+        .await
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "checkpoint not found")
+                .into_response();
+        }
+        Err(err) => return store_error_response(err),
+    };
 
     // Find the event-log position at which the checkpoint was recorded.
     let position = match checkpoint_recorded_position(
@@ -12456,7 +12481,7 @@ async fn restore_checkpoint_handler(
                 "not_found",
                 "checkpoint event not found in event log",
             )
-            .into_response()
+            .into_response();
         }
         Err(err) => return store_error_response(err),
     };
@@ -12482,7 +12507,7 @@ async fn save_checkpoint_handler(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": err.to_string() })),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -12511,7 +12536,7 @@ async fn get_checkpoint_strategy_handler(
         Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -12539,7 +12564,7 @@ async fn set_checkpoint_strategy_handler(
         Ok(Some(run)) if run.project.tenant_id == *tenant_scope.tenant_id() => run,
         Ok(Some(_)) | Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -12641,7 +12666,7 @@ async fn get_plugin_handler(
                     StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({ "error": err.to_string() })),
                 )
-                    .into_response()
+                    .into_response();
             }
         },
         Err(_) => {
@@ -12649,7 +12674,7 @@ async fn get_plugin_handler(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": "plugin host unavailable" })),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -12780,7 +12805,7 @@ async fn plugin_eval_score_handler(
         Some(m) => m,
         None => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found")
-                .into_response()
+                .into_response();
         }
     };
 
@@ -12888,7 +12913,7 @@ async fn plugin_capabilities_handler(
                     StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({ "error": err.to_string() })),
                 )
-                    .into_response()
+                    .into_response();
             }
         },
         Err(_) => {
@@ -12896,7 +12921,7 @@ async fn plugin_capabilities_handler(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": "plugin host unavailable" })),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -13150,7 +13175,7 @@ async fn render_prompt_version_handler(
                     content: String::new(),
                 }),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -13970,7 +13995,7 @@ async fn sqeq_submit_handler(
                     body.correlation_id.clone(),
                     None,
                     Some(format!("invalid start_run params: {err}")),
-                )
+                );
             }
         };
 
@@ -13989,7 +14014,7 @@ async fn sqeq_submit_handler(
                     body.correlation_id.clone(),
                     None,
                     Some("sqeq session not found".to_owned()),
-                )
+                );
             }
         };
 
@@ -14013,7 +14038,7 @@ async fn sqeq_submit_handler(
                     body.correlation_id.clone(),
                     None,
                     Some("session not found".to_owned()),
-                )
+                );
             }
             Err(err) => {
                 return sqeq_ack_response(
@@ -14022,7 +14047,7 @@ async fn sqeq_submit_handler(
                     body.correlation_id.clone(),
                     None,
                     Some(err.to_string()),
-                )
+                );
             }
         }
 
@@ -14036,7 +14061,7 @@ async fn sqeq_submit_handler(
                         body.correlation_id.clone(),
                         None,
                         Some("parent run not found".to_owned()),
-                    )
+                    );
                 }
                 Err(err) => {
                     return sqeq_ack_response(
@@ -14045,7 +14070,7 @@ async fn sqeq_submit_handler(
                         body.correlation_id.clone(),
                         None,
                         Some(err.to_string()),
-                    )
+                    );
                 }
             }
         }
@@ -14290,7 +14315,7 @@ async fn approve_plan_handler(
             Ok(Some(r)) => r,
             Ok(None) => {
                 return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                    .into_response()
+                    .into_response();
             }
             Err(e) => {
                 return AppApiError::new(
@@ -14298,7 +14323,7 @@ async fn approve_plan_handler(
                     "store_error",
                     e.to_string(),
                 )
-                .into_response()
+                .into_response();
             }
         };
 
@@ -14356,7 +14381,7 @@ async fn reject_plan_handler(
             Ok(Some(r)) => r,
             Ok(None) => {
                 return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                    .into_response()
+                    .into_response();
             }
             Err(e) => {
                 return AppApiError::new(
@@ -14364,7 +14389,7 @@ async fn reject_plan_handler(
                     "store_error",
                     e.to_string(),
                 )
-                .into_response()
+                .into_response();
             }
         };
 
@@ -14424,7 +14449,7 @@ async fn revise_plan_handler(
         Ok(Some(r)) => r,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             return AppApiError::new(
@@ -14432,7 +14457,7 @@ async fn revise_plan_handler(
                 "store_error",
                 e.to_string(),
             )
-            .into_response()
+            .into_response();
         }
     };
 
@@ -16473,7 +16498,7 @@ async fn complete_ingest_job_handler(
         Ok(Some(job)) => job,
         Ok(None) => {
             return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "ingest job not found")
-                .into_response()
+                .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -16776,7 +16801,7 @@ async fn memory_provenance_handler(
                 "provenance_failed",
                 err.to_string(),
             )
-            .into_response()
+            .into_response();
         }
     };
 
@@ -16826,7 +16851,7 @@ async fn memory_related_documents_handler(
                 "document_not_found",
                 "document not found",
             )
-            .into_response()
+            .into_response();
         }
     };
 
@@ -16911,7 +16936,7 @@ async fn get_trace_handler(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": err.to_string() })),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -17501,7 +17526,7 @@ async fn resolve_provider_key_handler(
                 "not_found",
                 "provider connection not found",
             )
-            .into_response()
+            .into_response();
         }
         Err(err) => return runtime_error_response(err),
     };
@@ -19113,7 +19138,7 @@ async fn delete_auth_token_handler(
                     "error": "not_found", "token_id": token_id
                 })),
             )
-                .into_response()
+                .into_response();
         }
     };
     state.service_tokens.revoke(&raw);

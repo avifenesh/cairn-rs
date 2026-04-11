@@ -5,12 +5,12 @@ How to transition from local/in-memory to persistent team mode with Postgres.
 ## Quick start (Docker)
 
 ```bash
-# One command — starts Cairn + Postgres (connect your own LLM provider separately)
-docker compose -f docker-compose.postgres.yml up --build
+# One command — starts Cairn + Postgres (Postgres is the default)
+docker compose up --build
 
 # Override the admin token
 echo 'CAIRN_ADMIN_TOKEN=my-production-token' > .env
-docker compose -f docker-compose.postgres.yml up -d
+docker compose up -d
 
 # Verify
 ./scripts/docker-health-check.sh postgres
