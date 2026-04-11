@@ -1,17 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Activity, BookOpen, Loader2, Wrench } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
-import { defaultApi } from "../lib/api";
-
-function StatCard({ label, value, sub }: { label: string; value: number; sub?: string }) {
-  return (
-    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
+import { StatCard } from "../components/StatCard";
+import { FeatureEmptyState } from "../components/FeatureEmptyState";
+import { defaultApi, ApiError } from "../lib/api";
 
 function displayName(skill: { id?: string; name?: string }) {
   return skill.name?.trim() || skill.id?.trim() || "Unnamed skill";
@@ -33,6 +25,20 @@ export function SkillsPage() {
   }
 
   if (isError) {
+    const is501 = error instanceof ApiError && error.status === 501;
+    if (is501) {
+      return (
+        <div className="p-6">
+          <FeatureEmptyState
+            icon={<Wrench size={20} className="text-gray-400 dark:text-zinc-500" />}
+            title="Skills not yet available"
+            description="Skills are auto-discovered from agent execution. Run an agent workflow to populate skills."
+            actionLabel="Go to Runs"
+            actionHref="#runs"
+          />
+        </div>
+      );
+    }
     return <ErrorFallback error={error} resource="skills" onRetry={() => void refetch()} />;
   }
 
@@ -61,9 +67,9 @@ export function SkillsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <StatCard label="Installed" value={summary.total} />
-        <StatCard label="Enabled" value={summary.enabled} />
-        <StatCard label="Disabled" value={summary.disabled} />
+        <StatCard compact variant="info" label="Installed" value={summary.total} />
+        <StatCard compact variant="success" label="Enabled" value={summary.enabled} />
+        <StatCard compact label="Disabled" value={summary.disabled} />
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.3fr,0.7fr]">
@@ -77,13 +83,13 @@ export function SkillsPage() {
           </div>
 
           {items.length === 0 ? (
-            <div className="px-4 py-8 text-center">
-              <BookOpen size={18} className="mx-auto text-gray-300 dark:text-zinc-700 mb-2" />
-              <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No skills discovered</p>
-              <p className="text-[12px] text-gray-400 dark:text-zinc-600 mt-1">
-                Installed skills will appear here when the host reports them.
-              </p>
-            </div>
+            <FeatureEmptyState
+              icon={<BookOpen size={20} className="text-gray-400 dark:text-zinc-500" />}
+              title="No skills discovered"
+              description="Skills are auto-discovered from agent execution. Run an agent workflow to populate skills."
+              actionLabel="Go to Runs"
+              actionHref="#runs"
+            />
           ) : (
             <div className="divide-y divide-gray-200 dark:divide-zinc-800">
               {items.map((skill, index) => (
