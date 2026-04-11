@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Trash2, XCircle } from "lucide-react";
 import { DataTable } from "../components/DataTable";
+import { StatCard } from "../components/StatCard";
 import { CopyButton } from "../components/CopyButton";
 import { HelpTooltip } from "../components/HelpTooltip";
 import { ErrorFallback } from "../components/ErrorFallback";
@@ -63,22 +64,6 @@ function OutcomePill({ outcome }: { outcome: string }) {
       <span className={clsx("w-1 h-1 rounded-full shrink-0", OUTCOME_DOT[outcome] ?? OUTCOME_DOT.denied)} />
       {outcome}
     </span>
-  );
-}
-
-// ── Stat card ────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, accent = "default" }: {
-  label: string; value: string | number;
-  accent?: "default" | "emerald" | "red" | "amber";
-}) {
-  const border = { default: "border-l-zinc-700", emerald: "border-l-emerald-500", red: "border-l-red-500", amber: "border-l-amber-500" }[accent];
-  const val = { default: "text-gray-900 dark:text-zinc-100", emerald: "text-emerald-400", red: "text-red-400", amber: "text-amber-400" }[accent];
-  return (
-    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4", border)}>
-      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
-      <p className={clsx("text-2xl font-semibold tabular-nums", val)}>{value}</p>
-    </div>
   );
 }
 
@@ -159,9 +144,9 @@ export function DecisionsPage() {
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total Decisions" value={decisions.length} />
-        <StatCard label="Allowed" value={allowed} accent="emerald" />
-        <StatCard label="Denied" value={denied} accent="red" />
-        <StatCard label="Cached Rules" value={cacheEntries.length} accent="amber" />
+        <StatCard label="Allowed" value={allowed} variant="success" />
+        <StatCard label="Denied" value={denied} variant="danger" />
+        <StatCard label="Cached Rules" value={cacheEntries.length} variant="warning" />
       </div>
 
       {/* Tab bar */}
