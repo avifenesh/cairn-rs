@@ -6,6 +6,7 @@ import {
   Play, Pause,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { Card } from "../components/Card";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
 import type {
@@ -77,7 +78,7 @@ function ReleaseBadge({ state }: { state: string }) {
 function DiffPanel({ diff, onClose }: { diff: PromptVersionDiff; onClose: () => void }) {
   const pct = Math.round(diff.similarity_score * 100);
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden mt-2">
+    <Card variant="inner" className="mt-2">
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-zinc-800">
         <div className="flex items-center gap-3">
           <GitCompare size={12} className="text-gray-400 dark:text-zinc-500" />
@@ -123,7 +124,7 @@ function DiffPanel({ diff, onClose }: { diff: PromptVersionDiff; onClose: () => 
             ))}
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -428,7 +429,7 @@ function AssetItem({
             ) : versions.length === 0 ? (
               <p className="text-[12px] text-gray-300 dark:text-zinc-600 italic py-2">No versions yet.</p>
             ) : (
-              <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-x-auto divide-y divide-gray-200 dark:divide-zinc-800/50">
+              <Card variant="shell" className="overflow-x-auto divide-y divide-gray-200 dark:divide-zinc-800/50">
                 {versions.map((v, i) => (
                   <VersionRow
                     key={v.prompt_version_id}
@@ -438,7 +439,7 @@ function AssetItem({
                     onCreateRelease={(vid) => createRelease.mutate(vid)}
                   />
                 ))}
-              </div>
+              </Card>
             )}
           </div>
 
@@ -450,7 +451,7 @@ function AssetItem({
               </p>
               <div className="space-y-2">
                 {assetReleases.map((rel) => (
-                  <div key={rel.prompt_release_id} className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-3 py-2">
+                  <Card key={rel.prompt_release_id} className="px-3 py-2">
                     <div className="flex items-center justify-between gap-3 mb-1.5">
                       <code className="text-[11px] font-mono text-gray-400 dark:text-zinc-500">
                         {shortId(rel.prompt_release_id)}
@@ -458,7 +459,7 @@ function AssetItem({
                       <span className="text-[10px] text-gray-300 dark:text-zinc-600">{fmtTime(rel.updated_at)}</span>
                     </div>
                     <ReleaseControls release={rel} />
-                  </div>
+                  </Card>
                 ))}
               </div>
             </div>
@@ -498,7 +499,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
   const valid = id.trim().length > 0 && name.trim().length > 0;
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 px-4 py-3 space-y-3">
+    <Card className="px-4 py-3 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-[12px] font-medium text-gray-700 dark:text-zinc-300">New Prompt Asset</span>
         <button onClick={onClose} className="p-0.5 rounded text-gray-400 dark:text-zinc-600 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors">
@@ -553,7 +554,7 @@ function NewPromptForm({ onClose }: { onClose: () => void }) {
           Create
         </button>
       </div>
-    </div>
+    </Card>
   );
 }
 
