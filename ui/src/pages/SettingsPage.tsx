@@ -2,8 +2,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { RefreshCw, Loader2, Check, X, Radio, Wifi, ShieldCheck, SlidersHorizontal, Server, Plus, Trash2 } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
+import { Card } from "../components/Card";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
+import { sectionLabel as sectionLabelCls } from "../lib/design-system";
 import { usePreferences, type Preferences } from "../hooks/usePreferences";
 import { useScope } from "../hooks/useScope";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -74,14 +76,14 @@ function BackendBadge({ backend }: { backend: string }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
+    <Card variant="shell">
       <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
         <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">{title}</p>
       </div>
       <div className="px-4 bg-gray-50/60 dark:bg-zinc-900/60">
         {children}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -655,12 +657,14 @@ function PreferenceStatCard({
   );
 }
 
-/** A single tenant-level default setting row. */
+/** A single default setting row. Saves to tenant scope by default; pass saveScope/saveScopeId for system-level overrides. */
 function PreferenceRow({
   label,
   description,
   settingKey,
   control,
+  saveScope,
+  saveScopeId,
 }: {
   label:       string;
   description: string;
@@ -671,6 +675,10 @@ function PreferenceRow({
     local:    string,
     setLocal: (v: string) => void,
   ) => React.ReactNode;
+  /** Override the scope for PUT (default: "tenant"). */
+  saveScope?:   string;
+  /** Override the scope ID for PUT (default: current tenant_id). */
+  saveScopeId?: string;
 }) {
   const qc = useQueryClient();
   const [scope] = useScope();
@@ -698,6 +706,9 @@ function PreferenceRow({
 
   const dirty = local !== storedStr && local !== "";
 
+  const effectiveScope   = saveScope   ?? "tenant";
+  const effectiveScopeId = saveScopeId ?? scope.tenant_id;
+
   const saveMutation = useMutation({
     mutationFn: () => {
       // Coerce to the right JSON type based on the key suffix.
@@ -709,7 +720,7 @@ function PreferenceRow({
       } else if (settingKey === "temperature") {
         value = parseFloat(local);
       }
-      return defaultApi.setDefaultSetting("tenant", scope.tenant_id, settingKey, value);
+      return defaultApi.setDefaultSetting(effectiveScope, effectiveScopeId, settingKey, value);
     },
     onSuccess: () => {
       setSaveState("saved");
@@ -938,7 +949,7 @@ function NotificationPreferencesSection() {
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
+    <Card variant="shell">
       <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
         <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">
           Notifications
@@ -1122,7 +1133,7 @@ function NotificationPreferencesSection() {
           </>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -1160,11 +1171,159 @@ function ModelPicker({ local, setLocal }: { local: string; setLocal: (v: string)
   );
 }
 
+// ── Provider Defaults Section ────────────────────────────────────────────────
+
+function ActiveProviderIndicator() {
+  const { data: healthData, isLoading } = useQuery({
+    queryKey: ["providers-health"],
+    queryFn: () => defaultApi.getProviderHealth(),
+    refetchInterval: 20_000,
+  });
+
+  const { data: connData } = useQuery({
+    queryKey: ["provider-connections"],
+    queryFn: () => defaultApi.listProviderConnections(),
+    staleTime: 30_000,
+  });
+
+  const entries = connData?.items ?? [];
+  const healthList = Array.isArray(healthData) ? healthData : [];
+  const healthMap = new Map(healthList.map(h => [h.connection_id, h]));
+  const healthy   = entries.filter(e => healthMap.get(e.provider_connection_id)?.healthy === true).length;
+  const total     = entries.length;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-[11px] text-gray-400 dark:text-zinc-600">
+        <Loader2 size={11} className="animate-spin" /> Checking providers…
+      </div>
+    );
+  }
+
+  if (total === 0) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-950/20 border border-amber-800/30">
+        <X size={11} className="text-amber-400 shrink-0" />
+        <span className="text-[11px] text-amber-300">
+          No provider connections registered. Add one on the Providers page.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800">
+        <span className={clsx(
+          "w-2 h-2 rounded-full shrink-0",
+          healthy === total ? "bg-emerald-400" : healthy > 0 ? "bg-amber-400" : "bg-red-400 animate-pulse",
+        )} />
+        <span className="text-[12px] text-gray-700 dark:text-zinc-300 font-medium">
+          {healthy}/{total} provider{total !== 1 ? "s" : ""} live
+        </span>
+      </div>
+      {entries.slice(0, 4).map(e => {
+        const h = healthMap.get(e.provider_connection_id);
+        return (
+          <span
+            key={e.provider_connection_id}
+            className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500 dark:text-zinc-400"
+            title={`${e.provider_connection_id}: ${h?.healthy ? "healthy" : h ? "unhealthy" : "unknown"}`}
+          >
+            <span className={clsx(
+              "w-1.5 h-1.5 rounded-full shrink-0",
+              h?.healthy === true ? "bg-emerald-400" : h?.healthy === false ? "bg-red-400" : "bg-zinc-600",
+            )} />
+            {e.provider_connection_id}
+          </span>
+        );
+      })}
+      {entries.length > 4 && (
+        <span className="text-[10px] text-gray-400 dark:text-zinc-600">+{entries.length - 4} more</span>
+      )}
+    </div>
+  );
+}
+
+function ProviderDefaultsSection() {
+  return (
+    <Card variant="shell">
+      <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
+        <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">Provider Defaults</p>
+        <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
+          System-level model assignments. These control which models Cairn uses for each purpose.
+          Changes take effect immediately (hot-reloaded).
+        </p>
+      </div>
+      <div className="px-5 bg-gray-50/60 dark:bg-zinc-900/60">
+        {/* Active provider indicator */}
+        <div className="py-3 border-b border-gray-200 dark:border-zinc-800">
+          <ActiveProviderIndicator />
+        </div>
+
+        <PreferenceRow
+          label="Generate model"
+          description="Primary model for generation requests (worker/everyday path). Used by runs and tool calls."
+          settingKey="generate_model"
+          saveScope="system"
+          saveScopeId="system"
+          control={(_, local, setLocal) => (
+            <ModelPicker local={local} setLocal={setLocal} />
+          )}
+        />
+        <PreferenceRow
+          label="Brain model"
+          description="Compute-heavy model for orchestration, planning, and reasoning tasks."
+          settingKey="brain_model"
+          saveScope="system"
+          saveScopeId="system"
+          control={(_, local, setLocal) => (
+            <ModelPicker local={local} setLocal={setLocal} />
+          )}
+        />
+        <PreferenceRow
+          label="Stream model"
+          description="Model used for SSE token-streaming responses."
+          settingKey="stream_model"
+          saveScope="system"
+          saveScopeId="system"
+          control={(_, local, setLocal) => (
+            <ModelPicker local={local} setLocal={setLocal} />
+          )}
+        />
+        <PreferenceRow
+          label="Embed model"
+          description="Embedding model for the knowledge pipeline (OpenAI-compatible path)."
+          settingKey="embed_model"
+          saveScope="system"
+          saveScopeId="system"
+          control={(_, local, setLocal) => (
+            <ModelPicker local={local} setLocal={setLocal} />
+          )}
+        />
+        <PreferenceRow
+          label="Max output tokens"
+          description="Default cap on output length for generation calls. 0 = provider default."
+          settingKey="max_tokens"
+          saveScope="system"
+          saveScopeId="system"
+          control={(_, local, setLocal) => (
+            <PrefNumber local={local} setLocal={setLocal} min={0} max={128_000} placeholder="e.g. 4096" />
+          )}
+        />
+      </div>
+    </Card>
+  );
+}
+
 function PreferencesTab() {
   return (
     <div className="max-w-3xl space-y-6">
+      {/* Provider defaults (system-scoped) */}
+      <ProviderDefaultsSection />
+
       {/* Section: tenant defaults */}
-      <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
+      <Card variant="shell">
         <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
           <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">Tenant Defaults</p>
           <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
@@ -1214,7 +1373,7 @@ function PreferencesTab() {
             )}
           />
         </div>
-      </div>
+      </Card>
 
       {/* Hint about future per-project overrides */}
       <p className="text-[11px] text-gray-300 dark:text-zinc-600 leading-relaxed px-1">
@@ -1239,7 +1398,7 @@ function OperatorPreferencesSection() {
   return (
     <div className="max-w-3xl space-y-6">
       {/* Appearance */}
-      <div className="rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
+      <Card variant="shell">
         <div className="border-l-2 border-indigo-500 px-4 py-2.5 bg-gray-100/40 dark:bg-zinc-800/40">
           <p className="text-[12px] font-semibold text-gray-700 dark:text-zinc-300 uppercase tracking-wider">Appearance</p>
         </div>
@@ -1314,7 +1473,7 @@ function OperatorPreferencesSection() {
             </select>
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* Notifications */}
       <NotificationPreferencesSection />
