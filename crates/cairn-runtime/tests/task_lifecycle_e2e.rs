@@ -96,7 +96,7 @@ async fn step3_claim_moves_to_leased() {
         "claimed task must be Leased"
     );
     assert_eq!(
-        leased.lease_owner.as_ref().map(|w| w.as_str()),
+        leased.lease_owner.as_deref(),
         Some("worker_01"),
         "lease_owner must be set to the claiming worker"
     );
@@ -259,7 +259,7 @@ async fn full_task_lifecycle() {
         .unwrap();
     assert_eq!(leased.state, TaskState::Leased);
     assert_eq!(
-        leased.lease_owner.as_ref().map(|w| w.as_str()),
+        leased.lease_owner.as_deref(),
         Some("worker_01")
     );
     let original_expiry = leased.lease_expires_at.unwrap();

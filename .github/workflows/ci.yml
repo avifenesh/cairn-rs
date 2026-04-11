@@ -82,9 +82,18 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      - name: cargo test --workspace
-        run: cargo test --workspace
-        timeout-minutes: 15
+      # Unit tests (lib only — fast, no heavy linking)
+      - name: cargo test --lib
+        run: cargo test --workspace --lib
+        timeout-minutes: 10
+      # Integration tests (exclude cairn-app to avoid linker pressure)
+      - name: cargo test --tests (non-app)
+        run: cargo test --workspace --exclude cairn-app --tests
+        timeout-minutes: 10
+      # cairn-app integration tests (specific, not --tests which links everything)
+      - name: cairn-app integration tests
+        run: cargo test -p cairn-app --test bootstrap_smoke --test source_refresh --test request_tracing --test entitlement_gates
+        timeout-minutes: 8
 
   # ── 5. UI Build + Type Check + Component Tests ──────────────────────────────
   ui:
