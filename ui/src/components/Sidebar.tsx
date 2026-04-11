@@ -222,6 +222,7 @@ export function Sidebar({ current, onNavigate, mobileOpen = false, onMobileClose
       )}
 
       <aside
+        data-testid="sidebar"
         aria-label="Main navigation"
         className={clsx(
           'flex flex-col h-screen',

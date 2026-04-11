@@ -87,6 +87,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               <div className="relative">
                 <input
                   id="token"
+                  data-testid="login-token-input"
                   type={showToken ? 'text' : 'password'}
                   autoComplete="current-password"
                   autoFocus
@@ -135,6 +136,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             {/* Submit */}
             <button
               type="submit"
+              data-testid="login-submit-btn"
               disabled={loading || !token.trim()}
               className="w-full h-9 flex items-center justify-center gap-2 rounded-lg
                          bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700

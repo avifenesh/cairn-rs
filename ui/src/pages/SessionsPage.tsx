@@ -139,6 +139,7 @@ export function SessionsPage() {
             <Upload size={11} /> Import
           </button>
           <button
+            data-testid="new-session-btn"
             onClick={() => createSession.mutate()}
             disabled={createSession.isPending}
             className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1.5 text-[11px] text-white font-medium transition-colors disabled:opacity-50"

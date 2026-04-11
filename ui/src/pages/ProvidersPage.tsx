@@ -961,6 +961,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
             <RefreshCw size={11} /> Refresh
           </button>
           <button
+            data-testid="add-provider-btn"
             onClick={onAdd}
             className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-[11px] text-white font-medium transition-colors"
           >

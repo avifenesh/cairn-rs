@@ -88,6 +88,7 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
         placement="top"
       />
       <button
+        data-testid="approve-btn"
         onClick={e => {
           e.stopPropagation();
           if (!window.confirm(
@@ -102,6 +103,7 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
         {resolve.isPending ? <Loader2 size={10} className="animate-spin inline" /> : "Approve"}
       </button>
       <button
+        data-testid="reject-btn"
         onClick={e => {
           e.stopPropagation();
           if (!window.confirm(
