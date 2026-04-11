@@ -6,6 +6,7 @@ import {
   Key, Store,
 } from 'lucide-react';
 import { ErrorFallback } from '../components/ErrorFallback';
+import { StatCard } from '../components/StatCard';
 import { defaultApi } from '../lib/api';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import type { PluginManifest, PluginCapability, PluginDetailResponse, CatalogEntry } from '../lib/types';
@@ -42,18 +43,6 @@ function fmtUptime(ms: number): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-
-// ── Stat card ─────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
 }
 
 // ── Plugin detail panel ───────────────────────────────────────────────────────
@@ -631,9 +620,9 @@ export function PluginsPage() {
       {/* Stat strip */}
       {!isLoading && (
         <div className="grid grid-cols-3 gap-x-6 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 shrink-0">
-          <StatCard label="Total"     value={plugins.length} />
-          <StatCard label="Active"    value="—" sub="expand to check" />
-          <StatCard label="Errored"   value="—" sub="expand to check" />
+          <StatCard compact variant="info" label="Total"     value={plugins.length} />
+          <StatCard compact label="Active"    value="—" description="expand to check" />
+          <StatCard compact label="Errored"   value="—" description="expand to check" />
         </div>
       )}
 
