@@ -14,8 +14,7 @@ use cairn_domain::lifecycle::TaskState;
 use cairn_domain::task_dependencies::TaskDependency;
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
-    SessionCreated, SessionId, StateTransition, TaskCreated, TaskDependencyAdded, TaskId,
-    TaskStateChanged,
+    SessionCreated, SessionId, StateTransition, TaskCreated, TaskId, TaskStateChanged,
 };
 use cairn_store::projections::TaskDependencyRecord;
 use cairn_store::{

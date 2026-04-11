@@ -7,9 +7,7 @@ use cairn_runtime::services::{
     ProjectServiceImpl, RunServiceImpl, SessionServiceImpl, TaskServiceImpl, TenantServiceImpl,
     WorkspaceServiceImpl,
 };
-use cairn_runtime::{
-    ProjectService, RunService, SessionService, TaskService, TenantService, WorkspaceService,
-};
+use cairn_runtime::{ProjectService, SessionService, TaskService, TenantService, WorkspaceService};
 use cairn_store::projections::RunReadModel;
 use cairn_store::{EventLog, InMemoryStore};
 

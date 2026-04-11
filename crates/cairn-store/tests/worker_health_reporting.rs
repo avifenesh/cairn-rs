@@ -11,7 +11,6 @@
 use std::sync::Arc;
 
 use cairn_domain::lifecycle::FailureClass;
-use cairn_domain::tenancy::TenantKey;
 use cairn_domain::workers::{ExternalWorkerOutcome, ExternalWorkerProgress, ExternalWorkerReport};
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ExternalWorkerRegistered, ExternalWorkerReported,
@@ -23,9 +22,6 @@ use cairn_store::{projections::ExternalWorkerReadModel, EventLog, InMemoryStore}
 
 fn tenant(n: &str) -> TenantId {
     TenantId::new(format!("tenant_w_{n}"))
-}
-fn tenant_key(n: &str) -> TenantKey {
-    TenantKey::new(format!("tenant_w_{n}"))
 }
 fn worker(n: &str) -> WorkerId {
     WorkerId::new(format!("worker_{n}"))

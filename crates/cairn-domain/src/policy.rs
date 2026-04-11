@@ -124,7 +124,7 @@ pub enum GuardrailRuleEffect {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApprovalMode, ApprovalRequirement, PolicyEffect, PolicyVerdict};
+    use super::{ApprovalRequirement, PolicyEffect, PolicyVerdict};
 
     #[test]
     fn hold_verdict_implies_approval_requirement() {

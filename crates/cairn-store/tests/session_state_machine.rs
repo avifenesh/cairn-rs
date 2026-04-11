@@ -324,7 +324,7 @@ async fn multiple_sessions_in_project_tracked_independently() {
 #[tokio::test]
 async fn count_by_state_returns_correct_counts() {
     let store = InMemoryStore::new();
-    let ts = now_ms();
+    let _ts = now_ms();
 
     // Create 4 sessions: 2 Open, 1 Completed, 1 Failed.
     store
@@ -429,7 +429,7 @@ async fn list_active_returns_open_sessions_only() {
 #[tokio::test]
 async fn list_by_project_ordered_by_created_at() {
     let store = InMemoryStore::new();
-    let ts = now_ms();
+    let _ts = now_ms();
 
     // Create three sessions in one batch — they share the same stored_at timestamp.
     // With equal timestamps the secondary sort by session_id kicks in.

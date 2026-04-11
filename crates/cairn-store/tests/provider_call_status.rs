@@ -11,9 +11,7 @@
 //! Also fixes a projection bug discovered during this task:
 //!   error_class was always stored as None — now populated from the event.
 
-use cairn_domain::providers::{
-    OperationKind, ProviderCallErrorClass, ProviderCallStatus, RouteDecisionStatus,
-};
+use cairn_domain::providers::{OperationKind, ProviderCallErrorClass, ProviderCallStatus};
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, ProviderBindingId,
     ProviderCallCompleted, ProviderCallId, ProviderConnectionId, ProviderModelId, RouteAttemptId,

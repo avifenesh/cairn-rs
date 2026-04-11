@@ -472,7 +472,7 @@ mod tests {
     use std::sync::Arc;
 
     use cairn_domain::*;
-    use cairn_store::projections::TaskReadModel;
+
     use cairn_store::InMemoryStore;
 
     use super::TaskServiceImpl;

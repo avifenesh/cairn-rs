@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    ApprovalDecision, ApprovalId, ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId,
-    TenantId, WorkspaceRole,
+    ApprovalDecision, ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId, TenantId,
+    WorkspaceRole,
 };
 use cairn_runtime::approval_policies::ApprovalPolicyService;
 use cairn_runtime::approvals::ApprovalService;

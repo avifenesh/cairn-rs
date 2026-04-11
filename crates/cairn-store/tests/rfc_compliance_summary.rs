@@ -21,7 +21,6 @@ use cairn_domain::{
     SessionCreated, SessionId, TenantId,
 };
 use cairn_store::{
-    event_log::EventPosition,
     projections::{
         ApprovalReadModel, PromptReleaseReadModel, RouteDecisionReadModel, RunReadModel,
     },

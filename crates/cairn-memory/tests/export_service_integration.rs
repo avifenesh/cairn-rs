@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
-use cairn_memory::bundles::{
-    BundleType, DocumentExportFilters, ExportService, KnowledgeDocumentPayload,
-};
+use cairn_memory::bundles::{BundleType, DocumentExportFilters, KnowledgeDocumentPayload};
 use cairn_memory::export_service_impl::InMemoryExportService;
 use cairn_memory::in_memory::InMemoryDocumentStore;
 use cairn_memory::ingest::{IngestRequest, IngestService, SourceType};

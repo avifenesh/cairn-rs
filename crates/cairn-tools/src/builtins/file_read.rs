@@ -233,7 +233,6 @@ pub(super) fn resolve_safe_path(
 mod tests {
     use super::*;
     use cairn_domain::ProjectKey;
-    use std::io::Write;
 
     fn project() -> ProjectKey {
         ProjectKey::new("t", "w", "p")

@@ -114,7 +114,7 @@ where
 mod tests {
     use super::*;
     use cairn_domain::{TenantId, WorkspaceId};
-    use cairn_store::projections::{PromptAssetReadModel, PromptVersionReadModel};
+
     use cairn_store::InMemoryStore;
 
     use crate::prompt_assets::PromptAssetService;

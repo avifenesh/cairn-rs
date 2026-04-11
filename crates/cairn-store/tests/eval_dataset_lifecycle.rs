@@ -26,7 +26,7 @@ fn evt(id: &str, payload: RuntimeEvent) -> EventEnvelope<RuntimeEvent> {
     // EvalDatasetCreated/EntryAdded have no project key — use runtime source.
     // We construct the envelope directly since for_runtime_event expects a
     // project from the payload, which these events don't carry.
-    use cairn_domain::{tenancy::ProjectKey, OwnershipKey, ProjectId, WorkspaceId};
+    use cairn_domain::OwnershipKey;
     EventEnvelope {
         event_id: EventId::new(id),
         source: EventSource::Runtime,

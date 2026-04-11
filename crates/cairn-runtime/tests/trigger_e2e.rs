@@ -4,9 +4,9 @@ use cairn_domain::decisions::RunMode;
 use cairn_domain::ids::{OperatorId, RunTemplateId, SignalId, TriggerId};
 use cairn_domain::tenancy::ProjectKey;
 use cairn_runtime::services::trigger_service::{
-    auto_approve_decision, evaluate_conditions, substitute_variables, RateLimitConfig, RunTemplate,
-    SignalPattern, SkipReason, TemplateBudget, Trigger, TriggerCondition, TriggerError,
-    TriggerEvent, TriggerService, TriggerState,
+    auto_approve_decision, substitute_variables, RateLimitConfig, RunTemplate, SignalPattern,
+    SkipReason, TemplateBudget, Trigger, TriggerCondition, TriggerError, TriggerEvent,
+    TriggerService, TriggerState,
 };
 use serde_json::json;
 

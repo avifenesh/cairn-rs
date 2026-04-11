@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn tool_search_finds_github_tools() {
-        use super::super::{BuiltinToolDescriptor, BuiltinToolRegistry};
+        use super::super::BuiltinToolRegistry;
         use std::sync::Arc;
 
         let reg = BuiltinToolRegistry::new()

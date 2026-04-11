@@ -113,7 +113,7 @@ async fn tool_invocation_is_recorded_before_approval() {
 #[tokio::test]
 async fn approval_requested_creates_pending_record() {
     let store = InMemoryStore::new();
-    let ts = now_ms();
+    let _ts = now_ms();
     let run_id = RunId::new("run_appr_2");
     let approval_id = ApprovalId::new("appr_2");
 
@@ -178,7 +178,7 @@ async fn approval_requested_creates_pending_record() {
 #[tokio::test]
 async fn approval_resolved_approved_updates_decision() {
     let store = InMemoryStore::new();
-    let ts = now_ms();
+    let _ts = now_ms();
     let run_id = RunId::new("run_appr_3");
     let approval_id = ApprovalId::new("appr_3");
 

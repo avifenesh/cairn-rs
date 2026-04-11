@@ -12,8 +12,6 @@
 //!   - Metric values (policy_pass_rate, task_success_rate, etc.) are correct
 //!   - Matrices compose correctly when populated from EvalRunService results
 
-use std::sync::Arc;
-
 use cairn_domain::{
     EvalRunId, PolicyId, ProjectId, PromptAssetId, PromptReleaseId, PromptVersionId,
     ProviderBindingId, RouteDecisionId, SourceId,

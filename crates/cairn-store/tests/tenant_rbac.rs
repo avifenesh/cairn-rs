@@ -176,7 +176,7 @@ async fn run_list_is_scoped_to_project() {
     let store = InMemoryStore::new();
     let proj_a = project("tenant_a", "ws_a");
     let proj_b = project("tenant_b", "ws_b");
-    let ts = now_ms();
+    let _ts = now_ms();
 
     // Create sessions first (runs reference a session).
     store
@@ -270,7 +270,7 @@ async fn run_list_is_scoped_to_project() {
 async fn cross_tenant_run_query_returns_empty() {
     let store = InMemoryStore::new();
     let proj_a = project("tenant_x", "ws_x");
-    let proj_b = project("tenant_y", "ws_y");
+    let _proj_b = project("tenant_y", "ws_y");
 
     store
         .append(&[

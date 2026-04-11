@@ -6,14 +6,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use cairn_domain::{OnExhaustion, ProjectKey, RepoAccessContext, RunId, TenantId};
-use cairn_workspace::providers::SandboxProvider;
+use cairn_domain::{OnExhaustion, ProjectKey, RepoAccessContext, TenantId};
 use cairn_workspace::repo_store::access_service::ProjectRepoAccessService;
 use cairn_workspace::repo_store::clone_cache::RepoCloneCache;
-use cairn_workspace::sandbox::service::{
-    BufferedSandboxEventSink, Clock, SandboxService, SystemClock,
-};
-use cairn_workspace::sandbox::types::{ProvisionedSandbox, SandboxState};
+use cairn_workspace::sandbox::service::{BufferedSandboxEventSink, SandboxService, SystemClock};
 use cairn_workspace::sandbox::{
     HostCapabilityRequirements, RepoId, SandboxBase, SandboxPolicy, SandboxStrategy,
     SandboxStrategyRequest,
@@ -35,6 +31,7 @@ fn project(id: &str) -> ProjectKey {
     ProjectKey::new("test-tenant", "test-ws", id)
 }
 
+#[allow(dead_code)]
 fn empty_policy() -> SandboxPolicy {
     SandboxPolicy {
         strategy: SandboxStrategyRequest::Preferred(SandboxStrategy::Reflink),
@@ -51,6 +48,7 @@ fn empty_policy() -> SandboxPolicy {
     }
 }
 
+#[allow(dead_code)]
 fn repo_policy(repo_id: RepoId) -> SandboxPolicy {
     SandboxPolicy {
         base: SandboxBase::Repo {
@@ -132,7 +130,7 @@ async fn rfc016_ensure_all_cloned_creates_clones_for_distinct_repos() {
         let path = base
             .join(t.as_str())
             .join("org")
-            .join(repo.as_str().split('/').last().unwrap());
+            .join(repo.as_str().split('/').next_back().unwrap());
         assert!(
             path.join(".git").exists(),
             "git dir must exist for {}",

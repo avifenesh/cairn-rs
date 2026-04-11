@@ -315,7 +315,7 @@ fn latency_improvement_detected_when_p50_decreases() {
 fn multiple_runs_for_same_asset_tracked_independently() {
     let svc = EvalRunService::new();
     let asset_id = PromptAssetId::new("asset_multi");
-    let project_id = ProjectId::new("proj_multi");
+    let _project_id = ProjectId::new("proj_multi");
 
     let run_a = full_run(
         &svc,

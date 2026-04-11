@@ -379,11 +379,10 @@ async fn derived_events_do_not_break_monotonicity() {
     // ProviderCallCompleted triggers derived RunCostUpdated and SessionCostUpdated
     // events in the projection. These get their own positions in the log.
     // The global ordering guarantee must hold even with derived events.
-    use cairn_domain::providers::{OperationKind, ProviderCallStatus, RouteDecisionStatus};
+    use cairn_domain::providers::{OperationKind, ProviderCallStatus};
     use cairn_domain::{
         ProviderBindingId, ProviderCallCompleted, ProviderCallId, ProviderConnectionId,
-        ProviderModelId, RouteAttemptId, RouteDecisionId, RunCreated, RunId, SessionCreated,
-        SessionId,
+        ProviderModelId, RouteAttemptId, RouteDecisionId, RunId,
     };
 
     let store = InMemoryStore::new();

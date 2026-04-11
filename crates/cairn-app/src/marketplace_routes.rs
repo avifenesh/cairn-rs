@@ -390,30 +390,6 @@ pub async fn disable_plugin_handler(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{project_key_from_path, ListQuery};
-
-    #[test]
-    fn project_key_from_path_accepts_full_scope() {
-        let scoped = project_key_from_path("tenant-a/workspace-a/project-a").unwrap();
-        assert_eq!(scoped.tenant_id.as_str(), "tenant-a");
-        assert_eq!(scoped.workspace_id.as_str(), "workspace-a");
-        assert_eq!(scoped.project_id.as_str(), "project-a");
-    }
-
-    #[test]
-    fn list_query_caps_page_size() {
-        let query = ListQuery {
-            limit: Some(500),
-            offset: Some(3),
-        };
-
-        assert_eq!(query.limit(), 100);
-        assert_eq!(query.offset(), 3);
-    }
-}
-
 /// DELETE /v1/plugins/:id
 ///
 /// Uninstalls a plugin, revoking all credentials and removing all
@@ -437,5 +413,29 @@ pub async fn uninstall_plugin_handler(
             }),
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{project_key_from_path, ListQuery};
+
+    #[test]
+    fn project_key_from_path_accepts_full_scope() {
+        let scoped = project_key_from_path("tenant-a/workspace-a/project-a").unwrap();
+        assert_eq!(scoped.tenant_id.as_str(), "tenant-a");
+        assert_eq!(scoped.workspace_id.as_str(), "workspace-a");
+        assert_eq!(scoped.project_id.as_str(), "project-a");
+    }
+
+    #[test]
+    fn list_query_caps_page_size() {
+        let query = ListQuery {
+            limit: Some(500),
+            offset: Some(3),
+        };
+
+        assert_eq!(query.limit(), 100);
+        assert_eq!(query.offset(), 3);
     }
 }

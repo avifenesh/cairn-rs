@@ -17,35 +17,33 @@ use cairn_domain::commercial::ProductTier;
 use cairn_domain::errors::RuntimeEntityRef;
 use cairn_domain::events::StateTransition;
 use cairn_domain::lifecycle::{RunState, SessionState, TaskState};
-use cairn_domain::notification_prefs::NotificationChannel;
 use cairn_domain::policy::{ApprovalRequirement, GuardrailDecisionKind, GuardrailSubjectType};
 use cairn_domain::providers::{
     OperationKind, ProviderBindingSettings, ProviderBudgetPeriod, ProviderCallStatus,
     ProviderConnectionStatus, ProviderHealthStatus, RetryPolicy, RouteDecisionStatus,
-    RoutePolicyRule, StructuredOutputMode,
+    StructuredOutputMode,
 };
 use cairn_domain::tenancy::{TenantKey, WorkspaceKey, WorkspaceRole};
 use cairn_domain::tool_invocation::{ToolInvocationOutcomeKind, ToolInvocationTarget};
-use cairn_domain::workers::{ExternalWorkerOutcome, ExternalWorkerReport};
+use cairn_domain::workers::ExternalWorkerReport;
 use cairn_domain::{
-    ApprovalDelegated, ApprovalId, ApprovalPolicyCreated, ApprovalRequested, ApprovalResolved,
-    AuditLogEntryRecorded, ChannelCreated, ChannelId, ChannelMessageConsumed, ChannelMessageSent,
-    CheckpointId, CheckpointRecorded, CheckpointRestored, CheckpointStrategySet, CredentialId,
+    ApprovalDelegated, ApprovalId, ApprovalPolicyCreated, ApprovalRequested, AuditLogEntryRecorded,
+    ChannelCreated, ChannelId, ChannelMessageConsumed, ChannelMessageSent, CheckpointId,
+    CheckpointRecorded, CheckpointRestored, CheckpointStrategySet, CredentialId,
     CredentialKeyRotated, CredentialRevoked, CredentialStored, DefaultSettingCleared,
     DefaultSettingSet, EntitlementOverrideSet, EvalBaselineLocked, EvalBaselineSet,
     EvalDatasetCreated, EvalDatasetEntryAdded, EvalRubricCreated, EvalRunCompleted, EvalRunId,
     EvalRunStarted, EventEnvelope, EventId, EventLogCompacted, EventSource, ExecutionClass,
     ExternalWorkerReactivated, ExternalWorkerRegistered, ExternalWorkerReported,
-    ExternalWorkerSuspended, FailureClass, GuardrailPolicyCreated, GuardrailPolicyEvaluated,
-    IngestJobCompleted, IngestJobId, IngestJobStarted, LicenseActivated, MailboxMessageAppended,
-    MailboxMessageId, NotificationPreferenceSet, NotificationSent, OperatorId,
-    OperatorIntervention, OperatorProfileCreated, OperatorProfileUpdated, PauseScheduled,
-    PermissionDecisionRecorded, ProjectCreated, ProjectId, ProjectKey, PromptAssetCreated,
-    PromptAssetId, PromptReleaseCreated, PromptReleaseId, PromptReleaseTransitioned,
-    PromptRolloutStarted, PromptVersionCreated, PromptVersionId, ProviderBindingCreated,
-    ProviderBindingId, ProviderBindingStateChanged, ProviderBudgetAlertTriggered,
-    ProviderBudgetExceeded, ProviderBudgetSet, ProviderCallCompleted, ProviderCallId,
-    ProviderConnectionId, ProviderConnectionRegistered, ProviderHealthChecked,
+    ExternalWorkerSuspended, GuardrailPolicyCreated, GuardrailPolicyEvaluated, IngestJobCompleted,
+    IngestJobId, IngestJobStarted, LicenseActivated, MailboxMessageAppended, MailboxMessageId,
+    NotificationPreferenceSet, NotificationSent, OperatorId, OperatorIntervention,
+    OperatorProfileCreated, OperatorProfileUpdated, PauseScheduled, PermissionDecisionRecorded,
+    ProjectCreated, ProjectKey, PromptAssetCreated, PromptAssetId, PromptReleaseCreated,
+    PromptReleaseId, PromptReleaseTransitioned, PromptRolloutStarted, PromptVersionCreated,
+    PromptVersionId, ProviderBindingCreated, ProviderBindingId, ProviderBindingStateChanged,
+    ProviderBudgetAlertTriggered, ProviderBudgetExceeded, ProviderBudgetSet, ProviderCallCompleted,
+    ProviderCallId, ProviderConnectionId, ProviderConnectionRegistered, ProviderHealthChecked,
     ProviderHealthScheduleSet, ProviderHealthScheduleTriggered, ProviderMarkedDegraded,
     ProviderModelId, ProviderModelRegistered, ProviderPoolConnectionAdded,
     ProviderPoolConnectionRemoved, ProviderPoolCreated, ProviderRecovered, ProviderRetryPolicySet,
@@ -56,11 +54,10 @@ use cairn_domain::{
     SessionId, SessionStateChanged, SignalId, SignalIngested, SignalRouted,
     SignalSubscriptionCreated, SnapshotCreated, SoulPatchApplied, SoulPatchProposed,
     SpendAlertTriggered, SubagentSpawned, TaskCreated, TaskDependencyAdded, TaskDependencyResolved,
-    TaskId, TaskLeaseClaimed, TaskLeaseExpired, TaskLeaseHeartbeated, TaskPriorityChanged,
-    TaskStateChanged, TenantCreated, TenantId, TenantQuotaSet, TenantQuotaViolated,
-    ToolInvocationCompleted, ToolInvocationFailed, ToolInvocationId, ToolInvocationProgressUpdated,
-    ToolInvocationStarted, UserMessageAppended, WorkerId, WorkspaceCreated, WorkspaceId,
-    WorkspaceMemberAdded, WorkspaceMemberRemoved,
+    TaskId, TaskLeaseExpired, TaskPriorityChanged, TaskStateChanged, TenantCreated, TenantId,
+    TenantQuotaSet, TenantQuotaViolated, ToolInvocationCompleted, ToolInvocationFailed,
+    ToolInvocationId, ToolInvocationProgressUpdated, ToolInvocationStarted, UserMessageAppended,
+    WorkerId, WorkspaceCreated, WorkspaceId, WorkspaceMemberAdded, WorkspaceMemberRemoved,
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────

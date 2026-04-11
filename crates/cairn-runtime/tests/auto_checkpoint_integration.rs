@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use cairn_domain::{CheckpointStrategy, ProjectKey, RunId, SessionId, TaskId};
+use cairn_domain::{ProjectKey, RunId, SessionId, TaskId};
 use cairn_runtime::{
-    RunService, RunServiceImpl, SessionService, SessionServiceImpl, TaskService, TaskServiceImpl,
+    RunServiceImpl, SessionService, SessionServiceImpl, TaskService, TaskServiceImpl,
 };
 use cairn_store::projections::CheckpointReadModel;
 use cairn_store::InMemoryStore;

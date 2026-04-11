@@ -17,7 +17,7 @@ use cairn_domain::{
 };
 use cairn_store::{
     event_log::{EntityRef, EventPosition},
-    projections::{RetentionMaintenance, RetentionPolicyReadModel},
+    projections::RetentionMaintenance,
     EventLog, InMemoryStore,
 };
 

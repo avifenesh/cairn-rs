@@ -22,11 +22,11 @@ use cairn_domain::{
         TaskCreated,
     },
     tenancy::OwnershipKey,
-    ApprovalId, ApprovalRequirement, CheckpointDisposition, CheckpointId, EventEnvelope, EventId,
+    ApprovalId, ApprovalRequirement, CheckpointDisposition, CheckpointId, EventEnvelope,
     EventSource, MailboxMessageId, OperatorId, ProjectId, ProjectKey, RunId, RuntimeEvent,
     SessionId, TaskId, TenantId, WorkspaceId,
 };
-use cairn_store::{EventLog, EventPosition, InMemoryStore};
+use cairn_store::{EventLog, InMemoryStore};
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 

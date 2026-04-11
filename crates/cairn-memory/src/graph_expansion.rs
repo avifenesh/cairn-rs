@@ -109,7 +109,7 @@ mod tests {
     use crate::ingest::{ChunkRecord, SourceType};
     use crate::retrieval::{RetrievalResult, ScoringBreakdown};
     use cairn_domain::{ChunkId, KnowledgeDocumentId, ProjectKey, SourceId};
-    use cairn_graph::projections::{GraphEdge, GraphNode, GraphProjectionError};
+    use cairn_graph::projections::{GraphEdge, GraphNode};
     use cairn_graph::queries::{GraphQuery, GraphQueryError, Subgraph};
     use std::collections::HashMap;
     use std::sync::Mutex;

@@ -14,7 +14,7 @@
 
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, MailboxMessageAppended, MailboxMessageId, ProjectId,
-    ProjectKey, RunId, RuntimeEvent, SessionCreated, SessionId, TenantId, WorkspaceId,
+    ProjectKey, RunId, RuntimeEvent, TenantId, WorkspaceId,
 };
 use cairn_store::{
     projections::{MailboxReadModel, MAX_MESSAGE_CONTENT_LEN},

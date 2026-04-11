@@ -208,13 +208,11 @@ mod tests {
         let r = GlobFindTool
             .execute(&p(), serde_json::json!({"pattern":"*.toml","path":"."}))
             .await;
-        match r {
-            Ok(res) => {
-                let files = res.output["files"].as_array().unwrap();
-                // May be empty if run from a dir without .toml; just check no crash
-                let _ = files.len();
-            }
-            Err(_) => {} // path not found in test env is ok
+        if let Ok(res) = r {
+            let files = res.output["files"].as_array().unwrap();
+            // May be empty if run from a dir without .toml; just check no crash
+            let _ = files.len();
         }
+        // path not found in test env is ok
     }
 }

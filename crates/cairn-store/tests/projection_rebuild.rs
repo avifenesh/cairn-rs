@@ -19,18 +19,16 @@
 //!     - Decision values (approval approved/rejected)
 //!     - The full ordered event log (position, payload)
 
-use std::sync::Arc;
-
 use cairn_domain::policy::{ApprovalDecision, ApprovalRequirement};
 use cairn_domain::{
     ApprovalId, ApprovalRequested, ApprovalResolved, EventEnvelope, EventId, EventSource,
     FailureClass, ProjectId, ProjectKey, RunCreated, RunId, RunState, RunStateChanged,
     RuntimeEvent, SessionCreated, SessionId, SessionState, SessionStateChanged, StateTransition,
-    TaskCreated, TaskId, TaskState, TaskStateChanged, TenantId, WorkspaceId,
+    TaskCreated, TaskId, TaskState, TenantId, WorkspaceId,
 };
 use cairn_store::{
     projections::{ApprovalReadModel, RunReadModel, SessionReadModel, TaskReadModel},
-    EventLog, EventPosition, InMemoryStore,
+    EventLog, InMemoryStore,
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────

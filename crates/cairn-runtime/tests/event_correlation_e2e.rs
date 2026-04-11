@@ -13,9 +13,9 @@ use std::sync::Arc;
 
 use cairn_domain::{
     CommandId, EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
-    SessionCreated, SessionId, TenantId,
+    SessionCreated, SessionId,
 };
-use cairn_store::{event_log::EventPosition, EventLog, InMemoryStore};
+use cairn_store::{EventLog, InMemoryStore};
 
 fn project() -> ProjectKey {
     ProjectKey::new("t_corr", "ws_corr", "proj_corr")

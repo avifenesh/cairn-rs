@@ -523,8 +523,10 @@ mod tests {
 
     #[tokio::test]
     async fn runtime_request_linkage_flows_into_pipeline_and_persistence() {
+        type StartArgsList = Vec<(Option<String>, Option<String>, Option<String>)>;
+
         struct RecordingInvocationService {
-            start_args: Mutex<Vec<(Option<String>, Option<String>, Option<String>)>>,
+            start_args: Mutex<StartArgsList>,
         }
 
         #[async_trait]

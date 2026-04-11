@@ -9,7 +9,7 @@ use cairn_graph::projections::{EdgeKind, GraphEdge, GraphNode, NodeKind};
 use cairn_graph::queries::{
     GraphQuery, GraphQueryError, GraphQueryService, Subgraph, TraversalDirection,
 };
-use cairn_memory::deep_search::{DeepSearchRequest, DeepSearchService, HopOutcome};
+use cairn_memory::deep_search::{DeepSearchRequest, DeepSearchService};
 use cairn_memory::deep_search_impl::{GraphExpansionHook, IterativeDeepSearch, QualityGateConfig};
 use cairn_memory::graph_expansion::GraphBackedExpansion;
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};

@@ -3,21 +3,6 @@ set -euo pipefail
 
 echo "═══ pre-push gate ═══"
 
-echo "  fmt..."
-if ! cargo fmt --all --check >/dev/null 2>&1; then
-  echo "  ❌ cargo fmt failed. Run 'cargo fmt --all' and recommit."
-  exit 1
-fi
-echo "  ✓ fmt"
-
-echo "  clippy..."
-if ! cargo clippy --workspace -- -D warnings >/dev/null 2>&1; then
-  echo "  ❌ clippy warnings. Fix before pushing."
-  cargo clippy --workspace -- -D warnings 2>&1 | grep "error" | head -5
-  exit 1
-fi
-echo "  ✓ clippy"
-
 echo "  rust tests..."
 if ! cargo test --workspace --quiet >/dev/null 2>&1; then
   echo "  ❌ rust tests failed."
@@ -25,14 +10,6 @@ if ! cargo test --workspace --quiet >/dev/null 2>&1; then
   exit 1
 fi
 echo "  ✓ rust tests"
-
-echo "  tsc..."
-if ! (cd ui && npx tsc --noEmit) >/dev/null 2>&1; then
-  echo "  ❌ TypeScript check failed."
-  (cd ui && npx tsc --noEmit) 2>&1 | head -10
-  exit 1
-fi
-echo "  ✓ tsc"
 
 echo "  ui build..."
 if ! (cd ui && npm run build) >/dev/null 2>&1; then

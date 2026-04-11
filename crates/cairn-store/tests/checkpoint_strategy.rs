@@ -55,7 +55,7 @@ fn set_strategy(
 ) -> EventEnvelope<RuntimeEvent> {
     // CheckpointStrategySet has no project field (system-level event).
     // Use a raw envelope since for_runtime_event requires a project.
-    use cairn_domain::{tenancy::ProjectKey as PK, OwnershipKey};
+    use cairn_domain::OwnershipKey;
     EventEnvelope {
         event_id: EventId::new(evt_id),
         source: EventSource::Runtime,

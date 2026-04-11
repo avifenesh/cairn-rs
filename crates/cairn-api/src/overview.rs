@@ -157,7 +157,7 @@ mod tests {
 
         let project = ProjectKey::new("t1", "w1", "p1");
 
-        let runs = vec![
+        let runs = [
             RunRecord {
                 run_id: RunId::new("run_1"),
                 session_id: SessionId::new("sess_a"),

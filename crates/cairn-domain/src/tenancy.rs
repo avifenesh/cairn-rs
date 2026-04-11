@@ -191,7 +191,7 @@ pub struct WorkspaceMembership {
 
 #[cfg(test)]
 mod tests {
-    use super::{OwnershipKey, ProjectKey, Scope, TenantKey, WorkspaceKey, WorkspaceRole};
+    use super::{OwnershipKey, ProjectKey, Scope, TenantKey, WorkspaceKey};
 
     #[test]
     fn scope_hierarchy_matches_rfc_order() {

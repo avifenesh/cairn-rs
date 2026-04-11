@@ -13,7 +13,7 @@ use cairn_domain::events::RunStateChanged;
 use cairn_domain::lifecycle::RunState;
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
-    SessionCreated, SessionId, StateTransition, SubagentSpawned, TaskCreated, TaskId,
+    SessionCreated, SessionId, StateTransition, SubagentSpawned, TaskId,
 };
 use cairn_store::{projections::RunReadModel, EventLog, InMemoryStore};
 

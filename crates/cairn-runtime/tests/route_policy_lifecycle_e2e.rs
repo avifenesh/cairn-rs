@@ -18,7 +18,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cairn_domain::providers::{RoutePolicy, RoutePolicyRule};
+use cairn_domain::providers::RoutePolicyRule;
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, RoutePolicyCreated, RuntimeEvent, TenantId,
 };

@@ -2,17 +2,12 @@
 
 use std::sync::Arc;
 
-use cairn_domain::{ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId, WorkspaceKey};
-use cairn_runtime::{
-    PromptReleaseService, PromptReleaseServiceImpl, PromptVersionService, PromptVersionServiceImpl,
-};
+use cairn_domain::{ProjectKey, PromptAssetId, PromptReleaseId, PromptVersionId};
+use cairn_runtime::{PromptReleaseService, PromptReleaseServiceImpl};
 use cairn_store::InMemoryStore;
 
 fn project() -> ProjectKey {
     ProjectKey::new("tenant", "workspace", "project")
-}
-fn workspace() -> WorkspaceKey {
-    WorkspaceKey::new("tenant", "workspace")
 }
 fn asset() -> PromptAssetId {
     PromptAssetId::new("asset_1")
@@ -93,11 +88,11 @@ async fn prompt_rollout_distributes_traffic_by_percent() {
     );
 
     assert!(
-        big_count >= 70 && big_count <= 90,
+        (70..=90).contains(&big_count),
         "80% release should be selected 70–90 times out of 100, got {big_count}"
     );
     assert!(
-        small_count >= 10 && small_count <= 30,
+        (10..=30).contains(&small_count),
         "20% release should be selected 10–30 times out of 100, got {small_count}"
     );
 }

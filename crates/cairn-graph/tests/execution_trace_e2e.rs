@@ -19,7 +19,7 @@ use std::sync::Arc;
 use cairn_domain::ProjectKey;
 use cairn_graph::in_memory::InMemoryGraphStore;
 use cairn_graph::projections::{EdgeKind, GraphEdge, GraphNode, GraphProjection, NodeKind};
-use cairn_graph::queries::{GraphQuery, GraphQueryError, GraphQueryService, TraversalDirection};
+use cairn_graph::queries::{GraphQuery, GraphQueryService, TraversalDirection};
 
 fn project() -> ProjectKey {
     ProjectKey::new("t_graph", "w_graph", "p_graph")

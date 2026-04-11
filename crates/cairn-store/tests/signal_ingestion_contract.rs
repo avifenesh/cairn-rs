@@ -171,7 +171,7 @@ async fn payload_round_trips_primitive_types() {
     let payload = serde_json::json!({
         "string_field":  "hello world",
         "int_field":     42,
-        "float_field":   3.14,
+        "float_field":   std::f64::consts::PI,
         "bool_true":     true,
         "bool_false":    false,
         "null_field":    null
@@ -196,7 +196,7 @@ async fn payload_round_trips_primitive_types() {
 
     assert_eq!(record.payload["string_field"], "hello world");
     assert_eq!(record.payload["int_field"], 42);
-    assert!((record.payload["float_field"].as_f64().unwrap() - 3.14).abs() < 1e-9);
+    assert!((record.payload["float_field"].as_f64().unwrap() - std::f64::consts::PI).abs() < 1e-9);
     assert_eq!(record.payload["bool_true"], true);
     assert_eq!(record.payload["bool_false"], false);
     assert!(record.payload["null_field"].is_null());

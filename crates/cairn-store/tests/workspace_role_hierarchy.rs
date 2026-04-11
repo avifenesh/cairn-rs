@@ -16,8 +16,7 @@
 use cairn_domain::{
     events::{WorkspaceMemberAdded, WorkspaceMemberRemoved},
     tenancy::OwnershipKey,
-    EventEnvelope, EventId, EventSource, OperatorId, ProjectId, ProjectKey, RuntimeEvent, TenantId,
-    WorkspaceId, WorkspaceKey, WorkspaceRole,
+    EventEnvelope, EventId, EventSource, OperatorId, RuntimeEvent, WorkspaceKey, WorkspaceRole,
 };
 use cairn_store::{projections::WorkspaceMembershipReadModel, EventLog, InMemoryStore};
 

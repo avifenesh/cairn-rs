@@ -259,12 +259,12 @@ async fn list_by_project_returns_failed_and_succeeded_jobs() {
     // Verify the error messages on the failed jobs.
     assert!(failed.iter().any(|j| j
         .error_message
-        .as_ref()
-        .map_or(false, |e| e.contains("UTF-8"))));
+        .as_deref()
+        .is_some_and(|e| e.contains("UTF-8"))));
     assert!(failed.iter().any(|j| j
         .error_message
-        .as_ref()
-        .map_or(false, |e| e.contains("timeout"))));
+        .as_deref()
+        .is_some_and(|e| e.contains("timeout"))));
 
     // Completed jobs have no error_message.
     assert!(

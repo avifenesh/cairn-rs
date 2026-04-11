@@ -424,8 +424,7 @@ mod rfc011_tests {
         };
         let errs = config.validate().unwrap_err();
         assert!(
-            errs.iter()
-                .any(|e| *e == ConfigValidationError::SqliteNotSupportedInTeamMode),
+            errs.contains(&ConfigValidationError::SqliteNotSupportedInTeamMode),
             "RFC 011: SQLite must be rejected in self-hosted team mode"
         );
     }
@@ -447,8 +446,7 @@ mod rfc011_tests {
         );
         let errs = config.validate().unwrap_err();
         assert!(
-            errs.iter()
-                .any(|e| *e == ConfigValidationError::MissingEncryptionKeyInTeamMode),
+            errs.contains(&ConfigValidationError::MissingEncryptionKeyInTeamMode),
             "RFC 011: missing encryption key must be a validation error"
         );
     }

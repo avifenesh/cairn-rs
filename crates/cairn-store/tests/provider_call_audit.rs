@@ -16,11 +16,11 @@
 //!   RunCostReadModel accumulates per-run cost from every ProviderCallCompleted
 //!   event that carries a run_id.  This is the session-aggregation path.
 
-use cairn_domain::providers::{OperationKind, ProviderCallStatus, RouteDecisionStatus};
+use cairn_domain::providers::{OperationKind, ProviderCallStatus};
 use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, ProviderBindingId,
     ProviderCallCompleted, ProviderCallId, ProviderConnectionId, ProviderModelId, RouteAttemptId,
-    RouteDecisionId, RouteDecisionMade, RunId, RuntimeEvent, SessionId, TenantId, WorkspaceId,
+    RouteDecisionId, RunId, RuntimeEvent, SessionId, TenantId, WorkspaceId,
 };
 use cairn_store::{
     projections::{ProviderCallReadModel, RunCostReadModel},

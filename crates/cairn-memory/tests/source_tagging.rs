@@ -23,7 +23,7 @@ fn chunk_has_tag(chunk: &cairn_memory::ingest::ChunkRecord, tag: &str) -> bool {
         .as_ref()
         .and_then(|m| m.get("tags"))
         .and_then(|v| v.as_array())
-        .map_or(false, |arr| arr.iter().any(|v| v.as_str() == Some(tag)))
+        .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(tag)))
 }
 
 /// Ingest doc with tags=['production','qa'].

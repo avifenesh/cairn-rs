@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn fallback_chain_selects_primary_when_capable() {
         use cairn_domain::providers::ProviderCapability;
-        let resolver = FallbackChainResolver::new(vec![
+        let _resolver = FallbackChainResolver::new(vec![
             ranked(
                 "primary",
                 OperationKind::Generate,

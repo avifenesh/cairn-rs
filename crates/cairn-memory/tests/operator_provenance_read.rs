@@ -15,7 +15,8 @@ use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, R
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-struct TestGraph(Arc<Mutex<(HashMap<String, GraphNode>, Vec<GraphEdge>)>>);
+type GraphData = (HashMap<String, GraphNode>, Vec<GraphEdge>);
+struct TestGraph(Arc<Mutex<GraphData>>);
 impl TestGraph {
     fn new() -> Self {
         Self(Arc::new(Mutex::new((HashMap::new(), Vec::new()))))

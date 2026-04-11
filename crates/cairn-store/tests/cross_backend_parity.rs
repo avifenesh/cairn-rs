@@ -1099,7 +1099,7 @@ mod sqlite_parity {
         // Compare: event stream length.
         let stream_b = store_b.read_stream(None, 1000).await.unwrap();
         // stream_b has the original events, stream length check is against original.
-        assert!(stream_b.len() > 0);
+        assert!(!stream_b.is_empty());
     }
 
     /// Rebuild-ordering regression: tool invocation list_by_run ordering

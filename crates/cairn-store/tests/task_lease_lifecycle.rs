@@ -15,10 +15,7 @@ use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectKey, RunCreated, RunId, RuntimeEvent,
     SessionCreated, SessionId, StateTransition, TaskCreated, TaskId,
 };
-use cairn_store::{
-    projections::{TaskLeaseExpiredReadModel, TaskReadModel},
-    EventLog, InMemoryStore,
-};
+use cairn_store::{projections::TaskReadModel, EventLog, InMemoryStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
