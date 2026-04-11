@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Play, Pause, Trash2, Zap } from "lucide-react";
 import { DataTable } from "../components/DataTable";
+import { StatCard } from "../components/StatCard";
 import { CopyButton } from "../components/CopyButton";
 import { HelpTooltip } from "../components/HelpTooltip";
 import { ErrorFallback } from "../components/ErrorFallback";
@@ -79,22 +80,6 @@ function StatePill({ state }: { state: string }) {
   );
 }
 
-// ── Stat card (matches Sessions/Runs pattern) ────────────────────────────────
-
-function StatCard({ label, value, accent = "default" }: {
-  label: string; value: string | number;
-  accent?: "default" | "emerald" | "amber" | "blue";
-}) {
-  const border = { default: "border-l-zinc-700", emerald: "border-l-emerald-500", amber: "border-l-amber-500", blue: "border-l-blue-500" }[accent];
-  const val = { default: "text-gray-900 dark:text-zinc-100", emerald: "text-emerald-400", amber: "text-amber-400", blue: "text-blue-400" }[accent];
-  return (
-    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4", border)}>
-      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
-      <p className={clsx("text-2xl font-semibold tabular-nums", val)}>{value}</p>
-    </div>
-  );
-}
-
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export function TriggersPage() {
@@ -162,9 +147,9 @@ export function TriggersPage() {
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total Triggers" value={triggers.length} />
-        <StatCard label="Enabled" value={enabled} accent="emerald" />
+        <StatCard label="Enabled" value={enabled} variant="success" />
         <StatCard label="Disabled / Suspended" value={triggers.length - enabled} />
-        <StatCard label="Templates" value={templates.length} accent="blue" />
+        <StatCard label="Templates" value={templates.length} variant="info" />
       </div>
 
       {/* Tab bar */}
