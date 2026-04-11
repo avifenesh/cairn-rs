@@ -3,6 +3,7 @@ import {
   ArrowLeft, Loader2, AlertTriangle, CheckCircle2, Inbox, Download,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { StatCard } from "../components/StatCard";
 import { StateBadge } from "../components/StateBadge";
 import { CopyButton } from "../components/CopyButton";
 import { defaultApi } from "../lib/api";
@@ -63,18 +64,6 @@ function SessionPill({ state }: { state: SessionState }) {
       <span className={clsx("w-1 h-1 rounded-full shrink-0", SESSION_DOT[state])} />
       {state}
     </span>
-  );
-}
-
-// ── Stat card ──────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
   );
 }
 
@@ -192,24 +181,24 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
 
         {/* Stat cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 py-3 px-4 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60">
-          <StatCard
+          <StatCard compact variant="info"
             label="Runs"
             value={runsLoading ? "—" : runs.length}
-            sub={runsLoading ? undefined : `${activeRuns} active`}
+            description={runsLoading ? undefined : `${activeRuns} active`}
           />
-          <StatCard
+          <StatCard compact variant="info"
             label="Traces"
             value={tracesLoading ? "—" : traces.length}
-            sub={tracesLoading ? undefined : `${traces.filter(t => t.is_error).length} errors`}
+            description={tracesLoading ? undefined : `${traces.filter(t => t.is_error).length} errors`}
           />
-          <StatCard
+          <StatCard compact variant="info"
             label="Tokens"
             value={tracesLoading ? "—" : fmtTokens(
               traces.reduce((s, t) => s + t.prompt_tokens + t.completion_tokens, 0)
             )}
-            sub="prompt + completion"
+            description="prompt + completion"
           />
-          <StatCard
+          <StatCard compact variant="info"
             label="Cost"
             value={tracesLoading ? "—" : fmtCost(
               traces.reduce((s, t) => s + t.cost_micros, 0)

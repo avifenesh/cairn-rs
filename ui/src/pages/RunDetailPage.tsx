@@ -7,6 +7,7 @@ import {
   Bolt, Box,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { StatCard } from "../components/StatCard";
 import { StateBadge } from "../components/StateBadge";
 import { GanttView } from "../components/TimelineView";
 import { CopyButton } from "../components/CopyButton";
@@ -45,18 +46,6 @@ const fmtMicros = (micros: number) => {
 
 const fmtTokens = (n: number) =>
   n >= 1_000 ? `${(n / 1_000).toFixed(1)}k` : String(n);
-
-// ── Stat card ──────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
 
 // ── Orchestration timeline ────────────────────────────────────────────────────
 
@@ -646,24 +635,24 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
 
         {/* Stat cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 py-3 px-4 rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60">
-          <StatCard
+          <StatCard compact variant="info"
             label="Duration"
             value={duration}
-            sub={isTerminal ? "total" : "running"}
+            description={isTerminal ? "total" : "running"}
           />
-          <StatCard
+          <StatCard compact variant="info"
             label="Tasks"
             value={safeTasks?.length ?? "—"}
-            sub={safeTasks ? `${safeTasks.filter(t => t.state === "completed").length} completed` : undefined}
+            description={safeTasks ? `${safeTasks.filter(t => t.state === "completed").length} completed` : undefined}
           />
-          <StatCard
+          <StatCard compact variant="info"
             label="Events"
             value={safeEvents?.length ?? "—"}
           />
-          <StatCard
+          <StatCard compact variant="info"
             label="Cost"
             value={cost ? fmtMicros(cost.total_cost_micros) : "—"}
-            sub={cost && cost.provider_calls > 0 ? `${cost.provider_calls} provider call${cost.provider_calls !== 1 ? "s" : ""}` : undefined}
+            description={cost && cost.provider_calls > 0 ? `${cost.provider_calls} provider call${cost.provider_calls !== 1 ? "s" : ""}` : undefined}
           />
         </div>
 

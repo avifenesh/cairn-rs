@@ -9,6 +9,11 @@ interface StatCardProps {
   description?: string;
   variant?: StatCardVariant;
   loading?: boolean;
+  /**
+   * Compact mode: renders as an inline border-l-2 stat without card background.
+   * Used inside stat strips (RunDetailPage, SessionDetailPage, etc.).
+   */
+  compact?: boolean;
   /** Reserved for future icon support — not yet rendered. */
   icon?: React.ReactNode;
   /** Optional inline help text shown as a (?) tooltip next to the label. */
@@ -31,12 +36,33 @@ const VALUE: Record<StatCardVariant, string> = {
   info:    "text-indigo-600 dark:text-indigo-400",
 };
 
-export function StatCard({ label, value, description, variant = "default", loading = false, help }: StatCardProps) {
+export function StatCard({ label, value, description, variant = "default", loading = false, compact = false, help }: StatCardProps) {
   if (loading) {
-    return (
+    return compact ? (
+      <div className={clsx("border-l-2 pl-3 py-0.5 animate-pulse", ACCENT[variant])}>
+        <div className="h-2 w-16 rounded bg-gray-200 dark:bg-zinc-800 mb-2" />
+        <div className="h-5 w-10 rounded bg-gray-200 dark:bg-zinc-800" />
+      </div>
+    ) : (
       <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-gray-300 dark:border-l-zinc-700 rounded-lg p-4 animate-pulse">
         <div className="h-2 w-18 rounded bg-gray-200 dark:bg-zinc-800 mb-3" />
         <div className="h-6 w-12 rounded bg-gray-200 dark:bg-zinc-800" />
+      </div>
+    );
+  }
+
+  if (compact) {
+    return (
+      <div data-stat-card className={clsx("border-l-2 pl-3 py-0.5", ACCENT[variant])}>
+        <p data-stat-label className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
+          {label}
+        </p>
+        <p data-stat-value className={clsx("text-[20px] font-semibold tabular-nums leading-tight", VALUE[variant])}>
+          {value}
+        </p>
+        {description && (
+          <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{description}</p>
+        )}
       </div>
     );
   }

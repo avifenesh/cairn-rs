@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { RefreshCw, Loader2, Check, X, Radio, Wifi, ShieldCheck, SlidersHorizontal, Server, Plus, Trash2 } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
+import { StatCard } from "../components/StatCard";
 import { Card } from "../components/Card";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
@@ -638,23 +639,6 @@ function notificationChannelPlaceholder(kind: string): string {
   );
 }
 
-function PreferenceStatCard({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-}) {
-  return (
-    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
 
 /** A single default setting row. Saves to tenant scope by default; pass saveScope/saveScopeId for system-level overrides. */
 function PreferenceRow({
@@ -977,8 +961,8 @@ function NotificationPreferencesSection() {
           </div>
 
           <div className="flex gap-6">
-            <PreferenceStatCard label="Events" value={localEvents.length} sub={storedEvents.length > 0 ? "stored" : "none stored"} />
-            <PreferenceStatCard label="Channels" value={localChannels.length} sub={invalidChannel ? "needs targets" : "configured"} />
+            <StatCard compact variant="info" label="Events" value={localEvents.length} description={storedEvents.length > 0 ? "stored" : "none stored"} />
+            <StatCard compact variant="info" label="Channels" value={localChannels.length} description={invalidChannel ? "needs targets" : "configured"} />
           </div>
         </div>
 
