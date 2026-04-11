@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { RefreshCw, Loader2, ServerCrash, Database, ChevronDown, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
+import { StatCard } from '../components/StatCard';
 import { defaultApi } from '../lib/api';
 import type { SourceRecord, SourceQualityRecord } from '../lib/types';
 
@@ -161,18 +162,6 @@ function SourceRow({ source, even, expanded, onToggle }: {
   );
 }
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function SourcesPage() {
@@ -227,9 +216,9 @@ export function SourcesPage() {
       {/* Stat strip */}
       {!isLoading && rows.length > 0 && (
         <div className="grid grid-cols-3 gap-x-6 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 shrink-0">
-          <StatCard label="Sources"     value={rows.length} />
-          <StatCard label="Total Docs"  value={totalDocs.toLocaleString()} />
-          <StatCard label="Avg Quality" value={`${(avgQuality * 100).toFixed(0)}%`} />
+          <StatCard compact variant="info" label="Sources"     value={rows.length} />
+          <StatCard compact variant="info" label="Total Docs"  value={totalDocs.toLocaleString()} />
+          <StatCard compact variant="info" label="Avg Quality" value={`${(avgQuality * 100).toFixed(0)}%`} />
         </div>
       )}
 
