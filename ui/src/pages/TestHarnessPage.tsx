@@ -14,6 +14,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { card as cardPreset } from "../lib/design-system";
 import { defaultApi } from "../lib/api";
 import { useScope, type ProjectScope } from "../hooks/useScope";
 
@@ -711,7 +712,7 @@ export function TestHarnessPage() {
         </div>
 
         {/* How it works — clear instructions */}
-        <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-4">
+        <div className={cardPreset.base}>
           <p className="text-[12px] font-medium text-gray-700 dark:text-zinc-300 mb-1">How the Test Harness works</p>
           <p className="text-[11px] text-gray-400 dark:text-zinc-500 leading-relaxed">
             Each scenario runs a sequence of API calls against the live server. Click <strong>Run</strong> on a scenario to test it,
