@@ -5,7 +5,6 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { Card } from "../components/Card";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
-import { sectionLabel as sectionLabelCls } from "../lib/design-system";
 import { usePreferences, type Preferences } from "../hooks/usePreferences";
 import { useScope } from "../hooks/useScope";
 import { useWebSocket } from "../hooks/useWebSocket";

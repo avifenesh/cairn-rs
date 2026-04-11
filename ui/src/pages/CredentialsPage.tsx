@@ -23,6 +23,10 @@ import { defaultApi } from '../lib/api';
 import { useScope } from '../hooks/useScope';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import type { CredentialSummary, StoreCredentialRequest } from '../lib/types';
+import { Badge } from '../components/Badge';
+import { FormField, fieldInputMono } from '../components/FormField';
+import { StatCard } from '../components/StatCard';
+import { ds } from '../lib/design-system';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -58,33 +62,23 @@ function fmtRelative(ms: number | null | undefined): string {
   return months === 1 ? '1 month ago' : `${months} months ago`;
 }
 
-/** Badge colours per credential type */
-function typeColors(credType: string): string {
-  switch (credType) {
-    case 'api_key':           return 'text-indigo-400 bg-indigo-400/10 border-indigo-400/20';
-    case 'oauth_token':       return 'text-purple-400 bg-purple-400/10 border-purple-400/20';
-    case 'connection_string': return 'text-sky-400 bg-sky-400/10 border-sky-400/20';
-    case 'service_account':   return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
-    case 'bearer_token':      return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
-    default:                  return 'text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 border-gray-200 dark:border-zinc-700';
-  }
-}
 
 function typeLabel(credType: string): string {
   return CREDENTIAL_TYPES.find(t => t.value === credType)?.label ?? credType;
 }
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
+/** Maps credential type to a Badge variant. */
+function credTypeBadgeVariant(credType: string): "info" | "purple" | "sky" | "warning" | "success" | "neutral" {
+  switch (credType) {
+    case 'api_key':           return 'info';
+    case 'oauth_token':       return 'purple';
+    case 'connection_string': return 'sky';
+    case 'service_account':   return 'warning';
+    case 'bearer_token':      return 'success';
+    default:                  return 'neutral';
+  }
 }
+
 
 // ── Delete confirmation dialog ────────────────────────────────────────────────
 
@@ -101,9 +95,9 @@ function DeleteDialog({
 }) {
   const trapRef = useFocusTrap({ onClose: onCancel });
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
+    <div className={ds.modal.backdrop} onClick={onCancel}>
       <div
-        className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg w-full max-w-md mx-4 shadow-2xl"
+        className={clsx(ds.modal.container, "w-full max-w-md mx-4 shadow-2xl")}
         ref={trapRef}
         role="dialog"
         aria-modal="true"
@@ -215,11 +209,11 @@ function AddCredentialModal({
   const trapRef = useFocusTrap({ onClose: onClose });
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className={ds.modal.backdrop}
       onClick={onClose}
     >
       <div
-        className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg w-full max-w-lg mx-4 shadow-2xl"
+        className={clsx(ds.modal.container, "w-full max-w-lg mx-4 shadow-2xl")}
         ref={trapRef}
         role="dialog"
         aria-modal="true"
@@ -248,54 +242,35 @@ function AddCredentialModal({
         {/* Form */}
         <form id={formId} onSubmit={submit} className="p-5 space-y-4">
           {/* Scope row: tenant_id */}
-          <div>
-            <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
-              Tenant <span className="text-red-400">*</span>
-            </label>
+          <FormField label="Tenant" required error={fieldErr.tenant_id}>
             <input
               type="text"
               value={form.tenant_id}
               onChange={e => set('tenant_id', e.target.value)}
               placeholder="default"
               className={clsx(
-                'w-full h-8 bg-white dark:bg-zinc-950 border rounded-md px-3 text-[12px] text-gray-800 dark:text-zinc-200',
-                'placeholder-zinc-600 focus:outline-none transition-colors',
-                fieldErr.tenant_id
-                  ? 'border-red-500/60 focus:border-red-500'
-                  : 'border-gray-200 dark:border-zinc-800 focus:border-indigo-500',
+                fieldInputMono,
+                fieldErr.tenant_id && 'border-red-500/60 focus:border-red-500',
               )}
             />
-            {fieldErr.tenant_id && (
-              <p className="mt-1 text-[11px] text-red-400">{fieldErr.tenant_id}</p>
-            )}
-          </div>
+          </FormField>
 
           {/* Two-column: Provider ID + Type */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
-                Provider ID <span className="text-red-400">*</span>
-              </label>
+            <FormField label="Provider ID" required error={fieldErr.provider_id}>
               <input
                 type="text"
                 value={form.provider_id}
                 onChange={e => set('provider_id', e.target.value)}
                 placeholder="openai-production"
                 className={clsx(
-                  'w-full h-8 bg-white dark:bg-zinc-950 border rounded-md px-3 text-[12px] text-gray-800 dark:text-zinc-200',
-                  'placeholder-zinc-600 focus:outline-none transition-colors',
-                  fieldErr.provider_id
-                    ? 'border-red-500/60 focus:border-red-500'
-                    : 'border-gray-200 dark:border-zinc-800 focus:border-indigo-500',
+                  fieldInputMono,
+                  fieldErr.provider_id && 'border-red-500/60 focus:border-red-500',
                 )}
               />
-              {fieldErr.provider_id && (
-                <p className="mt-1 text-[11px] text-red-400">{fieldErr.provider_id}</p>
-              )}
-            </div>
+            </FormField>
 
-            <div>
-              <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">Type</label>
+            <FormField label="Type" helper="Informational — backend derives type from provider_id">
               <select
                 value={form.cred_type}
                 onChange={e => set('cred_type', e.target.value as CredentialTypeValue)}
@@ -305,15 +280,11 @@ function AddCredentialModal({
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
-              <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-600">Informational — backend derives type from provider_id</p>
-            </div>
+            </FormField>
           </div>
 
           {/* Secret value */}
-          <div>
-            <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
-              Secret Value <span className="text-red-400">*</span>
-            </label>
+          <FormField label="Secret Value" required error={fieldErr.plaintext_value} helper="Entered once — not retrievable after creation.">
             <div className="relative">
               <input
                 type={showValue ? 'text' : 'password'}
@@ -322,11 +293,8 @@ function AddCredentialModal({
                 placeholder="sk-…"
                 autoComplete="new-password"
                 className={clsx(
-                  'w-full h-8 bg-white dark:bg-zinc-950 border rounded-md pl-3 pr-9 text-[12px] text-gray-800 dark:text-zinc-200',
-                  'placeholder-zinc-600 focus:outline-none transition-colors font-mono',
-                  fieldErr.plaintext_value
-                    ? 'border-red-500/60 focus:border-red-500'
-                    : 'border-gray-200 dark:border-zinc-800 focus:border-indigo-500',
+                  fieldInputMono, 'pr-9',
+                  fieldErr.plaintext_value && 'border-red-500/60 focus:border-red-500',
                 )}
               />
               <button
@@ -338,30 +306,18 @@ function AddCredentialModal({
                 {showValue ? <EyeOff size={12} /> : <Eye size={12} />}
               </button>
             </div>
-            {fieldErr.plaintext_value && (
-              <p className="mt-1 text-[11px] text-red-400">{fieldErr.plaintext_value}</p>
-            )}
-            <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-600">
-              Entered once — not retrievable after creation.
-            </p>
-          </div>
+          </FormField>
 
           {/* Optional key_id */}
-          <div>
-            <label className="block text-[11px] text-gray-400 dark:text-zinc-500 mb-1.5">
-              Encryption Key ID <span className="text-gray-300 dark:text-zinc-600">(optional)</span>
-            </label>
+          <FormField label="Encryption Key ID" helper="Leave blank to use the default tenant encryption key.">
             <input
               type="text"
               value={form.key_id}
               onChange={e => set('key_id', e.target.value)}
               placeholder="key_prod_v2"
-              className="w-full h-8 bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 rounded-md px-3 text-[12px] text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+              className={fieldInputMono}
             />
-            <p className="mt-1 text-[10px] text-gray-300 dark:text-zinc-600">
-              Leave blank to use the default tenant encryption key.
-            </p>
-          </div>
+          </FormField>
 
           {displayErr && (
             <p className="text-[11px] text-red-400 font-mono">{displayErr}</p>
@@ -408,8 +364,9 @@ function CredentialRow({
   return (
     <div
       className={clsx(
-        'flex items-center gap-0 border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0 h-10',
-        even ? 'bg-gray-50 dark:bg-zinc-900' : 'bg-gray-50/50 dark:bg-zinc-900/50',
+        'flex items-center gap-0 h-10',
+        ds.table.rowBorder,
+        even ? ds.table.rowEven : ds.table.rowOdd,
         !cred.active && 'opacity-50',
       )}
     >
@@ -419,20 +376,15 @@ function CredentialRow({
           {cred.name || cred.provider_id}
         </span>
         {!cred.active && (
-          <span className="shrink-0 text-[10px] text-red-400 bg-red-400/10 border border-red-400/20 px-1.5 py-0.5 rounded">
-            revoked
-          </span>
+          <Badge variant="danger" outlined compact>revoked</Badge>
         )}
       </div>
 
       {/* Type badge */}
       <div className="w-36 shrink-0 px-2">
-        <span className={clsx(
-          'inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-medium',
-          typeColors(cred.credential_type),
-        )}>
+        <Badge variant={credTypeBadgeVariant(cred.credential_type)} outlined compact>
           {typeLabel(cred.credential_type)}
-        </span>
+        </Badge>
       </div>
 
       {/* Scope (tenant) */}
@@ -445,12 +397,9 @@ function CredentialRow({
       {/* Encrypted indicator */}
       <div className="w-24 shrink-0 px-2 flex items-center gap-1.5">
         {encrypted ? (
-          <>
-            <Lock size={10} className="text-emerald-400 shrink-0" />
-            <span className="text-[11px] text-emerald-400">Encrypted</span>
-          </>
+          <Badge variant="success" dot compact>Encrypted</Badge>
         ) : (
-          <span className="text-[11px] text-amber-400">Plaintext</span>
+          <Badge variant="warning" compact>Plaintext</Badge>
         )}
       </div>
 
@@ -534,13 +483,13 @@ export function CredentialsPage() {
   );
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
+    <div className={clsx("flex flex-col h-full", ds.surface.pageDense)}>
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
-        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
+      <div className={clsx(ds.toolbar.base, ds.surface.pageDense)}>
+        <span className={ds.toolbar.title}>
           Credentials
           {!isLoading && (
-            <span className="ml-2 text-[12px] text-gray-400 dark:text-zinc-500 font-normal">
+            <span className={ds.toolbar.count}>
               {active.length} active
             </span>
           )}
@@ -559,14 +508,14 @@ export function CredentialsPage() {
 
         <button
           onClick={() => setShowAdd(true)}
-          className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded bg-indigo-600 text-white text-[12px] hover:bg-indigo-500 transition-colors"
+          className={clsx(ds.btn.primary, "ml-auto")}
         >
           <Plus size={11} /> Add Credential
         </button>
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors"
+          className={ds.btn.ghost}
         >
           <RefreshCw size={11} className={isFetching ? 'animate-spin' : ''} />
           Refresh
@@ -575,10 +524,10 @@ export function CredentialsPage() {
 
       {/* Stat strip */}
       {!isLoading && (
-        <div className="grid grid-cols-3 gap-x-6 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 shrink-0">
-          <StatCard label="Total"     value={active.length}    sub={`${creds.length - active.length} revoked`} />
-          <StatCard label="Encrypted" value={encrypted.length} sub={active.length > 0 ? `${Math.round(encrypted.length / active.length * 100)}% of active` : undefined} />
-          <StatCard label="Types"     value={typeSet.size}     sub={Array.from(typeSet).join(', ') || '—'} />
+        <div className={clsx(ds.spacing.statGrid3, "px-5 py-3 border-b border-gray-200 dark:border-zinc-800 shrink-0")}>
+          <StatCard label="Total"     value={active.length}    description={`${creds.length - active.length} revoked`} variant="info" />
+          <StatCard label="Encrypted" value={encrypted.length} description={active.length > 0 ? `${Math.round(encrypted.length / active.length * 100)}% of active` : undefined} variant="success" />
+          <StatCard label="Types"     value={typeSet.size}     description={Array.from(typeSet).join(', ') || '—'} variant="default" />
         </div>
       )}
 
@@ -591,7 +540,7 @@ export function CredentialsPage() {
           </div>
         ) : creds.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-64 gap-3 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700">
+            <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700">
               <KeyRound size={24} className="text-gray-400 dark:text-zinc-500" />
             </div>
             <p className="text-[13px] font-medium text-gray-500 dark:text-zinc-400">No credentials stored</p>
@@ -601,7 +550,7 @@ export function CredentialsPage() {
             </p>
             <button
               onClick={() => setShowAdd(true)}
-              className="mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 text-white text-[12px] hover:bg-indigo-500 transition-colors"
+              className={clsx(ds.btn.primary, "mt-1")}
             >
               <Plus size={11} /> Add Credential
             </button>
@@ -609,7 +558,7 @@ export function CredentialsPage() {
         ) : (
           <div className="min-w-[700px]">
             {/* Column headers */}
-            <div className="flex items-center gap-0 h-8 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 sticky top-0">
+            <div className={clsx("flex items-center gap-0 h-8 border-b border-gray-200 dark:border-zinc-800 sticky top-0", ds.table.headBg)}>
               <div className="flex-1 min-w-0 px-4">
                 <span className="text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Name</span>
               </div>
