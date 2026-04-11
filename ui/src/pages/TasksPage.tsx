@@ -13,6 +13,7 @@ import { DataTable } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { CopyButton } from "../components/CopyButton";
 import { defaultApi } from "../lib/api";
+import { card as cardPreset } from "../lib/design-system";
 import type { TaskRecord, TaskState } from "../lib/types";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 
@@ -353,7 +354,7 @@ function KanbanColumn({ state, tasks }: { state: TaskState; tasks: TaskRecord[] 
   const hidden = tasks.length - shown.length;
 
   return (
-    <div className="flex flex-col min-w-[180px] max-w-[200px] shrink-0 rounded-lg border border-gray-200 dark:border-zinc-800 overflow-hidden">
+    <div className={clsx(cardPreset.shell, "flex flex-col min-w-[180px] max-w-[200px] shrink-0")}>
       {/* Column header */}
       <div className={clsx("flex items-center gap-2 px-3 py-2 shrink-0", cfg.headBg)}>
         <span className={clsx("w-2 h-2 rounded-full shrink-0", cfg.dot)} />
