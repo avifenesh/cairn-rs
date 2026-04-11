@@ -17,6 +17,7 @@ import {
   AlertTriangle, CheckCircle2, Send, RotateCcw, Clock,
 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { StatCard } from '../components/StatCard';
 import { defaultApi } from '../lib/api';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { ErrorFallback } from '../components/ErrorFallback';
@@ -107,18 +108,6 @@ function KindIcon({ kind, size = 12 }: { kind: string; size?: number }) {
   if (kind === 'email')  return <Mail size={size} />;
   if (kind === 'slack')  return <Bell size={size} />;
   return <Webhook size={size} />;
-}
-
-// ── Stat card ─────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
 }
 
 // ── Channel detail panel ──────────────────────────────────────────────────────
@@ -727,10 +716,10 @@ export function ChannelsPage() {
       {/* Stat strip */}
       {!isLoading && (
         <div className="grid grid-cols-4 gap-x-6 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 shrink-0">
-          <StatCard label="Channels"    value={channels.length} />
-          <StatCard label="Active"      value={activeCount} />
-          <StatCard label="Errors"      value={errorCount} sub={errorCount > 0 ? 'check delivery log' : undefined} />
-          <StatCard label="Events"      value={eventTypes.length} sub={eventTypes.length > 0 ? 'subscribed' : 'none configured'} />
+          <StatCard compact variant="info" label="Channels"    value={channels.length} />
+          <StatCard compact variant="success" label="Active"      value={activeCount} />
+          <StatCard compact variant="danger" label="Errors"      value={errorCount} description={errorCount > 0 ? 'check delivery log' : undefined} />
+          <StatCard compact variant="info" label="Events"      value={eventTypes.length} description={eventTypes.length > 0 ? 'subscribed' : 'none configured'} />
         </div>
       )}
 
