@@ -85,6 +85,22 @@ fn decrypt_value(
         .map_err(|e| RuntimeError::Internal(format!("credential plaintext invalid utf-8: {e}")))
 }
 
+pub(crate) fn decrypt_credential_record(record: &CredentialRecord) -> Result<String, RuntimeError> {
+    let encrypted_at_ms = record.encrypted_at_ms.ok_or_else(|| {
+        RuntimeError::Internal(format!(
+            "credential {} missing encrypted_at_ms",
+            record.id
+        ))
+    })?;
+    decrypt_value(
+        &record.tenant_id,
+        &record.provider_id,
+        &record.encrypted_value,
+        record.key_id.as_deref(),
+        encrypted_at_ms,
+    )
+}
+
 #[async_trait]
 impl<S> CredentialService for CredentialServiceImpl<S>
 where
@@ -202,19 +218,7 @@ where
         let mut rotated_ids = Vec::with_capacity(candidates.len());
 
         for (idx, credential) in candidates.iter().enumerate() {
-            let encrypted_at_ms = credential.encrypted_at_ms.ok_or_else(|| {
-                RuntimeError::Internal(format!(
-                    "credential {} missing encrypted_at_ms for rotation",
-                    credential.id
-                ))
-            })?;
-            let plaintext = decrypt_value(
-                &credential.tenant_id,
-                &credential.provider_id,
-                &credential.encrypted_value,
-                credential.key_id.as_deref(),
-                encrypted_at_ms,
-            )?;
+            let plaintext = decrypt_credential_record(credential)?;
             let rotated_at_ms = started_at_ms.saturating_add(idx as u64);
             let encrypted_value = encrypt_value(
                 &credential.tenant_id,

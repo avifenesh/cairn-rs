@@ -43,14 +43,12 @@ use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::provider_health::ProviderHealthService;
-use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
-use cairn_runtime::RecoveryService;
 use cairn_runtime::{
-    BedrockProvider, InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider,
-    OpenAiCompatProvider,
+    InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider,
 };
+use cairn_runtime::{CredentialService, DefaultsService, RecoveryService};
 use cairn_store::pg::PgMigrationRunner;
 use cairn_store::pg::{PgAdapter, PgEventLog};
 use cairn_store::projections::{
@@ -135,20 +133,20 @@ struct AppState {
     ingest: Arc<IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>>,
     ollama: Option<Arc<OllamaProvider>>,
     /// Heavy/generate provider: CAIRN_BRAIN_URL (gemma4 31B etc.)
-    openai_compat_brain: Option<Arc<OpenAiCompatProvider>>,
+    openai_compat_brain: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
     /// Light/embed+worker provider: CAIRN_WORKER_URL (qwen3.5, qwen3-embedding)
-    openai_compat_worker: Option<Arc<OpenAiCompatProvider>>,
+    openai_compat_worker: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
     /// OpenRouter provider: OPENROUTER_API_KEY activates https://openrouter.ai/api/v1
-    openai_compat_openrouter: Option<Arc<OpenAiCompatProvider>>,
+    openai_compat_openrouter: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
     /// Backward-compat alias: first of brain/worker/openrouter that is configured.
-    openai_compat: Option<Arc<OpenAiCompatProvider>>,
+    openai_compat: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
     metrics: Arc<std::sync::RwLock<AppMetrics>>,
     rate_limits: RateLimitTable,
     request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
     notifications: Arc<std::sync::RwLock<NotificationBuffer>>,
     templates: Arc<templates::TemplateRegistry>,
     entitlements: Arc<entitlements::EntitlementService>,
-    bedrock: Option<Arc<BedrockProvider>>,
+    bedrock: Option<Arc<cairn_providers::backends::bedrock::Bedrock>>,
     process_role: cairn_api::bootstrap::ProcessRole,
 }
 
@@ -1252,15 +1250,11 @@ async fn batch_create_runs_handler(
                 .unwrap_or(&uuid::Uuid::new_v4().to_string()),
         );
         let parent_run_id = run_body.parent_run_id.as_deref().map(RunId::new);
-
-        match RunService::start(
-            &state.runtime.runs,
-            &project,
-            &session_id,
-            run_id,
-            parent_run_id,
-        )
-        .await
+        match state
+            .runtime
+            .runs
+            .start(&project, &session_id, run_id, parent_run_id)
+            .await
         {
             Ok(record) => results.push(serde_json::json!({ "ok": true,  "run": record })),
             Err(e) => results.push(serde_json::json!({ "ok": false, "error": e.to_string() })),
@@ -2658,6 +2652,90 @@ struct DiscoverModelsQuery {
     adapter_type: Option<String>,
 }
 
+fn decrypt_provider_credential(
+    record: &cairn_domain::credentials::CredentialRecord,
+) -> Result<String, String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Key, Nonce};
+    use sha2::{Digest, Sha256};
+
+    let seed = record.key_id.as_deref().unwrap_or("cairn-local-test-key");
+    let digest = Sha256::digest(seed.as_bytes());
+    let mut key_material = [0u8; 32];
+    key_material.copy_from_slice(&digest[..32]);
+
+    let key = Key::<Aes256Gcm>::from_slice(&key_material);
+    let cipher = Aes256Gcm::new(key);
+
+    let encrypted_at_ms = record
+        .encrypted_at_ms
+        .ok_or_else(|| "credential missing encrypted_at_ms".to_owned())?;
+    let nonce_digest = Sha256::digest(
+        format!(
+            "{}:{}:{encrypted_at_ms}",
+            record.tenant_id.as_str(),
+            record.provider_id
+        )
+        .as_bytes(),
+    );
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&nonce_digest[..12]);
+
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let plaintext = cipher
+        .decrypt(nonce, record.encrypted_value.as_ref())
+        .map_err(|e| format!("credential decryption failed: {e}"))?;
+    String::from_utf8(plaintext).map_err(|e| format!("credential plaintext invalid utf-8: {e}"))
+}
+
+async fn resolve_connection_probe_material(
+    state: &AppState,
+    connection_id: &str,
+) -> (Option<String>, Option<String>) {
+    let system_project = cairn_domain::ProjectKey::new("system", "system", "system");
+
+    let endpoint_key = format!("provider_endpoint_{connection_id}");
+    let endpoint_url = match state
+        .runtime
+        .defaults
+        .resolve(&system_project, &endpoint_key)
+        .await
+    {
+        Ok(Some(setting)) => setting
+            .as_str()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        _ => None,
+    };
+
+    let credential_key = format!("provider_credential_{connection_id}");
+    let credential_id = match state
+        .runtime
+        .defaults
+        .resolve(&system_project, &credential_key)
+        .await
+    {
+        Ok(Some(setting)) => setting.as_str().map(str::to_owned),
+        _ => None,
+    };
+
+    let api_key = match credential_id {
+        Some(credential_id) => match state
+            .runtime
+            .credentials
+            .get(&cairn_domain::CredentialId::new(credential_id))
+            .await
+        {
+            Ok(Some(record)) if record.active => decrypt_provider_credential(&record).ok(),
+            _ => None,
+        },
+        None => None,
+    };
+
+    (endpoint_url, api_key)
+}
+
 /// `GET /v1/providers/connections/:id/discover-models`
 ///
 /// Queries the live provider endpoint for available models.
@@ -2699,13 +2777,24 @@ async fn discover_models_handler(
         .unwrap_or(&adapter_type)
         .to_lowercase();
 
+    let (stored_endpoint, stored_api_key) =
+        if query.endpoint_url.is_none() && query.api_key.is_none() {
+            resolve_connection_probe_material(&state, &connection_id).await
+        } else {
+            (None, None)
+        };
+
     if adapter_type == "ollama" {
-        discover_ollama_models_live(&state, query.endpoint_url.as_deref()).await
+        discover_ollama_models_live(
+            &state,
+            query.endpoint_url.as_deref().or(stored_endpoint.as_deref()),
+        )
+        .await
     } else {
         discover_openai_compat_models_live(
             &state,
-            query.endpoint_url.as_deref(),
-            query.api_key.as_deref(),
+            query.endpoint_url.as_deref().or(stored_endpoint.as_deref()),
+            query.api_key.as_deref().or(stored_api_key.as_deref()),
         )
         .await
     }
@@ -2833,7 +2922,7 @@ async fn discover_openai_compat_models_live(
     let (base_url, api_key) = match endpoint_override {
         Some(url) => (url.trim_end_matches('/').to_owned(), api_key_override.map(str::to_owned).unwrap_or_default()),
         None => match &state.openai_compat {
-            Some(p) => (p.base_url().to_owned(), std::env::var("OPENAI_COMPAT_API_KEY").unwrap_or_default()),
+            Some(p) => (p.base_url.as_str().trim_end_matches('/').to_owned(), std::env::var("OPENAI_COMPAT_API_KEY").unwrap_or_default()),
             None => return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
                 "error": "OpenAI-compat not configured — set OPENAI_COMPAT_BASE_URL or pass ?endpoint_url="
             }))).into_response(),
@@ -3043,11 +3132,19 @@ async fn test_connection_handler(
         .unwrap_or(&adapter_type)
         .to_lowercase();
 
+    let (stored_endpoint, stored_api_key) =
+        if query.endpoint_url.is_none() && query.api_key.is_none() {
+            resolve_connection_probe_material(&state, &connection_id).await
+        } else {
+            (None, None)
+        };
+
     let (probe_url, auth_header) = if adapter_type == "ollama" {
         let host = query
             .endpoint_url
             .as_deref()
             .map(|u| u.trim_end_matches('/').to_owned())
+            .or_else(|| stored_endpoint.clone())
             .or_else(|| state.ollama.as_ref().map(|p| p.host().to_owned()));
         match host {
             Some(h) => (format!("{h}/api/tags"), None),
@@ -3064,17 +3161,19 @@ async fn test_connection_handler(
             .endpoint_url
             .as_deref()
             .map(|u| u.trim_end_matches('/').to_owned())
+            .or_else(|| stored_endpoint.clone())
             .or_else(|| {
                 state
                     .openai_compat
                     .as_ref()
-                    .map(|p| p.base_url().to_owned())
+                    .map(|p| p.base_url.to_string())
             });
         match base {
             Some(b) => {
                 let key = query
                     .api_key
                     .clone()
+                    .or_else(|| stored_api_key.clone())
                     .or_else(|| std::env::var("OPENAI_COMPAT_API_KEY").ok())
                     .unwrap_or_default();
                 let auth = if key.is_empty() {
@@ -3169,50 +3268,74 @@ async fn ollama_generate_handler(
         return bad_request("prompt or messages is required").into_response();
     }
 
-    // Provider priority for generation: Ollama → brain → worker → OpenRouter.
     let default_model = state.runtime.runtime_config.default_generate_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_model).to_owned();
 
-    // Route to the appropriate tier based on model name.
-    // Brain tier: heavy models (gemma, cyankiwi, qwen3-coder, …).
-    // Worker tier: light models (qwen3.5, phi, llama, gemma-3-4b, …) or Ollama fallback.
-    let is_brain_model = model_id.to_lowercase() == "openrouter/free"
-        || model_id.to_lowercase().contains("gemma-3-27b")
-        || model_id.to_lowercase().contains("qwen3-coder")
-        || model_id.to_lowercase().contains("gemma-4")
-        || model_id.to_lowercase().contains("gemma4")
-        || model_id.to_lowercase().contains("cyankiwi")
-        || model_id.to_lowercase().contains("brain");
-
-    let provider: &dyn cairn_domain::providers::GenerationProvider = if let Some(ref ollama) =
-        state.ollama
+    let provider: Arc<dyn cairn_domain::providers::GenerationProvider> = match state
+        .runtime
+        .provider_registry
+        .resolve_generation_for_model(
+            &cairn_domain::TenantId::new("default_tenant"),
+            &model_id,
+            cairn_runtime::ProviderResolutionPurpose::Generate,
+        )
+        .await
     {
-        ollama.as_ref()
-    } else if is_brain_model {
-        // Brain-tier model — prefer brain, fall back to worker, then OpenRouter.
-        if let Some(ref brain) = state.openai_compat_brain {
-            brain.as_ref()
-        } else if let Some(ref worker) = state.openai_compat_worker {
-            worker.as_ref()
-        } else if let Some(ref or_) = state.openai_compat_openrouter {
-            or_.as_ref()
-        } else {
-            return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
-                    "error": "Brain provider not configured — set CAIRN_BRAIN_URL or OPENROUTER_API_KEY"
-                }))).into_response();
+        Ok(Some(provider)) => provider,
+        Ok(None) => {
+            let is_bedrock_model = model_id.contains('.');
+            let is_brain_model = model_id.to_lowercase() == "openrouter/free"
+                || model_id.to_lowercase().contains("gemma-3-27b")
+                || model_id.to_lowercase().contains("qwen3-coder")
+                || model_id.to_lowercase().contains("gemma-4")
+                || model_id.to_lowercase().contains("gemma4")
+                || model_id.to_lowercase().contains("cyankiwi")
+                || model_id.to_lowercase().contains("brain");
+
+            if is_bedrock_model {
+                if let Some(ref bedrock) = state.bedrock {
+                    bedrock.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+                } else {
+                    return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
+                            "error": "Bedrock provider not configured — set BEDROCK_API_KEY and BEDROCK_MODEL_ID"
+                        }))).into_response();
+                }
+            } else if let Some(ref ollama) = state.ollama {
+                ollama.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+            } else if is_brain_model {
+                if let Some(ref brain) = state.openai_compat_brain {
+                    brain.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+                } else if let Some(ref worker) = state.openai_compat_worker {
+                    worker.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+                } else if let Some(ref or_) = state.openai_compat_openrouter {
+                    or_.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+                } else if let Some(ref bedrock) = state.bedrock {
+                    bedrock.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+                } else {
+                    return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
+                            "error": "Brain provider not configured — set CAIRN_BRAIN_URL, OPENROUTER_API_KEY, or BEDROCK_API_KEY"
+                        }))).into_response();
+                }
+            } else if let Some(ref worker) = state.openai_compat_worker {
+                worker.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+            } else if let Some(ref brain) = state.openai_compat_brain {
+                brain.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+            } else if let Some(ref or_) = state.openai_compat_openrouter {
+                or_.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+            } else if let Some(ref bedrock) = state.bedrock {
+                bedrock.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>
+            } else {
+                return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
+                        "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, CAIRN_WORKER_URL, OPENROUTER_API_KEY, or BEDROCK_API_KEY"
+                    }))).into_response();
+            }
         }
-    } else {
-        // Worker-tier model — prefer worker, fall back to brain, then OpenRouter.
-        if let Some(ref worker) = state.openai_compat_worker {
-            worker.as_ref()
-        } else if let Some(ref brain) = state.openai_compat_brain {
-            brain.as_ref()
-        } else if let Some(ref or_) = state.openai_compat_openrouter {
-            or_.as_ref()
-        } else {
-            return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({
-                    "error": "No LLM provider configured — set OLLAMA_HOST, CAIRN_BRAIN_URL, CAIRN_WORKER_URL, or OPENROUTER_API_KEY"
-                }))).into_response();
+        Err(err) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                axum::Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
         }
     };
 
@@ -3454,18 +3577,18 @@ async fn chat_stream_handler(
         (format!("{}/v1/chat/completions", o.host()), String::new())
     } else if let Some(ref brain) = state.openai_compat_brain {
         (
-            format!("{}/chat/completions", brain.base_url()),
-            brain.api_key().to_owned(),
+            format!("{}/chat/completions", brain.base_url.as_str().trim_end_matches('/')),
+            brain.api_key.as_str().to_owned(),
         )
     } else if let Some(ref worker) = state.openai_compat_worker {
         (
-            format!("{}/chat/completions", worker.base_url()),
-            worker.api_key().to_owned(),
+            format!("{}/chat/completions", worker.base_url.as_str().trim_end_matches('/')),
+            worker.api_key.as_str().to_owned(),
         )
     } else if let Some(ref or_) = state.openai_compat_openrouter {
         (
-            format!("{}/chat/completions", or_.base_url()),
-            or_.api_key().to_owned(),
+            format!("{}/chat/completions", or_.base_url.as_str().trim_end_matches('/')),
+            or_.api_key.as_str().to_owned(),
         )
     } else {
         return (
@@ -4625,63 +4748,69 @@ async fn main() {
         None
     };
 
-    // ── OpenAI-compatible providers (optional) ───────────────────────────────
-    // CAIRN_BRAIN_URL  — heavy model endpoint (generate, chat).
-    //   Model: cyankiwi/gemma-4-31B-it-AWQ-4bit  (or CAIRN_BRAIN_MODEL override)
-    // CAIRN_WORKER_URL — light model endpoint (generate fast, embed).
-    //   Model: qwen3.5:9b / qwen3-embedding:8b   (or CAIRN_WORKER_MODEL override)
-    //
-    // Legacy fallback: OPENAI_COMPAT_BASE_URL still works and maps to both.
-    let openai_compat_brain: Option<Arc<OpenAiCompatProvider>> = {
+    // ── Provider construction via cairn-providers ──────────────────────────────
+    // All providers are constructed through ProviderBuilder using runtime config.
+    // cairn-providers implements cairn-domain's GenerationProvider trait via the
+    // bridge module, so everything plugs into the existing orchestrate/generate paths.
+    use cairn_providers::wire::openai_compat::{OpenAiCompat, ProviderConfig};
+    use cairn_providers::backends::bedrock::Bedrock as CairnBedrock;
+
+    let openai_compat_brain: Option<Arc<OpenAiCompat>> = {
         let brain_url = std::env::var("CAIRN_BRAIN_URL")
             .or_else(|_| std::env::var("OPENAI_COMPAT_BASE_URL"))
-            .ok();
+            .ok()
+            .filter(|u| !u.is_empty());
         let brain_key = std::env::var("CAIRN_BRAIN_KEY")
             .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
             .unwrap_or_default();
         brain_url.map(|url| {
-            let url = url.trim_end_matches('/').to_owned();
             eprintln!("openai-compat (brain): configured at {url}");
-            Arc::new(OpenAiCompatProvider::new(url, brain_key))
+            Arc::new(OpenAiCompat::new(
+                ProviderConfig::default(),
+                brain_key,
+                Some(url),
+                None, None, None, None,
+            ))
         })
     };
-    let openai_compat_worker: Option<Arc<OpenAiCompatProvider>> = {
+    let openai_compat_worker: Option<Arc<OpenAiCompat>> = {
         let worker_url = std::env::var("CAIRN_WORKER_URL")
             .or_else(|_| std::env::var("OPENAI_COMPAT_BASE_URL"))
-            .ok();
+            .ok()
+            .filter(|u| !u.is_empty());
         let worker_key = std::env::var("CAIRN_WORKER_KEY")
             .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
             .unwrap_or_default();
         worker_url.map(|url| {
-            let url = url.trim_end_matches('/').to_owned();
             eprintln!("openai-compat (worker): configured at {url}");
-            Arc::new(OpenAiCompatProvider::new(url, worker_key))
+            Arc::new(OpenAiCompat::new(
+                ProviderConfig::default(),
+                worker_key,
+                Some(url),
+                None, None, None, None,
+            ))
         })
     };
-    // ── OpenRouter provider (zero-cost path via OPENROUTER_API_KEY) ─────────────
-    // Brain model:  openrouter/free  (200K context, auto-routes to available free models)
-    // Worker model: google/gemma-3-4b-it:free  (32 K context)
-    let openai_compat_openrouter: Option<Arc<OpenAiCompatProvider>> = {
+    let openai_compat_openrouter: Option<Arc<OpenAiCompat>> = {
         use cairn_runtime::RuntimeConfig;
         RuntimeConfig::openrouter_api_key().map(|key| {
             eprintln!("openai-compat (openrouter): configured — brain=openrouter/free worker=google/gemma-3-4b-it:free");
-            Arc::new(OpenAiCompatProvider::new(
-                "https://openrouter.ai/api/v1".to_owned(),
+            Arc::new(OpenAiCompat::new(
+                ProviderConfig::OPENROUTER,
                 key,
+                None, None, None, None, None,
             ))
         })
     };
 
     // Legacy alias: expose the first configured provider as `openai_compat`.
-    let openai_compat: Option<Arc<OpenAiCompatProvider>> = openai_compat_brain
+    let openai_compat: Option<Arc<OpenAiCompat>> = openai_compat_brain
         .clone()
         .or_else(|| openai_compat_worker.clone())
         .or_else(|| openai_compat_openrouter.clone());
 
-    // ── Bedrock provider (optional) ────────────────────────────────────────────
-    // Requires BEDROCK_API_KEY or AWS_BEARER_TOKEN_BEDROCK env var.
-    // BEDROCK_MODEL_ID defaults to minimax.minimax-m2.5, AWS_REGION to us-west-2.
-    let bedrock: Option<Arc<BedrockProvider>> = BedrockProvider::from_env().map(|p| {
+    // Bedrock provider via cairn-providers.
+    let bedrock: Option<Arc<CairnBedrock>> = CairnBedrock::from_env().map(|p| {
         eprintln!(
             "bedrock: configured — model={} region={}",
             p.model_id(),
@@ -4690,9 +4819,48 @@ async fn main() {
         Arc::new(p)
     });
 
-    // ── Wire brain provider into lib_state for the orchestrate endpoint ──────
+    {
+        use cairn_domain::providers::GenerationProvider;
+        use cairn_providers::chat::ChatProvider;
+
+        lib_state
+            .runtime
+            .provider_registry
+            .set_startup_fallbacks(cairn_runtime::StartupFallbackProviders {
+                ollama: ollama.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::generation(
+                        provider.clone() as Arc<dyn GenerationProvider>
+                    )
+                }),
+                brain: openai_compat_brain.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::with_chat(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        provider.clone() as Arc<dyn ChatProvider>,
+                    )
+                }),
+                worker: openai_compat_worker.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::with_chat(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        provider.clone() as Arc<dyn ChatProvider>,
+                    )
+                }),
+                openrouter: openai_compat_openrouter.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::with_chat(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        provider.clone() as Arc<dyn ChatProvider>,
+                    )
+                }),
+                bedrock: bedrock.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::with_chat(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        provider.clone() as Arc<dyn ChatProvider>,
+                    )
+                }),
+            });
+    }
+
+    // Wire brain provider into lib_state for the orchestrate endpoint.
     // Priority: brain → worker → OpenRouter → Bedrock → Ollama.
-    // Arc::get_mut is safe here: lib_state has not been cloned yet.
     {
         use cairn_domain::providers::GenerationProvider;
         let brain: Option<Arc<dyn GenerationProvider>> = openai_compat_brain
@@ -5429,6 +5597,45 @@ fn test_make_app(mut state: AppState) -> axum::Router {
     state.document_store = lib_state.document_store.clone();
     state.retrieval = lib_state.retrieval.clone();
     state.ingest = lib_state.ingest.clone();
+    {
+        use cairn_domain::providers::GenerationProvider;
+        use cairn_providers::chat::ChatProvider;
+
+        state
+            .runtime
+            .provider_registry
+            .set_startup_fallbacks(cairn_runtime::StartupFallbackProviders {
+                ollama: state.ollama.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::generation(
+                        provider.clone() as Arc<dyn GenerationProvider>
+                    )
+                }),
+                brain: state.openai_compat_brain.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::with_chat(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        provider.clone() as Arc<dyn ChatProvider>,
+                    )
+                }),
+                worker: state.openai_compat_worker.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::with_chat(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        provider.clone() as Arc<dyn ChatProvider>,
+                    )
+                }),
+                openrouter: state.openai_compat_openrouter.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::with_chat(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        provider.clone() as Arc<dyn ChatProvider>,
+                    )
+                }),
+                bedrock: state.bedrock.as_ref().map(|provider| {
+                    cairn_runtime::StartupProviderEntry::with_chat(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        provider.clone() as Arc<dyn ChatProvider>,
+                    )
+                }),
+            });
+    }
     build_router(lib_state, state)
 }
 
@@ -5440,8 +5647,11 @@ mod tests {
     use axum::body::to_bytes;
     use axum::body::Body;
     use axum::http::Request;
+    use axum::routing::post;
+    use axum::Router;
     use cairn_api::bootstrap::{ServerBootstrap, StorageBackend};
     use cairn_domain::{ProjectKey, SessionId};
+    use cairn_providers::wire::openai_compat::{OpenAiCompat, ProviderConfig};
     use cairn_runtime::sessions::SessionService;
     use std::sync::Mutex;
     use tower::ServiceExt as _;
@@ -5528,6 +5738,75 @@ mod tests {
 
     fn make_app(state: AppState) -> Router {
         super::test_make_app(state)
+    }
+
+    async fn authed_json(
+        app: Router,
+        method: axum::http::Method,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> axum::response::Response {
+        app.oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn spawn_openai_compat_mock(text: &'static str) -> String {
+        let handler = move || async move {
+            Json(serde_json::json!({
+                "id": format!("mock-{text}"),
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": text,
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 2,
+                    "total_tokens": 5
+                }
+            }))
+        };
+        let app = Router::new()
+            .route("/chat/completions", post(handler))
+            .route("/v1/chat/completions", post(move || async move {
+                Json(serde_json::json!({
+                    "id": format!("mock-{text}"),
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": text,
+                        },
+                        "finish_reason": "stop"
+                    }],
+                    "usage": {
+                        "prompt_tokens": 3,
+                        "completion_tokens": 2,
+                        "total_tokens": 5
+                    }
+                }))
+            }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        format!("http://{addr}")
     }
 
     /// Issue a GET request with the test bearer token.
@@ -7906,6 +8185,122 @@ mod tests {
         assert_eq!(cost["total_tokens_in"], 80, "50+30 tokens in");
         assert_eq!(cost["total_tokens_out"], 30, "20+10 tokens out");
         assert_eq!(cost["provider_calls"], 2, "2 provider calls");
+    }
+
+    #[tokio::test]
+    async fn provider_connection_generate_roundtrip_invalidates_to_static_fallback() {
+        let static_url = spawn_openai_compat_mock("static").await;
+        let dynamic_url = spawn_openai_compat_mock("dynamic").await;
+
+        let mut state = make_state();
+        state.openai_compat_worker = Some(Arc::new(OpenAiCompat::new(
+            ProviderConfig::default(),
+            "static-key",
+            Some(static_url),
+            Some("gpt-4o-mini".to_owned()),
+            None,
+            None,
+            None,
+        )));
+        state.openai_compat = state.openai_compat_worker.clone();
+
+        let app = make_app(state);
+
+        let credential_resp = authed_json(
+            app.clone(),
+            axum::http::Method::POST,
+            "/v1/admin/tenants/default_tenant/credentials",
+            serde_json::json!({
+                "provider_id": "openai",
+                "plaintext_value": "dynamic-key",
+            }),
+        )
+        .await;
+        assert_eq!(credential_resp.status(), StatusCode::CREATED);
+        let credential_body = to_bytes(credential_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let credential_json: serde_json::Value =
+            serde_json::from_slice(&credential_body).unwrap();
+        let credential_id = credential_json["id"]
+            .as_str()
+            .expect("credential id")
+            .to_owned();
+
+        let create_resp = authed_json(
+            app.clone(),
+            axum::http::Method::POST,
+            "/v1/providers/connections",
+            serde_json::json!({
+                "tenant_id": "default_tenant",
+                "provider_connection_id": "conn_dynamic",
+                "provider_family": "openai",
+                "adapter_type": "openai_compat",
+                "supported_models": ["gpt-4o-mini"],
+                "credential_id": credential_id,
+                "endpoint_url": dynamic_url,
+            }),
+        )
+        .await;
+        assert_eq!(create_resp.status(), StatusCode::CREATED);
+
+        let dynamic_resp = authed_json(
+            app.clone(),
+            axum::http::Method::POST,
+            "/v1/providers/ollama/generate",
+            serde_json::json!({
+                "model": "gpt-4o-mini",
+                "prompt": "hello from dynamic",
+            }),
+        )
+        .await;
+        let dynamic_status = dynamic_resp.status();
+        let dynamic_body = to_bytes(dynamic_resp.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            dynamic_status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&dynamic_body)
+        );
+        let dynamic_json: serde_json::Value = serde_json::from_slice(&dynamic_body).unwrap();
+        assert_eq!(dynamic_json["text"], "dynamic");
+
+        let delete_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::DELETE)
+                    .uri("/v1/providers/connections/conn_dynamic")
+                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete_resp.status(), StatusCode::OK);
+
+        let fallback_resp = authed_json(
+            app,
+            axum::http::Method::POST,
+            "/v1/providers/ollama/generate",
+            serde_json::json!({
+                "model": "gpt-4o-mini",
+                "prompt": "hello from fallback",
+            }),
+        )
+        .await;
+        let fallback_status = fallback_resp.status();
+        let fallback_body = to_bytes(fallback_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            fallback_status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&fallback_body)
+        );
+        let fallback_json: serde_json::Value = serde_json::from_slice(&fallback_body).unwrap();
+        assert_eq!(fallback_json["text"], "static");
     }
 
     #[tokio::test]

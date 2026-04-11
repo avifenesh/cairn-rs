@@ -23,6 +23,7 @@ use crate::services::{
     SignalRouterServiceImpl, SignalServiceImpl, TaskServiceImpl, TenantServiceImpl,
     WorkspaceMembershipServiceImpl, WorkspaceServiceImpl,
 };
+use crate::ProviderRegistry;
 
 /// Bundled runtime services backed by `InMemoryStore`.
 ///
@@ -72,6 +73,7 @@ pub struct InMemoryServices {
     pub provider_connections: ProviderConnectionServiceImpl<InMemoryStore>,
     pub provider_health: ProviderHealthServiceImpl<InMemoryStore>,
     pub provider_pools: ProviderConnectionPoolServiceImpl<InMemoryStore>,
+    pub provider_registry: std::sync::Arc<ProviderRegistry<InMemoryStore>>,
 
     // ── Governance ────────────────────────────────────────────────────────
     pub credentials: CredentialServiceImpl<InMemoryStore>,
@@ -145,6 +147,7 @@ impl InMemoryServices {
             provider_connections: ProviderConnectionServiceImpl::new(store.clone()),
             provider_health: ProviderHealthServiceImpl::new(store.clone()),
             provider_pools: ProviderConnectionPoolServiceImpl::new(store.clone()),
+            provider_registry: std::sync::Arc::new(ProviderRegistry::new(store.clone())),
             credentials: CredentialServiceImpl::new(store.clone()),
             defaults: DefaultsServiceImpl::new(store.clone()),
             licenses: LicenseServiceImpl::new(store.clone()),

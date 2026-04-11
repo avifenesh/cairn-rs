@@ -40,6 +40,7 @@ pub mod provider_bindings;
 pub mod provider_connections;
 pub mod provider_health;
 pub mod provider_pools;
+pub mod provider_registry;
 pub mod quotas;
 pub mod recovery;
 pub mod research;
@@ -132,6 +133,10 @@ pub use provider_bindings::ProviderBindingService;
 pub use provider_connections::{ProviderConnectionConfig, ProviderConnectionService};
 pub use provider_health::ProviderHealthService;
 pub use provider_pools::ProviderConnectionPoolService;
+pub use provider_registry::{
+    json_messages_to_chat_messages, ProviderRegistry, ProviderResolutionPurpose,
+    StartupFallbackProviders, StartupProviderEntry,
+};
 pub use quotas::QuotaService;
 pub use resource_sharing::ResourceSharingService;
 pub use retention::RetentionService;

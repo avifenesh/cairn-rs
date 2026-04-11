@@ -5872,6 +5872,15 @@ async fn publish_runtime_frames_since(state: &Arc<AppState>, after: Option<Event
     let _ = projector.project_events(&events).await;
 
     for stored in events {
+        if let cairn_domain::RuntimeEvent::ProviderConnectionRegistered(connection) =
+            &stored.envelope.payload
+        {
+            state
+                .runtime
+                .provider_registry
+                .invalidate(&connection.provider_connection_id);
+        }
+
         // OTLP export (RFC 021): send each event to the exporter.
         let _ = state
             .otlp_exporter
@@ -10159,39 +10168,6 @@ async fn orchestrate_run_handler(
         }
     }
 
-    // Select provider based on model_id: Bedrock models (contain '.') use the Bedrock provider.
-    let is_bedrock_model = body
-        .model_id
-        .as_deref()
-        .map(|m| m.contains('.') && !m.contains('/'))
-        .unwrap_or(false);
-
-    let brain = if is_bedrock_model {
-        match &state.bedrock_provider {
-            Some(p) => p.clone(),
-            None => {
-                return AppApiError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "no_bedrock_provider",
-                    "Bedrock model requested but AWS credentials not configured.",
-                )
-                .into_response()
-            }
-        }
-    } else {
-        match &state.brain_provider {
-            Some(p) => p.clone(),
-            None => {
-                return AppApiError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "no_brain_provider",
-                    "No LLM provider configured. Add one via POST /v1/providers/connections, or set CAIRN_BRAIN_URL / OPENROUTER_API_KEY / OLLAMA_HOST.",
-                )
-                .into_response()
-            }
-        }
-    };
-
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -10230,6 +10206,48 @@ async fn orchestrate_run_handler(
     let model_id = match body.model_id {
         Some(m) => m,
         None => state.runtime.runtime_config.default_brain_model().await,
+    };
+
+    let is_bedrock_model = model_id.contains('.') && !model_id.contains('/');
+    let brain = match state
+        .runtime
+        .provider_registry
+        .resolve_generation_for_model(
+            &run.project.tenant_id,
+            &model_id,
+            cairn_runtime::ProviderResolutionPurpose::Brain,
+        )
+        .await
+    {
+        Ok(Some(provider)) => provider,
+        Ok(None) => {
+            if is_bedrock_model {
+                match &state.bedrock_provider {
+                    Some(provider) => provider.clone(),
+                    None => {
+                        return AppApiError::new(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "no_bedrock_provider",
+                            "Bedrock model requested but AWS credentials not configured.",
+                        )
+                        .into_response()
+                    }
+                }
+            } else {
+                match &state.brain_provider {
+                    Some(provider) => provider.clone(),
+                    None => {
+                        return AppApiError::new(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "no_brain_provider",
+                            "No LLM provider configured. Add one via POST /v1/providers/connections, or set CAIRN_BRAIN_URL / OPENROUTER_API_KEY / OLLAMA_HOST.",
+                        )
+                        .into_response()
+                    }
+                }
+            }
+        }
+        Err(err) => return runtime_error_response(err),
     };
 
     let gather = StandardGatherPhase::builder(state.runtime.store.clone())
@@ -17337,6 +17355,7 @@ async fn create_provider_connection_handler(
         return denied;
     }
 
+    let before = current_event_head(&state).await;
     let conn_id = body.provider_connection_id.clone();
     let credential_id = body.credential_id.clone();
     let endpoint_url = body.endpoint_url.clone();
@@ -17384,6 +17403,7 @@ async fn create_provider_connection_handler(
                     )
                     .await;
             }
+            publish_runtime_frames_since(&state, before).await;
             (StatusCode::CREATED, Json(record)).into_response()
         }
         Err(err) => (
@@ -17468,6 +17488,7 @@ async fn delete_provider_connection_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let conn_id = ProviderConnectionId::new(&id);
+    let before = current_event_head(&state).await;
     match state.runtime.provider_connections.get(&conn_id).await {
         Ok(Some(_)) => {
             // Deactivate by emitting a status change event.
@@ -17487,11 +17508,14 @@ async fn delete_provider_connection_handler(
                 ),
             );
             match state.runtime.store.append(&[event]).await {
-                Ok(_) => (
-                    StatusCode::OK,
-                    Json(serde_json::json!({ "deleted": true, "connection_id": id })),
-                )
-                    .into_response(),
+                Ok(_) => {
+                    publish_runtime_frames_since(&state, before).await;
+                    (
+                        StatusCode::OK,
+                        Json(serde_json::json!({ "deleted": true, "connection_id": id })),
+                    )
+                        .into_response()
+                }
                 Err(err) => store_error_response(err),
             }
         }

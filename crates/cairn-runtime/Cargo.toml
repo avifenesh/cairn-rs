@@ -10,6 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 cairn-domain = { path = "../cairn-domain" }
+cairn-providers = { path = "../cairn-providers" }
 cairn-store = { path = "../cairn-store" }
 cairn-plugin-catalog = { path = "../cairn-plugin-catalog" }
 cairn-plugin-proto = { path = "../cairn-plugin-proto" }
@@ -31,4 +32,3 @@ cairn-memory = { path = "../cairn-memory" }
 
 [features]
 default = []
-
