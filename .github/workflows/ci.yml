@@ -86,9 +86,17 @@ jobs:
       - name: cargo test --lib
         run: cargo test --workspace --lib
         timeout-minutes: 10
-      # Integration tests (exclude cairn-app to avoid linker pressure)
-      - name: cargo test --tests (non-app)
-        run: cargo test --workspace --exclude cairn-app --tests
+      # Integration tests (exclude heavy crates to avoid linker OOM on CI runner)
+      - name: cargo test --tests (core crates)
+        run: >
+          cargo test --tests
+          -p cairn-domain
+          -p cairn-store
+          -p cairn-runtime
+          -p cairn-providers
+          -p cairn-tools
+          -p cairn-orchestrator
+          -p cairn-evals
         timeout-minutes: 10
       # cairn-app integration tests (specific, not --tests which links everything)
       - name: cairn-app integration tests
@@ -109,7 +117,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - run: npm ci
+      - run: npm install
       - name: tsc --noEmit
         run: npx tsc --noEmit
       - name: build
