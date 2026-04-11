@@ -87,10 +87,7 @@ fn decrypt_value(
 
 pub(crate) fn decrypt_credential_record(record: &CredentialRecord) -> Result<String, RuntimeError> {
     let encrypted_at_ms = record.encrypted_at_ms.ok_or_else(|| {
-        RuntimeError::Internal(format!(
-            "credential {} missing encrypted_at_ms",
-            record.id
-        ))
+        RuntimeError::Internal(format!("credential {} missing encrypted_at_ms", record.id))
     })?;
     decrypt_value(
         &record.tenant_id,

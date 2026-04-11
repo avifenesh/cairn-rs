@@ -275,9 +275,13 @@ async fn source_create_list_and_delete_persist_registered_sources() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     let sources: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let items = sources.as_array().expect("sources list response must be an array");
+    let items = sources
+        .as_array()
+        .expect("sources list response must be an array");
     assert!(
-        items.iter().any(|item| item["source_id"].as_str() == Some(source_id)),
+        items
+            .iter()
+            .any(|item| item["source_id"].as_str() == Some(source_id)),
         "newly registered source must appear in the project source list"
     );
 
@@ -311,9 +315,13 @@ async fn source_create_list_and_delete_persist_registered_sources() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     let sources: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let items = sources.as_array().expect("sources list response must be an array");
+    let items = sources
+        .as_array()
+        .expect("sources list response must be an array");
     assert!(
-        items.iter().all(|item| item["source_id"].as_str() != Some(source_id)),
+        items
+            .iter()
+            .all(|item| item["source_id"].as_str() != Some(source_id)),
         "deleted source must be removed from the project source list"
     );
 }

@@ -9,6 +9,7 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { useToast } from "../components/Toast";
 import { clsx } from "clsx";
 import { useScope } from "../hooks/useScope";
+import { sectionLabel } from "../lib/design-system";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -134,7 +135,7 @@ export function TriggersPage() {
       <div className="flex items-center justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Triggers</p>
+            <p className={clsx(sectionLabel, "mb-0")}>Triggers</p>
             <HelpTooltip text="Signal-to-run bindings (RFC 022). When a signal arrives matching a trigger's pattern, a run is created from the linked template." placement="right" />
           </div>
           <p className="text-[11px] text-gray-500 dark:text-zinc-400">Implements RFC 022 — Trigger-Based Automation.</p>

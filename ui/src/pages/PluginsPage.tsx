@@ -8,6 +8,7 @@ import {
 import { ErrorFallback } from '../components/ErrorFallback';
 import { StatCard } from '../components/StatCard';
 import { defaultApi } from '../lib/api';
+import { sectionLabel } from '../lib/design-system';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import type { PluginManifest, PluginCapability, PluginDetailResponse, CatalogEntry } from '../lib/types';
 
@@ -570,7 +571,7 @@ export function PluginsPage() {
   return (
     <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
       <div className="px-4 pt-4 pb-2 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
-        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Plugins</p>
+        <p className={`${sectionLabel} mb-0`}>Plugins</p>
         <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">Implements RFC 015 — Plugin Marketplace &amp; Lifecycle.</p>
       </div>
 

@@ -1,4 +1,44 @@
+# Rust
 /target
+**/*.rs.bk
 
+# Environment & secrets
 .env
+.env.*
+!.env.example
+
+# Data & persistence
 data/
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Node / UI
+ui/node_modules/
+# ui/dist/ is tracked — embedded in binary via rust-embed
+ui/test-results/
+ui/playwright-report/
+
+# Coordination (ephemeral multi-agent state)
+.coordination/mailbox/inbox/*/msg-*.json
+.coordination/pids/*.pid
+
+# Remember (session logs)
+.remember/logs/
+.remember/tmp/
+
+# Claude Code
+.claude/repo-intel.json
+.claude/web-ctl/

@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { sectionLabel } from "../lib/design-system";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { StatCard } from "../components/StatCard";
 import { MiniChart } from "../components/MiniChart";
@@ -104,7 +105,7 @@ function ScoreTrends({ runs }: { runs: (EvalRunRecord & { _status: EvalRunStatus
 
   return (
     <div className="px-4 pb-4 border-b border-gray-200 dark:border-zinc-800">
-      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider pt-3 pb-2">
+      <p className={clsx(sectionLabel, "mb-0 pt-3 pb-2")}>
         Score Trend by Evaluator
       </p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
@@ -165,7 +166,7 @@ function EvaluatorRanking({ runs }: { runs: (EvalRunRecord & { _status: EvalRunS
       <div>
         <div className="flex items-center gap-1.5 pt-3 pb-2">
           <Trophy size={12} className="text-amber-400" />
-          <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Evaluator Rankings</p>
+          <p className={clsx(sectionLabel, "mb-0")}>Evaluator Rankings</p>
         </div>
         <BarChart
           items={items.map((i) => ({

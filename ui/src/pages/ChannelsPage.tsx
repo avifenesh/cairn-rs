@@ -19,6 +19,7 @@ import {
 import { clsx } from 'clsx';
 import { StatCard } from '../components/StatCard';
 import { defaultApi } from '../lib/api';
+import { sectionLabel } from '../lib/design-system';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { ErrorFallback } from '../components/ErrorFallback';
 import type { NotificationChannel, NotificationRecord } from '../lib/types';
@@ -184,7 +185,7 @@ function ChannelDetail({
   return (
     <div className="border-t border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/30">
       <div className="flex items-center justify-between px-4 py-2.5">
-        <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
+        <span className={`${sectionLabel} mb-0`}>
           Recent Deliveries
           {myDeliveries.length > 0 && (
             <span className="ml-1.5 font-normal normal-case text-gray-300 dark:text-zinc-600">({myDeliveries.length})</span>

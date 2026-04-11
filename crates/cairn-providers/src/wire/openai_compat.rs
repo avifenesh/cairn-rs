@@ -855,8 +855,10 @@ impl SseParser {
                         .collect()
                 });
                 if content.is_some() || reasoning.is_some() || calls.is_some() {
-                    if self.normalize && calls.is_some() {
-                        for tc in calls.as_ref().unwrap() {
+                    if self.normalize
+                        && let Some(ref call_list) = calls
+                    {
+                        for tc in call_list {
                             if !tc.function.name.is_empty() {
                                 self.flush_tool();
                                 self.tool_buf.function.name.clone_from(&tc.function.name);
@@ -1029,15 +1031,15 @@ fn parse_tool_chunk(
             serde_json::from_str(data).map_err(|e| ProviderError::Json(e.to_string()))?;
         let mut usage_opt = chunk.usage;
         for choice in &chunk.choices {
-            if let Some(ref text) = choice.delta.content {
-                if !text.is_empty() {
-                    results.push(StreamChunk::Text(text.clone()));
-                }
+            if let Some(ref text) = choice.delta.content
+                && !text.is_empty()
+            {
+                results.push(StreamChunk::Text(text.clone()));
             }
-            if let Some(ref r) = choice.delta.reasoning_content {
-                if !r.is_empty() {
-                    results.push(StreamChunk::Reasoning(r.clone()));
-                }
+            if let Some(ref r) = choice.delta.reasoning_content
+                && !r.is_empty()
+            {
+                results.push(StreamChunk::Reasoning(r.clone()));
             }
             if let Some(ref tcs) = choice.delta.tool_calls {
                 for tc in tcs {

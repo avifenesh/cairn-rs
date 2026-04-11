@@ -15,6 +15,10 @@ import {
 import { clsx } from "clsx";
 import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
+import { PageHeader } from "../components/PageHeader";
+import { StatCard as SharedStatCard } from "../components/StatCard";
+import { Card } from "../components/Card";
+import { ds } from "../lib/design-system";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -69,9 +73,19 @@ function statusColor(code: string): string {
   return "#10b981";                 // emerald
 }
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
+// ── Metric stat card helper (maps local accents to shared StatCard variants) ──
 
-function StatCard({
+function mapAccentToVariant(accent: string): "default" | "success" | "warning" | "danger" | "info" {
+  switch (accent) {
+    case "emerald": return "success";
+    case "amber":   return "warning";
+    case "red":     return "danger";
+    case "indigo":  return "info";
+    default:        return "default";
+  }
+}
+
+function MetricStatCard({
   label, value, sub, accent = "indigo", trend,
 }: {
   label:   string;
@@ -80,38 +94,21 @@ function StatCard({
   accent?: "indigo" | "emerald" | "amber" | "red" | "zinc";
   trend?:  "up" | "down" | "flat";
 }) {
-  const border = {
-    indigo:  "border-l-indigo-500",
-    emerald: "border-l-emerald-500",
-    amber:   "border-l-amber-500",
-    red:     "border-l-red-500",
-    zinc:    "border-l-zinc-600",
-  }[accent];
-  const textColor = {
-    indigo:  "text-indigo-400",
-    emerald: "text-emerald-400",
-    amber:   "text-amber-400",
-    red:     "text-red-400",
-    zinc:    "text-gray-700 dark:text-zinc-300",
-  }[accent];
-
   return (
-    <div className={clsx(
-      "bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-xl p-4 flex flex-col gap-1.5",
-      border,
-    )}>
-      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider truncate">
-        {label}
-      </p>
-      <div className="flex items-baseline gap-2">
-        <p className={clsx("text-[22px] font-semibold tabular-nums leading-none", textColor)}>
-          {value}
-        </p>
-        {trend === "up"   && <TrendingUp   size={13} className="text-red-400 shrink-0" />}
-        {trend === "down" && <TrendingDown  size={13} className="text-emerald-400 shrink-0" />}
-        {trend === "flat" && <Minus         size={13} className="text-gray-400 dark:text-zinc-600 shrink-0" />}
-      </div>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 truncate">{sub}</p>}
+    <div className="relative">
+      <SharedStatCard
+        label={label}
+        value={value}
+        description={sub}
+        variant={mapAccentToVariant(accent)}
+      />
+      {trend && (
+        <div className="absolute top-4 right-4">
+          {trend === "up"   && <TrendingUp   size={13} className="text-red-400 shrink-0" />}
+          {trend === "down" && <TrendingDown  size={13} className="text-emerald-400 shrink-0" />}
+          {trend === "flat" && <Minus         size={13} className="text-gray-400 dark:text-zinc-600 shrink-0" />}
+        </div>
+      )}
     </div>
   );
 }
@@ -128,7 +125,7 @@ function LatencyStrip({ data }: { data: MetricsSnapshot }) {
   const max = Math.max(...bars.map(b => b.ms), 1);
 
   return (
-    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
+    <Card>
       <div className="flex items-center gap-2 mb-4">
         <Clock size={13} className="text-gray-400 dark:text-zinc-500" />
         <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
@@ -157,7 +154,7 @@ function LatencyStrip({ data }: { data: MetricsSnapshot }) {
           );
         })}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -235,7 +232,7 @@ function EndpointTable({ byPath }: { byPath: Record<string, number> }) {
   if (sorted.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-zinc-800 overflow-hidden">
+    <Card variant="inner">
       <div className="flex items-center h-8 px-4 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
         <span className="flex-1 text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Endpoint</span>
         <span className="w-20 text-right text-[10px] text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Requests</span>
@@ -278,7 +275,7 @@ function EndpointTable({ byPath }: { byPath: Record<string, number> }) {
           </button>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -286,7 +283,7 @@ function EndpointTable({ byPath }: { byPath: Record<string, number> }) {
 
 function MetricsUnavailable() {
   return (
-    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 space-y-4">
+    <Card variant="shell" className="p-6 space-y-4">
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-950/30 border border-amber-800/40">
           <AlertTriangle size={16} className="text-amber-400" />
@@ -323,7 +320,7 @@ function MetricsUnavailable() {
         Once the server receives requests, this page will automatically populate with live data.
         The metrics ring buffer tracks the last 1 000 requests.
       </p>
-    </div>
+    </Card>
   );
 }
 
@@ -349,47 +346,41 @@ export function MetricsPage() {
     : null;
 
   return (
-    <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
-      <div className="max-w-5xl mx-auto px-5 py-5 space-y-5">
+    <div className={clsx("h-full overflow-y-auto", ds.surface.page)}>
+      <div className={ds.spacing.pageWide}>
 
         {/* Toolbar */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-[14px] font-semibold text-gray-900 dark:text-zinc-100">API Metrics</h2>
-            <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">
-              Rolling 1 000-request window · live from <code className="text-gray-400 dark:text-zinc-500">/v1/metrics</code>
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {updatedAt && (
-              <span className="text-[11px] text-gray-400 dark:text-zinc-600 flex items-center gap-1">
-                <Clock size={10} /> {updatedAt}
-              </span>
-            )}
-            <button
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
-                         text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1.5 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
-                         disabled:opacity-40 transition-colors"
-            >
-              <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-              Refresh
-            </button>
-            <a
-              href="/v1/metrics/prometheus"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
-                         text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1.5 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
-                         transition-colors"
-              title="Open Prometheus exposition format"
-            >
-              <ExternalLink size={11} />
-              Prometheus
-            </a>
-          </div>
-        </div>
+        <PageHeader
+          title="API Metrics"
+          subtitle={`Rolling 1 000-request window \u00b7 live from /v1/metrics`}
+          actions={
+            <div className="flex items-center gap-3">
+              {updatedAt && (
+                <span className="text-[11px] text-gray-400 dark:text-zinc-600 flex items-center gap-1">
+                  <Clock size={10} /> {updatedAt}
+                </span>
+              )}
+              <button
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className={ds.btn.secondary}
+              >
+                <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+                Refresh
+              </button>
+              <a
+                href="/v1/metrics/prometheus"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={ds.btn.secondary}
+                title="Open Prometheus exposition format"
+              >
+                <ExternalLink size={11} />
+                Prometheus
+              </a>
+            </div>
+          }
+        />
 
         {/* Loading */}
         {isLoading && (
@@ -408,27 +399,27 @@ export function MetricsPage() {
         {data && !isError && (
           <>
             {/* Key metric cards */}
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <StatCard
+            <div className={ds.spacing.statGrid}>
+              <MetricStatCard
                 label="Total Requests"
                 value={fmtCount(data.total_requests)}
                 sub="in ring buffer (last 1k)"
                 accent="indigo"
               />
-              <StatCard
+              <MetricStatCard
                 label="Error Rate"
                 value={fmtPct(data.error_rate)}
                 sub={`${Object.values(data.errors_by_status).reduce((s, v) => s + v, 0)} errors`}
                 accent={data.error_rate > 0.05 ? "red" : data.error_rate > 0.01 ? "amber" : "emerald"}
                 trend={errorTrend}
               />
-              <StatCard
+              <MetricStatCard
                 label="p95 Latency"
                 value={fmtLatency(data.p95_latency_ms)}
                 sub={`avg ${fmtLatency(data.avg_latency_ms)}`}
                 accent={data.p95_latency_ms > 1000 ? "amber" : data.p95_latency_ms > 300 ? "zinc" : "emerald"}
               />
-              <StatCard
+              <MetricStatCard
                 label="p99 Latency"
                 value={fmtLatency(data.p99_latency_ms)}
                 sub={`p50 ${fmtLatency(data.p50_latency_ms)}`}
@@ -440,9 +431,9 @@ export function MetricsPage() {
             <LatencyStrip data={data} />
 
             {/* Two-column: top endpoints + error breakdown */}
-            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <div className={ds.spacing.panelGrid} style={{ gap: "1.25rem" }}>
               {/* Top endpoints bar chart */}
-              <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
+              <Card>
                 <div className="flex items-center gap-2 mb-4">
                   <Zap size={13} className="text-gray-400 dark:text-zinc-500" />
                   <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
@@ -450,10 +441,10 @@ export function MetricsPage() {
                   </p>
                 </div>
                 <TopEndpoints byPath={data.requests_by_path} />
-              </div>
+              </Card>
 
               {/* Error breakdown */}
-              <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
+              <Card>
                 <div className="flex items-center gap-2 mb-4">
                   <AlertTriangle size={13} className="text-gray-400 dark:text-zinc-500" />
                   <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
@@ -461,12 +452,12 @@ export function MetricsPage() {
                   </p>
                 </div>
                 <ErrorBreakdown errors={data.errors_by_status} />
-              </div>
+              </Card>
             </div>
 
             {/* Full endpoint table */}
             <div>
-              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
+              <p className={ds.sectionLabel}>
                 All Endpoints
               </p>
               <EndpointTable byPath={data.requests_by_path} />

@@ -8,6 +8,7 @@ import { HelpTooltip } from "../components/HelpTooltip";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { useToast } from "../components/Toast";
 import { clsx } from "clsx";
+import { sectionLabel } from "../lib/design-system";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -123,7 +124,7 @@ export function DecisionsPage() {
       <div className="flex items-center justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Decisions</p>
+            <p className={clsx(sectionLabel, "mb-0")}>Decisions</p>
             <HelpTooltip text="Unified decision layer (RFC 019). Every tool invocation, trigger fire, and plugin enablement goes through policy evaluation before proceeding." placement="right" />
           </div>
           <p className="text-[11px] text-gray-500 dark:text-zinc-400">Implements RFC 019 — Unified Decision Layer.</p>

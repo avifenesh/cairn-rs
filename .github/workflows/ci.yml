@@ -8,18 +8,14 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  SQLX_OFFLINE: "true"   # never probe a live DB at compile time
+  SQLX_OFFLINE: "true"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
-# Cancel in-flight runs for the same branch when a new push arrives.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ── Shared cache priming ─────────────────────────────────────────────────────
-  # All Rust jobs depend on the same registry + build caches; they restore
-  # from the keys written here on the first run of each lock-file revision.
-
   # ── 1. Format ────────────────────────────────────────────────────────────────
   fmt:
     name: fmt
@@ -29,8 +25,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: cargo fmt --check
-        run: cargo fmt --all --check
+      - run: cargo fmt --all --check
 
   # ── 2. Check ─────────────────────────────────────────────────────────────────
   check:
@@ -48,8 +43,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      - name: cargo check --workspace
-        run: cargo check --workspace
+      - run: cargo check --workspace
 
   # ── 3. Clippy ────────────────────────────────────────────────────────────────
   clippy:
@@ -69,20 +63,9 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      # Library crates: hard-fail on every warning.
-      - name: clippy (lib crates, -D warnings)
-        run: >
-          cargo clippy
-          --workspace --exclude cairn-app
-          --all-targets
-          -- -D warnings
-      # Application crate: same standard as library crates.
-      - name: clippy (cairn-app)
-        run: >
-          cargo clippy -p cairn-app --all-targets
-          -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  # ── 4. Test ──────────────────────────────────────────────────────────────────
+  # ── 4. Rust Tests ────────────────────────────────────────────────────────────
   test:
     name: test
     runs-on: ubuntu-latest
@@ -99,28 +82,13 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      # Unit tests (all crates)
-      - name: cargo test --lib
-        run: cargo test --workspace --lib
-        timeout-minutes: 8
-      # Integration tests (exclude cairn-app — needs full HTTP server scaffold)
-      - name: cargo test --tests (non-app)
-        run: cargo test --workspace --exclude cairn-app --tests
-        timeout-minutes: 8
-      # cairn-app integration tests (HTTP surface + end-to-end workflows)
-      - name: cairn-app integration tests
-        run: >
-          cargo test -p cairn-app
-          --test bootstrap_server
-          --test full_workspace_suite
-          --test source_refresh
-          --test request_tracing
-          --test entitlement_gates
-        timeout-minutes: 8
+      - name: cargo test --workspace
+        run: cargo test --workspace
+        timeout-minutes: 15
 
-  # ── 5. UI build ──────────────────────────────────────────────────────────────
-  ui-build:
-    name: ui-build
+  # ── 5. UI Build + Type Check + Component Tests ──────────────────────────────
+  ui:
+    name: ui
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -129,12 +97,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - name: npm ci
-        run: npm ci
+      - run: npm ci
       - name: tsc --noEmit
         run: npx tsc --noEmit
-      - name: npm run build
+      - name: build
         run: npm run build
+      - name: vitest
+        run: npx vitest run

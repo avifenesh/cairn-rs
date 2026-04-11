@@ -11,6 +11,7 @@ import {
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
+import { FeatureEmptyState } from "../components/FeatureEmptyState";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -701,27 +702,13 @@ function ChatBubble({ msg }: { msg: Message }) {
 function EmptyChat({ model, noProviders }: { model: string; noProviders?: boolean }) {
   if (noProviders) {
     return (
-      <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center py-12 px-6">
-        <div className="w-10 h-10 rounded-full bg-amber-950/40 border border-amber-800/30 flex items-center justify-center">
-          <Bot size={18} className="text-amber-600" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-[13px] font-medium text-amber-500">No LLM providers available</p>
-          <p className="text-[11px] text-gray-400 dark:text-zinc-600 max-w-xs">
-            Configure at least one provider to use the Playground.
-          </p>
-        </div>
-        <div className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 px-4 py-3 text-left max-w-xs space-y-1.5">
-          <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Options</p>
-          {[
-            '1. Set CAIRN_BRAIN_URL to any OpenAI-compatible endpoint',
-            '2. Add provider connections via the Providers page',
-            '3. Supports OpenRouter, Bedrock, Vertex, and more',
-          ].map(step => (
-            <p key={step} className="text-[11px] text-gray-500 dark:text-zinc-400 font-mono">{step}</p>
-          ))}
-        </div>
-      </div>
+      <FeatureEmptyState
+        icon={<Bot size={20} className="text-gray-400 dark:text-zinc-500" />}
+        title="Configure a provider to use the Playground"
+        description="No LLM providers are available. Add a provider connection on the Providers page, or set CAIRN_BRAIN_URL to any OpenAI-compatible endpoint."
+        actionLabel="Go to Providers"
+        actionHref="#providers"
+      />
     );
   }
   return (

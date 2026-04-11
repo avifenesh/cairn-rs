@@ -4,6 +4,7 @@ import { ErrorFallback } from "../components/ErrorFallback";
 import { StatCard } from "../components/StatCard";
 import { FeatureEmptyState } from "../components/FeatureEmptyState";
 import { defaultApi, ApiError } from "../lib/api";
+import { Card } from "../components/Card";
 
 function displayName(skill: { id?: string; name?: string }) {
   return skill.name?.trim() || skill.id?.trim() || "Unnamed skill";
@@ -73,7 +74,7 @@ export function SkillsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.3fr,0.7fr]">
-        <section className="rounded-xl border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 overflow-hidden">
+        <Card variant="shell" className="overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-zinc-800">
             <div>
               <p className="text-[13px] font-medium text-gray-900 dark:text-zinc-100">Installed skills</p>
@@ -122,9 +123,9 @@ export function SkillsPage() {
               ))}
             </div>
           )}
-        </section>
+        </Card>
 
-        <section className="rounded-xl border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 overflow-hidden">
+        <Card variant="shell" className="overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200 dark:border-zinc-800">
             <p className="text-[13px] font-medium text-gray-900 dark:text-zinc-100">Currently active</p>
             <p className="text-[11px] text-gray-400 dark:text-zinc-600">Skills the host reports as active right now.</p>
@@ -147,7 +148,7 @@ export function SkillsPage() {
               ))}
             </div>
           )}
-        </section>
+        </Card>
       </div>
     </div>
   );

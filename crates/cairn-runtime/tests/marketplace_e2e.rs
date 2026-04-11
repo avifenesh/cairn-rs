@@ -437,7 +437,11 @@ fn rfc015_signal_knowledge_capture_with_memory_ingest() {
     .unwrap();
 
     // Verify the plugin declares signal source capability
-    let has_signal_source = svc.get_record("github").unwrap().descriptor.has_signal_source;
+    let has_signal_source = svc
+        .get_record("github")
+        .unwrap()
+        .descriptor
+        .has_signal_source;
     assert!(
         has_signal_source,
         "github plugin should declare has_signal_source"
@@ -461,7 +465,10 @@ fn rfc015_signal_knowledge_capture_with_memory_ingest() {
     // Resolve capture policy — should enable memory_ingest
     let enablement = svc.get_enablement("github", &p_ingest).unwrap();
     let policy = resolve_capture_policy(enablement, has_signal_source);
-    assert!(policy.graph_project, "graph_project should be ON by default");
+    assert!(
+        policy.graph_project,
+        "graph_project should be ON by default"
+    );
     assert!(
         policy.memory_ingest,
         "memory_ingest should be ON (override=true)"
@@ -575,9 +582,18 @@ fn rfc015_uninstall_drains_credentials_and_enablements() {
     }
 
     // Verify pre-uninstall state: 3 active enablements
-    assert_eq!(svc.enablements_for_project(&project("proj-drain-1")).len(), 1);
-    assert_eq!(svc.enablements_for_project(&project("proj-drain-2")).len(), 1);
-    assert_eq!(svc.enablements_for_project(&project("proj-drain-3")).len(), 1);
+    assert_eq!(
+        svc.enablements_for_project(&project("proj-drain-1")).len(),
+        1
+    );
+    assert_eq!(
+        svc.enablements_for_project(&project("proj-drain-2")).len(),
+        1
+    );
+    assert_eq!(
+        svc.enablements_for_project(&project("proj-drain-3")).len(),
+        1
+    );
 
     // Uninstall — must atomically: revoke credentials, clear enablements, transition state
     let uninstall_events = svc

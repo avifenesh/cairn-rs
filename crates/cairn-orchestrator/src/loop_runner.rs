@@ -1507,7 +1507,10 @@ mod tests {
         let mut last_compaction_iteration = None;
 
         let first = maybe_compact_history(&mut history, 0, &config, &mut last_compaction_iteration);
-        assert!(first.is_some(), "first over-threshold compaction should run");
+        assert!(
+            first.is_some(),
+            "first over-threshold compaction should run"
+        );
 
         history.extend((8..11).map(|i| StepSummary {
             iteration: i,

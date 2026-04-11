@@ -8,6 +8,7 @@ import {
 import { clsx } from "clsx";
 import { Card } from "../components/Card";
 import { defaultApi } from "../lib/api";
+import { sectionLabel } from "../lib/design-system";
 import { useToast } from "../components/Toast";
 import type {
   PromptAssetRecord, PromptVersionRecord, PromptReleaseRecord, PromptVersionDiff,
@@ -612,7 +613,7 @@ export function PromptsPage() {
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-5 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0">
         <FileText size={13} className="text-indigo-400 shrink-0" />
-        <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
+        <span className={`${sectionLabel} mb-0`}>
           Prompts
         </span>
 

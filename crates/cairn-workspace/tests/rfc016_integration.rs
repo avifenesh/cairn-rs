@@ -7,17 +7,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cairn_domain::{OnExhaustion, ProjectKey, RepoAccessContext, RunId, TenantId};
-use cairn_workspace::repo_store::clone_cache::RepoCloneCache;
+use cairn_workspace::providers::SandboxProvider;
 use cairn_workspace::repo_store::access_service::ProjectRepoAccessService;
-use cairn_workspace::sandbox::{
-    RepoId, SandboxBase, SandboxPolicy, SandboxStrategy, SandboxStrategyRequest,
-    HostCapabilityRequirements,
-};
+use cairn_workspace::repo_store::clone_cache::RepoCloneCache;
 use cairn_workspace::sandbox::service::{
     BufferedSandboxEventSink, Clock, SandboxService, SystemClock,
 };
-use cairn_workspace::sandbox::types::{SandboxState, ProvisionedSandbox};
-use cairn_workspace::providers::SandboxProvider;
+use cairn_workspace::sandbox::types::{ProvisionedSandbox, SandboxState};
+use cairn_workspace::sandbox::{
+    HostCapabilityRequirements, RepoId, SandboxBase, SandboxPolicy, SandboxStrategy,
+    SandboxStrategyRequest,
+};
 
 fn unique_dir(label: &str) -> PathBuf {
     let ts = std::time::SystemTime::now()
@@ -72,18 +72,50 @@ async fn rfc016_ensure_all_cloned_creates_clones_for_distinct_repos() {
     let t = tenant();
     let p1 = project("proj-1");
     let p2 = project("proj-2");
-    let ctx1 = RepoAccessContext { project: p1.clone() };
-    let ctx2 = RepoAccessContext { project: p2.clone() };
+    let ctx1 = RepoAccessContext {
+        project: p1.clone(),
+    };
+    let ctx2 = RepoAccessContext {
+        project: p2.clone(),
+    };
 
     let repo_a = RepoId::new("org/repo-a");
     let repo_b = RepoId::new("org/repo-b");
     let repo_c = RepoId::new("org/repo-c");
 
     // Project 1 has repo_a and repo_b; Project 2 has repo_b and repo_c
-    access.allow(&ctx1, &repo_a, cairn_domain::decisions::ActorRef::SystemPolicyChange).await.unwrap();
-    access.allow(&ctx1, &repo_b, cairn_domain::decisions::ActorRef::SystemPolicyChange).await.unwrap();
-    access.allow(&ctx2, &repo_b, cairn_domain::decisions::ActorRef::SystemPolicyChange).await.unwrap();
-    access.allow(&ctx2, &repo_c, cairn_domain::decisions::ActorRef::SystemPolicyChange).await.unwrap();
+    access
+        .allow(
+            &ctx1,
+            &repo_a,
+            cairn_domain::decisions::ActorRef::SystemPolicyChange,
+        )
+        .await
+        .unwrap();
+    access
+        .allow(
+            &ctx1,
+            &repo_b,
+            cairn_domain::decisions::ActorRef::SystemPolicyChange,
+        )
+        .await
+        .unwrap();
+    access
+        .allow(
+            &ctx2,
+            &repo_b,
+            cairn_domain::decisions::ActorRef::SystemPolicyChange,
+        )
+        .await
+        .unwrap();
+    access
+        .allow(
+            &ctx2,
+            &repo_c,
+            cairn_domain::decisions::ActorRef::SystemPolicyChange,
+        )
+        .await
+        .unwrap();
 
     // Ensure clones for all distinct repos
     for repo in [&repo_a, &repo_b, &repo_c] {
@@ -97,8 +129,15 @@ async fn rfc016_ensure_all_cloned_creates_clones_for_distinct_repos() {
 
     // Verify the physical paths exist with correct layout
     for repo in [&repo_a, &repo_b, &repo_c] {
-        let path = base.join(t.as_str()).join("org").join(repo.as_str().split('/').last().unwrap());
-        assert!(path.join(".git").exists(), "git dir must exist for {}", repo.as_str());
+        let path = base
+            .join(t.as_str())
+            .join("org")
+            .join(repo.as_str().split('/').last().unwrap());
+        assert!(
+            path.join(".git").exists(),
+            "git dir must exist for {}",
+            repo.as_str()
+        );
     }
 
     // Cleanup
@@ -197,8 +236,14 @@ async fn rfc016_concurrent_sandbox_writes_dont_leak() {
     std::fs::write(sandbox_b.join("shared_name.txt"), "B's version").unwrap();
 
     // Verify no cross-contamination
-    assert!(!sandbox_a.join("other.txt").exists(), "B's file must not appear in A");
-    assert!(!sandbox_b.join("secret.txt").exists(), "A's file must not appear in B");
+    assert!(
+        !sandbox_a.join("other.txt").exists(),
+        "B's file must not appear in A"
+    );
+    assert!(
+        !sandbox_b.join("secret.txt").exists(),
+        "A's file must not appear in B"
+    );
 
     // Same filename, different content
     let a_content = std::fs::read_to_string(sandbox_a.join("shared_name.txt")).unwrap();
@@ -219,12 +264,29 @@ async fn rfc016_allowlist_revoked_detected_on_access_check() {
     let repo = RepoId::new("org/private-repo");
 
     // Allow the repo
-    access.allow(&ctx, &repo, cairn_domain::decisions::ActorRef::SystemPolicyChange).await.unwrap();
+    access
+        .allow(
+            &ctx,
+            &repo,
+            cairn_domain::decisions::ActorRef::SystemPolicyChange,
+        )
+        .await
+        .unwrap();
     assert!(access.is_allowed(&ctx, &repo).await);
 
     // Revoke the repo
-    access.revoke(&ctx, &repo, cairn_domain::decisions::ActorRef::SystemPolicyChange).await.unwrap();
-    assert!(!access.is_allowed(&ctx, &repo).await, "revoked repo must not be allowed");
+    access
+        .revoke(
+            &ctx,
+            &repo,
+            cairn_domain::decisions::ActorRef::SystemPolicyChange,
+        )
+        .await
+        .unwrap();
+    assert!(
+        !access.is_allowed(&ctx, &repo).await,
+        "revoked repo must not be allowed"
+    );
 
     // A sandbox provisioned before revocation would now fail the access check.
     // This is the AllowlistRevoked preservation path from sealed RFC 016:

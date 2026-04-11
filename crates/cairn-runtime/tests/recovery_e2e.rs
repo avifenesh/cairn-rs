@@ -227,7 +227,13 @@ fn rfc020_clean_recovery_state_survives_restart() {
 
     // Write 20 tool results (simulating a run with 20 tool calls)
     for i in 0..20 {
-        let tcid = ToolCallId::derive("run-recovery", i / 3, i % 3, "memory_search", &format!(r#"{{"query":"q{}"}}"#, i));
+        let tcid = ToolCallId::derive(
+            "run-recovery",
+            i / 3,
+            i % 3,
+            "memory_search",
+            &format!(r#"{{"query":"q{}"}}"#, i),
+        );
         cache.insert(CachedToolResult {
             tool_call_id: tcid,
             tool_name: "memory_search".into(),
@@ -241,7 +247,13 @@ fn rfc020_clean_recovery_state_survives_restart() {
     // Simulate restart: rebuild cache from the same events
     let mut recovered_cache = ToolCallResultCache::new();
     for i in 0..20 {
-        let tcid = ToolCallId::derive("run-recovery", i / 3, i % 3, "memory_search", &format!(r#"{{"query":"q{}"}}"#, i));
+        let tcid = ToolCallId::derive(
+            "run-recovery",
+            i / 3,
+            i % 3,
+            "memory_search",
+            &format!(r#"{{"query":"q{}"}}"#, i),
+        );
         // On replay, the same ToolCallId deterministically matches
         recovered_cache.insert(CachedToolResult {
             tool_call_id: tcid.clone(),
@@ -256,7 +268,11 @@ fn rfc020_clean_recovery_state_survives_restart() {
         assert_eq!(original.completed_at, recovered.completed_at);
     }
 
-    assert_eq!(recovered_cache.len(), 20, "recovered cache must have same 20 entries");
+    assert_eq!(
+        recovered_cache.len(),
+        20,
+        "recovered cache must have same 20 entries"
+    );
 }
 
 // ── RFC 020 Test: In-flight approval survives restart ────────────────────────
@@ -327,11 +343,17 @@ fn rfc020_batched_append_all_or_nothing() {
     });
 
     // After commit: cache has the entry
-    assert!(committed_cache.get(&tcid).is_some(), "result must exist after batch commit");
+    assert!(
+        committed_cache.get(&tcid).is_some(),
+        "result must exist after batch commit"
+    );
 
     // Simulate crash BEFORE batch commit: a separate cache stays empty
     let crashed_cache = ToolCallResultCache::new();
-    assert!(crashed_cache.get(&tcid).is_none(), "crashed cache must have no partial state");
+    assert!(
+        crashed_cache.get(&tcid).is_none(),
+        "crashed cache must have no partial state"
+    );
 
     // Key invariant: there is no state where the memory event is visible
     // but ToolInvocationCompleted is not — because they're in the same batch.

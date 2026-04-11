@@ -10,6 +10,7 @@ import { clsx } from "clsx";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { defaultApi } from "../lib/api";
 import type { AuditOutcome } from "../lib/types";
+import { ds } from "../lib/design-system";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -141,12 +142,12 @@ export function AuditLogPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-11 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-white dark:bg-zinc-950">
+      <div className={clsx(ds.toolbar.base, "h-11", ds.surface.elevated)}>
         <Shield size={13} className="text-indigo-400 shrink-0" />
-        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
+        <span className={ds.toolbar.title}>
           Audit Log
           {!isLoading && (
-            <span className="ml-2 text-[11px] text-gray-400 dark:text-zinc-600 font-normal">
+            <span className={ds.toolbar.count}>
               {filtered.length}
               {(actionFilter !== "all" || outcomeFilter !== "all")
                 ? ` / ${entries.length} total`
@@ -159,8 +160,7 @@ export function AuditLogPage() {
         <select
           value={actionFilter}
           onChange={(e) => setActionFilter(e.target.value)}
-          className="rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 text-[12px]
-                     px-2 py-1 focus:outline-none focus:border-indigo-500"
+          className={ds.input.select}
         >
           <option value="all">All actions</option>
           {allActions.map((a) => (
@@ -172,8 +172,7 @@ export function AuditLogPage() {
         <select
           value={outcomeFilter}
           onChange={(e) => setOutcomeFilter(e.target.value as AuditOutcome | "all")}
-          className="rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-zinc-400 text-[12px]
-                     px-2 py-1 focus:outline-none focus:border-indigo-500"
+          className={ds.input.select}
         >
           <option value="all">All outcomes</option>
           <option value="success">Success</option>
@@ -183,9 +182,7 @@ export function AuditLogPage() {
         <button
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="ml-auto flex items-center gap-1.5 rounded border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900
-                     text-gray-400 dark:text-zinc-500 text-[12px] px-2.5 py-1 hover:text-gray-800 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-gray-100 dark:bg-zinc-800
-                     disabled:opacity-40 transition-colors"
+          className={clsx(ds.btn.secondary, "ml-auto")}
         >
           <RefreshCw size={11} className={clsx(isFetching && "animate-spin")} />
           Refresh
@@ -200,24 +197,10 @@ export function AuditLogPage() {
           <EmptyState filtered={actionFilter !== "all" || outcomeFilter !== "all"} />
         ) : (
           <table className="min-w-full">
-            <thead className="sticky top-0 z-10 bg-white dark:bg-zinc-950">
-              <tr className="border-b border-gray-200 dark:border-zinc-800">
-                {[
-                  { label: "Timestamp",     cls: "text-left"  },
-                  { label: "Actor",         cls: "text-left"  },
-                  { label: "Action",        cls: "text-left"  },
-                  { label: "Resource Type", cls: "text-left"  },
-                  { label: "Resource ID",   cls: "text-left"  },
-                  { label: "Outcome",       cls: "text-left"  },
-                  { label: "Details",       cls: "text-left"  },
-                ].map(({ label, cls }) => (
-                  <th
-                    key={label}
-                    className={clsx(
-                      "px-4 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap",
-                      cls,
-                    )}
-                  >
+            <thead className={clsx("sticky top-0 z-10", ds.table.headBg)}>
+              <tr>
+                {["Timestamp", "Actor", "Action", "Resource Type", "Resource ID", "Outcome", "Details"].map((label) => (
+                  <th key={label} className={ds.table.th}>
                     {label}
                   </th>
                 ))}
@@ -228,29 +211,29 @@ export function AuditLogPage() {
                 <tr
                   key={entry.entry_id}
                   className={clsx(
-                    "border-b border-gray-200/40 dark:border-zinc-800/40 h-9 transition-colors hover:bg-gray-50/50 dark:bg-zinc-900/50",
-                    idx % 2 !== 0 && "bg-gray-50/20 dark:bg-zinc-900/20",
+                    ds.table.rowBorder, ds.table.rowHover, "h-9",
+                    idx % 2 === 0 ? ds.table.rowEven : ds.table.rowOdd,
                   )}
                 >
-                  <td className="px-4 py-0 text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap font-mono">
+                  <td className={clsx(ds.table.td, "text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap font-mono")}>
                     {fmtTime(entry.occurred_at_ms)}
                   </td>
-                  <td className="px-4 py-0 font-mono text-[12px] text-gray-700 dark:text-zinc-300 whitespace-nowrap">
+                  <td className={clsx(ds.table.td, "font-mono text-[12px] text-gray-700 dark:text-zinc-300 whitespace-nowrap")}>
                     {entry.actor_id}
                   </td>
-                  <td className="px-4 py-0 text-[12px] text-gray-500 dark:text-zinc-400 whitespace-nowrap">
+                  <td className={clsx(ds.table.td, "text-[12px] text-gray-500 dark:text-zinc-400 whitespace-nowrap")}>
                     {entry.action}
                   </td>
-                  <td className="px-4 py-0 text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap">
+                  <td className={clsx(ds.table.td, "text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap")}>
                     {entry.resource_type || <span className="text-gray-300 dark:text-zinc-600">—</span>}
                   </td>
-                  <td className="px-4 py-0 font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap">
+                  <td className={clsx(ds.table.td, "font-mono text-[11px] text-gray-400 dark:text-zinc-500 whitespace-nowrap")}>
                     {entry.resource_id ? shortId(entry.resource_id) : <span className="text-gray-300 dark:text-zinc-600">—</span>}
                   </td>
-                  <td className="px-4 py-0 whitespace-nowrap">
+                  <td className={clsx(ds.table.td, "whitespace-nowrap")}>
                     <OutcomeBadge outcome={entry.outcome} />
                   </td>
-                  <td className="px-4 py-1.5">
+                  <td className={clsx(ds.table.td)}>
                     <DetailsCell metadata={entry.metadata ?? {}} />
                   </td>
                 </tr>

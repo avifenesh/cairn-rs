@@ -16,6 +16,7 @@ import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { defaultApi } from "../lib/api";
+import { sectionLabel } from "../lib/design-system";
 import type { TaskRecord, TaskState } from "../lib/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -316,7 +317,7 @@ function WorkerRow({
         <div className="border-t border-gray-200/60 dark:border-zinc-800/60 bg-white dark:bg-zinc-950/30">
           <div className="px-4 py-2 flex items-center gap-2">
             <Activity size={11} className="text-gray-400 dark:text-zinc-600" />
-            <span className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
+            <span className={clsx(sectionLabel, "mb-0")}>
               Task History
             </span>
             <span className="text-[10px] text-gray-300 dark:text-zinc-600">

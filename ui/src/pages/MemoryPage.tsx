@@ -1,7 +1,8 @@
 import { useState, useRef, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Loader2, X, RefreshCw } from 'lucide-react';
+import { Search, Loader2, X, RefreshCw, Database } from 'lucide-react';
 import { HelpTooltip } from '../components/HelpTooltip';
+import { FeatureEmptyState } from '../components/FeatureEmptyState';
 import { clsx } from 'clsx';
 import { defaultApi } from '../lib/api';
 import type { MemoryChunkResult, SourceRecord } from '../lib/types';
@@ -205,10 +206,13 @@ export function MemoryPage() {
               <Loader2 size={12} className="animate-spin" /> Searching…
             </div>
           ) : isSearchError ? (
-            <div className="px-4 py-6 text-center text-xs text-gray-400 dark:text-zinc-500">
-              <p className="font-medium text-amber-400 mb-1">Memory search unavailable</p>
-              <p>This feature requires an embedding provider. Configure one in Settings → Providers.</p>
-            </div>
+            <FeatureEmptyState
+              icon={<Database size={20} className="text-gray-400 dark:text-zinc-500" />}
+              title="No embedding provider configured"
+              description="Memory search requires an embedding provider to generate vector representations. Add one on the Providers page, then ingest documents via POST /v1/memory/ingest."
+              actionLabel="Go to Providers"
+              actionHref="#providers"
+            />
           ) : results.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-gray-400 dark:text-zinc-600">
               No results for "{submitted}"
@@ -252,10 +256,13 @@ export function MemoryPage() {
         </div>
 
         {isSourcesError ? (
-          <div className="px-4 py-6 text-center text-xs text-gray-400 dark:text-zinc-500">
-            <p className="font-medium text-amber-400 mb-1">Sources unavailable</p>
-            <p>Configure an embedding provider to enable memory features.</p>
-          </div>
+          <FeatureEmptyState
+            icon={<Database size={20} className="text-gray-400 dark:text-zinc-500" />}
+            title="No embedding provider configured"
+            description="Add one on the Providers page, then ingest documents via POST /v1/memory/ingest."
+            actionLabel="Go to Providers"
+            actionHref="#providers"
+          />
         ) : !sources || sources.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-gray-400 dark:text-zinc-600">
             No sources registered — POST to /v1/memory/ingest to add documents

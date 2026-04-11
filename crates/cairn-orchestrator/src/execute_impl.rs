@@ -611,10 +611,9 @@ fn truncate_tool_output_for_context(
     }
 
     match output {
-        serde_json::Value::String(text) => serde_json::Value::String(truncate_text_for_context(
-            &text,
-            token_limit,
-        )),
+        serde_json::Value::String(text) => {
+            serde_json::Value::String(truncate_text_for_context(&text, token_limit))
+        }
         serde_json::Value::Object(mut map) => {
             for key in ["stdout", "stderr", "output", "text", "result", "content"] {
                 if let Some(serde_json::Value::String(text)) = map.get(key) {
@@ -626,7 +625,9 @@ fn truncate_tool_output_for_context(
 
             serde_json::Value::String(truncate_text_for_context(&serialized, token_limit))
         }
-        other => serde_json::Value::String(truncate_text_for_context(&other.to_string(), token_limit)),
+        other => {
+            serde_json::Value::String(truncate_text_for_context(&other.to_string(), token_limit))
+        }
     }
 }
 
@@ -670,7 +671,9 @@ mod tests {
         InMemoryServices, RunService, SessionService,
     };
     use cairn_store::EventLog;
-    use cairn_tools::builtins::{BuiltinToolRegistry, ToolError, ToolHandler, ToolResult, ToolTier};
+    use cairn_tools::builtins::{
+        BuiltinToolRegistry, ToolError, ToolHandler, ToolResult, ToolTier,
+    };
     use serde_json::Value;
     use std::path::PathBuf;
     use std::sync::Arc;

@@ -18,6 +18,8 @@ import { defaultApi } from "../lib/api";
 import { useVirtualScroll, DEFAULT_ROW_HEIGHT } from "../hooks/useVirtualScroll";
 import type { LlmCallTrace } from "../lib/types";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
+import { StatCard } from "../components/StatCard";
+import { ds } from "../lib/design-system";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -50,25 +52,13 @@ function inferProvider(modelId: string): string {
   return "—";
 }
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="border-l-2 border-indigo-500 pl-3 py-0.5">
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[20px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
 
 // ── Column config ─────────────────────────────────────────────────────────────
 
 const TH = ({ ch, right, hide }: { ch: string; right?: boolean; hide?: string }) => (
   <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap",
-    "border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 sticky top-0 z-10",
-    right ? "text-right" : "text-left",
+    right ? ds.table.thRight : ds.table.th,
+    "bg-gray-50 dark:bg-zinc-900 sticky top-0 z-10",
     hide,
   )}>
     {ch}
@@ -83,8 +73,8 @@ function TraceRow({ trace, even }: { trace: LlmCallTrace; even: boolean }) {
       data-virtual-row
       style={{ height: DEFAULT_ROW_HEIGHT }}
       className={clsx(
-        "border-b border-gray-200/50 dark:border-zinc-800/50 transition-colors hover:bg-white/5",
-        even ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50",
+        ds.table.rowBorder, ds.table.rowHover,
+        even ? ds.table.rowEven : ds.table.rowOdd,
       )}
     >
       <td className="px-3 font-mono text-gray-500 dark:text-zinc-400 whitespace-nowrap text-[11px] hidden sm:table-cell"
@@ -200,13 +190,13 @@ export function TracesPage() {
   );
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 dark:bg-zinc-900">
+    <div className={clsx("flex flex-col h-full", ds.surface.pageDense)}>
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 h-10 border-b border-gray-200 dark:border-zinc-800 shrink-0 bg-gray-50 dark:bg-zinc-900">
-        <span className="text-[13px] font-medium text-gray-800 dark:text-zinc-200">
+      <div className={clsx(ds.toolbar.base, ds.surface.pageDense)}>
+        <span className={ds.toolbar.title}>
           LLM Traces
           {!isLoading && (
-            <span className="ml-2 text-[12px] text-gray-400 dark:text-zinc-500 font-normal">
+            <span className={ds.toolbar.count}>
               {filterQuery ? `${filtered.length} / ${traces.length}` : traces.length}
               {filtered.length > 0 && (
                 <span className="ml-1.5 text-[10px] text-indigo-500">
@@ -241,45 +231,45 @@ export function TracesPage() {
           onClick={() => exportCsv(filtered)}
           disabled={filtered.length === 0}
           title="Export filtered traces as CSV"
-          className="flex items-center gap-1 text-[12px] text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 disabled:opacity-30 transition-colors"
+          className={ds.btn.ghost}
         >
           <Download size={11} />
         </button>
 
-                  {/* Auto-refresh control */}
-          <div className="flex items-center gap-1">
-            <div className="relative">
-              <select
-                value={refreshInterval.option}
-                onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
-                className="appearance-none rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] font-mono pl-5 pr-2 h-7 text-gray-500 dark:text-zinc-400 focus:outline-none focus:border-indigo-500 transition-colors hover:border-zinc-600"
-                title="Auto-refresh interval"
-              >
-                {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
-              </select>
-              {isFetching
-                ? <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none"><RefreshCw size={9} className="animate-spin text-indigo-400" /></span>
-                : <span className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 dark:text-zinc-600"><RefreshCw size={9} /></span>
-              }
-            </div>
-            <button onClick={() => refetch()} disabled={isFetching}
-              className="flex items-center gap-1 h-7 px-2 rounded border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-40 transition-colors"
-              title="Refresh now"
+        {/* Auto-refresh control */}
+        <div className="flex items-center gap-1">
+          <div className="relative">
+            <select
+              value={refreshInterval.option}
+              onChange={e => setRefreshOption(e.target.value as import('../hooks/useAutoRefresh').RefreshOption)}
+              className={ds.autoRefresh.select}
+              title="Auto-refresh interval"
             >
-              <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
+              {REFRESH_OPTIONS.map(o => <option key={o.option} value={o.option}>{o.label}</option>)}
+            </select>
+            {isFetching
+              ? <span className={ds.autoRefresh.iconWrap}><RefreshCw size={9} className="animate-spin text-indigo-400" /></span>
+              : <span className={clsx(ds.autoRefresh.iconWrap, "text-gray-400 dark:text-zinc-600")}><RefreshCw size={9} /></span>
+            }
           </div>
+          <button onClick={() => refetch()} disabled={isFetching}
+            className={ds.btn.secondary}
+            title="Refresh now"
+          >
+            <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* Stat strip */}
       {!isLoading && traces.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-6 gap-y-3 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 shrink-0">
-          <StatCard label="Calls"        value={traces.length} />
-          <StatCard label="Total tokens" value={fmtTokens(totalTokens)} sub="prompt + completion" />
-          <StatCard label="Avg latency"  value={fmtLatency(avgLatency)} />
-          <StatCard label="Total cost"   value={fmtCost(totalCost)} />
-          <StatCard label="Error rate"   value={`${errorRate}%`} />
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 shrink-0">
+          <StatCard label="Calls"        value={traces.length} variant="info" />
+          <StatCard label="Total tokens" value={fmtTokens(totalTokens)} description="prompt + completion" variant="info" />
+          <StatCard label="Avg latency"  value={fmtLatency(avgLatency)} variant="info" />
+          <StatCard label="Total cost"   value={fmtCost(totalCost)} variant="info" />
+          <StatCard label="Error rate"   value={`${errorRate}%`} variant="info" />
         </div>
       )}
 

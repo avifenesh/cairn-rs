@@ -1555,9 +1555,9 @@ async fn load_run_visible_to_tenant(
             RuntimeEvent::RunStateChanged(change) if change.run_id == *run_id => {
                 if let Some(run) = reconstructed.as_mut() {
                     run.state = change.transition.to;
-                    run.failure_class = change.failure_class.clone();
-                    run.pause_reason = change.pause_reason.clone();
-                    run.resume_trigger = change.resume_trigger.clone();
+                    run.failure_class = change.failure_class;
+                    run.pause_reason = change.pause_reason;
+                    run.resume_trigger = change.resume_trigger;
                     run.version += 1;
                     run.updated_at = stored.stored_at;
                 }
@@ -3321,7 +3321,7 @@ fn graph_trace_snapshot(
             .cmp(&left.created_at)
             .then_with(|| left.node_id.cmp(&right.node_id))
     });
-    nodes.truncate(limit.max(1).min(500));
+    nodes.truncate(limit.clamp(1, 500));
 
     let node_ids = nodes
         .iter()
@@ -12153,7 +12153,7 @@ async fn graph_trace_preserved_handler(
     let response = graph_trace_snapshot(
         state.graph.as_ref(),
         &query.project(),
-        query.limit().max(100).min(500),
+        query.limit().clamp(100, 500),
     );
     (StatusCode::OK, Json(response)).into_response()
 }

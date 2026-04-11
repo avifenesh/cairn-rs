@@ -6,6 +6,10 @@ import { clsx } from "clsx";
 import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
+import { PageHeader } from "../components/PageHeader";
+import { StatCard } from "../components/StatCard";
+import { Card, CardHeader } from "../components/Card";
+import { ds } from "../lib/design-system";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -24,46 +28,6 @@ function formatTokens(n: number): string {
   return n.toLocaleString();
 }
 
-// ── Stat card — left-border accent, no icon ───────────────────────────────────
-
-interface StatCardProps {
-  label: string;
-  value: string;
-  sub?: string;
-  accent?: "default" | "emerald" | "blue" | "violet";
-  loading?: boolean;
-}
-
-const ACCENT_BORDER: Record<NonNullable<StatCardProps["accent"]>, string> = {
-  default: "border-l-zinc-700",
-  emerald: "border-l-emerald-500",
-  blue:    "border-l-blue-500",
-  violet:  "border-l-violet-500",
-};
-const ACCENT_VALUE: Record<NonNullable<StatCardProps["accent"]>, string> = {
-  default: "text-gray-900 dark:text-zinc-100",
-  emerald: "text-emerald-400",
-  blue:    "text-blue-400",
-  violet:  "text-violet-400",
-};
-
-function StatCard({ label, value, sub, accent = "default", loading }: StatCardProps) {
-  if (loading) {
-    return (
-      <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4 animate-pulse", ACCENT_BORDER[accent])}>
-        <div className="h-2.5 w-20 rounded bg-gray-100 dark:bg-zinc-800 mb-3" />
-        <div className="h-6 w-16 rounded bg-gray-100 dark:bg-zinc-800" />
-      </div>
-    );
-  }
-  return (
-    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4", ACCENT_BORDER[accent])}>
-      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2 truncate">{label}</p>
-      <p className={clsx("text-2xl font-semibold tabular-nums", ACCENT_VALUE[accent])}>{value}</p>
-      {sub && <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-600 truncate">{sub}</p>}
-    </div>
-  );
-}
 
 // ── Token split bar ───────────────────────────────────────────────────────────
 
@@ -177,44 +141,43 @@ export function CostsPage() {
     : 0;
 
   return (
-    <div className="h-full overflow-y-auto p-6 pb-8 space-y-5">
+    <div className={clsx("h-full overflow-y-auto pb-8", ds.spacing.pagePadded)}>
       {/* Toolbar */}
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Cost Tracking</p>
-        <button onClick={() => refetch()} className="flex items-center gap-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:bg-white/5 transition-colors">
-          <RefreshCw size={11} /> Refresh
-        </button>
-      </div>
+      <PageHeader
+        sectionLabel="Cost Tracking"
+        title="Costs"
+        actions={
+          <button onClick={() => refetch()} className={ds.btn.secondary}>
+            <RefreshCw size={11} /> Refresh
+          </button>
+        }
+      />
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Total Spend"     value={formatMicros(costs?.total_cost_micros ?? 0)} sub={`${(costs?.total_cost_micros ?? 0).toLocaleString()} µUSD`} accent="emerald" loading={isLoading} />
-        <StatCard label="Provider Calls"  value={(costs?.total_provider_calls ?? 0).toLocaleString()} sub={`avg ${formatMicros(avgPerCall)} / call`} accent="blue" loading={isLoading} />
-        <StatCard label="Input Tokens"    value={formatTokens(costs?.total_tokens_in ?? 0)}  sub="sent to providers"     accent="blue"    loading={isLoading} />
-        <StatCard label="Output Tokens"   value={formatTokens(costs?.total_tokens_out ?? 0)} sub="received"              accent="violet"  loading={isLoading} />
+      <div className={ds.spacing.statGrid}>
+        <StatCard label="Total Spend"     value={formatMicros(costs?.total_cost_micros ?? 0)} description={`${(costs?.total_cost_micros ?? 0).toLocaleString()} µUSD`} variant="success" loading={isLoading} />
+        <StatCard label="Provider Calls"  value={(costs?.total_provider_calls ?? 0).toLocaleString()} description={`avg ${formatMicros(avgPerCall)} / call`} variant="info" loading={isLoading} />
+        <StatCard label="Input Tokens"    value={formatTokens(costs?.total_tokens_in ?? 0)}  description="sent to providers"     variant="info"    loading={isLoading} />
+        <StatCard label="Output Tokens"   value={formatTokens(costs?.total_tokens_out ?? 0)} description="received"              variant="info"  loading={isLoading} />
       </div>
 
       {/* Token split + breakdown */}
       {!isLoading && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className={ds.spacing.panelGrid}>
           {/* Token distribution */}
-          <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 h-9 flex items-center border-b border-gray-200 dark:border-zinc-800">
-              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Token Distribution</p>
-            </div>
+          <Card variant="shell">
+            <CardHeader>Token Distribution</CardHeader>
             <div className="p-4">
               {totalTokens > 0
                 ? <TokenBar input={costs?.total_tokens_in ?? 0} output={costs?.total_tokens_out ?? 0} />
                 : <p className="text-[11px] text-gray-400 dark:text-zinc-600 text-center py-3">No token data yet</p>
               }
             </div>
-          </div>
+          </Card>
 
           {/* Cost breakdown table */}
-          <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 h-9 flex items-center border-b border-gray-200 dark:border-zinc-800">
-              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Breakdown</p>
-            </div>
+          <Card variant="shell">
+            <CardHeader>Breakdown</CardHeader>
             <div className="divide-y divide-gray-200 dark:divide-zinc-800/50">
               <BreakdownRow label="Total spend (USD)"   value={formatMicros(costs?.total_cost_micros ?? 0)} mono  even />
               <BreakdownRow label="Total spend (µUSD)"  value={(costs?.total_cost_micros ?? 0).toLocaleString()} mono />
@@ -224,18 +187,16 @@ export function CostsPage() {
               <BreakdownRow label="Input tokens"         value={formatTokens(costs?.total_tokens_in ?? 0)} mono />
               <BreakdownRow label="Output tokens"        value={formatTokens(costs?.total_tokens_out ?? 0)} mono even />
             </div>
-          </div>
+          </Card>
         </div>
       )}
 
       {/* Charts row — model breakdown bar chart + daily spend sparkline */}
       {!isLoading && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className={ds.spacing.panelGrid}>
           {/* Cost by model */}
-          <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 h-9 flex items-center border-b border-gray-200 dark:border-zinc-800">
-              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Cost by Model</p>
-            </div>
+          <Card variant="shell">
+            <CardHeader>Cost by Model</CardHeader>
             <div className="p-4">
               {modelCostItems.length === 0 ? (
                 <p className="text-[11px] text-gray-400 dark:text-zinc-600 text-center py-3 italic">
@@ -251,14 +212,13 @@ export function CostsPage() {
                 />
               )}
             </div>
-          </div>
+          </Card>
 
           {/* Daily spend trend sparkline */}
-          <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 h-9 flex items-center justify-between border-b border-gray-200 dark:border-zinc-800">
-              <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Daily Spend (7d)</p>
-              <span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono">µUSD</span>
-            </div>
+          <Card variant="shell">
+            <CardHeader actions={<span className="text-[10px] text-gray-300 dark:text-zinc-600 font-mono">µUSD</span>}>
+              Daily Spend (7d)
+            </CardHeader>
             <div className="p-4 flex items-end gap-4">
               <div className="flex-1">
                 <MiniChart
@@ -282,7 +242,7 @@ export function CostsPage() {
                 </p>
               </div>
             </div>
-          </div>
+          </Card>
         </div>
       )}
 

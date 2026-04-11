@@ -705,11 +705,11 @@ fn is_fallback_escalation(proposals: &[ActionProposal]) -> bool {
 mod tests {
     use super::*;
     use cairn_domain::contexts::PluginCategory;
-    use cairn_domain::OperatorId;
     use cairn_domain::providers::{GenerationResponse, ProviderAdapterError};
+    use cairn_domain::OperatorId;
     use cairn_runtime::services::{
-        DescriptorSource, MarketplaceCommand, MarketplaceService, PluginDescriptor,
-        is_plugin_tool_visible,
+        is_plugin_tool_visible, DescriptorSource, MarketplaceCommand, MarketplaceService,
+        PluginDescriptor,
     };
     use cairn_store::InMemoryStore;
     use cairn_tools::builtins::{
@@ -789,7 +789,10 @@ mod tests {
             vendor: "cairn".to_owned(),
             icon_url: None,
             command: vec!["echo".to_owned(), "github".to_owned()],
-            tools: vec!["github.issue_brief".to_owned(), "github.issue_search".to_owned()],
+            tools: vec![
+                "github.issue_brief".to_owned(),
+                "github.issue_search".to_owned(),
+            ],
             signal_sources: vec![],
             channels: vec![],
             required_credentials: vec![],
@@ -1422,7 +1425,10 @@ mod tests {
         let enabled_registry = registry_for_project(&enabled_project);
         let enabled_tool = ToolSearchTool::new(enabled_registry);
         let enabled = enabled_tool
-            .execute(&enabled_project, serde_json::json!({ "query": "search github issues" }))
+            .execute(
+                &enabled_project,
+                serde_json::json!({ "query": "search github issues" }),
+            )
             .await
             .unwrap();
         let enabled_names: Vec<&str> = enabled.output["matches"]
@@ -1446,8 +1452,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            disabled.output["total"],
-            0,
+            disabled.output["total"], 0,
             "disabled project must not discover tools from an unenabled plugin"
         );
     }

@@ -18,6 +18,7 @@ interface StatCardProps {
   icon?: React.ReactNode;
   /** Optional inline help text shown as a (?) tooltip next to the label. */
   help?: string;
+  className?: string;
 }
 
 const ACCENT: Record<StatCardVariant, string> = {
@@ -36,15 +37,15 @@ const VALUE: Record<StatCardVariant, string> = {
   info:    "text-indigo-600 dark:text-indigo-400",
 };
 
-export function StatCard({ label, value, description, variant = "default", loading = false, compact = false, help }: StatCardProps) {
+export function StatCard({ label, value, description, variant = "default", loading = false, compact = false, help, className }: StatCardProps) {
   if (loading) {
     return compact ? (
-      <div className={clsx("border-l-2 pl-3 py-0.5 animate-pulse", ACCENT[variant])}>
+      <div data-stat-card className={clsx("border-l-2 pl-3 py-0.5 animate-pulse", ACCENT[variant], className)}>
         <div className="h-2 w-16 rounded bg-gray-200 dark:bg-zinc-800 mb-2" />
         <div className="h-5 w-10 rounded bg-gray-200 dark:bg-zinc-800" />
       </div>
     ) : (
-      <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-gray-300 dark:border-l-zinc-700 rounded-lg p-4 animate-pulse">
+      <div data-stat-card className={clsx("bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-gray-300 dark:border-l-zinc-700 rounded-lg p-4 animate-pulse", className)}>
         <div className="h-2 w-18 rounded bg-gray-200 dark:bg-zinc-800 mb-3" />
         <div className="h-6 w-12 rounded bg-gray-200 dark:bg-zinc-800" />
       </div>
@@ -53,7 +54,7 @@ export function StatCard({ label, value, description, variant = "default", loadi
 
   if (compact) {
     return (
-      <div data-stat-card className={clsx("border-l-2 pl-3 py-0.5", ACCENT[variant])}>
+      <div data-stat-card className={clsx("border-l-2 pl-3 py-0.5", ACCENT[variant], className)}>
         <p data-stat-label className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
           {label}
         </p>
@@ -75,13 +76,14 @@ export function StatCard({ label, value, description, variant = "default", loadi
         "border border-gray-200 dark:border-zinc-800",
         "border-l-2 rounded-lg p-4",
         ACCENT[variant],
+        className,
       )}
     >
       <p data-stat-label className="text-[11px] font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1.5 truncate">
         <span className="truncate">{label}</span>
         {help && <HelpTooltip text={help} placement="top" className="shrink-0" />}
       </p>
-      <p data-stat-value className={clsx("text-xl font-semibold tabular-nums leading-none", VALUE[variant])}>
+      <p data-stat-value className={clsx("text-[20px] font-semibold tabular-nums leading-none", VALUE[variant])}>
         {value}
       </p>
       {description && (

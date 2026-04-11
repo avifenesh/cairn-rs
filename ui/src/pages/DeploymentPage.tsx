@@ -16,6 +16,9 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { defaultApi } from "../lib/api";
+import { PageHeader } from "../components/PageHeader";
+import { Card as SharedCard } from "../components/Card";
+import { ds } from "../lib/design-system";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -96,7 +99,7 @@ function Card({
   loading?: boolean;
 }) {
   return (
-    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+    <SharedCard variant="shell">
       {/* Card header */}
       <div className="flex items-center gap-2.5 px-4 py-3 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40">
         <div className={clsx(
@@ -121,12 +124,12 @@ function Card({
         {loading ? (
           <div className="space-y-2 animate-pulse">
             {[1, 2, 3].map(i => (
-              <div key={i} className="h-4 rounded bg-gray-100 dark:bg-zinc-800" style={{ width: `${60 + i * 12}%` }} />
+              <div key={i} className={ds.skeleton.base} style={{ height: "1rem", width: `${60 + i * 12}%` }} />
             ))}
           </div>
         ) : children}
       </div>
-    </div>
+    </SharedCard>
   );
 }
 
@@ -197,7 +200,7 @@ function RoleChip({ label, active, icon: Icon }: {
 
 function HealthBanner({ status }: { status: HealthStatus }) {
   if (status === "ok") return (
-    <div className="flex items-center gap-3 rounded-xl border border-emerald-800/40 bg-emerald-950/20 px-4 py-3">
+    <div className="flex items-center gap-3 rounded-lg border border-emerald-800/40 bg-emerald-950/20 px-4 py-3">
       <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
       <div>
         <p className="text-[13px] font-semibold text-emerald-300">All systems operational</p>
@@ -206,7 +209,7 @@ function HealthBanner({ status }: { status: HealthStatus }) {
     </div>
   );
   if (status === "degraded") return (
-    <div className="flex items-center gap-3 rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-3">
+    <div className="flex items-center gap-3 rounded-lg border border-amber-800/40 bg-amber-950/20 px-4 py-3">
       <AlertTriangle size={16} className="text-amber-400 shrink-0" />
       <div>
         <p className="text-[13px] font-semibold text-amber-300">Degraded</p>
@@ -215,7 +218,7 @@ function HealthBanner({ status }: { status: HealthStatus }) {
     </div>
   );
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-red-800/40 bg-red-950/20 px-4 py-3">
+    <div className="flex items-center gap-3 rounded-lg border border-red-800/40 bg-red-950/20 px-4 py-3">
       <XCircle size={16} className="text-red-400 shrink-0" />
       <div>
         <p className="text-[13px] font-semibold text-red-300">Unhealthy</p>
@@ -279,26 +282,25 @@ export function DeploymentPage() {
   const bufStatus     = checkStatus(health?.checks.event_buffer);
 
   return (
-    <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
-      <div className="p-6 space-y-5">
+    <div className={clsx("h-full overflow-y-auto", ds.surface.page)}>
+      <div className={ds.spacing.pagePadded}>
 
         {/* Toolbar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">Deployment</p>
-            {health && (
-              <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">v{health.version}</span>
-            )}
-          </div>
-          <button
-            onClick={() => rHealth()}
-            disabled={hFetching}
-            className="flex items-center gap-1.5 rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 px-2.5 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:bg-white/5 transition-colors disabled:opacity-40"
-          >
-            <RefreshCw size={11} className={hFetching ? "animate-spin" : ""} />
-            Refresh
-          </button>
-        </div>
+        <PageHeader
+          sectionLabel="Deployment"
+          title="Infrastructure"
+          status={health ? <span className="text-[11px] text-gray-400 dark:text-zinc-600 font-mono">v{health.version}</span> : undefined}
+          actions={
+            <button
+              onClick={() => rHealth()}
+              disabled={hFetching}
+              className={ds.btn.secondary}
+            >
+              <RefreshCw size={11} className={hFetching ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          }
+        />
 
         {/* Overall health banner */}
         {!isLoading && <HealthBanner status={overallStatus} />}
@@ -316,7 +318,7 @@ export function DeploymentPage() {
         </div>
 
         {/* Two-column grid */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className={ds.spacing.panelGrid}>
 
           {/* Storage */}
           <Card icon={Database} title="Storage Backend" status={storeStatus} loading={isLoading}>
