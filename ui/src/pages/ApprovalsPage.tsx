@@ -2,11 +2,13 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Loader2, Inbox, Check, X } from "lucide-react";
 import { ErrorFallback } from "../components/ErrorFallback";
+import { StatCard } from "../components/StatCard";
 import { HelpTooltip } from "../components/HelpTooltip";
 import { CopyButton } from "../components/CopyButton";
 import { clsx } from "clsx";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
+import { table as tablePreset } from "../lib/design-system";
 import type { ApprovalRecord, ApprovalDecision } from "../lib/types";
 import { useAutoRefresh, REFRESH_OPTIONS } from "../hooks/useAutoRefresh";
 
@@ -29,20 +31,6 @@ const fmtRelative = (ms: number): string => {
   if (d < 604_800_000) return `${Math.floor(d / 86_400_000)}d ago`;
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 };
-
-// ── Stat card ──────────────────────────────────────────────────────────────────
-
-function StatCard({
-  label, value, sub, accent,
-}: { label: string; value: string | number; sub?: string; accent?: string }) {
-  return (
-    <div className={clsx("border-l-2 pl-3 py-0.5", accent ?? "border-indigo-500")}>
-      <p className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-[22px] font-semibold text-gray-900 dark:text-zinc-100 tabular-nums leading-tight">{value}</p>
-      {sub && <p className="text-[11px] text-gray-400 dark:text-zinc-600 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
 
 // ── Decision badge ─────────────────────────────────────────────────────────────
 
@@ -124,11 +112,7 @@ function RowActions({ approval }: { approval: ApprovalRecord }) {
 // ── Table ─────────────────────────────────────────────────────────────────────
 
 const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
-  <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-gray-200 dark:border-zinc-800",
-    right ? "text-right" : "text-left",
-    hide,
-  )}>{ch}</th>
+  <th className={clsx(right ? tablePreset.thRight : tablePreset.th, hide)}>{ch}</th>
 );
 
 function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
@@ -241,14 +225,14 @@ export function ApprovalsPage() {
       {/* Stat strip */}
       {!isLoading && (
         <div className="grid grid-cols-3 gap-x-6 gap-y-3 px-5 py-3 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 shrink-0">
-          <StatCard
+          <StatCard compact
             label="Pending"
             value={pending.length}
-            sub={pending.length > 0 ? "requires action" : "inbox clear"}
-            accent={pending.length > 0 ? "border-amber-500" : "border-emerald-500"}
+            description={pending.length > 0 ? "requires action" : "inbox clear"}
+            variant={pending.length > 0 ? "warning" : "success"}
           />
-          <StatCard label="Approved (24h)" value={approved24} accent="border-emerald-500" />
-          <StatCard label="Rejected (24h)" value={rejected24} accent="border-red-500" />
+          <StatCard compact label="Approved (24h)" value={approved24} variant="success" />
+          <StatCard compact label="Rejected (24h)" value={rejected24} variant="danger" />
         </div>
       )}
 
