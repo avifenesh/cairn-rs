@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { ErrorFallback } from "../components/ErrorFallback";
+import { StatCard } from "../components/StatCard";
 import { MiniChart } from "../components/MiniChart";
 import { BarChart } from "../components/BarChart";
 import { defaultApi } from "../lib/api";
@@ -75,22 +76,6 @@ function StatusBadge({ status }: { status: EvalRunStatus }) {
       <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", STATUS_DOT[status])} />
       {status.charAt(0).toUpperCase() + status.slice(1)}
     </span>
-  );
-}
-
-// ── Stat card ─────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub, accent = false }: {
-  label: string; value: string | number; sub?: string; accent?: boolean;
-}) {
-  return (
-    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 border-l-indigo-500 rounded-lg p-4">
-      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
-      <p className={clsx("text-xl font-semibold tabular-nums", accent ? "text-indigo-400" : "text-gray-900 dark:text-zinc-100")}>
-        {value}
-      </p>
-      {sub && <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-600">{sub}</p>}
-    </div>
   );
 }
 
@@ -488,10 +473,10 @@ export function EvalsPage() {
       {/* Stat cards */}
       {!isLoading && total > 0 && (
         <div className="grid grid-cols-2 gap-3 px-4 py-4 border-b border-gray-200 dark:border-zinc-800 lg:grid-cols-4 shrink-0">
-          <StatCard label="Total Eval Runs"  value={total}          sub="all time" />
-          <StatCard label="Pass Rate"        value={`${passRate}%`} sub={`${completed} passed`} accent />
-          <StatCard label="Failed"           value={failed}         sub={failed > 0 ? "needs attention" : "none"} />
-          <StatCard label="Evaluator Types"  value={evalTypes}      sub="distinct types" />
+          <StatCard label="Total Eval Runs"  value={total}          description="all time" variant="info" />
+          <StatCard label="Pass Rate"        value={`${passRate}%`} description={`${completed} passed`} variant="info" />
+          <StatCard label="Failed"           value={failed}         description={failed > 0 ? "needs attention" : "none"} variant={failed > 0 ? "danger" : "default"} />
+          <StatCard label="Evaluator Types"  value={evalTypes}      description="distinct types" />
         </div>
       )}
 
