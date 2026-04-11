@@ -9,6 +9,7 @@ import { useTableKeyboard } from "../hooks/useTableKeyboard";
 import { useToast } from "../components/Toast";
 import { CopyButton } from "../components/CopyButton";
 import { defaultApi } from "../lib/api";
+import { sectionLabel, card as cardPreset } from "../lib/design-system";
 import type { RunRecord, RunState } from "../lib/types";
 import { TimelineView, ZoomSelector } from "../components/TimelineView";
 import type { ZoomLevel } from "../components/TimelineView";
@@ -52,7 +53,7 @@ function FieldRow({ label, value, mono=false }: { label: string; value: string; 
   );
 }
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">{children}</p>;
+  return <p className={sectionLabel}>{children}</p>;
 }
 
 function DetailPanel({ run, onClose }: { run: RunRecord; onClose: () => void }) {
@@ -73,7 +74,7 @@ function DetailPanel({ run, onClose }: { run: RunRecord; onClose: () => void }) 
         </div>
         <div>
           <SectionLabel>Identifiers</SectionLabel>
-          <div className="rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800">
+          <div className={cardPreset.base}>
             <FieldRow label="Run ID"    value={run.run_id}    mono />
             <FieldRow label="Session"   value={run.session_id} mono />
             {run.parent_run_id && <FieldRow label="Parent" value={run.parent_run_id} mono />}
@@ -81,7 +82,7 @@ function DetailPanel({ run, onClose }: { run: RunRecord; onClose: () => void }) 
         </div>
         <div>
           <SectionLabel>Project</SectionLabel>
-          <div className="rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800">
+          <div className={cardPreset.base}>
             <FieldRow label="Tenant"    value={run.project.tenant_id} />
             <FieldRow label="Workspace" value={run.project.workspace_id} />
             <FieldRow label="Project"   value={run.project.project_id} />
@@ -90,7 +91,7 @@ function DetailPanel({ run, onClose }: { run: RunRecord; onClose: () => void }) 
         {(run.failure_class || run.pause_reason) && (
           <div>
             <SectionLabel>Details</SectionLabel>
-            <div className="rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800">
+            <div className={cardPreset.base}>
               {run.failure_class && <FieldRow label="Failure" value={run.failure_class} />}
               {run.pause_reason  && <FieldRow label="Paused"  value={run.pause_reason}  />}
             </div>
@@ -98,7 +99,7 @@ function DetailPanel({ run, onClose }: { run: RunRecord; onClose: () => void }) 
         )}
         <div>
           <SectionLabel>Timestamps</SectionLabel>
-          <div className="rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800">
+          <div className={cardPreset.base}>
             <FieldRow label="Created" value={fmtTime(run.created_at)} />
             <FieldRow label="Updated" value={fmtTime(run.updated_at)} />
           </div>
