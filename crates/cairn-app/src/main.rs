@@ -2533,49 +2533,6 @@ async fn admin_event_log_handler(
     })))
 }
 
-// ── Provider registry handler ─────────────────────────────────────────────────
-
-/// `GET /v1/providers/registry` — list all known LLM providers with their
-/// API endpoints, env var names, available status, and known models.
-///
-/// This is reference data from the static provider registry. It does NOT
-/// reflect user-configured connections — use `GET /v1/providers/connections`
-/// for that. The registry helps clients auto-configure by showing which
-/// providers are available (env var set) and what models they support.
-async fn provider_registry_handler() -> impl axum::response::IntoResponse {
-    use cairn_domain::provider_registry;
-
-    let entries: Vec<serde_json::Value> = provider_registry::all()
-        .iter()
-        .map(|p| {
-            serde_json::json!({
-                "id": p.id,
-                "name": p.name,
-                "api_base": p.api_base,
-                "api_format": format!("{:?}", p.api_format).to_lowercase(),
-                "default_model": p.default_model,
-                "available": p.is_available(),
-                "requires_key": p.requires_key(),
-                "env_keys": p.env_keys,
-                "models": p.models.iter().map(|m| serde_json::json!({
-                    "id": m.id,
-                    "context_window": m.context_window,
-                    "capabilities": {
-                        "streaming": m.capabilities.streaming,
-                        "tool_use": m.capabilities.tool_use,
-                        "vision": m.capabilities.vision,
-                        "thinking": m.capabilities.thinking,
-                    },
-                    "input_cost_per_1m": m.input_cost_per_1m,
-                    "output_cost_per_1m": m.output_cost_per_1m,
-                })).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-
-    (StatusCode::OK, Json(entries))
-}
-
 // ── Ollama handler ────────────────────────────────────────────────────────────
 
 /// `GET /v1/providers/ollama/models` — list models available in the local Ollama registry.
@@ -4933,6 +4890,26 @@ async fn main() {
     // bridge module, so everything plugs into the existing orchestrate/generate paths.
     use cairn_providers::backends::bedrock::Bedrock as CairnBedrock;
     use cairn_providers::wire::openai_compat::{OpenAiCompat, ProviderConfig};
+    use cairn_runtime::RuntimeConfig;
+
+    let normalize_model = |model: String| {
+        let trimmed = model.trim();
+        if trimmed.is_empty() || trimmed == "default" {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    };
+    let configured_generate_model = normalize_model(
+        lib_state
+            .runtime
+            .runtime_config
+            .default_generate_model()
+            .await,
+    );
+    let configured_brain_model =
+        normalize_model(lib_state.runtime.runtime_config.default_brain_model().await)
+            .or_else(|| configured_generate_model.clone());
 
     let openai_compat_brain: Option<Arc<OpenAiCompat>> = {
         let brain_url = std::env::var("CAIRN_BRAIN_URL")
@@ -4943,12 +4920,15 @@ async fn main() {
             .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
             .unwrap_or_default();
         brain_url.map(|url| {
-            eprintln!("openai-compat (brain): configured at {url}");
+            eprintln!(
+                "openai-compat (brain): configured at {url} model={}",
+                configured_brain_model.as_deref().unwrap_or("<unset>")
+            );
             Arc::new(OpenAiCompat::new(
                 ProviderConfig::default(),
                 brain_key,
                 Some(url),
-                None,
+                configured_brain_model.clone(),
                 None,
                 None,
                 None,
@@ -4964,12 +4944,15 @@ async fn main() {
             .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
             .unwrap_or_default();
         worker_url.map(|url| {
-            eprintln!("openai-compat (worker): configured at {url}");
+            eprintln!(
+                "openai-compat (worker): configured at {url} model={}",
+                configured_generate_model.as_deref().unwrap_or("<unset>")
+            );
             Arc::new(OpenAiCompat::new(
                 ProviderConfig::default(),
                 worker_key,
                 Some(url),
-                None,
+                configured_generate_model.clone(),
                 None,
                 None,
                 None,
@@ -4977,7 +4960,6 @@ async fn main() {
         })
     };
     let openai_compat_openrouter: Option<Arc<OpenAiCompat>> = {
-        use cairn_runtime::RuntimeConfig;
         RuntimeConfig::openrouter_api_key().map(|key| {
             eprintln!("openai-compat (openrouter): configured — brain=openrouter/free worker=google/gemma-3-4b-it:free");
             Arc::new(OpenAiCompat::new(
@@ -5016,6 +4998,7 @@ async fn main() {
                         Arc::new(OllamaEmbeddingProvider::new(provider.host()))
                             as Arc<dyn EmbeddingProvider>,
                     )
+                    .with_metadata("ollama", None)
                 }),
                 brain: openai_compat_brain.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
@@ -5023,6 +5006,7 @@ async fn main() {
                         provider.clone() as Arc<dyn ChatProvider>,
                         provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
+                    .with_metadata("openai-compatible", Some(provider.model.clone()))
                 }),
                 worker: openai_compat_worker.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
@@ -5030,6 +5014,7 @@ async fn main() {
                         provider.clone() as Arc<dyn ChatProvider>,
                         provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
+                    .with_metadata("openai-compatible", Some(provider.model.clone()))
                 }),
                 openrouter: openai_compat_openrouter.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
@@ -5037,12 +5022,14 @@ async fn main() {
                         provider.clone() as Arc<dyn ChatProvider>,
                         provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
+                    .with_metadata("openrouter", Some(provider.model.clone()))
                 }),
                 bedrock: bedrock.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_chat(
                         provider.clone() as Arc<dyn GenerationProvider>,
                         provider.clone() as Arc<dyn ChatProvider>,
                     )
+                    .with_metadata("bedrock", Some(provider.model_id().to_owned()))
                 }),
             },
         );
@@ -5707,7 +5694,6 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
             "/v1/providers/connections/:id/test",
             get(test_connection_handler),
         )
-        .route("/v1/providers/registry", get(provider_registry_handler))
         .route("/v1/providers/ollama/models", get(ollama_models_handler))
         .route(
             "/v1/providers/ollama/models/:name/info",
@@ -5798,6 +5784,7 @@ fn test_make_app(mut state: AppState) -> axum::Router {
                         Arc::new(OllamaEmbeddingProvider::new(provider.host()))
                             as Arc<dyn EmbeddingProvider>,
                     )
+                    .with_metadata("ollama", None)
                 }),
                 brain: state.openai_compat_brain.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
@@ -5805,6 +5792,7 @@ fn test_make_app(mut state: AppState) -> axum::Router {
                         provider.clone() as Arc<dyn ChatProvider>,
                         provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
+                    .with_metadata("openai-compatible", Some(provider.model.clone()))
                 }),
                 worker: state.openai_compat_worker.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
@@ -5812,6 +5800,7 @@ fn test_make_app(mut state: AppState) -> axum::Router {
                         provider.clone() as Arc<dyn ChatProvider>,
                         provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
+                    .with_metadata("openai-compatible", Some(provider.model.clone()))
                 }),
                 openrouter: state.openai_compat_openrouter.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
@@ -5819,12 +5808,14 @@ fn test_make_app(mut state: AppState) -> axum::Router {
                         provider.clone() as Arc<dyn ChatProvider>,
                         provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
+                    .with_metadata("openrouter", Some(provider.model.clone()))
                 }),
                 bedrock: state.bedrock.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_chat(
                         provider.clone() as Arc<dyn GenerationProvider>,
                         provider.clone() as Arc<dyn ChatProvider>,
                     )
+                    .with_metadata("bedrock", Some(provider.model_id().to_owned()))
                 }),
             },
         );

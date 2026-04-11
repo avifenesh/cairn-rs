@@ -1566,9 +1566,8 @@ async fn load_run_visible_to_tenant(
         }
     }
 
-    Ok(reconstructed.filter(|run| {
-        tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id()
-    }))
+    Ok(reconstructed
+        .filter(|run| tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id()))
 }
 
 fn forbidden_api_error(message: impl Into<String>) -> AppApiError {
@@ -3345,7 +3344,12 @@ fn graph_trace_snapshot(
 
     let root = nodes
         .iter()
-        .find(|node| matches!(node.kind, NodeKind::Session | NodeKind::Run | NodeKind::Task))
+        .find(|node| {
+            matches!(
+                node.kind,
+                NodeKind::Session | NodeKind::Run | NodeKind::Task
+            )
+        })
         .map(|node| node.node_id.clone());
 
     GraphTraceResponse { nodes, edges, root }
@@ -5147,6 +5151,7 @@ impl AppBootstrap {
     /// Build the complete router: catalog routes + fallback + state + middleware.
     fn build_router(state: Arc<AppState>) -> Router {
         let routes = Self::build_catalog_routes()
+            .route("/v1/providers/registry", get(provider_registry_handler))
             .fallback(not_found_handler)
             .with_state(state.clone());
         Self::apply_middleware(routes, state)
@@ -10204,8 +10209,15 @@ async fn orchestrate_run_handler(
     };
 
     let model_id = match body.model_id {
-        Some(m) => m,
-        None => state.runtime.runtime_config.default_brain_model().await,
+        Some(model_id) => model_id,
+        None => {
+            let brain_model = state.runtime.runtime_config.default_brain_model().await;
+            if brain_model.trim().is_empty() || brain_model == "default" {
+                state.runtime.runtime_config.default_generate_model().await
+            } else {
+                brain_model
+            }
+        }
     };
 
     let is_bedrock_model = model_id.contains('.') && !model_id.contains('/');
@@ -12067,10 +12079,12 @@ async fn list_tool_invocations_handler(
     let Some(run_id) = query.run_id.as_deref() else {
         return (
             StatusCode::OK,
-            Json(ListResponse::<cairn_domain::tool_invocation::ToolInvocationRecord> {
-                items: Vec::new(),
-                has_more: false,
-            }),
+            Json(
+                ListResponse::<cairn_domain::tool_invocation::ToolInvocationRecord> {
+                    items: Vec::new(),
+                    has_more: false,
+                },
+            ),
         )
             .into_response();
     };
@@ -17332,6 +17346,50 @@ async fn list_provider_connections_handler(
         )
             .into_response(),
     }
+}
+
+async fn provider_registry_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let snapshot = state.runtime.provider_registry.snapshot();
+    let catalog = static_provider_registry_catalog();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "connections": snapshot.connections,
+            "fallbacks": snapshot.fallbacks,
+            "catalog": catalog,
+        })),
+    )
+        .into_response()
+}
+
+fn static_provider_registry_catalog() -> Vec<serde_json::Value> {
+    cairn_domain::provider_registry::all()
+        .iter()
+        .map(|provider| {
+            serde_json::json!({
+                "id": provider.id,
+                "name": provider.name,
+                "api_base": provider.api_base,
+                "api_format": format!("{:?}", provider.api_format).to_lowercase(),
+                "default_model": provider.default_model,
+                "available": provider.is_available(),
+                "requires_key": provider.requires_key(),
+                "env_keys": provider.env_keys,
+                "models": provider.models.iter().map(|model| serde_json::json!({
+                    "id": model.id,
+                    "context_window": model.context_window,
+                    "capabilities": {
+                        "streaming": model.capabilities.streaming,
+                        "tool_use": model.capabilities.tool_use,
+                        "vision": model.capabilities.vision,
+                        "thinking": model.capabilities.thinking,
+                    },
+                    "input_cost_per_1m": model.input_cost_per_1m,
+                    "output_cost_per_1m": model.output_cost_per_1m,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
 }
 
 #[utoipa::path(

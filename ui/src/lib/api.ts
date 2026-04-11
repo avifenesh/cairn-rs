@@ -620,8 +620,14 @@ export function createApiClient(config: ApiClientConfig) {
       return getList(`/v1/providers/health?${qs}`);
     },
 
-    /** GET /v1/providers/registry — static provider registry with availability and known models. */
-    getProviderRegistry: (): Promise<import("./types").ProviderRegistryEntry[]> => get("/v1/providers/registry"),
+    /** GET /v1/providers/registry — live provider registry state plus static catalog. */
+    getProviderRegistry: async (): Promise<import("./types").ProviderRegistryEntry[]> => {
+      const response = await get<
+        | import("./types").ProviderRegistryEntry[]
+        | { catalog?: import("./types").ProviderRegistryEntry[] }
+      >("/v1/providers/registry");
+      return Array.isArray(response) ? response : (response.catalog ?? []);
+    },
 
     // ── Provider connections ─────────────────────────────────────────────────
 

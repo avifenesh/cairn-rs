@@ -33,6 +33,8 @@ pub struct StartupProviderEntry {
     generation: Arc<dyn GenerationProvider>,
     chat: Option<Arc<dyn ChatProvider>>,
     embedding: Option<Arc<dyn DomainEmbeddingProvider>>,
+    backend: String,
+    model: Option<String>,
 }
 
 impl StartupProviderEntry {
@@ -41,6 +43,8 @@ impl StartupProviderEntry {
             generation: provider,
             chat: None,
             embedding: None,
+            backend: "unknown".to_owned(),
+            model: None,
         }
     }
 
@@ -49,6 +53,8 @@ impl StartupProviderEntry {
             generation,
             chat: Some(chat),
             embedding: None,
+            backend: "unknown".to_owned(),
+            model: None,
         }
     }
 
@@ -60,6 +66,8 @@ impl StartupProviderEntry {
             generation,
             chat: None,
             embedding: Some(embedding),
+            backend: "unknown".to_owned(),
+            model: None,
         }
     }
 
@@ -72,7 +80,15 @@ impl StartupProviderEntry {
             generation,
             chat: Some(chat),
             embedding: Some(embedding),
+            backend: "unknown".to_owned(),
+            model: None,
         }
+    }
+
+    pub fn with_metadata(mut self, backend: impl Into<String>, model: Option<String>) -> Self {
+        self.backend = backend.into();
+        self.model = model.filter(|value| !value.is_empty());
+        self
     }
 }
 
@@ -86,9 +102,35 @@ pub struct StartupFallbackProviders {
 }
 
 struct CachedProvider {
+    connection_id: String,
+    backend: String,
+    model: String,
     chat: Arc<dyn ChatProvider>,
     generation: Arc<dyn GenerationProvider>,
     embedding: Option<Arc<dyn DomainEmbeddingProvider>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ProviderRegistryConnectionState {
+    pub connection_id: String,
+    pub backend: String,
+    pub model: String,
+    pub cached: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ProviderRegistryFallbackState {
+    pub source: String,
+    pub backend: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ProviderRegistrySnapshot {
+    pub connections: Vec<ProviderRegistryConnectionState>,
+    pub fallbacks: Vec<ProviderRegistryFallbackState>,
 }
 
 pub struct ProviderRegistry<S> {
@@ -117,6 +159,26 @@ impl<S> ProviderRegistry<S> {
 
     pub fn invalidate_all(&self) {
         lock(&self.cache).clear();
+    }
+
+    pub fn snapshot(&self) -> ProviderRegistrySnapshot {
+        let mut connections: Vec<_> = lock(&self.cache)
+            .values()
+            .map(|cached| ProviderRegistryConnectionState {
+                connection_id: cached.connection_id.clone(),
+                backend: cached.backend.clone(),
+                model: cached.model.clone(),
+                cached: true,
+            })
+            .collect();
+        connections.sort_by(|left, right| left.connection_id.cmp(&right.connection_id));
+
+        let fallbacks = fallback_snapshot(&read_lock(&self.fallbacks));
+
+        ProviderRegistrySnapshot {
+            connections,
+            fallbacks,
+        }
     }
 }
 
@@ -282,12 +344,15 @@ where
         let default_model = configured_model.unwrap_or_default();
         let generation: Arc<dyn GenerationProvider> = Arc::new(ChatProviderGenerationAdapter::new(
             chat.clone(),
-            default_model,
+            default_model.clone(),
         ));
         let embedding =
             build_embedding_provider(&backend, endpoint, api_key, connection, requested_model);
 
         Ok(CachedProvider {
+            connection_id: connection.provider_connection_id.as_str().to_owned(),
+            backend: backend.to_string(),
+            model: default_model,
             chat,
             generation,
             embedding,
@@ -759,6 +824,62 @@ fn select_connection<'a>(
     })
 }
 
+fn fallback_snapshot(fallbacks: &StartupFallbackProviders) -> Vec<ProviderRegistryFallbackState> {
+    let mut entries = Vec::new();
+    push_fallback(
+        &mut entries,
+        "env:OLLAMA_HOST",
+        fallbacks.ollama.as_ref(),
+        "ollama",
+    );
+    push_fallback(
+        &mut entries,
+        "env:CAIRN_BRAIN_URL",
+        fallbacks.brain.as_ref(),
+        "openai-compatible",
+    );
+    push_fallback(
+        &mut entries,
+        "env:CAIRN_WORKER_URL",
+        fallbacks.worker.as_ref(),
+        "openai-compatible",
+    );
+    push_fallback(
+        &mut entries,
+        "env:OPENROUTER_API_KEY",
+        fallbacks.openrouter.as_ref(),
+        "openrouter",
+    );
+    push_fallback(
+        &mut entries,
+        "env:BEDROCK_API_KEY",
+        fallbacks.bedrock.as_ref(),
+        "bedrock",
+    );
+    entries
+}
+
+fn push_fallback(
+    entries: &mut Vec<ProviderRegistryFallbackState>,
+    source: &str,
+    entry: Option<&StartupProviderEntry>,
+    default_backend: &str,
+) {
+    let Some(entry) = entry else {
+        return;
+    };
+    entries.push(ProviderRegistryFallbackState {
+        source: source.to_owned(),
+        backend: if entry.backend == "unknown" {
+            default_backend.to_owned()
+        } else {
+            entry.backend.clone()
+        },
+        model: entry.model.clone(),
+        active: true,
+    });
+}
+
 fn is_bedrock_model(model_id: &str) -> bool {
     model_id.contains('.') && !model_id.contains('/')
 }
@@ -963,6 +1084,59 @@ mod tests {
             .unwrap();
 
         assert!(Arc::ptr_eq(&resolved, &fallback));
+    }
+
+    #[tokio::test]
+    async fn snapshot_reports_cached_connections_and_configured_fallbacks() {
+        let store = seeded_store().await;
+        seed_connection(&store, "conn_snapshot").await;
+        let registry = ProviderRegistry::new(store);
+        registry.set_startup_fallbacks(StartupFallbackProviders {
+            brain: Some(
+                StartupProviderEntry::generation(Arc::new(FakeGenerationProvider {
+                    label: "brain",
+                }))
+                .with_metadata("openai-compatible", Some("gpt-4.1-mini".to_owned())),
+            ),
+            bedrock: Some(
+                StartupProviderEntry::generation(Arc::new(FakeGenerationProvider {
+                    label: "bedrock",
+                }))
+                .with_metadata("bedrock", Some("minimax.minimax-m2.5".to_owned())),
+            ),
+            ..Default::default()
+        });
+
+        registry
+            .resolve_generation_for_model(
+                &TenantId::new("tenant_registry"),
+                "gpt-4o-mini",
+                ProviderResolutionPurpose::Generate,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        let snapshot = registry.snapshot();
+        assert_eq!(snapshot.connections.len(), 1);
+        assert_eq!(snapshot.connections[0].connection_id, "conn_snapshot");
+        assert_eq!(snapshot.connections[0].backend, "openai-compatible");
+        assert_eq!(snapshot.connections[0].model, "gpt-4o-mini");
+        assert!(snapshot.connections[0].cached);
+
+        assert_eq!(snapshot.fallbacks.len(), 2);
+        assert!(snapshot.fallbacks.iter().any(|entry| {
+            entry.source == "env:CAIRN_BRAIN_URL"
+                && entry.backend == "openai-compatible"
+                && entry.model.as_deref() == Some("gpt-4.1-mini")
+                && entry.active
+        }));
+        assert!(snapshot.fallbacks.iter().any(|entry| {
+            entry.source == "env:BEDROCK_API_KEY"
+                && entry.backend == "bedrock"
+                && entry.model.as_deref() == Some("minimax.minimax-m2.5")
+                && entry.active
+        }));
     }
 
     async fn seeded_store() -> Arc<InMemoryStore> {
