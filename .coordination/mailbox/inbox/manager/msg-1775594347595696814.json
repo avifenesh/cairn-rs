@@ -1,9 +1,0 @@
-{"from":"worker-3","to":"manager","ts":"2026-04-07T23:39:07+03:00","body":"ALL 4 SCRIPT FIXES APPLIED — bash -n clean.
-
-1. e2e-prompt-lifecycle.sh: TENANT/WORKSPACE/PROJECT changed from 'default/default/default' to 'default_tenant/default_workspace/default_project' (matching actual DEFAULT_* constants in lib.rs:216-218). The '403 workspace mismatch' was because the TenantScope resolves to default_workspace but the asset was created in 'default'.
-
-2. e2e-eval-pipeline.sh: subject_kind changed from 'prompt_asset' (invalid) to 'prompt_release'. Valid EvalSubjectKind values are: prompt_release, provider_route, retrieval_policy, skill, guardrail_policy (cairn-domain/src/evals.rs:7-13).
-
-3. e2e-sse-streaming.sh: Replaced the malformed tool_invocation_started event (requires target, execution_class, requested_at_ms, started_at_ms — full ToolInvocationStarted struct) with a second run_state_changed event (running→completed). SSE test still proves events flow through the stream.
-
-4. e2e-cost-tracking.sh: Added ?tenant_id=default_tenant to all GET /v1/providers/bindings* calls. The list_provider_bindings_handler uses TenantScopedQuery which requires tenant_id as a query param."}
