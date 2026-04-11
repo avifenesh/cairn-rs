@@ -179,17 +179,17 @@ async fn multiple_sessions_and_runs_are_tracked_independently() {
         .is_some());
 
     // Run records exist and are correctly attributed to their sessions.
-    let rA1 = RunReadModel::get(store.as_ref(), &RunId::new("rA1"))
+    let r_a1 = RunReadModel::get(store.as_ref(), &RunId::new("rA1"))
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(rA1.session_id.as_str(), "sA");
+    assert_eq!(r_a1.session_id.as_str(), "sA");
 
-    let rB1 = RunReadModel::get(store.as_ref(), &RunId::new("rB1"))
+    let r_b1 = RunReadModel::get(store.as_ref(), &RunId::new("rB1"))
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(rB1.session_id.as_str(), "sB");
+    assert_eq!(r_b1.session_id.as_str(), "sB");
 
     // count_active_runs reflects all pending/running runs.
     let active = store.count_active_runs().await;

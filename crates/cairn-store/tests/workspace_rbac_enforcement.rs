@@ -175,7 +175,7 @@ async fn add_members_with_all_four_roles() {
         let rec = WorkspaceMembershipReadModel::get_member(&store, &wkey("t1", "ws1"), operator)
             .await
             .unwrap()
-            .expect(&format!("{operator} must be in workspace"));
+            .unwrap_or_else(|| panic!("{operator} must be in workspace"));
         assert_eq!(rec.role, expected_role, "{operator}: role mismatch");
     }
 }

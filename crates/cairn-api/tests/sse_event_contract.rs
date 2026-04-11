@@ -268,7 +268,7 @@ fn sse_replay_query_after_position_filtering() {
     assert_eq!(reconnect_query.limit, 50);
 
     // The after_position semantics: only events with position > 42 are replayed.
-    let all_positions = vec![
+    let all_positions = [
         EventPosition(10),
         EventPosition(42),
         EventPosition(43),
@@ -279,7 +279,7 @@ fn sse_replay_query_after_position_filtering() {
         .filter(|&&pos| {
             reconnect_query
                 .after_position
-                .map_or(true, |after| pos > after)
+                .is_none_or(|after| pos > after)
         })
         .collect();
 

@@ -7,7 +7,7 @@ use cairn_domain::{
     RuntimeEvent, SessionId,
 };
 use cairn_runtime::services::{RunServiceImpl, SessionServiceImpl};
-use cairn_runtime::{RunService, SessionService};
+use cairn_runtime::SessionService;
 use cairn_store::projections::RunCostReadModel;
 use cairn_store::{EventLog, InMemoryStore};
 

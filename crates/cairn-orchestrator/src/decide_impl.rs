@@ -1311,8 +1311,8 @@ mod tests {
         // Build a registry with both Observational and External tools.
         let registry = std::sync::Arc::new(
             cairn_tools::builtins::BuiltinToolRegistry::new()
-                .register(std::sync::Arc::new(cairn_tools::GrepSearchTool::default())) // Observational
-                .register(std::sync::Arc::new(cairn_tools::CalculateTool::default())) // Observational
+                .register(std::sync::Arc::new(cairn_tools::GrepSearchTool)) // Observational
+                .register(std::sync::Arc::new(cairn_tools::CalculateTool)) // Observational
                 .register(std::sync::Arc::new(cairn_tools::ShellExecTool)), // External
         );
 

@@ -311,8 +311,8 @@ async fn archive_already_archived_session_is_idempotent() {
 
     // Second archive should succeed (idempotent) or return Archived record.
     let result = sessions.archive(&sess_id).await;
-    match result {
-        Ok(record) => assert_eq!(record.state, SessionState::Archived),
-        Err(_) => {} // acceptable: some impls treat double-archive as no-op error
+    if let Ok(record) = result {
+        assert_eq!(record.state, SessionState::Archived);
     }
+    // acceptable: some impls treat double-archive as no-op error
 }

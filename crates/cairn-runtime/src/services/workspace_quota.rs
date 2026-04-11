@@ -553,7 +553,7 @@ mod tests {
 
         mgr.record_run_started("ws1");
         mgr.record_run_started("ws1");
-        assert!(mgr.check_run_quota(&ws("ws1")).is_ok() == false);
+        assert!(mgr.check_run_quota(&ws("ws1")).is_err());
 
         let err = mgr.check_run_quota(&ws("ws1")).unwrap_err();
         assert_eq!(err.quota_type, "max_concurrent_runs");

@@ -30,10 +30,6 @@ use cairn_store::{event_log::EntityRef, EventLog, InMemoryStore};
 fn project_a() -> ProjectKey {
     ProjectKey::new("tenant_perm", "ws_perm", "proj_a")
 }
-fn project_b() -> ProjectKey {
-    ProjectKey::new("tenant_perm", "ws_perm", "proj_b")
-}
-
 fn ev<P: Into<RuntimeEvent>>(id: &str, payload: P) -> EventEnvelope<RuntimeEvent> {
     EventEnvelope::for_runtime_event(EventId::new(id), EventSource::Runtime, payload.into())
 }

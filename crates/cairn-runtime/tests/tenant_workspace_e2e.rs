@@ -17,13 +17,15 @@ use cairn_runtime::services::{
 use cairn_runtime::{ProjectService, TenantService, WorkspaceMembershipService, WorkspaceService};
 use cairn_store::InMemoryStore;
 
-fn services() -> (
+type Services = (
     Arc<InMemoryStore>,
     TenantServiceImpl<InMemoryStore>,
     WorkspaceServiceImpl<InMemoryStore>,
     ProjectServiceImpl<InMemoryStore>,
     WorkspaceMembershipServiceImpl<InMemoryStore>,
-) {
+);
+
+fn services() -> Services {
     let store = Arc::new(InMemoryStore::new());
     (
         store.clone(),

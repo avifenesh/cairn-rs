@@ -164,7 +164,7 @@ fn voice_format_serde_round_trip_all_variants() {
             "{fmt:?} must serialise to {expected_json}"
         );
 
-        let deserialized: VoiceFormat = serde_json::from_str(*expected_json).unwrap();
+        let deserialized: VoiceFormat = serde_json::from_str(expected_json).unwrap();
         assert_eq!(
             deserialized, *fmt,
             "{expected_json} must deserialise back to {fmt:?}"

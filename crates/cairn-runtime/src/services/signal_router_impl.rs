@@ -246,7 +246,7 @@ mod tests {
     use crate::services::{
         RunServiceImpl, SessionServiceImpl, SignalRouterServiceImpl, SignalServiceImpl,
     };
-    use crate::{RunService, SessionService, SignalRouterService, SignalService};
+    use crate::{SessionService, SignalRouterService, SignalService};
 
     fn test_project() -> ProjectKey {
         ProjectKey::new("tenant_acme", "ws_main", "project_alpha")

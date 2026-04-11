@@ -85,7 +85,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     /// Local newtype wrapper to satisfy orphan rule for GraphProjection impl.
-    struct TestGraph(Arc<Mutex<(HashMap<String, GraphNode>, Vec<GraphEdge>)>>);
+    type NodeMap = (HashMap<String, GraphNode>, Vec<GraphEdge>);
+    struct TestGraph(Arc<Mutex<NodeMap>>);
 
     impl TestGraph {
         fn new() -> Self {

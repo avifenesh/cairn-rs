@@ -356,7 +356,7 @@ async fn all_final_status_variants_persist_correctly() {
         let r = RouteDecisionReadModel::get(&store, &RouteDecisionId::new(*id))
             .await
             .unwrap()
-            .expect(&format!("{id} must be persisted"));
+            .unwrap_or_else(|| panic!("{id} must be persisted"));
 
         assert_eq!(
             r.final_status, *expected_status,

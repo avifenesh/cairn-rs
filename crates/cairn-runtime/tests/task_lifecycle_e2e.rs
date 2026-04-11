@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use cairn_domain::{FailureClass, ProjectKey, RunId, SessionId, TaskId, TaskState};
 use cairn_runtime::{
-    RunService, RunServiceImpl, SessionService, SessionServiceImpl, TaskService, TaskServiceImpl,
+    RunServiceImpl, SessionService, SessionServiceImpl, TaskService, TaskServiceImpl,
 };
 use cairn_store::InMemoryStore;
 
@@ -258,10 +258,7 @@ async fn full_task_lifecycle() {
         .await
         .unwrap();
     assert_eq!(leased.state, TaskState::Leased);
-    assert_eq!(
-        leased.lease_owner.as_deref(),
-        Some("worker_01")
-    );
+    assert_eq!(leased.lease_owner.as_deref(), Some("worker_01"));
     let original_expiry = leased.lease_expires_at.unwrap();
 
     // (4) Heartbeat → extends expiry.

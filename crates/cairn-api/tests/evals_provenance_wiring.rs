@@ -15,13 +15,12 @@ fn scorecard_from_cairn_evals_serializes_through_api() {
             prompt_release_id: cairn_domain::ids::PromptReleaseId::new("release_1"),
             prompt_version_id: cairn_domain::ids::PromptVersionId::new("version_1"),
             eval_run_id: cairn_domain::ids::EvalRunId::new("eval_1"),
-            metrics: {
-                let mut m = EvalMetrics::default();
-                m.task_success_rate = Some(0.92);
-                m.latency_p50_ms = Some(150);
-                m.latency_p99_ms = Some(450);
-                m.cost_per_run = Some(0.003);
-                m
+            metrics: EvalMetrics {
+                task_success_rate: Some(0.92),
+                latency_p50_ms: Some(150),
+                latency_p99_ms: Some(450),
+                cost_per_run: Some(0.003),
+                ..EvalMetrics::default()
             },
         }],
     };

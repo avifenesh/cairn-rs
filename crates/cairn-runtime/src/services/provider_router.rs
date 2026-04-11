@@ -462,25 +462,25 @@ mod tests {
     /// Mock provider that either succeeds or fails.
     struct MockProvider {
         should_fail: bool,
-        fail_error: Option<ProviderAdapterError>,
+        _fail_error: Option<ProviderAdapterError>,
     }
 
     impl MockProvider {
         fn ok() -> Arc<dyn GenerationProvider> {
             Arc::new(Self {
                 should_fail: false,
-                fail_error: None,
+                _fail_error: None,
             })
         }
 
         fn failing(err: ProviderAdapterError) -> Arc<dyn GenerationProvider> {
             Arc::new(Self {
                 should_fail: true,
-                fail_error: Some(err),
+                _fail_error: Some(err),
             })
         }
 
-        fn timeout() -> Arc<dyn GenerationProvider> {
+        fn _timeout() -> Arc<dyn GenerationProvider> {
             Self::failing(ProviderAdapterError::TimedOut)
         }
     }

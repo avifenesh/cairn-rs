@@ -5,7 +5,7 @@
 //!
 //!   1. No license  → every feature is Denied (fail-closed)
 //!   2. LocalEval   → GA features (e.g. `runtime_core`) are Allowed;
-//!                    entitlement-gated features remain Denied
+//!      entitlement-gated features remain Denied
 //!   3. Unknown feature names → always Denied (fail-closed, RFC 014 §4)
 //!   4. Operator overrides can unblock a denied feature per-tenant
 //!   5. Overrides can also block an otherwise-GA feature per-tenant

@@ -2933,992 +2933,6 @@ impl InMemoryStore {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_project() -> ProjectKey {
-        ProjectKey::new("tenant", "workspace", "project")
-    }
-
-    fn make_envelope(event: RuntimeEvent) -> EventEnvelope<RuntimeEvent> {
-        EventEnvelope::for_runtime_event(EventId::new("evt_test"), EventSource::Runtime, event)
-    }
-
-    #[tokio::test]
-    async fn append_and_read_session_lifecycle() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-        let session_id = SessionId::new("sess_1");
-
-        // Create session
-        let positions = store
-            .append(&[make_envelope(RuntimeEvent::SessionCreated(
-                SessionCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                },
-            ))])
-            .await
-            .unwrap();
-
-        assert_eq!(positions.len(), 1);
-        assert_eq!(positions[0], EventPosition(1));
-
-        // Read projection
-        let session = SessionReadModel::get(&store, &session_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(session.state, SessionState::Open);
-        assert_eq!(session.version, 1);
-
-        // Change state
-        store
-            .append(&[make_envelope(RuntimeEvent::SessionStateChanged(
-                SessionStateChanged {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                    transition: StateTransition {
-                        from: Some(SessionState::Open),
-                        to: SessionState::Completed,
-                    },
-                },
-            ))])
-            .await
-            .unwrap();
-
-        let session = SessionReadModel::get(&store, &session_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(session.state, SessionState::Completed);
-        assert_eq!(session.version, 2);
-    }
-
-    #[tokio::test]
-    async fn append_and_read_run_lifecycle() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-        let session_id = SessionId::new("sess_1");
-        let run_id = RunId::new("run_1");
-
-        store
-            .append(&[make_envelope(RuntimeEvent::RunCreated(RunCreated {
-                project: project.clone(),
-                session_id: session_id.clone(),
-                run_id: run_id.clone(),
-                parent_run_id: None,
-                agent_role_id: None,
-                prompt_release_id: None,
-            }))])
-            .await
-            .unwrap();
-
-        let run = RunReadModel::get(&store, &run_id).await.unwrap().unwrap();
-        assert_eq!(run.state, RunState::Pending);
-
-        // Advance to running then completed
-        store
-            .append(&[
-                make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
-                    project: project.clone(),
-                    run_id: run_id.clone(),
-                    transition: StateTransition {
-                        from: Some(RunState::Pending),
-                        to: RunState::Running,
-                    },
-                    failure_class: None,
-                    pause_reason: None,
-                    resume_trigger: None,
-                })),
-                make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
-                    project: project.clone(),
-                    run_id: run_id.clone(),
-                    transition: StateTransition {
-                        from: Some(RunState::Running),
-                        to: RunState::Completed,
-                    },
-                    failure_class: None,
-                    pause_reason: None,
-                    resume_trigger: None,
-                })),
-            ])
-            .await
-            .unwrap();
-
-        let run = RunReadModel::get(&store, &run_id).await.unwrap().unwrap();
-        assert_eq!(run.state, RunState::Completed);
-        assert_eq!(run.version, 3);
-    }
-
-    #[tokio::test]
-    async fn task_lifecycle_with_lease() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-        let task_id = TaskId::new("task_1");
-
-        store
-            .append(&[make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
-                project: project.clone(),
-                task_id: task_id.clone(),
-                parent_run_id: None,
-                parent_task_id: None,
-                prompt_release_id: None,
-            }))])
-            .await
-            .unwrap();
-
-        let task = TaskReadModel::get(&store, &task_id).await.unwrap().unwrap();
-        assert_eq!(task.state, TaskState::Queued);
-
-        // Claim lease via event (Worker 2 added TaskLeaseClaimed)
-        store
-            .append(&[
-                make_envelope(RuntimeEvent::TaskLeaseClaimed(TaskLeaseClaimed {
-                    project: project.clone(),
-                    task_id: task_id.clone(),
-                    lease_owner: "worker-a".to_owned(),
-                    lease_token: 1,
-                    lease_expires_at_ms: 9999999999,
-                })),
-                make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
-                    project: project.clone(),
-                    task_id: task_id.clone(),
-                    transition: StateTransition {
-                        from: Some(TaskState::Queued),
-                        to: TaskState::Leased,
-                    },
-                    failure_class: None,
-                    pause_reason: None,
-                    resume_trigger: None,
-                })),
-            ])
-            .await
-            .unwrap();
-
-        let task = TaskReadModel::get(&store, &task_id).await.unwrap().unwrap();
-        assert_eq!(task.state, TaskState::Leased);
-        assert_eq!(task.lease_owner.as_deref(), Some("worker-a"));
-    }
-
-    #[tokio::test]
-    async fn checkpoint_supersedes_previous_latest() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-        let run_id = RunId::new("run_1");
-
-        store
-            .append(&[make_envelope(RuntimeEvent::CheckpointRecorded(
-                CheckpointRecorded {
-                    project: project.clone(),
-                    run_id: run_id.clone(),
-                    checkpoint_id: CheckpointId::new("cp_1"),
-                    disposition: CheckpointDisposition::Latest,
-                    data: None,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        store
-            .append(&[make_envelope(RuntimeEvent::CheckpointRecorded(
-                CheckpointRecorded {
-                    project: project.clone(),
-                    run_id: run_id.clone(),
-                    checkpoint_id: CheckpointId::new("cp_2"),
-                    disposition: CheckpointDisposition::Latest,
-                    data: None,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        let cp1 = CheckpointReadModel::get(&store, &CheckpointId::new("cp_1"))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(cp1.disposition, CheckpointDisposition::Superseded);
-
-        let latest = store.latest_for_run(&run_id).await.unwrap().unwrap();
-        assert_eq!(latest.checkpoint_id, CheckpointId::new("cp_2"));
-    }
-
-    #[tokio::test]
-    async fn tool_invocation_projection_tracks_terminal_outcome() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-        let invocation_id = ToolInvocationId::new("tool_1");
-        let run_id = RunId::new("run_1");
-
-        store
-            .append(&[
-                make_envelope(RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
-                    project: project.clone(),
-                    invocation_id: invocation_id.clone(),
-                    session_id: Some(SessionId::new("sess_1")),
-                    run_id: Some(run_id.clone()),
-                    task_id: Some(TaskId::new("task_1")),
-                    target: ToolInvocationTarget::Builtin {
-                        tool_name: "fs.read".to_owned(),
-                    },
-                    execution_class: ExecutionClass::SupervisedProcess,
-                    prompt_release_id: None,
-                    requested_at_ms: 100,
-                    started_at_ms: 101,
-                })),
-                make_envelope(RuntimeEvent::ToolInvocationCompleted(
-                    ToolInvocationCompleted {
-                        project,
-                        invocation_id: invocation_id.clone(),
-                        task_id: Some(TaskId::new("task_1")),
-                        tool_name: "fs.read".to_owned(),
-                        finished_at_ms: 105,
-                        outcome: ToolInvocationOutcomeKind::Success,
-                    },
-                )),
-            ])
-            .await
-            .unwrap();
-
-        let record = ToolInvocationReadModel::get(&store, &invocation_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(record.state, ToolInvocationState::Completed);
-        assert_eq!(record.outcome, Some(ToolInvocationOutcomeKind::Success));
-        assert_eq!(record.finished_at_ms, Some(105));
-
-        let listed = ToolInvocationReadModel::list_by_run(&store, &run_id, 10, 0)
-            .await
-            .unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].invocation_id, invocation_id);
-    }
-
-    #[tokio::test]
-    async fn tool_invocation_projection_preserves_canceled_state_and_orders_by_request_time() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-        let run_id = RunId::new("run_1");
-        let older_invocation = ToolInvocationId::new("tool_old");
-        let newer_invocation = ToolInvocationId::new("tool_new");
-
-        store
-            .append(&[
-                make_envelope(RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
-                    project: project.clone(),
-                    invocation_id: newer_invocation.clone(),
-                    session_id: Some(SessionId::new("sess_1")),
-                    run_id: Some(run_id.clone()),
-                    task_id: None,
-                    target: ToolInvocationTarget::Builtin {
-                        tool_name: "shell.exec".to_owned(),
-                    },
-                    execution_class: ExecutionClass::SandboxedProcess,
-                    prompt_release_id: None,
-                    requested_at_ms: 200,
-                    started_at_ms: 201,
-                })),
-                make_envelope(RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
-                    project: project.clone(),
-                    invocation_id: newer_invocation.clone(),
-                    task_id: None,
-                    tool_name: "shell.exec".to_owned(),
-                    finished_at_ms: 205,
-                    outcome: ToolInvocationOutcomeKind::Canceled,
-                    error_message: Some("canceled".to_owned()),
-                })),
-                make_envelope(RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
-                    project,
-                    invocation_id: older_invocation.clone(),
-                    session_id: Some(SessionId::new("sess_1")),
-                    run_id: Some(run_id.clone()),
-                    task_id: None,
-                    target: ToolInvocationTarget::Builtin {
-                        tool_name: "fs.read".to_owned(),
-                    },
-                    execution_class: ExecutionClass::SupervisedProcess,
-                    prompt_release_id: None,
-                    requested_at_ms: 100,
-                    started_at_ms: 101,
-                })),
-            ])
-            .await
-            .unwrap();
-
-        let canceled = ToolInvocationReadModel::get(&store, &newer_invocation)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(canceled.state, ToolInvocationState::Canceled);
-        assert_eq!(canceled.outcome, Some(ToolInvocationOutcomeKind::Canceled));
-        assert_eq!(canceled.error_message.as_deref(), Some("canceled"));
-
-        let listed = ToolInvocationReadModel::list_by_run(&store, &run_id, 10, 0)
-            .await
-            .unwrap();
-        assert_eq!(listed.len(), 2);
-        assert_eq!(listed[0].invocation_id, older_invocation);
-        assert_eq!(listed[1].invocation_id, newer_invocation);
-
-        let paged = ToolInvocationReadModel::list_by_run(&store, &run_id, 1, 1)
-            .await
-            .unwrap();
-        assert_eq!(paged.len(), 1);
-        assert_eq!(paged[0].invocation_id, newer_invocation);
-    }
-
-    #[tokio::test]
-    async fn event_stream_read() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-
-        store
-            .append(&[
-                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
-                    project: project.clone(),
-                    session_id: SessionId::new("s1"),
-                })),
-                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
-                    project: project.clone(),
-                    session_id: SessionId::new("s2"),
-                })),
-            ])
-            .await
-            .unwrap();
-
-        let all = store.read_stream(None, 100).await.unwrap();
-        assert_eq!(all.len(), 2);
-
-        let after_first = store
-            .read_stream(Some(EventPosition(1)), 100)
-            .await
-            .unwrap();
-        assert_eq!(after_first.len(), 1);
-    }
-
-    /// Full lifecycle integration test: session -> run -> task -> approval -> checkpoint -> mailbox.
-    /// Validates all projections are correct after a realistic event sequence.
-    #[tokio::test]
-    async fn full_lifecycle_projection_correctness() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-        let session_id = SessionId::new("sess_int");
-        let run_id = RunId::new("run_int");
-        let task_id = TaskId::new("task_int");
-        let approval_id = ApprovalId::new("approval_int");
-        let checkpoint_id_1 = CheckpointId::new("cp_int_1");
-        let checkpoint_id_2 = CheckpointId::new("cp_int_2");
-        let message_id = MailboxMessageId::new("msg_int");
-
-        // 1. Create session.
-        store
-            .append(&[make_envelope(RuntimeEvent::SessionCreated(
-                SessionCreated {
-                    project: project.clone(),
-                    session_id: session_id.clone(),
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 2. Create run in session.
-        store
-            .append(&[make_envelope(RuntimeEvent::RunCreated(RunCreated {
-                project: project.clone(),
-                session_id: session_id.clone(),
-                run_id: run_id.clone(),
-                parent_run_id: None,
-                agent_role_id: None,
-                prompt_release_id: None,
-            }))])
-            .await
-            .unwrap();
-
-        // 3. Start run.
-        store
-            .append(&[make_envelope(RuntimeEvent::RunStateChanged(
-                RunStateChanged {
-                    project: project.clone(),
-                    run_id: run_id.clone(),
-                    transition: StateTransition {
-                        from: Some(RunState::Pending),
-                        to: RunState::Running,
-                    },
-                    failure_class: None,
-                    pause_reason: None,
-                    resume_trigger: None,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 4. Create task.
-        store
-            .append(&[make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
-                project: project.clone(),
-                task_id: task_id.clone(),
-                parent_run_id: Some(run_id.clone()),
-                parent_task_id: None,
-                prompt_release_id: None,
-            }))])
-            .await
-            .unwrap();
-
-        // 5. Claim task lease.
-        store
-            .append(&[make_envelope(RuntimeEvent::TaskLeaseClaimed(
-                TaskLeaseClaimed {
-                    project: project.clone(),
-                    task_id: task_id.clone(),
-                    lease_owner: "worker-alpha".to_owned(),
-                    lease_token: 1,
-                    lease_expires_at_ms: 9999999999,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 6. Task starts running.
-        store
-            .append(&[make_envelope(RuntimeEvent::TaskStateChanged(
-                TaskStateChanged {
-                    project: project.clone(),
-                    task_id: task_id.clone(),
-                    transition: StateTransition {
-                        from: Some(TaskState::Leased),
-                        to: TaskState::Running,
-                    },
-                    failure_class: None,
-                    pause_reason: None,
-                    resume_trigger: None,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 7. Request approval.
-        store
-            .append(&[make_envelope(RuntimeEvent::ApprovalRequested(
-                ApprovalRequested {
-                    project: project.clone(),
-                    approval_id: approval_id.clone(),
-                    run_id: Some(run_id.clone()),
-                    task_id: Some(task_id.clone()),
-                    requirement: ApprovalRequirement::Required,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 8. Save checkpoint.
-        store
-            .append(&[make_envelope(RuntimeEvent::CheckpointRecorded(
-                CheckpointRecorded {
-                    project: project.clone(),
-                    run_id: run_id.clone(),
-                    checkpoint_id: checkpoint_id_1.clone(),
-                    disposition: CheckpointDisposition::Latest,
-                    data: None,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 9. Save second checkpoint (supersedes first).
-        store
-            .append(&[make_envelope(RuntimeEvent::CheckpointRecorded(
-                CheckpointRecorded {
-                    project: project.clone(),
-                    run_id: run_id.clone(),
-                    checkpoint_id: checkpoint_id_2.clone(),
-                    disposition: CheckpointDisposition::Latest,
-                    data: None,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 10. Resolve approval.
-        store
-            .append(&[make_envelope(RuntimeEvent::ApprovalResolved(
-                ApprovalResolved {
-                    project: project.clone(),
-                    approval_id: approval_id.clone(),
-                    decision: ApprovalDecision::Approved,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 11. Send mailbox message.
-        store
-            .append(&[make_envelope(RuntimeEvent::MailboxMessageAppended(
-                MailboxMessageAppended {
-                    project: project.clone(),
-                    message_id: message_id.clone(),
-                    run_id: Some(run_id.clone()),
-                    task_id: Some(task_id.clone()),
-                    content: String::new(),
-                    from_run_id: None,
-                    from_task_id: None,
-                    deliver_at_ms: 0,
-                    sender: None,
-                    recipient: None,
-                    body: None,
-                    sent_at: None,
-                    delivery_status: None,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 12. Complete task.
-        store
-            .append(&[make_envelope(RuntimeEvent::TaskStateChanged(
-                TaskStateChanged {
-                    project: project.clone(),
-                    task_id: task_id.clone(),
-                    transition: StateTransition {
-                        from: Some(TaskState::Running),
-                        to: TaskState::Completed,
-                    },
-                    failure_class: None,
-                    pause_reason: None,
-                    resume_trigger: None,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // 13. Complete run.
-        store
-            .append(&[make_envelope(RuntimeEvent::RunStateChanged(
-                RunStateChanged {
-                    project: project.clone(),
-                    run_id: run_id.clone(),
-                    transition: StateTransition {
-                        from: Some(RunState::Running),
-                        to: RunState::Completed,
-                    },
-                    failure_class: None,
-                    pause_reason: None,
-                    resume_trigger: None,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // --- Verify all projections ---
-
-        // Session: still open (derived from run state, not explicit close).
-        let session = SessionReadModel::get(&store, &session_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(session.state, SessionState::Open);
-
-        // Run: completed.
-        let run = RunReadModel::get(&store, &run_id).await.unwrap().unwrap();
-        assert_eq!(run.state, RunState::Completed);
-        assert!(run.state.is_terminal());
-        assert!(run.parent_run_id.is_none());
-
-        // Task: completed with lease info preserved.
-        let task = TaskReadModel::get(&store, &task_id).await.unwrap().unwrap();
-        assert_eq!(task.state, TaskState::Completed);
-        assert!(task.state.is_terminal());
-        assert_eq!(task.lease_owner.as_deref(), Some("worker-alpha"));
-        assert_eq!(task.parent_run_id.as_ref(), Some(&run_id));
-
-        // Approval: resolved as approved.
-        let approval = ApprovalReadModel::get(&store, &approval_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(approval.decision, Some(ApprovalDecision::Approved));
-        assert_eq!(approval.run_id.as_ref(), Some(&run_id));
-
-        // Checkpoint 1: superseded.
-        let cp1 = CheckpointReadModel::get(&store, &checkpoint_id_1)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(cp1.disposition, CheckpointDisposition::Superseded);
-
-        // Checkpoint 2: latest.
-        let cp2 = CheckpointReadModel::get(&store, &checkpoint_id_2)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(cp2.disposition, CheckpointDisposition::Latest);
-
-        // Latest checkpoint for run is cp2.
-        let latest = store.latest_for_run(&run_id).await.unwrap().unwrap();
-        assert_eq!(latest.checkpoint_id, checkpoint_id_2);
-
-        // Mailbox: message linked to run and task.
-        let msg = MailboxReadModel::get(&store, &message_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(msg.run_id.as_ref(), Some(&run_id));
-        assert_eq!(msg.task_id.as_ref(), Some(&task_id));
-
-        // No non-terminal runs remain.
-        assert!(!store.any_non_terminal(&session_id).await.unwrap());
-
-        // Event stream has all 13 events.
-        let all = store.read_stream(None, 100).await.unwrap();
-        assert_eq!(all.len(), 13);
-
-        // Entity-filtered read for run events.
-        let run_events = store
-            .read_by_entity(&EntityRef::Run(run_id.clone()), None, 100)
-            .await
-            .unwrap();
-        assert!(run_events.len() >= 3); // created + 2 state changes
-    }
-
-    /// Expired lease detection for recovery sweeps.
-    #[tokio::test]
-    async fn expired_lease_detection() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-
-        // Create two tasks with leases.
-        for (id, expires) in [("t1", 100u64), ("t2", 9999999999u64)] {
-            let task_id = TaskId::new(id);
-            store
-                .append(&[make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
-                    project: project.clone(),
-                    task_id: task_id.clone(),
-                    parent_run_id: None,
-                    parent_task_id: None,
-                    prompt_release_id: None,
-                }))])
-                .await
-                .unwrap();
-
-            store
-                .append(&[make_envelope(RuntimeEvent::TaskLeaseClaimed(
-                    TaskLeaseClaimed {
-                        project: project.clone(),
-                        task_id: task_id.clone(),
-                        lease_owner: "w".to_owned(),
-                        lease_token: 1,
-                        lease_expires_at_ms: expires,
-                    },
-                ))])
-                .await
-                .unwrap();
-
-            store
-                .append(&[make_envelope(RuntimeEvent::TaskStateChanged(
-                    TaskStateChanged {
-                        project: project.clone(),
-                        task_id,
-                        transition: StateTransition {
-                            from: Some(TaskState::Queued),
-                            to: TaskState::Leased,
-                        },
-                        failure_class: None,
-                        pause_reason: None,
-                        resume_trigger: None,
-                    },
-                ))])
-                .await
-                .unwrap();
-        }
-
-        // t1 expired (lease at 100, now is 500), t2 still valid.
-        let expired = store.list_expired_leases(500, 100).await.unwrap();
-        assert_eq!(expired.len(), 1);
-        assert_eq!(expired[0].task_id, TaskId::new("t1"));
-    }
-
-    #[tokio::test]
-    async fn signal_projection_and_read_model() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-        let signal_id = SignalId::new("sig_1");
-
-        store
-            .append(&[make_envelope(RuntimeEvent::SignalIngested(
-                SignalIngested {
-                    project: project.clone(),
-                    signal_id: signal_id.clone(),
-                    source: "webhook".to_owned(),
-                    payload: serde_json::json!({"key": "value"}),
-                    timestamp_ms: 1000,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // get returns the record with correct fields.
-        let record = SignalReadModel::get(&store, &signal_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(record.id, signal_id);
-        assert_eq!(record.project, project);
-        assert_eq!(record.source, "webhook");
-        assert_eq!(record.payload["key"], "value");
-        assert_eq!(record.timestamp_ms, 1000);
-
-        // list_by_project returns it.
-        let list = SignalReadModel::list_by_project(&store, &project, 10, 0)
-            .await
-            .unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].id, signal_id);
-
-        // list_by_project with a different project returns empty.
-        let other_project = ProjectKey::new("other_tenant", "other_ws", "other_proj");
-        let empty = SignalReadModel::list_by_project(&store, &other_project, 10, 0)
-            .await
-            .unwrap();
-        assert!(empty.is_empty());
-    }
-
-    #[tokio::test]
-    async fn signal_entity_ref_filtering() {
-        let store = InMemoryStore::new();
-        let project = test_project();
-        let signal_id = SignalId::new("sig_entity");
-
-        store
-            .append(&[make_envelope(RuntimeEvent::SignalIngested(
-                SignalIngested {
-                    project: project.clone(),
-                    signal_id: signal_id.clone(),
-                    source: "api".to_owned(),
-                    payload: serde_json::json!(null),
-                    timestamp_ms: 500,
-                },
-            ))])
-            .await
-            .unwrap();
-
-        // read_by_entity with matching Signal ref returns the event.
-        let events = store
-            .read_by_entity(&EntityRef::Signal(signal_id.clone()), None, 100)
-            .await
-            .unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0].envelope.payload,
-            RuntimeEvent::SignalIngested(e) if e.signal_id == signal_id
-        ));
-
-        // read_by_entity with a different signal ID returns empty.
-        let other = store
-            .read_by_entity(&EntityRef::Signal(SignalId::new("sig_other")), None, 100)
-            .await
-            .unwrap();
-        assert!(other.is_empty());
-    }
-
-    // ── Secondary event log (dual-write) ─────────────────────────────────────
-
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    /// Minimal in-memory secondary log that counts appended events.
-    struct CountingLog {
-        count: Arc<AtomicUsize>,
-        events: Arc<Mutex<Vec<EventEnvelope<RuntimeEvent>>>>,
-    }
-
-    impl CountingLog {
-        fn new() -> (Arc<Self>, Arc<AtomicUsize>) {
-            let count = Arc::new(AtomicUsize::new(0));
-            let log = Arc::new(CountingLog {
-                count: count.clone(),
-                events: Arc::new(Mutex::new(Vec::new())),
-            });
-            (log, count)
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl EventLog for CountingLog {
-        async fn append(
-            &self,
-            events: &[EventEnvelope<RuntimeEvent>],
-        ) -> Result<Vec<EventPosition>, crate::StoreError> {
-            self.count.fetch_add(events.len(), Ordering::SeqCst);
-            self.events.lock().unwrap().extend(events.iter().cloned());
-            Ok(events
-                .iter()
-                .enumerate()
-                .map(|(i, _)| EventPosition(i as u64))
-                .collect())
-        }
-
-        async fn read_stream(
-            &self,
-            _after: Option<EventPosition>,
-            _limit: usize,
-        ) -> Result<Vec<StoredEvent>, crate::StoreError> {
-            Ok(vec![])
-        }
-
-        async fn head_position(&self) -> Result<Option<EventPosition>, crate::StoreError> {
-            Ok(None)
-        }
-
-        async fn read_by_entity(
-            &self,
-            _entity: &EntityRef,
-            _after: Option<EventPosition>,
-            _limit: usize,
-        ) -> Result<Vec<StoredEvent>, crate::StoreError> {
-            Ok(vec![])
-        }
-
-        async fn find_by_causation_id(
-            &self,
-            _causation_id: &str,
-        ) -> Result<Option<EventPosition>, crate::StoreError> {
-            Ok(None)
-        }
-    }
-
-    /// Secondary log receives all events appended to the primary store.
-    #[tokio::test]
-    async fn secondary_log_receives_all_appends() {
-        let store = Arc::new(InMemoryStore::new());
-        let (counting_log, count) = CountingLog::new();
-        store.set_secondary_log(counting_log);
-
-        let project = test_project();
-
-        // Append a session created event.
-        store
-            .append(&[make_envelope(RuntimeEvent::SessionCreated(
-                SessionCreated {
-                    project: project.clone(),
-                    session_id: SessionId::new("sess_sec_1"),
-                },
-            ))])
-            .await
-            .unwrap();
-
-        assert_eq!(
-            count.load(Ordering::SeqCst),
-            1,
-            "secondary must receive 1 event"
-        );
-
-        // Append two more events in a single batch.
-        store
-            .append(&[
-                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
-                    project: project.clone(),
-                    session_id: SessionId::new("sess_sec_2"),
-                })),
-                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
-                    project: project.clone(),
-                    session_id: SessionId::new("sess_sec_3"),
-                })),
-            ])
-            .await
-            .unwrap();
-
-        assert_eq!(
-            count.load(Ordering::SeqCst),
-            3,
-            "secondary must receive all 3 events total"
-        );
-    }
-
-    /// Primary store is not affected when secondary log is absent.
-    #[tokio::test]
-    async fn no_secondary_log_works_normally() {
-        let store = InMemoryStore::new();
-        // No secondary log set — append must succeed normally.
-        let positions = store
-            .append(&[make_envelope(RuntimeEvent::SessionCreated(
-                SessionCreated {
-                    project: test_project(),
-                    session_id: SessionId::new("sess_no_sec"),
-                },
-            ))])
-            .await
-            .unwrap();
-
-        assert_eq!(positions.len(), 1);
-        let sessions = SessionReadModel::list_active(&store, 10).await.unwrap();
-        assert_eq!(sessions.len(), 1);
-    }
-
-    /// Primary write is NOT rolled back when secondary fails.
-    #[tokio::test]
-    async fn secondary_failure_does_not_roll_back_primary() {
-        struct FailingLog;
-
-        #[async_trait::async_trait]
-        impl EventLog for FailingLog {
-            async fn append(
-                &self,
-                _events: &[EventEnvelope<RuntimeEvent>],
-            ) -> Result<Vec<EventPosition>, crate::StoreError> {
-                Err(crate::StoreError::Internal("secondary down".to_owned()))
-            }
-            async fn read_stream(
-                &self,
-                _: Option<EventPosition>,
-                _: usize,
-            ) -> Result<Vec<StoredEvent>, crate::StoreError> {
-                Ok(vec![])
-            }
-            async fn head_position(&self) -> Result<Option<EventPosition>, crate::StoreError> {
-                Ok(None)
-            }
-            async fn read_by_entity(
-                &self,
-                _: &EntityRef,
-                _: Option<EventPosition>,
-                _: usize,
-            ) -> Result<Vec<StoredEvent>, crate::StoreError> {
-                Ok(vec![])
-            }
-            async fn find_by_causation_id(
-                &self,
-                _: &str,
-            ) -> Result<Option<EventPosition>, crate::StoreError> {
-                Ok(None)
-            }
-        }
-
-        let store = Arc::new(InMemoryStore::new());
-        store.set_secondary_log(Arc::new(FailingLog));
-
-        // The primary append must succeed despite secondary failure.
-        let positions = store
-            .append(&[make_envelope(RuntimeEvent::SessionCreated(
-                SessionCreated {
-                    project: test_project(),
-                    session_id: SessionId::new("sess_resilient"),
-                },
-            ))])
-            .await
-            .unwrap();
-
-        assert_eq!(
-            positions.len(),
-            1,
-            "primary must succeed even when secondary fails"
-        );
-        let sessions = SessionReadModel::list_active(store.as_ref(), 10)
-            .await
-            .unwrap();
-        assert_eq!(sessions.len(), 1, "primary projection must be updated");
-    }
-}
-
 #[async_trait]
 impl ApprovalPolicyReadModel for InMemoryStore {
     async fn get_policy(
@@ -5998,5 +5012,990 @@ impl InMemoryStore {
             state.events.push(stored);
         }
         count
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_project() -> ProjectKey {
+        ProjectKey::new("tenant", "workspace", "project")
+    }
+
+    fn make_envelope(event: RuntimeEvent) -> EventEnvelope<RuntimeEvent> {
+        EventEnvelope::for_runtime_event(EventId::new("evt_test"), EventSource::Runtime, event)
+    }
+
+    #[tokio::test]
+    async fn append_and_read_session_lifecycle() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let session_id = SessionId::new("sess_1");
+
+        // Create session
+        let positions = store
+            .append(&[make_envelope(RuntimeEvent::SessionCreated(
+                SessionCreated {
+                    project: project.clone(),
+                    session_id: session_id.clone(),
+                },
+            ))])
+            .await
+            .unwrap();
+
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0], EventPosition(1));
+
+        // Read projection
+        let session = SessionReadModel::get(&store, &session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.state, SessionState::Open);
+        assert_eq!(session.version, 1);
+
+        // Change state
+        store
+            .append(&[make_envelope(RuntimeEvent::SessionStateChanged(
+                SessionStateChanged {
+                    project: project.clone(),
+                    session_id: session_id.clone(),
+                    transition: StateTransition {
+                        from: Some(SessionState::Open),
+                        to: SessionState::Completed,
+                    },
+                },
+            ))])
+            .await
+            .unwrap();
+
+        let session = SessionReadModel::get(&store, &session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.state, SessionState::Completed);
+        assert_eq!(session.version, 2);
+    }
+
+    #[tokio::test]
+    async fn append_and_read_run_lifecycle() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let session_id = SessionId::new("sess_1");
+        let run_id = RunId::new("run_1");
+
+        store
+            .append(&[make_envelope(RuntimeEvent::RunCreated(RunCreated {
+                project: project.clone(),
+                session_id: session_id.clone(),
+                run_id: run_id.clone(),
+                parent_run_id: None,
+                agent_role_id: None,
+                prompt_release_id: None,
+            }))])
+            .await
+            .unwrap();
+
+        let run = RunReadModel::get(&store, &run_id).await.unwrap().unwrap();
+        assert_eq!(run.state, RunState::Pending);
+
+        // Advance to running then completed
+        store
+            .append(&[
+                make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+                    project: project.clone(),
+                    run_id: run_id.clone(),
+                    transition: StateTransition {
+                        from: Some(RunState::Pending),
+                        to: RunState::Running,
+                    },
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
+                })),
+                make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+                    project: project.clone(),
+                    run_id: run_id.clone(),
+                    transition: StateTransition {
+                        from: Some(RunState::Running),
+                        to: RunState::Completed,
+                    },
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
+                })),
+            ])
+            .await
+            .unwrap();
+
+        let run = RunReadModel::get(&store, &run_id).await.unwrap().unwrap();
+        assert_eq!(run.state, RunState::Completed);
+        assert_eq!(run.version, 3);
+    }
+
+    #[tokio::test]
+    async fn task_lifecycle_with_lease() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let task_id = TaskId::new("task_1");
+
+        store
+            .append(&[make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
+                project: project.clone(),
+                task_id: task_id.clone(),
+                parent_run_id: None,
+                parent_task_id: None,
+                prompt_release_id: None,
+            }))])
+            .await
+            .unwrap();
+
+        let task = TaskReadModel::get(&store, &task_id).await.unwrap().unwrap();
+        assert_eq!(task.state, TaskState::Queued);
+
+        // Claim lease via event (Worker 2 added TaskLeaseClaimed)
+        store
+            .append(&[
+                make_envelope(RuntimeEvent::TaskLeaseClaimed(TaskLeaseClaimed {
+                    project: project.clone(),
+                    task_id: task_id.clone(),
+                    lease_owner: "worker-a".to_owned(),
+                    lease_token: 1,
+                    lease_expires_at_ms: 9999999999,
+                })),
+                make_envelope(RuntimeEvent::TaskStateChanged(TaskStateChanged {
+                    project: project.clone(),
+                    task_id: task_id.clone(),
+                    transition: StateTransition {
+                        from: Some(TaskState::Queued),
+                        to: TaskState::Leased,
+                    },
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
+                })),
+            ])
+            .await
+            .unwrap();
+
+        let task = TaskReadModel::get(&store, &task_id).await.unwrap().unwrap();
+        assert_eq!(task.state, TaskState::Leased);
+        assert_eq!(task.lease_owner.as_deref(), Some("worker-a"));
+    }
+
+    #[tokio::test]
+    async fn checkpoint_supersedes_previous_latest() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let run_id = RunId::new("run_1");
+
+        store
+            .append(&[make_envelope(RuntimeEvent::CheckpointRecorded(
+                CheckpointRecorded {
+                    project: project.clone(),
+                    run_id: run_id.clone(),
+                    checkpoint_id: CheckpointId::new("cp_1"),
+                    disposition: CheckpointDisposition::Latest,
+                    data: None,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        store
+            .append(&[make_envelope(RuntimeEvent::CheckpointRecorded(
+                CheckpointRecorded {
+                    project: project.clone(),
+                    run_id: run_id.clone(),
+                    checkpoint_id: CheckpointId::new("cp_2"),
+                    disposition: CheckpointDisposition::Latest,
+                    data: None,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        let cp1 = CheckpointReadModel::get(&store, &CheckpointId::new("cp_1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cp1.disposition, CheckpointDisposition::Superseded);
+
+        let latest = store.latest_for_run(&run_id).await.unwrap().unwrap();
+        assert_eq!(latest.checkpoint_id, CheckpointId::new("cp_2"));
+    }
+
+    #[tokio::test]
+    async fn tool_invocation_projection_tracks_terminal_outcome() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let invocation_id = ToolInvocationId::new("tool_1");
+        let run_id = RunId::new("run_1");
+
+        store
+            .append(&[
+                make_envelope(RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
+                    project: project.clone(),
+                    invocation_id: invocation_id.clone(),
+                    session_id: Some(SessionId::new("sess_1")),
+                    run_id: Some(run_id.clone()),
+                    task_id: Some(TaskId::new("task_1")),
+                    target: ToolInvocationTarget::Builtin {
+                        tool_name: "fs.read".to_owned(),
+                    },
+                    execution_class: ExecutionClass::SupervisedProcess,
+                    prompt_release_id: None,
+                    requested_at_ms: 100,
+                    started_at_ms: 101,
+                })),
+                make_envelope(RuntimeEvent::ToolInvocationCompleted(
+                    ToolInvocationCompleted {
+                        project,
+                        invocation_id: invocation_id.clone(),
+                        task_id: Some(TaskId::new("task_1")),
+                        tool_name: "fs.read".to_owned(),
+                        finished_at_ms: 105,
+                        outcome: ToolInvocationOutcomeKind::Success,
+                    },
+                )),
+            ])
+            .await
+            .unwrap();
+
+        let record = ToolInvocationReadModel::get(&store, &invocation_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.state, ToolInvocationState::Completed);
+        assert_eq!(record.outcome, Some(ToolInvocationOutcomeKind::Success));
+        assert_eq!(record.finished_at_ms, Some(105));
+
+        let listed = ToolInvocationReadModel::list_by_run(&store, &run_id, 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].invocation_id, invocation_id);
+    }
+
+    #[tokio::test]
+    async fn tool_invocation_projection_preserves_canceled_state_and_orders_by_request_time() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let run_id = RunId::new("run_1");
+        let older_invocation = ToolInvocationId::new("tool_old");
+        let newer_invocation = ToolInvocationId::new("tool_new");
+
+        store
+            .append(&[
+                make_envelope(RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
+                    project: project.clone(),
+                    invocation_id: newer_invocation.clone(),
+                    session_id: Some(SessionId::new("sess_1")),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    target: ToolInvocationTarget::Builtin {
+                        tool_name: "shell.exec".to_owned(),
+                    },
+                    execution_class: ExecutionClass::SandboxedProcess,
+                    prompt_release_id: None,
+                    requested_at_ms: 200,
+                    started_at_ms: 201,
+                })),
+                make_envelope(RuntimeEvent::ToolInvocationFailed(ToolInvocationFailed {
+                    project: project.clone(),
+                    invocation_id: newer_invocation.clone(),
+                    task_id: None,
+                    tool_name: "shell.exec".to_owned(),
+                    finished_at_ms: 205,
+                    outcome: ToolInvocationOutcomeKind::Canceled,
+                    error_message: Some("canceled".to_owned()),
+                })),
+                make_envelope(RuntimeEvent::ToolInvocationStarted(ToolInvocationStarted {
+                    project,
+                    invocation_id: older_invocation.clone(),
+                    session_id: Some(SessionId::new("sess_1")),
+                    run_id: Some(run_id.clone()),
+                    task_id: None,
+                    target: ToolInvocationTarget::Builtin {
+                        tool_name: "fs.read".to_owned(),
+                    },
+                    execution_class: ExecutionClass::SupervisedProcess,
+                    prompt_release_id: None,
+                    requested_at_ms: 100,
+                    started_at_ms: 101,
+                })),
+            ])
+            .await
+            .unwrap();
+
+        let canceled = ToolInvocationReadModel::get(&store, &newer_invocation)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(canceled.state, ToolInvocationState::Canceled);
+        assert_eq!(canceled.outcome, Some(ToolInvocationOutcomeKind::Canceled));
+        assert_eq!(canceled.error_message.as_deref(), Some("canceled"));
+
+        let listed = ToolInvocationReadModel::list_by_run(&store, &run_id, 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].invocation_id, older_invocation);
+        assert_eq!(listed[1].invocation_id, newer_invocation);
+
+        let paged = ToolInvocationReadModel::list_by_run(&store, &run_id, 1, 1)
+            .await
+            .unwrap();
+        assert_eq!(paged.len(), 1);
+        assert_eq!(paged[0].invocation_id, newer_invocation);
+    }
+
+    #[tokio::test]
+    async fn event_stream_read() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+
+        store
+            .append(&[
+                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("s1"),
+                })),
+                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("s2"),
+                })),
+            ])
+            .await
+            .unwrap();
+
+        let all = store.read_stream(None, 100).await.unwrap();
+        assert_eq!(all.len(), 2);
+
+        let after_first = store
+            .read_stream(Some(EventPosition(1)), 100)
+            .await
+            .unwrap();
+        assert_eq!(after_first.len(), 1);
+    }
+
+    /// Full lifecycle integration test: session -> run -> task -> approval -> checkpoint -> mailbox.
+    /// Validates all projections are correct after a realistic event sequence.
+    #[tokio::test]
+    async fn full_lifecycle_projection_correctness() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let session_id = SessionId::new("sess_int");
+        let run_id = RunId::new("run_int");
+        let task_id = TaskId::new("task_int");
+        let approval_id = ApprovalId::new("approval_int");
+        let checkpoint_id_1 = CheckpointId::new("cp_int_1");
+        let checkpoint_id_2 = CheckpointId::new("cp_int_2");
+        let message_id = MailboxMessageId::new("msg_int");
+
+        // 1. Create session.
+        store
+            .append(&[make_envelope(RuntimeEvent::SessionCreated(
+                SessionCreated {
+                    project: project.clone(),
+                    session_id: session_id.clone(),
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 2. Create run in session.
+        store
+            .append(&[make_envelope(RuntimeEvent::RunCreated(RunCreated {
+                project: project.clone(),
+                session_id: session_id.clone(),
+                run_id: run_id.clone(),
+                parent_run_id: None,
+                agent_role_id: None,
+                prompt_release_id: None,
+            }))])
+            .await
+            .unwrap();
+
+        // 3. Start run.
+        store
+            .append(&[make_envelope(RuntimeEvent::RunStateChanged(
+                RunStateChanged {
+                    project: project.clone(),
+                    run_id: run_id.clone(),
+                    transition: StateTransition {
+                        from: Some(RunState::Pending),
+                        to: RunState::Running,
+                    },
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 4. Create task.
+        store
+            .append(&[make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
+                project: project.clone(),
+                task_id: task_id.clone(),
+                parent_run_id: Some(run_id.clone()),
+                parent_task_id: None,
+                prompt_release_id: None,
+            }))])
+            .await
+            .unwrap();
+
+        // 5. Claim task lease.
+        store
+            .append(&[make_envelope(RuntimeEvent::TaskLeaseClaimed(
+                TaskLeaseClaimed {
+                    project: project.clone(),
+                    task_id: task_id.clone(),
+                    lease_owner: "worker-alpha".to_owned(),
+                    lease_token: 1,
+                    lease_expires_at_ms: 9999999999,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 6. Task starts running.
+        store
+            .append(&[make_envelope(RuntimeEvent::TaskStateChanged(
+                TaskStateChanged {
+                    project: project.clone(),
+                    task_id: task_id.clone(),
+                    transition: StateTransition {
+                        from: Some(TaskState::Leased),
+                        to: TaskState::Running,
+                    },
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 7. Request approval.
+        store
+            .append(&[make_envelope(RuntimeEvent::ApprovalRequested(
+                ApprovalRequested {
+                    project: project.clone(),
+                    approval_id: approval_id.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: Some(task_id.clone()),
+                    requirement: ApprovalRequirement::Required,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 8. Save checkpoint.
+        store
+            .append(&[make_envelope(RuntimeEvent::CheckpointRecorded(
+                CheckpointRecorded {
+                    project: project.clone(),
+                    run_id: run_id.clone(),
+                    checkpoint_id: checkpoint_id_1.clone(),
+                    disposition: CheckpointDisposition::Latest,
+                    data: None,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 9. Save second checkpoint (supersedes first).
+        store
+            .append(&[make_envelope(RuntimeEvent::CheckpointRecorded(
+                CheckpointRecorded {
+                    project: project.clone(),
+                    run_id: run_id.clone(),
+                    checkpoint_id: checkpoint_id_2.clone(),
+                    disposition: CheckpointDisposition::Latest,
+                    data: None,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 10. Resolve approval.
+        store
+            .append(&[make_envelope(RuntimeEvent::ApprovalResolved(
+                ApprovalResolved {
+                    project: project.clone(),
+                    approval_id: approval_id.clone(),
+                    decision: ApprovalDecision::Approved,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 11. Send mailbox message.
+        store
+            .append(&[make_envelope(RuntimeEvent::MailboxMessageAppended(
+                MailboxMessageAppended {
+                    project: project.clone(),
+                    message_id: message_id.clone(),
+                    run_id: Some(run_id.clone()),
+                    task_id: Some(task_id.clone()),
+                    content: String::new(),
+                    from_run_id: None,
+                    from_task_id: None,
+                    deliver_at_ms: 0,
+                    sender: None,
+                    recipient: None,
+                    body: None,
+                    sent_at: None,
+                    delivery_status: None,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 12. Complete task.
+        store
+            .append(&[make_envelope(RuntimeEvent::TaskStateChanged(
+                TaskStateChanged {
+                    project: project.clone(),
+                    task_id: task_id.clone(),
+                    transition: StateTransition {
+                        from: Some(TaskState::Running),
+                        to: TaskState::Completed,
+                    },
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // 13. Complete run.
+        store
+            .append(&[make_envelope(RuntimeEvent::RunStateChanged(
+                RunStateChanged {
+                    project: project.clone(),
+                    run_id: run_id.clone(),
+                    transition: StateTransition {
+                        from: Some(RunState::Running),
+                        to: RunState::Completed,
+                    },
+                    failure_class: None,
+                    pause_reason: None,
+                    resume_trigger: None,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // --- Verify all projections ---
+
+        // Session: still open (derived from run state, not explicit close).
+        let session = SessionReadModel::get(&store, &session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.state, SessionState::Open);
+
+        // Run: completed.
+        let run = RunReadModel::get(&store, &run_id).await.unwrap().unwrap();
+        assert_eq!(run.state, RunState::Completed);
+        assert!(run.state.is_terminal());
+        assert!(run.parent_run_id.is_none());
+
+        // Task: completed with lease info preserved.
+        let task = TaskReadModel::get(&store, &task_id).await.unwrap().unwrap();
+        assert_eq!(task.state, TaskState::Completed);
+        assert!(task.state.is_terminal());
+        assert_eq!(task.lease_owner.as_deref(), Some("worker-alpha"));
+        assert_eq!(task.parent_run_id.as_ref(), Some(&run_id));
+
+        // Approval: resolved as approved.
+        let approval = ApprovalReadModel::get(&store, &approval_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(approval.decision, Some(ApprovalDecision::Approved));
+        assert_eq!(approval.run_id.as_ref(), Some(&run_id));
+
+        // Checkpoint 1: superseded.
+        let cp1 = CheckpointReadModel::get(&store, &checkpoint_id_1)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cp1.disposition, CheckpointDisposition::Superseded);
+
+        // Checkpoint 2: latest.
+        let cp2 = CheckpointReadModel::get(&store, &checkpoint_id_2)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cp2.disposition, CheckpointDisposition::Latest);
+
+        // Latest checkpoint for run is cp2.
+        let latest = store.latest_for_run(&run_id).await.unwrap().unwrap();
+        assert_eq!(latest.checkpoint_id, checkpoint_id_2);
+
+        // Mailbox: message linked to run and task.
+        let msg = MailboxReadModel::get(&store, &message_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(msg.run_id.as_ref(), Some(&run_id));
+        assert_eq!(msg.task_id.as_ref(), Some(&task_id));
+
+        // No non-terminal runs remain.
+        assert!(!store.any_non_terminal(&session_id).await.unwrap());
+
+        // Event stream has all 13 events.
+        let all = store.read_stream(None, 100).await.unwrap();
+        assert_eq!(all.len(), 13);
+
+        // Entity-filtered read for run events.
+        let run_events = store
+            .read_by_entity(&EntityRef::Run(run_id.clone()), None, 100)
+            .await
+            .unwrap();
+        assert!(run_events.len() >= 3); // created + 2 state changes
+    }
+
+    /// Expired lease detection for recovery sweeps.
+    #[tokio::test]
+    async fn expired_lease_detection() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+
+        // Create two tasks with leases.
+        for (id, expires) in [("t1", 100u64), ("t2", 9999999999u64)] {
+            let task_id = TaskId::new(id);
+            store
+                .append(&[make_envelope(RuntimeEvent::TaskCreated(TaskCreated {
+                    project: project.clone(),
+                    task_id: task_id.clone(),
+                    parent_run_id: None,
+                    parent_task_id: None,
+                    prompt_release_id: None,
+                }))])
+                .await
+                .unwrap();
+
+            store
+                .append(&[make_envelope(RuntimeEvent::TaskLeaseClaimed(
+                    TaskLeaseClaimed {
+                        project: project.clone(),
+                        task_id: task_id.clone(),
+                        lease_owner: "w".to_owned(),
+                        lease_token: 1,
+                        lease_expires_at_ms: expires,
+                    },
+                ))])
+                .await
+                .unwrap();
+
+            store
+                .append(&[make_envelope(RuntimeEvent::TaskStateChanged(
+                    TaskStateChanged {
+                        project: project.clone(),
+                        task_id,
+                        transition: StateTransition {
+                            from: Some(TaskState::Queued),
+                            to: TaskState::Leased,
+                        },
+                        failure_class: None,
+                        pause_reason: None,
+                        resume_trigger: None,
+                    },
+                ))])
+                .await
+                .unwrap();
+        }
+
+        // t1 expired (lease at 100, now is 500), t2 still valid.
+        let expired = store.list_expired_leases(500, 100).await.unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].task_id, TaskId::new("t1"));
+    }
+
+    #[tokio::test]
+    async fn signal_projection_and_read_model() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let signal_id = SignalId::new("sig_1");
+
+        store
+            .append(&[make_envelope(RuntimeEvent::SignalIngested(
+                SignalIngested {
+                    project: project.clone(),
+                    signal_id: signal_id.clone(),
+                    source: "webhook".to_owned(),
+                    payload: serde_json::json!({"key": "value"}),
+                    timestamp_ms: 1000,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // get returns the record with correct fields.
+        let record = SignalReadModel::get(&store, &signal_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.id, signal_id);
+        assert_eq!(record.project, project);
+        assert_eq!(record.source, "webhook");
+        assert_eq!(record.payload["key"], "value");
+        assert_eq!(record.timestamp_ms, 1000);
+
+        // list_by_project returns it.
+        let list = SignalReadModel::list_by_project(&store, &project, 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, signal_id);
+
+        // list_by_project with a different project returns empty.
+        let other_project = ProjectKey::new("other_tenant", "other_ws", "other_proj");
+        let empty = SignalReadModel::list_by_project(&store, &other_project, 10, 0)
+            .await
+            .unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[tokio::test]
+    async fn signal_entity_ref_filtering() {
+        let store = InMemoryStore::new();
+        let project = test_project();
+        let signal_id = SignalId::new("sig_entity");
+
+        store
+            .append(&[make_envelope(RuntimeEvent::SignalIngested(
+                SignalIngested {
+                    project: project.clone(),
+                    signal_id: signal_id.clone(),
+                    source: "api".to_owned(),
+                    payload: serde_json::json!(null),
+                    timestamp_ms: 500,
+                },
+            ))])
+            .await
+            .unwrap();
+
+        // read_by_entity with matching Signal ref returns the event.
+        let events = store
+            .read_by_entity(&EntityRef::Signal(signal_id.clone()), None, 100)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].envelope.payload,
+            RuntimeEvent::SignalIngested(e) if e.signal_id == signal_id
+        ));
+
+        // read_by_entity with a different signal ID returns empty.
+        let other = store
+            .read_by_entity(&EntityRef::Signal(SignalId::new("sig_other")), None, 100)
+            .await
+            .unwrap();
+        assert!(other.is_empty());
+    }
+
+    // ── Secondary event log (dual-write) ─────────────────────────────────────
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Minimal in-memory secondary log that counts appended events.
+    struct CountingLog {
+        count: Arc<AtomicUsize>,
+        events: Arc<Mutex<Vec<EventEnvelope<RuntimeEvent>>>>,
+    }
+
+    impl CountingLog {
+        fn new() -> (Arc<Self>, Arc<AtomicUsize>) {
+            let count = Arc::new(AtomicUsize::new(0));
+            let log = Arc::new(CountingLog {
+                count: count.clone(),
+                events: Arc::new(Mutex::new(Vec::new())),
+            });
+            (log, count)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl EventLog for CountingLog {
+        async fn append(
+            &self,
+            events: &[EventEnvelope<RuntimeEvent>],
+        ) -> Result<Vec<EventPosition>, crate::StoreError> {
+            self.count.fetch_add(events.len(), Ordering::SeqCst);
+            self.events.lock().unwrap().extend(events.iter().cloned());
+            Ok(events
+                .iter()
+                .enumerate()
+                .map(|(i, _)| EventPosition(i as u64))
+                .collect())
+        }
+
+        async fn read_stream(
+            &self,
+            _after: Option<EventPosition>,
+            _limit: usize,
+        ) -> Result<Vec<StoredEvent>, crate::StoreError> {
+            Ok(vec![])
+        }
+
+        async fn head_position(&self) -> Result<Option<EventPosition>, crate::StoreError> {
+            Ok(None)
+        }
+
+        async fn read_by_entity(
+            &self,
+            _entity: &EntityRef,
+            _after: Option<EventPosition>,
+            _limit: usize,
+        ) -> Result<Vec<StoredEvent>, crate::StoreError> {
+            Ok(vec![])
+        }
+
+        async fn find_by_causation_id(
+            &self,
+            _causation_id: &str,
+        ) -> Result<Option<EventPosition>, crate::StoreError> {
+            Ok(None)
+        }
+    }
+
+    /// Secondary log receives all events appended to the primary store.
+    #[tokio::test]
+    async fn secondary_log_receives_all_appends() {
+        let store = Arc::new(InMemoryStore::new());
+        let (counting_log, count) = CountingLog::new();
+        store.set_secondary_log(counting_log);
+
+        let project = test_project();
+
+        // Append a session created event.
+        store
+            .append(&[make_envelope(RuntimeEvent::SessionCreated(
+                SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("sess_sec_1"),
+                },
+            ))])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "secondary must receive 1 event"
+        );
+
+        // Append two more events in a single batch.
+        store
+            .append(&[
+                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("sess_sec_2"),
+                })),
+                make_envelope(RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("sess_sec_3"),
+                })),
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            3,
+            "secondary must receive all 3 events total"
+        );
+    }
+
+    /// Primary store is not affected when secondary log is absent.
+    #[tokio::test]
+    async fn no_secondary_log_works_normally() {
+        let store = InMemoryStore::new();
+        // No secondary log set — append must succeed normally.
+        let positions = store
+            .append(&[make_envelope(RuntimeEvent::SessionCreated(
+                SessionCreated {
+                    project: test_project(),
+                    session_id: SessionId::new("sess_no_sec"),
+                },
+            ))])
+            .await
+            .unwrap();
+
+        assert_eq!(positions.len(), 1);
+        let sessions = SessionReadModel::list_active(&store, 10).await.unwrap();
+        assert_eq!(sessions.len(), 1);
+    }
+
+    /// Primary write is NOT rolled back when secondary fails.
+    #[tokio::test]
+    async fn secondary_failure_does_not_roll_back_primary() {
+        struct FailingLog;
+
+        #[async_trait::async_trait]
+        impl EventLog for FailingLog {
+            async fn append(
+                &self,
+                _events: &[EventEnvelope<RuntimeEvent>],
+            ) -> Result<Vec<EventPosition>, crate::StoreError> {
+                Err(crate::StoreError::Internal("secondary down".to_owned()))
+            }
+            async fn read_stream(
+                &self,
+                _: Option<EventPosition>,
+                _: usize,
+            ) -> Result<Vec<StoredEvent>, crate::StoreError> {
+                Ok(vec![])
+            }
+            async fn head_position(&self) -> Result<Option<EventPosition>, crate::StoreError> {
+                Ok(None)
+            }
+            async fn read_by_entity(
+                &self,
+                _: &EntityRef,
+                _: Option<EventPosition>,
+                _: usize,
+            ) -> Result<Vec<StoredEvent>, crate::StoreError> {
+                Ok(vec![])
+            }
+            async fn find_by_causation_id(
+                &self,
+                _: &str,
+            ) -> Result<Option<EventPosition>, crate::StoreError> {
+                Ok(None)
+            }
+        }
+
+        let store = Arc::new(InMemoryStore::new());
+        store.set_secondary_log(Arc::new(FailingLog));
+
+        // The primary append must succeed despite secondary failure.
+        let positions = store
+            .append(&[make_envelope(RuntimeEvent::SessionCreated(
+                SessionCreated {
+                    project: test_project(),
+                    session_id: SessionId::new("sess_resilient"),
+                },
+            ))])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            positions.len(),
+            1,
+            "primary must succeed even when secondary fails"
+        );
+        let sessions = SessionReadModel::list_active(store.as_ref(), 10)
+            .await
+            .unwrap();
+        assert_eq!(sessions.len(), 1, "primary projection must be updated");
     }
 }

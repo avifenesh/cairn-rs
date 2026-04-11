@@ -154,7 +154,7 @@ async fn three_source_types_all_produce_chunks() {
     // All chunks carry a non-empty content hash.
     for chunk in &all_chunks {
         assert!(
-            chunk.content_hash.as_ref().map_or(false, |h| !h.is_empty()),
+            chunk.content_hash.as_ref().is_some_and(|h| !h.is_empty()),
             "every chunk must carry a non-empty content_hash"
         );
     }

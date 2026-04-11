@@ -4,8 +4,9 @@
 //!   1. Multi-document ingest
 //!   2. LexicalOnly query ranked by relevance
 //!   3. Metadata filter via tag restricts results
-//!   4a. Within-document dedup (duplicate paragraph stored once)
-//!   4b. Cross-submit dedup (same content, different doc ID)
+//!   4. Dedup:
+//!      - Within-document dedup (duplicate paragraph stored once)
+//!      - Cross-submit dedup (same content, different doc ID)
 //!   5. Source quality tracking via chunk counts after ingestion
 
 use std::sync::Arc;

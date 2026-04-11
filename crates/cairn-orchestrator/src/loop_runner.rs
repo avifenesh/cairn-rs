@@ -689,8 +689,8 @@ fn now_millis() -> u64 {
 mod tests {
     use super::*;
     use crate::context::{
-        ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput, LoopConfig,
-        LoopSignal, OrchestrationContext,
+        ActionResult, ActionStatus, CompactionConfig, DecideOutput, ExecuteOutcome, GatherOutput,
+        LoopConfig, LoopSignal, OrchestrationContext,
     };
     use crate::error::OrchestratorError;
     use async_trait::async_trait;
@@ -1407,12 +1407,17 @@ mod tests {
     #[tokio::test]
     async fn compaction_triggers_when_history_exceeds_threshold() {
         // Build a loop with compaction enabled and low thresholds for testing.
-        let mut config = LoopConfig::default();
-        config.max_iterations = 1;
-        config.compaction.enabled = true;
-        config.compaction.min_steps = 3;
-        config.compaction.keep_last = 2;
-        config.compaction.threshold_pct = 1; // very low so it always triggers
+        let config = LoopConfig {
+            max_iterations: 1,
+            compaction: CompactionConfig {
+                enabled: true,
+                min_steps: 3,
+                keep_last: 2,
+                threshold_pct: 1, // very low so it always triggers
+                ..CompactionConfig::default()
+            },
+            ..LoopConfig::default()
+        };
 
         // Pre-populate step_history with enough steps.
         // We can't directly set step_history in the loop, so instead we test

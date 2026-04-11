@@ -309,6 +309,115 @@ where
     }
 }
 
+// ── Additional stubs for cairn-app ────────────────────────────────────────
+
+impl<S> RunServiceImpl<S>
+where
+    S: cairn_store::EventLog
+        + cairn_store::projections::RunReadModel
+        + cairn_store::projections::SessionReadModel
+        + 'static,
+{
+    /// List child runs for a parent run.
+    pub async fn list_child_runs(
+        &self,
+        parent_run_id: &cairn_domain::RunId,
+        limit: usize,
+    ) -> Result<Vec<cairn_store::projections::RunRecord>, crate::error::RuntimeError> {
+        // Scan event log for RunCreated events that reference this parent_run_id,
+        // then fetch the current record for each child run found.
+        let events = cairn_store::EventLog::read_stream(self.store.as_ref(), None, 10_000).await?;
+        let child_run_ids: Vec<cairn_domain::RunId> = events
+            .into_iter()
+            .filter_map(|stored| {
+                if let cairn_domain::RuntimeEvent::RunCreated(e) = stored.envelope.payload {
+                    if e.parent_run_id.as_ref() == Some(parent_run_id) {
+                        return Some(e.run_id);
+                    }
+                }
+                None
+            })
+            .take(limit)
+            .collect();
+
+        let mut records = Vec::new();
+        for run_id in child_run_ids {
+            if let Some(record) =
+                cairn_store::projections::RunReadModel::get(self.store.as_ref(), &run_id).await?
+            {
+                records.push(record);
+            }
+        }
+        Ok(records)
+    }
+
+    /// Spawn a subagent run linked to a parent.
+    pub async fn spawn_subagent(
+        &self,
+        project: &cairn_domain::ProjectKey,
+        parent_run_id: cairn_domain::RunId,
+        session_id: &cairn_domain::SessionId,
+        child_run_id: Option<cairn_domain::RunId>,
+    ) -> Result<cairn_store::projections::RunRecord, crate::error::RuntimeError> {
+        let child_run_id = child_run_id.unwrap_or_else(|| {
+            cairn_domain::RunId::new(format!("subagent_{}", parent_run_id.as_str()))
+        });
+        let event = super::event_helpers::make_envelope(cairn_domain::RuntimeEvent::RunCreated(
+            cairn_domain::RunCreated {
+                project: project.clone(),
+                session_id: session_id.clone(),
+                run_id: child_run_id.clone(),
+                parent_run_id: Some(parent_run_id),
+                prompt_release_id: None,
+                agent_role_id: None,
+            },
+        ));
+        self.store.append(&[event]).await?;
+        cairn_store::projections::RunReadModel::get(self.store.as_ref(), &child_run_id)
+            .await?
+            .ok_or_else(|| {
+                crate::error::RuntimeError::Internal("subagent run not found after create".into())
+            })
+    }
+
+    /// Set a checkpoint strategy for a run.
+    ///
+    /// Emits a `CheckpointStrategySet` event. The `strategy` string describes
+    /// the trigger kind: "periodic", "on_tool_call", or "manual".
+    ///
+    /// Strategies containing "auto" or "on_task_complete" enable
+    /// `trigger_on_task_complete`, which creates a checkpoint automatically
+    /// when any task in the run completes.
+    pub async fn set_checkpoint_strategy(
+        &self,
+        run_id: &cairn_domain::RunId,
+        strategy: String,
+    ) -> Result<(), crate::error::RuntimeError> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        let trigger_on_task_complete =
+            strategy.contains("auto") || strategy.contains("on_task_complete");
+
+        let event =
+            super::event_helpers::make_envelope(cairn_domain::RuntimeEvent::CheckpointStrategySet(
+                cairn_domain::CheckpointStrategySet {
+                    strategy_id: format!("strat_{}_{}", run_id.as_str(), now_ms),
+                    description: strategy,
+                    set_at_ms: now_ms,
+                    run_id: Some(run_id.clone()),
+                    interval_ms: 0,
+                    max_checkpoints: 0,
+                    trigger_on_task_complete,
+                },
+            ));
+
+        self.store.append(&[event]).await?;
+        Ok(())
+    }
+}
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -468,115 +577,5 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-    }
-}
-
-// ── Additional stubs for cairn-app ────────────────────────────────────────
-
-impl<S> RunServiceImpl<S>
-where
-    S: cairn_store::EventLog
-        + cairn_store::projections::RunReadModel
-        + cairn_store::projections::SessionReadModel
-        + 'static,
-{
-    /// List child runs for a parent run.
-    pub async fn list_child_runs(
-        &self,
-        parent_run_id: &cairn_domain::RunId,
-        limit: usize,
-    ) -> Result<Vec<cairn_store::projections::RunRecord>, crate::error::RuntimeError> {
-        // Scan event log for RunCreated events that reference this parent_run_id,
-        // then fetch the current record for each child run found.
-        let events = cairn_store::EventLog::read_stream(self.store.as_ref(), None, 10_000).await?;
-        let child_run_ids: Vec<cairn_domain::RunId> = events
-            .into_iter()
-            .filter_map(|stored| {
-                if let cairn_domain::RuntimeEvent::RunCreated(e) = stored.envelope.payload {
-                    if e.parent_run_id.as_ref() == Some(parent_run_id) {
-                        return Some(e.run_id);
-                    }
-                }
-                None
-            })
-            .take(limit)
-            .collect();
-
-        let mut records = Vec::new();
-        for run_id in child_run_ids {
-            if let Some(record) =
-                cairn_store::projections::RunReadModel::get(self.store.as_ref(), &run_id).await?
-            {
-                records.push(record);
-            }
-        }
-        Ok(records)
-    }
-
-    /// Spawn a subagent run linked to a parent.
-    pub async fn spawn_subagent(
-        &self,
-        project: &cairn_domain::ProjectKey,
-        parent_run_id: cairn_domain::RunId,
-        session_id: &cairn_domain::SessionId,
-        child_run_id: Option<cairn_domain::RunId>,
-    ) -> Result<cairn_store::projections::RunRecord, crate::error::RuntimeError> {
-        let child_run_id = child_run_id.unwrap_or_else(|| {
-            cairn_domain::RunId::new(format!("subagent_{}", parent_run_id.as_str()))
-        });
-        let event = super::event_helpers::make_envelope(cairn_domain::RuntimeEvent::RunCreated(
-            cairn_domain::RunCreated {
-                project: project.clone(),
-                session_id: session_id.clone(),
-                run_id: child_run_id.clone(),
-                parent_run_id: Some(parent_run_id),
-                prompt_release_id: None,
-                agent_role_id: None,
-            },
-        ));
-        self.store.append(&[event]).await?;
-        cairn_store::projections::RunReadModel::get(self.store.as_ref(), &child_run_id)
-            .await?
-            .ok_or_else(|| {
-                crate::error::RuntimeError::Internal("subagent run not found after create".into())
-            })
-    }
-
-    /// Set a checkpoint strategy for a run.
-    ///
-    /// Emits a `CheckpointStrategySet` event. The `strategy` string describes
-    /// the trigger kind: "periodic", "on_tool_call", or "manual".
-    ///
-    /// Strategies containing "auto" or "on_task_complete" enable
-    /// `trigger_on_task_complete`, which creates a checkpoint automatically
-    /// when any task in the run completes.
-    pub async fn set_checkpoint_strategy(
-        &self,
-        run_id: &cairn_domain::RunId,
-        strategy: String,
-    ) -> Result<(), crate::error::RuntimeError> {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
-        let trigger_on_task_complete =
-            strategy.contains("auto") || strategy.contains("on_task_complete");
-
-        let event =
-            super::event_helpers::make_envelope(cairn_domain::RuntimeEvent::CheckpointStrategySet(
-                cairn_domain::CheckpointStrategySet {
-                    strategy_id: format!("strat_{}_{}", run_id.as_str(), now_ms),
-                    description: strategy,
-                    set_at_ms: now_ms,
-                    run_id: Some(run_id.clone()),
-                    interval_ms: 0,
-                    max_checkpoints: 0,
-                    trigger_on_task_complete,
-                },
-            ));
-
-        self.store.append(&[event]).await?;
-        Ok(())
     }
 }

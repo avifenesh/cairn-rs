@@ -145,7 +145,7 @@ async fn deep_search_with_max_hops_2_performs_at_least_one_hop() {
         .await
         .unwrap();
 
-    assert!(response.hops.len() >= 1, "must perform at least 1 hop");
+    assert!(!response.hops.is_empty(), "must perform at least 1 hop");
     assert_eq!(
         response.hops.len(),
         2,

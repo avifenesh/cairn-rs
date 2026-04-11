@@ -17,7 +17,7 @@ use cairn_domain::{
 };
 use cairn_store::{
     sqlite::{SqliteAdapter, SqliteEventLog},
-    EntityRef, EventLog, EventPosition,
+    EntityRef, EventLog,
 };
 
 // ── Test harness ──────────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ async fn append_single_event_round_trips() {
     let log = open().await;
     let envelope = session_envelope("evt_rt_1", "sess_rt_1");
 
-    let positions = log.append(&[envelope.clone()]).await.unwrap();
+    let positions = log.append(std::slice::from_ref(&envelope)).await.unwrap();
     assert_eq!(positions.len(), 1);
     assert!(
         positions[0].0 >= 1,
@@ -138,13 +138,10 @@ async fn read_stream_returns_all_events_when_after_is_none() {
 async fn read_stream_respects_after_cursor() {
     let log = open().await;
 
-    let mut last_pos = EventPosition(0);
     for i in 0..5u32 {
-        let pos = log
-            .append(&[session_envelope(&format!("e{i}"), &format!("s{i}"))])
+        log.append(&[session_envelope(&format!("e{i}"), &format!("s{i}"))])
             .await
             .unwrap();
-        last_pos = pos[0];
     }
 
     // Positions start at 1; after=pos1 means we skip position 1.
@@ -456,7 +453,7 @@ async fn read_stream_returns_events_in_position_order() {
 async fn event_source_variants_survive_sqlite_round_trip() {
     let log = open().await;
 
-    let sources = vec![
+    let sources = [
         EventSource::Runtime,
         EventSource::Scheduler,
         EventSource::System,

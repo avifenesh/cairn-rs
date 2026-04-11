@@ -117,7 +117,6 @@ mod tests {
     use std::sync::Arc;
 
     use cairn_domain::*;
-    use cairn_store::projections::CheckpointReadModel;
     use cairn_store::InMemoryStore;
 
     use crate::checkpoints::CheckpointService;

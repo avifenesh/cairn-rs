@@ -16,8 +16,7 @@ use cairn_domain::{
     RunId, RuntimeEvent, SessionId, TaskId,
 };
 use cairn_runtime::{
-    MailboxService, MailboxServiceImpl, RunService, RunServiceImpl, SessionService,
-    SessionServiceImpl,
+    MailboxService, MailboxServiceImpl, RunServiceImpl, SessionService, SessionServiceImpl,
 };
 use cairn_store::projections::MailboxReadModel;
 use cairn_store::{EventLog, InMemoryStore};

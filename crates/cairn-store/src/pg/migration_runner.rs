@@ -226,74 +226,6 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
     statements
 }
 
-#[cfg(test)]
-mod tests {
-    use super::split_sql_statements;
-
-    #[test]
-    fn simple_statements_are_split() {
-        let sql = "CREATE TABLE a (id INT); CREATE TABLE b (id INT);";
-        let stmts = split_sql_statements(sql);
-        assert_eq!(stmts.len(), 2);
-        assert!(stmts[0].starts_with("CREATE TABLE a"));
-        assert!(stmts[1].starts_with("CREATE TABLE b"));
-    }
-
-    #[test]
-    fn dollar_quoted_function_is_not_split() {
-        let sql = r#"
-CREATE OR REPLACE FUNCTION tsv_trigger() RETURNS trigger AS $$
-BEGIN
-    NEW.tsv := to_tsvector('english', NEW.text);
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg BEFORE INSERT ON chunks FOR EACH ROW EXECUTE FUNCTION tsv_trigger();
-"#;
-        let stmts = split_sql_statements(sql);
-        // Should be exactly 2: the function and the trigger.
-        assert_eq!(stmts.len(), 2, "got: {stmts:?}");
-        assert!(
-            stmts[0].contains("LANGUAGE plpgsql"),
-            "first stmt: {}",
-            stmts[0]
-        );
-        assert!(
-            stmts[1].contains("CREATE TRIGGER"),
-            "second stmt: {}",
-            stmts[1]
-        );
-    }
-
-    #[test]
-    fn single_line_comments_are_handled() {
-        let sql = "-- comment\nCREATE TABLE a (id INT); -- trailing\nCREATE TABLE b (id INT);";
-        let stmts = split_sql_statements(sql);
-        assert_eq!(stmts.len(), 2);
-    }
-
-    #[test]
-    fn empty_input_returns_empty() {
-        assert!(split_sql_statements("").is_empty());
-        assert!(split_sql_statements("   -- just a comment\n   ").is_empty());
-    }
-
-    #[test]
-    fn v014_migration_splits_into_four_statements() {
-        // The actual V014 migration content should split into exactly 4 statements:
-        // ALTER TABLE, CREATE INDEX, CREATE FUNCTION, CREATE TRIGGER.
-        let sql = include_str!("../../migrations/V014__add_chunks_fts.sql");
-        let stmts = split_sql_statements(sql);
-        assert_eq!(
-            stmts.len(),
-            4,
-            "expected 4 statements, got {}: {stmts:?}",
-            stmts.len()
-        );
-    }
-}
-
 impl PgMigrationRunner {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -368,10 +300,10 @@ impl PgMigrationRunner {
             // Execute the migration SQL statement by statement.
             // Uses a dollar-quote-aware splitter so that PL/pgSQL function
             // bodies like:
-            //   CREATE OR REPLACE FUNCTION … AS $$
-            //   BEGIN … ; … END;
+            //   CREATE OR REPLACE FUNCTION ... AS $$
+            //   BEGIN ... ; ... END;
             //   $$ LANGUAGE plpgsql;
-            // are not incorrectly broken at the semicolons inside $$…$$.
+            // are not incorrectly broken at the semicolons inside $$...$$.
             for statement in split_sql_statements(sql) {
                 sqlx::query(&statement)
                     .execute(&mut *tx)
@@ -402,5 +334,73 @@ impl PgMigrationRunner {
             .map_err(|e| StoreError::Migration(e.to_string()))?;
 
         Ok(results)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_sql_statements;
+
+    #[test]
+    fn simple_statements_are_split() {
+        let sql = "CREATE TABLE a (id INT); CREATE TABLE b (id INT);";
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].starts_with("CREATE TABLE a"));
+        assert!(stmts[1].starts_with("CREATE TABLE b"));
+    }
+
+    #[test]
+    fn dollar_quoted_function_is_not_split() {
+        let sql = r#"
+CREATE OR REPLACE FUNCTION tsv_trigger() RETURNS trigger AS $$
+BEGIN
+    NEW.tsv := to_tsvector('english', NEW.text);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg BEFORE INSERT ON chunks FOR EACH ROW EXECUTE FUNCTION tsv_trigger();
+"#;
+        let stmts = split_sql_statements(sql);
+        // Should be exactly 2: the function and the trigger.
+        assert_eq!(stmts.len(), 2, "got: {stmts:?}");
+        assert!(
+            stmts[0].contains("LANGUAGE plpgsql"),
+            "first stmt: {}",
+            stmts[0]
+        );
+        assert!(
+            stmts[1].contains("CREATE TRIGGER"),
+            "second stmt: {}",
+            stmts[1]
+        );
+    }
+
+    #[test]
+    fn single_line_comments_are_handled() {
+        let sql = "-- comment\nCREATE TABLE a (id INT); -- trailing\nCREATE TABLE b (id INT);";
+        let stmts = split_sql_statements(sql);
+        assert_eq!(stmts.len(), 2);
+    }
+
+    #[test]
+    fn empty_input_returns_empty() {
+        assert!(split_sql_statements("").is_empty());
+        assert!(split_sql_statements("   -- just a comment\n   ").is_empty());
+    }
+
+    #[test]
+    fn v014_migration_splits_into_four_statements() {
+        // The actual V014 migration content should split into exactly 4 statements:
+        // ALTER TABLE, CREATE INDEX, CREATE FUNCTION, CREATE TRIGGER.
+        let sql = include_str!("../../migrations/V014__add_chunks_fts.sql");
+        let stmts = split_sql_statements(sql);
+        assert_eq!(
+            stmts.len(),
+            4,
+            "expected 4 statements, got {}: {stmts:?}",
+            stmts.len()
+        );
     }
 }

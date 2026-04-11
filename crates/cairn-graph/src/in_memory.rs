@@ -680,6 +680,61 @@ fn bfs_shortest_path(
     None
 }
 
+#[async_trait::async_trait]
+impl GraphQueryService for std::sync::Arc<InMemoryGraphStore> {
+    async fn query(&self, query: GraphQuery) -> Result<Subgraph, GraphQueryError> {
+        GraphQueryService::query(self.as_ref(), query).await
+    }
+
+    async fn neighbors(
+        &self,
+        node_id: &str,
+        edge_filter: Option<crate::projections::EdgeKind>,
+        direction: crate::queries::TraversalDirection,
+        limit: usize,
+    ) -> Result<Vec<(crate::projections::GraphEdge, crate::projections::GraphNode)>, GraphQueryError>
+    {
+        GraphQueryService::neighbors(self.as_ref(), node_id, edge_filter, direction, limit).await
+    }
+
+    async fn find_edges_by_source(
+        &self,
+        source_node_id: &str,
+        edge_filter: Option<crate::projections::EdgeKind>,
+        limit: usize,
+    ) -> Result<Vec<crate::projections::GraphEdge>, GraphQueryError> {
+        GraphQueryService::find_edges_by_source(self.as_ref(), source_node_id, edge_filter, limit)
+            .await
+    }
+
+    async fn find_edges_by_target(
+        &self,
+        target_node_id: &str,
+        edge_filter: Option<crate::projections::EdgeKind>,
+        limit: usize,
+    ) -> Result<Vec<crate::projections::GraphEdge>, GraphQueryError> {
+        GraphQueryService::find_edges_by_target(self.as_ref(), target_node_id, edge_filter, limit)
+            .await
+    }
+
+    async fn shortest_path(
+        &self,
+        from_node_id: &str,
+        to_node_id: &str,
+        edge_filter: Option<crate::projections::EdgeKind>,
+        max_depth: u32,
+    ) -> Result<Option<Subgraph>, GraphQueryError> {
+        GraphQueryService::shortest_path(
+            self.as_ref(),
+            from_node_id,
+            to_node_id,
+            edge_filter,
+            max_depth,
+        )
+        .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1267,60 +1322,5 @@ mod tests {
             3,
             "cycle detection should prevent infinite traversal"
         );
-    }
-}
-
-#[async_trait::async_trait]
-impl GraphQueryService for std::sync::Arc<InMemoryGraphStore> {
-    async fn query(&self, query: GraphQuery) -> Result<Subgraph, GraphQueryError> {
-        GraphQueryService::query(self.as_ref(), query).await
-    }
-
-    async fn neighbors(
-        &self,
-        node_id: &str,
-        edge_filter: Option<crate::projections::EdgeKind>,
-        direction: crate::queries::TraversalDirection,
-        limit: usize,
-    ) -> Result<Vec<(crate::projections::GraphEdge, crate::projections::GraphNode)>, GraphQueryError>
-    {
-        GraphQueryService::neighbors(self.as_ref(), node_id, edge_filter, direction, limit).await
-    }
-
-    async fn find_edges_by_source(
-        &self,
-        source_node_id: &str,
-        edge_filter: Option<crate::projections::EdgeKind>,
-        limit: usize,
-    ) -> Result<Vec<crate::projections::GraphEdge>, GraphQueryError> {
-        GraphQueryService::find_edges_by_source(self.as_ref(), source_node_id, edge_filter, limit)
-            .await
-    }
-
-    async fn find_edges_by_target(
-        &self,
-        target_node_id: &str,
-        edge_filter: Option<crate::projections::EdgeKind>,
-        limit: usize,
-    ) -> Result<Vec<crate::projections::GraphEdge>, GraphQueryError> {
-        GraphQueryService::find_edges_by_target(self.as_ref(), target_node_id, edge_filter, limit)
-            .await
-    }
-
-    async fn shortest_path(
-        &self,
-        from_node_id: &str,
-        to_node_id: &str,
-        edge_filter: Option<crate::projections::EdgeKind>,
-        max_depth: u32,
-    ) -> Result<Option<Subgraph>, GraphQueryError> {
-        GraphQueryService::shortest_path(
-            self.as_ref(),
-            from_node_id,
-            to_node_id,
-            edge_filter,
-            max_depth,
-        )
-        .await
     }
 }

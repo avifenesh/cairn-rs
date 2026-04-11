@@ -49,6 +49,7 @@ fn now_ms() -> u64 {
 }
 
 /// Build a ProviderCallCompleted event with all audit fields.
+#[allow(clippy::too_many_arguments)]
 fn completed_call(
     evt_id: &str,
     call_id: &str,

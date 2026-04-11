@@ -956,7 +956,7 @@ mod tests {
         assert_eq!(status, Some(IngestStatus::Completed));
 
         let chunks = pipeline.store.chunks.lock().unwrap();
-        assert!(chunks.len() >= 1);
+        assert!(!chunks.is_empty());
         assert!(chunks[0].text.contains("Hello"));
     }
 

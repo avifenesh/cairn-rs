@@ -200,7 +200,7 @@ async fn stored_event_fields_populated() {
     let pa = project_a();
 
     let envelope = session_event("evt_fields", EventSource::Runtime, &pa, "sess_fields");
-    store.append(&[envelope.clone()]).await.unwrap();
+    store.append(std::slice::from_ref(&envelope)).await.unwrap();
 
     let events = store.read_stream(None, 10).await.unwrap();
     assert_eq!(events.len(), 1);
@@ -287,7 +287,7 @@ async fn all_event_source_variants_survive_round_trip() {
     let store = InMemoryStore::new();
     let pa = project_a();
 
-    let sources = vec![
+    let sources = [
         EventSource::Runtime,
         EventSource::Scheduler,
         EventSource::System,

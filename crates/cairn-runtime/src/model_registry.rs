@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn model_registry_with_bundled_loads_all_models() {
         let reg = ModelRegistry::with_bundled().expect("bundled TOML must parse");
-        assert!(reg.len() > 0, "bundled catalog must not be empty");
+        assert!(!reg.is_empty(), "bundled catalog must not be empty");
     }
 
     #[test]

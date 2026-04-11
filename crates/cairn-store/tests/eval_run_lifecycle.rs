@@ -186,7 +186,7 @@ async fn eval_run_failure_records_error_message() {
     assert!(
         rec.error_message
             .as_ref()
-            .map_or(false, |e| e.contains("timed out")),
+            .is_some_and(|e| e.contains("timed out")),
         "error_message must contain the failure reason; got: {:?}",
         rec.error_message
     );

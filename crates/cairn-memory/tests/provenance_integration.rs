@@ -21,7 +21,8 @@ use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
 
 /// Shared in-memory graph for test.
-struct TestGraph(Arc<Mutex<(HashMap<String, GraphNode>, Vec<GraphEdge>)>>);
+type NodeMap = (HashMap<String, GraphNode>, Vec<GraphEdge>);
+struct TestGraph(Arc<Mutex<NodeMap>>);
 
 impl TestGraph {
     fn new() -> Self {
