@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Trash2, XCircle } from "lucide-react";
 import { DataTable } from "../components/DataTable";
-import { StatCard } from "../components/StatCard";
+import { StatCard as SummaryStatCard } from "../components/StatCard";
 import { CopyButton } from "../components/CopyButton";
 import { HelpTooltip } from "../components/HelpTooltip";
 import { ErrorFallback } from "../components/ErrorFallback";
@@ -143,10 +143,10 @@ export function DecisionsPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total Decisions" value={decisions.length} />
-        <StatCard label="Allowed" value={allowed} variant="success" />
-        <StatCard label="Denied" value={denied} variant="danger" />
-        <StatCard label="Cached Rules" value={cacheEntries.length} variant="warning" />
+        <SummaryStatCard label="Total Decisions" value={decisions.length} />
+        <SummaryStatCard label="Allowed" value={allowed} variant="success" />
+        <SummaryStatCard label="Denied" value={denied} variant="danger" />
+        <SummaryStatCard label="Cached Rules" value={cacheEntries.length} variant="warning" />
       </div>
 
       {/* Tab bar */}
