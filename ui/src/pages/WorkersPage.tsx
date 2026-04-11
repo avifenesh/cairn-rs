@@ -13,6 +13,7 @@ import {
   Activity, CheckCircle2, Clock, AlertTriangle, Cpu,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { StatCard } from "../components/StatCard";
 import { ErrorFallback } from "../components/ErrorFallback";
 import { defaultApi } from "../lib/api";
 import type { TaskRecord, TaskState } from "../lib/types";
@@ -120,38 +121,6 @@ function buildWorkerSummaries(tasks: TaskRecord[]): WorkerSummary[] {
       if (a.status !== b.status) return a.status === "active" ? -1 : 1;
       return b.last_seen_ms - a.last_seen_ms;
     });
-}
-
-// ── Stat card ─────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub, color = "indigo" }: {
-  label: string;
-  value: string | number;
-  sub?: string;
-  color?: "indigo" | "emerald" | "zinc" | "amber";
-}) {
-  const border = {
-    indigo:  "border-l-indigo-500",
-    emerald: "border-l-emerald-500",
-    zinc:    "border-l-zinc-600",
-    amber:   "border-l-amber-500",
-  }[color];
-  const valueColor = {
-    indigo:  "text-indigo-400",
-    emerald: "text-emerald-400",
-    zinc:    "text-gray-700 dark:text-zinc-300",
-    amber:   "text-amber-400",
-  }[color];
-
-  return (
-    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4", border)}>
-      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2 truncate">
-        {label}
-      </p>
-      <p className={clsx("text-xl font-semibold tabular-nums leading-none", valueColor)}>{value}</p>
-      {sub && <p className="mt-1.5 text-[11px] text-gray-400 dark:text-zinc-600 truncate">{sub}</p>}
-    </div>
-  );
 }
 
 // ── Task state badge (inline) ─────────────────────────────────────────────────
@@ -448,26 +417,25 @@ export function WorkersPage() {
           <StatCard
             label="Total Workers"
             value={totalWorkers}
-            sub="seen via task leases"
-            color="indigo"
+            description="seen via task leases"
+            variant="info"
           />
           <StatCard
             label="Active"
             value={activeWorkers}
-            sub={activeWorkers > 0 ? "holding tasks now" : "none running"}
-            color="emerald"
+            description={activeWorkers > 0 ? "holding tasks now" : "none running"}
+            variant="success"
           />
           <StatCard
             label="Idle"
             value={idleWorkers}
-            sub="no current task"
-            color="zinc"
+            description="no current task"
           />
           <StatCard
             label="Avg Task Time"
             value={avgTaskTime !== null ? fmtDuration(avgTaskTime) : "—"}
-            sub="across completed tasks"
-            color="amber"
+            description="across completed tasks"
+            variant="warning"
           />
         </div>
       )}
