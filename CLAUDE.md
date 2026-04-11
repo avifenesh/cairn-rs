@@ -19,32 +19,39 @@ These are non-negotiable. Every instance MUST follow them.
 
 ```bash
 cargo build --workspace                   # Full workspace build
-cargo run -p cairn-app                    # Local dev (in-memory store)
+cargo run -p cairn-app                    # Local dev (Postgres via DATABASE_URL, or in-memory fallback)
 
-# With any OpenAI-compatible provider
-CAIRN_BRAIN_URL=https://your-provider/v1 \
-OPENAI_COMPAT_API_KEY=<key> \
+# With Postgres (recommended):
+DATABASE_URL=postgres://cairn:pass@localhost:5432/cairn \
 CAIRN_ADMIN_TOKEN=dev-admin-token cargo run -p cairn-app
 
-# Docker
+# Explicit in-memory (dev only — all data lost on restart):
+cargo run -p cairn-app -- --db memory
+
+# Docker (Postgres included in docker-compose.yml):
 docker compose up --build
 ```
 
-Cairn is provider-agnostic — connect any LLM endpoint (OpenAI, Anthropic, Bedrock, Vertex, OpenRouter, Ollama, Groq, etc.) via env vars or `POST /v1/providers/connections`.
+Cairn is provider-agnostic — connect any LLM endpoint (OpenAI, Anthropic, Bedrock, Vertex, OpenRouter, Ollama, Groq, DeepSeek, xAI, Google Gemini, MiniMax, etc.) via env vars or `POST /v1/providers/connections`. 13 provider backends supported.
 
 Default admin token: `dev-admin-token`. Dashboard: `http://localhost:3000`. Swagger: `/v1/docs`.
 
+Auth token: `CAIRN_ADMIN_TOKEN` env var, or `CAIRN_ADMIN_TOKEN_FILE` for Docker secrets. Rotatable at runtime via `POST /v1/admin/rotate-token`.
+
 CLI: `cairn-app --addr 0.0.0.0 --port 3000 --mode team --db postgres://user:pass@host/db`
+
+Log rotation: set `CAIRN_LOG_DIR=/var/log/cairn` for daily-rotating log files.
 
 ## Tests
 
 ```bash
-cargo test --workspace                                  # All ~2700 tests
-cargo test -p cairn-app --lib                           # App unit tests (49)
+cargo test --workspace                                  # All ~3300+ tests
+cargo test -p cairn-app --lib                           # App unit tests (72)
 cargo test -p cairn-app --test full_workspace_suite     # E2E integration (6 workflows)
 CAIRN_TOKEN=dev-admin-token ./scripts/smoke-test.sh     # 81-check HTTP smoke test
 cd ui && npx tsc --noEmit                               # UI type check
 cd ui && npm run build                                  # UI build (must succeed before cargo build)
+cd ui && npx playwright test                            # 72 browser E2E tests (operator journeys)
 ```
 
 Single test: `cargo test -p cairn-domain -- test_name`
@@ -60,7 +67,7 @@ After `npm run build`, `cargo build -p cairn-app` embeds the new UI assets.
 
 ## Architecture
 
-17-crate Rust workspace. Each crate owns one bounded context. No circular dependencies.
+18-crate Rust workspace. Each crate owns one bounded context. No circular dependencies.
 
 ```
 domain → store → runtime → {memory, graph, evals, tools, agent, signal, channels} → api/plugin-proto → app
@@ -69,7 +76,7 @@ domain → store → runtime → {memory, graph, evals, tools, agent, signal, ch
 | Crate | Owns |
 |-------|------|
 | `cairn-domain` | Pure types: IDs, commands (30+), events (56+), state machines, policy. No IO. |
-| `cairn-store` | Append-only event log + sync projections. Backends: InMemory / Postgres / SQLite (feature-gated). |
+| `cairn-store` | Append-only event log + sync projections. Backends: Postgres (default via `DATABASE_URL`) / SQLite / InMemory (`--db memory`). |
 | `cairn-runtime` | Service layer: sessions, runs, tasks, approvals, checkpoints, mailbox, recovery. |
 | `cairn-app` | Axum HTTP server. `lib.rs` has route catalog + middleware. `main.rs` has binary wiring + embedded UI. |
 | `cairn-memory` | Knowledge pipeline: ingest → chunk → embed → index → score → rerank → retrieve. |
@@ -104,7 +111,7 @@ React 19 + TypeScript + Tailwind v4 + TanStack Query. 30 operator pages. Embedde
 
 - **List responses** are inconsistent: some endpoints return `T[]`, others `{items: T[], hasMore}`. The UI `getList()` helper in `api.ts` normalizes both. Always use `getList()` for list endpoints.
 - **Health endpoints**: `/health` returns `{status: "healthy", store_ok, ...}`. `/v1/status` returns `{status: "ok", components: [...]}`. Use `isRuntimeHealthy()` / `isStoreHealthy()` from `ui/src/lib/types.ts` — never access `runtime_ok` or `store_ok` directly.
-- **Store backends**: Feature-gated via Cargo features (`postgres`, `sqlite`). Default is in-memory (ephemeral — all data lost on restart).
+- **Store backends**: Feature-gated via Cargo features (`postgres`, `sqlite`). Default is Postgres when `DATABASE_URL` is set. Use `--db memory` for explicit in-memory (ephemeral, with startup warning).
 - **`unsafe_code = "forbid"`** at workspace level. No exceptions.
 - **RFCs**: Behavior is specified by RFCs in `docs/design/rfcs/`. Each RFC has integration tests as compliance proof.
 
@@ -113,4 +120,4 @@ React 19 + TypeScript + Tailwind v4 + TanStack Query. 30 operator pages. Embedde
 - Every API change must update the OpenAPI spec at `crates/cairn-app/src/openapi_spec.rs`.
 - TypeScript types in `ui/src/lib/types.ts` MUST match actual API response shapes. When the API changes, update both sides.
 - The smoke test at `scripts/smoke-test.sh` is the release gatekeeper. It must pass before any deploy.
-- In-memory store loses all data on restart. For persistent dogfood testing, use `--db cairn.db`.
+- In-memory store (`--db memory`) loses all data on restart. Set `DATABASE_URL` for persistent storage (Postgres recommended, SQLite for single-node).

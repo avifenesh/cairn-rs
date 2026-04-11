@@ -209,17 +209,17 @@ cairn-app [OPTIONS]
   --addr   <addr>   Bind address              (default: 127.0.0.1)
   --port   <port>   Listen port               (default: 3000)
   --mode   team     Bind 0.0.0.0, require token, enable team features
-  --db     <url>    postgres://... or sqlite:path.db
-                    Omit to use ephemeral in-memory store (local dev)
+  --db     <url>    postgres://... or sqlite:path.db or memory
+                    Also reads DATABASE_URL env var (Postgres default)
 ```
 
 ### Persistence backends
 
-| Backend | Flag | Notes |
-|---------|------|-------|
-| In-memory | _(default)_ | Resets on restart. Local development only. |
-| SQLite | `--db cairn.db` | Durable single-file store. Single-writer. |
-| Postgres | `--db postgres://user:pass@host/db` | Full durability. Concurrent writers. Schema migrations run on startup. |
+| Backend | Config | Notes |
+|---------|--------|-------|
+| Postgres | `DATABASE_URL=postgres://...` _(default)_ | Full durability. Concurrent writers. Schema migrations run on startup. |
+| SQLite | `--db sqlite:cairn.db` | Durable single-file store. Single-writer. |
+| In-memory | `--db memory` | Resets on restart. Local development only. Startup warning emitted. |
 
 ---
 
@@ -260,10 +260,10 @@ All `/v1/` routes require `Authorization: Bearer <token>`. `/health` and `/v1/st
 # Full workspace build
 cargo build --workspace
 
-# Run the server (in-memory, local mode)
+# Run the server (Postgres via DATABASE_URL, or in-memory fallback)
 cargo run -p cairn-app
 
-# Run all 2 700+ tests
+# Run all 3 300+ tests
 cargo test --workspace
 
 # Run the end-to-end integration suite (6 full-workflow tests)

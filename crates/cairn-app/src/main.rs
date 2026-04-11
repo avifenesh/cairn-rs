@@ -20,6 +20,7 @@ mod validate;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -84,6 +85,7 @@ struct PgBackend {
 struct SqliteBackend {
     event_log: Arc<SqliteEventLog>,
     adapter: Arc<SqliteAdapter>,
+    path: PathBuf,
 }
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
@@ -1542,7 +1544,7 @@ async fn import_session_handler(
                     code: "wrong_export_type",
                     message: format!("expected 'session_export', got '{t}'"),
                 }),
-            ))
+            ));
         }
     }
 
@@ -1689,7 +1691,7 @@ async fn resolve_approval_handler(
         other => {
             return Err(bad_request(format!(
                 "unknown decision: {other}; use 'approved' or 'rejected'"
-            )))
+            )));
         }
     };
     match state
@@ -2352,6 +2354,51 @@ async fn export_otlp_handler(
 /// The snapshot contains all events in position order. Restoring it via
 /// `POST /v1/admin/restore` will replay every event and rebuild all
 /// projections from scratch, giving a consistent store state.
+/// POST /v1/admin/rotate-token — rotate the admin bearer token at runtime.
+///
+/// Requires the current admin token in the Authorization header.
+/// Body: `{ "new_token": "..." }` (min 16 chars).
+///
+/// The token registry is shared (same Arc) between the main.rs and lib.rs
+/// routers, so a single revoke+register updates both.
+async fn rotate_token_handler(
+    State(state): State<AppState>,
+    Json(body): Json<RotateTokenRequest>,
+) -> impl IntoResponse {
+    let new_token = body.new_token.trim().to_owned();
+    if new_token.len() < 16 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "new_token must be at least 16 characters"})),
+        );
+    }
+
+    // Find and revoke the old admin token, then register the new one.
+    let entries = state.tokens.all_entries();
+    for (old_token, principal) in &entries {
+        if let AuthPrincipal::ServiceAccount { name, .. } = principal {
+            if name == "admin" {
+                state.tokens.revoke(old_token);
+                state.tokens.register(new_token, principal.clone());
+                return (
+                    StatusCode::OK,
+                    Json(serde_json::json!({"status": "rotated"})),
+                );
+            }
+        }
+    }
+
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({"error": "admin token not found in registry"})),
+    )
+}
+
+#[derive(Deserialize)]
+struct RotateTokenRequest {
+    new_token: String,
+}
+
 async fn admin_snapshot_handler(State(state): State<AppState>) -> impl IntoResponse {
     let snap = state.runtime.store.dump_events();
     let json = match serde_json::to_vec_pretty(&snap) {
@@ -2384,6 +2431,39 @@ async fn admin_snapshot_handler(State(state): State<AppState>) -> impl IntoRespo
         .header("X-Event-Count", snap.event_count.to_string())
         .body(axum::body::Body::from(json))
         .unwrap()
+        .into_response()
+}
+
+async fn backup_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let Some(sqlite) = state.sqlite.as_ref() else {
+        return not_found("SQLite backup is only available when the SQLite backend is active")
+            .into_response();
+    };
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs());
+    let backup_path = PathBuf::from(format!("{}.backup-{timestamp}", sqlite.path.display()));
+
+    let size_bytes = match tokio::fs::copy(&sqlite.path, &backup_path).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return internal_error(format!(
+                "failed to back up SQLite database {}: {error}",
+                sqlite.path.display()
+            ))
+            .into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "backed_up",
+            "path": backup_path.to_string_lossy(),
+            "size_bytes": size_bytes,
+        })),
+    )
         .into_response()
 }
 
@@ -3108,7 +3188,7 @@ async fn test_connection_handler(
                     StatusCode::SERVICE_UNAVAILABLE,
                     axum::Json(serde_json::json!({ "error": "Ollama not configured" })),
                 )
-                    .into_response()
+                    .into_response();
             }
         }
     } else {
@@ -3138,7 +3218,7 @@ async fn test_connection_handler(
                     StatusCode::SERVICE_UNAVAILABLE,
                     axum::Json(serde_json::json!({ "error": "Provider not configured" })),
                 )
-                    .into_response()
+                    .into_response();
             }
         }
     };
@@ -4036,7 +4116,7 @@ async fn ollama_model_info_handler(
                 StatusCode::BAD_GATEWAY,
                 axum::Json(serde_json::json!({"error": e.to_string()})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -4047,7 +4127,7 @@ async fn ollama_model_info_handler(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(serde_json::json!({"error": e.to_string()})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -4209,7 +4289,9 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
                 i += 1;
                 if i < args.len() {
                     let val = &args[i];
-                    if val.starts_with("postgres://") || val.starts_with("postgresql://") {
+                    if val == "memory" {
+                        config.storage = StorageBackend::InMemory;
+                    } else if val.starts_with("postgres://") || val.starts_with("postgresql://") {
                         config.storage = StorageBackend::Postgres {
                             connection_url: val.clone(),
                         };
@@ -4250,9 +4332,33 @@ fn parse_args_from(args: &[String]) -> BootstrapConfig {
     config
 }
 
+/// Resolve the storage backend from environment when no `--db` flag was given.
+///
+/// Priority: `DATABASE_URL` env var → InMemory fallback.
+/// This runs after CLI parsing so `--db` always wins.
+fn resolve_storage_from_env(config: &mut BootstrapConfig) {
+    if !matches!(config.storage, StorageBackend::InMemory) {
+        return; // --db flag was given, don't override
+    }
+    if let Ok(url) = std::env::var("DATABASE_URL") {
+        let url = url.trim().to_owned();
+        if !url.is_empty() {
+            if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+                config.storage = StorageBackend::Postgres {
+                    connection_url: url,
+                };
+            } else if url.starts_with("sqlite:") || url.ends_with(".db") {
+                config.storage = StorageBackend::Sqlite { path: url };
+            }
+        }
+    }
+}
+
 fn parse_args() -> BootstrapConfig {
     let args: Vec<String> = std::env::args().collect();
-    parse_args_from(&args)
+    let mut config = parse_args_from(&args);
+    resolve_storage_from_env(&mut config);
+    config
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -4655,33 +4761,90 @@ async fn main() {
 
     // Initialise structured request tracing.  Operators can tune verbosity via
     // the RUST_LOG env var (e.g. RUST_LOG=cairn_app=info,tower_http=debug).
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_target(false)
-        .compact()
-        .init();
+    //
+    // When CAIRN_LOG_DIR is set, logs are also written to daily-rotating files.
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    if let Ok(log_dir) = std::env::var("CAIRN_LOG_DIR") {
+        let log_dir = log_dir.trim().to_owned();
+        if !log_dir.is_empty() {
+            use tracing_subscriber::layer::SubscriberExt;
+            use tracing_subscriber::util::SubscriberInitExt;
+
+            let file_appender = tracing_appender::rolling::daily(&log_dir, "cairn.log");
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_writer(file_appender)
+                .with_target(false)
+                .compact()
+                .with_ansi(false);
+            let stdout_layer = tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .compact();
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(stdout_layer)
+                .with(file_layer)
+                .init();
+            eprintln!("logs: rotating daily to {log_dir}/cairn.*.log");
+        } else {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .with_target(false)
+                .compact()
+                .init();
+        }
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_target(false)
+            .compact()
+            .init();
+    }
 
     let config = parse_args();
 
     // ── Token registry ────────────────────────────────────────────────────────
-    // Read admin token from env; fall back to a hardcoded dev token in local
-    // mode. Team mode requires an explicit token or startup aborts.
-    let admin_token = std::env::var("CAIRN_ADMIN_TOKEN").unwrap_or_else(|_| {
-        if config.mode == DeploymentMode::SelfHostedTeam {
-            eprintln!(
-                "error: CAIRN_ADMIN_TOKEN env var is required in team mode. \
-                 Set it to a strong random token before starting."
-            );
-            std::process::exit(1);
+    // Priority: CAIRN_ADMIN_TOKEN_FILE > CAIRN_ADMIN_TOKEN > default dev token.
+    // CAIRN_ADMIN_TOKEN_FILE reads from a file path (Docker secrets pattern).
+    let admin_token = if let Ok(file_path) = std::env::var("CAIRN_ADMIN_TOKEN_FILE") {
+        let file_path = file_path.trim().to_owned();
+        match std::fs::read_to_string(&file_path) {
+            Ok(contents) => {
+                let token = contents.trim().to_owned();
+                if token.is_empty() {
+                    eprintln!("error: CAIRN_ADMIN_TOKEN_FILE at {file_path} is empty");
+                    std::process::exit(1);
+                }
+                eprintln!("auth: admin token loaded from file {file_path}");
+                token
+            }
+            Err(e) => {
+                eprintln!("error: cannot read CAIRN_ADMIN_TOKEN_FILE at {file_path}: {e}");
+                std::process::exit(1);
+            }
         }
-        "dev-admin-token".to_owned()
-    });
-    eprintln!("auth: admin token prepared (set CAIRN_ADMIN_TOKEN to override)");
+    } else {
+        std::env::var("CAIRN_ADMIN_TOKEN").unwrap_or_else(|_| {
+            if config.mode == DeploymentMode::SelfHostedTeam {
+                eprintln!(
+                    "error: CAIRN_ADMIN_TOKEN env var is required in team mode. \
+                     Set it to a strong random token before starting."
+                );
+                std::process::exit(1);
+            }
+            "dev-admin-token".to_owned()
+        })
+    };
+    if admin_token == "dev-admin-token" {
+        eprintln!(
+            "⚠ auth: using default dev-admin-token — override with CAIRN_ADMIN_TOKEN in production"
+        );
+    } else {
+        eprintln!("auth: admin token configured");
+    }
 
-    // ── Durable backends (Postgres / SQLite) — optional ─────────────────────
+    // ── Durable backends (Postgres / SQLite) ────────────────────────────────
     let pg;
     let sqlite;
     match &config.storage {
@@ -4734,6 +4897,10 @@ async fn main() {
             } else {
                 format!("sqlite:{path}")
             };
+            let sqlite_path = path
+                .strip_prefix("sqlite:")
+                .unwrap_or(path.as_str())
+                .to_owned();
             eprintln!("store: connecting to SQLite at {url}");
             match SqlitePoolOptions::new()
                 .max_connections(1) // SQLite is not safe with multiple writers
@@ -4754,6 +4921,7 @@ async fn main() {
                     let backend = Arc::new(SqliteBackend {
                         event_log: sqlite_event_log.clone(),
                         adapter: Arc::new(adapter),
+                        path: PathBuf::from(sqlite_path),
                     });
                     eprintln!("store: SQLite backend active (all service events dual-written)");
                     pg = None;
@@ -4765,7 +4933,11 @@ async fn main() {
                 }
             }
         }
-        _ => {
+        StorageBackend::InMemory => {
+            eprintln!(
+                "⚠ store: using in-memory backend — ALL DATA WILL BE LOST on restart. \
+                 Set DATABASE_URL or use --db to configure a durable store."
+            );
             pg = None;
             sqlite = None;
         }
@@ -5676,6 +5848,7 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
         // The observability middleware populates lib_state.request_log, which the
         // catalog handler reads — so the request log is always fresh.
         .route("/v1/admin/snapshot", post(admin_snapshot_handler))
+        .route("/v1/admin/backup", post(backup_handler))
         .route("/v1/admin/restore", post(admin_restore_handler))
         .route(
             "/v1/admin/rebuild-projections",
@@ -5683,6 +5856,7 @@ fn build_router(lib_state: Arc<cairn_app::AppState>, state: AppState) -> Router 
         )
         .route("/v1/admin/event-count", get(event_count_handler))
         .route("/v1/admin/event-log", get(admin_event_log_handler))
+        .route("/v1/admin/rotate-token", post(rotate_token_handler))
         // Notifications
         .route("/v1/notifications", get(list_notifications_handler))
         .route(
@@ -5979,6 +6153,31 @@ mod tests {
         String::from_utf8_lossy(&bytes).into_owned()
     }
 
+    #[tokio::test]
+    async fn admin_backup_returns_404_when_sqlite_backend_is_disabled() {
+        let app = make_app(make_state());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri("/v1/admin/backup")
+                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["code"], "not_found");
+        assert_eq!(
+            payload["message"],
+            "SQLite backup is only available when the SQLite backend is active"
+        );
+    }
+
     async fn spawn_openai_compat_mock(text: &'static str) -> String {
         let handler = move || async move {
             Json(serde_json::json!({
@@ -6233,6 +6432,49 @@ mod tests {
             "my_data.db".to_owned(),
         ]);
         assert!(matches!(c.storage, StorageBackend::Sqlite { .. }));
+    }
+
+    #[test]
+    fn parse_args_db_memory_sets_in_memory() {
+        let c = parse_args_from(&[
+            "cairn-app".to_owned(),
+            "--db".to_owned(),
+            "memory".to_owned(),
+        ]);
+        assert!(
+            matches!(c.storage, StorageBackend::InMemory),
+            "--db memory must select in-memory store"
+        );
+    }
+
+    #[test]
+    fn resolve_storage_picks_up_database_url() {
+        let mut c = parse_args_from(&["cairn-app".to_owned()]);
+        assert!(matches!(c.storage, StorageBackend::InMemory));
+        // Simulate DATABASE_URL being set
+        std::env::set_var("DATABASE_URL", "postgres://cairn:pass@localhost/cairn");
+        resolve_storage_from_env(&mut c);
+        assert!(
+            matches!(c.storage, StorageBackend::Postgres { .. }),
+            "DATABASE_URL must be picked up when no --db flag"
+        );
+        std::env::remove_var("DATABASE_URL");
+    }
+
+    #[test]
+    fn resolve_storage_db_flag_wins_over_database_url() {
+        std::env::set_var("DATABASE_URL", "postgres://ignored@localhost/db");
+        let mut c = parse_args_from(&[
+            "cairn-app".to_owned(),
+            "--db".to_owned(),
+            "my.db".to_owned(),
+        ]);
+        resolve_storage_from_env(&mut c);
+        assert!(
+            matches!(c.storage, StorageBackend::Sqlite { .. }),
+            "--db flag must take precedence over DATABASE_URL"
+        );
+        std::env::remove_var("DATABASE_URL");
     }
 
     #[test]
