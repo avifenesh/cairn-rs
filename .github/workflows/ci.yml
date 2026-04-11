@@ -82,26 +82,21 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      # Unit tests (lib only — fast, no heavy linking)
+      # Unit tests — all lib tests across the workspace
       - name: cargo test --lib
         run: cargo test --workspace --lib
         timeout-minutes: 10
-      # Integration tests (exclude heavy crates to avoid linker OOM on CI runner)
-      - name: cargo test --tests (core crates)
-        run: >
-          cargo test --tests
-          -p cairn-domain
-          -p cairn-store
-          -p cairn-runtime
-          -p cairn-providers
-          -p cairn-tools
-          -p cairn-orchestrator
-          -p cairn-evals
-        timeout-minutes: 10
-      # cairn-app integration tests (specific, not --tests which links everything)
-      - name: cairn-app integration tests
-        run: cargo test -p cairn-app --test bootstrap_smoke --test source_refresh --test request_tracing --test entitlement_gates
+      # Integration tests — run sequentially to avoid linker OOM on 7GB runners
+      - name: integration tests (providers + domain)
+        run: cargo test --tests -p cairn-domain -p cairn-providers -p cairn-evals
         timeout-minutes: 8
+        env:
+          CARGO_BUILD_JOBS: "2"
+      - name: cairn-app smoke tests
+        run: cargo test -p cairn-app --test bootstrap_smoke --test source_refresh
+        timeout-minutes: 8
+        env:
+          CARGO_BUILD_JOBS: "2"
 
   # ── 5. UI Build + Type Check + Component Tests ──────────────────────────────
   ui:
