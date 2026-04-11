@@ -13,6 +13,7 @@ import { CopyButton } from "../components/CopyButton";
 import { useToast } from "../components/Toast";
 import { defaultApi } from "../lib/api";
 import { useEventStream } from "../hooks/useEventStream";
+import { table as tablePreset } from "../lib/design-system";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -503,8 +504,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const TH = ({ ch, right, hide }: { ch: React.ReactNode; right?: boolean; hide?: string }) => (
   <th className={clsx(
-    "px-3 py-2 text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider whitespace-nowrap border-b border-gray-200 dark:border-zinc-800",
-    right ? "text-right" : "text-left",
+    right ? tablePreset.thRight : tablePreset.th,
     hide,
   )}>{ch}</th>
 );
@@ -731,7 +731,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
                   {safeTasks.map((t, i) => (
                     <tr key={t.task_id} className={clsx(
                       "transition-colors",
-                      i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]",
+                      i % 2 === 0 ? tablePreset.rowEven : tablePreset.rowOdd,
                       "hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60",
                     )}>
                       <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-zinc-300 whitespace-nowrap" title={t.task_id}>
