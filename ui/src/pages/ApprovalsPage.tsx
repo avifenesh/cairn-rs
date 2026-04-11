@@ -145,7 +145,7 @@ function ApprovalsTable({ approvals }: { approvals: ApprovalRecord[] }) {
           <tr key={a.approval_id}
             className={clsx(
               "group transition-colors",
-              i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]",
+              i % 2 === 0 ? tablePreset.rowEven : tablePreset.rowOdd,
               "hover:bg-gray-100/70 dark:hover:bg-gray-100/70 dark:bg-zinc-800/70",
             )}>
             <td className="px-3 py-1.5 font-mono text-gray-700 dark:text-zinc-300 whitespace-nowrap" title={a.approval_id}>

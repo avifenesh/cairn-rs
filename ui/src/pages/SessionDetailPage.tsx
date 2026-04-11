@@ -7,6 +7,7 @@ import { StatCard } from "../components/StatCard";
 import { StateBadge } from "../components/StateBadge";
 import { CopyButton } from "../components/CopyButton";
 import { defaultApi } from "../lib/api";
+import { table as tablePreset } from "../lib/design-system";
 import type { SessionState } from "../lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -234,7 +235,7 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                       onClick={() => { window.location.hash = `run/${run.run_id}`; }}
                       className={clsx(
                         "cursor-pointer transition-colors",
-                        i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]",
+                        i % 2 === 0 ? tablePreset.rowEven : tablePreset.rowOdd,
                         "hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60",
                       )}
                     >
@@ -295,7 +296,7 @@ export function SessionDetailPage({ sessionId, onBack }: SessionDetailPageProps)
                   {traces.map((trace, i) => (
                     <tr key={trace.trace_id} className={clsx(
                       "transition-colors",
-                      i % 2 === 0 ? "bg-gray-50 dark:bg-zinc-900" : "bg-[#111113]",
+                      i % 2 === 0 ? tablePreset.rowEven : tablePreset.rowOdd,
                       "hover:bg-gray-100/60 dark:hover:bg-gray-100/60 dark:bg-zinc-800/60",
                     )}>
                       <td className="px-3 py-1.5 font-mono text-gray-500 dark:text-zinc-400 whitespace-nowrap text-[12px] hidden sm:table-cell">
