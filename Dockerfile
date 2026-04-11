@@ -1,7 +1,7 @@
 # cairn-rs — multi-stage production build
 #
 # Stages:
-#   ui-builder  — Node 22 slim: npm ci && npm run build
+#   ui-builder  — Node 22 slim: npm install && npm run build
 #   builder     — Rust 1.82 slim: cargo build --release (embeds ui/dist via rust-embed)
 #   runtime     — Debian bookworm-slim: minimal image with only the final binary
 #
@@ -25,7 +25,7 @@ WORKDIR /ui
 
 # Install dependencies — separate layer so it's cached when only sources change.
 COPY ui/package.json ui/package-lock.json* ./
-RUN npm ci --prefer-offline
+RUN npm install
 
 # Build the SPA.
 COPY ui/ ./
