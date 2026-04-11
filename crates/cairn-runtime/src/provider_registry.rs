@@ -11,7 +11,9 @@ use cairn_domain::{CredentialId, ProviderConnectionId, TenantId};
 use cairn_providers::chat::{ChatMessage, ChatProvider};
 use cairn_providers::wire::openai_compat::OpenAiCompat;
 use cairn_providers::{Backend, ProviderBuilder};
-use cairn_store::projections::{CredentialReadModel, DefaultsReadModel, ProviderConnectionReadModel};
+use cairn_store::projections::{
+    CredentialReadModel, DefaultsReadModel, ProviderConnectionReadModel,
+};
 
 use crate::error::RuntimeError;
 use crate::services::credential_impl::decrypt_credential_record;
@@ -42,10 +44,7 @@ impl StartupProviderEntry {
         }
     }
 
-    pub fn with_chat(
-        generation: Arc<dyn GenerationProvider>,
-        chat: Arc<dyn ChatProvider>,
-    ) -> Self {
+    pub fn with_chat(generation: Arc<dyn GenerationProvider>, chat: Arc<dyn ChatProvider>) -> Self {
         Self {
             generation,
             chat: Some(chat),
@@ -123,7 +122,12 @@ impl<S> ProviderRegistry<S> {
 
 impl<S> ProviderRegistry<S>
 where
-    S: ProviderConnectionReadModel + DefaultsReadModel + CredentialReadModel + Send + Sync + 'static,
+    S: ProviderConnectionReadModel
+        + DefaultsReadModel
+        + CredentialReadModel
+        + Send
+        + Sync
+        + 'static,
 {
     pub async fn resolve_generation_for_model(
         &self,
@@ -139,7 +143,9 @@ where
         let Some(connection) = select_connection(&active_connections, model_id) else {
             return Ok(None);
         };
-        let cached = self.cached_provider_for_connection(connection, model_id).await?;
+        let cached = self
+            .cached_provider_for_connection(connection, model_id)
+            .await?;
         Ok(Some(cached.generation.clone()))
     }
 
@@ -157,8 +163,14 @@ where
         let Some(connection) = select_connection(&active_connections, model_id) else {
             return Ok(None);
         };
-        let cached = self.cached_provider_for_connection(connection, model_id).await?;
+        let cached = self
+            .cached_provider_for_connection(connection, model_id)
+            .await?;
         Ok(Some(cached.chat.clone()))
+    }
+
+    pub async fn has_active_connections(&self, tenant_id: &TenantId) -> Result<bool, RuntimeError> {
+        Ok(!self.active_connections(tenant_id).await?.is_empty())
     }
 
     pub async fn resolve_embedding_for_model(
@@ -174,7 +186,9 @@ where
         let Some(connection) = select_connection(&active_connections, model_id) else {
             return Ok(None);
         };
-        let cached = self.cached_provider_for_connection(connection, model_id).await?;
+        let cached = self
+            .cached_provider_for_connection(connection, model_id)
+            .await?;
         Ok(cached.embedding.clone())
     }
 
@@ -221,8 +235,12 @@ where
         requested_model: &str,
     ) -> Result<CachedProvider, RuntimeError> {
         let backend = backend_for_connection(connection)?;
-        let endpoint = self.endpoint_for_connection(&connection.provider_connection_id).await?;
-        let api_key = self.api_key_for_connection(&connection.provider_connection_id).await?;
+        let endpoint = self
+            .endpoint_for_connection(&connection.provider_connection_id)
+            .await?;
+        let api_key = self
+            .api_key_for_connection(&connection.provider_connection_id)
+            .await?;
         let configured_model = if !requested_model.is_empty()
             && connection
                 .supported_models
@@ -249,25 +267,25 @@ where
             builder = builder.model(model);
         }
 
-        let chat: Arc<dyn ChatProvider> = Arc::from(builder.build_chat().map_err(|err| {
-            RuntimeError::Validation {
-                reason: format!(
-                    "failed to build provider connection {}: {err}",
-                    connection.provider_connection_id
-                ),
-            }
-        })?);
+        let chat: Arc<dyn ChatProvider> =
+            Arc::from(
+                builder
+                    .build_chat()
+                    .map_err(|err| RuntimeError::Validation {
+                        reason: format!(
+                            "failed to build provider connection {}: {err}",
+                            connection.provider_connection_id
+                        ),
+                    })?,
+            );
 
         let default_model = configured_model.unwrap_or_default();
-        let generation: Arc<dyn GenerationProvider> =
-            Arc::new(ChatProviderGenerationAdapter::new(chat.clone(), default_model));
-        let embedding = build_embedding_provider(
-            &backend,
-            endpoint,
-            api_key,
-            connection,
-            requested_model,
-        );
+        let generation: Arc<dyn GenerationProvider> = Arc::new(ChatProviderGenerationAdapter::new(
+            chat.clone(),
+            default_model,
+        ));
+        let embedding =
+            build_embedding_provider(&backend, endpoint, api_key, connection, requested_model);
 
         Ok(CachedProvider {
             chat,
@@ -308,7 +326,8 @@ where
         )
         .await?;
 
-        let Some(credential_id) = setting.and_then(|setting| setting.value.as_str().map(str::to_owned))
+        let Some(credential_id) =
+            setting.and_then(|setting| setting.value.as_str().map(str::to_owned))
         else {
             return Ok(None);
         };
@@ -342,7 +361,10 @@ where
     ) -> Option<Arc<dyn GenerationProvider>> {
         let fallbacks = read_lock(&self.fallbacks);
         if is_bedrock_model(model_id) {
-            return fallbacks.bedrock.as_ref().map(|entry| entry.generation.clone());
+            return fallbacks
+                .bedrock
+                .as_ref()
+                .map(|entry| entry.generation.clone());
         }
 
         match purpose {
@@ -350,15 +372,30 @@ where
                 .brain
                 .as_ref()
                 .map(|entry| entry.generation.clone())
-                .or_else(|| fallbacks.worker.as_ref().map(|entry| entry.generation.clone()))
+                .or_else(|| {
+                    fallbacks
+                        .worker
+                        .as_ref()
+                        .map(|entry| entry.generation.clone())
+                })
                 .or_else(|| {
                     fallbacks
                         .openrouter
                         .as_ref()
                         .map(|entry| entry.generation.clone())
                 })
-                .or_else(|| fallbacks.bedrock.as_ref().map(|entry| entry.generation.clone()))
-                .or_else(|| fallbacks.ollama.as_ref().map(|entry| entry.generation.clone())),
+                .or_else(|| {
+                    fallbacks
+                        .bedrock
+                        .as_ref()
+                        .map(|entry| entry.generation.clone())
+                })
+                .or_else(|| {
+                    fallbacks
+                        .ollama
+                        .as_ref()
+                        .map(|entry| entry.generation.clone())
+                }),
             ProviderResolutionPurpose::Generate => {
                 if let Some(ollama) = fallbacks.ollama.as_ref() {
                     return Some(ollama.generation.clone());
@@ -369,7 +406,10 @@ where
                         .as_ref()
                         .map(|entry| entry.generation.clone())
                         .or_else(|| {
-                            fallbacks.worker.as_ref().map(|entry| entry.generation.clone())
+                            fallbacks
+                                .worker
+                                .as_ref()
+                                .map(|entry| entry.generation.clone())
                         })
                         .or_else(|| {
                             fallbacks
@@ -378,7 +418,10 @@ where
                                 .map(|entry| entry.generation.clone())
                         })
                         .or_else(|| {
-                            fallbacks.bedrock.as_ref().map(|entry| entry.generation.clone())
+                            fallbacks
+                                .bedrock
+                                .as_ref()
+                                .map(|entry| entry.generation.clone())
                         })
                 } else {
                     fallbacks
@@ -386,7 +429,10 @@ where
                         .as_ref()
                         .map(|entry| entry.generation.clone())
                         .or_else(|| {
-                            fallbacks.brain.as_ref().map(|entry| entry.generation.clone())
+                            fallbacks
+                                .brain
+                                .as_ref()
+                                .map(|entry| entry.generation.clone())
                         })
                         .or_else(|| {
                             fallbacks
@@ -395,7 +441,10 @@ where
                                 .map(|entry| entry.generation.clone())
                         })
                         .or_else(|| {
-                            fallbacks.bedrock.as_ref().map(|entry| entry.generation.clone())
+                            fallbacks
+                                .bedrock
+                                .as_ref()
+                                .map(|entry| entry.generation.clone())
                         })
                 }
             }
@@ -403,15 +452,30 @@ where
                 .brain
                 .as_ref()
                 .map(|entry| entry.generation.clone())
-                .or_else(|| fallbacks.worker.as_ref().map(|entry| entry.generation.clone()))
+                .or_else(|| {
+                    fallbacks
+                        .worker
+                        .as_ref()
+                        .map(|entry| entry.generation.clone())
+                })
                 .or_else(|| {
                     fallbacks
                         .openrouter
                         .as_ref()
                         .map(|entry| entry.generation.clone())
                 })
-                .or_else(|| fallbacks.bedrock.as_ref().map(|entry| entry.generation.clone()))
-                .or_else(|| fallbacks.ollama.as_ref().map(|entry| entry.generation.clone())),
+                .or_else(|| {
+                    fallbacks
+                        .bedrock
+                        .as_ref()
+                        .map(|entry| entry.generation.clone())
+                })
+                .or_else(|| {
+                    fallbacks
+                        .ollama
+                        .as_ref()
+                        .map(|entry| entry.generation.clone())
+                }),
         }
     }
 
@@ -491,7 +555,11 @@ where
     ) -> Option<Arc<dyn DomainEmbeddingProvider>> {
         let fallbacks = read_lock(&self.fallbacks);
 
-        if let Some(ollama) = fallbacks.ollama.as_ref().and_then(|entry| entry.embedding.clone()) {
+        if let Some(ollama) = fallbacks
+            .ollama
+            .as_ref()
+            .and_then(|entry| entry.embedding.clone())
+        {
             return Some(ollama);
         }
 
@@ -540,7 +608,10 @@ struct ChatProviderGenerationAdapter {
 
 impl ChatProviderGenerationAdapter {
     fn new(chat: Arc<dyn ChatProvider>, default_model: String) -> Self {
-        Self { chat, default_model }
+        Self {
+            chat,
+            default_model,
+        }
     }
 }
 
@@ -638,9 +709,7 @@ fn backend_for_connection(connection: &ProviderConnectionRecord) -> Result<Backe
 
 fn normalize_backend(raw: &str) -> String {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "openai_compat" | "openai-compat" | "openai_compatible" => {
-            "openai-compatible".to_owned()
-        }
+        "openai_compat" | "openai-compat" | "openai_compatible" => "openai-compatible".to_owned(),
         other => other.to_owned(),
     }
 }
@@ -706,7 +775,9 @@ fn is_brain_model(model_id: &str) -> bool {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn read_lock<T>(lockable: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -735,7 +806,8 @@ mod tests {
 
     use crate::provider_connections::{ProviderConnectionConfig, ProviderConnectionService};
     use crate::services::{
-        CredentialServiceImpl, DefaultsServiceImpl, ProviderConnectionServiceImpl, TenantServiceImpl,
+        CredentialServiceImpl, DefaultsServiceImpl, ProviderConnectionServiceImpl,
+        TenantServiceImpl,
     };
     use crate::tenants::TenantService;
     use crate::{CredentialService, DefaultsService};
@@ -850,9 +922,8 @@ mod tests {
     async fn falls_back_to_startup_generation_when_no_connections_exist() {
         let store = seeded_store().await;
         let registry = ProviderRegistry::new(store);
-        let fallback: Arc<dyn GenerationProvider> = Arc::new(FakeGenerationProvider {
-            label: "fallback",
-        });
+        let fallback: Arc<dyn GenerationProvider> =
+            Arc::new(FakeGenerationProvider { label: "fallback" });
         registry.set_startup_fallbacks(StartupFallbackProviders {
             worker: Some(StartupProviderEntry::generation(fallback.clone())),
             ..Default::default()
@@ -898,7 +969,10 @@ mod tests {
         let store = Arc::new(InMemoryStore::new());
         let tenants = TenantServiceImpl::new(store.clone());
         tenants
-            .create(TenantId::new("tenant_registry"), "Registry Tenant".to_owned())
+            .create(
+                TenantId::new("tenant_registry"),
+                "Registry Tenant".to_owned(),
+            )
             .await
             .unwrap();
         store

@@ -45,10 +45,8 @@ use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::provider_health::ProviderHealthService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
-use cairn_runtime::{
-    InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider,
-};
 use cairn_runtime::{CredentialService, DefaultsService, RecoveryService};
+use cairn_runtime::{InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider};
 use cairn_store::pg::PgMigrationRunner;
 use cairn_store::pg::{PgAdapter, PgEventLog};
 use cairn_store::projections::{
@@ -3162,12 +3160,7 @@ async fn test_connection_handler(
             .as_deref()
             .map(|u| u.trim_end_matches('/').to_owned())
             .or_else(|| stored_endpoint.clone())
-            .or_else(|| {
-                state
-                    .openai_compat
-                    .as_ref()
-                    .map(|p| p.base_url.to_string())
-            });
+            .or_else(|| state.openai_compat.as_ref().map(|p| p.base_url.to_string()));
         match base {
             Some(b) => {
                 let key = query
@@ -3445,14 +3438,17 @@ async fn ollama_embed_handler(
         .default_ollama_embed_model()
         .await;
     let default_compat_embed = state.runtime.runtime_config.default_embed_model().await;
-    let model_id = body.model.as_deref().unwrap_or_else(|| {
-        if state.ollama.is_some() {
-            &default_ollama_embed
-        } else {
-            &default_compat_embed
-        }
-    })
-    .to_owned();
+    let model_id = body
+        .model
+        .as_deref()
+        .unwrap_or_else(|| {
+            if state.ollama.is_some() {
+                &default_ollama_embed
+            } else {
+                &default_compat_embed
+            }
+        })
+        .to_owned();
 
     let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> = match state
         .runtime
@@ -3554,81 +3550,233 @@ async fn ollama_embed_handler(
 ///   - `event: error`  data: `{"error": "..."}`
 ///
 /// Clients read via `fetch()` + `ReadableStream` — no EventSource needed.
+fn stream_generation_provider_as_sse(
+    provider: Arc<dyn cairn_domain::providers::GenerationProvider>,
+    model_id: String,
+    messages: Vec<serde_json::Value>,
+) -> Response {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(8);
+
+    tokio::spawn(async move {
+        let start = std::time::Instant::now();
+        let settings = cairn_domain::providers::ProviderBindingSettings::default();
+        match provider.generate(&model_id, messages, &settings).await {
+            Ok(resp) => {
+                let _ = tx
+                    .send(Ok(Event::default()
+                        .event("token")
+                        .data(serde_json::json!({"text": resp.text}).to_string())))
+                    .await;
+                let _ = tx
+                    .send(Ok(Event::default().event("done").data(
+                        serde_json::json!({
+                            "latency_ms": start.elapsed().as_millis() as u64,
+                            "model": resp.model_id,
+                            "tokens_in": resp.input_tokens,
+                            "tokens_out": resp.output_tokens,
+                        })
+                        .to_string(),
+                    )))
+                    .await;
+            }
+            Err(err) => {
+                let _ = tx
+                    .send(Ok(Event::default().event("error").data(
+                        serde_json::json!({"error": err.to_string()}).to_string(),
+                    )))
+                    .await;
+            }
+        }
+    });
+
+    Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+fn stream_chat_provider_as_sse(
+    provider: Arc<dyn cairn_providers::chat::ChatProvider>,
+    model_id: String,
+    messages: Vec<cairn_providers::chat::ChatMessage>,
+) -> Response {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
+
+    tokio::spawn(async move {
+        let start = std::time::Instant::now();
+        let mut stream = match provider.chat_stream(&messages, None).await {
+            Ok(stream) => stream,
+            Err(err) => {
+                let _ = tx
+                    .send(Ok(Event::default().event("error").data(
+                        serde_json::json!({"error": err.to_string()}).to_string(),
+                    )))
+                    .await;
+                return;
+            }
+        };
+
+        while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
+            match chunk {
+                Ok(text) if !text.is_empty() => {
+                    let _ = tx
+                        .send(Ok(Event::default()
+                            .event("token")
+                            .data(serde_json::json!({"text": text}).to_string())))
+                        .await;
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    let _ = tx
+                        .send(Ok(Event::default().event("error").data(
+                            serde_json::json!({"error": err.to_string()}).to_string(),
+                        )))
+                        .await;
+                    return;
+                }
+            }
+        }
+
+        let _ = tx
+            .send(Ok(Event::default().event("done").data(
+                serde_json::json!({
+                    "latency_ms": start.elapsed().as_millis() as u64,
+                    "model": model_id,
+                })
+                .to_string(),
+            )))
+            .await;
+    });
+
+    Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
 async fn chat_stream_handler(
     State(state): State<AppState>,
     Json(body): Json<OllamaGenerateRequest>,
 ) -> impl IntoResponse {
     let default_stream = state.runtime.runtime_config.default_stream_model().await;
     let model_id = body.model.as_deref().unwrap_or(&default_stream).to_owned();
-
-    // Bedrock models contain a '.' (e.g. minimax.minimax-m2.5). Route them
-    // through the Bedrock provider's non-streaming API and emit the result as SSE.
-    let is_bedrock_model = model_id.contains('.');
-    if is_bedrock_model {
-        if let Some(ref bedrock) = state.bedrock {
-            use cairn_domain::providers::GenerationProvider as _;
-            let messages: Vec<serde_json::Value> = body.messages.unwrap_or_else(|| {
-                vec![serde_json::json!({"role": "user", "content": body.prompt})]
-            });
-            let bedrock = bedrock.clone();
-            let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(8);
-            tokio::spawn(async move {
-                let start = std::time::Instant::now();
-                let settings = cairn_domain::providers::ProviderBindingSettings::default();
-                match bedrock.generate(&model_id, messages, &settings).await {
-                    Ok(resp) => {
-                        let _ = tx
-                            .send(Ok(Event::default()
-                                .event("token")
-                                .data(serde_json::json!({"text": resp.text}).to_string())))
-                            .await;
-                        let _ = tx
-                            .send(Ok(Event::default().event("done").data(
-                                serde_json::json!({
-                                    "latency_ms": start.elapsed().as_millis() as u64,
-                                    "model": resp.model_id,
-                                    "tokens_in": resp.input_tokens,
-                                    "tokens_out": resp.output_tokens,
-                                })
-                                .to_string(),
-                            )))
-                            .await;
-                    }
-                    Err(err) => {
-                        let msg = format!("{err}");
-                        let _ = tx
-                            .send(Ok(Event::default()
-                                .event("error")
-                                .data(serde_json::json!({"error": msg}).to_string())))
-                            .await;
-                    }
-                }
-            });
-            return Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
-                .keep_alive(KeepAlive::default())
+    let tenant_id = cairn_domain::TenantId::new("default_tenant");
+    let messages: Vec<serde_json::Value> = body
+        .messages
+        .unwrap_or_else(|| vec![serde_json::json!({"role": "user", "content": body.prompt})]);
+    let chat_messages = cairn_runtime::json_messages_to_chat_messages(&messages);
+    let has_active_connections = match state
+        .runtime
+        .provider_registry
+        .has_active_connections(&tenant_id)
+        .await
+    {
+        Ok(has_connections) => has_connections,
+        Err(err) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                axum::Json(serde_json::json!({ "error": err.to_string() })),
+            )
                 .into_response();
         }
-        // Fall through to OpenAI-compat if no Bedrock provider
+    };
+
+    // Bedrock models contain a '.' (e.g. minimax.minimax-m2.5). Connection-backed
+    // Bedrock routes resolve through the registry first; otherwise we keep the
+    // existing single-shot static fallback and wrap it as SSE.
+    let is_bedrock_model = model_id.contains('.');
+    if is_bedrock_model && has_active_connections {
+        match state
+            .runtime
+            .provider_registry
+            .resolve_generation_for_model(
+                &tenant_id,
+                &model_id,
+                cairn_runtime::ProviderResolutionPurpose::Stream,
+            )
+            .await
+        {
+            Ok(Some(provider)) => {
+                return stream_generation_provider_as_sse(
+                    provider,
+                    model_id.clone(),
+                    messages.clone(),
+                );
+            }
+            Ok(None) => {}
+            Err(err) => {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    axum::Json(serde_json::json!({ "error": err.to_string() })),
+                )
+                    .into_response();
+            }
+        }
+    } else if has_active_connections {
+        match state
+            .runtime
+            .provider_registry
+            .resolve_chat_for_model(
+                &tenant_id,
+                &model_id,
+                cairn_runtime::ProviderResolutionPurpose::Stream,
+            )
+            .await
+        {
+            Ok(Some(provider)) => {
+                return stream_chat_provider_as_sse(
+                    provider,
+                    model_id.clone(),
+                    chat_messages.clone(),
+                );
+            }
+            Ok(None) => {}
+            Err(err) => {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    axum::Json(serde_json::json!({ "error": err.to_string() })),
+                )
+                    .into_response();
+            }
+        }
     }
 
-    // Provider resolution: Ollama first, then OpenAI-compat brain, then worker.
+    if is_bedrock_model {
+        if let Some(ref bedrock) = state.bedrock {
+            return stream_generation_provider_as_sse(
+                bedrock.clone() as Arc<dyn cairn_domain::providers::GenerationProvider>,
+                model_id,
+                messages,
+            );
+        }
+        // Fall through to OpenAI-compat if no Bedrock provider.
+    }
+
+    // Static provider resolution: Ollama first, then OpenAI-compat brain, then worker.
     // All three expose /v1/chat/completions (OpenAI wire format) so the same
     // streaming logic applies — only URL construction differs.
     let (stream_url, stream_api_key): (String, String) = if let Some(ref o) = state.ollama {
         (format!("{}/v1/chat/completions", o.host()), String::new())
     } else if let Some(ref brain) = state.openai_compat_brain {
         (
-            format!("{}/chat/completions", brain.base_url.as_str().trim_end_matches('/')),
+            format!(
+                "{}/chat/completions",
+                brain.base_url.as_str().trim_end_matches('/')
+            ),
             brain.api_key.as_str().to_owned(),
         )
     } else if let Some(ref worker) = state.openai_compat_worker {
         (
-            format!("{}/chat/completions", worker.base_url.as_str().trim_end_matches('/')),
+            format!(
+                "{}/chat/completions",
+                worker.base_url.as_str().trim_end_matches('/')
+            ),
             worker.api_key.as_str().to_owned(),
         )
     } else if let Some(ref or_) = state.openai_compat_openrouter {
         (
-            format!("{}/chat/completions", or_.base_url.as_str().trim_end_matches('/')),
+            format!(
+                "{}/chat/completions",
+                or_.base_url.as_str().trim_end_matches('/')
+            ),
             or_.api_key.as_str().to_owned(),
         )
     } else {
@@ -3639,18 +3787,12 @@ async fn chat_stream_handler(
                 })),
             ).into_response();
     };
-    // Resolve thinking-mode flag before spawning (RuntimeConfig is not Send across spawn).
     let disable_thinking = state
         .runtime
         .runtime_config
         .supports_thinking_mode(&model_id)
         .await;
-    // Use full message history when provided; fall back to single-turn prompt.
-    let messages: Vec<serde_json::Value> = body
-        .messages
-        .unwrap_or_else(|| vec![serde_json::json!({"role": "user", "content": body.prompt})]);
 
-    // Spawn a task that calls the provider with stream=true and forwards chunks via channel.
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
 
     tokio::spawn(async move {
@@ -3660,9 +3802,6 @@ async fn chat_stream_handler(
             .build()
             .expect("reqwest client");
 
-        let url = stream_url;
-        // Disable chain-of-thought reasoning for models that default to thinking mode
-        // (e.g. Qwen3). Controlled via RuntimeConfig / DefaultsService at runtime.
         let mut req_body = serde_json::json!({
             "model":    model_id,
             "messages": messages,
@@ -3672,16 +3811,16 @@ async fn chat_stream_handler(
             req_body["options"] = serde_json::json!({ "think": false });
         }
 
-        let mut req = client.post(&url).json(&req_body);
+        let mut req = client.post(&stream_url).json(&req_body);
         if !stream_api_key.is_empty() {
             req = req.bearer_auth(&stream_api_key);
         }
         let resp = match req.send().await {
             Ok(r) => r,
-            Err(e) => {
+            Err(err) => {
                 let _ = tx
                     .send(Ok(Event::default().event("error").data(
-                        serde_json::json!({"error": e.to_string()}).to_string(),
+                        serde_json::json!({"error": err.to_string()}).to_string(),
                     )))
                     .await;
                 return;
@@ -3703,25 +3842,23 @@ async fn chat_stream_handler(
 
         while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
             let bytes = match chunk {
-                Ok(b) => b,
-                Err(e) => {
+                Ok(bytes) => bytes,
+                Err(err) => {
                     let _ = tx
                         .send(Ok(Event::default().event("error").data(
-                            serde_json::json!({"error": e.to_string()}).to_string(),
+                            serde_json::json!({"error": err.to_string()}).to_string(),
                         )))
                         .await;
                     return;
                 }
             };
 
-            buf.push_str(&String::from_utf8_lossy(&bytes[..]));
+            buf.push_str(&String::from_utf8_lossy(&bytes));
 
-            // Process complete SSE lines from buffer.
             while let Some(nl) = buf.find('\n') {
                 let line = buf[..nl].trim().to_owned();
                 buf = buf[nl + 1..].to_owned();
 
-                // Ollama SSE lines start with "data: "
                 let Some(data) = line.strip_prefix("data: ") else {
                     continue;
                 };
@@ -3733,13 +3870,12 @@ async fn chat_stream_handler(
                     continue;
                 };
 
-                // Extract delta text from choices[0].delta.content
                 if let Some(text) = parsed
                     .get("choices")
-                    .and_then(|c| c.get(0))
-                    .and_then(|c| c.get("delta"))
-                    .and_then(|d| d.get("content"))
-                    .and_then(|c| c.as_str())
+                    .and_then(|choices| choices.get(0))
+                    .and_then(|choice| choice.get("delta"))
+                    .and_then(|delta| delta.get("content"))
+                    .and_then(|content| content.as_str())
                 {
                     if !text.is_empty() {
                         let _ = tx
@@ -3752,11 +3888,13 @@ async fn chat_stream_handler(
             }
         }
 
-        // Emit done event with timing.
-        let latency_ms = start.elapsed().as_millis() as u64;
         let _ = tx
             .send(Ok(Event::default().event("done").data(
-                serde_json::json!({"latency_ms": latency_ms, "model": model_id}).to_string(),
+                serde_json::json!({
+                    "latency_ms": start.elapsed().as_millis() as u64,
+                    "model": model_id,
+                })
+                .to_string(),
             )))
             .await;
     });
@@ -4793,8 +4931,8 @@ async fn main() {
     // All providers are constructed through ProviderBuilder using runtime config.
     // cairn-providers implements cairn-domain's GenerationProvider trait via the
     // bridge module, so everything plugs into the existing orchestrate/generate paths.
-    use cairn_providers::wire::openai_compat::{OpenAiCompat, ProviderConfig};
     use cairn_providers::backends::bedrock::Bedrock as CairnBedrock;
+    use cairn_providers::wire::openai_compat::{OpenAiCompat, ProviderConfig};
 
     let openai_compat_brain: Option<Arc<OpenAiCompat>> = {
         let brain_url = std::env::var("CAIRN_BRAIN_URL")
@@ -4810,7 +4948,10 @@ async fn main() {
                 ProviderConfig::default(),
                 brain_key,
                 Some(url),
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
             ))
         })
     };
@@ -4828,7 +4969,10 @@ async fn main() {
                 ProviderConfig::default(),
                 worker_key,
                 Some(url),
-                None, None, None, None,
+                None,
+                None,
+                None,
+                None,
             ))
         })
     };
@@ -4864,10 +5008,8 @@ async fn main() {
         use cairn_domain::providers::{EmbeddingProvider, GenerationProvider};
         use cairn_providers::chat::ChatProvider;
 
-        lib_state
-            .runtime
-            .provider_registry
-            .set_startup_fallbacks(cairn_runtime::StartupFallbackProviders {
+        lib_state.runtime.provider_registry.set_startup_fallbacks(
+            cairn_runtime::StartupFallbackProviders {
                 ollama: ollama.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_embedding(
                         provider.clone() as Arc<dyn GenerationProvider>,
@@ -4902,7 +5044,8 @@ async fn main() {
                         provider.clone() as Arc<dyn ChatProvider>,
                     )
                 }),
-            });
+            },
+        );
     }
 
     // Wire brain provider into lib_state for the orchestrate endpoint.
@@ -5647,10 +5790,8 @@ fn test_make_app(mut state: AppState) -> axum::Router {
         use cairn_domain::providers::{EmbeddingProvider, GenerationProvider};
         use cairn_providers::chat::ChatProvider;
 
-        state
-            .runtime
-            .provider_registry
-            .set_startup_fallbacks(cairn_runtime::StartupFallbackProviders {
+        state.runtime.provider_registry.set_startup_fallbacks(
+            cairn_runtime::StartupFallbackProviders {
                 ollama: state.ollama.as_ref().map(|provider| {
                     cairn_runtime::StartupProviderEntry::with_embedding(
                         provider.clone() as Arc<dyn GenerationProvider>,
@@ -5685,7 +5826,8 @@ fn test_make_app(mut state: AppState) -> axum::Router {
                         provider.clone() as Arc<dyn ChatProvider>,
                     )
                 }),
-            });
+            },
+        );
     }
     build_router(lib_state, state)
 }
@@ -5810,6 +5952,24 @@ mod tests {
         .unwrap()
     }
 
+    async fn authed_sse_post(app: Router, uri: &str, body: serde_json::Value) -> String {
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri(uri)
+                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
     async fn spawn_openai_compat_mock(text: &'static str) -> String {
         let handler = move || async move {
             Json(serde_json::json!({
@@ -5831,27 +5991,28 @@ mod tests {
         };
         let app = Router::new()
             .route("/chat/completions", post(handler))
-            .route("/v1/chat/completions", post(move || async move {
-                Json(serde_json::json!({
-                    "id": format!("mock-{text}"),
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": text,
-                        },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": {
-                        "prompt_tokens": 3,
-                        "completion_tokens": 2,
-                        "total_tokens": 5
-                    }
-                }))
-            }));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+            .route(
+                "/v1/chat/completions",
+                post(move || async move {
+                    Json(serde_json::json!({
+                        "id": format!("mock-{text}"),
+                        "choices": [{
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": text,
+                            },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 3,
+                            "completion_tokens": 2,
+                            "total_tokens": 5
+                        }
+                    }))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -5865,12 +6026,8 @@ mod tests {
         embedding: Vec<f32>,
         token_count: u32,
     ) -> String {
-        let embedding_payload = serde_json::Value::Array(
-            embedding
-                .into_iter()
-                .map(serde_json::Value::from)
-                .collect(),
-        );
+        let embedding_payload =
+            serde_json::Value::Array(embedding.into_iter().map(serde_json::Value::from).collect());
         let body = serde_json::json!({
             "object": "list",
             "data": [{
@@ -5885,20 +6042,81 @@ mod tests {
             }
         });
         let app = Router::new()
-            .route("/embeddings", post({
-                let body = body.clone();
-                move || {
+            .route(
+                "/embeddings",
+                post({
+                    let body = body.clone();
+                    move || {
+                        let body = body.clone();
+                        async move { Json(body) }
+                    }
+                }),
+            )
+            .route(
+                "/v1/embeddings",
+                post(move || {
                     let body = body.clone();
                     async move { Json(body) }
-                }
-            }))
-            .route("/v1/embeddings", post(move || {
-                let body = body.clone();
-                async move { Json(body) }
-            }));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        format!("http://{addr}")
+    }
+
+    async fn spawn_openai_compat_stream_mock(chunks: Vec<&'static str>) -> String {
+        let mut payload = String::new();
+        for chunk in chunks {
+            payload.push_str("data: ");
+            payload.push_str(
+                &serde_json::json!({
+                    "choices": [{
+                        "delta": {
+                            "content": chunk,
+                        }
+                    }]
+                })
+                .to_string(),
+            );
+            payload.push_str("\n\n");
+        }
+        payload.push_str("data: [DONE]\n\n");
+
+        let app = Router::new()
+            .route(
+                "/chat/completions",
+                post({
+                    let payload = payload.clone();
+                    move || {
+                        let payload = payload.clone();
+                        async move {
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from(payload))
+                                .unwrap()
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/v1/chat/completions",
+                post(move || {
+                    let payload = payload.clone();
+                    async move {
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "text/event-stream")
+                            .body(Body::from(payload))
+                            .unwrap()
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -8330,8 +8548,7 @@ mod tests {
         let credential_body = to_bytes(credential_resp.into_body(), usize::MAX)
             .await
             .unwrap();
-        let credential_json: serde_json::Value =
-            serde_json::from_slice(&credential_body).unwrap();
+        let credential_json: serde_json::Value = serde_json::from_slice(&credential_body).unwrap();
         let credential_id = credential_json["id"]
             .as_str()
             .expect("credential id")
@@ -8365,7 +8582,9 @@ mod tests {
         )
         .await;
         let dynamic_status = dynamic_resp.status();
-        let dynamic_body = to_bytes(dynamic_resp.into_body(), usize::MAX).await.unwrap();
+        let dynamic_body = to_bytes(dynamic_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(
             dynamic_status,
             StatusCode::OK,
@@ -8448,8 +8667,7 @@ mod tests {
         let credential_body = to_bytes(credential_resp.into_body(), usize::MAX)
             .await
             .unwrap();
-        let credential_json: serde_json::Value =
-            serde_json::from_slice(&credential_body).unwrap();
+        let credential_json: serde_json::Value = serde_json::from_slice(&credential_body).unwrap();
         let credential_id = credential_json["id"]
             .as_str()
             .expect("credential id")
@@ -8483,7 +8701,9 @@ mod tests {
         )
         .await;
         let dynamic_status = dynamic_resp.status();
-        let dynamic_body = to_bytes(dynamic_resp.into_body(), usize::MAX).await.unwrap();
+        let dynamic_body = to_bytes(dynamic_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(
             dynamic_status,
             StatusCode::OK,
@@ -8533,6 +8753,105 @@ mod tests {
         assert_eq!(fallback_json["model"], "embed-dynamic");
         assert_eq!(fallback_json["token_count"], 11);
         assert_embedding_matches(&fallback_json["embeddings"][0], &[0.9, 0.8]);
+    }
+
+    #[tokio::test]
+    async fn provider_connection_stream_roundtrip_invalidates_to_static_fallback() {
+        let static_url = spawn_openai_compat_stream_mock(vec!["static stream"]).await;
+        let dynamic_url = spawn_openai_compat_stream_mock(vec!["dynamic stream"]).await;
+
+        let mut state = make_state();
+        state.openai_compat_openrouter = Some(Arc::new(OpenAiCompat::new(
+            ProviderConfig::OPENROUTER,
+            "static-key",
+            Some(static_url),
+            Some("openrouter/free".to_owned()),
+            None,
+            None,
+            None,
+        )));
+        state.openai_compat = state.openai_compat_openrouter.clone();
+
+        let app = make_app(state);
+
+        let credential_resp = authed_json(
+            app.clone(),
+            axum::http::Method::POST,
+            "/v1/admin/tenants/default_tenant/credentials",
+            serde_json::json!({
+                "provider_id": "openrouter",
+                "plaintext_value": "dynamic-key",
+            }),
+        )
+        .await;
+        assert_eq!(credential_resp.status(), StatusCode::CREATED);
+        let credential_body = to_bytes(credential_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let credential_json: serde_json::Value = serde_json::from_slice(&credential_body).unwrap();
+        let credential_id = credential_json["id"]
+            .as_str()
+            .expect("credential id")
+            .to_owned();
+
+        let create_resp = authed_json(
+            app.clone(),
+            axum::http::Method::POST,
+            "/v1/providers/connections",
+            serde_json::json!({
+                "tenant_id": "default_tenant",
+                "provider_connection_id": "conn_stream_dynamic",
+                "provider_family": "openrouter",
+                "adapter_type": "openrouter",
+                "supported_models": ["openrouter/free"],
+                "credential_id": credential_id,
+                "endpoint_url": dynamic_url,
+            }),
+        )
+        .await;
+        assert_eq!(create_resp.status(), StatusCode::CREATED);
+
+        let dynamic_sse = authed_sse_post(
+            app.clone(),
+            "/v1/chat/stream",
+            serde_json::json!({
+                "model": "openrouter/free",
+                "prompt": "hello stream",
+            }),
+        )
+        .await;
+        assert!(dynamic_sse.contains("event: token"));
+        assert!(dynamic_sse.contains("data:"));
+        assert!(dynamic_sse.contains("dynamic stream"));
+        assert!(dynamic_sse.contains("event: done"));
+
+        let delete_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::DELETE)
+                    .uri("/v1/providers/connections/conn_stream_dynamic")
+                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete_resp.status(), StatusCode::OK);
+
+        let fallback_sse = authed_sse_post(
+            app,
+            "/v1/chat/stream",
+            serde_json::json!({
+                "model": "openrouter/free",
+                "prompt": "hello fallback stream",
+            }),
+        )
+        .await;
+        assert!(fallback_sse.contains("event: token"));
+        assert!(fallback_sse.contains("data:"));
+        assert!(fallback_sse.contains("static stream"));
+        assert!(fallback_sse.contains("event: done"));
     }
 
     #[tokio::test]
