@@ -32,7 +32,7 @@ COPY ui/ ./
 RUN npm run build
 
 # ── Stage 1: Rust builder ─────────────────────────────────────────────────────
-FROM rust:1.86-slim AS builder
+FROM rust:1.88-slim AS builder
 
 # Build dependencies needed by sqlx, openssl-sys, and rustls.
 RUN apt-get update && \
@@ -91,8 +91,8 @@ COPY crates/ crates/
 # Inject the production UI assets so rust-embed bakes them into the binary.
 COPY --from=ui-builder /ui/dist /build/ui/dist
 
-# Touch binary crate source so Cargo knows it changed.
-RUN touch crates/cairn-app/src/main.rs
+# Touch all crate sources so Cargo invalidates stale .rmeta from the stub layer.
+RUN find crates -name "*.rs" -exec touch {} +
 
 RUN cargo build --release --bin cairn-app
 
