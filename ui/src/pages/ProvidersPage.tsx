@@ -14,7 +14,10 @@ import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ProviderKind = "openai_compat" | "openrouter" | "local";
+type ProviderKind =
+  | "openai" | "anthropic" | "ollama" | "deepseek" | "xai" | "google"
+  | "groq" | "azure-openai" | "openrouter" | "minimax" | "bedrock" | "bedrock-compat"
+  | "openai-compatible";
 
 interface ProviderKindMeta {
   label: string;
@@ -23,32 +26,126 @@ interface ProviderKindMeta {
   defaultFamily: string;
   defaultAdapter: string;
   defaultUrl: string;
+  defaultModel: string;
 }
 
 const PROVIDER_KINDS: Record<ProviderKind, ProviderKindMeta> = {
-  openai_compat: {
-    label: "OpenAI-compatible",
-    description: "Any API serving the OpenAI chat/completions format — OpenAI, Anthropic, Groq, Together, Bedrock, Vertex, and more.",
+  openai: {
+    label: "OpenAI",
+    description: "GPT-4, GPT-4.1, o-series models via api.openai.com.",
+    icon: <Zap size={16} />,
+    defaultFamily: "openai",
+    defaultAdapter: "openai",
+    defaultUrl: "https://api.openai.com/v1",
+    defaultModel: "gpt-4.1-nano",
+  },
+  anthropic: {
+    label: "Anthropic",
+    description: "Claude models via api.anthropic.com.",
+    icon: <Zap size={16} />,
+    defaultFamily: "anthropic",
+    defaultAdapter: "anthropic",
+    defaultUrl: "https://api.anthropic.com/v1",
+    defaultModel: "claude-sonnet-4-6",
+  },
+  ollama: {
+    label: "Ollama",
+    description: "Local self-hosted models via Ollama.",
+    icon: <HardDrive size={16} />,
+    defaultFamily: "ollama",
+    defaultAdapter: "ollama",
+    defaultUrl: "http://localhost:11434/v1",
+    defaultModel: "llama3.2:3b",
+  },
+  deepseek: {
+    label: "DeepSeek",
+    description: "DeepSeek reasoning and chat models.",
+    icon: <Zap size={16} />,
+    defaultFamily: "deepseek",
+    defaultAdapter: "deepseek",
+    defaultUrl: "https://api.deepseek.com/v1",
+    defaultModel: "deepseek-chat",
+  },
+  xai: {
+    label: "xAI",
+    description: "Grok models via api.x.ai.",
+    icon: <Zap size={16} />,
+    defaultFamily: "xai",
+    defaultAdapter: "xai",
+    defaultUrl: "https://api.x.ai/v1",
+    defaultModel: "grok-3-mini",
+  },
+  google: {
+    label: "Google Gemini",
+    description: "Gemini models via Google AI Studio or Vertex AI.",
     icon: <Globe size={16} />,
-    defaultFamily: "openai_compat",
-    defaultAdapter: "openai_compat",
-    defaultUrl: "https://api.openai.com",
+    defaultFamily: "google",
+    defaultAdapter: "google",
+    defaultUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    defaultModel: "gemini-2.5-flash",
+  },
+  groq: {
+    label: "Groq",
+    description: "Ultra-fast inference for open models.",
+    icon: <Zap size={16} />,
+    defaultFamily: "groq",
+    defaultAdapter: "groq",
+    defaultUrl: "https://api.groq.com/openai/v1",
+    defaultModel: "llama-3.3-70b-versatile",
+  },
+  "azure-openai": {
+    label: "Azure OpenAI",
+    description: "OpenAI models hosted on your Azure subscription.",
+    icon: <Server size={16} />,
+    defaultFamily: "azure-openai",
+    defaultAdapter: "azure-openai",
+    defaultUrl: "",
+    defaultModel: "gpt-4.1",
   },
   openrouter: {
     label: "OpenRouter",
-    description: "Access 200+ models via one OpenAI-compatible endpoint. Free tier available at openrouter.ai.",
+    description: "Access 200+ models via one endpoint. Free tier available.",
     icon: <Globe size={16} />,
-    defaultFamily: "openai_compat",
-    defaultAdapter: "openai_compat",
+    defaultFamily: "openrouter",
+    defaultAdapter: "openrouter",
     defaultUrl: "https://openrouter.ai/api/v1",
+    defaultModel: "openrouter/auto",
   },
-  local: {
-    label: "Local / Custom",
-    description: "Custom provider with manual configuration.",
-    icon: <HardDrive size={16} />,
-    defaultFamily: "custom",
-    defaultAdapter: "custom",
+  minimax: {
+    label: "MiniMax",
+    description: "MiniMax M1 and M2.5 models.",
+    icon: <Zap size={16} />,
+    defaultFamily: "minimax",
+    defaultAdapter: "minimax",
+    defaultUrl: "https://api.minimaxi.chat/v1",
+    defaultModel: "MiniMax-M1",
+  },
+  bedrock: {
+    label: "AWS Bedrock (Converse)",
+    description: "Full-featured Converse API — guardrails, documents, native tool_config.",
+    icon: <Server size={16} />,
+    defaultFamily: "bedrock",
+    defaultAdapter: "bedrock",
     defaultUrl: "",
+    defaultModel: "us.anthropic.claude-sonnet-4-6-v1",
+  },
+  "bedrock-compat": {
+    label: "AWS Bedrock (OpenAI)",
+    description: "Bedrock's OpenAI-compatible gateway — standard /chat/completions format.",
+    icon: <Server size={16} />,
+    defaultFamily: "bedrock-compat",
+    defaultAdapter: "bedrock-compat",
+    defaultUrl: "https://bedrock-runtime.us-west-2.amazonaws.com",
+    defaultModel: "us.anthropic.claude-sonnet-4-6-v1",
+  },
+  "openai-compatible": {
+    label: "OpenAI-Compatible",
+    description: "Any endpoint that speaks the /chat/completions format. You supply the URL and key.",
+    icon: <Settings size={16} />,
+    defaultFamily: "openai-compatible",
+    defaultAdapter: "openai-compatible",
+    defaultUrl: "",
+    defaultModel: "",
   },
 };
 
@@ -328,8 +425,17 @@ function ConnectionRow({
   });
 
   const familyColor: Record<string, string> = {
-    openai_compat: "text-sky-400 bg-sky-950/40 border-sky-800/40",
-    custom:        "text-gray-500 dark:text-zinc-400 bg-gray-100/60 dark:bg-zinc-800/60 border-gray-200 dark:border-zinc-700",
+    openai:                "text-sky-400 bg-sky-950/40 border-sky-800/40",
+    anthropic:             "text-violet-400 bg-violet-950/40 border-violet-800/40",
+    ollama:                "text-amber-400 bg-amber-950/40 border-amber-800/40",
+    google:                "text-emerald-400 bg-emerald-950/40 border-emerald-800/40",
+    groq:                  "text-cyan-400 bg-cyan-950/40 border-cyan-800/40",
+    openrouter:            "text-indigo-400 bg-indigo-950/40 border-indigo-800/40",
+    bedrock:               "text-orange-400 bg-orange-950/40 border-orange-800/40",
+    "bedrock-compat":      "text-orange-400 bg-orange-950/40 border-orange-800/40",
+    "azure-openai":        "text-blue-400 bg-blue-950/40 border-blue-800/40",
+    "openai-compatible":   "text-gray-400 dark:text-zinc-500 bg-gray-100/60 dark:bg-zinc-800/60 border-gray-200 dark:border-zinc-700",
+    custom:                "text-gray-500 dark:text-zinc-400 bg-gray-100/60 dark:bg-zinc-800/60 border-gray-200 dark:border-zinc-700",
   };
 
   const familyClass = familyColor[record.provider_family] ?? familyColor.custom;
@@ -457,19 +563,19 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
 
   // Step: 0=type, 1=form, 2=models
   const [step, setStep] = useState<0 | 1 | 2>(0);
-  const [kind, setKind] = useState<ProviderKind>("openai_compat");
+  const [kind, setKind] = useState<ProviderKind>("openai");
 
   const meta = PROVIDER_KINDS[kind];
 
   // Form fields
-  const [connectionId, setConnectionId] = useState(() => genConnectionId("openai_compat"));
+  const [connectionId, setConnectionId] = useState(() => genConnectionId("openai"));
   const [baseUrl,      setBaseUrl]       = useState(meta.defaultUrl);
   const [apiKey,       setApiKey]        = useState("");
   const [family,       setFamily]        = useState(meta.defaultFamily);
   const [adapter,      setAdapter]       = useState(meta.defaultAdapter);
 
   // Model entry
-  const [models, setModels]     = useState<string[]>([]);
+  const [models, setModels]     = useState<string[]>([meta.defaultModel].filter(Boolean));
   const [modelInput, setModelInput] = useState("");
 
   const selectKind = (k: ProviderKind) => {
@@ -479,6 +585,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
     setBaseUrl(m.defaultUrl);
     setFamily(m.defaultFamily);
     setAdapter(m.defaultAdapter);
+    setModels(m.defaultModel ? [m.defaultModel] : []);
   };
 
   const addModel = () => {
@@ -569,17 +676,18 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
 
           {/* ── Step 0: Type selection ── */}
           {step === 0 && (
-            <div className="space-y-3">
+            <div>
               <p className="text-[12px] text-gray-400 dark:text-zinc-500 mb-4">
-                Choose the type of provider you want to connect.
+                Choose the provider you want to connect.
               </p>
 
+              <div className="grid grid-cols-2 gap-2">
               {(Object.entries(PROVIDER_KINDS) as [ProviderKind, ProviderKindMeta][]).map(([k, m]) => (
                 <button
                   key={k}
                   onClick={() => { selectKind(k); setStep(1); }}
                   className={clsx(
-                    "w-full flex items-start gap-3 p-4 rounded-lg border text-left transition-colors",
+                    "flex items-start gap-2 p-3 rounded-lg border text-left transition-colors",
                     kind === k
                       ? "border-indigo-500/60 bg-indigo-950/30"
                       : "border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60 hover:border-gray-300 dark:hover:border-zinc-700 hover:bg-gray-100/40 dark:hover:bg-zinc-800/40",
@@ -597,6 +705,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                   )}
                 </button>
               ))}
+              </div>
             </div>
           )}
 
@@ -624,7 +733,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 <p className="mt-1 text-[10px] text-gray-400 dark:text-zinc-600">Unique identifier for this connection. Cannot be changed later.</p>
               </label>
 
-              {kind !== "local" && (
+              {kind !== "openai-compatible" && (
                 <label className="block">
                   <span className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Base URL</span>
                   <input
@@ -636,7 +745,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 </label>
               )}
 
-              {(kind === "openai_compat" || kind === "openrouter") && (
+              {kind !== "ollama" && kind !== "bedrock" && (
                 <label className="block">
                   <span className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">API Key</span>
                   <input
@@ -695,7 +804,7 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                     onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addModel(); } }}
                     placeholder={
                       kind === "openrouter"    ? "e.g. openai/gpt-4o, anthropic/claude-3.5-sonnet" :
-                      kind === "openai_compat" ? "e.g. gpt-4o, claude-3.5-sonnet" :
+                      kind === "openai" ? "e.g. gpt-4.1-nano, gpt-4o" :
                                                 "model_id"
                     }
                     className="w-full rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 pl-7 pr-3 h-8 text-xs text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
