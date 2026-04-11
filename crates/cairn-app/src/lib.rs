@@ -10219,6 +10219,15 @@ async fn orchestrate_run_handler(
             }
         }
     };
+    let model_id = model_id.trim().to_owned();
+    if model_id.is_empty() || model_id == "default" {
+        return AppApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no_brain_provider",
+            "No default LLM model configured. Set brain_model or generate_model, or provide model_id explicitly.",
+        )
+        .into_response();
+    }
 
     let is_bedrock_model = model_id.contains('.') && !model_id.contains('/');
     let brain = match state
