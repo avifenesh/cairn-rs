@@ -16,7 +16,9 @@ import {
   ChevronRight, Users, Layers,
 } from "lucide-react";
 import { clsx } from "clsx";
+import { Card } from "../components/Card";
 import { defaultApi } from "../lib/api";
+import { sectionLabel } from "../lib/design-system";
 import { EventLog } from "../components/EventLog";
 import { StatCard } from "../components/StatCard";
 import { MiniChart } from "../components/MiniChart";
@@ -64,22 +66,8 @@ const STATE_COLORS: Partial<Record<RunState, string>> = {
   canceled:           "text-gray-400 dark:text-zinc-500",
 };
 
-// ── Panel / section primitives (local — not importing from DashboardPage) ─────
-
-function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={clsx("bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4", className)}>
-      {children}
-    </div>
-  );
-}
-
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
-      {children}
-    </p>
-  );
+  return <p className={sectionLabel}>{children}</p>;
 }
 
 // ── Active run row ────────────────────────────────────────────────────────────
@@ -375,7 +363,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
         {/* Run trend + task breakdown */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/* Run trend sparkline */}
-          <Panel>
+          <Card>
             <div className="flex items-center justify-between mb-3">
               <SectionLabel>Run Volume (12 h)</SectionLabel>
               <span className="flex items-center gap-1 text-[10px] text-gray-300 dark:text-zinc-600">
@@ -401,10 +389,10 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 </div>
               </>
             )}
-          </Panel>
+          </Card>
 
           {/* Task state breakdown */}
-          <Panel>
+          <Card>
             <SectionLabel>Task State Breakdown</SectionLabel>
             {tasksLoading ? (
               <div className="space-y-2 animate-pulse">
@@ -413,11 +401,11 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
             ) : (
               <TaskRing tasks={allTasks} />
             )}
-          </Panel>
+          </Card>
         </div>
 
         {/* Active runs */}
-        <Panel>
+        <Card>
           <div className="flex items-center justify-between mb-3">
             <SectionLabel>
               Active Runs
@@ -458,11 +446,11 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
               )}
             </div>
           )}
-        </Panel>
+        </Card>
 
         {/* Pending approvals */}
         {allApprovals.length > 0 && (
-          <Panel>
+          <Card>
             <SectionLabel>Pending Approvals ({allApprovals.length})</SectionLabel>
             <div className="space-y-0">
               {allApprovals.map((appr, i) => (
@@ -494,12 +482,12 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 </div>
               ))}
             </div>
-          </Panel>
+          </Card>
         )}
 
         {/* Recent session + worker summary */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Panel>
+          <Card>
             <SectionLabel>Workers</SectionLabel>
             {tasksLoading ? (
               <div className="h-12 rounded bg-gray-100 dark:bg-zinc-800 animate-pulse" />
@@ -533,10 +521,10 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 </div>
               );
             })()}
-          </Panel>
+          </Card>
 
           {/* Resource summary */}
-          <Panel>
+          <Card>
             <SectionLabel>Resources</SectionLabel>
             <div className="space-y-2">
               {[
@@ -557,11 +545,11 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
                 </div>
               ))}
             </div>
-          </Panel>
+          </Card>
         </div>
 
         {/* Live event log */}
-        <Panel>
+        <Card>
           <div className="flex items-center justify-between mb-3">
             <SectionLabel>Live Events</SectionLabel>
             <span className="flex items-center gap-1 text-[10px] text-gray-300 dark:text-zinc-600">
@@ -572,7 +560,7 @@ export function ProjectDashboardPage({ projectId }: ProjectDashboardPageProps) {
             initialEvents={recentEvents ?? []}
             maxEvents={40}
           />
-        </Panel>
+        </Card>
 
       </div>
     </div>
