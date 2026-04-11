@@ -4945,7 +4945,7 @@ async fn main() {
 
     // ── Lib.rs AppState (catalog-driven router, shared runtime) ─────────────
     let mut lib_state = Arc::new(
-        cairn_app::AppState::new(BootstrapConfig::default())
+        cairn_app::AppState::new(config.clone())
             .await
             .expect("failed to initialise lib AppState"),
     );
