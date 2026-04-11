@@ -7406,7 +7406,12 @@ async fn get_settings_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
         ),
     };
 
-    (StatusCode::OK, Json(settings))
+    let mut response = Json(settings).into_response();
+    response.headers_mut().insert(
+        "x-cairn-settings-source",
+        axum::http::HeaderValue::from_static("lib_catalog"),
+    );
+    response
 }
 
 fn tls_settings_summary(config: &BootstrapConfig) -> Result<TlsSettingsResponse, String> {

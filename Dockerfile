@@ -81,7 +81,7 @@ RUN for d in cairn-domain cairn-store cairn-runtime cairn-tools cairn-tools-deri
 # Stub ui/dist so rust-embed doesn't abort the deps build.
 RUN mkdir -p ui/dist && touch ui/dist/.keep
 
-# Pre-compile dependencies (failures are expected due to stubs — suppressed).
+# Pre-compile external dependencies only (workspace stubs will fail — that's fine).
 ENV SQLX_OFFLINE=true
 RUN cargo build --release --bin cairn-app 2>/dev/null || true
 
@@ -91,8 +91,9 @@ COPY crates/ crates/
 # Inject the production UI assets so rust-embed bakes them into the binary.
 COPY --from=ui-builder /ui/dist /build/ui/dist
 
-# Touch all crate sources so Cargo invalidates stale .rmeta from the stub layer.
-RUN find crates -name "*.rs" -exec touch {} +
+# Nuke entire target dir to guarantee a fully clean build.
+# This sacrifices the external dep cache but ensures no stale artifacts.
+RUN rm -rf target
 
 RUN cargo build --release --bin cairn-app
 
