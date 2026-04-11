@@ -256,6 +256,7 @@ export function DataTable<T>({
                 return (
                 <tr
                   key={i}
+                  data-testid={rowKey ? `row-${rowKey}` : undefined}
                   onClick={() => onRowClick?.(row, absIdx)}
                   className={clsx(
                     'border-b border-gray-200/50 dark:border-zinc-800/50 last:border-0 transition-colors',

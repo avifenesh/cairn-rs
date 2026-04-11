@@ -113,7 +113,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
             {/* Error state */}
             {error && (
-              <div className="flex items-start gap-2 rounded-lg bg-red-950/40 border border-red-800/40 px-3 py-2.5">
+              <div data-testid="login-error" className="flex items-start gap-2 rounded-lg bg-red-950/40 border border-red-800/40 px-3 py-2.5">
                 <AlertCircle size={13} className="text-red-400 shrink-0 mt-0.5" />
                 <p className="text-[12px] text-red-300 leading-snug">{error}</p>
               </div>

@@ -167,7 +167,10 @@ test.describe("2. Connect LLM Provider", () => {
     // Verify in UI
     await signIn(page);
     await nav(page, "providers");
-    expect(await page.locator(`text=${connId}`).isVisible({ timeout: 5000 }).catch(() => false)).toBeTruthy();
+    // Connection may appear via data-testid or title attribute (IDs truncated in display)
+    const connVisible = await page.locator(`[data-testid="provider-row-${connId}"]`).isVisible({ timeout: 5000 }).catch(() => false)
+      || await page.locator(`[title*="${connId}"]`).first().isVisible({ timeout: 2000 }).catch(() => false);
+    expect(connVisible).toBeTruthy();
 
     // Verify registry
     const reg = await get(request, "/v1/providers/registry");
@@ -910,102 +913,88 @@ test.describe("24. Real LLM Calls", () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 test("FULL JOURNEY: health → connect → session → orchestrate (real LLM) → task → approve → complete → verify", async ({ page, request }) => {
-  test.setTimeout(120_000); // 2 min — real LLM calls take time
-
-  // 1. Health check
-  expect((await get(request, "/health")).status).toBe("healthy");
-
-  // 2. Sign in
-  await signIn(page);
+  test.setTimeout(120_000);
 
   const sid = `journey_${id()}`, rid = `journey_run_${id()}`, tid = `journey_task_${id()}`, aid = `journey_appr_${id()}`;
 
-  // 3. Create session + run
-  await post(request, "/v1/sessions", { session_id: sid, ...scope });
-  await post(request, "/v1/runs", { run_id: rid, session_id: sid, ...scope });
-  const createdRun = await get(request, `/v1/runs/${rid}`);
-  expect(createdRun.run?.state ?? createdRun.state).toBe("pending");
-
-  // 4. REAL ORCHESTRATION — call the actual LLM
-  const orchResp = await request.post(`${BASE}/v1/runs/${rid}/orchestrate`, {
-    headers: HDR,
-    data: { input: "Summarize what Cairn does in one sentence.", max_steps: 1 },
-    timeout: 30_000,
-  });
-  const orchOk = orchResp.status() === 200;
-  if (orchOk) {
-    const orchBody = await orchResp.json();
-    expect(orchBody.termination).toBeDefined();
-    expect(orchBody.summary || orchBody.text).toBeTruthy();
-  }
-
-  // 5. Create task
-  await appendRuntimeEvent(request, "task_created", {
-    task_id: tid,
-    parent_run_id: rid,
-    parent_task_id: null,
-    prompt_release_id: null,
+  await test.step("1. Health check", async () => {
+    expect((await get(request, "/health")).status).toBe("healthy");
   });
 
-  // 6. Task → running
-  await appendRuntimeEvent(request, "task_state_changed", {
-    task_id: tid,
-    transition: { from: "queued", to: "running" },
-    failure_class: null,
-    pause_reason: null,
-    resume_trigger: null,
+  await test.step("2. Sign in", async () => {
+    await signIn(page);
   });
 
-  // 7. Request approval
-  await appendRuntimeEvent(request, "approval_requested", {
-    approval_id: aid,
-    run_id: rid,
-    task_id: tid,
-    requirement: "required",
+  await test.step("3. Create session + run", async () => {
+    await post(request, "/v1/sessions", { session_id: sid, ...scope });
+    await post(request, "/v1/runs", { run_id: rid, session_id: sid, ...scope });
+    const createdRun = await get(request, `/v1/runs/${rid}`);
+    expect(createdRun.run?.state ?? createdRun.state).toBe("pending");
   });
 
-  // 8. Approve via UI
-  await nav(page, "approvals");
-  const btn = page.getByTestId("approve-btn").first();
-  if (await btn.isVisible({ timeout: 3000 }).catch(() => false)) {
-    page.on("dialog", d => d.accept());
-    await btn.click();
-    await page.waitForTimeout(500);
-  }
-
-  // Task → completed
-  await appendRuntimeEvent(request, "task_state_changed", {
-    task_id: tid,
-    transition: { from: "running", to: "completed" },
-    failure_class: null,
-    pause_reason: null,
-    resume_trigger: null,
+  await test.step("4. Orchestrate with real LLM", async () => {
+    const orchResp = await request.post(`${BASE}/v1/runs/${rid}/orchestrate`, {
+      headers: HDR,
+      data: { input: "Summarize what Cairn does in one sentence.", max_steps: 1 },
+      timeout: 30_000,
+    });
+    if (orchResp.status() === 200) {
+      const orchBody = await orchResp.json();
+      expect(orchBody.termination).toBeDefined();
+      expect(orchBody.summary || orchBody.text).toBeTruthy();
+    }
   });
 
-  // Run → completed
-  await appendRuntimeEvent(request, "run_state_changed", {
-    run_id: rid,
-    transition: { from: "running", to: "completed" },
-    failure_class: null,
-    pause_reason: null,
-    resume_trigger: null,
+  await test.step("5. Create task + advance to running", async () => {
+    await appendRuntimeEvent(request, "task_created", {
+      task_id: tid, parent_run_id: rid, parent_task_id: null, prompt_release_id: null,
+    });
+    await appendRuntimeEvent(request, "task_state_changed", {
+      task_id: tid, transition: { from: "queued", to: "running" },
+      failure_class: null, pause_reason: null, resume_trigger: null,
+    });
   });
 
-  // Verify event trail
-  const events = await get(request, `/v1/runs/${rid}/events`);
-  expect(listFrom(events).length).toBeGreaterThanOrEqual(3);
-  const finalRun = await get(request, `/v1/runs/${rid}`);
-  expect(finalRun.run?.state ?? finalRun.state).toBe("completed");
+  await test.step("6. Request approval", async () => {
+    await appendRuntimeEvent(request, "approval_requested", {
+      approval_id: aid, run_id: rid, task_id: tid, requirement: "required",
+    });
+  });
 
-  // Verify telemetry
-  const usage = await get(request, "/v1/telemetry/usage");
-  expect(usage).toBeDefined();
+  await test.step("7. Approve via UI", async () => {
+    await nav(page, "approvals");
+    const btn = page.getByTestId("approve-btn").first();
+    if (await btn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      page.on("dialog", d => d.accept());
+      await btn.click();
+      await page.waitForTimeout(500);
+    }
+  });
 
-  // Verify traces
-  await nav(page, "traces");
-  expect((await page.textContent("body"))!.length).toBeGreaterThan(20);
+  await test.step("8. Complete task + run", async () => {
+    await appendRuntimeEvent(request, "task_state_changed", {
+      task_id: tid, transition: { from: "running", to: "completed" },
+      failure_class: null, pause_reason: null, resume_trigger: null,
+    });
+    await appendRuntimeEvent(request, "run_state_changed", {
+      run_id: rid, transition: { from: "running", to: "completed" },
+      failure_class: null, pause_reason: null, resume_trigger: null,
+    });
+  });
 
-  // Verify costs page
-  await nav(page, "costs");
-  expect((await page.textContent("body"))!.length).toBeGreaterThan(20);
+  await test.step("9. Verify event trail + final state", async () => {
+    const events = await get(request, `/v1/runs/${rid}/events`);
+    expect(listFrom(events).length).toBeGreaterThanOrEqual(3);
+    const finalRun = await get(request, `/v1/runs/${rid}`);
+    expect(finalRun.run?.state ?? finalRun.state).toBe("completed");
+  });
+
+  await test.step("10. Verify telemetry + traces + costs", async () => {
+    const usage = await get(request, "/v1/telemetry/usage");
+    expect(usage).toBeDefined();
+    await nav(page, "traces");
+    expect((await page.textContent("body"))!.length).toBeGreaterThan(20);
+    await nav(page, "costs");
+    expect((await page.textContent("body"))!.length).toBeGreaterThan(20);
+  });
 });

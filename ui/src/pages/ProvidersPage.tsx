@@ -9,6 +9,7 @@ import { clsx } from "clsx";
 import { StatCard } from "../components/StatCard";
 import { defaultApi } from "../lib/api";
 import { useToast } from "../components/Toast";
+import { sectionLabel } from "../lib/design-system";
 import { useScope } from "../hooks/useScope";
 import type { ProviderConnectionRecord, ProviderHealthEntry } from "../lib/types";
 
@@ -442,7 +443,7 @@ function ConnectionRow({
 
   return (
     <>
-      <tr className={clsx("border-b border-gray-200/50 dark:border-zinc-800/50 hover:bg-white/5 transition-colors", even ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50")}>
+      <tr data-testid={`provider-row-${record.provider_connection_id}`} className={clsx("border-b border-gray-200/50 dark:border-zinc-800/50 hover:bg-white/5 transition-colors", even ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50")}>
         {/* Status */}
         <td className="px-4 h-10 w-6">
           <div className="flex items-center gap-1.5">
@@ -941,7 +942,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
+          <p className={clsx(sectionLabel, "mb-0")}>
             Provider Connections
           </p>
           {entries.length > 0 && (
@@ -1062,7 +1063,7 @@ export function ProvidersPage() {
   return (
     <div className="p-6 space-y-6">
       <div className="space-y-1">
-        <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
+        <p className={clsx(sectionLabel, "mb-0")}>
           Providers
         </p>
         <p className="text-[12px] text-gray-500 dark:text-zinc-400">
