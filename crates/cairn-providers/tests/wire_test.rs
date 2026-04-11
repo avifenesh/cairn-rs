@@ -15,6 +15,7 @@ fn provider(server: &MockServer) -> OpenAiCompat {
         None,
         None,
     )
+    .expect("provider should build")
 }
 
 #[tokio::test]
@@ -70,6 +71,40 @@ async fn openai_compat_parses_chat_usage_and_tool_calls() {
     assert_eq!(tool_calls[0].id, "call_1");
     assert_eq!(tool_calls[0].function.name, "search");
     assert_eq!(tool_calls[0].function.arguments, "{\"q\":\"rust\"}");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn openai_compat_ignores_malformed_stream_frames_and_keeps_valid_chunks() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/chat/completions")
+            .json_body_includes(r#"{"stream":true}"#);
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\r\n\r\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"broken\"}}\r\n\r\n",
+                ": keep-alive comment\r\n\r\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\r\n\r\n",
+                "data: [DONE]\r\n\r\n",
+            ));
+    });
+
+    let provider = provider(&server);
+    let chunks = provider
+        .chat_stream(&[ChatMessage::user("hello")], None)
+        .await
+        .expect("stream should start")
+        .collect::<Vec<_>>()
+        .await;
+
+    let parts: Vec<String> = chunks
+        .into_iter()
+        .map(|result| result.expect("chunk should parse"))
+        .collect();
+    assert_eq!(parts, vec!["Hello".to_owned(), " world".to_owned()]);
     mock.assert();
 }
 

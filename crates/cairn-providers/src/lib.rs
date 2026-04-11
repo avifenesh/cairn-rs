@@ -75,6 +75,12 @@ pub struct Usage {
 
 /// Super-trait combining chat + completion + embedding + model listing.
 pub trait CairnProvider:
-    ChatProvider + CompletionProvider + EmbeddingProvider + models::ModelsProvider + Send + Sync + 'static
+    ChatProvider
+    + CompletionProvider
+    + EmbeddingProvider
+    + models::ModelsProvider
+    + Send
+    + Sync
+    + 'static
 {
 }

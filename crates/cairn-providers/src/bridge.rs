@@ -6,13 +6,108 @@
 
 use async_trait::async_trait;
 use cairn_domain::providers::{
-    EmbeddingProvider as DomainEmbeddingProvider, EmbeddingResponse,
-    GenerationProvider, GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
+    EmbeddingProvider as DomainEmbeddingProvider, EmbeddingResponse, GenerationProvider,
+    GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
 };
+use serde_json::Value;
 
-use crate::chat::{ChatMessage, ChatProvider};
-use crate::wire::openai_compat::OpenAiCompat;
 use crate::backends::bedrock::Bedrock;
+use crate::chat::{ChatMessage, ChatRole, MessageContent};
+use crate::error::truncate_raw_response;
+use crate::wire::openai_compat::OpenAiCompat;
+use crate::{FunctionCall, ToolCall};
+
+fn json_content_to_string(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+fn json_tool_calls(value: &Value) -> Option<Vec<ToolCall>> {
+    value.as_array().map(|calls| {
+        calls
+            .iter()
+            .map(|call| ToolCall {
+                id: call
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                call_type: call
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("function")
+                    .to_owned(),
+                function: FunctionCall {
+                    name: call
+                        .get("function")
+                        .and_then(|function| function.get("name"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    arguments: call
+                        .get("function")
+                        .and_then(|function| function.get("arguments"))
+                        .map(json_content_to_string)
+                        .unwrap_or_default(),
+                },
+            })
+            .collect()
+    })
+}
+
+fn json_messages_to_chat_messages(messages: &[Value]) -> Vec<ChatMessage> {
+    messages
+        .iter()
+        .map(|message| {
+            let role = message
+                .get("role")
+                .and_then(Value::as_str)
+                .unwrap_or("user");
+            let content = message
+                .get("content")
+                .map(json_content_to_string)
+                .unwrap_or_default();
+            match role {
+                "system" => ChatMessage::system(content),
+                "assistant" => {
+                    if let Some(tool_calls) = message.get("tool_calls").and_then(json_tool_calls) {
+                        ChatMessage {
+                            role: ChatRole::Assistant,
+                            content_type: MessageContent::ToolUse(tool_calls),
+                            content,
+                        }
+                    } else {
+                        ChatMessage::assistant(content)
+                    }
+                }
+                "tool" => ChatMessage {
+                    role: ChatRole::Tool,
+                    content_type: MessageContent::ToolResult(vec![ToolCall {
+                        id: message
+                            .get("tool_call_id")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
+                        call_type: "function".to_owned(),
+                        function: FunctionCall {
+                            name: message
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_owned(),
+                            arguments: content,
+                        },
+                    }]),
+                    content: String::new(),
+                },
+                _ => ChatMessage::user(content),
+            }
+        })
+        .collect()
+}
 
 // ── OpenAiCompat → GenerationProvider ────────────────────────────────────────
 
@@ -24,31 +119,25 @@ impl GenerationProvider for OpenAiCompat {
         messages: Vec<serde_json::Value>,
         _settings: &ProviderBindingSettings,
     ) -> Result<GenerationResponse, ProviderAdapterError> {
-        let chat_messages: Vec<ChatMessage> = messages
-            .iter()
-            .map(|m| {
-                let role = m["role"].as_str().unwrap_or("user");
-                let content = m["content"].as_str().unwrap_or("").to_owned();
-                match role {
-                    "system" => ChatMessage::system(content),
-                    "assistant" => ChatMessage::assistant(content),
-                    _ => ChatMessage::user(content),
-                }
-            })
-            .collect();
-
-        // Temporarily override model if caller specifies one.
-        // The OpenAiCompat struct stores model as a field — for now we use
-        // the configured model. A future version will allow per-call override.
-        let _ = model_id; // TODO: per-call model override
+        let chat_messages = json_messages_to_chat_messages(&messages);
+        let effective_model = model_id.trim();
 
         let response = self
-            .chat_with_tools(&chat_messages, None, None)
+            .chat_with_tools_for_model(
+                (!effective_model.is_empty()).then_some(effective_model),
+                &chat_messages,
+                None,
+                None,
+            )
             .await
             .map_err(|e| match e {
                 crate::error::ProviderError::RateLimited => ProviderAdapterError::RateLimited,
-                crate::error::ProviderError::Http(msg) => ProviderAdapterError::TransportFailure(msg),
-                crate::error::ProviderError::Auth(msg) => ProviderAdapterError::TransportFailure(msg),
+                crate::error::ProviderError::Http(msg) => {
+                    ProviderAdapterError::TransportFailure(msg)
+                }
+                crate::error::ProviderError::Auth(msg) => {
+                    ProviderAdapterError::TransportFailure(msg)
+                }
                 other => ProviderAdapterError::ProviderError(other.to_string()),
             })?;
 
@@ -58,21 +147,27 @@ impl GenerationProvider for OpenAiCompat {
             .tool_calls()
             .unwrap_or_default()
             .into_iter()
-            .map(|tc| serde_json::json!({
-                "id": tc.id,
-                "type": tc.call_type,
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                }
-            }))
+            .map(|tc| {
+                serde_json::json!({
+                    "id": tc.id,
+                    "type": tc.call_type,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    }
+                })
+            })
             .collect();
 
         Ok(GenerationResponse {
             text,
             input_tokens: usage.as_ref().map(|u| u.prompt_tokens),
             output_tokens: usage.as_ref().map(|u| u.completion_tokens),
-            model_id: self.model.clone(),
+            model_id: if effective_model.is_empty() {
+                self.model.clone()
+            } else {
+                effective_model.to_owned()
+            },
             tool_calls,
         })
     }
@@ -89,41 +184,31 @@ impl GenerationProvider for Bedrock {
         messages: Vec<serde_json::Value>,
         _settings: &ProviderBindingSettings,
     ) -> Result<GenerationResponse, ProviderAdapterError> {
-        let chat_messages: Vec<ChatMessage> = messages
-            .iter()
-            .map(|m| {
-                let role = m["role"].as_str().unwrap_or("user");
-                let content = m["content"].as_str().unwrap_or("").to_owned();
-                match role {
-                    "system" => ChatMessage::system(content),
-                    "assistant" => ChatMessage::assistant(content),
-                    _ => ChatMessage::user(content),
-                }
-            })
-            .collect();
+        let chat_messages = json_messages_to_chat_messages(&messages);
+        let effective_model = if model_id.trim().is_empty() {
+            self.model_id()
+        } else {
+            model_id.trim()
+        };
 
         let response = self
-            .chat_with_tools(&chat_messages, None, None)
+            .chat_with_tools_for_model(Some(effective_model), &chat_messages, None, None)
             .await
             .map_err(|e| match e {
                 crate::error::ProviderError::RateLimited => ProviderAdapterError::RateLimited,
-                crate::error::ProviderError::Http(msg) => ProviderAdapterError::TransportFailure(msg),
+                crate::error::ProviderError::Http(msg) => {
+                    ProviderAdapterError::TransportFailure(msg)
+                }
                 other => ProviderAdapterError::ProviderError(other.to_string()),
             })?;
 
         let text = response.text().unwrap_or_default();
         let usage = response.usage();
-        let effective_model = if model_id.is_empty() {
-            self.model_id().to_owned()
-        } else {
-            model_id.to_owned()
-        };
-
         Ok(GenerationResponse {
             text,
             input_tokens: usage.as_ref().map(|u| u.prompt_tokens),
             output_tokens: usage.as_ref().map(|u| u.completion_tokens),
-            model_id: effective_model,
+            model_id: effective_model.to_owned(),
             tool_calls: vec![],
         })
     }
@@ -154,7 +239,8 @@ impl DomainEmbeddingProvider for OpenAiCompat {
             "model": model,
             "input": texts,
         });
-        let resp = reqwest::Client::new()
+        let resp = self
+            .client()
             .post(url)
             .bearer_auth(&self.api_key)
             .json(&body)
@@ -166,7 +252,7 @@ impl DomainEmbeddingProvider for OpenAiCompat {
             if status.as_u16() == 429 {
                 return Err(ProviderAdapterError::RateLimited);
             }
-            let text = resp.text().await.unwrap_or_default();
+            let text = truncate_raw_response(&resp.text().await.unwrap_or_default());
             return Err(ProviderAdapterError::ProviderError(format!(
                 "embedding {status}: {text}"
             )));
@@ -180,9 +266,11 @@ impl DomainEmbeddingProvider for OpenAiCompat {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|item| {
-                        item["embedding"]
-                            .as_array()
-                            .map(|v| v.iter().filter_map(|n| n.as_f64().map(|f| f as f32)).collect())
+                        item["embedding"].as_array().map(|v| {
+                            v.iter()
+                                .filter_map(|n| n.as_f64().map(|f| f as f32))
+                                .collect()
+                        })
                     })
                     .collect()
             })

@@ -347,7 +347,13 @@ where
             default_model.clone(),
         ));
         let embedding =
-            build_embedding_provider(&backend, endpoint, api_key, connection, requested_model);
+            build_embedding_provider(&backend, endpoint, api_key, connection, requested_model)
+                .map_err(|err| RuntimeError::Validation {
+                    reason: format!(
+                        "failed to build embedding provider for connection {}: {err}",
+                        connection.provider_connection_id
+                    ),
+                })?;
 
         Ok(CachedProvider {
             connection_id: connection.provider_connection_id.as_str().to_owned(),
@@ -785,9 +791,9 @@ fn build_embedding_provider(
     api_key: Option<String>,
     connection: &ProviderConnectionRecord,
     requested_model: &str,
-) -> Option<Arc<dyn DomainEmbeddingProvider>> {
+) -> Result<Option<Arc<dyn DomainEmbeddingProvider>>, cairn_providers::error::ProviderError> {
     if matches!(backend, Backend::Bedrock) {
-        return None;
+        return Ok(None);
     }
 
     let model = if !requested_model.is_empty() {
@@ -804,8 +810,8 @@ fn build_embedding_provider(
         None,
         None,
         None,
-    ));
-    Some(embedding)
+    )?);
+    Ok(Some(embedding))
 }
 
 fn select_connection<'a>(

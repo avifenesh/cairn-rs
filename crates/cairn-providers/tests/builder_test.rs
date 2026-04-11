@@ -1,8 +1,9 @@
 use cairn_providers::{
-    Backend, ChatMessage, ProviderBuilder,
-    wire::openai_compat::ProviderConfig,
+    Backend, ChatMessage, ProviderBuilder, StructuredOutput, Tool, ToolChoice,
+    error::ProviderError, wire::openai_compat::ProviderConfig,
 };
 use httpmock::prelude::*;
+use serde_json::json;
 
 #[derive(Debug, Clone)]
 struct BackendCase {
@@ -62,23 +63,19 @@ fn backend_configs_match_expected_presets() {
             "{backend} endpoint"
         );
         assert_eq!(
-            actual.supports_reasoning_effort,
-            expected.supports_reasoning_effort,
+            actual.supports_reasoning_effort, expected.supports_reasoning_effort,
             "{backend} reasoning flag"
         );
         assert_eq!(
-            actual.supports_structured_output,
-            expected.supports_structured_output,
+            actual.supports_structured_output, expected.supports_structured_output,
             "{backend} structured output flag"
         );
         assert_eq!(
-            actual.supports_parallel_tool_calls,
-            expected.supports_parallel_tool_calls,
+            actual.supports_parallel_tool_calls, expected.supports_parallel_tool_calls,
             "{backend} parallel tools flag"
         );
         assert_eq!(
-            actual.supports_stream_options,
-            expected.supports_stream_options,
+            actual.supports_stream_options, expected.supports_stream_options,
             "{backend} stream options flag"
         );
     }
@@ -187,4 +184,72 @@ fn provider_builder_constructs_bedrock_chat_provider() {
         .build_chat();
 
     assert!(provider.is_ok(), "bedrock builder should succeed");
+}
+
+#[test]
+fn provider_builder_rejects_invalid_base_url_without_panicking() {
+    let result = ProviderBuilder::new(Backend::OpenAI)
+        .api_key("test-key")
+        .base_url("not a valid url")
+        .build_chat();
+
+    assert!(
+        matches!(result, Err(ProviderError::InvalidRequest(message)) if message.contains("invalid base URL"))
+    );
+}
+
+#[test]
+fn provider_builder_requires_endpoint_for_generic_backend() {
+    let result = ProviderBuilder::new(Backend::OpenAiCompatible)
+        .api_key("test-key")
+        .build_chat();
+
+    assert!(
+        matches!(result, Err(ProviderError::InvalidRequest(message)) if message.contains("endpoint URL required for generic backend"))
+    );
+}
+
+#[tokio::test]
+async fn bedrock_rejects_tools_and_structured_output_until_supported() {
+    let provider = ProviderBuilder::new(Backend::Bedrock)
+        .api_key("bedrock-key")
+        .model("anthropic.claude-3-7-sonnet")
+        .region("eu-west-1")
+        .build_chat()
+        .expect("bedrock builder should succeed");
+
+    let tool = Tool {
+        tool_type: "function".to_owned(),
+        function: cairn_providers::chat::FunctionDef {
+            name: "search".to_owned(),
+            description: "search docs".to_owned(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "q": { "type": "string" }
+                }
+            }),
+        },
+    };
+    let schema = StructuredOutput {
+        name: "result".to_owned(),
+        description: None,
+        schema: Some(json!({
+            "type": "object",
+            "properties": {
+                "answer": { "type": "string" }
+            }
+        })),
+        strict: Some(true),
+    };
+
+    let error = provider
+        .chat_with_tools(&[ChatMessage::user("hello")], Some(&[tool]), Some(schema))
+        .await
+        .expect_err("bedrock should reject tools/schema until implemented");
+
+    assert!(
+        matches!(error, ProviderError::Unsupported(message) if message.contains("does not support tools or structured output"))
+    );
+    let _ = ToolChoice::Auto;
 }

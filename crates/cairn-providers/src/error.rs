@@ -1,5 +1,18 @@
 //! Provider error types.
 
+pub(crate) fn truncate_raw_response(raw: &str) -> String {
+    const MAX_CHARS: usize = 500;
+    let mut truncated = String::new();
+    for (idx, ch) in raw.chars().enumerate() {
+        if idx >= MAX_CHARS {
+            truncated.push_str("...");
+            return truncated;
+        }
+        truncated.push(ch);
+    }
+    truncated
+}
+
 /// Errors that can occur when interacting with LLM providers.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ProviderError {

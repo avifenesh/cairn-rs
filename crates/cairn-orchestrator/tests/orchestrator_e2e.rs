@@ -378,15 +378,18 @@ async fn live_openrouter_loop_completes() {
 
     use cairn_providers::wire::openai_compat::{OpenAiCompat, ProviderConfig};
 
-    let brain_provider = Arc::new(OpenAiCompat::new(
-        ProviderConfig::OPENROUTER,
-        api_key,
-        Some("https://openrouter.ai/api/v1".to_owned()),
-        Some("openrouter/auto".to_owned()),
-        None,
-        None,
-        None,
-    ));
+    let brain_provider = Arc::new(
+        OpenAiCompat::new(
+            ProviderConfig::OPENROUTER,
+            api_key,
+            Some("https://openrouter.ai/api/v1".to_owned()),
+            Some("openrouter/auto".to_owned()),
+            None,
+            None,
+            None,
+        )
+        .expect("live openrouter provider should build"),
+    );
 
     // Model: openrouter/auto — 262K context, zero cost.
     let model_id = "openrouter/auto".to_owned();

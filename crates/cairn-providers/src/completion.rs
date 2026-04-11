@@ -45,8 +45,5 @@ impl std::fmt::Display for CompletionResponse {
 
 #[async_trait]
 pub trait CompletionProvider: Send + Sync {
-    async fn complete(
-        &self,
-        req: &CompletionRequest,
-    ) -> Result<CompletionResponse, ProviderError>;
+    async fn complete(&self, req: &CompletionRequest) -> Result<CompletionResponse, ProviderError>;
 }

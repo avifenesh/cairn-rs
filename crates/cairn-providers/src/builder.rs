@@ -153,6 +153,11 @@ impl ProviderBuilder {
 
     /// Build a boxed [`ChatProvider`].
     pub fn build_chat(self) -> Result<Box<dyn ChatProvider>, ProviderError> {
+        if self.backend == Backend::OpenAiCompatible && self.base_url.is_none() {
+            return Err(ProviderError::InvalidRequest(
+                "endpoint URL required for generic backend".to_owned(),
+            ));
+        }
         let key = self.api_key.unwrap_or_default();
 
         // Bedrock has its own wire format.
@@ -176,6 +181,6 @@ impl ProviderBuilder {
             self.max_tokens,
             self.temperature,
             self.timeout_secs,
-        )))
+        )?))
     }
 }

@@ -277,9 +277,7 @@ pub trait ChatProvider: Send + Sync {
         _schema: Option<StructuredOutput>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<String, ProviderError>> + Send>>, ProviderError>
     {
-        Err(ProviderError::Unsupported(
-            "streaming not supported".into(),
-        ))
+        Err(ProviderError::Unsupported("streaming not supported".into()))
     }
 
     async fn chat_stream_structured(
@@ -287,8 +285,10 @@ pub trait ChatProvider: Send + Sync {
         _messages: &[ChatMessage],
         _tools: Option<&[Tool]>,
         _schema: Option<StructuredOutput>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamResponse, ProviderError>> + Send>>, ProviderError>
-    {
+    ) -> Result<
+        Pin<Box<dyn Stream<Item = Result<StreamResponse, ProviderError>> + Send>>,
+        ProviderError,
+    > {
         Err(ProviderError::Unsupported(
             "structured streaming not supported".into(),
         ))

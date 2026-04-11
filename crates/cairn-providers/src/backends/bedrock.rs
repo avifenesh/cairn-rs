@@ -7,12 +7,10 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::chat::{
-    ChatMessage, ChatProvider, ChatResponse, ChatRole, StructuredOutput, Tool,
-};
+use crate::chat::{ChatMessage, ChatProvider, ChatResponse, ChatRole, StructuredOutput, Tool};
 use crate::completion::{CompletionProvider, CompletionRequest, CompletionResponse};
 use crate::embedding::EmbeddingProvider;
-use crate::error::ProviderError;
+use crate::error::{ProviderError, truncate_raw_response};
 use crate::models::ModelsProvider;
 use crate::{CairnProvider, ToolCall, Usage};
 
@@ -64,6 +62,48 @@ impl Bedrock {
         &self.region
     }
 
+    pub(crate) async fn chat_with_tools_for_model(
+        &self,
+        model: Option<&str>,
+        messages: &[ChatMessage],
+        tools: Option<&[Tool]>,
+        schema: Option<StructuredOutput>,
+    ) -> Result<Box<dyn ChatResponse>, ProviderError> {
+        if tools.is_some_and(|tools| !tools.is_empty()) || schema.is_some() {
+            return Err(ProviderError::Unsupported(
+                "Bedrock chat_with_tools does not support tools or structured output yet"
+                    .to_owned(),
+            ));
+        }
+
+        let model = model
+            .filter(|model| !model.trim().is_empty())
+            .unwrap_or(&self.model_id);
+        let wire_msgs: Vec<Value> = messages
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "role": m.role.to_string(),
+                    "content": m.content,
+                })
+            })
+            .collect();
+        let system = messages
+            .iter()
+            .find(|m| m.role == ChatRole::System)
+            .map(|m| m.content.clone());
+        let (text, input_tokens, output_tokens) = self.converse(model, wire_msgs, system).await?;
+        let usage = match (input_tokens, output_tokens) {
+            (Some(i), Some(o)) => Some(Usage {
+                prompt_tokens: i,
+                completion_tokens: o,
+                total_tokens: i + o,
+            }),
+            _ => None,
+        };
+        Ok(Box::new(BedrockChatResponse { text, usage }))
+    }
+
     async fn converse(
         &self,
         model: &str,
@@ -104,7 +144,7 @@ impl Bedrock {
             if status.as_u16() == 429 {
                 return Err(ProviderError::RateLimited);
             }
-            let body = resp.text().await.unwrap_or_default();
+            let body = truncate_raw_response(&resp.text().await.unwrap_or_default());
             return Err(ProviderError::Provider(format!("Bedrock {status}: {body}")));
         }
         let resp_body: Value = resp
@@ -121,7 +161,9 @@ impl Bedrock {
             })
             .unwrap_or_default();
         let input_tokens = resp_body["usage"]["inputTokens"].as_u64().map(|n| n as u32);
-        let output_tokens = resp_body["usage"]["outputTokens"].as_u64().map(|n| n as u32);
+        let output_tokens = resp_body["usage"]["outputTokens"]
+            .as_u64()
+            .map(|n| n as u32);
         Ok((text, input_tokens, output_tokens))
     }
 }
@@ -164,38 +206,11 @@ impl ChatProvider for Bedrock {
     async fn chat_with_tools(
         &self,
         messages: &[ChatMessage],
-        _tools: Option<&[Tool]>,
-        _schema: Option<StructuredOutput>,
+        tools: Option<&[Tool]>,
+        schema: Option<StructuredOutput>,
     ) -> Result<Box<dyn ChatResponse>, ProviderError> {
-        let model = if messages.is_empty() {
-            &self.model_id
-        } else {
-            &self.model_id
-        };
-        let wire_msgs: Vec<Value> = messages
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "role": m.role.to_string(),
-                    "content": m.content,
-                })
-            })
-            .collect();
-        let system = messages
-            .iter()
-            .find(|m| m.role == ChatRole::System)
-            .map(|m| m.content.clone());
-        let (text, input_tokens, output_tokens) =
-            self.converse(model, wire_msgs, system).await?;
-        let usage = match (input_tokens, output_tokens) {
-            (Some(i), Some(o)) => Some(Usage {
-                prompt_tokens: i,
-                completion_tokens: o,
-                total_tokens: i + o,
-            }),
-            _ => None,
-        };
-        Ok(Box::new(BedrockChatResponse { text, usage }))
+        self.chat_with_tools_for_model(None, messages, tools, schema)
+            .await
     }
 }
 

@@ -14,10 +14,10 @@ use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
 use crate::chat::{
-    ChatMessage, ChatProvider, ChatResponse, ChatRole, MessageContent,
-    StreamChunk, StreamChoice, StreamDelta, StreamResponse, StructuredOutput, Tool, ToolChoice,
+    ChatMessage, ChatProvider, ChatResponse, ChatRole, MessageContent, StreamChoice, StreamChunk,
+    StreamDelta, StreamResponse, StructuredOutput, Tool, ToolChoice,
 };
-use crate::error::ProviderError;
+use crate::error::{ProviderError, truncate_raw_response};
 use crate::{FunctionCall, ToolCall, Usage};
 
 // ── Provider config (runtime, not generic) ───────────────────────────────────
@@ -247,16 +247,25 @@ impl OpenAiCompat {
         max_tokens: Option<u32>,
         temperature: Option<f32>,
         timeout_secs: Option<u64>,
-    ) -> Self {
+    ) -> Result<Self, ProviderError> {
         let mut builder = Client::builder();
         if let Some(sec) = timeout_secs {
             builder = builder.timeout(std::time::Duration::from_secs(sec));
         }
         let raw_url = base_url.unwrap_or_else(|| config.default_base_url.to_owned());
         let normalized = format!("{}/", raw_url.trim_end_matches('/'));
-        Self {
+        let base_url = Url::parse(&normalized).map_err(|err| {
+            ProviderError::InvalidRequest(format!("invalid base URL for {}: {err}", config.name))
+        })?;
+        let client = builder.build().map_err(|err| {
+            ProviderError::InvalidRequest(format!(
+                "failed to build HTTP client for {}: {err}",
+                config.name
+            ))
+        })?;
+        Ok(Self {
             api_key: api_key.into(),
-            base_url: Url::parse(&normalized).expect("invalid base URL"),
+            base_url,
             model: model.unwrap_or_else(|| config.default_model.to_owned()),
             max_tokens,
             temperature,
@@ -270,13 +279,17 @@ impl OpenAiCompat {
             normalize_response: true,
             embedding_encoding_format: None,
             embedding_dimensions: None,
-            client: builder.build().expect("failed to build HTTP client"),
+            client,
             config,
-        }
+        })
     }
 
     pub fn config(&self) -> &ProviderConfig {
         &self.config
+    }
+
+    pub(crate) fn client(&self) -> &Client {
+        &self.client
     }
 
     fn prepare_messages<'a>(&self, messages: &'a [ChatMessage]) -> Vec<WireMessage<'a>> {
@@ -302,6 +315,7 @@ impl OpenAiCompat {
 
     fn build_request<'a>(
         &'a self,
+        model: &'a str,
         messages: Vec<WireMessage<'a>>,
         tools: Option<Vec<Tool>>,
         schema: Option<StructuredOutput>,
@@ -328,12 +342,14 @@ impl OpenAiCompat {
             None
         };
         let stream_options = if stream && self.config.supports_stream_options {
-            Some(WireStreamOptions { include_usage: true })
+            Some(WireStreamOptions {
+                include_usage: true,
+            })
         } else {
             None
         };
         WireRequest {
-            model: &self.model,
+            model,
             messages,
             max_tokens: self.max_tokens,
             temperature: self.temperature,
@@ -350,7 +366,39 @@ impl OpenAiCompat {
         }
     }
 
-    async fn send_request(&self, body: &WireRequest<'_>) -> Result<reqwest::Response, ProviderError> {
+    pub(crate) async fn chat_with_tools_for_model(
+        &self,
+        model: Option<&str>,
+        messages: &[ChatMessage],
+        tools: Option<&[Tool]>,
+        schema: Option<StructuredOutput>,
+    ) -> Result<Box<dyn ChatResponse>, ProviderError> {
+        let wire_msgs = self.prepare_messages(messages);
+        let effective_model = model
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .unwrap_or(&self.model);
+        let body = self.build_request(
+            effective_model,
+            wire_msgs,
+            tools.map(|t| t.to_vec()),
+            schema,
+            false,
+        );
+        let resp = self.send_request(&body).await?;
+        let text = resp.text().await?;
+        let parsed: WireChatResponse =
+            serde_json::from_str(&text).map_err(|e| ProviderError::ResponseFormat {
+                message: format!("failed to decode {} response: {e}", self.config.name),
+                raw_response: truncate_raw_response(&text),
+            })?;
+        Ok(Box::new(parsed))
+    }
+
+    async fn send_request(
+        &self,
+        body: &WireRequest<'_>,
+    ) -> Result<reqwest::Response, ProviderError> {
         if self.api_key.is_empty() {
             return Err(ProviderError::Auth(format!(
                 "missing {} API key",
@@ -374,7 +422,7 @@ impl OpenAiCompat {
             if status.as_u16() == 429 {
                 return Err(ProviderError::RateLimited);
             }
-            let body = resp.text().await.unwrap_or_default();
+            let body = truncate_raw_response(&resp.text().await.unwrap_or_default());
             return Err(ProviderError::ResponseFormat {
                 message: format!("{} returned HTTP {status}", self.config.name),
                 raw_response: body,
@@ -394,24 +442,16 @@ impl ChatProvider for OpenAiCompat {
         tools: Option<&[Tool]>,
         schema: Option<StructuredOutput>,
     ) -> Result<Box<dyn ChatResponse>, ProviderError> {
-        let wire_msgs = self.prepare_messages(messages);
-        let body = self.build_request(wire_msgs, tools.map(|t| t.to_vec()), schema, false);
-        let resp = self.send_request(&body).await?;
-        let text = resp.text().await?;
-        let parsed: WireChatResponse = serde_json::from_str(&text).map_err(|e| {
-            ProviderError::ResponseFormat {
-                message: format!("failed to decode {} response: {e}", self.config.name),
-                raw_response: text,
-            }
-        })?;
-        Ok(Box::new(parsed))
+        self.chat_with_tools_for_model(None, messages, tools, schema)
+            .await
     }
 
     async fn chat_stream(
         &self,
         messages: &[ChatMessage],
         schema: Option<StructuredOutput>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, ProviderError>> + Send>>, ProviderError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, ProviderError>> + Send>>, ProviderError>
+    {
         let struct_stream = self.chat_stream_structured(messages, None, schema).await?;
         let content_stream = struct_stream.filter_map(|result| async move {
             match result {
@@ -432,9 +472,18 @@ impl ChatProvider for OpenAiCompat {
         messages: &[ChatMessage],
         tools: Option<&[Tool]>,
         schema: Option<StructuredOutput>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamResponse, ProviderError>> + Send>>, ProviderError> {
+    ) -> Result<
+        Pin<Box<dyn Stream<Item = Result<StreamResponse, ProviderError>> + Send>>,
+        ProviderError,
+    > {
         let wire_msgs = self.prepare_messages(messages);
-        let body = self.build_request(wire_msgs, tools.map(|t| t.to_vec()), schema, true);
+        let body = self.build_request(
+            &self.model,
+            wire_msgs,
+            tools.map(|t| t.to_vec()),
+            schema,
+            true,
+        );
         let resp = self.send_request(&body).await?;
         Ok(create_sse_stream(resp, self.normalize_response))
     }
@@ -444,9 +493,16 @@ impl ChatProvider for OpenAiCompat {
         messages: &[ChatMessage],
         tools: Option<&[Tool]>,
         schema: Option<StructuredOutput>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send>>, ProviderError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send>>, ProviderError>
+    {
         let wire_msgs = self.prepare_messages(messages);
-        let body = self.build_request(wire_msgs, tools.map(|t| t.to_vec()), schema, true);
+        let body = self.build_request(
+            &self.model,
+            wire_msgs,
+            tools.map(|t| t.to_vec()),
+            schema,
+            true,
+        );
         let resp = self.send_request(&body).await?;
         Ok(create_tool_sse_stream(resp))
     }
@@ -457,7 +513,10 @@ impl ChatProvider for OpenAiCompat {
 #[derive(Serialize, Debug)]
 pub struct WireMessage<'a> {
     pub role: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none", with = "either::serde_untagged_optional")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "either::serde_untagged_optional"
+    )]
     pub content: Option<Either<Vec<WireContentPart>, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
@@ -535,10 +594,14 @@ impl ChatResponse for WireChatResponse {
         self.choices.first().and_then(|c| c.message.content.clone())
     }
     fn tool_calls(&self) -> Option<Vec<ToolCall>> {
-        self.choices.first().and_then(|c| c.message.tool_calls.clone())
+        self.choices
+            .first()
+            .and_then(|c| c.message.tool_calls.clone())
     }
     fn thinking(&self) -> Option<String> {
-        self.choices.first().and_then(|c| c.message.reasoning_content.clone())
+        self.choices
+            .first()
+            .and_then(|c| c.message.reasoning_content.clone())
     }
     fn usage(&self) -> Option<Usage> {
         self.usage.clone()
@@ -649,7 +712,10 @@ fn to_wire_message(msg: &ChatMessage) -> WireMessage<'_> {
 
 fn find_sse_boundary(buf: &[u8]) -> Option<(usize, usize)> {
     let lf = buf.windows(2).position(|w| w == b"\n\n").map(|p| (p, 2));
-    let crlf = buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| (p, 4));
+    let crlf = buf
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|p| (p, 4));
     match (lf, crlf) {
         (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
         (Some(a), None) | (None, Some(a)) => Some(a),
@@ -674,7 +740,10 @@ impl SseParser {
             tool_buf: ToolCall {
                 id: String::new(),
                 call_type: "function".to_owned(),
-                function: FunctionCall { name: String::new(), arguments: String::new() },
+                function: FunctionCall {
+                    name: String::new(),
+                    arguments: String::new(),
+                },
             },
             normalize,
         }
@@ -696,7 +765,10 @@ impl SseParser {
         self.tool_buf = ToolCall {
             id: String::new(),
             call_type: "function".to_owned(),
-            function: FunctionCall { name: String::new(), arguments: String::new() },
+            function: FunctionCall {
+                name: String::new(),
+                arguments: String::new(),
+            },
         };
     }
 
@@ -704,13 +776,20 @@ impl SseParser {
         let event = String::from_utf8_lossy(event_bytes);
         let mut data = String::new();
         for line in event.lines() {
-            if let Some(d) = line.strip_prefix("data: ").or_else(|| line.strip_prefix("data:").map(str::trim_start)) {
+            if let Some(d) = line
+                .strip_prefix("data: ")
+                .or_else(|| line.strip_prefix("data:").map(str::trim_start))
+            {
                 if d == "[DONE]" {
                     self.flush_tool();
                     if let Some(u) = self.usage.take() {
                         self.results.push(Ok(StreamResponse {
                             choices: vec![StreamChoice {
-                                delta: StreamDelta { content: None, reasoning_content: None, tool_calls: None },
+                                delta: StreamDelta {
+                                    content: None,
+                                    reasoning_content: None,
+                                    tool_calls: None,
+                                },
                             }],
                             usage: Some(u),
                         }));
@@ -722,12 +801,19 @@ impl SseParser {
                 data.push_str(line);
             }
         }
-        if data.is_empty() { return; }
+        if data.is_empty() {
+            return;
+        }
 
         #[derive(Deserialize)]
-        struct Chunk { choices: Vec<CC>, usage: Option<Usage> }
+        struct Chunk {
+            choices: Vec<CC>,
+            usage: Option<Usage>,
+        }
         #[derive(Deserialize)]
-        struct CC { delta: CD }
+        struct CC {
+            delta: CD,
+        }
         #[derive(Deserialize)]
         struct CD {
             content: Option<String>,
@@ -736,24 +822,37 @@ impl SseParser {
             tool_calls: Option<Vec<CT>>,
         }
         #[derive(Deserialize)]
-        struct CT { id: Option<String>, #[serde(rename = "type", default)] _call_type: Option<String>, function: CF }
+        struct CT {
+            id: Option<String>,
+            #[serde(rename = "type", default)]
+            _call_type: Option<String>,
+            function: CF,
+        }
         #[derive(Deserialize)]
-        struct CF { name: Option<String>, #[serde(default)] arguments: String }
+        struct CF {
+            name: Option<String>,
+            #[serde(default)]
+            arguments: String,
+        }
 
         if let Ok(chunk) = serde_json::from_str::<Chunk>(&data) {
-            if let Some(u) = chunk.usage { self.usage = Some(u); }
+            if let Some(u) = chunk.usage {
+                self.usage = Some(u);
+            }
             for choice in &chunk.choices {
                 let content = choice.delta.content.clone();
                 let reasoning = choice.delta.reasoning_content.clone();
                 let calls: Option<Vec<ToolCall>> = choice.delta.tool_calls.as_ref().map(|tcs| {
-                    tcs.iter().map(|c| ToolCall {
-                        id: c.id.clone().unwrap_or_default(),
-                        call_type: "function".to_owned(),
-                        function: FunctionCall {
-                            name: c.function.name.clone().unwrap_or_default(),
-                            arguments: c.function.arguments.clone(),
-                        },
-                    }).collect()
+                    tcs.iter()
+                        .map(|c| ToolCall {
+                            id: c.id.clone().unwrap_or_default(),
+                            call_type: "function".to_owned(),
+                            function: FunctionCall {
+                                name: c.function.name.clone().unwrap_or_default(),
+                                arguments: c.function.arguments.clone(),
+                            },
+                        })
+                        .collect()
                 });
                 if content.is_some() || reasoning.is_some() || calls.is_some() {
                     if self.normalize && calls.is_some() {
@@ -763,7 +862,10 @@ impl SseParser {
                                 self.tool_buf.function.name.clone_from(&tc.function.name);
                             }
                             if !tc.function.arguments.is_empty() {
-                                self.tool_buf.function.arguments.push_str(&tc.function.arguments);
+                                self.tool_buf
+                                    .function
+                                    .arguments
+                                    .push_str(&tc.function.arguments);
                             }
                             if !tc.id.is_empty() {
                                 self.tool_buf.id.clone_from(&tc.id);
@@ -772,7 +874,13 @@ impl SseParser {
                     } else {
                         self.flush_tool();
                         self.results.push(Ok(StreamResponse {
-                            choices: vec![StreamChoice { delta: StreamDelta { content, reasoning_content: reasoning, tool_calls: calls } }],
+                            choices: vec![StreamChoice {
+                                delta: StreamDelta {
+                                    content,
+                                    reasoning_content: reasoning,
+                                    tool_calls: calls,
+                                },
+                            }],
                             usage: None,
                         }));
                     }
@@ -796,54 +904,71 @@ fn create_sse_stream(
     response: reqwest::Response,
     normalize: bool,
 ) -> Pin<Box<dyn Stream<Item = Result<StreamResponse, ProviderError>> + Send>> {
-    let stream = response.bytes_stream().scan(SseParser::new(normalize), |parser, chunk| {
-        let results = match chunk {
-            Ok(bytes) => parser.consume(&bytes),
-            Err(e) => vec![Err(ProviderError::Http(e.to_string()))],
-        };
-        futures::future::ready(Some(results))
-    }).flat_map(futures::stream::iter);
+    let stream = response
+        .bytes_stream()
+        .scan(SseParser::new(normalize), |parser, chunk| {
+            let results = match chunk {
+                Ok(bytes) => parser.consume(&bytes),
+                Err(e) => vec![Err(ProviderError::Http(e.to_string()))],
+            };
+            futures::future::ready(Some(results))
+        })
+        .flat_map(futures::stream::iter);
     Box::pin(stream)
 }
 
 // ── Tool streaming ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
-struct ToolUseState { id: String, name: String, args: String, started: bool }
+struct ToolUseState {
+    id: String,
+    name: String,
+    args: String,
+    started: bool,
+}
 
 fn create_tool_sse_stream(
     response: reqwest::Response,
 ) -> Pin<Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send>> {
-    let stream = response.bytes_stream().scan(
-        (Vec::<u8>::new(), HashMap::<usize, ToolUseState>::new()),
-        move |(buf, states), chunk| {
-            let results = match chunk {
-                Ok(bytes) => {
-                    let mut out = Vec::new();
-                    buf.extend_from_slice(&bytes);
-                    while let Some((pos, len)) = find_sse_boundary(buf) {
-                        let event = buf[..pos].to_vec();
-                        buf.drain(..pos + len);
-                        let text = String::from_utf8_lossy(&event);
-                        match parse_tool_chunk(text.trim(), states) {
-                            Ok(chunks) => out.extend(chunks.into_iter().map(Ok)),
-                            Err(e) => out.push(Err(e)),
+    let stream = response
+        .bytes_stream()
+        .scan(
+            (Vec::<u8>::new(), HashMap::<usize, ToolUseState>::new()),
+            move |(buf, states), chunk| {
+                let results = match chunk {
+                    Ok(bytes) => {
+                        let mut out = Vec::new();
+                        buf.extend_from_slice(&bytes);
+                        while let Some((pos, len)) = find_sse_boundary(buf) {
+                            let event = buf[..pos].to_vec();
+                            buf.drain(..pos + len);
+                            let text = String::from_utf8_lossy(&event);
+                            match parse_tool_chunk(text.trim(), states) {
+                                Ok(chunks) => out.extend(chunks.into_iter().map(Ok)),
+                                Err(e) => out.push(Err(e)),
+                            }
                         }
+                        out
                     }
-                    out
-                }
-                Err(e) => vec![Err(ProviderError::Http(e.to_string()))],
-            };
-            async move { Some(results) }
-        },
-    ).flat_map(futures::stream::iter);
+                    Err(e) => vec![Err(ProviderError::Http(e.to_string()))],
+                };
+                async move { Some(results) }
+            },
+        )
+        .flat_map(futures::stream::iter);
     Box::pin(stream)
 }
 
-fn parse_tool_chunk(event: &str, states: &mut HashMap<usize, ToolUseState>) -> Result<Vec<StreamChunk>, ProviderError> {
+fn parse_tool_chunk(
+    event: &str,
+    states: &mut HashMap<usize, ToolUseState>,
+) -> Result<Vec<StreamChunk>, ProviderError> {
     let mut results = Vec::new();
     for line in event.lines() {
-        let data = match line.strip_prefix("data: ").or_else(|| line.strip_prefix("data:").map(str::trim_start)) {
+        let data = match line
+            .strip_prefix("data: ")
+            .or_else(|| line.strip_prefix("data:").map(str::trim_start))
+        {
             Some(d) => d.trim(),
             None => continue,
         };
@@ -852,54 +977,127 @@ fn parse_tool_chunk(event: &str, states: &mut HashMap<usize, ToolUseState>) -> R
                 if state.started {
                     results.push(StreamChunk::ToolUseComplete {
                         index: idx,
-                        tool_call: ToolCall { id: state.id, call_type: "function".to_owned(), function: FunctionCall { name: state.name, arguments: state.args } },
+                        tool_call: ToolCall {
+                            id: state.id,
+                            call_type: "function".to_owned(),
+                            function: FunctionCall {
+                                name: state.name,
+                                arguments: state.args,
+                            },
+                        },
                     });
                 }
             }
-            results.push(StreamChunk::Done { stop_reason: "end_turn".to_owned() });
+            results.push(StreamChunk::Done {
+                stop_reason: "end_turn".to_owned(),
+            });
             return Ok(results);
         }
 
         #[derive(Deserialize)]
-        struct C { choices: Vec<CC>, #[serde(default)] usage: Option<Usage> }
+        struct C {
+            choices: Vec<CC>,
+            #[serde(default)]
+            usage: Option<Usage>,
+        }
         #[derive(Deserialize)]
-        struct CC { delta: CD, finish_reason: Option<String> }
+        struct CC {
+            delta: CD,
+            finish_reason: Option<String>,
+        }
         #[derive(Deserialize)]
-        struct CD { content: Option<String>, #[serde(default, alias = "reasoning")] reasoning_content: Option<String>, tool_calls: Option<Vec<CT>> }
+        struct CD {
+            content: Option<String>,
+            #[serde(default, alias = "reasoning")]
+            reasoning_content: Option<String>,
+            tool_calls: Option<Vec<CT>>,
+        }
         #[derive(Deserialize)]
-        struct CT { index: Option<usize>, id: Option<String>, function: CF }
+        struct CT {
+            index: Option<usize>,
+            id: Option<String>,
+            function: CF,
+        }
         #[derive(Deserialize)]
-        struct CF { name: Option<String>, #[serde(default)] arguments: String }
+        struct CF {
+            name: Option<String>,
+            #[serde(default)]
+            arguments: String,
+        }
 
-        let chunk: C = serde_json::from_str(data).map_err(|e| ProviderError::Json(e.to_string()))?;
+        let chunk: C =
+            serde_json::from_str(data).map_err(|e| ProviderError::Json(e.to_string()))?;
         let mut usage_opt = chunk.usage;
         for choice in &chunk.choices {
-            if let Some(ref text) = choice.delta.content { if !text.is_empty() { results.push(StreamChunk::Text(text.clone())); } }
-            if let Some(ref r) = choice.delta.reasoning_content { if !r.is_empty() { results.push(StreamChunk::Reasoning(r.clone())); } }
+            if let Some(ref text) = choice.delta.content {
+                if !text.is_empty() {
+                    results.push(StreamChunk::Text(text.clone()));
+                }
+            }
+            if let Some(ref r) = choice.delta.reasoning_content {
+                if !r.is_empty() {
+                    results.push(StreamChunk::Reasoning(r.clone()));
+                }
+            }
             if let Some(ref tcs) = choice.delta.tool_calls {
                 for tc in tcs {
                     let idx = tc.index.unwrap_or(0);
                     let state = states.entry(idx).or_default();
-                    if let Some(ref id) = tc.id { state.id = id.clone(); }
+                    if let Some(ref id) = tc.id {
+                        state.id = id.clone();
+                    }
                     if let Some(ref name) = tc.function.name {
                         state.name = name.clone();
-                        if !state.started { state.started = true; results.push(StreamChunk::ToolUseStart { index: idx, id: state.id.clone(), name: state.name.clone() }); }
+                        if !state.started {
+                            state.started = true;
+                            results.push(StreamChunk::ToolUseStart {
+                                index: idx,
+                                id: state.id.clone(),
+                                name: state.name.clone(),
+                            });
+                        }
                     }
-                    if !tc.function.arguments.is_empty() { state.args.push_str(&tc.function.arguments); results.push(StreamChunk::ToolUseDelta { index: idx, partial_json: tc.function.arguments.clone() }); }
+                    if !tc.function.arguments.is_empty() {
+                        state.args.push_str(&tc.function.arguments);
+                        results.push(StreamChunk::ToolUseDelta {
+                            index: idx,
+                            partial_json: tc.function.arguments.clone(),
+                        });
+                    }
                 }
             }
             if let Some(ref reason) = choice.finish_reason {
                 for (idx, state) in states.drain() {
                     if state.started {
-                        results.push(StreamChunk::ToolUseComplete { index: idx, tool_call: ToolCall { id: state.id, call_type: "function".to_owned(), function: FunctionCall { name: state.name, arguments: state.args } } });
+                        results.push(StreamChunk::ToolUseComplete {
+                            index: idx,
+                            tool_call: ToolCall {
+                                id: state.id,
+                                call_type: "function".to_owned(),
+                                function: FunctionCall {
+                                    name: state.name,
+                                    arguments: state.args,
+                                },
+                            },
+                        });
                     }
                 }
-                if let Some(u) = usage_opt.take() { results.push(StreamChunk::Usage(u)); }
-                let stop = match reason.as_str() { "tool_calls" => "tool_use", "stop" => "end_turn", other => other };
-                results.push(StreamChunk::Done { stop_reason: stop.to_owned() });
+                if let Some(u) = usage_opt.take() {
+                    results.push(StreamChunk::Usage(u));
+                }
+                let stop = match reason.as_str() {
+                    "tool_calls" => "tool_use",
+                    "stop" => "end_turn",
+                    other => other,
+                };
+                results.push(StreamChunk::Done {
+                    stop_reason: stop.to_owned(),
+                });
             }
         }
-        if let Some(u) = usage_opt.take() { results.push(StreamChunk::Usage(u)); }
+        if let Some(u) = usage_opt.take() {
+            results.push(StreamChunk::Usage(u));
+        }
     }
     Ok(results)
 }

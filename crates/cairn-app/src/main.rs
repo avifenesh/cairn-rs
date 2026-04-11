@@ -4919,12 +4919,12 @@ async fn main() {
         let brain_key = std::env::var("CAIRN_BRAIN_KEY")
             .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
             .unwrap_or_default();
-        brain_url.map(|url| {
+        brain_url.and_then(|url| {
             eprintln!(
                 "openai-compat (brain): configured at {url} model={}",
                 configured_brain_model.as_deref().unwrap_or("<unset>")
             );
-            Arc::new(OpenAiCompat::new(
+            match OpenAiCompat::new(
                 ProviderConfig::default(),
                 brain_key,
                 Some(url),
@@ -4932,7 +4932,13 @@ async fn main() {
                 None,
                 None,
                 None,
-            ))
+            ) {
+                Ok(provider) => Some(Arc::new(provider)),
+                Err(err) => {
+                    eprintln!("openai-compat (brain): invalid config: {err}");
+                    None
+                }
+            }
         })
     };
     let openai_compat_worker: Option<Arc<OpenAiCompat>> = {
@@ -4943,12 +4949,12 @@ async fn main() {
         let worker_key = std::env::var("CAIRN_WORKER_KEY")
             .or_else(|_| std::env::var("OPENAI_COMPAT_API_KEY"))
             .unwrap_or_default();
-        worker_url.map(|url| {
+        worker_url.and_then(|url| {
             eprintln!(
                 "openai-compat (worker): configured at {url} model={}",
                 configured_generate_model.as_deref().unwrap_or("<unset>")
             );
-            Arc::new(OpenAiCompat::new(
+            match OpenAiCompat::new(
                 ProviderConfig::default(),
                 worker_key,
                 Some(url),
@@ -4956,17 +4962,29 @@ async fn main() {
                 None,
                 None,
                 None,
-            ))
+            ) {
+                Ok(provider) => Some(Arc::new(provider)),
+                Err(err) => {
+                    eprintln!("openai-compat (worker): invalid config: {err}");
+                    None
+                }
+            }
         })
     };
     let openai_compat_openrouter: Option<Arc<OpenAiCompat>> = {
-        RuntimeConfig::openrouter_api_key().map(|key| {
+        RuntimeConfig::openrouter_api_key().and_then(|key| {
             eprintln!("openai-compat (openrouter): configured — brain=openrouter/free worker=google/gemma-3-4b-it:free");
-            Arc::new(OpenAiCompat::new(
+            match OpenAiCompat::new(
                 ProviderConfig::OPENROUTER,
                 key,
                 None, None, None, None, None,
-            ))
+            ) {
+                Ok(provider) => Some(Arc::new(provider)),
+                Err(err) => {
+                    eprintln!("openai-compat (openrouter): invalid config: {err}");
+                    None
+                }
+            }
         })
     };
 
@@ -8512,15 +8530,18 @@ mod tests {
         let dynamic_url = spawn_openai_compat_mock("dynamic").await;
 
         let mut state = make_state();
-        state.openai_compat_worker = Some(Arc::new(OpenAiCompat::new(
-            ProviderConfig::default(),
-            "static-key",
-            Some(static_url),
-            Some("gpt-4o-mini".to_owned()),
-            None,
-            None,
-            None,
-        )));
+        state.openai_compat_worker = Some(Arc::new(
+            OpenAiCompat::new(
+                ProviderConfig::default(),
+                "static-key",
+                Some(static_url),
+                Some("gpt-4o-mini".to_owned()),
+                None,
+                None,
+                None,
+            )
+            .expect("static fallback provider should build"),
+        ));
         state.openai_compat = state.openai_compat_worker.clone();
 
         let app = make_app(state);
@@ -8631,15 +8652,18 @@ mod tests {
             spawn_openai_compat_embedding_mock("embed-dynamic", vec![0.1, 0.2], 7).await;
 
         let mut state = make_state();
-        state.openai_compat_worker = Some(Arc::new(OpenAiCompat::new(
-            ProviderConfig::default(),
-            "static-key",
-            Some(static_url),
-            Some("embed-dynamic".to_owned()),
-            None,
-            None,
-            None,
-        )));
+        state.openai_compat_worker = Some(Arc::new(
+            OpenAiCompat::new(
+                ProviderConfig::default(),
+                "static-key",
+                Some(static_url),
+                Some("embed-dynamic".to_owned()),
+                None,
+                None,
+                None,
+            )
+            .expect("static embedding fallback provider should build"),
+        ));
         state.openai_compat = state.openai_compat_worker.clone();
 
         let app = make_app(state);
@@ -8752,15 +8776,18 @@ mod tests {
         let dynamic_url = spawn_openai_compat_stream_mock(vec!["dynamic stream"]).await;
 
         let mut state = make_state();
-        state.openai_compat_openrouter = Some(Arc::new(OpenAiCompat::new(
-            ProviderConfig::OPENROUTER,
-            "static-key",
-            Some(static_url),
-            Some("openrouter/free".to_owned()),
-            None,
-            None,
-            None,
-        )));
+        state.openai_compat_openrouter = Some(Arc::new(
+            OpenAiCompat::new(
+                ProviderConfig::OPENROUTER,
+                "static-key",
+                Some(static_url),
+                Some("openrouter/free".to_owned()),
+                None,
+                None,
+                None,
+            )
+            .expect("static stream fallback provider should build"),
+        ));
         state.openai_compat = state.openai_compat_openrouter.clone();
 
         let app = make_app(state);

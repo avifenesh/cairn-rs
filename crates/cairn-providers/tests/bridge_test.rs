@@ -1,6 +1,4 @@
-use cairn_domain::providers::{
-    GenerationProvider, ProviderAdapterError, ProviderBindingSettings,
-};
+use cairn_domain::providers::{GenerationProvider, ProviderAdapterError, ProviderBindingSettings};
 use cairn_providers::wire::openai_compat::{OpenAiCompat, ProviderConfig};
 use httpmock::prelude::*;
 use serde_json::json;
@@ -15,15 +13,16 @@ fn provider(server: &MockServer) -> OpenAiCompat {
         None,
         None,
     )
+    .expect("provider should build")
 }
 
 #[tokio::test]
-async fn generation_bridge_maps_text_usage_and_tool_calls() {
+async fn generation_bridge_maps_text_usage_tool_calls_and_respects_model_override() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
         when.method(POST)
             .path("/chat/completions")
-            .json_body_includes(r#"{"model":"gpt-4.1-nano"}"#);
+            .json_body_includes(r#"{"model":"caller-model-override"}"#);
         then.status(200)
             .header("content-type", "application/json")
             .body(
@@ -55,7 +54,7 @@ async fn generation_bridge_maps_text_usage_and_tool_calls() {
     let provider = provider(&server);
     let response = GenerationProvider::generate(
         &provider,
-        "caller-model-is-ignored-for-now",
+        "caller-model-override",
         vec![json!({ "role": "user", "content": "hello bridge" })],
         &ProviderBindingSettings::default(),
     )
@@ -65,7 +64,7 @@ async fn generation_bridge_maps_text_usage_and_tool_calls() {
     assert_eq!(response.text, "bridge reply");
     assert_eq!(response.input_tokens, Some(9));
     assert_eq!(response.output_tokens, Some(4));
-    assert_eq!(response.model_id, "gpt-4.1-nano");
+    assert_eq!(response.model_id, "caller-model-override");
     assert_eq!(response.tool_calls.len(), 1);
     assert_eq!(response.tool_calls[0]["id"], "call_1");
     assert_eq!(response.tool_calls[0]["function"]["name"], "search");
