@@ -3439,26 +3439,6 @@ async fn ollama_embed_handler(
             .into_response();
     }
 
-    // Provider priority for embedding: Ollama → worker → brain → OpenRouter.
-    let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> = if let Some(ref ollama) =
-        state.ollama
-    {
-        Arc::new(OllamaEmbeddingProvider::new(ollama.host()))
-    } else if let Some(ref worker) = state.openai_compat_worker {
-        worker.clone()
-    } else if let Some(ref brain) = state.openai_compat_brain {
-        brain.clone()
-    } else if let Some(ref or_) = state.openai_compat_openrouter {
-        or_.clone()
-    } else {
-        return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                axum::Json(serde_json::json!({
-                    "error": "No embedding provider configured — set OLLAMA_HOST, CAIRN_WORKER_URL, CAIRN_BRAIN_URL, or OPENROUTER_API_KEY"
-                })),
-            ).into_response();
-    };
-
     let default_ollama_embed = state
         .runtime
         .runtime_config
@@ -3471,10 +3451,71 @@ async fn ollama_embed_handler(
         } else {
             &default_compat_embed
         }
-    });
+    })
+    .to_owned();
+
+    let embedder: Arc<dyn cairn_domain::providers::EmbeddingProvider> = match state
+        .runtime
+        .provider_registry
+        .resolve_embedding_for_model(&cairn_domain::TenantId::new("default_tenant"), &model_id)
+        .await
+    {
+        Ok(Some(embedder)) => embedder,
+        Ok(None) => {
+            let model_id_lower = model_id.to_ascii_lowercase();
+            let is_brain_model = model_id_lower == "openrouter/free"
+                || model_id_lower.contains("gemma-3-27b")
+                || model_id_lower.contains("qwen3-coder")
+                || model_id_lower.contains("gemma-4")
+                || model_id_lower.contains("gemma4")
+                || model_id_lower.contains("cyankiwi")
+                || model_id_lower.contains("brain");
+
+            if let Some(ref ollama) = state.ollama {
+                Arc::new(OllamaEmbeddingProvider::new(ollama.host()))
+            } else if is_brain_model {
+                if let Some(ref brain) = state.openai_compat_brain {
+                    brain.clone() as Arc<dyn cairn_domain::providers::EmbeddingProvider>
+                } else if let Some(ref worker) = state.openai_compat_worker {
+                    worker.clone() as Arc<dyn cairn_domain::providers::EmbeddingProvider>
+                } else if let Some(ref or_) = state.openai_compat_openrouter {
+                    or_.clone() as Arc<dyn cairn_domain::providers::EmbeddingProvider>
+                } else {
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        axum::Json(serde_json::json!({
+                            "error": "No embedding provider configured — set OLLAMA_HOST, CAIRN_WORKER_URL, CAIRN_BRAIN_URL, or OPENROUTER_API_KEY"
+                        })),
+                    )
+                        .into_response();
+                }
+            } else if let Some(ref worker) = state.openai_compat_worker {
+                worker.clone() as Arc<dyn cairn_domain::providers::EmbeddingProvider>
+            } else if let Some(ref brain) = state.openai_compat_brain {
+                brain.clone() as Arc<dyn cairn_domain::providers::EmbeddingProvider>
+            } else if let Some(ref or_) = state.openai_compat_openrouter {
+                or_.clone() as Arc<dyn cairn_domain::providers::EmbeddingProvider>
+            } else {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    axum::Json(serde_json::json!({
+                        "error": "No embedding provider configured — set OLLAMA_HOST, CAIRN_WORKER_URL, CAIRN_BRAIN_URL, or OPENROUTER_API_KEY"
+                    })),
+                )
+                    .into_response();
+            }
+        }
+        Err(err) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                axum::Json(serde_json::json!({ "error": err.to_string() })),
+            )
+                .into_response();
+        }
+    };
 
     let start = std::time::Instant::now();
-    match embedder.embed(model_id, body.texts).await {
+    match embedder.embed(&model_id, body.texts).await {
         Ok(resp) => {
             let latency_ms = start.elapsed().as_millis() as u64;
             (
@@ -4820,7 +4861,7 @@ async fn main() {
     });
 
     {
-        use cairn_domain::providers::GenerationProvider;
+        use cairn_domain::providers::{EmbeddingProvider, GenerationProvider};
         use cairn_providers::chat::ChatProvider;
 
         lib_state
@@ -4828,26 +4869,31 @@ async fn main() {
             .provider_registry
             .set_startup_fallbacks(cairn_runtime::StartupFallbackProviders {
                 ollama: ollama.as_ref().map(|provider| {
-                    cairn_runtime::StartupProviderEntry::generation(
-                        provider.clone() as Arc<dyn GenerationProvider>
+                    cairn_runtime::StartupProviderEntry::with_embedding(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        Arc::new(OllamaEmbeddingProvider::new(provider.host()))
+                            as Arc<dyn EmbeddingProvider>,
                     )
                 }),
                 brain: openai_compat_brain.as_ref().map(|provider| {
-                    cairn_runtime::StartupProviderEntry::with_chat(
+                    cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
                         provider.clone() as Arc<dyn GenerationProvider>,
                         provider.clone() as Arc<dyn ChatProvider>,
+                        provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
                 }),
                 worker: openai_compat_worker.as_ref().map(|provider| {
-                    cairn_runtime::StartupProviderEntry::with_chat(
+                    cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
                         provider.clone() as Arc<dyn GenerationProvider>,
                         provider.clone() as Arc<dyn ChatProvider>,
+                        provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
                 }),
                 openrouter: openai_compat_openrouter.as_ref().map(|provider| {
-                    cairn_runtime::StartupProviderEntry::with_chat(
+                    cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
                         provider.clone() as Arc<dyn GenerationProvider>,
                         provider.clone() as Arc<dyn ChatProvider>,
+                        provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
                 }),
                 bedrock: bedrock.as_ref().map(|provider| {
@@ -5598,7 +5644,7 @@ fn test_make_app(mut state: AppState) -> axum::Router {
     state.retrieval = lib_state.retrieval.clone();
     state.ingest = lib_state.ingest.clone();
     {
-        use cairn_domain::providers::GenerationProvider;
+        use cairn_domain::providers::{EmbeddingProvider, GenerationProvider};
         use cairn_providers::chat::ChatProvider;
 
         state
@@ -5606,26 +5652,31 @@ fn test_make_app(mut state: AppState) -> axum::Router {
             .provider_registry
             .set_startup_fallbacks(cairn_runtime::StartupFallbackProviders {
                 ollama: state.ollama.as_ref().map(|provider| {
-                    cairn_runtime::StartupProviderEntry::generation(
-                        provider.clone() as Arc<dyn GenerationProvider>
+                    cairn_runtime::StartupProviderEntry::with_embedding(
+                        provider.clone() as Arc<dyn GenerationProvider>,
+                        Arc::new(OllamaEmbeddingProvider::new(provider.host()))
+                            as Arc<dyn EmbeddingProvider>,
                     )
                 }),
                 brain: state.openai_compat_brain.as_ref().map(|provider| {
-                    cairn_runtime::StartupProviderEntry::with_chat(
+                    cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
                         provider.clone() as Arc<dyn GenerationProvider>,
                         provider.clone() as Arc<dyn ChatProvider>,
+                        provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
                 }),
                 worker: state.openai_compat_worker.as_ref().map(|provider| {
-                    cairn_runtime::StartupProviderEntry::with_chat(
+                    cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
                         provider.clone() as Arc<dyn GenerationProvider>,
                         provider.clone() as Arc<dyn ChatProvider>,
+                        provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
                 }),
                 openrouter: state.openai_compat_openrouter.as_ref().map(|provider| {
-                    cairn_runtime::StartupProviderEntry::with_chat(
+                    cairn_runtime::StartupProviderEntry::with_chat_and_embedding(
                         provider.clone() as Arc<dyn GenerationProvider>,
                         provider.clone() as Arc<dyn ChatProvider>,
+                        provider.clone() as Arc<dyn EmbeddingProvider>,
                     )
                 }),
                 bedrock: state.bedrock.as_ref().map(|provider| {
@@ -5809,6 +5860,53 @@ mod tests {
         format!("http://{addr}")
     }
 
+    async fn spawn_openai_compat_embedding_mock(
+        model: &'static str,
+        embedding: Vec<f32>,
+        token_count: u32,
+    ) -> String {
+        let embedding_payload = serde_json::Value::Array(
+            embedding
+                .into_iter()
+                .map(serde_json::Value::from)
+                .collect(),
+        );
+        let body = serde_json::json!({
+            "object": "list",
+            "data": [{
+                "object": "embedding",
+                "index": 0,
+                "embedding": embedding_payload,
+            }],
+            "model": model,
+            "usage": {
+                "prompt_tokens": token_count,
+                "total_tokens": token_count,
+            }
+        });
+        let app = Router::new()
+            .route("/embeddings", post({
+                let body = body.clone();
+                move || {
+                    let body = body.clone();
+                    async move { Json(body) }
+                }
+            }))
+            .route("/v1/embeddings", post(move || {
+                let body = body.clone();
+                async move { Json(body) }
+            }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        format!("http://{addr}")
+    }
+
     /// Issue a GET request with the test bearer token.
     async fn authed_get(app: Router, uri: &str) -> axum::response::Response {
         app.oneshot(
@@ -5847,6 +5945,18 @@ mod tests {
             .header("authorization", format!("Bearer {TEST_TOKEN}"))
             .body(Body::from(serde_json::to_string(&body).unwrap()))
             .unwrap()
+    }
+
+    fn assert_embedding_matches(actual: &serde_json::Value, expected: &[f64]) {
+        let actual = actual.as_array().expect("embedding array");
+        assert_eq!(actual.len(), expected.len(), "embedding length mismatch");
+        for (index, (actual, expected)) in actual.iter().zip(expected.iter()).enumerate() {
+            let actual = actual.as_f64().expect("embedding value");
+            assert!(
+                (actual - expected).abs() < 1e-5,
+                "embedding[{index}] expected {expected}, got {actual}"
+            );
+        }
     }
 
     // ── Arg parsing ──
@@ -8301,6 +8411,128 @@ mod tests {
         );
         let fallback_json: serde_json::Value = serde_json::from_slice(&fallback_body).unwrap();
         assert_eq!(fallback_json["text"], "static");
+    }
+
+    #[tokio::test]
+    async fn provider_connection_embed_roundtrip_invalidates_to_static_fallback() {
+        let static_url =
+            spawn_openai_compat_embedding_mock("embed-dynamic", vec![0.9, 0.8], 11).await;
+        let dynamic_url =
+            spawn_openai_compat_embedding_mock("embed-dynamic", vec![0.1, 0.2], 7).await;
+
+        let mut state = make_state();
+        state.openai_compat_worker = Some(Arc::new(OpenAiCompat::new(
+            ProviderConfig::default(),
+            "static-key",
+            Some(static_url),
+            Some("embed-dynamic".to_owned()),
+            None,
+            None,
+            None,
+        )));
+        state.openai_compat = state.openai_compat_worker.clone();
+
+        let app = make_app(state);
+
+        let credential_resp = authed_json(
+            app.clone(),
+            axum::http::Method::POST,
+            "/v1/admin/tenants/default_tenant/credentials",
+            serde_json::json!({
+                "provider_id": "openai",
+                "plaintext_value": "dynamic-key",
+            }),
+        )
+        .await;
+        assert_eq!(credential_resp.status(), StatusCode::CREATED);
+        let credential_body = to_bytes(credential_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let credential_json: serde_json::Value =
+            serde_json::from_slice(&credential_body).unwrap();
+        let credential_id = credential_json["id"]
+            .as_str()
+            .expect("credential id")
+            .to_owned();
+
+        let create_resp = authed_json(
+            app.clone(),
+            axum::http::Method::POST,
+            "/v1/providers/connections",
+            serde_json::json!({
+                "tenant_id": "default_tenant",
+                "provider_connection_id": "conn_embed_dynamic",
+                "provider_family": "openai",
+                "adapter_type": "openai_compat",
+                "supported_models": ["embed-dynamic"],
+                "credential_id": credential_id,
+                "endpoint_url": dynamic_url,
+            }),
+        )
+        .await;
+        assert_eq!(create_resp.status(), StatusCode::CREATED);
+
+        let dynamic_resp = authed_json(
+            app.clone(),
+            axum::http::Method::POST,
+            "/v1/memory/embed",
+            serde_json::json!({
+                "model": "embed-dynamic",
+                "texts": ["hello registry"],
+            }),
+        )
+        .await;
+        let dynamic_status = dynamic_resp.status();
+        let dynamic_body = to_bytes(dynamic_resp.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            dynamic_status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&dynamic_body)
+        );
+        let dynamic_json: serde_json::Value = serde_json::from_slice(&dynamic_body).unwrap();
+        assert_eq!(dynamic_json["model"], "embed-dynamic");
+        assert_eq!(dynamic_json["token_count"], 7);
+        assert_embedding_matches(&dynamic_json["embeddings"][0], &[0.1, 0.2]);
+
+        let delete_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::DELETE)
+                    .uri("/v1/providers/connections/conn_embed_dynamic")
+                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete_resp.status(), StatusCode::OK);
+
+        let fallback_resp = authed_json(
+            app,
+            axum::http::Method::POST,
+            "/v1/memory/embed",
+            serde_json::json!({
+                "model": "embed-dynamic",
+                "texts": ["hello fallback"],
+            }),
+        )
+        .await;
+        let fallback_status = fallback_resp.status();
+        let fallback_body = to_bytes(fallback_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            fallback_status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&fallback_body)
+        );
+        let fallback_json: serde_json::Value = serde_json::from_slice(&fallback_body).unwrap();
+        assert_eq!(fallback_json["model"], "embed-dynamic");
+        assert_eq!(fallback_json["token_count"], 11);
+        assert_embedding_matches(&fallback_json["embeddings"][0], &[0.9, 0.8]);
     }
 
     #[tokio::test]

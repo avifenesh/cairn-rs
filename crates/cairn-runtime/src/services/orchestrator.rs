@@ -312,8 +312,8 @@ impl ResponseParser {
 
 /// Orchestrates a full brain LLM call: build prompt → generate → parse.
 ///
-/// Wraps any `GenerationProvider` implementation.  In production this is
-/// the `OpenAiCompatProvider` pointing at `conn_cairn_brain`.
+/// Wraps any `GenerationProvider` implementation. In production this is
+/// typically an OpenAI-compatible provider resolved from `conn_cairn_brain`.
 pub struct BrainLlmClient {
     provider: Arc<dyn GenerationProvider>,
     model_id: String,

@@ -106,17 +106,11 @@ pub use workspace_membership_impl::WorkspaceMembershipServiceImpl;
 pub mod resource_sharing_impl;
 pub use resource_sharing_impl::ResourceSharingServiceImpl;
 
-pub mod bedrock_provider;
-pub use bedrock_provider::BedrockProvider;
-
 pub mod ollama_provider;
 pub use ollama_provider::{OllamaModel, OllamaProvider, OllamaTagsResponse};
 
 pub mod ollama_embedding;
 pub use ollama_embedding::OllamaEmbeddingProvider;
-
-pub mod openai_compat_provider;
-pub use openai_compat_provider::OpenAiCompatProvider;
 
 pub mod provider_health_tracker;
 pub use provider_health_tracker::ProviderHealthTracker;

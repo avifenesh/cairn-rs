@@ -21,8 +21,8 @@
 //! ```
 //!
 //! OpenRouter compatibility note: OpenRouter exposes an OpenAI-compatible
-//! `/v1/chat/completions` endpoint.  `OpenAiCompatProvider` works without
-//! any modification — just point `base_url` at `https://openrouter.ai/api/v1`
+//! `/v1/chat/completions` endpoint. `OpenAiCompat` works without any
+//! modification — just point `base_url` at `https://openrouter.ai/api/v1`
 //! and supply the bearer token.
 
 use std::path::PathBuf;
@@ -38,7 +38,7 @@ use cairn_runtime::{
         ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RunServiceImpl,
         TaskServiceImpl, ToolInvocationServiceImpl,
     },
-    InMemoryServices, RunService, SessionService,
+    InMemoryServices, SessionService,
 };
 use cairn_store::EventLog;
 
@@ -376,11 +376,16 @@ async fn live_openrouter_loop_completes() {
     let api_key =
         std::env::var("OPENROUTER_API_KEY").expect("set OPENROUTER_API_KEY to run live tests");
 
-    use cairn_runtime::OpenAiCompatProvider;
+    use cairn_providers::wire::openai_compat::{OpenAiCompat, ProviderConfig};
 
-    let brain_provider = Arc::new(OpenAiCompatProvider::new(
-        "https://openrouter.ai/api/v1",
+    let brain_provider = Arc::new(OpenAiCompat::new(
+        ProviderConfig::OPENROUTER,
         api_key,
+        Some("https://openrouter.ai/api/v1".to_owned()),
+        Some("openrouter/auto".to_owned()),
+        None,
+        None,
+        None,
     ));
 
     // Model: openrouter/auto — 262K context, zero cost.

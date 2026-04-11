@@ -3,11 +3,13 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuar
 
 use async_trait::async_trait;
 use cairn_domain::providers::{
-    GenerationProvider, GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
-    ProviderConnectionRecord, ProviderConnectionStatus,
+    EmbeddingProvider as DomainEmbeddingProvider, GenerationProvider, GenerationResponse,
+    ProviderAdapterError, ProviderBindingSettings, ProviderConnectionRecord,
+    ProviderConnectionStatus,
 };
 use cairn_domain::{CredentialId, ProviderConnectionId, TenantId};
 use cairn_providers::chat::{ChatMessage, ChatProvider};
+use cairn_providers::wire::openai_compat::OpenAiCompat;
 use cairn_providers::{Backend, ProviderBuilder};
 use cairn_store::projections::{CredentialReadModel, DefaultsReadModel, ProviderConnectionReadModel};
 
@@ -28,6 +30,7 @@ pub enum ProviderResolutionPurpose {
 pub struct StartupProviderEntry {
     generation: Arc<dyn GenerationProvider>,
     chat: Option<Arc<dyn ChatProvider>>,
+    embedding: Option<Arc<dyn DomainEmbeddingProvider>>,
 }
 
 impl StartupProviderEntry {
@@ -35,6 +38,7 @@ impl StartupProviderEntry {
         Self {
             generation: provider,
             chat: None,
+            embedding: None,
         }
     }
 
@@ -45,6 +49,30 @@ impl StartupProviderEntry {
         Self {
             generation,
             chat: Some(chat),
+            embedding: None,
+        }
+    }
+
+    pub fn with_embedding(
+        generation: Arc<dyn GenerationProvider>,
+        embedding: Arc<dyn DomainEmbeddingProvider>,
+    ) -> Self {
+        Self {
+            generation,
+            chat: None,
+            embedding: Some(embedding),
+        }
+    }
+
+    pub fn with_chat_and_embedding(
+        generation: Arc<dyn GenerationProvider>,
+        chat: Arc<dyn ChatProvider>,
+        embedding: Arc<dyn DomainEmbeddingProvider>,
+    ) -> Self {
+        Self {
+            generation,
+            chat: Some(chat),
+            embedding: Some(embedding),
         }
     }
 }
@@ -61,6 +89,7 @@ pub struct StartupFallbackProviders {
 struct CachedProvider {
     chat: Arc<dyn ChatProvider>,
     generation: Arc<dyn GenerationProvider>,
+    embedding: Option<Arc<dyn DomainEmbeddingProvider>>,
 }
 
 pub struct ProviderRegistry<S> {
@@ -132,6 +161,23 @@ where
         Ok(Some(cached.chat.clone()))
     }
 
+    pub async fn resolve_embedding_for_model(
+        &self,
+        tenant_id: &TenantId,
+        model_id: &str,
+    ) -> Result<Option<Arc<dyn DomainEmbeddingProvider>>, RuntimeError> {
+        let active_connections = self.active_connections(tenant_id).await?;
+        if active_connections.is_empty() {
+            return Ok(self.select_fallback_embedding(model_id));
+        }
+
+        let Some(connection) = select_connection(&active_connections, model_id) else {
+            return Ok(None);
+        };
+        let cached = self.cached_provider_for_connection(connection, model_id).await?;
+        Ok(cached.embedding.clone())
+    }
+
     async fn active_connections(
         &self,
         tenant_id: &TenantId,
@@ -177,17 +223,26 @@ where
         let backend = backend_for_connection(connection)?;
         let endpoint = self.endpoint_for_connection(&connection.provider_connection_id).await?;
         let api_key = self.api_key_for_connection(&connection.provider_connection_id).await?;
-        let configured_model = connection
-            .supported_models
-            .first()
-            .cloned()
-            .or_else(|| (!requested_model.is_empty()).then(|| requested_model.to_owned()));
+        let configured_model = if !requested_model.is_empty()
+            && connection
+                .supported_models
+                .iter()
+                .any(|model| model.eq_ignore_ascii_case(requested_model))
+        {
+            Some(requested_model.to_owned())
+        } else {
+            connection
+                .supported_models
+                .first()
+                .cloned()
+                .or_else(|| (!requested_model.is_empty()).then(|| requested_model.to_owned()))
+        };
 
-        let mut builder = ProviderBuilder::new(backend);
-        if let Some(endpoint) = endpoint {
+        let mut builder = ProviderBuilder::new(backend.clone());
+        if let Some(endpoint) = endpoint.clone() {
             builder = builder.base_url(endpoint);
         }
-        if let Some(api_key) = api_key {
+        if let Some(api_key) = api_key.clone() {
             builder = builder.api_key(api_key);
         }
         if let Some(model) = configured_model.clone() {
@@ -206,8 +261,19 @@ where
         let default_model = configured_model.unwrap_or_default();
         let generation: Arc<dyn GenerationProvider> =
             Arc::new(ChatProviderGenerationAdapter::new(chat.clone(), default_model));
+        let embedding = build_embedding_provider(
+            &backend,
+            endpoint,
+            api_key,
+            connection,
+            requested_model,
+        );
 
-        Ok(CachedProvider { chat, generation })
+        Ok(CachedProvider {
+            chat,
+            generation,
+            embedding,
+        })
     }
 
     async fn endpoint_for_connection(
@@ -418,6 +484,53 @@ where
             }
         }
     }
+
+    fn select_fallback_embedding(
+        &self,
+        model_id: &str,
+    ) -> Option<Arc<dyn DomainEmbeddingProvider>> {
+        let fallbacks = read_lock(&self.fallbacks);
+
+        if let Some(ollama) = fallbacks.ollama.as_ref().and_then(|entry| entry.embedding.clone()) {
+            return Some(ollama);
+        }
+
+        if is_brain_model(model_id) {
+            fallbacks
+                .brain
+                .as_ref()
+                .and_then(|entry| entry.embedding.clone())
+                .or_else(|| {
+                    fallbacks
+                        .worker
+                        .as_ref()
+                        .and_then(|entry| entry.embedding.clone())
+                })
+                .or_else(|| {
+                    fallbacks
+                        .openrouter
+                        .as_ref()
+                        .and_then(|entry| entry.embedding.clone())
+                })
+        } else {
+            fallbacks
+                .worker
+                .as_ref()
+                .and_then(|entry| entry.embedding.clone())
+                .or_else(|| {
+                    fallbacks
+                        .brain
+                        .as_ref()
+                        .and_then(|entry| entry.embedding.clone())
+                })
+                .or_else(|| {
+                    fallbacks
+                        .openrouter
+                        .as_ref()
+                        .and_then(|entry| entry.embedding.clone())
+                })
+        }
+    }
 }
 
 struct ChatProviderGenerationAdapter {
@@ -532,6 +645,35 @@ fn normalize_backend(raw: &str) -> String {
     }
 }
 
+fn build_embedding_provider(
+    backend: &Backend,
+    endpoint: Option<String>,
+    api_key: Option<String>,
+    connection: &ProviderConnectionRecord,
+    requested_model: &str,
+) -> Option<Arc<dyn DomainEmbeddingProvider>> {
+    if matches!(backend, Backend::Bedrock) {
+        return None;
+    }
+
+    let model = if !requested_model.is_empty() {
+        Some(requested_model.to_owned())
+    } else {
+        connection.supported_models.first().cloned()
+    };
+
+    let embedding: Arc<dyn DomainEmbeddingProvider> = Arc::new(OpenAiCompat::new(
+        backend.config(),
+        api_key.unwrap_or_default(),
+        endpoint,
+        model,
+        None,
+        None,
+        None,
+    ));
+    Some(embedding)
+}
+
 fn select_connection<'a>(
     connections: &'a [ProviderConnectionRecord],
     model_id: &str,
@@ -585,7 +727,8 @@ mod tests {
 
     use async_trait::async_trait;
     use cairn_domain::providers::{
-        GenerationProvider, GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
+        EmbeddingProvider as DomainEmbeddingProvider, EmbeddingResponse, GenerationProvider,
+        GenerationResponse, ProviderAdapterError, ProviderBindingSettings,
     };
     use cairn_domain::{ProviderConnectionId, TenantId};
     use cairn_store::InMemoryStore;
@@ -605,6 +748,10 @@ mod tests {
         label: &'static str,
     }
 
+    struct FakeEmbeddingProvider {
+        token_count: u32,
+    }
+
     #[async_trait]
     impl GenerationProvider for FakeGenerationProvider {
         async fn generate(
@@ -619,6 +766,24 @@ mod tests {
                 output_tokens: None,
                 model_id: model_id.to_owned(),
                 tool_calls: Vec::new(),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl DomainEmbeddingProvider for FakeEmbeddingProvider {
+        async fn embed(
+            &self,
+            model_id: &str,
+            texts: Vec<String>,
+        ) -> Result<EmbeddingResponse, ProviderAdapterError> {
+            Ok(EmbeddingResponse {
+                embeddings: texts
+                    .into_iter()
+                    .map(|text| vec![text.len() as f32])
+                    .collect(),
+                model_id: model_id.to_owned(),
+                token_count: self.token_count,
             })
         }
     }
@@ -699,6 +864,29 @@ mod tests {
                 "worker-lite",
                 ProviderResolutionPurpose::Generate,
             )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(Arc::ptr_eq(&resolved, &fallback));
+    }
+
+    #[tokio::test]
+    async fn falls_back_to_startup_embedding_when_no_connections_exist() {
+        let store = seeded_store().await;
+        let registry = ProviderRegistry::new(store);
+        let fallback: Arc<dyn DomainEmbeddingProvider> =
+            Arc::new(FakeEmbeddingProvider { token_count: 7 });
+        registry.set_startup_fallbacks(StartupFallbackProviders {
+            worker: Some(StartupProviderEntry::with_embedding(
+                Arc::new(FakeGenerationProvider { label: "worker" }),
+                fallback.clone(),
+            )),
+            ..Default::default()
+        });
+
+        let resolved = registry
+            .resolve_embedding_for_model(&TenantId::new("tenant_registry"), "worker-embed")
             .await
             .unwrap()
             .unwrap();

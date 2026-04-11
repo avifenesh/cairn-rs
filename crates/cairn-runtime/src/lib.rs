@@ -155,10 +155,6 @@ pub use services::event_helpers::seed_event_counter;
 // ── Ollama local LLM + embedding providers ────────────────────────────────────
 pub use services::{OllamaEmbeddingProvider, OllamaModel, OllamaProvider, OllamaTagsResponse};
 
-// ── OpenAI-compatible inference provider ─────────────────────────────────────
-pub use services::BedrockProvider;
-pub use services::OpenAiCompatProvider;
-
 // ── Stable app/runtime boundary exports ──────────────────────────────────────
 pub use services::make_envelope;
 pub use services::parse_outcome;
