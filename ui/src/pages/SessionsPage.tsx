@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { ChevronRight, RefreshCw, Plus, Upload } from 'lucide-react';
 import { DataTable } from '../components/DataTable';
+import { StatCard } from '../components/StatCard';
 import { ErrorFallback } from '../components/ErrorFallback';
 import { useToast } from '../components/Toast';
 import { clsx } from 'clsx';
@@ -53,23 +54,6 @@ function SessionPill({ state }: { state: SessionState }) {
       <span className={clsx('w-1 h-1 rounded-full shrink-0', SESSION_DOT[state])} />
       {state}
     </span>
-  );
-}
-
-// ── Stat card (left-border accent, no icon) ───────────────────────────────────
-
-function StatCard({ label, value, sub, accent = 'default' }: {
-  label: string; value: string | number; sub?: string;
-  accent?: 'default' | 'blue' | 'emerald';
-}) {
-  const border = { default: 'border-l-zinc-700', blue: 'border-l-blue-500', emerald: 'border-l-emerald-500' }[accent];
-  const val    = { default: 'text-gray-900 dark:text-zinc-100', blue: 'text-blue-400', emerald: 'text-emerald-400' }[accent];
-  return (
-    <div className={clsx('bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 border-l-2 rounded-lg p-4', border)}>
-      <p className="text-[11px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">{label}</p>
-      <p className={clsx('text-2xl font-semibold tabular-nums', val)}>{value}</p>
-      {sub && <p className="mt-1 text-[11px] text-gray-400 dark:text-zinc-600">{sub}</p>}
-    </div>
   );
 }
 
@@ -166,9 +150,9 @@ export function SessionsPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Total Sessions" value={list.length} accent="default" />
-        <StatCard label="Active Now"     value={activeNow}   accent={activeNow > 0 ? 'blue' : 'default'} sub={activeNow > 0 ? `${activeNow} open` : 'none open'} />
-        <StatCard label="Completed"      value={list.filter(s => s.state === 'completed').length} accent="emerald" />
+        <StatCard label="Total Sessions" value={list.length} />
+        <StatCard label="Active Now"     value={activeNow}   variant={activeNow > 0 ? 'info' : 'default'} description={activeNow > 0 ? `${activeNow} open` : 'none open'} />
+        <StatCard label="Completed"      value={list.filter(s => s.state === 'completed').length} variant="success" />
       </div>
 
       {/* Table */}
