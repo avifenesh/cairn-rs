@@ -1,0 +1,22 @@
+[package]
+name = "cairn-github"
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+description = "GitHub App integration for Cairn — authentication, webhooks, and API operations"
+
+[dependencies]
+async-trait = "0.1"
+base64 = "0.22"
+hmac = "0.12"
+jsonwebtoken = "9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "sync"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

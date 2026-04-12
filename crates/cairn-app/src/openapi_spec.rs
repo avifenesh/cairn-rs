@@ -984,6 +984,68 @@ pub const OPENAPI_JSON: &str = r##"{
         }
       }
     },
+    "/v1/webhooks/github": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Receive GitHub webhook events",
+        "description": "Verifies HMAC-SHA256 signature, parses the event, and dispatches based on configured event-to-action mappings. Auth is via webhook signature, not bearer token.",
+        "operationId": "githubWebhook",
+        "responses": {
+          "200": { "description": "Event processed or ignored" },
+          "401": { "description": "Invalid or missing signature" },
+          "503": { "description": "GitHub App not configured" }
+        }
+      }
+    },
+    "/v1/webhooks/github/actions": {
+      "get": {
+        "tags": ["Webhooks"],
+        "summary": "List GitHub webhook event-to-action mappings",
+        "operationId": "listWebhookActions",
+        "responses": {
+          "200": { "description": "Current action mappings", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      },
+      "put": {
+        "tags": ["Webhooks"],
+        "summary": "Replace GitHub webhook event-to-action mappings",
+        "operationId": "setWebhookActions",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "actions": { "type": "array", "items": { "type": "object", "properties": { "event_pattern": { "type": "string" }, "label_filter": { "type": "string" }, "repo_filter": { "type": "string" }, "action": { "type": "string", "enum": ["create_and_orchestrate", "acknowledge", "ignore"] } } } } } } } }
+        },
+        "responses": {
+          "200": { "description": "Actions updated" },
+          "503": { "description": "GitHub App not configured" }
+        }
+      }
+    },
+    "/v1/webhooks/github/scan": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Scan a repo for open issues and queue them for sequential processing",
+        "description": "Lists open issues from a GitHub repo via the App API, creates a session+run for each, and processes them one at a time through the orchestrator. Each issue gets its own PR with an approval gate before merge.",
+        "operationId": "githubScan",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["repo", "installation_id"], "properties": { "repo": { "type": "string", "description": "owner/repo" }, "installation_id": { "type": "integer", "description": "GitHub App installation ID" }, "labels": { "type": "string", "description": "Comma-separated label filter" }, "limit": { "type": "integer", "description": "Max issues to scan (default 30, max 100)" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Issues queued for processing" },
+          "503": { "description": "GitHub App not configured" }
+        }
+      }
+    },
+    "/v1/webhooks/github/queue": {
+      "get": {
+        "tags": ["Webhooks"],
+        "summary": "View the current issue processing queue",
+        "operationId": "githubQueue",
+        "responses": {
+          "200": { "description": "Queue status", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
     "/v1/bundles/export": {
       "post": {
         "tags": ["Bundles"],

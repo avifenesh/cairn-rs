@@ -22,6 +22,7 @@ cairn-store = { path = "../cairn-store", features = ["postgres", "sqlite"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite"], optional = false }
 cairn-domain = { path = "../cairn-domain" }
 cairn-tools = { path = "../cairn-tools" }
+cairn-github = { path = "../cairn-github" }
 axum = { version = "0.7", features = ["ws"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 tower = { version = "0.4", features = ["full"] }

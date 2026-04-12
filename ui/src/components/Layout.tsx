@@ -12,7 +12,7 @@ const VALID_PAGES: NavPage[] = [
   'dashboard', 'workspaces',
   'sessions', 'runs', 'tasks', 'workers', 'orchestration', 'approvals', 'triggers', 'decisions', 'prompts', 'agent-templates',
   'traces', 'memory', 'sources', 'costs', 'cost-calc', 'evals', 'graph', 'audit-log', 'logs', 'metrics',
-  'providers', 'plugins', 'skills', 'credentials', 'channels', 'deployment', 'playground', 'test-harness', 'api-docs', 'settings', 'profile',
+  'providers', 'plugins', 'skills', 'credentials', 'integrations', 'channels', 'deployment', 'playground', 'test-harness', 'api-docs', 'settings', 'profile',
 ];
 
 // ── Route descriptor ──────────────────────────────────────────────────────────
@@ -85,6 +85,7 @@ export const PAGE_TITLES: Record<NavPage, string> = {
   skills:      'Skills',
   credentials:  'Credentials',
   deployment:   'Deployment Health',
+  integrations: 'Integrations',
   channels:    'Channels',
   playground:      'Playground',
   'test-harness':  'Test Harness',

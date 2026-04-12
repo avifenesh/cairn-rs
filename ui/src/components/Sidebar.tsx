@@ -1,5 +1,6 @@
 import {
   Bell,
+  Cable,
   Cpu,
   GitBranch,
   Calculator,
@@ -71,6 +72,7 @@ export type NavPage =
   | 'triggers'
   | 'decisions'
   | 'deployment'
+  | 'integrations'
   | 'profile';
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
@@ -132,6 +134,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'skills',      label: 'Skills',      icon: Wrench   },
       { id: 'credentials',  label: 'Credentials',  icon: KeyRound     },
       { id: 'deployment',   label: 'Deployment',   icon: ServerCrash  },
+      { id: 'integrations',  label: 'Integrations',  icon: Cable    },
       { id: 'channels',     label: 'Channels',     icon: Bell     },
       { id: 'playground',    label: 'Playground',    icon: Terminal  },
       { id: 'test-harness',  label: 'Test Harness',  icon: TestTube  },

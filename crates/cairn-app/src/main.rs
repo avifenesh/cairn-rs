@@ -5308,6 +5308,59 @@ async fn main() {
         }
     }
 
+    // ── Wire GitHub App integration into lib_state ────────────────────────────
+    {
+        let github_app_id = std::env::var("GITHUB_APP_ID").ok();
+        let github_key_file = std::env::var("GITHUB_PRIVATE_KEY_FILE").ok();
+        let github_webhook_secret = std::env::var("GITHUB_WEBHOOK_SECRET").ok();
+
+        if let (Some(app_id_str), Some(key_file), Some(webhook_secret)) =
+            (github_app_id, github_key_file, github_webhook_secret)
+        {
+            match app_id_str.parse::<u64>() {
+                Ok(app_id) => match std::fs::read(&key_file) {
+                    Ok(pem_bytes) => match cairn_github::AppCredentials::new(app_id, &pem_bytes) {
+                        Ok(credentials) => {
+                            let github = cairn_app::GitHubIntegration {
+                                credentials,
+                                webhook_secret,
+                                installations: tokio::sync::RwLock::new(
+                                    std::collections::HashMap::new(),
+                                ),
+                                event_actions: tokio::sync::RwLock::new(vec![]),
+                                issue_queue: tokio::sync::RwLock::new(
+                                    std::collections::VecDeque::new(),
+                                ),
+                                queue_paused: std::sync::atomic::AtomicBool::new(false),
+                                queue_running: std::sync::atomic::AtomicBool::new(false),
+                                http: reqwest::Client::new(),
+                            };
+                            let lib_mut = Arc::get_mut(&mut lib_state)
+                                .expect("lib_state must not be cloned before github is wired");
+                            lib_mut.github = Some(Arc::new(github));
+                            eprintln!("GitHub App: wired (app_id={app_id})");
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                    "WARNING: GitHub App key invalid: {e} — GitHub integration disabled"
+                                );
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!(
+                            "WARNING: Cannot read {key_file}: {e} — GitHub integration disabled"
+                        );
+                    }
+                },
+                Err(_) => {
+                    eprintln!(
+                        "WARNING: GITHUB_APP_ID is not a valid number — GitHub integration disabled"
+                    );
+                }
+            }
+        }
+    }
+
     // ── Wire built-in tool registry into lib_state ───────────────────────────
     // Build with the real RetrievalService + IngestPipeline so the orchestrator
     // can actually search and store memory during execution.

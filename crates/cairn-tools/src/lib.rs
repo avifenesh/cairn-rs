@@ -27,13 +27,14 @@ pub use builtin::{ToolDescriptor, ToolHost, ToolInput, ToolOutcome};
 pub use builtins::{
     BuiltinToolDescriptor, BuiltinToolRegistry, CalculateTool, CancelTaskTool, CreateTaskTool,
     DeleteMemoryTool, EvalScoreTool, FileReadTool, FileWriteTool, GetApprovalsTool, GetRunTool,
-    GetTaskTool, GhCreateCommentTool, GhGetIssueTool, GhListIssuesTool, GhSearchCodeTool,
-    GitOperationsTool, GlobFindTool, GraphQueryTool, GrepSearchTool, HttpRequestTool,
-    JsonExtractTool, ListRunsTool, MemorySearchTool, MemoryStoreTool, NoopSink, NotificationSink,
-    NotifyOperatorTool, PermissionLevel, ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool,
-    SearchEventsTool, ShellExecTool, SummarizeTextTool, ToolCategory, ToolContext, ToolError,
-    ToolExecute, ToolHandler, ToolResult, ToolSearchTool, ToolTier, UpdateMemoryTool,
-    WaitForTaskTool, WebFetchTool,
+    GetTaskTool, GhApiCreateBranchTool, GhApiCreatePrTool, GhApiListContentsTool, GhApiMergePrTool,
+    GhApiReadFileTool, GhApiWriteFileTool, GhCreateCommentTool, GhGetIssueTool, GhListIssuesTool,
+    GhSearchCodeTool, GitHubClientProvider, GitOperationsTool, GlobFindTool, GraphQueryTool,
+    GrepSearchTool, HttpRequestTool, JsonExtractTool, ListRunsTool, MemorySearchTool,
+    MemoryStoreTool, NoopSink, NotificationSink, NotifyOperatorTool, PermissionLevel,
+    ResolveApprovalTool, ScheduleTaskTool, ScratchPadTool, SearchEventsTool, ShellExecTool,
+    SummarizeTextTool, ToolCategory, ToolContext, ToolError, ToolExecute, ToolHandler, ToolResult,
+    ToolSearchTool, ToolTier, UpdateMemoryTool, WaitForTaskTool, WebFetchTool,
 };
 pub use execution_class::{select_execution_config, SelectedConfig};
 pub use executor::{execute_builtin, ExecutionOutcome};

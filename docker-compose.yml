@@ -74,6 +74,11 @@ services:
       BEDROCK_API_KEY: "${BEDROCK_API_KEY:-}"
       BEDROCK_MODEL_ID: "${BEDROCK_MODEL_ID:-}"
       AWS_REGION: "${AWS_REGION:-}"
+
+      # ── GitHub App Integration (optional) ──────────────────────────────
+      GITHUB_APP_ID: "${GITHUB_APP_ID:-}"
+      GITHUB_PRIVATE_KEY_FILE: "${GITHUB_PRIVATE_KEY_FILE:-}"
+      GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET:-}"
     depends_on:
       postgres:
         condition: service_healthy

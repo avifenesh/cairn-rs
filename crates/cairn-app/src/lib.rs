@@ -1073,6 +1073,97 @@ pub struct AppState {
     /// Ring buffer of the last 2,000 structured request log entries, populated
     /// by the observability middleware.  Consumed by `GET /v1/admin/logs`.
     pub request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
+    /// GitHub App integration — set by main.rs when GITHUB_APP_ID + private key are configured.
+    pub github: Option<Arc<GitHubIntegration>>,
+}
+
+/// GitHub App integration state.
+pub struct GitHubIntegration {
+    pub credentials: cairn_github::AppCredentials,
+    pub webhook_secret: String,
+    /// Map of installation_id → InstallationToken (auto-refreshing).
+    pub installations:
+        tokio::sync::RwLock<std::collections::HashMap<u64, cairn_github::InstallationToken>>,
+    /// Operator-configured event→action mappings.
+    /// Key: event key (e.g., "issues.opened", "issues.labeled").
+    /// Value: action to take.
+    pub event_actions: tokio::sync::RwLock<Vec<GitHubEventAction>>,
+    /// Sequential issue processing queue.
+    pub issue_queue: tokio::sync::RwLock<std::collections::VecDeque<IssueQueueEntry>>,
+    /// Whether the queue processor is paused.
+    pub queue_paused: std::sync::atomic::AtomicBool,
+    /// Whether the queue processor is currently running.
+    pub queue_running: std::sync::atomic::AtomicBool,
+    pub http: reqwest::Client,
+}
+
+impl std::fmt::Debug for GitHubIntegration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitHubIntegration")
+            .field("app_id", &self.credentials.app_id)
+            .finish()
+    }
+}
+
+impl GitHubIntegration {
+    /// Get or create an InstallationToken for the given installation ID.
+    pub async fn token_for_installation(
+        &self,
+        installation_id: u64,
+    ) -> cairn_github::InstallationToken {
+        {
+            let cache = self.installations.read().await;
+            if let Some(token) = cache.get(&installation_id) {
+                return token.clone();
+            }
+        }
+        let token = cairn_github::InstallationToken::new(
+            self.credentials.clone(),
+            installation_id,
+            self.http.clone(),
+        );
+        let mut cache = self.installations.write().await;
+        cache.insert(installation_id, token.clone());
+        token
+    }
+
+    /// Get a GitHubClient for the given installation.
+    pub async fn client_for_installation(
+        &self,
+        installation_id: u64,
+    ) -> cairn_github::GitHubClient {
+        let token = self.token_for_installation(installation_id).await;
+        cairn_github::GitHubClient::with_http(token, self.http.clone())
+    }
+}
+
+/// Configurable event→action mapping for GitHub webhooks.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct GitHubEventAction {
+    /// Event key pattern to match (e.g., "issues.opened", "issues.labeled", "push").
+    /// Supports "*" as wildcard (e.g., "issues.*" matches all issue events).
+    pub event_pattern: String,
+    /// Optional label filter — only trigger if the issue/PR has this label.
+    #[serde(default)]
+    pub label_filter: Option<String>,
+    /// Optional repo filter — only trigger for this repo (owner/repo).
+    #[serde(default)]
+    pub repo_filter: Option<String>,
+    /// What to do when the event matches.
+    pub action: WebhookAction,
+}
+
+/// What to do when a webhook event matches a configured pattern.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookAction {
+    /// Create a session + run and trigger orchestration.
+    /// The goal is derived from the issue/PR title + body.
+    CreateAndOrchestrate,
+    /// Post a comment acknowledging the event.
+    Acknowledge,
+    /// Ignore the event (useful for explicit deny rules).
+    Ignore,
 }
 
 impl AppState {
@@ -1349,6 +1440,7 @@ impl AppState {
             bedrock_provider: None,
             tool_registry: None,
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
+            github: None,
         };
         state.runtime.store.reset_usage_counters();
         Ok(state)
@@ -5128,6 +5220,35 @@ impl AppBootstrap {
                 get(trigger_routes::get_run_template_handler)
                     .delete(trigger_routes::delete_run_template_handler),
             )
+            // ── GitHub Webhooks & Integrations ───────────────────────────────
+            .route("/v1/providers/registry", get(provider_registry_handler))
+            .route("/v1/webhooks/github", post(github_webhook_handler))
+            .route(
+                "/v1/webhooks/github/actions",
+                get(list_webhook_actions_handler).put(set_webhook_actions_handler),
+            )
+            .route("/v1/webhooks/github/scan", post(github_scan_handler))
+            .route("/v1/webhooks/github/queue", get(github_queue_handler))
+            .route(
+                "/v1/webhooks/github/queue/pause",
+                post(github_queue_pause_handler),
+            )
+            .route(
+                "/v1/webhooks/github/queue/resume",
+                post(github_queue_resume_handler),
+            )
+            .route(
+                "/v1/webhooks/github/queue/:issue/skip",
+                post(github_queue_skip_handler),
+            )
+            .route(
+                "/v1/webhooks/github/queue/:issue/retry",
+                post(github_queue_retry_handler),
+            )
+            .route(
+                "/v1/webhooks/github/installations",
+                get(github_installations_handler),
+            )
     }
 
     /// Apply the standard middleware stack (auth, CORS, rate-limit, tracing)
@@ -5151,7 +5272,6 @@ impl AppBootstrap {
     /// Build the complete router: catalog routes + fallback + state + middleware.
     fn build_router(state: Arc<AppState>) -> Router {
         let routes = Self::build_catalog_routes()
-            .route("/v1/providers/registry", get(provider_registry_handler))
             .fallback(not_found_handler)
             .with_state(state.clone());
         Self::apply_middleware(routes, state)
@@ -5445,6 +5565,7 @@ fn auth_exempt_path(path: &str) -> bool {
             | "/docs"
             | "/v1/stream"
             | "/v1/docs"
+            | "/v1/webhooks/github"
     ) {
         return true;
     }
@@ -19216,6 +19337,1241 @@ fn is_admin_principal(principal: &AuthPrincipal) -> bool {
         AuthPrincipal::System => true,
         AuthPrincipal::ServiceAccount { name, .. } => name == "admin",
         AuthPrincipal::Operator { .. } => false,
+    }
+}
+
+// ── GitHub webhook handlers ──────────────────────────────────────────────────
+
+/// POST /v1/webhooks/github — receive and process GitHub webhook events.
+///
+/// Authentication: HMAC-SHA256 signature verification (not bearer token).
+/// Processing: responds 200 immediately, processes async in a spawned task.
+async fn github_webhook_handler(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh.clone(),
+        None => {
+            return AppApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "github_not_configured",
+                "GitHub App integration is not configured. Set GITHUB_APP_ID, GITHUB_PRIVATE_KEY_FILE, and GITHUB_WEBHOOK_SECRET.",
+            )
+            .into_response();
+        }
+    };
+
+    // Verify HMAC-SHA256 signature.
+    let signature = match headers
+        .get("x-hub-signature-256")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(sig) => sig.to_owned(),
+        None => {
+            tracing::warn!("GitHub webhook: missing X-Hub-Signature-256 header");
+            return AppApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "missing_signature",
+                "X-Hub-Signature-256 header is required",
+            )
+            .into_response();
+        }
+    };
+
+    if cairn_github::verify_signature(&signature, github.webhook_secret.as_bytes(), &body).is_err()
+    {
+        tracing::warn!("GitHub webhook: invalid signature");
+        return AppApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_signature",
+            "Webhook signature verification failed",
+        )
+        .into_response();
+    }
+
+    // Parse event type and delivery ID.
+    let event_type = headers
+        .get("x-github-event")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_owned();
+    let delivery_id = headers
+        .get("x-github-delivery")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_owned();
+
+    // Parse the event.
+    let event = match cairn_github::WebhookEvent::parse(&event_type, &delivery_id, &body) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!(event_type, delivery_id, error = %e, "GitHub webhook: failed to parse event");
+            return AppApiError::new(
+                StatusCode::BAD_REQUEST,
+                "parse_error",
+                format!("Failed to parse webhook event: {e}"),
+            )
+            .into_response();
+        }
+    };
+
+    let event_key = event.event_key();
+    let repo = event.repository().unwrap_or("unknown").to_owned();
+    let installation_id = event.installation_id();
+
+    tracing::info!(
+        event_key,
+        repo,
+        delivery_id,
+        ?installation_id,
+        "GitHub webhook received"
+    );
+
+    // Find matching action from configured event-to-action mappings.
+    let matched_action = {
+        let actions = github.event_actions.read().await;
+        find_matching_action(&actions, &event)
+    };
+
+    let action = match matched_action {
+        Some(action) => action,
+        None => {
+            tracing::debug!(event_key, "GitHub webhook: no matching action configured");
+            return Json(serde_json::json!({
+                "status": "ignored",
+                "event": event_key,
+                "reason": "no matching action configured",
+            }))
+            .into_response();
+        }
+    };
+
+    match action.action {
+        WebhookAction::Ignore => Json(serde_json::json!({
+            "status": "ignored",
+            "event": event_key,
+        }))
+        .into_response(),
+        WebhookAction::Acknowledge => {
+            if let Some(inst_id) = installation_id {
+                let github_clone = github.clone();
+                let event_key_clone = event_key.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = acknowledge_event(&github_clone, inst_id, &event).await {
+                        tracing::warn!(event = event_key_clone, error = %e, "Failed to acknowledge");
+                    }
+                });
+            }
+            Json(serde_json::json!({
+                "status": "acknowledged",
+                "event": event_key,
+            }))
+            .into_response()
+        }
+        WebhookAction::CreateAndOrchestrate => {
+            let state_clone = state.clone();
+            let github_clone = github.clone();
+            let event_key_clone = event_key.clone();
+            let delivery_id_clone = delivery_id.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    process_webhook_orchestrate(&state_clone, &github_clone, &event).await
+                {
+                    tracing::error!(event = event_key_clone, error = %e, "Webhook processing failed");
+                }
+            });
+            Json(serde_json::json!({
+                "status": "accepted",
+                "event": event_key,
+                "delivery_id": delivery_id_clone,
+            }))
+            .into_response()
+        }
+    }
+}
+
+fn find_matching_action(
+    actions: &[GitHubEventAction],
+    event: &cairn_github::WebhookEvent,
+) -> Option<GitHubEventAction> {
+    let event_key = event.event_key();
+    let repo = event.repository().unwrap_or("");
+
+    for action in actions {
+        if !event_pattern_matches(&action.event_pattern, &event_key) {
+            continue;
+        }
+        if let Some(ref repo_filter) = action.repo_filter {
+            if repo_filter != repo {
+                continue;
+            }
+        }
+        if let Some(ref label_filter) = action.label_filter {
+            let has_label = match &event.payload {
+                cairn_github::WebhookEventPayload::Issues(e) => {
+                    e.issue.labels.iter().any(|l| &l.name == label_filter)
+                }
+                _ => false,
+            };
+            if !has_label {
+                continue;
+            }
+        }
+        return Some(action.clone());
+    }
+    None
+}
+
+fn event_pattern_matches(pattern: &str, event_key: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix(".*") {
+        return event_key.starts_with(prefix);
+    }
+    pattern == event_key
+}
+
+async fn acknowledge_event(
+    github: &GitHubIntegration,
+    installation_id: u64,
+    event: &cairn_github::WebhookEvent,
+) -> Result<(), cairn_github::GitHubError> {
+    let client = github.client_for_installation(installation_id).await;
+    let repo = event.repository().unwrap_or("");
+    let (owner, repo_name) = repo.split_once('/').unwrap_or(("", repo));
+
+    let issue_number = match &event.payload {
+        cairn_github::WebhookEventPayload::Issues(e) => Some(e.issue.number),
+        cairn_github::WebhookEventPayload::IssueComment(e) => Some(e.issue.number),
+        cairn_github::WebhookEventPayload::PullRequest(e) => Some(e.pull_request.number),
+        _ => None,
+    };
+
+    if let Some(number) = issue_number {
+        let msg = format!(
+            "Cairn received this event (`{}`). Processing...",
+            event.event_key()
+        );
+        client
+            .create_comment(owner, repo_name, number, &msg)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn process_webhook_orchestrate(
+    state: &AppState,
+    github: &GitHubIntegration,
+    event: &cairn_github::WebhookEvent,
+) -> Result<(), String> {
+    use cairn_domain::{ProjectKey, RunId, SessionId};
+    use cairn_runtime::services::{RunServiceImpl, SessionServiceImpl};
+    use cairn_store::projections::SessionReadModel;
+
+    let repo_full = event.repository().unwrap_or("unknown/unknown");
+    let (owner, repo_name) = repo_full.split_once('/').unwrap_or(("unknown", "unknown"));
+    let installation_id = event.installation_id().ok_or("no installation_id")?;
+
+    let (goal, issue_number) = match &event.payload {
+        cairn_github::WebhookEventPayload::Issues(e) => {
+            let body = e.issue.body.as_deref().unwrap_or("");
+            (
+                format!(
+                    "GitHub Issue #{}: {}\n\nRepository: {}\n\n{}",
+                    e.issue.number, e.issue.title, repo_full, body
+                ),
+                Some(e.issue.number),
+            )
+        }
+        cairn_github::WebhookEventPayload::IssueComment(e) => (
+            format!(
+                "GitHub Issue #{} comment by @{}:\n{}\n\nRepository: {}",
+                e.issue.number, e.comment.user.login, e.comment.body, repo_full
+            ),
+            Some(e.issue.number),
+        ),
+        cairn_github::WebhookEventPayload::PullRequest(e) => {
+            let body = e.pull_request.body.as_deref().unwrap_or("");
+            (
+                format!(
+                    "GitHub PR #{}: {}\n\nRepository: {}\n\n{}",
+                    e.pull_request.number, e.pull_request.title, repo_full, body
+                ),
+                Some(e.pull_request.number),
+            )
+        }
+        _ => (
+            format!("GitHub event: {} on {}", event.event_key(), repo_full),
+            None,
+        ),
+    };
+
+    let project = ProjectKey::new("default_tenant", "default_workspace", "default_project");
+
+    let session_id_str = match issue_number {
+        Some(n) => format!("gh-{}-{}-issue-{}", owner, repo_name, n),
+        None => format!("gh-{}-{}-{}", owner, repo_name, event.delivery_id),
+    };
+    let session_id = SessionId::new(&session_id_str);
+
+    let session_svc = SessionServiceImpl::new(state.runtime.store.clone());
+    if SessionReadModel::get(state.runtime.store.as_ref(), &session_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        session_svc
+            .create(&project, session_id.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    let run_id_str = format!("{}-run-{}", session_id_str, event.delivery_id);
+    let run_id = RunId::new(&run_id_str);
+    let run_svc = RunServiceImpl::new(state.runtime.store.clone());
+    let run = run_svc
+        .start(&project, &session_id, run_id.clone(), None)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    tracing::info!(
+        session_id = session_id_str,
+        run_id = run_id_str,
+        event = event.event_key(),
+        repo = repo_full,
+        "Created session + run for GitHub webhook"
+    );
+
+    // Comment on the issue.
+    if let Some(number) = issue_number {
+        let client = github.client_for_installation(installation_id).await;
+        let msg = format!(
+            "Cairn is working on this.\n\n- Session: `{}`\n- Run: `{}`",
+            session_id_str, run_id_str
+        );
+        if let Err(e) = client.create_comment(owner, repo_name, number, &msg).await {
+            tracing::warn!(error = %e, "Failed to post GitHub comment");
+        }
+    }
+
+    // Trigger orchestration.
+    webhook_trigger_orchestration(state, &run, &goal).await
+}
+
+async fn webhook_trigger_orchestration(
+    state: &AppState,
+    run: &cairn_store::projections::RunRecord,
+    goal: &str,
+) -> Result<(), String> {
+    use cairn_orchestrator::{
+        LlmDecidePhase, LoopConfig, LoopTermination, OrchestrationContext, OrchestratorLoop,
+        RuntimeExecutePhase, StandardGatherPhase,
+    };
+    use cairn_runtime::services::{
+        ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RunServiceImpl,
+        TaskServiceImpl, ToolInvocationServiceImpl,
+    };
+
+    if run.state == cairn_domain::RunState::Pending {
+        use cairn_domain::{RunState, RunStateChanged, RuntimeEvent, StateTransition};
+        use cairn_runtime::make_envelope;
+        let evt = make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: run.project.clone(),
+            run_id: run.run_id.clone(),
+            transition: StateTransition {
+                from: Some(RunState::Pending),
+                to: RunState::Running,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }));
+        let _ = state.runtime.store.append(&[evt]).await;
+    }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let working_dir = working_dir_for_run(state, run)
+        .await
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+
+    let ctx = OrchestrationContext {
+        project: run.project.clone(),
+        session_id: run.session_id.clone(),
+        run_id: run.run_id.clone(),
+        task_id: None,
+        iteration: 0,
+        goal: goal.to_owned(),
+        agent_type: "github_agent".to_owned(),
+        run_started_at_ms: now_ms,
+        working_dir,
+        run_mode: cairn_domain::decisions::RunMode::default(),
+        discovered_tool_names: vec![],
+    };
+
+    let model_id = {
+        let brain = state.runtime.runtime_config.default_brain_model().await;
+        if brain.trim().is_empty() || brain == "default" {
+            state.runtime.runtime_config.default_generate_model().await
+        } else {
+            brain
+        }
+    };
+    let model_id = model_id.trim().to_owned();
+    if model_id.is_empty() || model_id == "default" {
+        return Err("No brain model configured".to_owned());
+    }
+
+    let is_bedrock = model_id.contains('.') && !model_id.contains('/');
+    let brain = match state
+        .runtime
+        .provider_registry
+        .resolve_generation_for_model(
+            &run.project.tenant_id,
+            &model_id,
+            cairn_runtime::ProviderResolutionPurpose::Brain,
+        )
+        .await
+    {
+        Ok(Some(p)) => p,
+        Ok(None) if is_bedrock => state
+            .bedrock_provider
+            .as_ref()
+            .ok_or("No Bedrock provider")?
+            .clone(),
+        Ok(None) => state
+            .brain_provider
+            .as_ref()
+            .ok_or("No brain provider")?
+            .clone(),
+        Err(e) => return Err(format!("Provider error: {e}")),
+    };
+
+    let gather = StandardGatherPhase::builder(state.runtime.store.clone())
+        .with_retrieval(state.retrieval.clone())
+        .with_graph(state.graph.clone())
+        .with_defaults(state.runtime.store.clone())
+        .with_checkpoints(state.runtime.store.clone())
+        .build();
+
+    let decide = LlmDecidePhase::new(brain, model_id);
+
+    let store = state.runtime.store.clone();
+    let config = LoopConfig {
+        max_iterations: 50,
+        timeout_ms: 30 * 60 * 1_000,
+        ..LoopConfig::default()
+    };
+
+    let execute = RuntimeExecutePhase::builder()
+        .run_service(Arc::new(RunServiceImpl::new(store.clone())))
+        .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
+        .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
+        .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
+        .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
+        .tool_invocation_service(Arc::new(ToolInvocationServiceImpl::new(store)))
+        .checkpoint_every_n_tool_calls(config.checkpoint_every_n_tool_calls)
+        .build();
+
+    let orchestrator = OrchestratorLoop::new(gather, decide, execute, config);
+    let run_id = run.run_id.clone();
+    let project = run.project.clone();
+
+    match orchestrator.run(ctx).await {
+        Ok(term) => {
+            tracing::info!(run_id = %run_id, ?term, "Webhook orchestration finished");
+            let (to_state, failure_class) = match term {
+                LoopTermination::Completed { .. } | LoopTermination::PlanProposed { .. } => {
+                    (cairn_domain::RunState::Completed, None)
+                }
+                LoopTermination::WaitingApproval { .. } => return Ok(()),
+                LoopTermination::WaitingSubagent { .. } => return Ok(()),
+                _ => (
+                    cairn_domain::RunState::Failed,
+                    Some(cairn_domain::FailureClass::ExecutionError),
+                ),
+            };
+            use cairn_domain::{RunStateChanged, RuntimeEvent, StateTransition};
+            use cairn_runtime::make_envelope;
+            let evt = make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+                project,
+                run_id,
+                transition: StateTransition {
+                    from: Some(cairn_domain::RunState::Running),
+                    to: to_state,
+                },
+                failure_class,
+                pause_reason: None,
+                resume_trigger: None,
+            }));
+            let _ = state.runtime.store.append(&[evt]).await;
+            Ok(())
+        }
+        Err(e) => Err(format!("Orchestration error: {e}")),
+    }
+}
+
+/// GET /v1/webhooks/github/actions — list configured event-to-action mappings.
+async fn list_webhook_actions_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh,
+        None => {
+            return Json(serde_json::json!({
+                "actions": [],
+                "github_configured": false,
+            }))
+            .into_response();
+        }
+    };
+    let actions = github.event_actions.read().await;
+    Json(serde_json::json!({
+        "actions": *actions,
+        "github_configured": true,
+    }))
+    .into_response()
+}
+
+/// PUT /v1/webhooks/github/actions — replace event-to-action mappings.
+async fn set_webhook_actions_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SetWebhookActionsRequest>,
+) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh,
+        None => {
+            return AppApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "github_not_configured",
+                "GitHub App integration is not configured",
+            )
+            .into_response();
+        }
+    };
+    let mut actions = github.event_actions.write().await;
+    *actions = body.actions;
+    let count = actions.len();
+    tracing::info!(count, "GitHub webhook actions updated");
+    Json(serde_json::json!({
+        "status": "ok",
+        "actions_count": count,
+    }))
+    .into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct SetWebhookActionsRequest {
+    actions: Vec<GitHubEventAction>,
+}
+
+// ── GitHub issue scanner ─────────────────────────────────────────────────────
+
+/// POST /v1/webhooks/github/scan — scan a repo for open issues and queue them.
+///
+/// Lists open issues via GitHub API, creates session+run for each,
+/// then processes them sequentially (one at a time, with approval gates).
+async fn github_scan_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ScanRequest>,
+) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh.clone(),
+        None => {
+            return AppApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "github_not_configured",
+                "GitHub App integration is not configured",
+            )
+            .into_response();
+        }
+    };
+
+    let (owner, repo_name) = match body.repo.split_once('/') {
+        Some(pair) => pair,
+        None => {
+            return AppApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_repo",
+                "repo must be owner/repo format",
+            )
+            .into_response();
+        }
+    };
+
+    // Auto-resolve installation_id if not provided.
+    let installation_id = match body.installation_id {
+        Some(id) => id,
+        None => {
+            match github.credentials.list_installations(&github.http).await {
+                Ok(installs) => {
+                    // Find installation matching the repo owner.
+                    match installs.iter().find(|i| i.account.login == owner) {
+                        Some(i) => i.id,
+                        None if !installs.is_empty() => installs[0].id,
+                        None => {
+                            return AppApiError::new(
+                                StatusCode::BAD_REQUEST,
+                                "no_installation",
+                                format!("No GitHub App installation found for {owner}"),
+                            )
+                            .into_response();
+                        }
+                    }
+                }
+                Err(e) => {
+                    return AppApiError::new(
+                        StatusCode::BAD_GATEWAY,
+                        "github_api_error",
+                        format!("Failed to list installations: {e}"),
+                    )
+                    .into_response();
+                }
+            }
+        }
+    };
+    let client = github.client_for_installation(installation_id).await;
+
+    // List open issues from the repo.
+    let labels_str = body.labels.as_deref();
+    let per_page = body.limit.unwrap_or(30).min(100);
+    let issues = match client
+        .list_issues(owner, repo_name, Some("open"), labels_str, per_page)
+        .await
+    {
+        Ok(issues) => issues,
+        Err(e) => {
+            return AppApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "github_api_error",
+                format!("Failed to list issues: {e}"),
+            )
+            .into_response();
+        }
+    };
+
+    if issues.is_empty() {
+        return Json(serde_json::json!({
+            "status": "no_issues",
+            "repo": body.repo,
+            "message": "No open issues found matching filters",
+        }))
+        .into_response();
+    }
+
+    // Filter out pull requests (GitHub API returns PRs in the issues endpoint).
+    let issues: Vec<_> = issues
+        .into_iter()
+        .filter(|i| !i.html_url.contains("/pull/"))
+        .collect();
+
+    let issue_count = issues.len();
+
+    // Create sessions and runs for each issue, collect into the processing queue.
+    let project =
+        cairn_domain::ProjectKey::new("default_tenant", "default_workspace", "default_project");
+    let mut queued = Vec::new();
+
+    for issue in &issues {
+        let session_id_str = format!("gh-{}-{}-issue-{}", owner, repo_name, issue.number);
+        let session_id = cairn_domain::SessionId::new(&session_id_str);
+
+        let session_svc =
+            cairn_runtime::services::SessionServiceImpl::new(state.runtime.store.clone());
+        if cairn_store::projections::SessionReadModel::get(
+            state.runtime.store.as_ref(),
+            &session_id,
+        )
+        .await
+        .unwrap_or(None)
+        .is_none()
+        {
+            if let Err(e) = session_svc.create(&project, session_id.clone()).await {
+                tracing::warn!(issue = issue.number, error = %e, "Failed to create session");
+                continue;
+            }
+        }
+
+        let run_id_str = format!("{}-scan-run", session_id_str);
+        let run_id = cairn_domain::RunId::new(&run_id_str);
+        let run_svc = cairn_runtime::services::RunServiceImpl::new(state.runtime.store.clone());
+
+        // Skip if a run already exists for this scan (idempotent).
+        if cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id)
+            .await
+            .unwrap_or(None)
+            .is_some()
+        {
+            tracing::info!(issue = issue.number, "Run already exists — skipping");
+            continue;
+        }
+
+        match run_svc
+            .start(&project, &session_id, run_id.clone(), None)
+            .await
+        {
+            Ok(_) => {
+                queued.push(QueuedIssue {
+                    issue_number: issue.number,
+                    title: issue.title.clone(),
+                    session_id: session_id_str.clone(),
+                    run_id: run_id_str.clone(),
+                });
+            }
+            Err(e) => {
+                tracing::warn!(issue = issue.number, error = %e, "Failed to create run");
+            }
+        }
+    }
+
+    let queued_count = queued.len();
+    tracing::info!(
+        repo = body.repo,
+        total_issues = issue_count,
+        queued = queued_count,
+        "GitHub scan: issues queued for processing"
+    );
+
+    // Store the queue in AppState and spawn the sequential processor.
+    if !queued.is_empty() {
+        {
+            let mut queue = state.github.as_ref().unwrap().issue_queue.write().await;
+            for item in &queued {
+                queue.push_back(IssueQueueEntry {
+                    repo: body.repo.clone(),
+                    installation_id,
+                    issue_number: item.issue_number,
+                    title: item.title.clone(),
+                    session_id: item.session_id.clone(),
+                    run_id: item.run_id.clone(),
+                    status: IssueQueueStatus::Pending,
+                });
+            }
+        }
+
+        // Spawn the sequential processor if not already running.
+        let state_clone = state.clone();
+        let github_clone = github.clone();
+        tokio::spawn(async move {
+            process_issue_queue(state_clone, github_clone).await;
+        });
+    }
+
+    Json(serde_json::json!({
+        "status": "queued",
+        "repo": body.repo,
+        "total_issues": issue_count,
+        "queued": queued_count,
+        "issues": queued,
+    }))
+    .into_response()
+}
+
+/// GET /v1/webhooks/github/queue — view the current issue processing queue.
+async fn github_queue_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh,
+        None => {
+            return Json(serde_json::json!({
+                "queue": [],
+                "github_configured": false,
+            }))
+            .into_response();
+        }
+    };
+
+    let queue = github.issue_queue.read().await;
+    let items: Vec<serde_json::Value> = queue
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "repo": entry.repo,
+                "issue_number": entry.issue_number,
+                "title": entry.title,
+                "session_id": entry.session_id,
+                "run_id": entry.run_id,
+                "status": format!("{:?}", entry.status),
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "queue": items,
+        "total": items.len(),
+    }))
+    .into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct ScanRequest {
+    /// Repository in owner/repo format.
+    repo: String,
+    /// GitHub App installation ID (auto-resolved from repo owner if omitted).
+    #[serde(default)]
+    installation_id: Option<u64>,
+    /// Optional label filter (comma-separated).
+    #[serde(default)]
+    labels: Option<String>,
+    /// Max issues to scan (default 30, max 100).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+struct QueuedIssue {
+    issue_number: u64,
+    title: String,
+    session_id: String,
+    run_id: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct IssueQueueEntry {
+    pub repo: String,
+    pub installation_id: u64,
+    pub issue_number: u64,
+    pub title: String,
+    pub session_id: String,
+    pub run_id: String,
+    pub status: IssueQueueStatus,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum IssueQueueStatus {
+    Pending,
+    Processing,
+    WaitingApproval,
+    Completed,
+    Failed(String),
+}
+
+/// Process queued issues sequentially — one at a time.
+///
+/// For each issue:
+/// 1. Post a "starting work" comment on the GitHub issue
+/// 2. Run orchestration (LLM reads issue, writes code, creates PR)
+/// 3. If orchestration requests approval → pause, wait for operator
+/// 4. On approval → continue to next issue
+/// 5. On failure → mark failed, move to next
+async fn process_issue_queue(state: Arc<AppState>, github: Arc<GitHubIntegration>) {
+    // Guard: only one processor at a time.
+    if github
+        .queue_running
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        tracing::debug!("Queue processor already running — exiting");
+        return;
+    }
+
+    loop {
+        // Check pause flag.
+        if github
+            .queue_paused
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            tracing::info!("Queue paused — processor sleeping");
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            continue;
+        }
+
+        // Find the next Pending entry.
+        let entry = {
+            let mut queue = github.issue_queue.write().await;
+            let next = queue
+                .iter_mut()
+                .find(|e| e.status == IssueQueueStatus::Pending);
+            match next {
+                Some(e) => {
+                    e.status = IssueQueueStatus::Processing;
+                    e.clone()
+                }
+                None => {
+                    tracing::info!("Issue queue empty — processor exiting");
+                    github
+                        .queue_running
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                    return;
+                }
+            }
+        };
+
+        emit_github_progress(
+            &state,
+            serde_json::json!({
+                "action": "issue_started",
+                "issue": entry.issue_number,
+                "title": entry.title,
+                "repo": entry.repo,
+            }),
+        );
+
+        tracing::info!(
+            issue = entry.issue_number,
+            repo = entry.repo,
+            "Processing issue from queue"
+        );
+
+        let (owner, repo_name) = entry.repo.split_once('/').unwrap_or(("", &entry.repo));
+
+        // Post comment on the issue.
+        let client = github.client_for_installation(entry.installation_id).await;
+        let msg = format!(
+            "Cairn is now working on this issue.\n\n- Session: `{}`\n- Run: `{}`",
+            entry.session_id, entry.run_id
+        );
+        if let Err(e) = client
+            .create_comment(owner, repo_name, entry.issue_number, &msg)
+            .await
+        {
+            tracing::warn!(error = %e, "Failed to post start comment");
+        }
+
+        // Build goal from the issue.
+        let issue = client.get_issue(owner, repo_name, entry.issue_number).await;
+        let goal = match issue {
+            Ok(issue) => {
+                let body = issue.body.as_deref().unwrap_or("");
+                format!(
+                    "GitHub Issue #{}: {}\n\nRepository: {}\n\n{}\n\n\
+                    Instructions: Analyze this issue, implement the fix or feature, \
+                    create a branch, commit the changes, and open a pull request. \
+                    Use the github_api tools to interact with the repository.",
+                    issue.number, issue.title, entry.repo, body
+                )
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to fetch issue — using basic goal");
+                format!(
+                    "GitHub Issue #{} in {}: implement and open a PR",
+                    entry.issue_number, entry.repo
+                )
+            }
+        };
+
+        // Get the run record.
+        let run_id = cairn_domain::RunId::new(&entry.run_id);
+        let run = match cairn_store::projections::RunReadModel::get(
+            state.runtime.store.as_ref(),
+            &run_id,
+        )
+        .await
+        {
+            Ok(Some(r)) => r,
+            _ => {
+                tracing::error!(run_id = entry.run_id, "Run not found — skipping issue");
+                update_queue_status(
+                    &github,
+                    entry.issue_number,
+                    IssueQueueStatus::Failed("run not found".into()),
+                )
+                .await;
+                continue;
+            }
+        };
+
+        // Trigger orchestration.
+        match webhook_trigger_orchestration(&state, &run, &goal).await {
+            Ok(()) => {
+                // Check if the run ended up waiting for approval.
+                let final_run = cairn_store::projections::RunReadModel::get(
+                    state.runtime.store.as_ref(),
+                    &run_id,
+                )
+                .await;
+
+                let final_state = final_run
+                    .ok()
+                    .flatten()
+                    .map(|r| r.state)
+                    .unwrap_or(cairn_domain::RunState::Failed);
+
+                match final_state {
+                    cairn_domain::RunState::WaitingApproval => {
+                        update_queue_status(
+                            &github,
+                            entry.issue_number,
+                            IssueQueueStatus::WaitingApproval,
+                        )
+                        .await;
+
+                        // Post comment about needing approval.
+                        let approval_msg =
+                            "Cairn has created a PR for this issue and is waiting for operator approval in the Cairn dashboard.";
+                        let _ = client
+                            .create_comment(owner, repo_name, entry.issue_number, approval_msg)
+                            .await;
+
+                        tracing::info!(
+                            issue = entry.issue_number,
+                            "Issue waiting for approval — continuing to next"
+                        );
+                    }
+                    cairn_domain::RunState::Completed => {
+                        update_queue_status(
+                            &github,
+                            entry.issue_number,
+                            IssueQueueStatus::Completed,
+                        )
+                        .await;
+
+                        let done_msg =
+                            "Cairn has completed work on this issue. Please review the PR.";
+                        let _ = client
+                            .create_comment(owner, repo_name, entry.issue_number, done_msg)
+                            .await;
+
+                        tracing::info!(issue = entry.issue_number, "Issue completed");
+                    }
+                    _ => {
+                        update_queue_status(
+                            &github,
+                            entry.issue_number,
+                            IssueQueueStatus::Failed(format!("run ended in {:?}", final_state)),
+                        )
+                        .await;
+
+                        let fail_msg = format!(
+                            "Cairn encountered an issue while working on this (run state: {:?}). An operator may retry.",
+                            final_state
+                        );
+                        let _ = client
+                            .create_comment(owner, repo_name, entry.issue_number, &fail_msg)
+                            .await;
+
+                        tracing::warn!(
+                            issue = entry.issue_number,
+                            state = ?final_state,
+                            "Issue processing ended in non-completed state"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                update_queue_status(
+                    &github,
+                    entry.issue_number,
+                    IssueQueueStatus::Failed(e.clone()),
+                )
+                .await;
+
+                let err_msg = format!("Cairn failed to process this issue: {e}");
+                let _ = client
+                    .create_comment(owner, repo_name, entry.issue_number, &err_msg)
+                    .await;
+
+                tracing::error!(issue = entry.issue_number, error = e, "Orchestration error");
+            }
+        }
+
+        // Brief pause between issues to avoid hammering the API.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+}
+
+async fn update_queue_status(
+    github: &GitHubIntegration,
+    issue_number: u64,
+    status: IssueQueueStatus,
+) {
+    let mut queue = github.issue_queue.write().await;
+    if let Some(entry) = queue.iter_mut().find(|e| e.issue_number == issue_number) {
+        entry.status = status;
+    }
+}
+
+/// Emit a GitHub progress SSE event.
+fn emit_github_progress(state: &AppState, data: serde_json::Value) {
+    let frame = cairn_api::sse::SseFrame {
+        event: cairn_api::sse::SseEventName::GitHubProgress,
+        data,
+        id: None,
+    };
+    let seq = state
+        .sse_seq
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let mut frame_with_id = frame.clone();
+    frame_with_id.id = Some(seq.to_string());
+    {
+        let mut buf = state
+            .sse_event_buffer
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        if buf.len() >= 10_000 {
+            buf.pop_front();
+        }
+        buf.push_back((seq, frame_with_id));
+    }
+    let _ = state.runtime_sse_tx.send(frame);
+}
+
+/// POST /v1/webhooks/github/queue/pause
+async fn github_queue_pause_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if let Some(ref gh) = state.github {
+        gh.queue_paused
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        emit_github_progress(&state, serde_json::json!({"action": "queue_paused"}));
+        Json(serde_json::json!({"status": "paused"})).into_response()
+    } else {
+        AppApiError::new(StatusCode::SERVICE_UNAVAILABLE, "github_not_configured", "")
+            .into_response()
+    }
+}
+
+/// POST /v1/webhooks/github/queue/resume
+async fn github_queue_resume_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh.clone(),
+        None => {
+            return AppApiError::new(StatusCode::SERVICE_UNAVAILABLE, "github_not_configured", "")
+                .into_response();
+        }
+    };
+
+    github
+        .queue_paused
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    emit_github_progress(&state, serde_json::json!({"action": "queue_resumed"}));
+
+    // Restart processor if not running.
+    if !github
+        .queue_running
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        let state_clone = state.clone();
+        let github_clone = github.clone();
+        tokio::spawn(async move {
+            process_issue_queue(state_clone, github_clone).await;
+        });
+    }
+
+    Json(serde_json::json!({"status": "resumed"})).into_response()
+}
+
+/// POST /v1/webhooks/github/queue/:issue/skip
+async fn github_queue_skip_handler(
+    State(state): State<Arc<AppState>>,
+    Path(issue_str): Path<String>,
+) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh,
+        None => {
+            return AppApiError::new(StatusCode::SERVICE_UNAVAILABLE, "github_not_configured", "")
+                .into_response();
+        }
+    };
+
+    let issue_number: u64 = match issue_str.parse() {
+        Ok(n) => n,
+        Err(_) => {
+            return AppApiError::new(StatusCode::BAD_REQUEST, "invalid_issue", "not a number")
+                .into_response();
+        }
+    };
+
+    let mut queue = github.issue_queue.write().await;
+    if let Some(entry) = queue.iter_mut().find(|e| e.issue_number == issue_number) {
+        entry.status = IssueQueueStatus::Failed("skipped by operator".into());
+        emit_github_progress(
+            &state,
+            serde_json::json!({"action": "issue_skipped", "issue": issue_number}),
+        );
+        Json(serde_json::json!({"status": "skipped", "issue": issue_number})).into_response()
+    } else {
+        AppApiError::new(StatusCode::NOT_FOUND, "not_found", "issue not in queue").into_response()
+    }
+}
+
+/// POST /v1/webhooks/github/queue/:issue/retry
+async fn github_queue_retry_handler(
+    State(state): State<Arc<AppState>>,
+    Path(issue_str): Path<String>,
+) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh.clone(),
+        None => {
+            return AppApiError::new(StatusCode::SERVICE_UNAVAILABLE, "github_not_configured", "")
+                .into_response();
+        }
+    };
+
+    let issue_number: u64 = match issue_str.parse() {
+        Ok(n) => n,
+        Err(_) => {
+            return AppApiError::new(StatusCode::BAD_REQUEST, "invalid_issue", "not a number")
+                .into_response();
+        }
+    };
+
+    {
+        let mut queue = github.issue_queue.write().await;
+        if let Some(entry) = queue.iter_mut().find(|e| e.issue_number == issue_number) {
+            entry.status = IssueQueueStatus::Pending;
+            emit_github_progress(
+                &state,
+                serde_json::json!({"action": "issue_retried", "issue": issue_number}),
+            );
+        } else {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "issue not in queue")
+                .into_response();
+        }
+    }
+
+    // Restart processor if not running.
+    if !github
+        .queue_running
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        let state_clone = state.clone();
+        let github_clone = github.clone();
+        tokio::spawn(async move {
+            process_issue_queue(state_clone, github_clone).await;
+        });
+    }
+
+    Json(serde_json::json!({"status": "retried", "issue": issue_number})).into_response()
+}
+
+/// GET /v1/webhooks/github/installations — list GitHub App installations.
+async fn github_installations_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh,
+        None => {
+            return Json(serde_json::json!({
+                "installations": [],
+                "configured": false,
+            }))
+            .into_response();
+        }
+    };
+
+    match github.credentials.list_installations(&github.http).await {
+        Ok(installations) => {
+            let items: Vec<serde_json::Value> = installations
+                .iter()
+                .map(|i| {
+                    serde_json::json!({
+                        "id": i.id,
+                        "account": i.account.login,
+                        "repository_selection": i.repository_selection,
+                    })
+                })
+                .collect();
+            Json(serde_json::json!({
+                "installations": items,
+                "configured": true,
+            }))
+            .into_response()
+        }
+        Err(e) => AppApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "github_api_error",
+            format!("Failed to list installations: {e}"),
+        )
+        .into_response(),
     }
 }
 

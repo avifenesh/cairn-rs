@@ -1097,7 +1097,71 @@ export function createApiClient(config: ApiClientConfig) {
     /** POST /v1/notifications/read-all — mark all notifications as read. */
     markAllNotificationsRead: (): Promise<void> =>
       post("/v1/notifications/read-all", {}),
+
+    // ── Integrations (GitHub) ───────────────────────────────────────────────
+
+    /** GET /v1/webhooks/github/installations — list GitHub App installations. */
+    getGitHubInstallations: (): Promise<{ installations: { id: number; account: string; repository_selection: string | null }[]; configured: boolean }> =>
+      get("/v1/webhooks/github/installations"),
+
+    /** GET /v1/webhooks/github/actions — list event→action mappings. */
+    getGitHubActions: (): Promise<{ actions: GitHubEventAction[]; github_configured: boolean }> =>
+      get("/v1/webhooks/github/actions"),
+
+    /** PUT /v1/webhooks/github/actions — replace event→action mappings. */
+    setGitHubActions: (actions: GitHubEventAction[]): Promise<{ status: string; actions_count: number }> =>
+      put("/v1/webhooks/github/actions", { actions }),
+
+    /** POST /v1/webhooks/github/scan — scan repo for open issues. */
+    scanGitHubIssues: (repo: string, opts?: { installation_id?: number; labels?: string; limit?: number }): Promise<GitHubScanResult> =>
+      post("/v1/webhooks/github/scan", { repo, ...opts }),
+
+    /** GET /v1/webhooks/github/queue — get issue processing queue. */
+    getGitHubQueue: (): Promise<{ queue: GitHubQueueEntry[]; total: number }> =>
+      get("/v1/webhooks/github/queue"),
+
+    /** POST /v1/webhooks/github/queue/pause — pause processing. */
+    pauseGitHubQueue: (): Promise<{ status: string }> =>
+      post("/v1/webhooks/github/queue/pause", {}),
+
+    /** POST /v1/webhooks/github/queue/resume — resume processing. */
+    resumeGitHubQueue: (): Promise<{ status: string }> =>
+      post("/v1/webhooks/github/queue/resume", {}),
+
+    /** POST /v1/webhooks/github/queue/:issue/skip — skip an issue. */
+    skipGitHubIssue: (issue: number): Promise<{ status: string }> =>
+      post(`/v1/webhooks/github/queue/${issue}/skip`, {}),
+
+    /** POST /v1/webhooks/github/queue/:issue/retry — retry a failed issue. */
+    retryGitHubIssue: (issue: number): Promise<{ status: string }> =>
+      post(`/v1/webhooks/github/queue/${issue}/retry`, {}),
   };
+}
+
+// ── GitHub integration types ─────────────────────────────────────────────────
+
+export interface GitHubEventAction {
+  event_pattern: string;
+  label_filter?: string;
+  repo_filter?: string;
+  action: "create_and_orchestrate" | "acknowledge" | "ignore";
+}
+
+export interface GitHubScanResult {
+  status: string;
+  repo: string;
+  total_issues: number;
+  queued: number;
+  issues: { issue_number: number; title: string; session_id: string; run_id: string }[];
+}
+
+export interface GitHubQueueEntry {
+  repo: string;
+  issue_number: number;
+  title: string;
+  session_id: string;
+  run_id: string;
+  status: string;
 }
 
 // ── Token persistence ─────────────────────────────────────────────────────────

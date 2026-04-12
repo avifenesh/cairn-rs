@@ -14,6 +14,7 @@ cairn-graph  = { path = "../cairn-graph" }
 cairn-plugin-proto = { path = "../cairn-plugin-proto" }
 cairn-runtime = { path = "../cairn-runtime" }
 cairn-store   = { path = "../cairn-store" }
+cairn-github  = { path = "../cairn-github" }
 async-trait = "0.1"
 schemars = "0.8"
 serde = { version = "1.0", features = ["derive"] }

@@ -24,6 +24,7 @@ pub mod get_run;
 pub mod get_task;
 pub mod git_operations;
 pub mod github;
+pub mod github_api;
 pub mod glob_find;
 pub mod graph_query;
 pub mod grep_search;
@@ -65,6 +66,10 @@ pub use get_run::GetRunTool;
 pub use get_task::GetTaskTool;
 pub use git_operations::GitOperationsTool;
 pub use github::{GhCreateCommentTool, GhGetIssueTool, GhListIssuesTool, GhSearchCodeTool};
+pub use github_api::{
+    GhApiCreateBranchTool, GhApiCreatePrTool, GhApiListContentsTool, GhApiMergePrTool,
+    GhApiReadFileTool, GhApiWriteFileTool, GitHubClientProvider,
+};
 pub use glob_find::GlobFindTool;
 pub use graph_query::GraphQueryTool;
 pub use grep_search::GrepSearchTool;

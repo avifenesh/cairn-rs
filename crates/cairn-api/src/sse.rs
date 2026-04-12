@@ -31,6 +31,8 @@ pub enum SseEventName {
     SkillActivated,
     /// Operator notification emitted by the `notify_operator` built-in tool.
     OperatorNotification,
+    /// GitHub issue queue progress — emitted as issues move through stages.
+    GitHubProgress,
 }
 
 impl SseEventName {
@@ -61,6 +63,7 @@ impl SseEventName {
             SseEventName::AgentProgress => "agent_progress",
             SseEventName::SkillActivated => "skill_activated",
             SseEventName::OperatorNotification => "operator_notification",
+            SseEventName::GitHubProgress => "github_progress",
         }
     }
 }
