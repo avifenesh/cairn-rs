@@ -22,7 +22,6 @@ import {
   clearStoredToken,
   defaultApi,
 } from '../lib/api';
-import type { ChangelogEntry } from '../lib/types';
 import {
   usePreferences,
   applyTheme,
@@ -372,47 +371,34 @@ function AboutSection() {
   );
 }
 
-// ── Changelog ─────────────────────────────────────────────────────────────────
+// ── Release Notes ─────────────────────────────────────────────────────────────
 
-function ChangelogSection() {
-  const { data: entries, isLoading, isError } = useQuery({
-    queryKey: ['changelog'],
-    queryFn:  (): Promise<ChangelogEntry[]> => defaultApi.getChangelog(),
-    staleTime: Infinity,
-  });
-
-  const list = entries ?? [];
-
+function ReleaseNotesSection() {
   return (
-    <SectionCard title="Changelog" icon={ListOrdered}>
-      {isError ? (
-        <p className="text-[12px] text-gray-400 dark:text-zinc-600">Could not load changelog.</p>
-      ) : isLoading ? (
-        <p className="text-[12px] text-gray-400 dark:text-zinc-600">Loading…</p>
-      ) : list.length === 0 ? (
-        <p className="text-[12px] text-gray-400 dark:text-zinc-600">No changelog entries.</p>
-      ) : (
-        <div className="space-y-5">
-          {list.map((entry: ChangelogEntry) => (
-            <div key={entry.version}>
-              <div className="flex items-baseline gap-3 mb-2">
-                <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100 font-mono">
-                  v{entry.version}
-                </span>
-                <span className="text-[11px] text-gray-400 dark:text-zinc-600">{entry.date}</span>
-              </div>
-              <ul className="space-y-1">
-                {entry.changes.map((change: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-[12px] text-gray-500 dark:text-zinc-400">
-                    <span className="mt-1.5 h-1 w-1 rounded-full bg-zinc-600 shrink-0" />
-                    {change}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+    <SectionCard title="Release Notes" icon={ListOrdered}>
+      <div>
+        <div className="flex items-baseline gap-3 mb-2">
+          <span className="text-[13px] font-semibold text-gray-900 dark:text-zinc-100 font-mono">
+            v0.1.0
+          </span>
+          <span className="text-[11px] text-gray-400 dark:text-zinc-600">2026-04-12</span>
         </div>
-      )}
+        <ul className="space-y-1">
+          {[
+            "Postgres default store with auto-migrations and event replay",
+            "13 LLM provider backends — runtime provider registry with hot-reload",
+            "Rate limiting (1000/min token, 100/min IP) with X-RateLimit headers",
+            "Log rotation via CAIRN_LOG_DIR, admin token rotation endpoint",
+            "Docker single-command deployment with health checks",
+            "30 operator UI pages with unified design system",
+          ].map((note, i) => (
+            <li key={i} className="flex items-start gap-2 text-[12px] text-gray-500 dark:text-zinc-400">
+              <span className="mt-1.5 h-1 w-1 rounded-full bg-zinc-600 shrink-0" />
+              {note}
+            </li>
+          ))}
+        </ul>
+      </div>
     </SectionCard>
   );
 }
@@ -437,7 +423,7 @@ export function ProfilePage() {
         <TokenSection />
         <PreferencesSection />
         <AboutSection />
-        <ChangelogSection />
+        <ReleaseNotesSection />
       </div>
     </div>
   );
