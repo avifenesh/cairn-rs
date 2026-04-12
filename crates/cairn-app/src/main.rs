@@ -2768,6 +2768,15 @@ async fn resolve_connection_probe_material(
         None => None,
     };
 
+    // Resolve $ENV_VAR references — if the stored key starts with '$', treat it as an env var name.
+    let api_key = api_key.map(|key| {
+        if let Some(var_name) = key.strip_prefix('$') {
+            std::env::var(var_name).unwrap_or(key)
+        } else {
+            key
+        }
+    });
+
     (endpoint_url, api_key)
 }
 
