@@ -79,9 +79,9 @@ export function StatCard({ label, value, description, variant = "default", loadi
         className,
       )}
     >
-      <p data-stat-label className="text-[11px] font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1.5 truncate">
+      <p data-stat-label className="text-[11px] font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
         <span className="truncate">{label}</span>
-        {help && <HelpTooltip text={help} placement="top" className="shrink-0" />}
+        {help && <HelpTooltip text={help} placement="right" className="shrink-0" />}
       </p>
       <p data-stat-value className={clsx("text-[20px] font-semibold tabular-nums leading-none", VALUE[variant])}>
         {value}
