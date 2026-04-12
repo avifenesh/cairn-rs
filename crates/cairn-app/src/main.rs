@@ -3200,6 +3200,28 @@ async fn test_connection_handler(
                     .into_response();
             }
         }
+    } else if adapter_type.contains("bedrock") {
+        // Bedrock: probe the runtime endpoint with a simple GET to check reachability.
+        let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_owned());
+        let key = query
+            .api_key
+            .clone()
+            .or_else(|| stored_api_key.clone())
+            .or_else(|| std::env::var("BEDROCK_API_KEY").ok())
+            .unwrap_or_default();
+        let base = query
+            .endpoint_url
+            .as_deref()
+            .map(|u| u.trim_end_matches('/').to_owned())
+            .or_else(|| stored_endpoint.clone())
+            .unwrap_or_else(|| format!("https://bedrock-runtime.{region}.amazonaws.com"));
+        let auth = if key.is_empty() {
+            None
+        } else {
+            Some(format!("Bearer {key}"))
+        };
+        // Probe the base URL — a 403 or 404 still means reachable.
+        (base, auth)
     } else {
         let base = query
             .endpoint_url
@@ -3244,15 +3266,28 @@ async fn test_connection_handler(
     match req.send().await {
         Ok(resp) => {
             let latency_ms = start.elapsed().as_millis() as u64;
-            let ok = resp.status().is_success();
+            let status = resp.status().as_u16();
+            // For Bedrock: any HTTP response (even 403) means endpoint is reachable.
+            let ok = if adapter_type.contains("bedrock") {
+                status != 0
+            } else {
+                resp.status().is_success()
+            };
+            let detail = if ok && resp.status().is_success() {
+                "reachable"
+            } else if ok {
+                "reachable (auth required)"
+            } else {
+                "returned non-2xx"
+            };
             (
                 StatusCode::OK,
                 axum::Json(serde_json::json!({
                     "ok":         ok,
                     "latency_ms": latency_ms,
                     "provider":   adapter_type,
-                    "status":     resp.status().as_u16(),
-                    "detail":     if ok { "reachable" } else { "returned non-2xx" },
+                    "status":     status,
+                    "detail":     detail,
                 })),
             )
                 .into_response()
