@@ -7386,16 +7386,6 @@ async fn materialize_onboarding_template_handler(
 }
 
 async fn get_settings_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let tenant_id = TenantId::new(DEFAULT_TENANT_ID);
-    let _license_tier = state
-        .runtime
-        .licenses
-        .get_active(&tenant_id)
-        .await
-        .ok()
-        .flatten()
-        .map(|license| product_tier_label(license.tier));
-
     let settings = SettingsSummary {
         deployment_mode: deployment_mode_label(state.config.mode).to_owned(),
         store_backend: storage_backend_label(&state.config.storage).to_owned(),
@@ -7405,13 +7395,7 @@ async fn get_settings_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
                 .has_role(cairn_api::bootstrap::ServerRole::PluginHost),
         ),
     };
-
-    let mut response = Json(settings).into_response();
-    response.headers_mut().insert(
-        "x-cairn-settings-source",
-        axum::http::HeaderValue::from_static("lib_catalog"),
-    );
-    response
+    (StatusCode::OK, Json(settings))
 }
 
 fn tls_settings_summary(config: &BootstrapConfig) -> Result<TlsSettingsResponse, String> {
@@ -18609,6 +18593,7 @@ fn storage_backend_label(storage: &StorageBackend) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn product_tier_label(tier: ProductTier) -> String {
     match tier {
         ProductTier::LocalEval => "local_eval",
