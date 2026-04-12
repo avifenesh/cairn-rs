@@ -403,17 +403,50 @@ function ConnectionRow({
   health,
   even,
   onDelete,
-  onEdit,
+  onUpdated,
 }: {
   record: ProviderConnectionRecord;
   health?: ProviderHealthEntry;
   even: boolean;
   onDelete: (id: string) => void;
-  onEdit: (record: ProviderConnectionRecord) => void;
+  onUpdated: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editFamily, setEditFamily] = useState(record.provider_family);
+  const [editAdapter, setEditAdapter] = useState(record.adapter_type);
+  const [editModels, setEditModels] = useState(record.supported_models.join(", "));
+  const [editEndpoint, setEditEndpoint] = useState("");
+  const [saving, setSaving] = useState(false);
   const isHealthy = health?.healthy ?? null;
   const toast = useToast();
+
+  const startEdit = () => {
+    setEditFamily(record.provider_family);
+    setEditAdapter(record.adapter_type);
+    setEditModels(record.supported_models.join(", "));
+    setEditEndpoint("");
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      await defaultApi.updateProviderConnection(record.provider_connection_id, {
+        provider_family: editFamily.trim(),
+        adapter_type: editAdapter.trim(),
+        supported_models: editModels.split(",").map(m => m.trim()).filter(Boolean),
+        ...(editEndpoint.trim() ? { endpoint_url: editEndpoint.trim() } : {}),
+      });
+      toast.success(`Updated ${record.provider_connection_id}`);
+      setEditing(false);
+      onUpdated();
+    } catch (e) {
+      toast.error(`Update failed: ${e instanceof Error ? e.message : "error"}`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const testConn = useMutation({
     mutationFn: () => defaultApi.testConnection(record.provider_connection_id),
@@ -516,7 +549,7 @@ function ConnectionRow({
               {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             </button>
             <button
-              onClick={() => onEdit(record)}
+              onClick={startEdit}
               className="text-gray-400 dark:text-zinc-600 hover:text-indigo-400 transition-colors"
               title="Edit connection"
             >
@@ -532,6 +565,48 @@ function ConnectionRow({
           </div>
         </td>
       </tr>
+
+      {/* Inline edit form */}
+      {editing && (
+        <tr className="border-b border-indigo-500/30 bg-indigo-950/10">
+          <td colSpan={6} className="px-4 py-3">
+            <div className="grid grid-cols-4 gap-3">
+              <label className="block">
+                <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Family</span>
+                <input value={editFamily} onChange={e => setEditFamily(e.target.value)}
+                  className="mt-1 w-full rounded bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-2 py-1.5 text-xs text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500" />
+              </label>
+              <label className="block">
+                <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Adapter</span>
+                <input value={editAdapter} onChange={e => setEditAdapter(e.target.value)}
+                  className="mt-1 w-full rounded bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-2 py-1.5 text-xs text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500" />
+              </label>
+              <label className="block">
+                <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Models (comma-sep)</span>
+                <input value={editModels} onChange={e => setEditModels(e.target.value)}
+                  className="mt-1 w-full rounded bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-2 py-1.5 text-xs text-gray-800 dark:text-zinc-200 focus:outline-none focus:border-indigo-500" />
+              </label>
+              <label className="block">
+                <span className="text-[10px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">Endpoint URL</span>
+                <input value={editEndpoint} onChange={e => setEditEndpoint(e.target.value)}
+                  placeholder="leave blank to keep current"
+                  className="mt-1 w-full rounded bg-white dark:bg-zinc-950 border border-gray-200 dark:border-zinc-800 px-2 py-1.5 text-xs text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500" />
+              </label>
+            </div>
+            <div className="flex items-center gap-2 mt-3">
+              <button onClick={saveEdit} disabled={saving}
+                className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-[11px] font-medium text-white transition-colors disabled:opacity-50">
+                {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                Save
+              </button>
+              <button onClick={() => setEditing(false)}
+                className="rounded-md border border-gray-200 dark:border-zinc-700 px-3 py-1.5 text-[11px] text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-300 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </td>
+        </tr>
+      )}
 
       {/* Expanded: per-model settings */}
       {expanded && record.supported_models.length > 0 && (
@@ -936,39 +1011,6 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
   const healthy   = entries.filter(e => healthMap.get(e.provider_connection_id)?.healthy === true).length;
   const unhealthy = entries.length - healthy;
 
-  const handleEdit = (record: ProviderConnectionRecord) => {
-    const newFamily = prompt("Provider family:", record.provider_family);
-    if (!newFamily) return;
-    const newModels = prompt("Supported models (comma-separated):", record.supported_models.join(", "));
-    if (newModels === null) return;
-    const newEndpoint = prompt("Endpoint URL:", "");
-
-    const body: Record<string, unknown> = {
-      provider_family: newFamily,
-      adapter_type: record.adapter_type,
-      supported_models: newModels.split(",").map(m => m.trim()).filter(Boolean),
-    };
-    if (newEndpoint) body.endpoint_url = newEndpoint;
-
-    fetch(`/v1/providers/connections/${record.provider_connection_id}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${localStorage.getItem("cairn_token") ?? ""}`,
-      },
-      body: JSON.stringify(body),
-    })
-      .then(r => {
-        if (!r.ok) throw new Error(`${r.status}`);
-        return r.json();
-      })
-      .then(() => {
-        toast.success(`Updated ${record.provider_connection_id}`);
-        refetch();
-      })
-      .catch((e: unknown) => toast.error(`Update failed: ${e instanceof Error ? e.message : "error"}`));
-  };
-
   const handleDelete = (id: string) => {
     if (!confirm(`Delete connection "${id}"?`)) return;
     defaultApi
@@ -1069,7 +1111,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
                   health={healthMap.get(entry.provider_connection_id)}
                   even={i % 2 === 0}
                   onDelete={handleDelete}
-                  onEdit={handleEdit}
+                  onUpdated={refetch}
                 />
               ))}
             </tbody>
