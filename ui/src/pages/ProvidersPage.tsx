@@ -755,18 +755,22 @@ function AddProviderModal({ onClose, onCreated }: AddProviderModalProps) {
                 </label>
               )}
 
-              {kind !== "ollama" && kind !== "bedrock" && (
+              {kind !== "ollama" && (
                 <label className="block">
                   <span className="text-[11px] text-gray-400 dark:text-zinc-500 uppercase tracking-wide">API Key</span>
                   <input
                     type="password"
                     value={apiKey}
                     onChange={e => setApiKey(e.target.value)}
-                    placeholder="sk-… (optional)"
+                    placeholder={kind === "bedrock" || kind === "bedrock-compat" ? "ABSK… (or leave blank to use BEDROCK_API_KEY env var)" : "sk-… (optional)"}
                     autoComplete="off"
                     className="mt-1.5 w-full rounded-md bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 px-3 py-2 text-xs text-gray-800 dark:text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                   />
-                  <p className="mt-1 text-[10px] text-gray-400 dark:text-zinc-600">Stored as a credential. Leave blank for unauthenticated endpoints.</p>
+                  <p className="mt-1 text-[10px] text-gray-400 dark:text-zinc-600">
+                    {kind === "bedrock" || kind === "bedrock-compat"
+                      ? "Leave blank to use BEDROCK_API_KEY from environment. Or paste a key to store it as a credential."
+                      : "Stored as a credential. Leave blank for unauthenticated endpoints."}
+                  </p>
                 </label>
               )}
 
