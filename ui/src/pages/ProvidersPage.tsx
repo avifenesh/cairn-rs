@@ -127,7 +127,7 @@ const PROVIDER_KINDS: Record<ProviderKind, ProviderKindMeta> = {
     icon: <Server size={16} />,
     defaultFamily: "bedrock",
     defaultAdapter: "bedrock",
-    defaultUrl: "",
+    defaultUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
     defaultModel: "us.anthropic.claude-sonnet-4-6",
   },
   "bedrock-compat": {
