@@ -128,16 +128,16 @@ const PROVIDER_KINDS: Record<ProviderKind, ProviderKindMeta> = {
     defaultFamily: "bedrock",
     defaultAdapter: "bedrock",
     defaultUrl: "",
-    defaultModel: "us.anthropic.claude-sonnet-4-6-v1",
+    defaultModel: "us.anthropic.claude-sonnet-4-6",
   },
   "bedrock-compat": {
-    label: "AWS Bedrock (OpenAI)",
-    description: "Bedrock's OpenAI-compatible gateway — standard /chat/completions format.",
+    label: "AWS Bedrock (OpenAI/Mantle)",
+    description: "Bedrock Mantle gateway — OpenAI Responses API + Chat Completions format.",
     icon: <Server size={16} />,
     defaultFamily: "bedrock-compat",
     defaultAdapter: "bedrock-compat",
-    defaultUrl: "https://bedrock-runtime.us-west-2.amazonaws.com",
-    defaultModel: "us.anthropic.claude-sonnet-4-6-v1",
+    defaultUrl: "https://bedrock-mantle.us-east-1.api.aws/v1",
+    defaultModel: "us.anthropic.claude-sonnet-4-6",
   },
   "openai-compatible": {
     label: "OpenAI-Compatible",
@@ -528,7 +528,7 @@ function ConnectionRow({
       {expanded && record.supported_models.length > 0 && (
         <tr className={clsx("border-b border-gray-200/50 dark:border-zinc-800/50", even ? "bg-gray-50 dark:bg-zinc-900" : "bg-gray-50/50 dark:bg-zinc-900/50")}>
           <td colSpan={6} className="px-4 pb-3 pt-1">
-            <div className="bg-white dark:bg-zinc-950 rounded-md border border-gray-200 dark:border-zinc-800 overflow-hidden">
+            <div className="bg-white dark:bg-zinc-950 rounded-md border border-gray-200 dark:border-zinc-800">
               <div className="px-3 py-1.5 border-b border-gray-200 dark:border-zinc-800 flex items-center gap-2">
                 <span className="text-[10px] font-medium text-gray-400 dark:text-zinc-600 uppercase tracking-wider">Models</span>
                 <span className="text-[10px] text-gray-300 dark:text-zinc-600">· defaults are tenant-scoped</span>
@@ -981,7 +981,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
       )}
 
       {/* Table */}
-      <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+      <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg">
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
