@@ -22,7 +22,7 @@ COPY ui/ ./
 RUN npm run build
 
 # ── Stage 1: Rust builder (single clean build, no stubs) ─────────────────────
-FROM rust:1.88-slim AS builder
+FROM rust:1.88-bookworm AS builder
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
