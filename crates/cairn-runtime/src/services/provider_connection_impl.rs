@@ -89,6 +89,40 @@ where
         Ok(ProviderConnectionReadModel::get(self.store.as_ref(), id).await?)
     }
 
+    async fn update(
+        &self,
+        id: &ProviderConnectionId,
+        config: ProviderConnectionConfig,
+    ) -> Result<ProviderConnectionRecord, RuntimeError> {
+        let existing = ProviderConnectionReadModel::get(self.store.as_ref(), id)
+            .await?
+            .ok_or_else(|| RuntimeError::NotFound {
+                entity: "provider_connection",
+                id: id.to_string(),
+            })?;
+
+        // Re-register with updated config (same ID, same tenant).
+        let event = make_envelope(RuntimeEvent::ProviderConnectionRegistered(
+            ProviderConnectionRegistered {
+                tenant: TenantKey::new(existing.tenant_id.clone()),
+                provider_connection_id: id.clone(),
+                provider_family: config.provider_family,
+                adapter_type: config.adapter_type,
+                supported_models: config.supported_models,
+                status: existing.status,
+                registered_at: now_ms(),
+            },
+        ));
+
+        self.store.append(&[event]).await?;
+
+        ProviderConnectionReadModel::get(self.store.as_ref(), id)
+            .await?
+            .ok_or_else(|| {
+                RuntimeError::Internal("provider connection not found after update".to_owned())
+            })
+    }
+
     async fn list(
         &self,
         tenant_id: &TenantId,

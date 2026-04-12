@@ -5043,7 +5043,7 @@ impl AppBootstrap {
             )
             .route(
                 "/v1/providers/connections/:id",
-                delete(delete_provider_connection_handler),
+                put(update_provider_connection_handler).delete(delete_provider_connection_handler),
             )
             // ── Auth tokens ───────────────────────────────────────────────────────────
             .route(
@@ -17561,6 +17561,76 @@ async fn resolve_provider_key_handler(
                 .into_response()
         }
     }
+}
+
+/// `PUT /v1/providers/connections/:id` — update a provider connection.
+async fn update_provider_connection_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateProviderConnectionRequest>,
+) -> impl IntoResponse {
+    let conn_id = ProviderConnectionId::new(&id);
+    let before = current_event_head(&state).await;
+
+    let config = ProviderConnectionConfig {
+        provider_family: body.provider_family,
+        adapter_type: body.adapter_type,
+        supported_models: body.supported_models,
+    };
+
+    match state
+        .runtime
+        .provider_connections
+        .update(&conn_id, config)
+        .await
+    {
+        Ok(record) => {
+            // Update endpoint URL if provided.
+            if let Some(url) = body.endpoint_url {
+                let key = format!("provider_endpoint_{id}");
+                let _ = state
+                    .runtime
+                    .defaults
+                    .set(
+                        cairn_domain::Scope::System,
+                        "system".to_owned(),
+                        key,
+                        serde_json::json!(url),
+                    )
+                    .await;
+            }
+            // Update credential if provided.
+            if let Some(cred_id) = body.credential_id {
+                let key = format!("provider_credential_{id}");
+                let _ = state
+                    .runtime
+                    .defaults
+                    .set(
+                        cairn_domain::Scope::System,
+                        "system".to_owned(),
+                        key,
+                        serde_json::json!(cred_id),
+                    )
+                    .await;
+            }
+            publish_runtime_frames_since(&state, before).await;
+            (StatusCode::OK, Json(record)).into_response()
+        }
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateProviderConnectionRequest {
+    provider_family: String,
+    adapter_type: String,
+    supported_models: Vec<String>,
+    endpoint_url: Option<String>,
+    credential_id: Option<String>,
 }
 
 /// `DELETE /v1/providers/connections/:id` — remove a provider connection.

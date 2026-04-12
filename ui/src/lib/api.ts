@@ -656,6 +656,10 @@ export function createApiClient(config: ApiClientConfig) {
     }): Promise<import("./types").ProviderConnectionRecord> =>
       post("/v1/providers/connections", body),
 
+    /** PUT /v1/providers/connections/:id — update a provider connection. */
+    updateProviderConnection: (id: string, body: Record<string, unknown>): Promise<unknown> =>
+      put(`/v1/providers/connections/${encodeURIComponent(id)}`, body),
+
     /** DELETE /v1/providers/connections/:id — disable/remove a provider connection. */
     deleteProviderConnection: (id: string): Promise<{ deleted: boolean; connection_id: string }> =>
       del(`/v1/providers/connections/${encodeURIComponent(id)}`),

@@ -2,7 +2,7 @@ import { useState, type FormEvent, useId } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw, ServerCrash, Loader2, Plus, Trash2, ChevronDown, ChevronRight,
-  HardDrive, Zap, XCircle,
+  HardDrive, Zap, XCircle, Pencil,
   Globe, Server, Check, X, Settings, Tag,
 } from "lucide-react";
 import { clsx } from "clsx";
@@ -403,11 +403,13 @@ function ConnectionRow({
   health,
   even,
   onDelete,
+  onEdit,
 }: {
   record: ProviderConnectionRecord;
   health?: ProviderHealthEntry;
   even: boolean;
   onDelete: (id: string) => void;
+  onEdit: (record: ProviderConnectionRecord) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isHealthy = health?.healthy ?? null;
@@ -512,6 +514,13 @@ function ConnectionRow({
               title={expanded ? "Collapse" : "Expand models"}
             >
               {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            </button>
+            <button
+              onClick={() => onEdit(record)}
+              className="text-gray-400 dark:text-zinc-600 hover:text-indigo-400 transition-colors"
+              title="Edit connection"
+            >
+              <Pencil size={12} />
             </button>
             <button
               onClick={() => onDelete(record.provider_connection_id)}
@@ -925,6 +934,39 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
   const healthy   = entries.filter(e => healthMap.get(e.provider_connection_id)?.healthy === true).length;
   const unhealthy = entries.length - healthy;
 
+  const handleEdit = (record: ProviderConnectionRecord) => {
+    const newFamily = prompt("Provider family:", record.provider_family);
+    if (!newFamily) return;
+    const newModels = prompt("Supported models (comma-separated):", record.supported_models.join(", "));
+    if (newModels === null) return;
+    const newEndpoint = prompt("Endpoint URL:", "");
+
+    const body: Record<string, unknown> = {
+      provider_family: newFamily,
+      adapter_type: record.adapter_type,
+      supported_models: newModels.split(",").map(m => m.trim()).filter(Boolean),
+    };
+    if (newEndpoint) body.endpoint_url = newEndpoint;
+
+    fetch(`/v1/providers/connections/${record.provider_connection_id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${localStorage.getItem("cairn_token") ?? ""}`,
+      },
+      body: JSON.stringify(body),
+    })
+      .then(r => {
+        if (!r.ok) throw new Error(`${r.status}`);
+        return r.json();
+      })
+      .then(() => {
+        toast.success(`Updated ${record.provider_connection_id}`);
+        refetch();
+      })
+      .catch((e: unknown) => toast.error(`Update failed: ${e instanceof Error ? e.message : "error"}`));
+  };
+
   const handleDelete = (id: string) => {
     if (!confirm(`Delete connection "${id}"?`)) return;
     defaultApi
@@ -1025,6 +1067,7 @@ function ConnectionsSection({ onAdd }: { onAdd: () => void }) {
                   health={healthMap.get(entry.provider_connection_id)}
                   even={i % 2 === 0}
                   onDelete={handleDelete}
+                  onEdit={handleEdit}
                 />
               ))}
             </tbody>

@@ -28,6 +28,12 @@ pub trait ProviderConnectionService: Send + Sync {
         id: &ProviderConnectionId,
     ) -> Result<Option<ProviderConnectionRecord>, RuntimeError>;
 
+    async fn update(
+        &self,
+        id: &ProviderConnectionId,
+        config: ProviderConnectionConfig,
+    ) -> Result<ProviderConnectionRecord, RuntimeError>;
+
     async fn list(
         &self,
         tenant_id: &TenantId,
