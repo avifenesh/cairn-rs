@@ -524,6 +524,8 @@ async fn entity_ref_matching_all_types() {
                     run_id: Some(run_id("x")),
                     task_id: None,
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 }),
             ),
             // Checkpoint

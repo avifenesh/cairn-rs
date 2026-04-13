@@ -498,6 +498,8 @@ fn runtime_events_map_to_correct_sse_surfaces() {
                 run_id: None,
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             }),
             Some(SseEventName::ApprovalRequired),
         ),

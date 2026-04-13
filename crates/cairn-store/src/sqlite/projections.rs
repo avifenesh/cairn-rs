@@ -148,8 +148,8 @@ impl SqliteSyncProjection {
             RuntimeEvent::ApprovalRequested(e) => {
                 let requirement_str = enum_to_str(&e.requirement)?;
                 sqlx::query(
-                    "INSERT INTO approvals (approval_id, tenant_id, workspace_id, project_id, run_id, task_id, requirement, version, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                    "INSERT INTO approvals (approval_id, tenant_id, workspace_id, project_id, run_id, task_id, requirement, title, description, version, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
                 )
                 .bind(e.approval_id.as_str())
                 .bind(e.project.tenant_id.as_str())
@@ -158,6 +158,8 @@ impl SqliteSyncProjection {
                 .bind(e.run_id.as_ref().map(|id| id.as_str()))
                 .bind(e.task_id.as_ref().map(|id| id.as_str()))
                 .bind(requirement_str)
+                .bind(e.title.as_deref())
+                .bind(e.description.as_deref())
                 .bind(now)
                 .bind(now)
                 .execute(&mut **tx)

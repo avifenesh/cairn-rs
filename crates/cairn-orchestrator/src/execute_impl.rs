@@ -459,14 +459,38 @@ impl RuntimeExecutePhase {
             // ── EscalateToOperator ─────────────────────────────────────────
             ActionType::EscalateToOperator => {
                 let approval_id = ApprovalId::new(new_id("appr"));
+
+                // Build context for the operator from the proposal + run goal.
+                let title = Some(format!("Agent requests approval: {}", proposal.description));
+                let description = {
+                    let mut desc = format!(
+                        "**Run:** `{}`\n**Goal:** {}\n\n**Agent says:**\n{}",
+                        ctx.run_id.as_str(),
+                        ctx.goal,
+                        proposal.description,
+                    );
+                    if let Some(ref tool) = proposal.tool_name {
+                        desc.push_str(&format!("\n\n**Tool:** `{}`", tool));
+                    }
+                    if let Some(ref args) = proposal.tool_args {
+                        let args_str = serde_json::to_string_pretty(args).unwrap_or_default();
+                        if args_str.len() < 2000 {
+                            desc.push_str(&format!("\n**Args:**\n```json\n{}\n```", args_str));
+                        }
+                    }
+                    Some(desc)
+                };
+
                 match self
                     .approval_service
-                    .request(
+                    .request_with_context(
                         &ctx.project,
                         approval_id.clone(),
                         Some(ctx.run_id.clone()),
                         ctx.task_id.clone(),
                         ApprovalRequirement::Required,
+                        title,
+                        description,
                     )
                     .await
                 {

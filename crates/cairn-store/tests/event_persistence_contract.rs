@@ -116,6 +116,8 @@ fn approval_event(id: &str, project: &ProjectKey, approval: &str) -> EventEnvelo
             run_id: None,
             task_id: None,
             requirement: ApprovalRequirement::Required,
+            title: None,
+            description: None,
         }),
     )
 }

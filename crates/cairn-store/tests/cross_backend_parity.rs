@@ -331,6 +331,8 @@ mod sqlite_parity {
                 run_id: Some(RunId::new("r1")),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             },
         ))])
         .await
@@ -550,6 +552,8 @@ mod sqlite_parity {
                 run_id: Some(RunId::new("r1")),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             })),
             make_envelope(RuntimeEvent::ApprovalRequested(ApprovalRequested {
                 project: project.clone(),
@@ -557,6 +561,8 @@ mod sqlite_parity {
                 run_id: Some(RunId::new("r1")),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             })),
             make_envelope(RuntimeEvent::ApprovalRequested(ApprovalRequested {
                 project: project.clone(),
@@ -564,6 +570,8 @@ mod sqlite_parity {
                 run_id: Some(RunId::new("r1")),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             })),
         ];
         mem.append(&approvals).await.unwrap();
@@ -915,6 +923,8 @@ mod sqlite_parity {
                 run_id: Some(RunId::new("r1")),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             })),
             make_envelope(RuntimeEvent::ApprovalResolved(ApprovalResolved {
                 project: project.clone(),
@@ -1078,6 +1088,8 @@ mod sqlite_parity {
                 run_id: Some(RunId::new("r1")),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             },
         ))];
         store_a.append(&extra).await.unwrap();

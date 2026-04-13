@@ -32,6 +32,28 @@ where
         task_id: Option<TaskId>,
         requirement: ApprovalRequirement,
     ) -> Result<ApprovalRecord, RuntimeError> {
+        self.request_with_context(
+            project,
+            approval_id,
+            run_id,
+            task_id,
+            requirement,
+            None,
+            None,
+        )
+        .await
+    }
+
+    async fn request_with_context(
+        &self,
+        project: &ProjectKey,
+        approval_id: ApprovalId,
+        run_id: Option<RunId>,
+        task_id: Option<TaskId>,
+        requirement: ApprovalRequirement,
+        title: Option<String>,
+        description: Option<String>,
+    ) -> Result<ApprovalRecord, RuntimeError> {
         let saved_run_id = run_id.clone();
         let event = make_envelope(RuntimeEvent::ApprovalRequested(ApprovalRequested {
             project: project.clone(),
@@ -39,6 +61,8 @@ where
             run_id,
             task_id,
             requirement,
+            title,
+            description,
         }));
 
         self.store.append(&[event]).await?;

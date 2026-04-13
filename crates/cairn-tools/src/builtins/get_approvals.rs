@@ -152,6 +152,8 @@ mod tests {
                     run_id: Some(RunId::new("run_1")),
                     task_id: None,
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 }),
             )])
             .await
@@ -184,6 +186,8 @@ mod tests {
                         run_id: Some(RunId::new(rid)),
                         task_id: None,
                         requirement: ApprovalRequirement::Required,
+                        title: None,
+                        description: None,
                     }),
                 )])
                 .await
