@@ -530,6 +530,13 @@ impl BuiltinToolRegistry {
         }
     }
 
+    /// Create a registry pre-populated with all tools from an existing registry.
+    pub fn from_existing(other: &BuiltinToolRegistry) -> Self {
+        Self {
+            tools: other.tools.clone(),
+        }
+    }
+
     /// Builder-style registration.  Last-write wins on name collision.
     pub fn register(mut self, handler: Arc<dyn ToolHandler>) -> Self {
         let tier = handler.tier();

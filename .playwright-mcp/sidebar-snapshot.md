@@ -1,0 +1,27 @@
+- generic [ref=e32]:
+  - link "Skip to content" [ref=e33] [cursor=pointer]:
+    - /url: "#main-content"
+  - complementary "Main navigation" [ref=e35]:
+    - generic [ref=e36]:
+      - img [ref=e37]
+      - generic [ref=e42]
+    - navigation "Main navigation" [ref=e45]:
+      - generic [ref=e46]
+      - generic [ref=e63]
+      - generic [ref=e116]
+      - generic [ref=e171]
+    - generic [ref=e225]:
+      - generic [ref=e226]
+      - button "Account" [ref=e229]
+      - button "Sign out" [ref=e233]
+  - generic [ref=e237]:
+    - banner [ref=e239]:
+      - navigation "breadcrumb" [ref=e240]
+      - button "Change scope" [ref=e244]
+      - generic [ref=e248]
+    - main "Main content" [ref=e268]:
+      - generic [ref=e270]
+  - generic "Connection status" [ref=e552]:
+    - button "Connected" [ref=e553]:
+      - generic [ref=e555]: Connected
+      - img [ref=e556]

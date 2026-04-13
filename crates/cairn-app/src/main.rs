@@ -5333,6 +5333,8 @@ async fn main() {
                                 ),
                                 queue_paused: std::sync::atomic::AtomicBool::new(false),
                                 queue_running: std::sync::atomic::AtomicBool::new(false),
+                                max_concurrent: std::sync::atomic::AtomicU32::new(3),
+                                run_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(3)),
                                 http: reqwest::Client::new(),
                             };
                             let lib_mut = Arc::get_mut(&mut lib_state)

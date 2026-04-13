@@ -1085,15 +1085,17 @@ pub struct GitHubIntegration {
     pub installations:
         tokio::sync::RwLock<std::collections::HashMap<u64, cairn_github::InstallationToken>>,
     /// Operator-configured event→action mappings.
-    /// Key: event key (e.g., "issues.opened", "issues.labeled").
-    /// Value: action to take.
     pub event_actions: tokio::sync::RwLock<Vec<GitHubEventAction>>,
-    /// Sequential issue processing queue.
+    /// Issue processing queue.
     pub issue_queue: tokio::sync::RwLock<std::collections::VecDeque<IssueQueueEntry>>,
-    /// Whether the queue processor is paused.
+    /// Whether the queue dispatcher is paused.
     pub queue_paused: std::sync::atomic::AtomicBool,
-    /// Whether the queue processor is currently running.
+    /// Whether the queue dispatcher loop is running.
     pub queue_running: std::sync::atomic::AtomicBool,
+    /// Max concurrent orchestration runs (operator-configurable).
+    pub max_concurrent: std::sync::atomic::AtomicU32,
+    /// Semaphore controlling concurrent run slots.
+    pub run_semaphore: Arc<tokio::sync::Semaphore>,
     pub http: reqwest::Client,
 }
 
@@ -5248,6 +5250,10 @@ impl AppBootstrap {
             .route(
                 "/v1/webhooks/github/installations",
                 get(github_installations_handler),
+            )
+            .route(
+                "/v1/webhooks/github/queue/concurrency",
+                put(set_queue_concurrency_handler),
             )
     }
 
@@ -19760,7 +19766,11 @@ async fn webhook_trigger_orchestration(
         .with_checkpoints(state.runtime.store.clone())
         .build();
 
-    let decide = LlmDecidePhase::new(brain, model_id);
+    // Build the tool registry — reuse the startup-wired registry (has memory tools,
+    // register-repo, etc.) and add GitHub API tools for webhook-triggered runs.
+    let registry = build_webhook_tool_registry(state);
+
+    let decide = LlmDecidePhase::new(brain, model_id).with_tools(registry.clone());
 
     let store = state.runtime.store.clone();
     let config = LoopConfig {
@@ -19770,6 +19780,7 @@ async fn webhook_trigger_orchestration(
     };
 
     let execute = RuntimeExecutePhase::builder()
+        .tool_registry(registry)
         .run_service(Arc::new(RunServiceImpl::new(store.clone())))
         .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
         .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
@@ -19779,7 +19790,11 @@ async fn webhook_trigger_orchestration(
         .checkpoint_every_n_tool_calls(config.checkpoint_every_n_tool_calls)
         .build();
 
-    let orchestrator = OrchestratorLoop::new(gather, decide, execute, config);
+    // Wire SSE + tracing emitter so orchestrator events appear in Run Detail,
+    // Traces page, and the live event stream — same as POST /v1/runs/:id/orchestrate.
+    let emitter = build_orchestrator_emitter(state);
+
+    let orchestrator = OrchestratorLoop::new(gather, decide, execute, config).with_emitter(emitter);
     let run_id = run.run_id.clone();
     let project = run.project.clone();
 
@@ -20052,13 +20067,6 @@ async fn github_scan_handler(
                 });
             }
         }
-
-        // Spawn the sequential processor if not already running.
-        let state_clone = state.clone();
-        let github_clone = github.clone();
-        tokio::spawn(async move {
-            process_issue_queue(state_clone, github_clone).await;
-        });
     }
 
     Json(serde_json::json!({
@@ -20099,9 +20107,31 @@ async fn github_queue_handler(State(state): State<Arc<AppState>>) -> impl IntoRe
         })
         .collect();
 
+    let max_concurrent = github
+        .max_concurrent
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let paused = github
+        .queue_paused
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let running = github
+        .queue_running
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let processing = items
+        .iter()
+        .filter(|e| {
+            e["status"]
+                .as_str()
+                .is_some_and(|s| s.contains("Processing"))
+        })
+        .count();
+
     Json(serde_json::json!({
         "queue": items,
         "total": items.len(),
+        "max_concurrent": max_concurrent,
+        "active_runs": processing,
+        "paused": paused,
+        "dispatcher_running": running,
     }))
     .into_response()
 }
@@ -20149,36 +20179,37 @@ pub enum IssueQueueStatus {
     Failed(String),
 }
 
-/// Process queued issues sequentially — one at a time.
+/// Concurrent queue dispatcher — fills up to `max_concurrent` run slots.
 ///
-/// For each issue:
-/// 1. Post a "starting work" comment on the GitHub issue
-/// 2. Run orchestration (LLM reads issue, writes code, creates PR)
-/// 3. If orchestration requests approval → pause, wait for operator
-/// 4. On approval → continue to next issue
-/// 5. On failure → mark failed, move to next
+/// Each run is dispatched as a tokio task that calls the real orchestrate
+/// handler path (same as POST /v1/runs/:id/orchestrate), giving full SSE
+/// emission, tracing, and Run Detail page observability.
 async fn process_issue_queue(state: Arc<AppState>, github: Arc<GitHubIntegration>) {
-    // Guard: only one processor at a time.
     if github
         .queue_running
         .swap(true, std::sync::atomic::Ordering::SeqCst)
     {
-        tracing::debug!("Queue processor already running — exiting");
+        tracing::debug!("Queue dispatcher already running");
         return;
     }
 
+    tracing::info!(
+        max_concurrent = github
+            .max_concurrent
+            .load(std::sync::atomic::Ordering::SeqCst),
+        "Queue dispatcher started"
+    );
+
     loop {
-        // Check pause flag.
         if github
             .queue_paused
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            tracing::info!("Queue paused — processor sleeping");
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             continue;
         }
 
-        // Find the next Pending entry.
+        // Pick the next pending entry.
         let entry = {
             let mut queue = github.issue_queue.write().await;
             let next = queue
@@ -20190,13 +20221,30 @@ async fn process_issue_queue(state: Arc<AppState>, github: Arc<GitHubIntegration
                     e.clone()
                 }
                 None => {
-                    tracing::info!("Issue queue empty — processor exiting");
-                    github
-                        .queue_running
-                        .store(false, std::sync::atomic::Ordering::SeqCst);
-                    return;
+                    let has_processing = queue
+                        .iter()
+                        .any(|e| e.status == IssueQueueStatus::Processing);
+                    if !has_processing {
+                        tracing::info!("Queue empty — dispatcher exiting");
+                        github
+                            .queue_running
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
+                        return;
+                    }
+                    drop(queue);
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    continue;
                 }
             }
+        };
+
+        // Acquire a semaphore permit (blocks if all slots full).
+        let permit = github.run_semaphore.clone().acquire_owned().await;
+        let Ok(permit) = permit else {
+            github
+                .queue_running
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            return;
         };
 
         emit_github_progress(
@@ -20205,171 +20253,119 @@ async fn process_issue_queue(state: Arc<AppState>, github: Arc<GitHubIntegration
                 "action": "issue_started",
                 "issue": entry.issue_number,
                 "title": entry.title,
-                "repo": entry.repo,
+                "run_id": entry.run_id,
             }),
         );
 
         tracing::info!(
             issue = entry.issue_number,
-            repo = entry.repo,
-            "Processing issue from queue"
+            run_id = entry.run_id,
+            "Dispatching issue to orchestrator"
         );
 
-        let (owner, repo_name) = entry.repo.split_once('/').unwrap_or(("", &entry.repo));
+        // Spawn a concurrent task for this issue.
+        let state_clone = state.clone();
+        let github_clone = github.clone();
+        tokio::spawn(async move {
+            let result = orchestrate_single_issue(&state_clone, &github_clone, &entry).await;
 
-        // Post comment on the issue.
-        let client = github.client_for_installation(entry.installation_id).await;
-        let msg = format!(
-            "Cairn is now working on this issue.\n\n- Session: `{}`\n- Run: `{}`",
-            entry.session_id, entry.run_id
-        );
-        if let Err(e) = client
-            .create_comment(owner, repo_name, entry.issue_number, &msg)
-            .await
-        {
-            tracing::warn!(error = %e, "Failed to post start comment");
-        }
-
-        // Build goal from the issue.
-        let issue = client.get_issue(owner, repo_name, entry.issue_number).await;
-        let goal = match issue {
-            Ok(issue) => {
-                let body = issue.body.as_deref().unwrap_or("");
-                format!(
-                    "GitHub Issue #{}: {}\n\nRepository: {}\n\n{}\n\n\
-                    Instructions: Analyze this issue, implement the fix or feature, \
-                    create a branch, commit the changes, and open a pull request. \
-                    Use the github_api tools to interact with the repository.",
-                    issue.number, issue.title, entry.repo, body
-                )
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to fetch issue — using basic goal");
-                format!(
-                    "GitHub Issue #{} in {}: implement and open a PR",
-                    entry.issue_number, entry.repo
-                )
-            }
-        };
-
-        // Get the run record.
-        let run_id = cairn_domain::RunId::new(&entry.run_id);
-        let run = match cairn_store::projections::RunReadModel::get(
-            state.runtime.store.as_ref(),
-            &run_id,
-        )
-        .await
-        {
-            Ok(Some(r)) => r,
-            _ => {
-                tracing::error!(run_id = entry.run_id, "Run not found — skipping issue");
-                update_queue_status(
-                    &github,
-                    entry.issue_number,
-                    IssueQueueStatus::Failed("run not found".into()),
-                )
-                .await;
-                continue;
-            }
-        };
-
-        // Trigger orchestration.
-        match webhook_trigger_orchestration(&state, &run, &goal).await {
-            Ok(()) => {
-                // Check if the run ended up waiting for approval.
-                let final_run = cairn_store::projections::RunReadModel::get(
-                    state.runtime.store.as_ref(),
-                    &run_id,
-                )
-                .await;
-
-                let final_state = final_run
-                    .ok()
-                    .flatten()
-                    .map(|r| r.state)
-                    .unwrap_or(cairn_domain::RunState::Failed);
-
-                match final_state {
-                    cairn_domain::RunState::WaitingApproval => {
-                        update_queue_status(
-                            &github,
-                            entry.issue_number,
-                            IssueQueueStatus::WaitingApproval,
-                        )
-                        .await;
-
-                        // Post comment about needing approval.
-                        let approval_msg =
-                            "Cairn has created a PR for this issue and is waiting for operator approval in the Cairn dashboard.";
-                        let _ = client
-                            .create_comment(owner, repo_name, entry.issue_number, approval_msg)
-                            .await;
-
-                        tracing::info!(
-                            issue = entry.issue_number,
-                            "Issue waiting for approval — continuing to next"
-                        );
-                    }
-                    cairn_domain::RunState::Completed => {
-                        update_queue_status(
-                            &github,
-                            entry.issue_number,
-                            IssueQueueStatus::Completed,
-                        )
-                        .await;
-
-                        let done_msg =
-                            "Cairn has completed work on this issue. Please review the PR.";
-                        let _ = client
-                            .create_comment(owner, repo_name, entry.issue_number, done_msg)
-                            .await;
-
-                        tracing::info!(issue = entry.issue_number, "Issue completed");
-                    }
-                    _ => {
-                        update_queue_status(
-                            &github,
-                            entry.issue_number,
-                            IssueQueueStatus::Failed(format!("run ended in {:?}", final_state)),
-                        )
-                        .await;
-
-                        let fail_msg = format!(
-                            "Cairn encountered an issue while working on this (run state: {:?}). An operator may retry.",
-                            final_state
-                        );
-                        let _ = client
-                            .create_comment(owner, repo_name, entry.issue_number, &fail_msg)
-                            .await;
-
-                        tracing::warn!(
-                            issue = entry.issue_number,
-                            state = ?final_state,
-                            "Issue processing ended in non-completed state"
-                        );
-                    }
+            let final_status = match result {
+                Ok(status) => status,
+                Err(e) => {
+                    tracing::error!(issue = entry.issue_number, error = %e, "Orchestration failed");
+                    IssueQueueStatus::Failed(e)
                 }
-            }
-            Err(e) => {
-                update_queue_status(
-                    &github,
-                    entry.issue_number,
-                    IssueQueueStatus::Failed(e.clone()),
-                )
-                .await;
+            };
 
-                let err_msg = format!("Cairn failed to process this issue: {e}");
-                let _ = client
-                    .create_comment(owner, repo_name, entry.issue_number, &err_msg)
-                    .await;
+            update_queue_status(&github_clone, entry.issue_number, final_status.clone()).await;
 
-                tracing::error!(issue = entry.issue_number, error = e, "Orchestration error");
-            }
-        }
+            emit_github_progress(
+                &state_clone,
+                serde_json::json!({
+                    "action": "issue_finished",
+                    "issue": entry.issue_number,
+                    "status": format!("{:?}", final_status),
+                    "run_id": entry.run_id,
+                }),
+            );
 
-        // Brief pause between issues to avoid hammering the API.
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            drop(permit);
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
+}
+
+/// Orchestrate a single issue — post comment, build goal, trigger orchestration.
+async fn orchestrate_single_issue(
+    state: &AppState,
+    github: &GitHubIntegration,
+    entry: &IssueQueueEntry,
+) -> Result<IssueQueueStatus, String> {
+    let (owner, repo_name) = entry.repo.split_once('/').unwrap_or(("", &entry.repo));
+
+    let client = github.client_for_installation(entry.installation_id).await;
+    let start_msg = format!(
+        "Cairn is working on this issue.\n\n- Run: `{}`\n- Track progress in the Cairn dashboard",
+        entry.run_id
+    );
+    let _ = client
+        .create_comment(owner, repo_name, entry.issue_number, &start_msg)
+        .await;
+
+    let goal = match client.get_issue(owner, repo_name, entry.issue_number).await {
+        Ok(issue) => {
+            let body = issue.body.as_deref().unwrap_or("");
+            format!(
+                "GitHub Issue #{}: {}\n\nRepository: {}\n\n{}\n\n\
+                Instructions: Analyze this issue, implement the fix or feature, \
+                create a branch, commit the changes, and open a pull request. \
+                Use the github_api tools to interact with the repository.",
+                issue.number, issue.title, entry.repo, body
+            )
+        }
+        Err(_) => format!(
+            "GitHub Issue #{} in {}: implement and open a PR",
+            entry.issue_number, entry.repo
+        ),
+    };
+
+    let run_id = cairn_domain::RunId::new(&entry.run_id);
+    let run = cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("run {} not found", entry.run_id))?;
+
+    webhook_trigger_orchestration(state, &run, &goal).await?;
+
+    let final_state =
+        cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|r| r.state)
+            .unwrap_or(cairn_domain::RunState::Failed);
+
+    let (status, comment) = match final_state {
+        cairn_domain::RunState::Completed => (
+            IssueQueueStatus::Completed,
+            "Cairn completed work on this issue. Please review the PR.".to_owned(),
+        ),
+        cairn_domain::RunState::WaitingApproval => (
+            IssueQueueStatus::WaitingApproval,
+            "Cairn created a PR — waiting for operator approval in the dashboard.".to_owned(),
+        ),
+        other => (
+            IssueQueueStatus::Failed(format!("run ended in {other:?}")),
+            format!("Cairn hit an issue (state: {other:?}). Operator may retry."),
+        ),
+    };
+
+    let _ = client
+        .create_comment(owner, repo_name, entry.issue_number, &comment)
+        .await;
+
+    Ok(status)
 }
 
 async fn update_queue_status(
@@ -20381,6 +20377,214 @@ async fn update_queue_status(
     if let Some(entry) = queue.iter_mut().find(|e| e.issue_number == issue_number) {
         entry.status = status;
     }
+}
+
+/// Build the tool registry for webhook-triggered orchestration runs.
+///
+/// Uses the startup-wired tool registry (which has all core + memory tools)
+/// and adds GitHub API tools for code operations.
+fn build_webhook_tool_registry(state: &AppState) -> Arc<cairn_tools::BuiltinToolRegistry> {
+    use cairn_tools::*;
+
+    let gh_provider = Arc::new(GitHubClientProvider::new());
+
+    // If we have a startup-wired registry, clone all its tools and add GH API tools.
+    // Otherwise build a minimal registry with just the GH tools.
+    if let Some(ref base) = state.tool_registry {
+        // The base registry has ~25 tools wired at startup (memory, file, shell, etc.)
+        // We add the GitHub API tools on top.
+        Arc::new(
+            BuiltinToolRegistry::from_existing(base)
+                .register(Arc::new(GhApiCreateBranchTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiReadFileTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiWriteFileTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiCreatePrTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiMergePrTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiListContentsTool::new(gh_provider))),
+        )
+    } else {
+        // Fallback: just the GitHub tools — won't have memory/file tools.
+        Arc::new(
+            BuiltinToolRegistry::new()
+                .register(Arc::new(GhApiCreateBranchTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiReadFileTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiWriteFileTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiCreatePrTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiMergePrTool::new(gh_provider.clone())))
+                .register(Arc::new(GhApiListContentsTool::new(gh_provider))),
+        )
+    }
+}
+
+/// Build the composite SSE + tracing emitter for the orchestrator loop.
+///
+/// Reused by both the HTTP handler and the webhook/queue pipeline so that
+/// all orchestrator events (LLM calls, tool invocations, step completions)
+/// flow through SSE, populate traces, and appear in Run Detail.
+fn build_orchestrator_emitter(
+    state: &AppState,
+) -> std::sync::Arc<dyn cairn_orchestrator::OrchestratorEventEmitter> {
+    let sse_emitter = std::sync::Arc::new(crate::sse_hooks::SseOrchestratorEmitter::new(
+        state.runtime_sse_tx.clone(),
+        state.sse_event_buffer.clone(),
+        state.sse_seq.clone(),
+    ));
+
+    struct TracingEmitter {
+        inner: std::sync::Arc<crate::sse_hooks::SseOrchestratorEmitter>,
+        store: std::sync::Arc<cairn_store::InMemoryStore>,
+        exporter: std::sync::Arc<cairn_runtime::telemetry::OtlpExporter>,
+    }
+
+    #[async_trait::async_trait]
+    impl cairn_orchestrator::OrchestratorEventEmitter for TracingEmitter {
+        async fn on_started(&self, ctx: &cairn_orchestrator::OrchestrationContext) {
+            self.inner.on_started(ctx).await;
+        }
+        async fn on_gather_completed(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            g: &cairn_orchestrator::GatherOutput,
+        ) {
+            self.inner.on_gather_completed(ctx, g).await;
+        }
+        async fn on_decide_completed(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            d: &cairn_orchestrator::DecideOutput,
+        ) {
+            self.inner.on_decide_completed(ctx, d).await;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let call_id = format!("orch_{}_{}", ctx.run_id.as_str(), now);
+            let event = cairn_domain::EventEnvelope::for_runtime_event(
+                cairn_domain::EventId::new(format!("evt_trace_{call_id}")),
+                cairn_domain::EventSource::Runtime,
+                cairn_domain::RuntimeEvent::ProviderCallCompleted(
+                    cairn_domain::events::ProviderCallCompleted {
+                        project: ctx.project.clone(),
+                        provider_call_id: cairn_domain::ProviderCallId::new(&call_id),
+                        route_decision_id: cairn_domain::RouteDecisionId::new(format!(
+                            "rd_{call_id}"
+                        )),
+                        route_attempt_id: cairn_domain::RouteAttemptId::new(format!(
+                            "ra_{call_id}"
+                        )),
+                        provider_binding_id: cairn_domain::ProviderBindingId::new("brain"),
+                        provider_connection_id: cairn_domain::ProviderConnectionId::new("brain"),
+                        provider_model_id: cairn_domain::ProviderModelId::new(&d.model_id),
+                        operation_kind: cairn_domain::providers::OperationKind::Generate,
+                        status: cairn_domain::providers::ProviderCallStatus::Succeeded,
+                        latency_ms: Some(d.latency_ms),
+                        input_tokens: d.input_tokens,
+                        output_tokens: d.output_tokens,
+                        cost_micros: Some(
+                            ((d.input_tokens.unwrap_or(0) as u64).saturating_mul(500)
+                                + (d.output_tokens.unwrap_or(0) as u64).saturating_mul(1500))
+                                / 1_000,
+                        ),
+                        completed_at: now,
+                        session_id: Some(ctx.session_id.clone()),
+                        run_id: Some(ctx.run_id.clone()),
+                        error_class: None,
+                        raw_error_message: None,
+                        retry_count: 0,
+                        task_id: ctx
+                            .task_id
+                            .as_ref()
+                            .map(|t| cairn_domain::TaskId::new(t.as_str())),
+                        prompt_release_id: None,
+                        fallback_position: 0,
+                        started_at: now.saturating_sub(d.latency_ms),
+                        finished_at: now,
+                    },
+                ),
+            );
+            let payload = event.payload.clone();
+            let _ = self.store.append(&[event]).await;
+            let _ = self.exporter.export_event(&payload).await;
+
+            use cairn_store::projections::LlmCallTraceReadModel;
+            let input_tokens = d.input_tokens.unwrap_or(0);
+            let output_tokens = d.output_tokens.unwrap_or(0);
+            let cost_micros = ((input_tokens as u64).saturating_mul(500)
+                + (output_tokens as u64).saturating_mul(1500))
+                / 1_000;
+            let trace = cairn_domain::LlmCallTrace {
+                trace_id: call_id,
+                model_id: d.model_id.clone(),
+                prompt_tokens: input_tokens,
+                completion_tokens: output_tokens,
+                latency_ms: d.latency_ms,
+                cost_micros,
+                session_id: Some(ctx.session_id.clone()),
+                run_id: Some(ctx.run_id.clone()),
+                created_at_ms: now,
+                is_error: false,
+            };
+            let _ = self.store.insert_trace(trace).await;
+        }
+        async fn on_tool_called(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            name: &str,
+            args: Option<&serde_json::Value>,
+        ) {
+            self.inner.on_tool_called(ctx, name, args).await;
+        }
+        async fn on_tool_result(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            name: &str,
+            ok: bool,
+            out: Option<&serde_json::Value>,
+            err: Option<&str>,
+        ) {
+            self.inner.on_tool_result(ctx, name, ok, out, err).await;
+        }
+        async fn on_context_compacted(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            before: usize,
+            after: usize,
+            before_tokens: usize,
+            after_tokens: usize,
+        ) {
+            self.inner
+                .on_context_compacted(ctx, before, after, before_tokens, after_tokens)
+                .await;
+        }
+        async fn on_plan_proposed(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            plan: &str,
+        ) {
+            self.inner.on_plan_proposed(ctx, plan).await;
+        }
+        async fn on_step_completed(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            d: &cairn_orchestrator::DecideOutput,
+            e: &cairn_orchestrator::ExecuteOutcome,
+        ) {
+            self.inner.on_step_completed(ctx, d, e).await;
+        }
+        async fn on_finished(
+            &self,
+            ctx: &cairn_orchestrator::OrchestrationContext,
+            t: &cairn_orchestrator::LoopTermination,
+        ) {
+            self.inner.on_finished(ctx, t).await;
+        }
+    }
+
+    std::sync::Arc::new(TracingEmitter {
+        inner: sse_emitter,
+        store: state.runtime.store.clone(),
+        exporter: state.otlp_exporter.clone(),
+    })
 }
 
 /// Emit a GitHub progress SSE event.
@@ -20430,6 +20634,25 @@ async fn github_queue_resume_handler(State(state): State<Arc<AppState>>) -> impl
                 .into_response();
         }
     };
+
+    // Check that a brain model is configured before starting.
+    let model_id = {
+        let brain = state.runtime.runtime_config.default_brain_model().await;
+        if brain.trim().is_empty() || brain == "default" {
+            state.runtime.runtime_config.default_generate_model().await
+        } else {
+            brain
+        }
+    };
+    let model_id = model_id.trim().to_owned();
+    if model_id.is_empty() || model_id == "default" {
+        return AppApiError::new(
+            StatusCode::PRECONDITION_FAILED,
+            "no_brain_model",
+            "No LLM model configured. Set brain_model or generate_model in Settings → Provider Defaults before starting the queue.",
+        )
+        .into_response();
+    }
 
     github
         .queue_paused
@@ -20573,6 +20796,40 @@ async fn github_installations_handler(State(state): State<Arc<AppState>>) -> imp
         )
         .into_response(),
     }
+}
+
+/// PUT /v1/webhooks/github/queue/concurrency — set max concurrent runs.
+async fn set_queue_concurrency_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let github = match &state.github {
+        Some(gh) => gh,
+        None => {
+            return AppApiError::new(StatusCode::SERVICE_UNAVAILABLE, "github_not_configured", "")
+                .into_response();
+        }
+    };
+
+    let max = body["max_concurrent"].as_u64().unwrap_or(3).clamp(1, 20) as u32;
+
+    let old = github
+        .max_concurrent
+        .swap(max, std::sync::atomic::Ordering::SeqCst);
+
+    // Resize the semaphore by adjusting permits.
+    if max > old {
+        github.run_semaphore.add_permits((max - old) as usize);
+    }
+    // Note: reducing permits below current usage is safe — existing tasks
+    // keep their permits, new ones wait until slots free up.
+
+    tracing::info!(old, new = max, "Queue concurrency updated");
+    Json(serde_json::json!({
+        "max_concurrent": max,
+        "previous": old,
+    }))
+    .into_response()
 }
 
 #[cfg(test)]
