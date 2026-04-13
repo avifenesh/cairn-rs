@@ -152,22 +152,27 @@ function ScanDialog({ onClose, onScan }: {
 
 // ── Issue row ───────────────────────────────────────────────────────────────
 
-function IssueRow({ entry, onSkip, onRetry }: {
+function IssueRow({ entry, onSkip, onRetry, onNavigate }: {
   entry: GitHubQueueEntry;
   onSkip: () => void;
   onRetry: () => void;
+  onNavigate: (hash: string) => void;
 }) {
   const isFailed = entry.status.includes("Failed");
   const isPending = entry.status.includes("Pending");
   const isActive = entry.status.includes("Processing");
+  const isWorking = isActive || entry.status.includes("WaitingApproval");
 
   return (
-    <div className={clsx(
-      "group flex items-center gap-3 px-4 py-3 border-b transition-colors",
-      border.subtle,
-      isActive && "bg-blue-950/20",
-      "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
-    )}>
+    <div
+      className={clsx(
+        "group flex items-center gap-3 px-4 py-3 border-b transition-colors cursor-pointer",
+        border.subtle,
+        isActive && "bg-blue-950/20",
+        "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
+      )}
+      onClick={() => onNavigate(`run/${encodeURIComponent(entry.run_id)}`)}
+    >
       <div className="shrink-0">{statusIcon(entry.status)}</div>
 
       <div className="min-w-0 flex-1">
@@ -178,11 +183,19 @@ function IssueRow({ entry, onSkip, onRetry }: {
           <span className={clsx("text-sm truncate", text.body)}>
             {entry.title}
           </span>
+          {isWorking && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-600/20 text-blue-400 border border-blue-600/30">
+              view run
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 mt-0.5">
           <span className={clsx("text-[11px] font-mono", text.muted)}>{entry.repo}</span>
           <span className={clsx("text-[11px]", statusColor(entry.status))}>
             {statusLabel(entry.status)}
+          </span>
+          <span className={clsx("text-[10px] font-mono", text.muted)}>
+            {entry.session_id.length > 30 ? `…${entry.session_id.slice(-25)}` : entry.session_id}
           </span>
         </div>
       </div>
@@ -263,6 +276,8 @@ export function IntegrationsPage() {
   const completed = queue.filter((e) => e.status.includes("Completed")).length;
   const failed = queue.filter((e) => e.status.includes("Failed")).length;
   const waiting = queue.filter((e) => e.status.includes("WaitingApproval")).length;
+  const maxConcurrent = (queueData as Record<string, unknown>)?.max_concurrent as number ?? 3;
+  const dispatcherRunning = (queueData as Record<string, unknown>)?.dispatcher_running as boolean ?? false;
 
   // Mutations.
   const scanMut = useMutation({
@@ -284,8 +299,16 @@ export function IntegrationsPage() {
     mutationFn: () => defaultApi.resumeGitHubQueue(),
     onSuccess: () => {
       setQueuePaused(false);
-      toast.success("Queue resumed");
+      toast.success("Processing started");
       void qc.invalidateQueries({ queryKey: ["github-queue"] });
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("no_brain_model") || msg.includes("412")) {
+        toast.error("No LLM model configured. Go to Settings and set a brain/generate model first.");
+      } else {
+        toast.error(`Failed to start: ${msg}`);
+      }
     },
   });
 
@@ -336,12 +359,37 @@ export function IntegrationsPage() {
           <div className="flex items-center gap-2">
             {isConfigured && (
               <>
-                {queuePaused || processing === 0 ? (
-                  <button
-                    onClick={() => {
-                      if (queuePaused) resumeMut.mutate();
-                      else if (pending > 0) resumeMut.mutate();
+                {/* Concurrency selector */}
+                <div className="flex items-center gap-1.5">
+                  <span className={clsx("text-[10px]", text.muted)}>Parallel:</span>
+                  <select
+                    value={maxConcurrent}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      fetch("/v1/webhooks/github/queue/concurrency", {
+                        method: "PUT",
+                        headers: {
+                          "Authorization": `Bearer ${localStorage.getItem("cairn_token") ?? ""}`,
+                          "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({ max_concurrent: val }),
+                      }).then(() => void qc.invalidateQueries({ queryKey: ["github-queue"] }));
                     }}
+                    className={clsx(
+                      "rounded border px-1.5 py-0.5 text-[11px]",
+                      surface.elevated, border.default, text.body,
+                      "focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
+                    )}
+                  >
+                    {[1, 2, 3, 5, 10].map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {queuePaused || (!dispatcherRunning && processing === 0) ? (
+                  <button
+                    onClick={() => resumeMut.mutate()}
                     disabled={pending === 0 && !queuePaused}
                     className={clsx(
                       "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
@@ -357,7 +405,7 @@ export function IntegrationsPage() {
                     onClick={() => pauseMut.mutate()}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white transition-colors"
                   >
-                    <Pause size={12} /> Pause
+                    <Pause size={12} /> Pause ({processing}/{maxConcurrent})
                   </button>
                 )}
 
@@ -406,6 +454,7 @@ export function IntegrationsPage() {
                     entry={entry}
                     onSkip={() => skipMut.mutate(entry.issue_number)}
                     onRetry={() => retryMut.mutate(entry.issue_number)}
+                    onNavigate={(hash) => { window.location.hash = hash; }}
                   />
                 ))}
               </div>
