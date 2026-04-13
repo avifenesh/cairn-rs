@@ -7049,6 +7049,8 @@ mod tests {
                         run_id: Some(run_id.clone()),
                         task_id: None,
                         requirement: ApprovalRequirement::Required,
+                        title: None,
+                        description: None,
                     }),
                 ),
             ])
@@ -7126,6 +7128,8 @@ mod tests {
                         run_id: Some(run_id.clone()),
                         task_id: None,
                         requirement: ApprovalRequirement::Required,
+                        title: None,
+                        description: None,
                     }),
                 ),
                 EventEnvelope::for_runtime_event(

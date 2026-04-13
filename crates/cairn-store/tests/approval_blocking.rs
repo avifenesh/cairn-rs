@@ -130,6 +130,8 @@ async fn request_approval(
                 run_id: Some(run.clone()),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             }),
         )])
         .await

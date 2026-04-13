@@ -570,6 +570,8 @@ mod tests {
             run_id: None,
             task_id: Some(TaskId::new("task_1")),
             requirement: ApprovalRequirement::Required,
+            title: None,
+            description: None,
         });
         let payload = shape_event_payload(&event).unwrap();
         assert!(payload.get("approval").is_some());
@@ -632,6 +634,8 @@ mod tests {
             run_id: None,
             task_id: Some(TaskId::new("task_1")),
             requirement: ApprovalRequirement::Required,
+            title: None,
+            description: None,
         });
         let record = ApprovalRecord {
             approval_id: ApprovalId::new("appr_1"),

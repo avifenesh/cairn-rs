@@ -173,6 +173,8 @@ fn approval_required_runtime_mapping_gap_is_still_explicit() {
         run_id: None,
         task_id: Some(TaskId::new("task_001")),
         requirement: ApprovalRequirement::Required,
+        title: None,
+        description: None,
     });
     let payload = cairn_api::sse_payloads::shape_event_payload(&event).unwrap();
 
@@ -202,6 +204,8 @@ fn approval_required_current_state_helper_uses_store_record() {
             run_id: None,
             task_id: Some(TaskId::new("task_001")),
             requirement: ApprovalRequirement::Required,
+            title: None,
+            description: None,
         },
     );
     let record = ApprovalRecord {

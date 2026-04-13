@@ -377,8 +377,8 @@ impl InMemoryStore {
                         task_id: e.task_id.clone(),
                         requirement: e.requirement,
                         decision: None,
-                        title: None,
-                        description: None,
+                        title: e.title.clone(),
+                        description: e.description.clone(),
                         version: 1,
                         created_at: now,
                         updated_at: now,
@@ -5488,6 +5488,8 @@ mod tests {
                     run_id: Some(run_id.clone()),
                     task_id: Some(task_id.clone()),
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 },
             ))])
             .await

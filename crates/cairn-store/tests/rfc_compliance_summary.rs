@@ -128,6 +128,8 @@ async fn rfc005_approval_blocks_run_progression() {
                     run_id: Some(RunId::new("r1")),
                     task_id: None,
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 }),
             ),
         ])

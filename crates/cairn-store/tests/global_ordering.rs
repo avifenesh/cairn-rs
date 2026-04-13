@@ -79,6 +79,8 @@ fn approval_evt(n: u32) -> EventEnvelope<RuntimeEvent> {
             run_id: Some(RunId::new(format!("run_{n:04}"))),
             task_id: None,
             requirement: ApprovalRequirement::Required,
+            title: None,
+            description: None,
         }),
     )
 }

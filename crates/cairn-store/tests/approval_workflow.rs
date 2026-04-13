@@ -145,6 +145,8 @@ async fn approval_requested_creates_pending_record() {
                     run_id: Some(run_id.clone()),
                     task_id: None,
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 }),
             ),
         ])
@@ -210,6 +212,8 @@ async fn approval_resolved_approved_updates_decision() {
                     run_id: Some(run_id.clone()),
                     task_id: None,
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 }),
             ),
         ])
@@ -294,6 +298,8 @@ async fn approval_resolved_rejected_records_rejection() {
                     run_id: Some(run_id.clone()),
                     task_id: None,
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 }),
             ),
             evt(
@@ -362,6 +368,8 @@ async fn multiple_approvals_pending_list_shows_unresolved_only() {
                     run_id: Some(run_id.clone()),
                     task_id: None,
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 }),
             ),
             evt(
@@ -372,6 +380,8 @@ async fn multiple_approvals_pending_list_shows_unresolved_only() {
                     run_id: Some(run_id.clone()),
                     task_id: None,
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 }),
             ),
             evt(
@@ -382,6 +392,8 @@ async fn multiple_approvals_pending_list_shows_unresolved_only() {
                     run_id: Some(run_id.clone()),
                     task_id: None,
                     requirement: ApprovalRequirement::Required,
+                    title: None,
+                    description: None,
                 }),
             ),
         ])
@@ -552,6 +564,8 @@ async fn full_approval_workflow_tool_to_resolution() {
                 run_id: Some(run_id.clone()),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             }),
         )])
         .await

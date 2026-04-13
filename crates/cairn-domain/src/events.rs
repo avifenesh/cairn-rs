@@ -651,6 +651,12 @@ pub struct ApprovalRequested {
     pub run_id: Option<RunId>,
     pub task_id: Option<TaskId>,
     pub requirement: ApprovalRequirement,
+    /// What the agent wants to do (e.g., "Create PR for issue #18").
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Detailed context — the agent's proposal, reasoning, affected files.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1994,6 +2000,8 @@ mod tests {
             run_id: None,
             task_id: Some(TaskId::new("task_9")),
             requirement: crate::policy::ApprovalRequirement::Required,
+            title: None,
+            description: None,
         });
 
         assert_eq!(task_event.project(), &project);

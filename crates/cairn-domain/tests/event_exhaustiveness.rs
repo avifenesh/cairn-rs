@@ -585,6 +585,8 @@ fn all_variants() -> Vec<RuntimeEvent> {
             run_id: Some(run()),
             task_id: None,
             requirement: ApprovalRequirement::Required,
+            title: None,
+            description: None,
         }),
         RuntimeEvent::ApprovalResolved(cairn_domain::ApprovalResolved {
             project: p(),

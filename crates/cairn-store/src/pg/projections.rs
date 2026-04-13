@@ -149,7 +149,7 @@ impl PgSyncProjection {
                 let requirement_str = enum_to_str(&e.requirement)?;
                 sqlx::query(
                     "INSERT INTO approvals (approval_id, tenant_id, workspace_id, project_id, run_id, task_id, requirement, title, description, version, created_at, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, 1, $8, $8)",
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $10)",
                 )
                 .bind(e.approval_id.as_str())
                 .bind(e.project.tenant_id.as_str())
@@ -158,6 +158,8 @@ impl PgSyncProjection {
                 .bind(e.run_id.as_ref().map(|id| id.as_str()))
                 .bind(e.task_id.as_ref().map(|id| id.as_str()))
                 .bind(requirement_str)
+                .bind(e.title.as_deref())
+                .bind(e.description.as_deref())
                 .bind(now)
                 .execute(&mut **tx)
                 .await

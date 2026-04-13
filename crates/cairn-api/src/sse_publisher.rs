@@ -177,6 +177,8 @@ mod tests {
             run_id: None,
             task_id: None,
             requirement: ApprovalRequirement::Required,
+            title: None,
+            description: None,
         });
         assert_eq!(
             map_event_to_sse_name(&event),
@@ -261,6 +263,8 @@ mod tests {
             run_id: None,
             task_id: Some(TaskId::new("task_1")),
             requirement: ApprovalRequirement::Required,
+            title: None,
+            description: None,
         });
         let stored = test_stored_event(event, 8);
         let record = ApprovalRecord {

@@ -243,6 +243,11 @@ where
             run_id: None,
             task_id: None,
             requirement: ApprovalRequirement::Required,
+            title: Some(format!("Approve prompt release: {}", release_id.as_str())),
+            description: Some(format!(
+                "Prompt release `{}` requires operator approval before activation.",
+                release_id.as_str()
+            )),
         }));
         self.store.append(&[event]).await?;
         // Store the release → approval link.

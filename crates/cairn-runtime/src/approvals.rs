@@ -22,6 +22,22 @@ pub trait ApprovalService: Send + Sync {
         requirement: ApprovalRequirement,
     ) -> Result<ApprovalRecord, RuntimeError>;
 
+    /// Request approval with context (title + description for the operator).
+    async fn request_with_context(
+        &self,
+        project: &ProjectKey,
+        approval_id: ApprovalId,
+        run_id: Option<RunId>,
+        task_id: Option<TaskId>,
+        requirement: ApprovalRequirement,
+        _title: Option<String>,
+        _description: Option<String>,
+    ) -> Result<ApprovalRecord, RuntimeError> {
+        // Default: delegate to request() without context (backwards compat).
+        self.request(project, approval_id, run_id, task_id, requirement)
+            .await
+    }
+
     /// Get an approval by ID.
     async fn get(&self, approval_id: &ApprovalId) -> Result<Option<ApprovalRecord>, RuntimeError>;
 

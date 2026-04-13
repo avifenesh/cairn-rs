@@ -213,6 +213,8 @@ fn build_20_events() -> Vec<EventEnvelope<RuntimeEvent>> {
                 run_id: Some(RunId::new("run_1")),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             }),
         ),
         // 12
@@ -224,6 +226,8 @@ fn build_20_events() -> Vec<EventEnvelope<RuntimeEvent>> {
                 run_id: Some(RunId::new("run_2")),
                 task_id: None,
                 requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
             }),
         ),
         // ── run state transitions (4) ────────────────────────────────
