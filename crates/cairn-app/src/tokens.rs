@@ -31,7 +31,7 @@ impl OperatorTokenStore {
     pub fn insert(&self, raw_token: String, record: OperatorTokenRecord) {
         self.inner
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(record.token_id.clone(), (raw_token, record));
     }
 
@@ -39,19 +39,23 @@ impl OperatorTokenStore {
     pub fn raw_token(&self, token_id: &str) -> Option<String> {
         self.inner
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(token_id)
             .map(|(t, _)| t.clone())
     }
 
     pub fn remove(&self, token_id: &str) -> bool {
-        self.inner.write().unwrap().remove(token_id).is_some()
+        self.inner
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(token_id)
+            .is_some()
     }
 
     pub fn list(&self) -> Vec<OperatorTokenRecord> {
         self.inner
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .values()
             .map(|(_, r)| r.clone())
             .collect()
