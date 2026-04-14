@@ -139,7 +139,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::broadcast;
-use tokio::{net::TcpListener, runtime::Builder};
+use tokio::{net::TcpListener, runtime::Builder, task::JoinSet};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
 use utoipa::{OpenApi, ToSchema};
@@ -1282,6 +1282,117 @@ async fn materialize_triggered_run(
     )
     .await?;
     Ok(run)
+}
+
+fn build_trigger_fire_decision_request(
+    project: &ProjectKey,
+    trigger_id: &cairn_domain::TriggerId,
+    signal_id: &SignalId,
+    signal_type: &str,
+) -> cairn_domain::decisions::DecisionRequest {
+    cairn_domain::decisions::DecisionRequest {
+        kind: cairn_domain::decisions::DecisionKind::TriggerFire {
+            trigger_id: trigger_id.as_str().to_owned(),
+            signal_type: signal_type.to_owned(),
+        },
+        principal: cairn_domain::decisions::Principal::System,
+        subject: cairn_domain::decisions::DecisionSubject::Resource {
+            resource_type: "signal".to_owned(),
+            resource_id: signal_id.as_str().to_owned(),
+        },
+        scope: project.clone(),
+        cost_estimate: None,
+        requested_at: now_ms(),
+        correlation_id: cairn_domain::CorrelationId::new(format!(
+            "trigger_fire_{}_{}",
+            trigger_id.as_str(),
+            signal_id.as_str()
+        )),
+    }
+}
+
+fn unavailable_trigger_decision(
+    trigger_id: &cairn_domain::TriggerId,
+    reason: String,
+) -> cairn_runtime::services::trigger_service::TriggerDecisionOutcome {
+    cairn_runtime::services::trigger_service::TriggerDecisionOutcome::Denied {
+        decision_id: cairn_domain::DecisionId::new(format!(
+            "dec_trigger_unavailable_{}_{}",
+            trigger_id.as_str(),
+            now_ms()
+        )),
+        reason,
+    }
+}
+
+async fn trigger_decision_outcomes_for_signal(
+    state: &AppState,
+    project: &ProjectKey,
+    signal_id: &SignalId,
+    signal_type: &str,
+    candidate_trigger_ids: Vec<cairn_domain::TriggerId>,
+) -> HashMap<
+    cairn_domain::TriggerId,
+    cairn_runtime::services::trigger_service::TriggerDecisionOutcome,
+> {
+    let decision_service = state.runtime.decision_service.clone();
+    let project = project.clone();
+    let signal_id = signal_id.clone();
+    let signal_type = signal_type.to_owned();
+    let mut outcomes = HashMap::new();
+    let mut evaluations = JoinSet::new();
+
+    for trigger_id in candidate_trigger_ids {
+        let decision_service = decision_service.clone();
+        let project = project.clone();
+        let signal_id = signal_id.clone();
+        let signal_type = signal_type.clone();
+        evaluations.spawn(async move {
+            let request = build_trigger_fire_decision_request(
+                &project,
+                &trigger_id,
+                &signal_id,
+                &signal_type,
+            );
+            let outcome = match decision_service.evaluate(request).await {
+                Ok(result) => match result.outcome {
+                    cairn_domain::decisions::DecisionOutcome::Allowed => {
+                        cairn_runtime::services::trigger_service::TriggerDecisionOutcome::Approved {
+                            decision_id: result.decision_id,
+                        }
+                    }
+                    cairn_domain::decisions::DecisionOutcome::Denied { deny_reason, .. } => {
+                        cairn_runtime::services::trigger_service::TriggerDecisionOutcome::Denied {
+                            decision_id: result.decision_id,
+                            reason: deny_reason,
+                        }
+                    }
+                },
+                Err(error) => {
+                    tracing::warn!(
+                        project = ?project,
+                        trigger_id = %trigger_id,
+                        signal_id = %signal_id,
+                        error = %error,
+                        "decision service failed during trigger fire evaluation"
+                    );
+                    unavailable_trigger_decision(
+                        &trigger_id,
+                        format!("decision_service_error: {error}"),
+                    )
+                }
+            };
+            (trigger_id, outcome)
+        });
+    }
+
+    while let Some(result) = evaluations.join_next().await {
+        if let Ok((trigger_id, outcome)) = result {
+            outcomes.insert(trigger_id, outcome);
+        }
+    }
+
+    outcomes
 }
 
 #[derive(Clone)]
@@ -9718,16 +9829,57 @@ async fn ingest_signal_handler(
             }
 
             // RFC 022: evaluate triggers for this signal
-            let (pending_runs, persisted_trigger_events) = {
-                let mut triggers = state.triggers.lock().unwrap();
-                let trigger_events = triggers.evaluate_signal(
+            let decision_candidates = {
+                let triggers = state.triggers.lock().unwrap();
+                triggers.decision_candidates_for_signal(
                     &project,
                     &record.id,
                     &record.source,
                     "", // plugin_id — empty for direct API signals
                     &record.payload,
                     None, // source_run_chain_depth
-                    &cairn_runtime::services::trigger_service::auto_approve_decision,
+                )
+            };
+            let trigger_decision_outcomes: HashMap<
+                cairn_domain::TriggerId,
+                cairn_runtime::services::trigger_service::TriggerDecisionOutcome,
+            > = trigger_decision_outcomes_for_signal(
+                state.as_ref(),
+                &project,
+                &record.id,
+                &record.source,
+                decision_candidates,
+            )
+            .await;
+            let prepared_trigger_ids: HashSet<_> =
+                trigger_decision_outcomes.keys().cloned().collect();
+            let (pending_runs, persisted_trigger_events) = {
+                let mut triggers = state.triggers.lock().unwrap();
+                let trigger_events = triggers.evaluate_signal_for_candidates(
+                    &project,
+                    &record.id,
+                    &record.source,
+                    "", // plugin_id — empty for direct API signals
+                    &record.payload,
+                    None, // source_run_chain_depth
+                    &prepared_trigger_ids,
+                    &|trigger_id, signal_type| {
+                        trigger_decision_outcomes.get(trigger_id).cloned().unwrap_or_else(|| {
+                            tracing::warn!(
+                                project = ?project,
+                                trigger_id = %trigger_id,
+                                signal_id = %record.id,
+                                signal_type,
+                                "trigger evaluation reached decision phase without a prepared decision"
+                            );
+                            unavailable_trigger_decision(
+                                trigger_id,
+                                format!(
+                                    "decision_unavailable_for_trigger_fire:{signal_type}"
+                                ),
+                            )
+                        })
+                    },
                 );
                 let persisted_trigger_events: Vec<RuntimeEvent> = trigger_events
                     .iter()
@@ -23084,6 +23236,37 @@ mod tests {
         serde_json::from_slice(&bytes).expect("response is valid JSON")
     }
 
+    #[derive(Clone)]
+    struct RecordingTriggerFireGuardrail {
+        requests: Arc<Mutex<Vec<cairn_domain::decisions::DecisionRequest>>>,
+        trigger_outcome: cairn_runtime::decisions::GuardrailCheckOutcome,
+    }
+
+    #[async_trait::async_trait]
+    impl cairn_runtime::decisions::GuardrailChecker for RecordingTriggerFireGuardrail {
+        async fn check(
+            &self,
+            request: &cairn_domain::decisions::DecisionRequest,
+        ) -> cairn_runtime::decisions::GuardrailCheckResult {
+            self.requests
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(request.clone());
+
+            let outcome = match &request.kind {
+                cairn_domain::decisions::DecisionKind::TriggerFire { .. } => {
+                    self.trigger_outcome.clone()
+                }
+                _ => cairn_runtime::decisions::GuardrailCheckOutcome::Allow,
+            };
+
+            cairn_runtime::decisions::GuardrailCheckResult {
+                outcome,
+                rule_ids: vec![],
+            }
+        }
+    }
+
     #[tokio::test]
     async fn graph_trace_returns_live_project_nodes_and_edges() {
         use cairn_graph::projections::GraphProjection;
@@ -23599,6 +23782,257 @@ mod tests {
             ),
             "replayed fire ledger must suppress duplicate fires: {replay_events:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn signal_ingest_records_trigger_fire_decision_before_materializing_run() {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let guardrail = Arc::new(RecordingTriggerFireGuardrail {
+            requests: requests.clone(),
+            trigger_outcome: cairn_runtime::decisions::GuardrailCheckOutcome::Allow,
+        });
+
+        let mut state = AppState::new(BootstrapConfig::default()).await.unwrap();
+        let runtime = Arc::get_mut(&mut state.runtime).expect("runtime arc must be unique in test");
+        runtime.decision_service = Arc::new(cairn_runtime::DecisionServiceImpl::with_services(
+            Arc::new(cairn_runtime::decisions::AllowAllScopeChecker),
+            Arc::new(cairn_runtime::decisions::AllowAllVisibilityChecker),
+            guardrail,
+            Arc::new(cairn_runtime::decisions::AllowAllBudgetChecker),
+            Arc::new(cairn_runtime::decisions::AutoApproveResolver),
+        ));
+        let state = Arc::new(state);
+        register_token(&state, "trigger-decision-allow-token");
+
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+
+        let template_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/projects/{DEFAULT_PROJECT_ID}/run-templates"),
+            "trigger-decision-allow-token",
+            serde_json::json!({
+                "name": "Decision allow template",
+                "description": "Template used to verify approved trigger fires",
+                "system_prompt": "Investigate the triggering signal.",
+                "initial_user_message": "Please inspect this labeled issue.",
+                "required_fields": []
+            }),
+        )
+        .await;
+        assert_eq!(template_resp.status(), StatusCode::CREATED);
+        let template_body = response_json(template_resp).await;
+        let template_id = template_body["events"][0]["template_id"]
+            .as_str()
+            .expect("template creation must return template_id")
+            .to_owned();
+
+        let trigger_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/projects/{DEFAULT_PROJECT_ID}/triggers"),
+            "trigger-decision-allow-token",
+            serde_json::json!({
+                "name": "Decision allow trigger",
+                "description": "Trigger used to verify approved trigger fires",
+                "signal_type": "github.issue.labeled",
+                "conditions": [],
+                "run_template_id": template_id,
+                "max_chain_depth": 5
+            }),
+        )
+        .await;
+        assert_eq!(trigger_resp.status(), StatusCode::CREATED);
+
+        let ingest_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/signals",
+            "trigger-decision-allow-token",
+            serde_json::json!({
+                "tenant_id": DEFAULT_TENANT_ID,
+                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "project_id": DEFAULT_PROJECT_ID,
+                "signal_id": "sig_trigger_decision_allow",
+                "source": "github.issue.labeled",
+                "payload": { "action": "labeled" }
+            }),
+        )
+        .await;
+        assert_eq!(ingest_resp.status(), StatusCode::CREATED);
+
+        let runs = cairn_store::projections::RunReadModel::list_active_by_project(
+            state.runtime.store.as_ref(),
+            &project,
+            10,
+        )
+        .await
+        .unwrap();
+        assert_eq!(runs.len(), 1, "approved trigger fires must create a run");
+
+        let recorded_requests = requests.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            recorded_requests.len(),
+            1,
+            "expected one trigger fire decision"
+        );
+        let request = &recorded_requests[0];
+        assert!(matches!(
+            &request.kind,
+            cairn_domain::decisions::DecisionKind::TriggerFire { signal_type, .. }
+                if signal_type == "github.issue.labeled"
+        ));
+        assert!(matches!(
+            request.principal,
+            cairn_domain::decisions::Principal::System
+        ));
+        assert!(matches!(
+            &request.subject,
+            cairn_domain::decisions::DecisionSubject::Resource {
+                resource_type,
+                resource_id,
+            } if resource_type == "signal" && resource_id == "sig_trigger_decision_allow"
+        ));
+    }
+
+    #[tokio::test]
+    async fn signal_ingest_denies_trigger_fire_when_decision_layer_denies() {
+        use cairn_store::event_log::EventLog;
+
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let guardrail = Arc::new(RecordingTriggerFireGuardrail {
+            requests: requests.clone(),
+            trigger_outcome: cairn_runtime::decisions::GuardrailCheckOutcome::Deny(
+                "trigger_guardrail_denied".to_owned(),
+            ),
+        });
+
+        let mut state = AppState::new(BootstrapConfig::default()).await.unwrap();
+        let runtime = Arc::get_mut(&mut state.runtime).expect("runtime arc must be unique in test");
+        runtime.decision_service = Arc::new(cairn_runtime::DecisionServiceImpl::with_services(
+            Arc::new(cairn_runtime::decisions::AllowAllScopeChecker),
+            Arc::new(cairn_runtime::decisions::AllowAllVisibilityChecker),
+            guardrail,
+            Arc::new(cairn_runtime::decisions::AllowAllBudgetChecker),
+            Arc::new(cairn_runtime::decisions::AutoApproveResolver),
+        ));
+        let state = Arc::new(state);
+        register_token(&state, "trigger-decision-deny-token");
+
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+
+        let template_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/projects/{DEFAULT_PROJECT_ID}/run-templates"),
+            "trigger-decision-deny-token",
+            serde_json::json!({
+                "name": "Decision deny template",
+                "description": "Template used to verify denied trigger fires",
+                "system_prompt": "Investigate the triggering signal.",
+                "initial_user_message": "Please inspect this labeled issue.",
+                "required_fields": []
+            }),
+        )
+        .await;
+        assert_eq!(template_resp.status(), StatusCode::CREATED);
+        let template_body = response_json(template_resp).await;
+        let template_id = template_body["events"][0]["template_id"]
+            .as_str()
+            .expect("template creation must return template_id")
+            .to_owned();
+
+        let trigger_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/projects/{DEFAULT_PROJECT_ID}/triggers"),
+            "trigger-decision-deny-token",
+            serde_json::json!({
+                "name": "Decision deny trigger",
+                "description": "Trigger used to verify denied trigger fires",
+                "signal_type": "github.issue.labeled",
+                "conditions": [],
+                "run_template_id": template_id,
+                "max_chain_depth": 5
+            }),
+        )
+        .await;
+        assert_eq!(trigger_resp.status(), StatusCode::CREATED);
+        let trigger_body = response_json(trigger_resp).await;
+        let trigger_id = trigger_body["events"][0]["trigger_id"]
+            .as_str()
+            .expect("trigger creation must return trigger_id")
+            .to_owned();
+
+        let signal_id = "sig_trigger_decision_deny";
+        let ingest_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/signals",
+            "trigger-decision-deny-token",
+            serde_json::json!({
+                "tenant_id": DEFAULT_TENANT_ID,
+                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "project_id": DEFAULT_PROJECT_ID,
+                "signal_id": signal_id,
+                "source": "github.issue.labeled",
+                "payload": { "action": "labeled" }
+            }),
+        )
+        .await;
+        assert_eq!(ingest_resp.status(), StatusCode::CREATED);
+
+        let runs = cairn_store::projections::RunReadModel::list_active_by_project(
+            state.runtime.store.as_ref(),
+            &project,
+            10,
+        )
+        .await
+        .unwrap();
+        assert!(
+            runs.is_empty(),
+            "denied trigger fires must not materialize runs"
+        );
+
+        let events = state
+            .runtime
+            .store
+            .read_stream(None, usize::MAX)
+            .await
+            .unwrap();
+        let denied = events
+            .iter()
+            .find_map(|stored| match &stored.envelope.payload {
+                RuntimeEvent::TriggerDenied(event)
+                    if event.trigger_id.as_str() == trigger_id
+                        && event.signal_id.as_str() == signal_id =>
+                {
+                    Some(event.clone())
+                }
+                _ => None,
+            });
+        let denied = denied.expect("denied trigger fire must be persisted");
+        assert_eq!(denied.reason, "trigger_guardrail_denied");
+
+        let recorded_requests = requests.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            recorded_requests.len(),
+            1,
+            "expected one trigger fire decision"
+        );
+        let request = &recorded_requests[0];
+        assert!(matches!(
+            &request.kind,
+            cairn_domain::decisions::DecisionKind::TriggerFire {
+                trigger_id: recorded_trigger_id,
+                signal_type,
+            } if recorded_trigger_id == &trigger_id && signal_type == "github.issue.labeled"
+        ));
+        assert!(matches!(
+            request.principal,
+            cairn_domain::decisions::Principal::System
+        ));
+        assert!(matches!(
+            &request.subject,
+            cairn_domain::decisions::DecisionSubject::Resource {
+                resource_type,
+                resource_id,
+            } if resource_type == "signal" && resource_id == signal_id
+        ));
     }
 
     #[tokio::test]

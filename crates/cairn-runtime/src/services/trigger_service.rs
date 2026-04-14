@@ -8,7 +8,7 @@
 //! The trigger evaluator is a runtime worker that subscribes to the signal
 //! router (RFC 015) and creates runs for matching triggers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cairn_domain::decisions::RunMode;
@@ -342,6 +342,14 @@ pub enum SkipReason {
     ChainTooDeep,
     AlreadyFired,
     MissingRequiredField { field: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TriggerPreDecisionStatus {
+    Ready,
+    Skipped(SkipReason),
+    RateLimited { bucket_capacity: u32 },
+    BudgetExceeded,
 }
 
 // ── Condition Evaluator ─────────────────────────────────────────────────────
@@ -762,6 +770,129 @@ impl TriggerService {
             .push(fired_at);
     }
 
+    fn matching_trigger_ids(
+        &self,
+        project: &ProjectKey,
+        signal_type: &str,
+        plugin_id: &str,
+    ) -> Vec<TriggerId> {
+        let mut trigger_ids: Vec<_> = self
+            .triggers
+            .values()
+            .filter(|trigger| {
+                &trigger.project == project
+                    && matches!(trigger.state, TriggerState::Enabled)
+                    && trigger.signal_pattern.signal_type == signal_type
+                    && trigger
+                        .signal_pattern
+                        .plugin_id
+                        .as_ref()
+                        .is_none_or(|pid| pid == plugin_id)
+            })
+            .map(|trigger| trigger.id.clone())
+            .collect();
+        trigger_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        trigger_ids
+    }
+
+    fn pre_decision_status(
+        &self,
+        project: &ProjectKey,
+        trigger_id: &TriggerId,
+        signal_id: &SignalId,
+        payload: &serde_json::Value,
+        source_run_chain_depth: Option<u8>,
+        now: u64,
+    ) -> Option<TriggerPreDecisionStatus> {
+        let trigger = self.triggers.get(trigger_id)?;
+
+        let ledger_key = (trigger.id.clone(), signal_id.clone());
+        if self.fire_ledger.contains_key(&ledger_key) {
+            return Some(TriggerPreDecisionStatus::Skipped(SkipReason::AlreadyFired));
+        }
+
+        if !evaluate_conditions(&trigger.conditions, payload) {
+            return Some(TriggerPreDecisionStatus::Skipped(
+                SkipReason::ConditionMismatch,
+            ));
+        }
+
+        let next_depth = source_run_chain_depth.map_or(1u8, |depth| depth.saturating_add(1));
+        if next_depth > trigger.max_chain_depth {
+            return Some(TriggerPreDecisionStatus::Skipped(SkipReason::ChainTooDeep));
+        }
+
+        let window_start = now.saturating_sub(60_000);
+        let current_trigger_count = self
+            .fire_counts
+            .get(trigger_id)
+            .map(|counts| counts.iter().filter(|&&ts| ts > window_start).count())
+            .unwrap_or(0);
+        if current_trigger_count as u32 >= trigger.rate_limit.max_per_minute {
+            return Some(TriggerPreDecisionStatus::RateLimited {
+                bucket_capacity: trigger.rate_limit.max_per_minute,
+            });
+        }
+
+        let hour_ago = now.saturating_sub(3_600_000);
+        let current_project_budget = self
+            .project_budgets
+            .get(project)
+            .map(|entries| entries.iter().filter(|&&ts| ts > hour_ago).count())
+            .unwrap_or(0);
+        if current_project_budget as u32 >= self.default_project_budget {
+            return Some(TriggerPreDecisionStatus::BudgetExceeded);
+        }
+
+        let template = self.templates.get(&trigger.run_template_id)?;
+        if let Some(field) = template
+            .required_fields
+            .iter()
+            .find(|field| resolve_path(payload, field).is_none())
+        {
+            return Some(TriggerPreDecisionStatus::Skipped(
+                SkipReason::MissingRequiredField {
+                    field: field.clone(),
+                },
+            ));
+        }
+
+        Some(TriggerPreDecisionStatus::Ready)
+    }
+
+    /// Preview which triggers are eligible for decision-layer evaluation for a signal.
+    ///
+    /// This runs the pre-decision checks without mutating trigger state so callers
+    /// can consult an async decision service outside the trigger mutex, then call
+    /// `evaluate_signal()` with the resulting outcomes to apply the durable events.
+    pub fn decision_candidates_for_signal(
+        &self,
+        project: &ProjectKey,
+        signal_id: &SignalId,
+        signal_type: &str,
+        plugin_id: &str,
+        payload: &serde_json::Value,
+        source_run_chain_depth: Option<u8>,
+    ) -> Vec<TriggerId> {
+        let now = now_ms();
+        self.matching_trigger_ids(project, signal_type, plugin_id)
+            .into_iter()
+            .filter(|trigger_id| {
+                matches!(
+                    self.pre_decision_status(
+                        project,
+                        trigger_id,
+                        signal_id,
+                        payload,
+                        source_run_chain_depth,
+                        now,
+                    ),
+                    Some(TriggerPreDecisionStatus::Ready)
+                )
+            })
+            .collect()
+    }
+
     // ── Trigger Evaluation ──────────────────────────────────────────
 
     /// Evaluate a signal against all enabled triggers in the project.
@@ -782,104 +913,101 @@ impl TriggerService {
         source_run_chain_depth: Option<u8>,
         decision_fn: &dyn Fn(&TriggerId, &str) -> TriggerDecisionOutcome,
     ) -> Vec<TriggerEvent> {
+        self.evaluate_signal_inner(
+            project,
+            signal_id,
+            signal_type,
+            plugin_id,
+            payload,
+            source_run_chain_depth,
+            None,
+            decision_fn,
+        )
+    }
+
+    /// Evaluate a signal only against a previously prepared trigger snapshot.
+    ///
+    /// This lets callers gather decision outcomes asynchronously without letting
+    /// newly created/enabled triggers slip into the later fire pass without a
+    /// matching decision result.
+    pub fn evaluate_signal_for_candidates(
+        &mut self,
+        project: &ProjectKey,
+        signal_id: &SignalId,
+        signal_type: &str,
+        plugin_id: &str,
+        payload: &serde_json::Value,
+        source_run_chain_depth: Option<u8>,
+        prepared_trigger_ids: &HashSet<TriggerId>,
+        decision_fn: &dyn Fn(&TriggerId, &str) -> TriggerDecisionOutcome,
+    ) -> Vec<TriggerEvent> {
+        self.evaluate_signal_inner(
+            project,
+            signal_id,
+            signal_type,
+            plugin_id,
+            payload,
+            source_run_chain_depth,
+            Some(prepared_trigger_ids),
+            decision_fn,
+        )
+    }
+
+    fn evaluate_signal_inner(
+        &mut self,
+        project: &ProjectKey,
+        signal_id: &SignalId,
+        signal_type: &str,
+        plugin_id: &str,
+        payload: &serde_json::Value,
+        source_run_chain_depth: Option<u8>,
+        prepared_trigger_ids: Option<&HashSet<TriggerId>>,
+        decision_fn: &dyn Fn(&TriggerId, &str) -> TriggerDecisionOutcome,
+    ) -> Vec<TriggerEvent> {
         let now = now_ms();
         let mut events = Vec::new();
 
-        // Collect matching trigger IDs first to avoid borrow issues
-        let matching_triggers: Vec<(
-            TriggerId,
-            RunTemplateId,
-            Vec<TriggerCondition>,
-            u8,
-            RateLimitConfig,
-        )> = self
-            .triggers
-            .values()
-            .filter(|t| {
-                &t.project == project
-                    && matches!(t.state, TriggerState::Enabled)
-                    && t.signal_pattern.signal_type == signal_type
-                    && t.signal_pattern
-                        .plugin_id
-                        .as_ref()
-                        .is_none_or(|pid| pid == plugin_id)
-            })
-            .map(|t| {
-                (
-                    t.id.clone(),
-                    t.run_template_id.clone(),
-                    t.conditions.clone(),
-                    t.max_chain_depth,
-                    t.rate_limit.clone(),
-                )
-            })
-            .collect();
+        let mut matching_triggers = self.matching_trigger_ids(project, signal_type, plugin_id);
+        if let Some(prepared_trigger_ids) = prepared_trigger_ids {
+            matching_triggers.retain(|trigger_id| prepared_trigger_ids.contains(trigger_id));
+        }
 
-        for (trigger_id, template_id, conditions, max_depth, rate_limit) in matching_triggers {
-            // Fire ledger dedup check
-            let ledger_key = (trigger_id.clone(), signal_id.clone());
-            if self.fire_ledger.contains_key(&ledger_key) {
-                events.push(TriggerEvent::TriggerSkipped {
-                    trigger_id,
-                    signal_id: signal_id.clone(),
-                    reason: SkipReason::AlreadyFired,
-                    skipped_at: now,
-                });
-                continue;
-            }
-
-            // Condition evaluation
-            if !evaluate_conditions(&conditions, payload) {
-                events.push(TriggerEvent::TriggerSkipped {
-                    trigger_id,
-                    signal_id: signal_id.clone(),
-                    reason: SkipReason::ConditionMismatch,
-                    skipped_at: now,
-                });
-                continue;
-            }
-
-            // Chain depth check
-            let next_depth = source_run_chain_depth.map_or(1u8, |d| d + 1);
-            if next_depth > max_depth {
-                events.push(TriggerEvent::TriggerSkipped {
-                    trigger_id,
-                    signal_id: signal_id.clone(),
-                    reason: SkipReason::ChainTooDeep,
-                    skipped_at: now,
-                });
-                continue;
-            }
-
-            // Rate limit check
-            let counts = self.fire_counts.entry(trigger_id.clone()).or_default();
-            let window_start = now.saturating_sub(60_000);
-            counts.retain(|&ts| ts > window_start);
-            if counts.len() as u32 >= rate_limit.max_per_minute {
-                events.push(TriggerEvent::TriggerRateLimited {
-                    trigger_id,
-                    signal_id: signal_id.clone(),
-                    bucket_remaining: 0,
-                    bucket_capacity: rate_limit.max_per_minute,
-                    rate_limited_at: now,
-                });
-                continue;
-            }
-
-            // Per-project budget check: if project has exceeded its hourly budget,
-            // skip the fire and suspend the trigger.
-            {
-                let budget_entries = self.project_budgets.entry(project.clone()).or_default();
-                let hour_ago = now.saturating_sub(3_600_000);
-                budget_entries.retain(|&ts| ts > hour_ago);
-                if budget_entries.len() as u32 >= self.default_project_budget {
-                    // Suspend this trigger
-                    if let Some(t) = self.triggers.get_mut(&trigger_id) {
-                        t.state = TriggerState::Suspended {
+        for trigger_id in matching_triggers {
+            match self.pre_decision_status(
+                project,
+                &trigger_id,
+                signal_id,
+                payload,
+                source_run_chain_depth,
+                now,
+            ) {
+                Some(TriggerPreDecisionStatus::Ready) => {}
+                Some(TriggerPreDecisionStatus::Skipped(reason)) => {
+                    events.push(TriggerEvent::TriggerSkipped {
+                        trigger_id,
+                        signal_id: signal_id.clone(),
+                        reason,
+                        skipped_at: now,
+                    });
+                    continue;
+                }
+                Some(TriggerPreDecisionStatus::RateLimited { bucket_capacity }) => {
+                    events.push(TriggerEvent::TriggerRateLimited {
+                        trigger_id,
+                        signal_id: signal_id.clone(),
+                        bucket_remaining: 0,
+                        bucket_capacity,
+                        rate_limited_at: now,
+                    });
+                    continue;
+                }
+                Some(TriggerPreDecisionStatus::BudgetExceeded) => {
+                    if let Some(trigger) = self.triggers.get_mut(&trigger_id) {
+                        trigger.state = TriggerState::Suspended {
                             reason: SuspensionReason::BudgetExceeded,
                             since: now,
                         };
-                        t.updated_at = now;
+                        trigger.updated_at = now;
                     }
                     events.push(TriggerEvent::TriggerSuspended {
                         trigger_id,
@@ -888,32 +1016,14 @@ impl TriggerService {
                     });
                     continue;
                 }
-            }
-
-            // Required fields check (from template)
-            if let Some(template) = self.templates.get(&template_id) {
-                let missing: Vec<String> = template
-                    .required_fields
-                    .iter()
-                    .filter(|f| resolve_path(payload, f).is_none())
-                    .cloned()
-                    .collect();
-
-                if let Some(field) = missing.into_iter().next() {
-                    events.push(TriggerEvent::TriggerSkipped {
-                        trigger_id,
-                        signal_id: signal_id.clone(),
-                        reason: SkipReason::MissingRequiredField { field },
-                        skipped_at: now,
-                    });
-                    continue;
-                }
+                None => continue,
             }
 
             // Decision layer check (RFC 019 integration).
             // The decision_fn callback simulates DecisionService::evaluate()
             // for the TriggerFire decision kind. In production, this calls
             // the actual DecisionService; in tests it can be overridden.
+            let next_depth = source_run_chain_depth.map_or(1u8, |depth| depth.saturating_add(1));
             let decision_outcome = (decision_fn)(&trigger_id, signal_type);
 
             match &decision_outcome {

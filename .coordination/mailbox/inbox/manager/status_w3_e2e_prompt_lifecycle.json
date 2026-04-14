@@ -1,1 +1,0 @@
-{"from":"worker-3","body":"DONE — scripts/e2e-prompt-lifecycle.sh (UC-12). Creates prompt asset, v1+v2 versions via POST /v1/prompts/assets/:id/versions, releases via POST /v1/prompts/releases, activate+rollback via /releases/:id/activate and /releases/:id/rollback, verifies version history intact after rollback. Accepts 404/501 as SKIP. Bash syntax OK."}
