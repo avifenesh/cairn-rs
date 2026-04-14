@@ -57,6 +57,7 @@ async fn generation_bridge_maps_text_usage_tool_calls_and_respects_model_overrid
         "caller-model-override",
         vec![json!({ "role": "user", "content": "hello bridge" })],
         &ProviderBindingSettings::default(),
+        &[],
     )
     .await
     .expect("generation bridge should succeed");
@@ -91,6 +92,7 @@ async fn generation_bridge_maps_rate_limit_errors() {
         "ignored",
         vec![json!({ "role": "user", "content": "hello bridge" })],
         &ProviderBindingSettings::default(),
+        &[],
     )
     .await
     .expect_err("rate limiting should surface as an adapter error");

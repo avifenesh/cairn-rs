@@ -183,6 +183,10 @@ pub trait ChatResponse: fmt::Debug + fmt::Display + Send + Sync {
     fn usage(&self) -> Option<Usage> {
         None
     }
+    /// The model's stop reason (e.g. "stop", "tool_calls", "tool_use").
+    fn finish_reason(&self) -> Option<String> {
+        None
+    }
 }
 
 // ── Streaming types ──────────────────────────────────────────────────────────

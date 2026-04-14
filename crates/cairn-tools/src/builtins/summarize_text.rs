@@ -19,6 +19,7 @@ impl GenerationProvider for NoopProvider {
         _: &str,
         _: Vec<Value>,
         _: &ProviderBindingSettings,
+        _tools: &[Value],
     ) -> Result<GenerationResponse, ProviderAdapterError> {
         Ok(GenerationResponse {
             text: "Summary not available (no LLM provider configured).".into(),
@@ -26,6 +27,7 @@ impl GenerationProvider for NoopProvider {
             output_tokens: None,
             model_id: "none".into(),
             tool_calls: vec![],
+            finish_reason: None,
         })
     }
 }
@@ -119,7 +121,7 @@ impl ToolHandler for SummarizeTextTool {
         };
         let resp = self
             .provider
-            .generate(&self.model_id, messages, &settings)
+            .generate(&self.model_id, messages, &settings, &[])
             .await
             .map_err(|e| ToolError::Transient(e.to_string()))?;
 

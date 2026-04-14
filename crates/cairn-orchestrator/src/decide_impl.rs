@@ -212,6 +212,10 @@ impl DecidePhase for LlmDecidePhase {
             });
         }
 
+        // Convert tool descriptors to OpenAI-format definitions for native tool calling.
+        let tool_defs: Vec<serde_json::Value> =
+            tool_descs.iter().map(descriptor_to_tool_def).collect();
+
         let system = build_system_prompt(&ctx.agent_type, &tool_descs);
         let user = build_user_message(ctx, gather, self.token_budget.as_ref());
         let messages = vec![
@@ -222,42 +226,56 @@ impl DecidePhase for LlmDecidePhase {
         let t0 = Instant::now();
         let resp = self
             .provider
-            .generate(&self.model_id, messages.clone(), &self.settings)
+            .generate(&self.model_id, messages.clone(), &self.settings, &tool_defs)
             .await
             .map_err(|e| OrchestratorError::Decide(e.to_string()))?;
         let latency_ms = t0.elapsed().as_millis() as u64;
         let raw_response = resp.text.clone();
 
-        // Parse — retry once if the first attempt yields only an escalation
-        // caused by malformed JSON (the LLM sometimes wraps in prose on first try).
-        let mut proposals = parse_proposals(&resp.text);
-        if is_fallback_escalation(&proposals) {
-            // Retry: explicitly ask the LLM to output only JSON
-            let retry_user = format!(
-                "{user}\n\n⚠️ Your last response was not valid JSON. \
-                 Return ONLY a JSON array of action objects — no prose, no markdown."
-            );
-            let retry_messages = vec![
-                serde_json::json!({ "role": "system", "content": system }),
-                serde_json::json!({ "role": "user",   "content": retry_user }),
-            ];
-            match self
-                .provider
-                .generate(&self.model_id, retry_messages, &self.settings)
-                .await
-            {
-                Ok(r2) => {
-                    let second = parse_proposals(&r2.text);
-                    if !is_fallback_escalation(&second) {
-                        proposals = second;
+        // ── Native tool call path ────────────────────────────────────────────
+        // If the model returned structured tool_calls (via native tool calling),
+        // convert them directly to ActionProposals. This is the preferred path —
+        // no JSON text parsing needed.
+        let mut proposals = if !resp.tool_calls.is_empty() {
+            tool_calls_to_proposals(&resp.tool_calls, &tool_descs)
+        } else {
+            // ── Legacy text-parsing path ─────────────────────────────────────
+            // Parse the raw text response as a JSON array of action objects.
+            // This is the fallback for models that don't support native tool calling.
+            let mut parsed = parse_proposals(&resp.text);
+            if is_fallback_escalation(&parsed) {
+                // Retry: explicitly ask the LLM to output only JSON
+                let retry_user = format!(
+                    "{user}\n\n⚠️ Your last response was not valid JSON. \
+                     Return ONLY a JSON array of action objects — no prose, no markdown."
+                );
+                let retry_messages = vec![
+                    serde_json::json!({ "role": "system", "content": system }),
+                    serde_json::json!({ "role": "user",   "content": retry_user }),
+                ];
+                match self
+                    .provider
+                    .generate(&self.model_id, retry_messages, &self.settings, &tool_defs)
+                    .await
+                {
+                    Ok(r2) => {
+                        // Check if retry response used native tools
+                        if !r2.tool_calls.is_empty() {
+                            parsed = tool_calls_to_proposals(&r2.tool_calls, &tool_descs);
+                        } else {
+                            let second = parse_proposals(&r2.text);
+                            if !is_fallback_escalation(&second) {
+                                parsed = second;
+                            }
+                        }
                     }
-                    // If second attempt also fails, keep the escalation from the first parse
-                }
-                Err(_) => {
-                    // Retry LLM call failed — keep the escalation from the first parse
+                    Err(_) => {
+                        // Retry LLM call failed — keep the escalation from the first parse
+                    }
                 }
             }
-        }
+            parsed
+        };
 
         // Apply confidence bias
         if self.confidence_bias.abs() > f64::EPSILON {
@@ -624,6 +642,76 @@ fn parse_proposals(raw: &str) -> Vec<ActionProposal> {
     )]
 }
 
+/// Convert a `BuiltinToolDescriptor` into an OpenAI-format tool definition.
+///
+/// Output: `{ "type": "function", "function": { "name": "...", "description": "...", "parameters": {...} } }`
+fn descriptor_to_tool_def(desc: &BuiltinToolDescriptor) -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": desc.name,
+            "description": desc.description,
+            "parameters": desc.parameters_schema,
+        }
+    })
+}
+
+/// Convert native tool_calls from the provider response into `ActionProposal` values.
+///
+/// Each tool_call becomes an `InvokeTool` proposal. The tool_name is the function name
+/// and tool_args are the parsed arguments.
+fn tool_calls_to_proposals(
+    tool_calls: &[serde_json::Value],
+    tool_descs: &[BuiltinToolDescriptor],
+) -> Vec<ActionProposal> {
+    let proposals: Vec<ActionProposal> = tool_calls
+        .iter()
+        .filter_map(|tc| {
+            let func = tc.get("function")?;
+            let name = func.get("name")?.as_str()?.to_owned();
+            // Arguments can be a JSON string (OpenAI) or a parsed object (Anthropic/Bedrock).
+            let args = match func.get("arguments") {
+                Some(serde_json::Value::String(s)) => {
+                    serde_json::from_str(s).unwrap_or(serde_json::Value::Null)
+                }
+                Some(v) => v.clone(),
+                None => serde_json::json!({}),
+            };
+
+            // Check if this tool is a safe read-only action.
+            let requires_approval = tool_descs
+                .iter()
+                .find(|d| d.name == name)
+                .map(|d| {
+                    matches!(
+                        d.execution_class,
+                        cairn_domain::policy::ExecutionClass::Sensitive
+                    )
+                })
+                .unwrap_or(false);
+
+            Some(ActionProposal {
+                action_type: ActionType::InvokeTool,
+                description: format!("invoke {name}"),
+                confidence: 0.9, // native tool calls are high-confidence by definition
+                tool_name: Some(name),
+                tool_args: Some(args),
+                requires_approval,
+            })
+        })
+        .collect();
+
+    if proposals.is_empty() {
+        // All tool calls were malformed — escalate
+        vec![ActionProposal::escalate(
+            "Model returned tool_calls but none could be parsed".to_owned(),
+            0.0,
+        )]
+    } else {
+        proposals
+    }
+}
+
 fn strip_markdown_fence(s: &str) -> &str {
     let s = s.trim();
     if let Some(inner) = s.strip_prefix("```json").or_else(|| s.strip_prefix("```")) {
@@ -753,6 +841,7 @@ mod tests {
             _model_id: &str,
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Ok(GenerationResponse {
                 text: self.response.clone(),
@@ -760,6 +849,7 @@ mod tests {
                 output_tokens: Some(100),
                 model_id: "test-brain".to_owned(),
                 tool_calls: vec![],
+                finish_reason: None,
             })
         }
     }
@@ -773,6 +863,7 @@ mod tests {
             _: &str,
             _: Vec<serde_json::Value>,
             _: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Err(ProviderAdapterError::TransportFailure("offline".to_owned()))
         }
@@ -1319,6 +1410,7 @@ mod tests {
                 _model: &str,
                 messages: Vec<serde_json::Value>,
                 _settings: &ProviderBindingSettings,
+                _tools: &[serde_json::Value],
             ) -> Result<GenerationResponse, ProviderAdapterError> {
                 if let Some(system) = messages.first().and_then(|m| m["content"].as_str()) {
                     *self.captured.lock().unwrap() = system.to_owned();
@@ -1329,6 +1421,7 @@ mod tests {
                     output_tokens: Some(50),
                     model_id: "test-model".to_owned(),
                     tool_calls: vec![],
+                    finish_reason: None,
                 })
             }
         }
@@ -1386,6 +1479,7 @@ mod tests {
                 _model: &str,
                 messages: Vec<serde_json::Value>,
                 _settings: &ProviderBindingSettings,
+                _tools: &[serde_json::Value],
             ) -> Result<GenerationResponse, ProviderAdapterError> {
                 if let Some(system) = messages.first().and_then(|m| m["content"].as_str()) {
                     *self.captured.lock().unwrap() = system.to_owned();
@@ -1396,6 +1490,7 @@ mod tests {
                     output_tokens: Some(20),
                     model_id: "test-model".to_owned(),
                     tool_calls: vec![],
+                    finish_reason: None,
                 })
             }
         }
@@ -1480,5 +1575,203 @@ mod tests {
             disabled.output["total"], 0,
             "disabled project must not discover tools from an unenabled plugin"
         );
+    }
+
+    // ── Native tool calling tests ────────────────────────────────────────────
+
+    #[test]
+    fn descriptor_to_tool_def_produces_openai_format() {
+        let desc = BuiltinToolDescriptor {
+            name: "file_read".to_owned(),
+            tier: ToolTier::Core,
+            description: "Read a file from the filesystem.".to_owned(),
+            parameters_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "File path" }
+                },
+                "required": ["path"]
+            }),
+            execution_class: cairn_domain::policy::ExecutionClass::SupervisedProcess,
+            permission_level: cairn_tools::builtins::PermissionLevel::ReadOnly,
+            category: cairn_tools::builtins::ToolCategory::FileSystem,
+            tool_effect: ToolEffect::Observational,
+            retry_safety: cairn_tools::builtins::RetrySafety::IdempotentSafe,
+        };
+        let def = descriptor_to_tool_def(&desc);
+        assert_eq!(def["type"], "function");
+        assert_eq!(def["function"]["name"], "file_read");
+        assert_eq!(
+            def["function"]["description"],
+            "Read a file from the filesystem."
+        );
+        assert!(def["function"]["parameters"]["properties"]["path"].is_object());
+    }
+
+    #[test]
+    fn tool_calls_to_proposals_converts_native_calls() {
+        let tool_calls = vec![serde_json::json!({
+            "id": "call_abc123",
+            "type": "function",
+            "function": {
+                "name": "file_read",
+                "arguments": "{\"path\": \"/tmp/test.txt\"}"
+            }
+        })];
+        let descs = vec![BuiltinToolDescriptor {
+            name: "file_read".to_owned(),
+            tier: ToolTier::Core,
+            description: "Read a file.".to_owned(),
+            parameters_schema: serde_json::json!({}),
+            execution_class: cairn_domain::policy::ExecutionClass::SupervisedProcess,
+            permission_level: cairn_tools::builtins::PermissionLevel::ReadOnly,
+            category: cairn_tools::builtins::ToolCategory::FileSystem,
+            tool_effect: ToolEffect::Observational,
+            retry_safety: cairn_tools::builtins::RetrySafety::IdempotentSafe,
+        }];
+        let proposals = tool_calls_to_proposals(&tool_calls, &descs);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::InvokeTool);
+        assert_eq!(proposals[0].tool_name.as_deref(), Some("file_read"));
+        assert_eq!(
+            proposals[0].tool_args.as_ref().unwrap()["path"],
+            "/tmp/test.txt"
+        );
+        assert!(!proposals[0].requires_approval);
+    }
+
+    #[test]
+    fn tool_calls_to_proposals_sets_approval_for_sensitive_tools() {
+        let tool_calls = vec![serde_json::json!({
+            "id": "call_xyz",
+            "type": "function",
+            "function": {
+                "name": "shell_exec",
+                "arguments": "{\"command\": \"rm -rf /\"}"
+            }
+        })];
+        let descs = vec![BuiltinToolDescriptor {
+            name: "shell_exec".to_owned(),
+            tier: ToolTier::Core,
+            description: "Execute a shell command.".to_owned(),
+            parameters_schema: serde_json::json!({}),
+            execution_class: cairn_domain::policy::ExecutionClass::Sensitive,
+            permission_level: cairn_tools::builtins::PermissionLevel::Execute,
+            category: cairn_tools::builtins::ToolCategory::Shell,
+            tool_effect: ToolEffect::External,
+            retry_safety: cairn_tools::builtins::RetrySafety::DangerousPause,
+        }];
+        let proposals = tool_calls_to_proposals(&tool_calls, &descs);
+        assert_eq!(proposals.len(), 1);
+        assert!(proposals[0].requires_approval);
+    }
+
+    #[test]
+    fn tool_calls_to_proposals_handles_object_arguments() {
+        // Anthropic/Bedrock return arguments as parsed JSON objects, not strings
+        let tool_calls = vec![serde_json::json!({
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "memory_search",
+                "arguments": { "query": "architecture" }
+            }
+        })];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].tool_args.as_ref().unwrap()["query"],
+            "architecture"
+        );
+    }
+
+    #[test]
+    fn tool_calls_to_proposals_parallel_calls() {
+        let tool_calls = vec![
+            serde_json::json!({
+                "id": "call_1",
+                "type": "function",
+                "function": { "name": "file_read", "arguments": "{\"path\": \"a.rs\"}" }
+            }),
+            serde_json::json!({
+                "id": "call_2",
+                "type": "function",
+                "function": { "name": "grep_search", "arguments": "{\"query\": \"TODO\"}" }
+            }),
+        ];
+        let proposals = tool_calls_to_proposals(&tool_calls, &[]);
+        assert_eq!(proposals.len(), 2);
+        assert_eq!(proposals[0].tool_name.as_deref(), Some("file_read"));
+        assert_eq!(proposals[1].tool_name.as_deref(), Some("grep_search"));
+    }
+
+    /// End-to-end: model returns native tool_calls → proposals are InvokeTool
+    #[tokio::test]
+    async fn decide_uses_native_tool_calls_when_present() {
+        struct NativeToolProvider;
+
+        #[async_trait]
+        impl GenerationProvider for NativeToolProvider {
+            async fn generate(
+                &self,
+                _model: &str,
+                _messages: Vec<serde_json::Value>,
+                _settings: &ProviderBindingSettings,
+                tools: &[serde_json::Value],
+            ) -> Result<GenerationResponse, ProviderAdapterError> {
+                // Verify tools were sent
+                assert!(!tools.is_empty(), "tools should be passed to generate");
+                assert_eq!(tools[0]["function"]["name"], "grep_search");
+
+                Ok(GenerationResponse {
+                    text: String::new(), // no text — only tool_calls
+                    input_tokens: Some(200),
+                    output_tokens: Some(50),
+                    model_id: "test-model".to_owned(),
+                    tool_calls: vec![serde_json::json!({
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "grep_search",
+                            "arguments": "{\"query\": \"architecture\"}"
+                        }
+                    })],
+                    finish_reason: Some("tool_calls".to_owned()),
+                })
+            }
+        }
+
+        let registry =
+            Arc::new(BuiltinToolRegistry::new().register(Arc::new(cairn_tools::GrepSearchTool)));
+        let phase =
+            LlmDecidePhase::new(Arc::new(NativeToolProvider), "test-model").with_tools(registry);
+        let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
+
+        assert_eq!(out.proposals.len(), 1);
+        assert_eq!(out.proposals[0].action_type, ActionType::InvokeTool);
+        assert_eq!(out.proposals[0].tool_name.as_deref(), Some("grep_search"));
+        assert_eq!(
+            out.proposals[0].tool_args.as_ref().unwrap()["query"],
+            "architecture"
+        );
+        assert!(
+            !out.proposals[0].requires_approval,
+            "grep is a safe read action"
+        );
+    }
+
+    /// Fallback: model returns text (no tool_calls) → parse_proposals handles it
+    #[tokio::test]
+    async fn decide_falls_back_to_text_parsing_when_no_tool_calls() {
+        let mock = Arc::new(MockProvider {
+            response: r#"[{"action_type":"complete_run","description":"done","confidence":0.9,"requires_approval":false}]"#.to_owned(),
+        });
+        let registry =
+            Arc::new(BuiltinToolRegistry::new().register(Arc::new(cairn_tools::GrepSearchTool)));
+        let phase = LlmDecidePhase::new(mock, "test-model").with_tools(registry);
+        let out = phase.decide(&ctx(), &empty_gather()).await.unwrap();
+
+        assert_eq!(out.proposals.len(), 1);
+        assert_eq!(out.proposals[0].action_type, ActionType::CompleteRun);
     }
 }

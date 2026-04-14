@@ -471,11 +471,22 @@ pub struct SpendThresholdRecord {
 /// structured output, timeout, and cancellation.
 #[async_trait::async_trait]
 pub trait GenerationProvider: Send + Sync {
+    /// Generate a response from the model.
+    ///
+    /// `tools` contains OpenAI-style tool definitions:
+    /// `[{ "type": "function", "function": { "name", "description", "parameters" } }]`
+    ///
+    /// Provider adapters translate these to their native format (Anthropic
+    /// `input_schema`, Bedrock `toolSpec`, etc.) and parse native `tool_calls`
+    /// from the response into `GenerationResponse::tool_calls`.
+    ///
+    /// Pass `&[]` when no tools should be sent (fallback to text-only).
     async fn generate(
         &self,
         model_id: &str,
         messages: Vec<serde_json::Value>,
         settings: &ProviderBindingSettings,
+        tools: &[serde_json::Value],
     ) -> Result<GenerationResponse, ProviderAdapterError>;
 }
 
@@ -486,7 +497,18 @@ pub struct GenerationResponse {
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
     pub model_id: String,
+    /// Native tool calls extracted from the provider response.
+    ///
+    /// Each entry is in OpenAI format:
+    /// `{ "id": "call_...", "type": "function", "function": { "name": "...", "arguments": "..." } }`
+    ///
+    /// Non-empty when the model chose to call tools via native tool calling.
+    /// Empty when the model returned only text, or the provider doesn't support tools.
     pub tool_calls: Vec<serde_json::Value>,
+    /// The provider's stop reason (e.g. "stop", "tool_calls", "tool_use").
+    /// Used to detect whether the model wants to call tools or has finished.
+    #[serde(default)]
+    pub finish_reason: Option<String>,
 }
 
 /// Reranker provider adapter trait per RFC 009.

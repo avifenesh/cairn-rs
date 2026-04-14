@@ -359,7 +359,7 @@ impl BrainLlmClient {
         let messages = PromptBuilder::build(ctx);
         let response = self
             .provider
-            .generate(&self.model_id, messages, &self.settings)
+            .generate(&self.model_id, messages, &self.settings, &[])
             .await
             .map_err(OrchestratorError::ProviderError)?;
         Ok(ResponseParser::parse(&response.text))
@@ -398,6 +398,7 @@ mod tests {
             _model_id: &str,
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Ok(GenerationResponse {
                 text: self.response.clone(),
@@ -405,6 +406,7 @@ mod tests {
                 output_tokens: Some(80),
                 model_id: "test-model".to_owned(),
                 tool_calls: vec![],
+                finish_reason: None,
             })
         }
     }
@@ -418,6 +420,7 @@ mod tests {
             _model_id: &str,
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Err(ProviderAdapterError::TransportFailure(
                 "mock failure".to_owned(),

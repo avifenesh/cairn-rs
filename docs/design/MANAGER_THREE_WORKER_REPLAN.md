@@ -33,6 +33,7 @@ That means the execution problem has changed:
 ### Stable Now
 
 - workspace-wide tests are green
+- `cairn-app` now boots a composed Axum server/router instead of acting as a bootstrap placeholder
 - preserved feed HTTP and `feed_update` SSE fixtures are aligned to the string-ID contract
 - `assistant_tool_call` completed/failed runtime payloads preserve `taskId`, `toolName`, and `phase`
 - runtime recovery no longer has the earlier placeholder-only implementation
@@ -42,13 +43,14 @@ That means the execution problem has changed:
 
 These are the live half-finished or still-explicit seams worth tracking.
 
-1. `cairn-app` is still a bootstrap shell, not a real composed product entrypoint.
+1. `cairn-app` is a real composed entrypoint now, but the product surface is still split between the library router and binary-only routes.
 
    Evidence:
 
+   - [`crates/cairn-app/src/lib.rs`](../../crates/cairn-app/src/lib.rs)
    - [`crates/cairn-app/src/main.rs`](../../crates/cairn-app/src/main.rs)
 
-   The main binary still prints bootstrap information and comments the intended service wiring instead of actually starting the server and composing the services.
+   The binary now starts the server and layers binary-specific routes on top of `AppBootstrap::build_catalog_routes()`. The remaining seam is surface truth living across both files, which makes route and composition drift easier to miss.
 
 2. `MemoryApiImpl` still uses temporary local CRUD state instead of a canonical durable backing path.
 
@@ -58,16 +60,15 @@ These are the live half-finished or still-explicit seams worth tracking.
 
    Search is service-backed, but create/list/accept/reject still use a local in-memory map and generated IDs/timestamps. That is useful scaffolding, but it is still half-work relative to the product contract.
 
-3. Generated migration reports are lagging behind live code in at least two places.
+3. Generated migration reports still need active refreshes when compatibility work lands.
 
    Evidence:
 
    - [`tests/fixtures/migration/phase0_http_endpoint_gap_report.md`](../../tests/fixtures/migration/phase0_http_endpoint_gap_report.md)
-   - [`tests/fixtures/migration/phase0_sse_publisher_gap_report.md`](../../tests/fixtures/migration/phase0_sse_publisher_gap_report.md)
    - [`crates/cairn-api/tests/http_boundary_alignment.rs`](../../crates/cairn-api/tests/http_boundary_alignment.rs)
-   - [`crates/cairn-app/src/sse_hooks.rs`](../../crates/cairn-app/src/sse_hooks.rs)
+   - [`crates/cairn-api/tests/migration_report_consistency.rs`](../../crates/cairn-api/tests/migration_report_consistency.rs)
 
-   The reports still describe memory search as thinner than the fixture and still describe `memory_proposed` as unmapped, while the current code and tests already prove more than that.
+   These reports are coordination artifacts, not passive notes. When a preserved contract claim changes, the generated reports and their consistency tests need to move in the same cut.
 
 4. `task_update` and `approval_required` still have a split truth:
 
@@ -90,15 +91,15 @@ These are the live half-finished or still-explicit seams worth tracking.
 
    The enriched builder is real, but the active composition path still relies on someone upstream to pass the final assembled assistant text.
 
-6. `memory_proposed` has a real hook and builder, but not yet a finished app-level composition story.
+6. `memory_proposed` has a real hook and builder, but the live memory API path still is not threaded through that hook end to end.
 
    Evidence:
 
+   - [`crates/cairn-app/src/lib.rs`](../../crates/cairn-app/src/lib.rs)
    - [`crates/cairn-app/src/sse_hooks.rs`](../../crates/cairn-app/src/sse_hooks.rs)
    - [`crates/cairn-memory/src/api_impl.rs`](../../crates/cairn-memory/src/api_impl.rs)
-   - [`crates/cairn-app/src/main.rs`](../../crates/cairn-app/src/main.rs)
 
-   The hook path exists and is tested, but the top-level app bootstrap still documents the intended composition in comments rather than wiring it for real.
+   The hook is constructed in app state and the builder is tested, but the live memory endpoint composition still needs that hook passed through the active `MemoryApiImpl` path rather than only existing as adjacent plumbing.
 
 ## Active Operating Model
 

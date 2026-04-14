@@ -32,8 +32,7 @@ ui/test-results/
 ui/playwright-report/
 
 # Coordination (ephemeral multi-agent state)
-.coordination/mailbox/inbox/*/msg-*.json
-.coordination/pids/*.pid
+.coordination/
 
 # Remember (session logs)
 .remember/logs/
