@@ -1350,7 +1350,17 @@ pub struct AppState {
     /// by the observability middleware.  Consumed by `GET /v1/admin/logs`.
     pub request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
     /// GitHub App integration — set by main.rs when GITHUB_APP_ID + private key are configured.
-    /// DEPRECATED: use `integrations` registry instead. Kept during migration.
+    ///
+    /// DEPRECATED: the canonical registration lives in `self.integrations` (the
+    /// `IntegrationRegistry`).  This field is kept ONLY because the legacy webhook,
+    /// queue, scan, and installation handlers below access `GitHubIntegration`
+    /// fields directly (credentials, installations, issue_queue, etc.) and the
+    /// `Integration` trait does not yet expose them.
+    ///
+    /// TODO(integration-migration): add `as_any()` to the `Integration` trait (or
+    /// surface the needed fields through trait methods), migrate the handlers to
+    /// look up GitHub via `state.integrations.get("github")`, then delete this
+    /// field and the `GitHubIntegration` struct.
     pub github: Option<Arc<GitHubIntegration>>,
     /// Integration plugin registry — holds all configured integrations (GitHub, Linear, etc.).
     pub integrations: Arc<cairn_integrations::IntegrationRegistry>,

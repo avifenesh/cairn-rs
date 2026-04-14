@@ -5309,6 +5309,14 @@ async fn main() {
     }
 
     // ── Wire GitHub App integration into lib_state ────────────────────────────
+    // The integration registry (`IntegrationRegistry`) is the canonical home for
+    // all integrations. We register a `GitHubPlugin` there.
+    //
+    // TODO(integration-migration): The legacy `state.github` (`GitHubIntegration`)
+    // is ALSO set here because the webhook/queue/scan handlers in lib.rs still
+    // access its concrete fields (credentials, installations, issue_queue, etc.)
+    // directly.  Once `Integration` trait exposes those fields (or we add
+    // `as_any()` for downcasting), migrate the handlers and remove `state.github`.
     {
         let github_app_id = std::env::var("GITHUB_APP_ID").ok();
         let github_key_file = std::env::var("GITHUB_PRIVATE_KEY_FILE").ok();
@@ -5321,6 +5329,8 @@ async fn main() {
                 Ok(app_id) => match std::fs::read(&key_file) {
                     Ok(pem_bytes) => match cairn_github::AppCredentials::new(app_id, &pem_bytes) {
                         Ok(credentials) => {
+                            // Legacy shim — kept until handlers are migrated to the registry.
+                            // See TODO(integration-migration) above.
                             let github = cairn_app::GitHubIntegration {
                                 credentials: credentials.clone(),
                                 webhook_secret: webhook_secret.clone(),
@@ -5337,7 +5347,8 @@ async fn main() {
                                 run_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(3)),
                                 http: reqwest::Client::new(),
                             };
-                            // Register GitHub plugin in the integration registry.
+                            // Canonical registration — the integration registry is the
+                            // single source of truth for all integrations.
                             let github_plugin = cairn_integrations::github::GitHubPlugin::new(
                                 credentials,
                                 webhook_secret,
@@ -5346,7 +5357,6 @@ async fn main() {
                             let lib_mut = Arc::get_mut(&mut lib_state)
                                 .expect("lib_state must not be cloned before github is wired");
                             lib_mut.github = Some(Arc::new(github));
-                            // Register in the integration registry (sync — we have exclusive access at startup).
                             let registry = Arc::get_mut(&mut lib_mut.integrations)
                                 .expect("integrations registry must not be cloned yet");
                             registry.register_sync(Arc::new(github_plugin));

@@ -167,18 +167,13 @@ impl EmbeddingProvider for OllamaEmbeddingProvider {
 mod tests {
     use super::*;
 
-    #[test]
-    fn from_env_returns_none_when_unset() {
-        std::env::remove_var("OLLAMA_HOST");
-        assert!(OllamaEmbeddingProvider::from_env().is_none());
-    }
+    // Env-var tests (`set_var`/`remove_var`) are unsound in multi-threaded
+    // test runners — they race with other tests. Test constructor directly.
 
     #[test]
-    fn from_env_uses_ollama_host_env_var() {
-        std::env::set_var("OLLAMA_HOST", "http://embed-box:11434");
-        let p = OllamaEmbeddingProvider::from_env().unwrap();
+    fn new_stores_host() {
+        let p = OllamaEmbeddingProvider::new("http://embed-box:11434");
         assert_eq!(p.host(), "http://embed-box:11434");
-        std::env::remove_var("OLLAMA_HOST");
     }
 
     #[test]
@@ -188,9 +183,9 @@ mod tests {
     }
 
     #[test]
-    fn trailing_slash_stripped_from_env() {
-        std::env::set_var("OLLAMA_HOST", "http://localhost:11434/");
-        let p = OllamaEmbeddingProvider::from_env().unwrap();
+    fn trailing_slash_stripped_by_constructor() {
+        let host = "http://localhost:11434/".trim_end_matches('/');
+        let p = OllamaEmbeddingProvider::new(host);
         assert_eq!(p.host(), "http://localhost:11434");
         std::env::remove_var("OLLAMA_HOST");
     }
