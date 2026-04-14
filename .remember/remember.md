@@ -1,16 +1,17 @@
 # Handoff
 
 ## State
-GitHub webhook→orchestrator pipeline built. New `cairn-github` crate (JWT auth, HMAC verification, full REST API client). Webhook handler at POST /v1/webhooks/github with HMAC-SHA256 verification, configurable event→action mappings (GET/PUT /v1/webhooks/github/actions). 6 new API-based GitHub tools in cairn-tools (create_branch, read_file, write_file, create_pr, merge_pr, list_contents). Pipeline: webhook → create session + run → trigger orchestration → LLM decides actions → tools execute → approval gate. All 72+9 tests pass, workspace compiles clean.
+cairn-integrations crate complete (59 tests): Integration trait, registry, 5 built-in plugins (GitHub, Linear, Notion, Obsidian, GenericWebhook). Runtime CRUD API live (`POST/GET/DELETE /v1/integrations`, dynamic `POST /v1/webhooks/{id}`). Core tools (file_read, file_write, shell_exec, git, grep, glob) now in base tool registry via `build_full_tool_registry()` in tool_impls.rs. All prompts rewritten. E2E tested: 18 cairn-dogfood issues scanned, agents dispatched, tools called. Two blocking issues found. All uncommitted on main.
 
 ## Next
-1. **Deploy to dolly** — rebuild Docker image, set GITHUB_APP_ID + GITHUB_PRIVATE_KEY_FILE + GITHUB_WEBHOOK_SECRET env vars, configure event→action mappings via API
-2. **Configure event actions** — PUT /v1/webhooks/github/actions with rules for cairn-dogfood issues
-3. **Wire GitHub API tools into orchestrate handler** — the tools exist but need to be registered in the orchestrate handler's tool registry (currently only gh CLI tools are registered)
-4. **Test end-to-end** — trigger a webhook from cairn-dogfood, verify session/run creation, orchestration, PR creation, approval flow
+1. **Switch to native tool calling** — Current approach asks LLM to output raw JSON arrays. Switch to OpenAI-style `tool_calls` / Anthropic `tool_use` blocks in `decide_impl.rs`. The `LlmDecidePhase` needs to send tools as function schemas and parse structured tool_calls from the response, not raw text.
+2. **Clone repo before orchestration** — `orchestrate_single_issue` must clone the repo into a cairn-workspace sandbox, set `working_dir` to the clone, so file/shell/git tools work locally. Use `SandboxService` or `RepoCloneCache`.
+3. **Commit all changes** — massive uncommitted diff: cairn-integrations crate, prompt rewrites, tool tier fix, CRUD API, JWT fix.
 
 ## Context
-- Dolly: ssh -i ~/.ssh/dolly.pem ubuntu@ec2-3-239-71-6.compute-1.amazonaws.com
-- GitHub App: cairn-agent-dev (ID 3353056), install 123311552, key at /app/github-app.pem
-- Webhook secret: cairn-webhook-secret-2026-k9x7m2p4q8
-- No workers — work solo
+- Two E2E blockers: (1) models output prose+JSON mixed → need native tool calling, (2) agent tries file_read on remote repo path → need local clone.
+- elephant-alpha is free but can't produce strict JSON. minimax-m2.5 via Bedrock works but hits the clone issue.
+- JWT fix: `exp = now + 540` (not 600) because `iat` backdated 60s.
+- Avi: tool tiers are dynamic per agent registration, not static. Each integration defines its tool set.
+- Gitea Docker: `docker start cairn-gitea` (port 3001), user cairn-admin/cairn-pass-2026.
+- Obsidian mock: `node /tmp/obsidian-api-server.js` (port 27124) with vault at /tmp/obsidian-vault.

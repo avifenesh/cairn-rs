@@ -422,6 +422,7 @@ dependencies = [
  "cairn-evals",
  "cairn-github",
  "cairn-graph",
+ "cairn-integrations",
  "cairn-memory",
  "cairn-orchestrator",
  "cairn-providers",
@@ -514,6 +515,23 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+]
+
+[[package]]
+name = "cairn-integrations"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cairn-domain",
+ "cairn-github",
+ "cairn-tools",
+ "http",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

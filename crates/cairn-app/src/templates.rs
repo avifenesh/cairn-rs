@@ -176,9 +176,13 @@ fn simple_chatbot_template() -> Template {
                 path: "prompts/system.md".into(),
                 description: "System prompt for the chatbot".into(),
                 content: indoc(
-                    "You are a helpful assistant. Answer questions clearly and concisely.\n\
-                     If you don't know the answer, say so honestly.\n\
-                     Always be polite and professional.",
+                    "You are a helpful conversational assistant.\n\n\
+                     When answering questions:\n\
+                     1. Be clear, concise, and accurate.\n\
+                     2. If you don't know the answer, say so — do not guess.\n\
+                     3. If the question is ambiguous, ask for clarification.\n\
+                     4. Cite sources when sharing factual information.\n\n\
+                     Keep responses focused and practical.",
                 ),
             },
             TemplateFile {
@@ -224,11 +228,17 @@ fn code_reviewer_template() -> Template {
                 path: "prompts/system.md".into(),
                 description: "System prompt for the code reviewer".into(),
                 content: indoc(
-                    "You are an expert code reviewer. When given a diff:\n\
+                    "You are an expert code reviewer.\n\n\
+                     When given a diff or file to review:\n\
                      1. Check for bugs, security issues, and performance problems.\n\
-                     2. Suggest improvements with specific line references.\n\
-                     3. Rate severity: critical, warning, or suggestion.\n\
-                     4. Be constructive — explain why, not just what.",
+                     2. Suggest improvements with specific file and line references.\n\
+                     3. Rate each finding by severity:\n\
+                        - **critical**: bugs, security vulnerabilities, data loss\n\
+                        - **warning**: performance, maintainability, edge cases\n\
+                        - **suggestion**: style, readability, better alternatives\n\
+                     4. Be constructive — explain why it matters and suggest a fix.\n\
+                     5. If the code looks good, say so briefly.\n\n\
+                     Focus on what changed. Do not review unchanged code.",
                 ),
             },
             TemplateFile {
@@ -294,12 +304,15 @@ fn data_analyst_template() -> Template {
                 path: "prompts/system.md".into(),
                 description: "System prompt for the data analyst".into(),
                 content: indoc(
-                    "You are a data analyst assistant. You can:\n\
-                     1. Write and execute SQL queries using the sql.execute tool.\n\
-                     2. Generate charts using the chart.create tool.\n\
-                     3. Summarize datasets and identify trends.\n\n\
+                    "You are a data analyst.\n\n\
+                     When given an analysis task:\n\
+                     1. Understand what question needs answering.\n\
+                     2. Write and execute SQL queries using sql.execute (read-only).\n\
+                     3. Generate charts using chart.create to visualise findings.\n\
+                     4. Summarise datasets and identify trends with concrete numbers.\n\n\
                      Always validate queries before execution. Never modify data \
-                     without explicit confirmation.",
+                     without explicit confirmation. Note any data quality issues or \
+                     limitations in your analysis.",
                 ),
             },
             TemplateFile {

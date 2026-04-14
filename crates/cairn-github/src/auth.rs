@@ -44,7 +44,7 @@ impl AppCredentials {
 
         let claims = JwtClaims {
             iat: now.saturating_sub(60), // 60s clock skew buffer
-            exp: now + 600,              // 10 minutes
+            exp: now + 540,              // 9 minutes (iat backdated 60s → total 10 min)
             iss: self.app_id.to_string(),
         };
 
