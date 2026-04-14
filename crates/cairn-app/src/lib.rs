@@ -139,7 +139,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::broadcast;
-use tokio::{net::TcpListener, runtime::Builder};
+use tokio::{net::TcpListener, runtime::Builder, task::JoinSet};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
 use utoipa::{OpenApi, ToSchema};
@@ -1335,40 +1335,61 @@ async fn trigger_decision_outcomes_for_signal(
     cairn_domain::TriggerId,
     cairn_runtime::services::trigger_service::TriggerDecisionOutcome,
 > {
+    let decision_service = state.runtime.decision_service.clone();
+    let project = project.clone();
+    let signal_id = signal_id.clone();
+    let signal_type = signal_type.to_owned();
     let mut outcomes = HashMap::new();
+    let mut evaluations = JoinSet::new();
 
     for trigger_id in candidate_trigger_ids {
-        let request =
-            build_trigger_fire_decision_request(project, &trigger_id, signal_id, signal_type);
-        let outcome = match state.runtime.decision_service.evaluate(request).await {
-            Ok(result) => match result.outcome {
-                cairn_domain::decisions::DecisionOutcome::Allowed => {
-                    cairn_runtime::services::trigger_service::TriggerDecisionOutcome::Approved {
-                        decision_id: result.decision_id,
+        let decision_service = decision_service.clone();
+        let project = project.clone();
+        let signal_id = signal_id.clone();
+        let signal_type = signal_type.clone();
+        evaluations.spawn(async move {
+            let request = build_trigger_fire_decision_request(
+                &project,
+                &trigger_id,
+                &signal_id,
+                &signal_type,
+            );
+            let outcome = match decision_service.evaluate(request).await {
+                Ok(result) => match result.outcome {
+                    cairn_domain::decisions::DecisionOutcome::Allowed => {
+                        cairn_runtime::services::trigger_service::TriggerDecisionOutcome::Approved {
+                            decision_id: result.decision_id,
+                        }
                     }
-                }
-                cairn_domain::decisions::DecisionOutcome::Denied { deny_reason, .. } => {
-                    cairn_runtime::services::trigger_service::TriggerDecisionOutcome::Denied {
-                        decision_id: result.decision_id,
-                        reason: deny_reason,
+                    cairn_domain::decisions::DecisionOutcome::Denied { deny_reason, .. } => {
+                        cairn_runtime::services::trigger_service::TriggerDecisionOutcome::Denied {
+                            decision_id: result.decision_id,
+                            reason: deny_reason,
+                        }
                     }
+                },
+                Err(error) => {
+                    tracing::warn!(
+                        project = ?project,
+                        trigger_id = %trigger_id,
+                        signal_id = %signal_id,
+                        error = %error,
+                        "decision service failed during trigger fire evaluation"
+                    );
+                    unavailable_trigger_decision(
+                        &trigger_id,
+                        format!("decision_service_error: {error}"),
+                    )
                 }
-            },
-            Err(error) => {
-                tracing::warn!(
-                    project = ?project,
-                    trigger_id = %trigger_id,
-                    signal_id = %signal_id,
-                    error = %error,
-                    "decision service failed during trigger fire evaluation"
-                );
-                unavailable_trigger_decision(
-                    &trigger_id,
-                    format!("decision_service_error: {error}"),
-                )
-            }
-        };
-        outcomes.insert(trigger_id, outcome);
+            };
+            (trigger_id, outcome)
+        });
+    }
+
+    while let Some(result) = evaluations.join_next().await {
+        if let Ok((trigger_id, outcome)) = result {
+            outcomes.insert(trigger_id, outcome);
+        }
     }
 
     outcomes
