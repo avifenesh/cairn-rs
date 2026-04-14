@@ -8,7 +8,7 @@
 //! The trigger evaluator is a runtime worker that subscribes to the signal
 //! router (RFC 015) and creates runs for matching triggers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cairn_domain::decisions::RunMode;
@@ -776,7 +776,8 @@ impl TriggerService {
         signal_type: &str,
         plugin_id: &str,
     ) -> Vec<TriggerId> {
-        self.triggers
+        let mut trigger_ids: Vec<_> = self
+            .triggers
             .values()
             .filter(|trigger| {
                 &trigger.project == project
@@ -789,7 +790,9 @@ impl TriggerService {
                         .is_none_or(|pid| pid == plugin_id)
             })
             .map(|trigger| trigger.id.clone())
-            .collect()
+            .collect();
+        trigger_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        trigger_ids
     }
 
     fn pre_decision_status(
@@ -910,10 +913,64 @@ impl TriggerService {
         source_run_chain_depth: Option<u8>,
         decision_fn: &dyn Fn(&TriggerId, &str) -> TriggerDecisionOutcome,
     ) -> Vec<TriggerEvent> {
+        self.evaluate_signal_inner(
+            project,
+            signal_id,
+            signal_type,
+            plugin_id,
+            payload,
+            source_run_chain_depth,
+            None,
+            decision_fn,
+        )
+    }
+
+    /// Evaluate a signal only against a previously prepared trigger snapshot.
+    ///
+    /// This lets callers gather decision outcomes asynchronously without letting
+    /// newly created/enabled triggers slip into the later fire pass without a
+    /// matching decision result.
+    pub fn evaluate_signal_for_candidates(
+        &mut self,
+        project: &ProjectKey,
+        signal_id: &SignalId,
+        signal_type: &str,
+        plugin_id: &str,
+        payload: &serde_json::Value,
+        source_run_chain_depth: Option<u8>,
+        prepared_trigger_ids: &HashSet<TriggerId>,
+        decision_fn: &dyn Fn(&TriggerId, &str) -> TriggerDecisionOutcome,
+    ) -> Vec<TriggerEvent> {
+        self.evaluate_signal_inner(
+            project,
+            signal_id,
+            signal_type,
+            plugin_id,
+            payload,
+            source_run_chain_depth,
+            Some(prepared_trigger_ids),
+            decision_fn,
+        )
+    }
+
+    fn evaluate_signal_inner(
+        &mut self,
+        project: &ProjectKey,
+        signal_id: &SignalId,
+        signal_type: &str,
+        plugin_id: &str,
+        payload: &serde_json::Value,
+        source_run_chain_depth: Option<u8>,
+        prepared_trigger_ids: Option<&HashSet<TriggerId>>,
+        decision_fn: &dyn Fn(&TriggerId, &str) -> TriggerDecisionOutcome,
+    ) -> Vec<TriggerEvent> {
         let now = now_ms();
         let mut events = Vec::new();
 
-        let matching_triggers = self.matching_trigger_ids(project, signal_type, plugin_id);
+        let mut matching_triggers = self.matching_trigger_ids(project, signal_type, plugin_id);
+        if let Some(prepared_trigger_ids) = prepared_trigger_ids {
+            matching_triggers.retain(|trigger_id| prepared_trigger_ids.contains(trigger_id));
+        }
 
         for trigger_id in matching_triggers {
             match self.pre_decision_status(

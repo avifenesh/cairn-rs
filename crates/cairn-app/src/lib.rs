@@ -9841,15 +9841,18 @@ async fn ingest_signal_handler(
                 decision_candidates,
             )
             .await;
+            let prepared_trigger_ids: HashSet<_> =
+                trigger_decision_outcomes.keys().cloned().collect();
             let (pending_runs, persisted_trigger_events) = {
                 let mut triggers = state.triggers.lock().unwrap();
-                let trigger_events = triggers.evaluate_signal(
+                let trigger_events = triggers.evaluate_signal_for_candidates(
                     &project,
                     &record.id,
                     &record.source,
                     "", // plugin_id — empty for direct API signals
                     &record.payload,
                     None, // source_run_chain_depth
+                    &prepared_trigger_ids,
                     &|trigger_id, signal_type| {
                         trigger_decision_outcomes.get(trigger_id).cloned().unwrap_or_else(|| {
                             tracing::warn!(
