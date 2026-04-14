@@ -2,13 +2,11 @@
 //! flow through real cairn-memory services, not route-local shaping.
 
 use cairn_api::feed::{FeedEndpoints, FeedItem, FeedQuery};
-use cairn_api::memory_api::{MemoryEndpoints, MemorySearchQuery};
-use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
+use cairn_api::memory_api::MemorySearchQuery;
+use cairn_domain::ProjectKey;
 use cairn_memory::api_impl::MemoryApiImpl;
 use cairn_memory::feed_impl::FeedStore;
 use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
-use cairn_memory::ingest::{IngestRequest, IngestService, SourceType};
-use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use std::sync::Arc;
 
 /// Proves MemoryEndpoints::search goes through RetrievalService,

@@ -8505,7 +8505,12 @@ async fn set_license_override_handler(
         Ok(record) => (StatusCode::OK, Json(record)).into_response(),
         Err(err) => {
             tracing::error!("set_license_override failed: {err}");
-            AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string()).into_response()
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
         }
     }
 }
@@ -9763,7 +9768,12 @@ async fn list_feed_handler(
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(err) => {
             tracing::error!("list_feed failed: {err}");
-            AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string()).into_response()
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
         }
     }
 }
@@ -9790,7 +9800,12 @@ async fn mark_all_feed_items_read_handler(
             .into_response(),
         Err(err) => {
             tracing::error!("mark_all_feed_items_read failed: {err}");
-            AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string()).into_response()
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
         }
     }
 }
@@ -10056,7 +10071,12 @@ async fn delete_signal_subscription_handler(
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
         Err(err) => {
             tracing::error!("delete_signal_subscription failed: {err}");
-            AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string()).into_response()
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
         }
     }
 }
@@ -12944,8 +12964,12 @@ async fn complete_task_handler(
                     Ok(true) => {}
                     Err(err) => {
                         tracing::error!("complete_task check non-terminal children failed: {err}");
-                        return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string())
-                            .into_response();
+                        return AppApiError::new(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "internal_error",
+                            err.to_string(),
+                        )
+                        .into_response();
                     }
                 }
             }
