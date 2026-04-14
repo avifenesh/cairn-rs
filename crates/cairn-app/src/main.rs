@@ -113,6 +113,11 @@ const RATE_WINDOW: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 /// Binary-specific state for routes not covered by the lib.rs catalog.
 ///
+/// Why the split: `cairn_app::AppState` (lib.rs) owns the catalog of 197+
+/// provider-agnostic routes. This struct adds binary-specific routes that
+/// depend on concrete store backends (Postgres/SQLite), WebSocket, or system
+/// introspection. Collapsing them would leak backend deps into the lib.
+///
 /// Shares `runtime` and `tokens` with `cairn_app::AppState` (same Arc).
 /// Fields like `document_store`, `retrieval`, and `ingest` are served
 /// exclusively by the catalog router and are NOT duplicated here.

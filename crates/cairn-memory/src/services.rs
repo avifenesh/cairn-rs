@@ -46,6 +46,12 @@ impl InMemoryServices {
     ///
     /// All services share the same document store so ingest is
     /// immediately visible to retrieval and diagnostics.
+    ///
+    /// Note: The `memory` field uses a no-op proposal hook by default.
+    /// Production code (`AppState::new`) constructs its own `MemoryApiImpl`
+    /// with an SSE proposal hook wired to the broadcast channel. If you need
+    /// SSE events in a custom setup, construct `MemoryApiImpl` directly and
+    /// call `.with_proposal_hook()`.
     pub fn new() -> Self {
         let store = Arc::new(InMemoryDocumentStore::new());
         let chunker = ParagraphChunker::default();
