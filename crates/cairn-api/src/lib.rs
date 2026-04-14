@@ -66,7 +66,7 @@ pub use read_models::{ApprovalSummary, ReadModelQuery, RunSummary, TaskSummary};
 pub use settings_api::{SettingsEndpoints, SettingsSummary};
 pub use sources_channels::{ChannelEndpoints, SourceEndpoints};
 pub use sse::{SseEventEntry, SseEventName, SseFrame, SseStream};
-pub use sse_publisher::{SsePublisher, SseReplayQuery};
+pub use sse_publisher::{ReadModelBackedSsePublisher, SsePublisher, SseReplayQuery};
 
 #[cfg(test)]
 mod tests {

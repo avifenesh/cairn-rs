@@ -77,13 +77,12 @@ fn owner_map_and_sse_gap_report_agree_on_builder_backed_streaming_events() {
     let assistant_end_owner = markdown_row(&owner_map, "assistant_end");
     let assistant_end_gap = markdown_row(&sse_gap_report, "assistant_end");
     assert!(
-        assistant_end_owner
-            .contains("dedicated assistant-streaming builder present; assembled final text handoff still open"),
-        "owner map should keep the assistant_end handoff gap explicit",
+        assistant_end_owner.contains("dedicated assistant-streaming builder present"),
+        "owner map should reflect assistant_end as a dedicated streaming builder path",
     );
     assert!(
-        assistant_end_gap.contains("`supported_via_dedicated_builder_followup_remaining`"),
-        "SSE gap report should keep the assistant_end follow-up explicit",
+        assistant_end_gap.contains("`supported_via_dedicated_builder`"),
+        "SSE gap report should reflect assistant_end as directly builder-backed",
     );
 }
 

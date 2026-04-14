@@ -68,6 +68,8 @@ impl SseMemoryProposalHook {
     }
 }
 
+pub struct SharedMemoryProposalHook(pub Arc<SseMemoryProposalHook>);
+
 impl MemoryProposalHook for SseMemoryProposalHook {
     fn on_proposed(&self, item: &MemoryItem) {
         let mut frame = build_memory_proposed_frame(item.clone(), None);
@@ -90,6 +92,12 @@ impl MemoryProposalHook for SseMemoryProposalHook {
         }
 
         self.frames.lock().unwrap().push(frame);
+    }
+}
+
+impl MemoryProposalHook for SharedMemoryProposalHook {
+    fn on_proposed(&self, item: &MemoryItem) {
+        self.0.on_proposed(item);
     }
 }
 

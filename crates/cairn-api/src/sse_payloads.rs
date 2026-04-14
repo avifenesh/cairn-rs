@@ -236,8 +236,7 @@ pub fn build_enriched_approval_frame(
 }
 
 /// Builds a higher-fidelity `assistant_end` SSE frame with the fully
-/// assembled message text. The caller accumulates deltas during streaming
-/// and passes the final text here.
+/// assembled message text.
 pub fn build_enriched_assistant_end_frame(
     task_id: &str,
     message_text: &str,
@@ -286,11 +285,15 @@ pub fn build_streaming_sse_frame(
                 serde_json::to_value(&payload).ok()?,
             )
         }
-        StreamingOutput::AssistantEnd(_) => {
-            // Caller must use build_enriched_assistant_end_frame with
-            // the assembled message text from accumulated deltas.
-            // Returning None forces the caller to handle this explicitly.
-            return None;
+        StreamingOutput::AssistantEnd(end) => {
+            let payload = AssistantEndPayload {
+                task_id: task_id.to_owned(),
+                message_text: end.message_text.clone(),
+            };
+            (
+                crate::sse::SseEventName::AssistantEnd,
+                serde_json::to_value(&payload).ok()?,
+            )
         }
         StreamingOutput::ToolCallRequested(t) => {
             let payload = AssistantToolCallPayload {
@@ -371,6 +374,44 @@ pub fn shape_event_payload(event: &RuntimeEvent) -> Option<serde_json::Value> {
                     id: e.task_id.to_string(),
                     task_type: None,
                     status: Some(format!("{:?}", e.transition.to).to_lowercase()),
+                    title: None,
+                    description: None,
+                    progress: None,
+                    created_at: None,
+                    updated_at: None,
+                },
+            };
+            serde_json::to_value(&payload).ok()
+        }
+        RuntimeEvent::TaskDependencyAdded(e) => {
+            let payload = TaskUpdatePayload {
+                task: TaskUpdateInner {
+                    id: if e.dependent_task_id.as_str().is_empty() {
+                        e.task_id.to_string()
+                    } else {
+                        e.dependent_task_id.to_string()
+                    },
+                    task_type: None,
+                    status: None,
+                    title: None,
+                    description: None,
+                    progress: None,
+                    created_at: None,
+                    updated_at: None,
+                },
+            };
+            serde_json::to_value(&payload).ok()
+        }
+        RuntimeEvent::TaskDependencyResolved(e) => {
+            let payload = TaskUpdatePayload {
+                task: TaskUpdateInner {
+                    id: if e.dependent_task_id.as_str().is_empty() {
+                        e.task_id.to_string()
+                    } else {
+                        e.dependent_task_id.to_string()
+                    },
+                    task_type: None,
+                    status: None,
                     title: None,
                     description: None,
                     progress: None,
@@ -501,6 +542,8 @@ pub fn shape_event_payload_with_records(
     match event {
         RuntimeEvent::TaskCreated(_)
         | RuntimeEvent::TaskStateChanged(_)
+        | RuntimeEvent::TaskDependencyAdded(_)
+        | RuntimeEvent::TaskDependencyResolved(_)
         | RuntimeEvent::TaskLeaseClaimed(_)
         | RuntimeEvent::TaskLeaseHeartbeated(_) => task_record
             .and_then(|record| serde_json::to_value(task_update_payload_from_record(record)).ok())
@@ -791,6 +834,25 @@ mod tests {
             is_error: false,
         });
         assert!(build_streaming_sse_frame(&output, "task_1", None).is_none());
+    }
+
+    #[test]
+    fn streaming_output_assistant_end_builds_sse_frame() {
+        use cairn_agent::streaming::{AssistantEnd, StopReason, StreamingOutput};
+        use cairn_domain::{RunId, SessionId};
+
+        let output = StreamingOutput::AssistantEnd(AssistantEnd {
+            session_id: SessionId::new("s1"),
+            run_id: RunId::new("r1"),
+            message_text: "The deploy is blocked by ops.".to_owned(),
+            stop_reason: StopReason::EndTurn,
+        });
+        let frame = build_streaming_sse_frame(&output, "task_1", Some("evt_end".to_owned()))
+            .expect("assistant_end should build directly from StreamingOutput");
+        assert_eq!(frame.event, crate::sse::SseEventName::AssistantEnd);
+        assert_eq!(frame.data["taskId"], "task_1");
+        assert_eq!(frame.data["messageText"], "The deploy is blocked by ops.");
+        assert_eq!(frame.id, Some("evt_end".to_owned()));
     }
 
     #[test]

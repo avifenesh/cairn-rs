@@ -76,7 +76,7 @@ impl Default for InMemoryServices {
 mod tests {
     use super::*;
     use cairn_api::feed::FeedEndpoints;
-    use cairn_api::memory_api::{MemoryEndpoints, MemorySearchQuery};
+    use cairn_api::memory_api::{CreateMemoryRequest, MemoryEndpoints, MemorySearchQuery};
     use cairn_domain::{KnowledgeDocumentId, ProjectKey, SourceId};
 
     use crate::deep_search::DeepSearchRequest;
@@ -102,6 +102,18 @@ mod tests {
                 bundle_source_id: None,
                 tags: vec![],
             })
+            .await
+            .unwrap();
+
+        services
+            .memory
+            .create(
+                &project,
+                &CreateMemoryRequest {
+                    content: "Rust ownership and borrowing rules.".to_owned(),
+                    category: Some("project".to_owned()),
+                },
+            )
             .await
             .unwrap();
 
