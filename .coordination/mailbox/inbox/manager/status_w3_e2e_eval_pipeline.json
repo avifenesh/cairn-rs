@@ -1,1 +1,0 @@
-{"from":"worker-3","body":"DONE — scripts/e2e-eval-pipeline.sh (UC-13). Creates dataset, adds 2 entries, creates rubric with 2 dimensions, creates baseline with EvalMetrics, creates+starts+scores eval run, checks dashboard + scorecard + list. All unimplemented endpoints gracefully SKIP. Bash syntax OK."}
