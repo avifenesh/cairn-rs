@@ -85,10 +85,10 @@ pub trait MemoryEndpoints: Send + Sync {
     ) -> Result<MemoryItem, Self::Error>;
 
     /// `POST /v1/memories/:id/accept` — accept a proposed memory.
-    async fn accept(&self, memory_id: &str) -> Result<(), Self::Error>;
+    async fn accept(&self, project: &ProjectKey, memory_id: &str) -> Result<(), Self::Error>;
 
     /// `POST /v1/memories/:id/reject` — reject a proposed memory.
-    async fn reject(&self, memory_id: &str) -> Result<(), Self::Error>;
+    async fn reject(&self, project: &ProjectKey, memory_id: &str) -> Result<(), Self::Error>;
 }
 
 // ---------------------------------------------------------------------------

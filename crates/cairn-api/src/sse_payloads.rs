@@ -383,6 +383,44 @@ pub fn shape_event_payload(event: &RuntimeEvent) -> Option<serde_json::Value> {
             };
             serde_json::to_value(&payload).ok()
         }
+        RuntimeEvent::TaskDependencyAdded(e) => {
+            let payload = TaskUpdatePayload {
+                task: TaskUpdateInner {
+                    id: if e.dependent_task_id.as_str().is_empty() {
+                        e.task_id.to_string()
+                    } else {
+                        e.dependent_task_id.to_string()
+                    },
+                    task_type: None,
+                    status: None,
+                    title: None,
+                    description: None,
+                    progress: None,
+                    created_at: None,
+                    updated_at: None,
+                },
+            };
+            serde_json::to_value(&payload).ok()
+        }
+        RuntimeEvent::TaskDependencyResolved(e) => {
+            let payload = TaskUpdatePayload {
+                task: TaskUpdateInner {
+                    id: if e.dependent_task_id.as_str().is_empty() {
+                        e.task_id.to_string()
+                    } else {
+                        e.dependent_task_id.to_string()
+                    },
+                    task_type: None,
+                    status: None,
+                    title: None,
+                    description: None,
+                    progress: None,
+                    created_at: None,
+                    updated_at: None,
+                },
+            };
+            serde_json::to_value(&payload).ok()
+        }
         RuntimeEvent::TaskLeaseClaimed(e) => {
             let payload = TaskUpdatePayload {
                 task: TaskUpdateInner {
@@ -504,6 +542,8 @@ pub fn shape_event_payload_with_records(
     match event {
         RuntimeEvent::TaskCreated(_)
         | RuntimeEvent::TaskStateChanged(_)
+        | RuntimeEvent::TaskDependencyAdded(_)
+        | RuntimeEvent::TaskDependencyResolved(_)
         | RuntimeEvent::TaskLeaseClaimed(_)
         | RuntimeEvent::TaskLeaseHeartbeated(_) => task_record
             .and_then(|record| serde_json::to_value(task_update_payload_from_record(record)).ok())
