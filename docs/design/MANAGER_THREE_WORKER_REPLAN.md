@@ -52,13 +52,13 @@ These are the live half-finished or still-explicit seams worth tracking.
 
    The binary now starts the server and layers binary-specific routes on top of `AppBootstrap::build_catalog_routes()`. The remaining seam is surface truth living across both files, which makes route and composition drift easier to miss.
 
-2. `MemoryApiImpl` still uses temporary local CRUD state instead of a canonical durable backing path.
+2. `MemoryApiImpl` is now composed through the app surface, but it still relies on the in-memory document store plus generated IDs/timestamps instead of a canonical durable backing path.
 
    Evidence:
 
    - [`crates/cairn-memory/src/api_impl.rs`](../../crates/cairn-memory/src/api_impl.rs)
 
-   Search is service-backed, but create/list/accept/reject still use a local in-memory map and generated IDs/timestamps. That is useful scaffolding, but it is still half-work relative to the product contract.
+   Search and the preserved `/v1/memories*` routes are now service/composition-backed, but create/list/accept/reject still depend on the in-memory document store and generated IDs/timestamps. That is useful scaffolding, but it is still half-work relative to the product contract.
 
 3. Generated migration reports still need active refreshes when compatibility work lands.
 
@@ -90,16 +90,6 @@ These are the live half-finished or still-explicit seams worth tracking.
    - [`crates/cairn-api/src/sse_payloads.rs`](../../crates/cairn-api/src/sse_payloads.rs)
 
    The enriched builder is real, but the active composition path still relies on someone upstream to pass the final assembled assistant text.
-
-6. `memory_proposed` has a real hook and builder, but the live memory API path still is not threaded through that hook end to end.
-
-   Evidence:
-
-   - [`crates/cairn-app/src/lib.rs`](../../crates/cairn-app/src/lib.rs)
-   - [`crates/cairn-app/src/sse_hooks.rs`](../../crates/cairn-app/src/sse_hooks.rs)
-   - [`crates/cairn-memory/src/api_impl.rs`](../../crates/cairn-memory/src/api_impl.rs)
-
-   The hook is constructed in app state and the builder is tested, but the live memory endpoint composition still needs that hook passed through the active `MemoryApiImpl` path rather than only existing as adjacent plumbing.
 
 ## Active Operating Model
 
@@ -145,7 +135,7 @@ Owns:
 Current focus:
 
 - reconcile generated reports with the code/tests that already pass
-- turn `memory_proposed` from "builder exists in isolation" into "composed product path"
+- keep the now-composed preserved memory routes and `memory_proposed` path reflected honestly in reports and fixtures
 - finish the `assistant_end` handoff story at the app surface
 
 ### Worker B: Runtime And Durable Core
@@ -189,7 +179,7 @@ Owns:
 Current focus:
 
 - replace temporary memory CRUD/state shortcuts with a more honest backing path
-- support `memory_proposed` through the real memory flow rather than test-only composition
+- keep the composed memory contract honest while durable backing replaces the in-memory shortcut
 - keep assistant streaming/eval/graph surfaces stable while Worker A finalizes product contract truth
 
 ## How We Decide Work Now
