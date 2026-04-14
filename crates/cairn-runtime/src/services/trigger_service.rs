@@ -528,6 +528,11 @@ fn now_ms() -> u64 {
 }
 
 /// In-memory trigger service managing triggers and run templates.
+///
+/// State is rebuilt from the event log on startup via `AppState::replay_triggers()`.
+/// This is intentional — the event log is the durable source of truth, and this
+/// struct is a read-optimized projection rebuilt on every cold start. The fire
+/// ledger prevents duplicate runs even across replays.
 pub struct TriggerService {
     triggers: HashMap<TriggerId, Trigger>,
     templates: HashMap<RunTemplateId, RunTemplate>,
