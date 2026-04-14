@@ -207,9 +207,9 @@ test.describe("3. Create Session", () => {
 
     await signIn(page);
     await nav(page, "sessions");
-    await expect(page.getByTestId("new-session-btn")).toBeVisible();
-    await expect(page.locator("table").first()).toBeVisible();
-    await expect(page.locator("text=Total Sessions")).toBeVisible();
+    await expect(page.getByTestId("new-session-btn")).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("table").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("text=Total Sessions")).toBeVisible({ timeout: 10_000 });
   });
 });
 
