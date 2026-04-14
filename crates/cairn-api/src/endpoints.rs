@@ -15,6 +15,7 @@ pub struct ListQuery {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub status: Option<String>,
+    pub category: Option<String>,
 }
 
 impl ListQuery {
