@@ -4,6 +4,7 @@
 //! pipeline, closing the seam between cairn-api and cairn-memory.
 
 use async_trait::async_trait;
+use chrono::{SecondsFormat, TimeZone, Utc};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -114,8 +115,16 @@ fn chunk_to_memory_item(chunk: &ChunkRecord) -> MemoryItem {
         status,
         source,
         confidence,
-        created_at: format!("{}", chunk.created_at),
+        created_at: format_memory_timestamp(chunk.created_at),
     }
+}
+
+fn format_memory_timestamp(created_at_ms: u64) -> String {
+    i64::try_from(created_at_ms)
+        .ok()
+        .and_then(|millis| Utc.timestamp_millis_opt(millis).single())
+        .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Secs, true))
+        .unwrap_or_else(|| created_at_ms.to_string())
 }
 
 #[async_trait]
@@ -136,6 +145,17 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
             .filter(|c| c.source_id.as_str() == MEMORY_SOURCE_ID)
             .map(chunk_to_memory_item)
             .collect();
+
+        if let Some(status) = query.status.as_deref() {
+            let expected = match status {
+                "proposed" => MemoryStatus::Proposed,
+                "accepted" => MemoryStatus::Accepted,
+                "rejected" => MemoryStatus::Rejected,
+                other => return Err(format!("invalid memory status: {other}")),
+            };
+            results.retain(|item| item.status == expected);
+        }
+
         results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
         let total = results.len();
@@ -169,14 +189,11 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
         let items: Vec<MemoryItem> = response
             .results
             .into_iter()
-            .map(|r| MemoryItem {
-                id: r.chunk.chunk_id.to_string(),
-                content: r.chunk.text,
-                category: None,
-                status: MemoryStatus::Accepted,
-                source: None,
-                confidence: Some(r.score),
-                created_at: format!("{}", r.chunk.created_at),
+            .filter(|r| r.chunk.source_id.as_str() == MEMORY_SOURCE_ID)
+            .map(|r| {
+                let mut item = chunk_to_memory_item(&r.chunk);
+                item.confidence = Some(r.score);
+                item
             })
             .collect();
 
@@ -239,7 +256,7 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
             status: MemoryStatus::Proposed,
             source: Some("assistant".to_owned()),
             confidence: None,
-            created_at: format!("{now}"),
+            created_at: format_memory_timestamp(now),
         };
 
         self.proposal_hook.on_proposed(&item);

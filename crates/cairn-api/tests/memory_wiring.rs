@@ -35,6 +35,10 @@ async fn create_and_list_memory() {
 
     assert_eq!(item.content, "Important fact");
     assert_eq!(item.status, MemoryStatus::Proposed);
+    assert!(
+        item.created_at.contains('T') && item.created_at.ends_with('Z'),
+        "created_at should preserve the ISO string contract"
+    );
 
     // List memories
     let list = api
@@ -44,6 +48,10 @@ async fn create_and_list_memory() {
 
     assert_eq!(list.items.len(), 1);
     assert_eq!(list.items[0].content, "Important fact");
+    assert!(
+        list.items[0].created_at.contains('T') && list.items[0].created_at.ends_with('Z'),
+        "list responses should preserve the ISO string contract"
+    );
 }
 
 #[tokio::test]
