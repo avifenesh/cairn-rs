@@ -544,6 +544,7 @@ dependencies = [
  "cairn-graph",
  "cairn-signal",
  "cairn-store",
+ "chrono",
  "serde",
  "serde_json",
  "sqlx",

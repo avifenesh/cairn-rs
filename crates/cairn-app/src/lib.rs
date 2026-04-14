@@ -35,9 +35,12 @@ use cairn_api::auth::{
 use cairn_api::bootstrap::{
     BootstrapConfig, DeploymentMode, EncryptionKeySource, ServerBootstrap, StorageBackend,
 };
+use cairn_api::endpoints::ListQuery;
 use cairn_api::feed::{FeedEndpoints, FeedItem, FeedQuery};
 use cairn_api::http::{preserved_route_catalog, ApiError, HttpMethod, ListResponse};
-use cairn_api::memory_api::{MemoryItem, MemoryStatus};
+use cairn_api::memory_api::{
+    CreateMemoryRequest, MemoryEndpoints, MemoryItem, MemorySearchQuery, MemoryStatus,
+};
 use cairn_api::onboarding::{
     create_onboarding_checklist, materialize_template, ProviderBindingBootstrapService,
     StarterTemplateRegistry,
@@ -82,6 +85,7 @@ use cairn_graph::projections::{GraphEdge, GraphNode, NodeKind};
 use cairn_graph::provenance::ProvenanceService;
 use cairn_graph::retrieval_projector::RetrievalGraphProjector;
 use cairn_graph::{GraphQuery, GraphQueryService, TraversalDirection};
+use cairn_memory::api_impl::MemoryApiImpl;
 use cairn_memory::bundles::{
     BundleEnvelope, ConflictResolutionStrategy, DocumentExportFilters, ImportService,
 };
@@ -1443,6 +1447,7 @@ pub struct AppState {
     a2a_tasks: Arc<Mutex<HashMap<String, A2aTaskBinding>>>,
     pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
     pub metrics: Arc<AppMetrics>,
+    pub memory_api: Arc<MemoryApiImpl<InMemoryRetrieval>>,
     #[allow(dead_code)]
     pub memory_proposal_hook: Arc<sse_hooks::SseMemoryProposalHook>,
     pub started_at: Instant,
@@ -1910,6 +1915,16 @@ impl AppState {
             sse_event_buffer.clone(),
             sse_seq.clone(),
         ));
+        let memory_api = Arc::new(
+            MemoryApiImpl::new(
+                InMemoryRetrieval::with_diagnostics(document_store.clone(), diagnostics.clone())
+                    .with_graph(graph.clone()),
+                document_store.clone(),
+            )
+            .with_proposal_hook(Box::new(sse_hooks::SharedMemoryProposalHook(
+                memory_proposal_hook.clone(),
+            ))),
+        );
 
         runtime
             .tenants
@@ -1974,6 +1989,7 @@ impl AppState {
             a2a_tasks,
             rate_limits,
             metrics,
+            memory_api,
             memory_proposal_hook,
             started_at: Instant::now(),
             otlp_exporter: Arc::new(cairn_runtime::telemetry::OtlpExporter::disabled()),
@@ -2032,6 +2048,61 @@ impl OptionalProjectScopedQuery {
 
     fn offset(&self) -> usize {
         self.offset.unwrap_or(0)
+    }
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+struct PreservedMemoryListQuery {
+    tenant_id: Option<String>,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+    status: Option<String>,
+    category: Option<String>,
+}
+
+impl PreservedMemoryListQuery {
+    fn project(&self) -> ProjectKey {
+        ProjectKey::new(
+            self.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
+            self.workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID),
+            self.project_id.as_deref().unwrap_or(DEFAULT_PROJECT_ID),
+        )
+    }
+
+    fn list_query(&self) -> ListQuery {
+        ListQuery {
+            limit: self.limit,
+            offset: self.offset,
+            status: self.status.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+struct PreservedMemorySearchParams {
+    q: String,
+    limit: Option<usize>,
+    tenant_id: Option<String>,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+}
+
+impl PreservedMemorySearchParams {
+    fn project(&self) -> ProjectKey {
+        ProjectKey::new(
+            self.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
+            self.workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID),
+            self.project_id.as_deref().unwrap_or(DEFAULT_PROJECT_ID),
+        )
+    }
+
+    fn search_query(&self) -> MemorySearchQuery {
+        MemorySearchQuery {
+            q: self.q.clone(),
+            limit: self.limit,
+        }
     }
 }
 
@@ -5025,6 +5096,18 @@ impl AppBootstrap {
                     (HttpMethod::Get, "/v1/memories") => {
                         router.route(&path, get(list_memories_preserved_handler))
                     }
+                    (HttpMethod::Get, "/v1/memories/search") => {
+                        router.route(&path, get(search_memories_preserved_handler))
+                    }
+                    (HttpMethod::Post, "/v1/memories") => {
+                        router.route(&path, post(create_memory_preserved_handler))
+                    }
+                    (HttpMethod::Post, "/v1/memories/:id/accept") => {
+                        router.route(&path, post(accept_memory_preserved_handler))
+                    }
+                    (HttpMethod::Post, "/v1/memories/:id/reject") => {
+                        router.route(&path, post(reject_memory_preserved_handler))
+                    }
                     (HttpMethod::Get, "/v1/graph/trace") => {
                         router.route(&path, get(graph_trace_preserved_handler))
                     }
@@ -5646,6 +5729,14 @@ impl AppBootstrap {
             )
             .route("/v1/graph/multi-hop/:node_id", get(multi_hop_graph_handler))
             // ── Memory ────────────────────────────────────────────────────────────────
+            .route(
+                "/v1/memories/:id/accept",
+                post(accept_memory_preserved_handler),
+            )
+            .route(
+                "/v1/memories/:id/reject",
+                post(reject_memory_preserved_handler),
+            )
             .route(
                 "/v1/memory/provenance/:document_id",
                 get(memory_provenance_handler),
@@ -12995,16 +13086,82 @@ async fn list_tool_invocations_handler(
         .into_response()
 }
 
-async fn list_memories_preserved_handler() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "items": [],
-            "hasMore": false,
-            "has_more": false,
-        })),
-    )
-        .into_response()
+async fn list_memories_preserved_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PreservedMemoryListQuery>,
+) -> impl IntoResponse {
+    match state
+        .memory_api
+        .list(&query.project(), &query.list_query())
+        .await
+    {
+        Ok(mut list) => {
+            if let Some(category) = query.category.as_deref() {
+                list.items
+                    .retain(|item| item.category.as_deref() == Some(category));
+            }
+
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "items": list.items,
+                    "hasMore": list.has_more,
+                    "has_more": list.has_more,
+                })),
+            )
+                .into_response()
+        }
+        Err(err) => memory_api_error_response(err),
+    }
+}
+
+async fn search_memories_preserved_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PreservedMemorySearchParams>,
+) -> impl IntoResponse {
+    if query.q.trim().is_empty() {
+        return bad_request_response("query parameter q is required");
+    }
+
+    match state
+        .memory_api
+        .search(&query.project(), &query.search_query())
+        .await
+    {
+        Ok(items) => (StatusCode::OK, Json(serde_json::json!({ "items": items }))).into_response(),
+        Err(err) => memory_api_error_response(err),
+    }
+}
+
+async fn create_memory_preserved_handler(
+    State(state): State<Arc<AppState>>,
+    Query(scope): Query<OptionalProjectScopedQuery>,
+    Json(body): Json<CreateMemoryRequest>,
+) -> impl IntoResponse {
+    match state.memory_api.create(&scope.project(), &body).await {
+        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
+        Err(err) => memory_api_error_response(err),
+    }
+}
+
+async fn accept_memory_preserved_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.memory_api.accept(&id).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(err) => memory_api_error_response(err),
+    }
+}
+
+async fn reject_memory_preserved_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.memory_api.reject(&id).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(err) => memory_api_error_response(err),
+    }
 }
 
 async fn graph_trace_preserved_handler(
@@ -19332,6 +19489,18 @@ fn bad_request_response(message: impl Into<String>) -> axum::response::Response 
     validation_error_response(message)
 }
 
+fn memory_api_error_response(err: String) -> Response {
+    if err.starts_with("memory not found:") {
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", err).into_response();
+    }
+
+    if err.starts_with("invalid memory status:") {
+        return bad_request_response(err);
+    }
+
+    AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err).into_response()
+}
+
 fn runtime_error_response(err: cairn_runtime::RuntimeError) -> axum::response::Response {
     match err {
         cairn_runtime::RuntimeError::NotFound { .. } => {
@@ -23234,6 +23403,151 @@ mod tests {
     async fn response_json(resp: axum::response::Response) -> serde_json::Value {
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice(&bytes).expect("response is valid JSON")
+    }
+
+    #[tokio::test]
+    async fn preserved_memory_routes_create_list_search_and_emit_sse() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "memory-preserved-token");
+
+        let create = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/memories",
+            "memory-preserved-token",
+            serde_json::json!({
+                "content": "Ops approvals should be summarized first in the weekly digest.",
+                "category": "project"
+            }),
+        )
+        .await;
+        assert_eq!(create.status(), StatusCode::CREATED);
+
+        let created = response_json(create).await;
+        let created_id = created["id"].as_str().expect("memory id").to_owned();
+        let created_at = created["createdAt"].as_str().expect("createdAt");
+        assert_eq!(created["status"], "proposed");
+        assert_eq!(created["category"], "project");
+        assert!(
+            created_at.contains('T') && created_at.ends_with('Z'),
+            "createdAt should preserve the ISO string contract"
+        );
+
+        let frames = state.memory_proposal_hook.collected_frames();
+        assert_eq!(
+            frames.len(),
+            1,
+            "create should emit one memory_proposed frame"
+        );
+        assert_eq!(
+            frames[0].data["memory"]["content"],
+            "Ops approvals should be summarized first in the weekly digest."
+        );
+
+        let list = get_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/memories?status=proposed&category=project",
+            "memory-preserved-token",
+        )
+        .await;
+        let list_items = list["items"].as_array().expect("items array");
+        assert_eq!(list_items.len(), 1);
+        assert_eq!(list_items[0]["id"], created_id);
+        assert_eq!(list["hasMore"], false);
+        assert_eq!(list["has_more"], false);
+
+        let search = get_json(
+            AppBootstrap::build_router(state),
+            "/v1/memories/search?q=weekly&limit=10",
+            "memory-preserved-token",
+        )
+        .await;
+        let search_items = search["items"].as_array().expect("items array");
+        assert_eq!(search_items.len(), 1);
+        assert_eq!(search_items[0]["id"], created_id);
+        assert_eq!(search_items[0]["status"], "proposed");
+        assert_eq!(search_items[0]["source"], "assistant");
+    }
+
+    #[tokio::test]
+    async fn preserved_memory_accept_and_reject_routes_update_status_filters() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "memory-status-token");
+
+        let accepted = response_json(
+            post_json(
+                AppBootstrap::build_router(state.clone()),
+                "/v1/memories",
+                "memory-status-token",
+                serde_json::json!({
+                    "content": "Ship blockers belong at the top of the summary.",
+                    "category": "ops"
+                }),
+            )
+            .await,
+        )
+        .await;
+        let accepted_id = accepted["id"].as_str().expect("accepted id").to_owned();
+
+        let rejected = response_json(
+            post_json(
+                AppBootstrap::build_router(state.clone()),
+                "/v1/memories",
+                "memory-status-token",
+                serde_json::json!({
+                    "content": "Archive old backlog screenshots after triage.",
+                    "category": "ops"
+                }),
+            )
+            .await,
+        )
+        .await;
+        let rejected_id = rejected["id"].as_str().expect("rejected id").to_owned();
+
+        let accept = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/memories/{accepted_id}/accept"),
+            "memory-status-token",
+            serde_json::json!({}),
+        )
+        .await;
+        let accept_status = accept.status();
+        let accept_body = response_json(accept).await;
+        assert_eq!(accept_status, StatusCode::OK, "{accept_body}");
+        assert_eq!(accept_body["ok"], true);
+
+        let reject = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/memories/{rejected_id}/reject"),
+            "memory-status-token",
+            serde_json::json!({}),
+        )
+        .await;
+        let reject_status = reject.status();
+        let reject_body = response_json(reject).await;
+        assert_eq!(reject_status, StatusCode::OK, "{reject_body}");
+        assert_eq!(reject_body["ok"], true);
+
+        let accepted_list = get_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/memories?status=accepted",
+            "memory-status-token",
+        )
+        .await;
+        let accepted_items = accepted_list["items"].as_array().expect("accepted items");
+        assert_eq!(accepted_items.len(), 1);
+        assert_eq!(accepted_items[0]["id"], accepted_id);
+        assert_eq!(accepted_items[0]["status"], "accepted");
+
+        let rejected_list = get_json(
+            AppBootstrap::build_router(state),
+            "/v1/memories?status=rejected",
+            "memory-status-token",
+        )
+        .await;
+        let rejected_items = rejected_list["items"].as_array().expect("rejected items");
+        assert_eq!(rejected_items.len(), 1);
+        assert_eq!(rejected_items[0]["id"], rejected_id);
+        assert_eq!(rejected_items[0]["status"], "rejected");
     }
 
     #[derive(Clone)]
