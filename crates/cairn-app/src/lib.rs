@@ -893,6 +893,282 @@ struct PendingTriggeredRun {
     template: cairn_runtime::RunTemplate,
 }
 
+fn trigger_condition_values(
+    conditions: &[cairn_runtime::TriggerCondition],
+) -> Vec<serde_json::Value> {
+    conditions
+        .iter()
+        .map(|condition| serde_json::to_value(condition).unwrap_or(serde_json::Value::Null))
+        .collect()
+}
+
+fn trigger_conditions_from_values(
+    values: &[serde_json::Value],
+) -> Result<Vec<cairn_runtime::TriggerCondition>, String> {
+    values
+        .iter()
+        .cloned()
+        .map(|value| {
+            serde_json::from_value(value)
+                .map_err(|error| format!("invalid persisted trigger condition: {error}"))
+        })
+        .collect()
+}
+
+fn domain_trigger_skip_reason(
+    reason: &cairn_runtime::SkipReason,
+) -> cairn_domain::events::TriggerSkipReason {
+    match reason {
+        cairn_runtime::SkipReason::ConditionMismatch => {
+            cairn_domain::events::TriggerSkipReason::ConditionMismatch
+        }
+        cairn_runtime::SkipReason::ChainTooDeep => {
+            cairn_domain::events::TriggerSkipReason::ChainTooDeep
+        }
+        cairn_runtime::SkipReason::AlreadyFired => {
+            cairn_domain::events::TriggerSkipReason::AlreadyFired
+        }
+        cairn_runtime::SkipReason::MissingRequiredField { field } => {
+            cairn_domain::events::TriggerSkipReason::MissingRequiredField {
+                field: field.clone(),
+            }
+        }
+    }
+}
+
+fn domain_trigger_suspension_reason(
+    reason: &cairn_runtime::SuspensionReason,
+) -> cairn_domain::events::TriggerSuspensionReason {
+    match reason {
+        cairn_runtime::SuspensionReason::RateLimitExceeded => {
+            cairn_domain::events::TriggerSuspensionReason::RateLimitExceeded
+        }
+        cairn_runtime::SuspensionReason::BudgetExceeded => {
+            cairn_domain::events::TriggerSuspensionReason::BudgetExceeded
+        }
+        cairn_runtime::SuspensionReason::RepeatedFailures { failure_count } => {
+            cairn_domain::events::TriggerSuspensionReason::RepeatedFailures {
+                failure_count: *failure_count,
+            }
+        }
+        cairn_runtime::SuspensionReason::OperatorPaused => {
+            cairn_domain::events::TriggerSuspensionReason::OperatorPaused
+        }
+    }
+}
+
+fn runtime_trigger_suspension_reason(
+    reason: &cairn_domain::events::TriggerSuspensionReason,
+) -> cairn_runtime::SuspensionReason {
+    match reason {
+        cairn_domain::events::TriggerSuspensionReason::RateLimitExceeded => {
+            cairn_runtime::SuspensionReason::RateLimitExceeded
+        }
+        cairn_domain::events::TriggerSuspensionReason::BudgetExceeded => {
+            cairn_runtime::SuspensionReason::BudgetExceeded
+        }
+        cairn_domain::events::TriggerSuspensionReason::RepeatedFailures { failure_count } => {
+            cairn_runtime::SuspensionReason::RepeatedFailures {
+                failure_count: *failure_count,
+            }
+        }
+        cairn_domain::events::TriggerSuspensionReason::OperatorPaused => {
+            cairn_runtime::SuspensionReason::OperatorPaused
+        }
+    }
+}
+
+fn runtime_event_for_run_template_created(template: &cairn_runtime::RunTemplate) -> RuntimeEvent {
+    RuntimeEvent::RunTemplateCreated(cairn_domain::events::RunTemplateCreated {
+        project: template.project.clone(),
+        template_id: template.id.clone(),
+        name: template.name.clone(),
+        description: template.description.clone(),
+        default_mode: template.default_mode.clone(),
+        system_prompt: template.system_prompt.clone(),
+        initial_user_message: template.initial_user_message.clone(),
+        plugin_allowlist: template.plugin_allowlist.clone(),
+        tool_allowlist: template.tool_allowlist.clone(),
+        budget_max_tokens: template.budget.max_tokens,
+        budget_max_wall_clock_ms: template.budget.max_wall_clock_ms,
+        budget_max_iterations: template.budget.max_iterations,
+        budget_exploration_budget_share: template.budget.exploration_budget_share,
+        sandbox_hint: template.sandbox_hint.clone(),
+        required_fields: template.required_fields.clone(),
+        created_by: template.created_by.clone(),
+        created_at: template.created_at,
+    })
+}
+
+fn runtime_event_for_trigger_created(trigger: &cairn_runtime::Trigger) -> RuntimeEvent {
+    RuntimeEvent::TriggerCreated(cairn_domain::events::TriggerCreated {
+        project: trigger.project.clone(),
+        trigger_id: trigger.id.clone(),
+        name: trigger.name.clone(),
+        description: trigger.description.clone(),
+        signal_type: trigger.signal_pattern.signal_type.clone(),
+        plugin_id: trigger.signal_pattern.plugin_id.clone(),
+        conditions: trigger_condition_values(&trigger.conditions),
+        run_template_id: trigger.run_template_id.clone(),
+        max_per_minute: trigger.rate_limit.max_per_minute,
+        max_burst: trigger.rate_limit.max_burst,
+        max_chain_depth: trigger.max_chain_depth,
+        created_by: trigger.created_by.clone(),
+        created_at: trigger.created_at,
+    })
+}
+
+fn runtime_event_for_trigger_service_event(
+    project: &ProjectKey,
+    event: &cairn_runtime::TriggerEvent,
+) -> Option<RuntimeEvent> {
+    match event {
+        cairn_runtime::TriggerEvent::TriggerEnabled { trigger_id, by, at } => Some(
+            RuntimeEvent::TriggerEnabled(cairn_domain::events::TriggerEnabled {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                by: by.clone(),
+                at: *at,
+            }),
+        ),
+        cairn_runtime::TriggerEvent::TriggerDisabled {
+            trigger_id,
+            by,
+            reason,
+            at,
+        } => Some(RuntimeEvent::TriggerDisabled(
+            cairn_domain::events::TriggerDisabled {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                by: by.clone(),
+                reason: reason.clone(),
+                at: *at,
+            },
+        )),
+        cairn_runtime::TriggerEvent::TriggerSuspended {
+            trigger_id,
+            reason,
+            at,
+        } => Some(RuntimeEvent::TriggerSuspended(
+            cairn_domain::events::TriggerSuspended {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                reason: domain_trigger_suspension_reason(reason),
+                at: *at,
+            },
+        )),
+        cairn_runtime::TriggerEvent::TriggerResumed { trigger_id, at } => Some(
+            RuntimeEvent::TriggerResumed(cairn_domain::events::TriggerResumed {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                at: *at,
+            }),
+        ),
+        cairn_runtime::TriggerEvent::TriggerDeleted { trigger_id, by, at } => Some(
+            RuntimeEvent::TriggerDeleted(cairn_domain::events::TriggerDeleted {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                by: by.clone(),
+                at: *at,
+            }),
+        ),
+        cairn_runtime::TriggerEvent::TriggerFired {
+            trigger_id,
+            signal_id,
+            signal_type,
+            run_id,
+            chain_depth,
+            fired_at,
+        } => Some(RuntimeEvent::TriggerFired(
+            cairn_domain::events::TriggerFired {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                signal_id: signal_id.clone(),
+                signal_type: signal_type.clone(),
+                run_id: run_id.clone(),
+                chain_depth: *chain_depth,
+                fired_at: *fired_at,
+            },
+        )),
+        cairn_runtime::TriggerEvent::TriggerSkipped {
+            trigger_id,
+            signal_id,
+            reason,
+            skipped_at,
+        } => Some(RuntimeEvent::TriggerSkipped(
+            cairn_domain::events::TriggerSkipped {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                signal_id: signal_id.clone(),
+                reason: domain_trigger_skip_reason(reason),
+                skipped_at: *skipped_at,
+            },
+        )),
+        cairn_runtime::TriggerEvent::TriggerDenied {
+            trigger_id,
+            signal_id,
+            decision_id,
+            reason,
+            denied_at,
+        } => Some(RuntimeEvent::TriggerDenied(
+            cairn_domain::events::TriggerDenied {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                signal_id: signal_id.clone(),
+                decision_id: decision_id.clone(),
+                reason: reason.clone(),
+                denied_at: *denied_at,
+            },
+        )),
+        cairn_runtime::TriggerEvent::TriggerRateLimited {
+            trigger_id,
+            signal_id,
+            bucket_remaining,
+            bucket_capacity,
+            rate_limited_at,
+        } => Some(RuntimeEvent::TriggerRateLimited(
+            cairn_domain::events::TriggerRateLimited {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                signal_id: signal_id.clone(),
+                bucket_remaining: *bucket_remaining,
+                bucket_capacity: *bucket_capacity,
+                rate_limited_at: *rate_limited_at,
+            },
+        )),
+        cairn_runtime::TriggerEvent::TriggerPendingApproval {
+            trigger_id,
+            signal_id,
+            approval_id,
+            pending_at,
+        } => Some(RuntimeEvent::TriggerPendingApproval(
+            cairn_domain::events::TriggerPendingApproval {
+                project: project.clone(),
+                trigger_id: trigger_id.clone(),
+                signal_id: signal_id.clone(),
+                approval_id: approval_id.clone(),
+                pending_at: *pending_at,
+            },
+        )),
+        cairn_runtime::TriggerEvent::RunTemplateDeleted {
+            template_id,
+            by,
+            at,
+        } => Some(RuntimeEvent::RunTemplateDeleted(
+            cairn_domain::events::RunTemplateDeleted {
+                project: project.clone(),
+                template_id: template_id.clone(),
+                by: by.clone(),
+                at: *at,
+            },
+        )),
+        cairn_runtime::TriggerEvent::TriggerCreated { .. }
+        | cairn_runtime::TriggerEvent::TriggerUpdated { .. }
+        | cairn_runtime::TriggerEvent::RunTemplateCreated { .. }
+        | cairn_runtime::TriggerEvent::RunTemplateUpdated { .. } => None,
+    }
+}
+
 async fn persist_trigger_run_defaults(
     state: &AppState,
     project: &ProjectKey,
@@ -1261,6 +1537,155 @@ impl AppState {
 
         if created > 0 || completed > 0 {
             eprintln!("eval replay: restored {created} runs ({completed} completed)");
+        }
+    }
+
+    /// Replay trigger/template lifecycle and fire outcomes into the in-memory trigger service.
+    pub async fn replay_triggers(&self) {
+        use cairn_store::event_log::EventLog;
+
+        let events = match self.runtime.store.read_stream(None, usize::MAX).await {
+            Ok(events) => events,
+            Err(error) => {
+                eprintln!("trigger replay: failed to read events: {error}");
+                return;
+            }
+        };
+
+        let mut triggers = self.triggers.lock().unwrap_or_else(|e| e.into_inner());
+        *triggers = TriggerService::new();
+
+        let mut restored_templates = 0u32;
+        let mut restored_triggers = 0u32;
+        let mut restored_fires = 0u32;
+
+        for stored in &events {
+            match &stored.envelope.payload {
+                RuntimeEvent::RunTemplateCreated(event) => {
+                    triggers.create_template(cairn_runtime::RunTemplate {
+                        id: event.template_id.clone(),
+                        project: event.project.clone(),
+                        name: event.name.clone(),
+                        description: event.description.clone(),
+                        default_mode: event.default_mode.clone(),
+                        system_prompt: event.system_prompt.clone(),
+                        initial_user_message: event.initial_user_message.clone(),
+                        plugin_allowlist: event.plugin_allowlist.clone(),
+                        tool_allowlist: event.tool_allowlist.clone(),
+                        budget: cairn_runtime::TemplateBudget {
+                            max_tokens: event.budget_max_tokens,
+                            max_wall_clock_ms: event.budget_max_wall_clock_ms,
+                            max_iterations: event.budget_max_iterations,
+                            exploration_budget_share: event.budget_exploration_budget_share,
+                        },
+                        sandbox_hint: event.sandbox_hint.clone(),
+                        required_fields: event.required_fields.clone(),
+                        created_by: event.created_by.clone(),
+                        created_at: event.created_at,
+                        updated_at: event.created_at,
+                    });
+                    restored_templates += 1;
+                }
+                RuntimeEvent::RunTemplateDeleted(event) => {
+                    let _ = triggers.delete_template(&event.template_id, event.by.clone());
+                }
+                RuntimeEvent::TriggerCreated(event) => {
+                    let conditions = match trigger_conditions_from_values(&event.conditions) {
+                        Ok(conditions) => conditions,
+                        Err(error) => {
+                            eprintln!(
+                                "trigger replay: failed to decode conditions for {}: {error}",
+                                event.trigger_id
+                            );
+                            continue;
+                        }
+                    };
+                    match triggers.create_trigger(cairn_runtime::Trigger {
+                        id: event.trigger_id.clone(),
+                        project: event.project.clone(),
+                        name: event.name.clone(),
+                        description: event.description.clone(),
+                        signal_pattern: cairn_runtime::SignalPattern {
+                            signal_type: event.signal_type.clone(),
+                            plugin_id: event.plugin_id.clone(),
+                        },
+                        conditions,
+                        run_template_id: event.run_template_id.clone(),
+                        state: cairn_runtime::TriggerState::Enabled,
+                        rate_limit: cairn_runtime::RateLimitConfig {
+                            max_per_minute: event.max_per_minute,
+                            max_burst: event.max_burst,
+                        },
+                        max_chain_depth: event.max_chain_depth,
+                        created_by: event.created_by.clone(),
+                        created_at: event.created_at,
+                        updated_at: event.created_at,
+                    }) {
+                        Ok(_) => restored_triggers += 1,
+                        Err(error) => eprintln!(
+                            "trigger replay: failed to restore trigger {}: {error}",
+                            event.trigger_id
+                        ),
+                    }
+                }
+                RuntimeEvent::TriggerEnabled(event) => {
+                    let _ = triggers.restore_trigger_state(
+                        &event.trigger_id,
+                        cairn_runtime::TriggerState::Enabled,
+                        event.at,
+                    );
+                }
+                RuntimeEvent::TriggerDisabled(event) => {
+                    let _ = triggers.restore_trigger_state(
+                        &event.trigger_id,
+                        cairn_runtime::TriggerState::Disabled {
+                            reason: event.reason.clone(),
+                            since: event.at,
+                        },
+                        event.at,
+                    );
+                }
+                RuntimeEvent::TriggerSuspended(event) => {
+                    let _ = triggers.restore_trigger_state(
+                        &event.trigger_id,
+                        cairn_runtime::TriggerState::Suspended {
+                            reason: runtime_trigger_suspension_reason(&event.reason),
+                            since: event.at,
+                        },
+                        event.at,
+                    );
+                }
+                RuntimeEvent::TriggerResumed(event) => {
+                    let _ = triggers.restore_trigger_state(
+                        &event.trigger_id,
+                        cairn_runtime::TriggerState::Enabled,
+                        event.at,
+                    );
+                }
+                RuntimeEvent::TriggerDeleted(event) => {
+                    let _ = triggers.delete_trigger(&event.trigger_id, event.by.clone());
+                }
+                RuntimeEvent::TriggerFired(event) => {
+                    triggers.restore_fired_trigger(
+                        &event.project,
+                        &event.trigger_id,
+                        &event.signal_id,
+                        event.fired_at,
+                    );
+                    restored_fires += 1;
+                }
+                RuntimeEvent::TriggerSkipped(_)
+                | RuntimeEvent::TriggerDenied(_)
+                | RuntimeEvent::TriggerRateLimited(_)
+                | RuntimeEvent::TriggerPendingApproval(_) => {}
+                _ => {}
+            }
+        }
+
+        if restored_templates > 0 || restored_triggers > 0 || restored_fires > 0 {
+            eprintln!(
+                "trigger replay: restored {restored_templates} templates, {restored_triggers} triggers, {restored_fires} fires"
+            );
         }
     }
 
@@ -6737,6 +7162,19 @@ fn event_type_name(event: &RuntimeEvent) -> &'static str {
         RuntimeEvent::SignalIngested(_) => "signal_ingested",
         RuntimeEvent::SignalSubscriptionCreated(_) => "signal_subscription_created",
         RuntimeEvent::SignalRouted(_) => "signal_routed",
+        RuntimeEvent::TriggerCreated(_) => "trigger_created",
+        RuntimeEvent::TriggerEnabled(_) => "trigger_enabled",
+        RuntimeEvent::TriggerDisabled(_) => "trigger_disabled",
+        RuntimeEvent::TriggerSuspended(_) => "trigger_suspended",
+        RuntimeEvent::TriggerResumed(_) => "trigger_resumed",
+        RuntimeEvent::TriggerDeleted(_) => "trigger_deleted",
+        RuntimeEvent::TriggerFired(_) => "trigger_fired",
+        RuntimeEvent::TriggerSkipped(_) => "trigger_skipped",
+        RuntimeEvent::TriggerDenied(_) => "trigger_denied",
+        RuntimeEvent::TriggerRateLimited(_) => "trigger_rate_limited",
+        RuntimeEvent::TriggerPendingApproval(_) => "trigger_pending_approval",
+        RuntimeEvent::RunTemplateCreated(_) => "run_template_created",
+        RuntimeEvent::RunTemplateDeleted(_) => "run_template_deleted",
         RuntimeEvent::ExternalWorkerRegistered(_) => "external_worker_registered",
         RuntimeEvent::ExternalWorkerReported(_) => "external_worker_reported",
         RuntimeEvent::ExternalWorkerSuspended(_) => "external_worker_suspended",
@@ -6964,6 +7402,60 @@ fn event_message(event: &RuntimeEvent) -> String {
         }
         RuntimeEvent::SignalRouted(routed) => {
             format!("Signal {} routed", routed.signal_id)
+        }
+        RuntimeEvent::TriggerCreated(trigger) => {
+            format!("Trigger {} created", trigger.trigger_id)
+        }
+        RuntimeEvent::TriggerEnabled(trigger) => {
+            format!("Trigger {} enabled", trigger.trigger_id)
+        }
+        RuntimeEvent::TriggerDisabled(trigger) => {
+            format!("Trigger {} disabled", trigger.trigger_id)
+        }
+        RuntimeEvent::TriggerSuspended(trigger) => {
+            format!("Trigger {} suspended", trigger.trigger_id)
+        }
+        RuntimeEvent::TriggerResumed(trigger) => {
+            format!("Trigger {} resumed", trigger.trigger_id)
+        }
+        RuntimeEvent::TriggerDeleted(trigger) => {
+            format!("Trigger {} deleted", trigger.trigger_id)
+        }
+        RuntimeEvent::TriggerFired(trigger) => {
+            format!(
+                "Trigger {} fired run {} from signal {}",
+                trigger.trigger_id, trigger.run_id, trigger.signal_id
+            )
+        }
+        RuntimeEvent::TriggerSkipped(trigger) => {
+            format!(
+                "Trigger {} skipped for signal {}",
+                trigger.trigger_id, trigger.signal_id
+            )
+        }
+        RuntimeEvent::TriggerDenied(trigger) => {
+            format!(
+                "Trigger {} denied for signal {}",
+                trigger.trigger_id, trigger.signal_id
+            )
+        }
+        RuntimeEvent::TriggerRateLimited(trigger) => {
+            format!(
+                "Trigger {} rate limited for signal {}",
+                trigger.trigger_id, trigger.signal_id
+            )
+        }
+        RuntimeEvent::TriggerPendingApproval(trigger) => {
+            format!(
+                "Trigger {} pending approval for signal {}",
+                trigger.trigger_id, trigger.signal_id
+            )
+        }
+        RuntimeEvent::RunTemplateCreated(template) => {
+            format!("Run template {} created", template.template_id)
+        }
+        RuntimeEvent::RunTemplateDeleted(template) => {
+            format!("Run template {} deleted", template.template_id)
         }
         RuntimeEvent::ExternalWorkerRegistered(registered) => {
             format!("Worker {} registered", registered.worker_id)
@@ -9216,7 +9708,7 @@ async fn ingest_signal_handler(
             }
 
             // RFC 022: evaluate triggers for this signal
-            let pending_runs = {
+            let (pending_runs, persisted_trigger_events) = {
                 let mut triggers = state.triggers.lock().unwrap();
                 let trigger_events = triggers.evaluate_signal(
                     &project,
@@ -9227,6 +9719,10 @@ async fn ingest_signal_handler(
                     None, // source_run_chain_depth
                     &cairn_runtime::services::trigger_service::auto_approve_decision,
                 );
+                let persisted_trigger_events: Vec<RuntimeEvent> = trigger_events
+                    .iter()
+                    .filter_map(|event| runtime_event_for_trigger_service_event(&project, event))
+                    .collect();
                 telemetry_routes::record_trigger_fire_usage(
                     state.runtime.store.as_ref(),
                     &project,
@@ -9281,8 +9777,22 @@ async fn ingest_signal_handler(
                         );
                     }
                 }
-                pending_runs
+                (pending_runs, persisted_trigger_events)
             };
+
+            if !persisted_trigger_events.is_empty() {
+                let envelopes: Vec<_> = persisted_trigger_events
+                    .into_iter()
+                    .map(cairn_runtime::make_envelope)
+                    .collect();
+                if let Err(error) = state.runtime.store.append(&envelopes).await {
+                    tracing::warn!(
+                        project = ?project,
+                        error = %error,
+                        "failed to persist trigger events during signal ingest"
+                    );
+                }
+            }
 
             for pending_run in pending_runs {
                 if let Err(err) =
@@ -22960,6 +23470,124 @@ mod tests {
             detail["run"]["created_by_trigger_id"],
             trigger_id.as_str(),
             "RunDetail must expose trigger provenance for the badge"
+        );
+    }
+
+    #[tokio::test]
+    async fn replay_triggers_restores_fire_ledger_after_signal_ingest() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "trigger-replay-token");
+
+        let project = ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID);
+
+        let template_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/projects/{DEFAULT_PROJECT_ID}/run-templates"),
+            "trigger-replay-token",
+            serde_json::json!({
+                "name": "Replay template",
+                "description": "Persisted template for replay coverage",
+                "system_prompt": "Investigate the triggering signal.",
+                "initial_user_message": "Please inspect this labeled issue.",
+                "required_fields": []
+            }),
+        )
+        .await;
+        assert_eq!(template_resp.status(), StatusCode::CREATED);
+        let template_body = response_json(template_resp).await;
+        let template_id = template_body["events"][0]["template_id"]
+            .as_str()
+            .expect("template creation must return template_id")
+            .to_owned();
+
+        let trigger_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/projects/{DEFAULT_PROJECT_ID}/triggers"),
+            "trigger-replay-token",
+            serde_json::json!({
+                "name": "Replay trigger",
+                "description": "Persisted trigger for replay coverage",
+                "signal_type": "github.issue.labeled",
+                "conditions": [],
+                "run_template_id": template_id,
+                "max_chain_depth": 5
+            }),
+        )
+        .await;
+        assert_eq!(trigger_resp.status(), StatusCode::CREATED);
+        let trigger_body = response_json(trigger_resp).await;
+        let trigger_id = trigger_body["events"][0]["trigger_id"]
+            .as_str()
+            .expect("trigger creation must return trigger_id")
+            .to_owned();
+
+        let signal_id = "sig_trigger_replay";
+        let payload = serde_json::json!({
+            "action": "labeled",
+            "labels": [{ "name": "cairn-ready" }]
+        });
+
+        let ingest_resp = post_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/signals",
+            "trigger-replay-token",
+            serde_json::json!({
+                "tenant_id": DEFAULT_TENANT_ID,
+                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "project_id": DEFAULT_PROJECT_ID,
+                "signal_id": signal_id,
+                "source": "github.issue.labeled",
+                "payload": payload
+            }),
+        )
+        .await;
+        assert_eq!(ingest_resp.status(), StatusCode::CREATED);
+
+        state.replay_triggers().await;
+
+        {
+            let triggers = state.triggers.lock().unwrap();
+            assert!(
+                triggers
+                    .get_template(&cairn_domain::RunTemplateId::new(&template_id))
+                    .is_some(),
+                "template must be restored from the event log"
+            );
+            let restored = triggers
+                .get_trigger(&cairn_domain::TriggerId::new(&trigger_id))
+                .expect("trigger must be restored from the event log");
+            assert_eq!(restored.project, project);
+            assert_eq!(restored.signal_pattern.signal_type, "github.issue.labeled");
+        }
+
+        let replay_events = {
+            let mut triggers = state.triggers.lock().unwrap();
+            triggers.evaluate_signal(
+                &project,
+                &cairn_domain::SignalId::new(signal_id),
+                "github.issue.labeled",
+                "",
+                &serde_json::json!({
+                    "action": "labeled",
+                    "labels": [{ "name": "cairn-ready" }]
+                }),
+                None,
+                &cairn_runtime::services::trigger_service::auto_approve_decision,
+            )
+        };
+
+        assert!(
+            matches!(
+                replay_events.as_slice(),
+                [cairn_runtime::TriggerEvent::TriggerSkipped {
+                    trigger_id: skipped_trigger_id,
+                    signal_id: skipped_signal_id,
+                    reason: cairn_runtime::SkipReason::AlreadyFired,
+                    ..
+                }] if skipped_trigger_id.as_str() == trigger_id
+                    && skipped_signal_id.as_str() == signal_id
+            ),
+            "replayed fire ledger must suppress duplicate fires: {replay_events:?}"
         );
     }
 

@@ -13,12 +13,14 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use cairn_domain::decisions::RunMode;
-use cairn_domain::ids::{OperatorId, RunTemplateId, TriggerId};
+use cairn_domain::ids::{EventId, OperatorId, RunTemplateId, TriggerId};
 use cairn_domain::tenancy::ProjectKey;
+use cairn_domain::{EventEnvelope, EventSource, RuntimeEvent};
 use cairn_runtime::{
     RateLimitConfig, RunTemplate, SignalPattern, TemplateBudget, Trigger, TriggerCondition,
     TriggerError, TriggerEvent, TriggerState,
 };
+use cairn_store::EventLog;
 
 use crate::AppState;
 
@@ -157,6 +159,26 @@ fn not_found_response(entity: &str, id: &str) -> axum::response::Response {
         .into_response()
 }
 
+async fn append_operator_runtime_event(
+    state: &AppState,
+    event: RuntimeEvent,
+) -> Result<(), String> {
+    let envelope = EventEnvelope::for_runtime_event(
+        EventId::new(format!("evt_trigger_{}", uuid::Uuid::new_v4())),
+        EventSource::Operator {
+            operator_id: operator_id(),
+        },
+        event,
+    );
+    state
+        .runtime
+        .store
+        .append(&[envelope])
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 // ── Trigger Handlers ────────────────────────────────────────────────────────
 
 /// GET /v1/projects/:project/triggers
@@ -186,45 +208,68 @@ pub async fn create_trigger_handler(
     Path(project_id): Path<String>,
     Json(body): Json<CreateTriggerRequest>,
 ) -> impl IntoResponse {
-    let mut triggers = state.triggers.lock().unwrap();
-    let now = now_ms();
-    let project = match project_key(&project_id) {
-        Ok(project) => project,
-        Err(message) => return bad_request_response(message),
+    let (event, persisted) = {
+        let mut triggers = state.triggers.lock().unwrap();
+        let now = now_ms();
+        let project = match project_key(&project_id) {
+            Ok(project) => project,
+            Err(message) => return bad_request_response(message),
+        };
+
+        let trigger = Trigger {
+            id: TriggerId::new(format!("trigger_{now}")),
+            project,
+            name: body.name,
+            description: body.description,
+            signal_pattern: SignalPattern {
+                signal_type: body.signal_type,
+                plugin_id: body.plugin_id,
+            },
+            conditions: body.conditions,
+            run_template_id: RunTemplateId::new(body.run_template_id),
+            state: TriggerState::Enabled,
+            rate_limit: body.rate_limit.unwrap_or_default(),
+            max_chain_depth: body.max_chain_depth,
+            created_by: operator_id(),
+            created_at: now,
+            updated_at: now,
+        };
+
+        match triggers.create_trigger(trigger) {
+            Ok(event) => {
+                let persisted = crate::runtime_event_for_trigger_created(
+                    triggers
+                        .get_trigger(match &event {
+                            TriggerEvent::TriggerCreated { trigger_id, .. } => trigger_id,
+                            _ => unreachable!("create_trigger must emit TriggerCreated"),
+                        })
+                        .expect("created trigger must remain available"),
+                );
+                (event, persisted)
+            }
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: e.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
     };
 
-    let trigger = Trigger {
-        id: TriggerId::new(format!("trigger_{now}")),
-        project,
-        name: body.name,
-        description: body.description,
-        signal_pattern: SignalPattern {
-            signal_type: body.signal_type,
-            plugin_id: body.plugin_id,
-        },
-        conditions: body.conditions,
-        run_template_id: RunTemplateId::new(body.run_template_id),
-        state: TriggerState::Enabled,
-        rate_limit: body.rate_limit.unwrap_or_default(),
-        max_chain_depth: body.max_chain_depth,
-        created_by: operator_id(),
-        created_at: now,
-        updated_at: now,
-    };
-
-    match triggers.create_trigger(trigger) {
-        Ok(event) => (
+    match append_operator_runtime_event(state.as_ref(), persisted).await {
+        Ok(()) => (
             StatusCode::CREATED,
             Json(TriggerEventResponse {
                 events: vec![event],
             }),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error }),
         )
             .into_response(),
     }
@@ -253,29 +298,46 @@ pub async fn delete_trigger_handler(
     State(state): State<Arc<AppState>>,
     Path((project_id, trigger_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let mut triggers = state.triggers.lock().unwrap();
-    let project = match project_key(&project_id) {
-        Ok(project) => project,
-        Err(message) => return bad_request_response(message),
-    };
-    match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
-        Some(trigger) if trigger.project == project => {}
-        _ => return not_found_response("trigger", &trigger_id),
-    }
+    let (event, persisted) = {
+        let mut triggers = state.triggers.lock().unwrap();
+        let project = match project_key(&project_id) {
+            Ok(project) => project,
+            Err(message) => return bad_request_response(message),
+        };
+        match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
+            Some(trigger) if trigger.project == project => {}
+            _ => return not_found_response("trigger", &trigger_id),
+        }
 
-    match triggers.delete_trigger(&TriggerId::new(&trigger_id), operator_id()) {
-        Ok(event) => (
+        match triggers.delete_trigger(&TriggerId::new(&trigger_id), operator_id()) {
+            Ok(event) => {
+                let persisted = crate::runtime_event_for_trigger_service_event(&project, &event)
+                    .expect("delete trigger should persist");
+                (event, persisted)
+            }
+            Err(e) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorResponse {
+                        error: e.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    match append_operator_runtime_event(state.as_ref(), persisted).await {
+        Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
                 events: vec![event],
             }),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error }),
         )
             .into_response(),
     }
@@ -286,29 +348,46 @@ pub async fn enable_trigger_handler(
     State(state): State<Arc<AppState>>,
     Path((project_id, trigger_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let mut triggers = state.triggers.lock().unwrap();
-    let project = match project_key(&project_id) {
-        Ok(project) => project,
-        Err(message) => return bad_request_response(message),
-    };
-    match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
-        Some(trigger) if trigger.project == project => {}
-        _ => return not_found_response("trigger", &trigger_id),
-    }
+    let (event, persisted) = {
+        let mut triggers = state.triggers.lock().unwrap();
+        let project = match project_key(&project_id) {
+            Ok(project) => project,
+            Err(message) => return bad_request_response(message),
+        };
+        match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
+            Some(trigger) if trigger.project == project => {}
+            _ => return not_found_response("trigger", &trigger_id),
+        }
 
-    match triggers.enable_trigger(&TriggerId::new(&trigger_id), operator_id()) {
-        Ok(event) => (
+        match triggers.enable_trigger(&TriggerId::new(&trigger_id), operator_id()) {
+            Ok(event) => {
+                let persisted = crate::runtime_event_for_trigger_service_event(&project, &event)
+                    .expect("enable trigger should persist");
+                (event, persisted)
+            }
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: e.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    match append_operator_runtime_event(state.as_ref(), persisted).await {
+        Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
                 events: vec![event],
             }),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error }),
         )
             .into_response(),
     }
@@ -320,30 +399,47 @@ pub async fn disable_trigger_handler(
     Path((project_id, trigger_id)): Path<(String, String)>,
     body: Option<Json<DisableRequest>>,
 ) -> impl IntoResponse {
-    let mut triggers = state.triggers.lock().unwrap();
-    let project = match project_key(&project_id) {
-        Ok(project) => project,
-        Err(message) => return bad_request_response(message),
-    };
-    match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
-        Some(trigger) if trigger.project == project => {}
-        _ => return not_found_response("trigger", &trigger_id),
-    }
-
     let reason = body.and_then(|Json(b)| b.reason);
-    match triggers.disable_trigger(&TriggerId::new(&trigger_id), operator_id(), reason) {
-        Ok(event) => (
+    let (event, persisted) = {
+        let mut triggers = state.triggers.lock().unwrap();
+        let project = match project_key(&project_id) {
+            Ok(project) => project,
+            Err(message) => return bad_request_response(message),
+        };
+        match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
+            Some(trigger) if trigger.project == project => {}
+            _ => return not_found_response("trigger", &trigger_id),
+        }
+
+        match triggers.disable_trigger(&TriggerId::new(&trigger_id), operator_id(), reason) {
+            Ok(event) => {
+                let persisted = crate::runtime_event_for_trigger_service_event(&project, &event)
+                    .expect("disable trigger should persist");
+                (event, persisted)
+            }
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: e.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    match append_operator_runtime_event(state.as_ref(), persisted).await {
+        Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
                 events: vec![event],
             }),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error }),
         )
             .into_response(),
     }
@@ -354,29 +450,46 @@ pub async fn resume_trigger_handler(
     State(state): State<Arc<AppState>>,
     Path((project_id, trigger_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let mut triggers = state.triggers.lock().unwrap();
-    let project = match project_key(&project_id) {
-        Ok(project) => project,
-        Err(message) => return bad_request_response(message),
-    };
-    match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
-        Some(trigger) if trigger.project == project => {}
-        _ => return not_found_response("trigger", &trigger_id),
-    }
+    let (event, persisted) = {
+        let mut triggers = state.triggers.lock().unwrap();
+        let project = match project_key(&project_id) {
+            Ok(project) => project,
+            Err(message) => return bad_request_response(message),
+        };
+        match triggers.get_trigger(&TriggerId::new(&trigger_id)) {
+            Some(trigger) if trigger.project == project => {}
+            _ => return not_found_response("trigger", &trigger_id),
+        }
 
-    match triggers.resume_trigger(&TriggerId::new(&trigger_id)) {
-        Ok(event) => (
+        match triggers.resume_trigger(&TriggerId::new(&trigger_id)) {
+            Ok(event) => {
+                let persisted = crate::runtime_event_for_trigger_service_event(&project, &event)
+                    .expect("resume trigger should persist");
+                (event, persisted)
+            }
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: e.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    match append_operator_runtime_event(state.as_ref(), persisted).await {
+        Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
                 events: vec![event],
             }),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error }),
         )
             .into_response(),
     }
@@ -411,39 +524,58 @@ pub async fn create_run_template_handler(
     Path(project_id): Path<String>,
     Json(body): Json<CreateRunTemplateRequest>,
 ) -> impl IntoResponse {
-    let mut triggers = state.triggers.lock().unwrap();
-    let now = now_ms();
-    let project = match project_key(&project_id) {
-        Ok(project) => project,
-        Err(message) => return bad_request_response(message),
+    let (event, persisted) = {
+        let mut triggers = state.triggers.lock().unwrap();
+        let now = now_ms();
+        let project = match project_key(&project_id) {
+            Ok(project) => project,
+            Err(message) => return bad_request_response(message),
+        };
+
+        let template = RunTemplate {
+            id: RunTemplateId::new(format!("tmpl_{now}")),
+            project,
+            name: body.name,
+            description: body.description,
+            default_mode: body.default_mode,
+            system_prompt: body.system_prompt,
+            initial_user_message: body.initial_user_message,
+            plugin_allowlist: body.plugin_allowlist,
+            tool_allowlist: body.tool_allowlist,
+            budget: body.budget,
+            sandbox_hint: body.sandbox_hint,
+            required_fields: body.required_fields,
+            created_by: operator_id(),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let event = triggers.create_template(template);
+        let persisted = crate::runtime_event_for_run_template_created(
+            triggers
+                .get_template(match &event {
+                    TriggerEvent::RunTemplateCreated { template_id, .. } => template_id,
+                    _ => unreachable!("create_template must emit RunTemplateCreated"),
+                })
+                .expect("created template must remain available"),
+        );
+        (event, persisted)
     };
 
-    let template = RunTemplate {
-        id: RunTemplateId::new(format!("tmpl_{now}")),
-        project,
-        name: body.name,
-        description: body.description,
-        default_mode: body.default_mode,
-        system_prompt: body.system_prompt,
-        initial_user_message: body.initial_user_message,
-        plugin_allowlist: body.plugin_allowlist,
-        tool_allowlist: body.tool_allowlist,
-        budget: body.budget,
-        sandbox_hint: body.sandbox_hint,
-        required_fields: body.required_fields,
-        created_by: operator_id(),
-        created_at: now,
-        updated_at: now,
-    };
-
-    let event = triggers.create_template(template);
-    (
-        StatusCode::CREATED,
-        Json(TriggerEventResponse {
-            events: vec![event],
-        }),
-    )
-        .into_response()
+    match append_operator_runtime_event(state.as_ref(), persisted).await {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(TriggerEventResponse {
+                events: vec![event],
+            }),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error }),
+        )
+            .into_response(),
+    }
 }
 
 /// GET /v1/projects/:project/run-templates/:template_id
@@ -470,36 +602,55 @@ pub async fn delete_run_template_handler(
     State(state): State<Arc<AppState>>,
     Path((project_id, template_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let mut triggers = state.triggers.lock().unwrap();
-    let project = match project_key(&project_id) {
-        Ok(project) => project,
-        Err(message) => return bad_request_response(message),
-    };
-    match triggers.get_template(&RunTemplateId::new(&template_id)) {
-        Some(template) if template.project == project => {}
-        _ => return not_found_response("run template", &template_id),
-    }
+    let (event, persisted) = {
+        let mut triggers = state.triggers.lock().unwrap();
+        let project = match project_key(&project_id) {
+            Ok(project) => project,
+            Err(message) => return bad_request_response(message),
+        };
+        match triggers.get_template(&RunTemplateId::new(&template_id)) {
+            Some(template) if template.project == project => {}
+            _ => return not_found_response("run template", &template_id),
+        }
 
-    match triggers.delete_template(&RunTemplateId::new(&template_id), operator_id()) {
-        Ok(event) => (
+        match triggers.delete_template(&RunTemplateId::new(&template_id), operator_id()) {
+            Ok(event) => {
+                let persisted = crate::runtime_event_for_trigger_service_event(&project, &event)
+                    .expect("delete template should persist");
+                (event, persisted)
+            }
+            Err(TriggerError::TemplateInUse { .. }) => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: "template is referenced by one or more triggers".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorResponse {
+                        error: e.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    match append_operator_runtime_event(state.as_ref(), persisted).await {
+        Ok(()) => (
             StatusCode::OK,
             Json(TriggerEventResponse {
                 events: vec![event],
             }),
         )
             .into_response(),
-        Err(TriggerError::TemplateInUse { .. }) => (
-            StatusCode::CONFLICT,
-            Json(ErrorResponse {
-                error: "template is referenced by one or more triggers".to_string(),
-            }),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error }),
         )
             .into_response(),
     }

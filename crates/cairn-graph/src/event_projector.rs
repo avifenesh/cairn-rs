@@ -181,6 +181,34 @@ impl<P: GraphProjection> EventProjector<P> {
                 edges += 1;
             }
 
+            RuntimeEvent::TriggerCreated(e) => {
+                self.add_node(
+                    &trigger_node_id(e.trigger_id.as_str()),
+                    NodeKind::Trigger,
+                    Some(&e.project),
+                    ts,
+                )
+                .await?;
+                nodes += 1;
+            }
+
+            RuntimeEvent::TriggerFired(e) => {
+                let trigger_node_id = trigger_node_id(e.trigger_id.as_str());
+
+                self.add_edge(
+                    e.signal_id.as_str(),
+                    &trigger_node_id,
+                    EdgeKind::MatchedBy,
+                    ts,
+                )
+                .await?;
+                edges += 1;
+
+                self.add_edge(&trigger_node_id, e.run_id.as_str(), EdgeKind::Fired, ts)
+                    .await?;
+                edges += 1;
+            }
+
             RuntimeEvent::CheckpointRestored(e) => {
                 self.add_edge(
                     e.checkpoint_id.as_str(),
@@ -374,6 +402,17 @@ impl<P: GraphProjection> EventProjector<P> {
             | RuntimeEvent::RunCostAlertTriggered(_)
             | RuntimeEvent::WorkspaceMemberAdded(_)
             | RuntimeEvent::WorkspaceMemberRemoved(_)
+            | RuntimeEvent::TriggerEnabled(_)
+            | RuntimeEvent::TriggerDisabled(_)
+            | RuntimeEvent::TriggerSuspended(_)
+            | RuntimeEvent::TriggerResumed(_)
+            | RuntimeEvent::TriggerDeleted(_)
+            | RuntimeEvent::TriggerSkipped(_)
+            | RuntimeEvent::TriggerDenied(_)
+            | RuntimeEvent::TriggerRateLimited(_)
+            | RuntimeEvent::TriggerPendingApproval(_)
+            | RuntimeEvent::RunTemplateCreated(_)
+            | RuntimeEvent::RunTemplateDeleted(_)
             | RuntimeEvent::ApprovalDelegated(_)
             | RuntimeEvent::AuditLogEntryRecorded(_)
             | RuntimeEvent::CheckpointStrategySet(_)
@@ -484,6 +523,10 @@ impl<P: GraphProjection> EventProjector<P> {
             })
             .await
     }
+}
+
+fn trigger_node_id(trigger_id: &str) -> String {
+    format!("trigger:{trigger_id}")
 }
 
 /// Result from projecting a batch of events.
@@ -698,5 +741,75 @@ mod tests {
         let result = projector.project_events(&events).await.unwrap();
         assert_eq!(result.nodes_created, 1); // EvalRun node only
         assert_eq!(result.edges_created, 0); // No edge without subject
+    }
+
+    #[tokio::test]
+    async fn projects_trigger_provenance_edges() {
+        let graph = Arc::new(MemGraph::new());
+        let projector = EventProjector::new(graph.clone());
+
+        let events = vec![
+            make_stored(RuntimeEvent::SignalIngested(SignalIngested {
+                project: ProjectKey::new("t", "w", "p"),
+                signal_id: SignalId::new("sig_1"),
+                source: "github.issue.labeled".to_owned(),
+                payload: serde_json::json!({"action": "labeled"}),
+                timestamp_ms: 100,
+            })),
+            make_stored(RuntimeEvent::RunCreated(RunCreated {
+                project: ProjectKey::new("t", "w", "p"),
+                session_id: SessionId::new("sess_1"),
+                run_id: RunId::new("run_1"),
+                parent_run_id: None,
+                prompt_release_id: None,
+                agent_role_id: None,
+            })),
+            make_stored(RuntimeEvent::TriggerCreated(TriggerCreated {
+                project: ProjectKey::new("t", "w", "p"),
+                trigger_id: TriggerId::new("trigger_1"),
+                name: "GitHub issue labeled".to_owned(),
+                description: None,
+                signal_type: "github.issue.labeled".to_owned(),
+                plugin_id: Some("github".to_owned()),
+                conditions: vec![],
+                run_template_id: RunTemplateId::new("tmpl_1"),
+                max_per_minute: 10,
+                max_burst: 20,
+                max_chain_depth: 5,
+                created_by: OperatorId::new("operator"),
+                created_at: 100,
+            })),
+            make_stored(RuntimeEvent::TriggerFired(TriggerFired {
+                project: ProjectKey::new("t", "w", "p"),
+                trigger_id: TriggerId::new("trigger_1"),
+                signal_id: SignalId::new("sig_1"),
+                signal_type: "github.issue.labeled".to_owned(),
+                run_id: RunId::new("run_1"),
+                chain_depth: 1,
+                fired_at: 110,
+            })),
+        ];
+
+        let result = projector.project_events(&events).await.unwrap();
+        assert_eq!(result.nodes_created, 3);
+        assert_eq!(result.edges_created, 3);
+
+        let nodes = graph.nodes.lock().unwrap();
+        assert!(nodes.contains_key("sig_1"));
+        assert!(nodes.contains_key("run_1"));
+        assert!(nodes.contains_key("trigger:trigger_1"));
+        assert_eq!(nodes["trigger:trigger_1"].kind, NodeKind::Trigger);
+
+        let edges = graph.edges.lock().unwrap();
+        assert!(edges.iter().any(|edge| {
+            edge.source_node_id == "sig_1"
+                && edge.target_node_id == "trigger:trigger_1"
+                && edge.kind == EdgeKind::MatchedBy
+        }));
+        assert!(edges.iter().any(|edge| {
+            edge.source_node_id == "trigger:trigger_1"
+                && edge.target_node_id == "run_1"
+                && edge.kind == EdgeKind::Fired
+        }));
     }
 }
