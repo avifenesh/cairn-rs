@@ -55,6 +55,8 @@ pub struct AssistantReasoning {
 pub struct AssistantEnd {
     pub session_id: SessionId,
     pub run_id: RunId,
+    /// Fully assembled assistant reply text for the completed turn.
+    pub message_text: String,
     /// Reason the turn ended.
     pub stop_reason: StopReason,
 }
@@ -144,6 +146,7 @@ mod tests {
         let end = StreamingOutput::AssistantEnd(AssistantEnd {
             session_id: SessionId::new("s1"),
             run_id: RunId::new("r1"),
+            message_text: "done".to_owned(),
             stop_reason: StopReason::EndTurn,
         });
         assert_eq!(end.sse_event_name(), "assistant_end");

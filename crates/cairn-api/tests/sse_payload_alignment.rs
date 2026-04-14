@@ -415,34 +415,23 @@ fn assistant_end_payload_matches_fixture_exactly() {
 }
 
 #[test]
-fn assistant_end_streaming_builder_still_requires_caller_assembled_text() {
+fn assistant_end_streaming_builder_preserves_message_text() {
     use cairn_agent::streaming::{AssistantEnd, StopReason, StreamingOutput};
     use cairn_domain::{RunId, SessionId};
 
     let output = StreamingOutput::AssistantEnd(AssistantEnd {
         session_id: SessionId::new("sess_1"),
         run_id: RunId::new("run_1"),
+        message_text: "The assembled reply text.".to_owned(),
         stop_reason: StopReason::EndTurn,
     });
 
-    // build_streaming_sse_frame returns None for AssistantEnd —
-    // callers must use build_enriched_assistant_end_frame with assembled text.
     let frame =
-        cairn_api::sse_payloads::build_streaming_sse_frame(&output, "task_assistant_001", None);
-    assert!(
-        frame.is_none(),
-        "AssistantEnd requires caller-assembled text via enriched builder"
-    );
-
-    // The real path:
-    let enriched = cairn_api::sse_payloads::build_enriched_assistant_end_frame(
-        "task_assistant_001",
-        "The assembled reply text.",
-        None,
-    );
-    assert_eq!(enriched.event.as_str(), "assistant_end");
-    assert_eq!(enriched.data["taskId"], "task_assistant_001");
-    assert_eq!(enriched.data["messageText"], "The assembled reply text.");
+        cairn_api::sse_payloads::build_streaming_sse_frame(&output, "task_assistant_001", None)
+            .expect("assistant_end should build directly from StreamingOutput");
+    assert_eq!(frame.event.as_str(), "assistant_end");
+    assert_eq!(frame.data["taskId"], "task_assistant_001");
+    assert_eq!(frame.data["messageText"], "The assembled reply text.");
 }
 
 #[test]

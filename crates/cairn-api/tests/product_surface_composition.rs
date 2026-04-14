@@ -298,12 +298,18 @@ fn streaming_sse_from_agent_output_produces_valid_frames() {
     assert_eq!(frame.data["toolName"], "list_approvals");
     assert_eq!(frame.data["args"]["status"], "pending");
 
-    // End with enriched builder
-    let end_frame = cairn_api::sse_payloads::build_enriched_assistant_end_frame(
+    let end = StreamingOutput::AssistantEnd(cairn_agent::streaming::AssistantEnd {
+        session_id: cairn_domain::ids::SessionId::new("sess_stream"),
+        run_id: cairn_domain::ids::RunId::new("run_stream"),
+        message_text: "The deploy is blocked by a pending approval.".to_owned(),
+        stop_reason: cairn_agent::streaming::StopReason::EndTurn,
+    });
+    let end_frame = cairn_api::sse_payloads::build_streaming_sse_frame(
+        &end,
         task_id,
-        "The deploy is blocked by a pending approval.",
         Some("evt_final".to_owned()),
-    );
+    )
+    .expect("assistant_end should build directly from StreamingOutput");
     assert_eq!(end_frame.event, cairn_api::sse::SseEventName::AssistantEnd);
     assert_eq!(
         end_frame.data["messageText"],
@@ -312,10 +318,8 @@ fn streaming_sse_from_agent_output_produces_valid_frames() {
 }
 
 #[test]
-fn assistant_end_caller_assembled_text_composition() {
-    // Proves the real caller pattern: accumulate deltas, then emit
-    // assistant_end with the full assembled text via the enriched builder.
-    use cairn_agent::streaming::{AssistantDelta, StreamingOutput};
+fn assistant_end_streaming_output_carries_full_reply_text() {
+    use cairn_agent::streaming::{AssistantDelta, AssistantEnd, StopReason, StreamingOutput};
 
     let task_id = "task_compose_1";
     let session = cairn_domain::ids::SessionId::new("s1");
@@ -343,7 +347,7 @@ fn assistant_end_caller_assembled_text_composition() {
         }),
     ];
 
-    // Caller accumulates delta text (this is the real API/SSE publisher pattern)
+    // Deltas still stream incrementally.
     let mut accumulated = String::new();
     for delta in &deltas {
         let frame =
@@ -353,12 +357,19 @@ fn assistant_end_caller_assembled_text_composition() {
     }
     assert_eq!(accumulated, "The deploy is blocked by ops.");
 
-    // AssistantEnd arrives — caller passes the accumulated text
-    let end_frame = cairn_api::sse_payloads::build_enriched_assistant_end_frame(
+    // AssistantEnd now carries the fully assembled reply text directly.
+    let end = StreamingOutput::AssistantEnd(AssistantEnd {
+        session_id: session,
+        run_id: run,
+        message_text: accumulated.clone(),
+        stop_reason: StopReason::EndTurn,
+    });
+    let end_frame = cairn_api::sse_payloads::build_streaming_sse_frame(
+        &end,
         task_id,
-        &accumulated,
         Some("evt_end".to_owned()),
-    );
+    )
+    .expect("assistant_end should build from streaming output");
 
     assert_eq!(end_frame.event, cairn_api::sse::SseEventName::AssistantEnd);
     assert_eq!(end_frame.data["taskId"], task_id);
