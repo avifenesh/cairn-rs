@@ -82,15 +82,6 @@ These are the live half-finished or still-explicit seams worth tracking.
 
    This is an honest open seam. The contract is not "missing entirely"; it is "exact path exists, generic runtime path still thinner".
 
-5. `assistant_end` still depends on caller-assembled final text.
-
-   Evidence:
-
-   - [`crates/cairn-api/tests/sse_payload_alignment.rs`](../../crates/cairn-api/tests/sse_payload_alignment.rs)
-   - [`crates/cairn-api/src/sse_payloads.rs`](../../crates/cairn-api/src/sse_payloads.rs)
-
-   The enriched builder is real, but the active composition path still relies on someone upstream to pass the final assembled assistant text.
-
 ## Active Operating Model
 
 The active execution model is now:
@@ -136,7 +127,7 @@ Current focus:
 
 - reconcile generated reports with the code/tests that already pass
 - keep the now-composed preserved memory routes and `memory_proposed` path reflected honestly in reports and fixtures
-- finish the `assistant_end` handoff story at the app surface
+- keep the dedicated assistant streaming families honest as the live app surface grows into them
 
 ### Worker B: Runtime And Durable Core
 

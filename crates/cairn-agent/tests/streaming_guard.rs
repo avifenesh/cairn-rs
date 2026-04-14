@@ -43,6 +43,7 @@ fn preserved_sse_event_names_are_stable() {
             StreamingOutput::AssistantEnd(AssistantEnd {
                 session_id: session(),
                 run_id: run(),
+                message_text: String::new(),
                 stop_reason: StopReason::EndTurn,
             }),
             "assistant_end",
@@ -118,6 +119,7 @@ fn all_variants_carry_session_and_run() {
         StreamingOutput::AssistantEnd(AssistantEnd {
             session_id: session(),
             run_id: run(),
+            message_text: String::new(),
             stop_reason: StopReason::EndTurn,
         }),
         StreamingOutput::ToolCallRequested(ToolCallRequested {
