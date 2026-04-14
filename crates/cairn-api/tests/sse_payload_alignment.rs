@@ -336,7 +336,7 @@ fn agent_progress_runtime_mapping_matches_current_fixture_contract() {
 fn poll_completed_payload_matches_fixture_exactly() {
     let fixture = load_fixture_payload("poll_completed__source_done");
 
-    let frame = cairn_api::sse_payloads::build_poll_completed_frame("slack", 3, None);
+    let frame = cairn_api::sse_payloads::build_poll_completed_frame("slack", 3, None).unwrap();
     assert_json_matches_fixture(frame.data, &fixture);
 }
 
@@ -361,7 +361,7 @@ fn feed_update_payload_still_has_item_wrapper() {
         group_key: Some("slack:deploy".to_owned()),
         created_at: "2026-04-03T09:30:00Z".to_owned(),
     };
-    let frame = cairn_api::sse_payloads::build_feed_update_frame(item, None);
+    let frame = cairn_api::sse_payloads::build_feed_update_frame(item, None).unwrap();
     assert!(
         frame.data.get("item").is_some(),
         "our payload has 'item' wrapper"
@@ -386,7 +386,7 @@ fn feed_update_payload_matches_fixture_exactly() {
         group_key: Some("slack:deploy".to_owned()),
         created_at: "2026-04-03T09:30:00Z".to_owned(),
     };
-    let frame = cairn_api::sse_payloads::build_feed_update_frame(item, None);
+    let frame = cairn_api::sse_payloads::build_feed_update_frame(item, None).unwrap();
     assert_json_matches_fixture(frame.data, &fixture);
 }
 

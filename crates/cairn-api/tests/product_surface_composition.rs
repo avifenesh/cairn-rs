@@ -77,7 +77,7 @@ fn operator_facing_enriched_sse_consumes_existing_seams() {
         updated_at: 1500,
     };
 
-    let frame = cairn_api::sse_payloads::build_enriched_task_update_frame(&record, None);
+    let frame = cairn_api::sse_payloads::build_enriched_task_update_frame(&record, None).unwrap();
     assert_eq!(frame.data["task"]["title"], "Operator task");
 
     let lifecycle = cairn_tools::runtime_service::ToolLifecycleOutput::completed(
@@ -85,7 +85,8 @@ fn operator_facing_enriched_sse_consumes_existing_seams() {
         Some(serde_json::json!({"clean": true})),
     );
     let tool_frame =
-        cairn_api::sse_payloads::build_enriched_tool_call_frame(&lifecycle, Some("task_op"), None);
+        cairn_api::sse_payloads::build_enriched_tool_call_frame(&lifecycle, Some("task_op"), None)
+            .unwrap();
     assert_eq!(tool_frame.data["toolName"], "git.status");
     assert_eq!(tool_frame.data["phase"], "completed");
 }
@@ -99,7 +100,8 @@ fn non_happy_path_tool_outcome_surfaces_correct_operator_shape() {
         "permission denied by remote",
     );
     let frame =
-        cairn_api::sse_payloads::build_enriched_tool_call_frame(&failed, Some("task_1"), None);
+        cairn_api::sse_payloads::build_enriched_tool_call_frame(&failed, Some("task_1"), None)
+            .unwrap();
     assert_eq!(frame.data["phase"], "failed");
     assert_eq!(frame.data["toolName"], "git.push");
     // errorDetail is in the lifecycle but args is not in the SSE frame
@@ -109,7 +111,8 @@ fn non_happy_path_tool_outcome_surfaces_correct_operator_shape() {
 
     let timeout = cairn_tools::runtime_service::ToolLifecycleOutput::failed("slow.tool", "timeout");
     let timeout_frame =
-        cairn_api::sse_payloads::build_enriched_tool_call_frame(&timeout, Some("task_2"), None);
+        cairn_api::sse_payloads::build_enriched_tool_call_frame(&timeout, Some("task_2"), None)
+            .unwrap();
     assert_eq!(timeout_frame.data["phase"], "failed");
     assert_eq!(timeout_frame.data["toolName"], "slow.tool");
 }
@@ -135,7 +138,7 @@ fn approval_sse_and_operator_read_are_consistent() {
     };
 
     // SSE frame from enriched builder
-    let sse_frame = cairn_api::sse_payloads::build_enriched_approval_frame(&record, None);
+    let sse_frame = cairn_api::sse_payloads::build_enriched_approval_frame(&record, None).unwrap();
     assert_eq!(sse_frame.data["approval"]["id"], "appr_op");
     assert_eq!(sse_frame.data["approval"]["status"], "pending");
     assert_eq!(sse_frame.data["approval"]["title"], "Approve deploy");
@@ -234,7 +237,8 @@ fn same_entity_coherent_across_route_read_and_sse_emission() {
     };
 
     // SSE emission surface
-    let sse_frame = cairn_api::sse_payloads::build_enriched_task_update_frame(&record, None);
+    let sse_frame =
+        cairn_api::sse_payloads::build_enriched_task_update_frame(&record, None).unwrap();
 
     // Both must agree on identity and state
     assert_eq!(read_summary.task_id.as_str(), "task_coherent");

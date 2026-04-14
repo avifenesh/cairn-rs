@@ -7,6 +7,7 @@
 use cairn_domain::events::*;
 use cairn_domain::tool_invocation::ToolInvocationTarget;
 use serde::Serialize;
+use tracing::warn;
 
 use crate::feed::FeedItem;
 
@@ -144,13 +145,19 @@ fn approval_required_payload_from_record(
 pub fn build_memory_proposed_frame(
     item: crate::memory_api::MemoryItem,
     event_id: Option<String>,
-) -> crate::sse::SseFrame {
-    let data = serde_json::to_value(&MemoryProposedPayload { memory: item }).unwrap_or_default();
-    crate::sse::SseFrame {
+) -> Option<crate::sse::SseFrame> {
+    let data = match serde_json::to_value(&MemoryProposedPayload { memory: item }) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("SSE payload shaping failed for memory_proposed: {e}");
+            return None;
+        }
+    };
+    Some(crate::sse::SseFrame {
         event: crate::sse::SseEventName::MemoryProposed,
         data,
         id: event_id,
-    }
+    })
 }
 
 // -- Assistant streaming SSE families (from cairn-agent StreamingOutput) --
@@ -186,7 +193,7 @@ pub fn build_enriched_tool_call_frame(
     lifecycle: &cairn_tools::runtime_service::ToolLifecycleOutput,
     task_id: Option<&str>,
     event_id: Option<String>,
-) -> crate::sse::SseFrame {
+) -> Option<crate::sse::SseFrame> {
     let payload = AssistantToolCallPayload {
         task_id: task_id.map(|s| s.to_owned()),
         tool_name: lifecycle.tool_name.clone(),
@@ -198,12 +205,18 @@ pub fn build_enriched_tool_call_frame(
         },
         args: lifecycle.args.clone(),
     };
-    let data = serde_json::to_value(&payload).unwrap_or_default();
-    crate::sse::SseFrame {
+    let data = match serde_json::to_value(&payload) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("SSE payload shaping failed for assistant_tool_call: {e}");
+            return None;
+        }
+    };
+    Some(crate::sse::SseFrame {
         event: crate::sse::SseEventName::AssistantToolCall,
         data,
         id: event_id,
-    }
+    })
 }
 
 /// Builds a higher-fidelity `task_update` SSE frame using a `TaskRecord`
@@ -211,28 +224,40 @@ pub fn build_enriched_tool_call_frame(
 pub fn build_enriched_task_update_frame(
     record: &cairn_store::projections::TaskRecord,
     event_id: Option<String>,
-) -> crate::sse::SseFrame {
+) -> Option<crate::sse::SseFrame> {
     let payload = task_update_payload_from_record(record);
-    let data = serde_json::to_value(&payload).unwrap_or_default();
-    crate::sse::SseFrame {
+    let data = match serde_json::to_value(&payload) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("SSE payload shaping failed for task_update: {e}");
+            return None;
+        }
+    };
+    Some(crate::sse::SseFrame {
         event: crate::sse::SseEventName::TaskUpdate,
         data,
         id: event_id,
-    }
+    })
 }
 
 /// Builds a higher-fidelity `approval_required` SSE frame using an `ApprovalRecord`.
 pub fn build_enriched_approval_frame(
     record: &cairn_store::projections::ApprovalRecord,
     event_id: Option<String>,
-) -> crate::sse::SseFrame {
+) -> Option<crate::sse::SseFrame> {
     let payload = approval_required_payload_from_record(record);
-    let data = serde_json::to_value(&payload).unwrap_or_default();
-    crate::sse::SseFrame {
+    let data = match serde_json::to_value(&payload) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("SSE payload shaping failed for approval_required: {e}");
+            return None;
+        }
+    };
+    Some(crate::sse::SseFrame {
         event: crate::sse::SseEventName::ApprovalRequired,
         data,
         id: event_id,
-    }
+    })
 }
 
 /// Builds a higher-fidelity `assistant_end` SSE frame with the fully
@@ -241,17 +266,23 @@ pub fn build_enriched_assistant_end_frame(
     task_id: &str,
     message_text: &str,
     event_id: Option<String>,
-) -> crate::sse::SseFrame {
+) -> Option<crate::sse::SseFrame> {
     let payload = AssistantEndPayload {
         task_id: task_id.to_owned(),
         message_text: message_text.to_owned(),
     };
-    let data = serde_json::to_value(&payload).unwrap_or_default();
-    crate::sse::SseFrame {
+    let data = match serde_json::to_value(&payload) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("SSE payload shaping failed for assistant_end: {e}");
+            return None;
+        }
+    };
+    Some(crate::sse::SseFrame {
         event: crate::sse::SseEventName::AssistantEnd,
         data,
         id: event_id,
-    }
+    })
 }
 
 /// Maps a `StreamingOutput` from cairn-agent to an SSE frame with
@@ -321,13 +352,22 @@ pub fn build_streaming_sse_frame(
 }
 
 /// Builds a `feed_update` SSE frame.
-pub fn build_feed_update_frame(item: FeedItem, event_id: Option<String>) -> crate::sse::SseFrame {
-    let data = serde_json::to_value(&FeedUpdatePayload { item }).unwrap_or_default();
-    crate::sse::SseFrame {
+pub fn build_feed_update_frame(
+    item: FeedItem,
+    event_id: Option<String>,
+) -> Option<crate::sse::SseFrame> {
+    let data = match serde_json::to_value(&FeedUpdatePayload { item }) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("SSE payload shaping failed for feed_update: {e}");
+            return None;
+        }
+    };
+    Some(crate::sse::SseFrame {
         event: crate::sse::SseEventName::FeedUpdate,
         data,
         id: event_id,
-    }
+    })
 }
 
 /// Builds a `poll_completed` SSE frame.
@@ -335,17 +375,22 @@ pub fn build_poll_completed_frame(
     source: &str,
     new_count: u32,
     event_id: Option<String>,
-) -> crate::sse::SseFrame {
-    let data = serde_json::to_value(&PollCompletedPayload {
+) -> Option<crate::sse::SseFrame> {
+    let data = match serde_json::to_value(&PollCompletedPayload {
         source: source.to_owned(),
         new_count,
-    })
-    .unwrap_or_default();
-    crate::sse::SseFrame {
+    }) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("SSE payload shaping failed for poll_completed: {e}");
+            return None;
+        }
+    };
+    Some(crate::sse::SseFrame {
         event: crate::sse::SseEventName::PollCompleted,
         data,
         id: event_id,
-    }
+    })
 }
 
 // -- Runtime event mapping --
@@ -755,7 +800,7 @@ mod tests {
             group_key: None,
             created_at: "2026-04-03T09:30:00Z".to_owned(),
         };
-        let frame = build_feed_update_frame(item, Some("evt_1".to_owned()));
+        let frame = build_feed_update_frame(item, Some("evt_1".to_owned())).unwrap();
         assert_eq!(frame.event, crate::sse::SseEventName::FeedUpdate);
         assert!(frame.data.get("item").is_some());
         assert_eq!(frame.data["item"]["id"], "feed_1");
@@ -763,7 +808,7 @@ mod tests {
 
     #[test]
     fn poll_completed_frame_has_source_and_count() {
-        let frame = build_poll_completed_frame("rss_feed_1", 5, None);
+        let frame = build_poll_completed_frame("rss_feed_1", 5, None).unwrap();
         assert_eq!(frame.event, crate::sse::SseEventName::PollCompleted);
         assert_eq!(frame.data["source"], "rss_feed_1");
         assert_eq!(frame.data["newCount"], 5);
@@ -861,7 +906,7 @@ mod tests {
             "git.status",
             Some(serde_json::json!({"path": "/repo"})),
         );
-        let frame = build_enriched_tool_call_frame(&lifecycle, Some("task_1"), None);
+        let frame = build_enriched_tool_call_frame(&lifecycle, Some("task_1"), None).unwrap();
         assert_eq!(frame.event, crate::sse::SseEventName::AssistantToolCall);
         assert_eq!(frame.data["toolName"], "git.status");
         assert_eq!(frame.data["phase"], "start");
@@ -875,7 +920,8 @@ mod tests {
             "fs.read",
             Some(serde_json::json!({"text": "file contents"})),
         );
-        let frame = build_enriched_tool_call_frame(&lifecycle, None, Some("evt_5".to_owned()));
+        let frame =
+            build_enriched_tool_call_frame(&lifecycle, None, Some("evt_5".to_owned())).unwrap();
         assert_eq!(frame.data["phase"], "completed");
         assert_eq!(frame.data["toolName"], "fs.read");
         assert!(frame.data.get("args").is_none());
@@ -906,7 +952,7 @@ mod tests {
             updated_at: 1500,
         };
 
-        let frame = build_enriched_task_update_frame(&record, Some("evt_10".to_owned()));
+        let frame = build_enriched_task_update_frame(&record, Some("evt_10".to_owned())).unwrap();
         assert_eq!(frame.event, crate::sse::SseEventName::TaskUpdate);
         assert_eq!(frame.data["task"]["id"], "task_001");
         assert_eq!(frame.data["task"]["status"], "running");
@@ -936,7 +982,7 @@ mod tests {
             updated_at: 2000,
         };
 
-        let frame = build_enriched_approval_frame(&record, None);
+        let frame = build_enriched_approval_frame(&record, None).unwrap();
         assert_eq!(frame.event, crate::sse::SseEventName::ApprovalRequired);
         assert_eq!(frame.data["approval"]["id"], "appr_001");
         assert_eq!(frame.data["approval"]["status"], "pending");
@@ -956,7 +1002,8 @@ mod tests {
             "task_assistant_001",
             "The deploy is blocked by a pending approval from ops.",
             Some("evt_20".to_owned()),
-        );
+        )
+        .unwrap();
         assert_eq!(frame.event, crate::sse::SseEventName::AssistantEnd);
         assert_eq!(frame.data["taskId"], "task_assistant_001");
         assert_eq!(

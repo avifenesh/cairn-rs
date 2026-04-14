@@ -6986,11 +6986,13 @@ async fn openapi_json_handler() -> impl IntoResponse {
     let mut value = match serde_json::to_value(OpenApiDoc::openapi()) {
         Ok(value) => value,
         Err(err) => {
-            return (
+            tracing::error!("openapi serialization failed: {err}");
+            return AppApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": err.to_string() })),
+                "internal_error",
+                err.to_string(),
             )
-                .into_response();
+            .into_response();
         }
     };
     value["openapi"] = serde_json::Value::String("3.0.3".to_owned());
@@ -8235,7 +8237,12 @@ async fn materialize_onboarding_template_handler(
     Json(body): Json<MaterializeTemplateRequest>,
 ) -> impl IntoResponse {
     let Some(template) = state.templates.get(&body.template_id).cloned() else {
-        return (StatusCode::NOT_FOUND, "starter template not found").into_response();
+        return AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "starter template not found",
+        )
+        .into_response();
     };
 
     let tenant_id = TenantId::new(
@@ -8717,7 +8724,9 @@ async fn get_tenant_handler(
 ) -> impl IntoResponse {
     match state.runtime.tenants.get(&TenantId::new(id)).await {
         Ok(Some(record)) => (StatusCode::OK, Json(record)).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, "tenant not found").into_response(),
+        Ok(None) => {
+            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "tenant not found").into_response()
+        }
         Err(err) => runtime_error_response(err),
     }
 }
@@ -8748,7 +8757,10 @@ async fn get_tenant_overview_handler(
     let tenant_id = TenantId::new(id);
 
     match state.runtime.tenants.get(&tenant_id).await {
-        Ok(None) => return (StatusCode::NOT_FOUND, "tenant not found").into_response(),
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "tenant not found")
+                .into_response()
+        }
         Err(err) => return runtime_error_response(err),
         Ok(Some(_)) => {}
     }
@@ -9177,7 +9189,10 @@ async fn list_projects_handler(
     let workspace_id = WorkspaceId::new(workspace_id);
     let workspace = match state.runtime.workspaces.get(&workspace_id).await {
         Ok(Some(workspace)) => workspace,
-        Ok(None) => return (StatusCode::NOT_FOUND, "workspace not found").into_response(),
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "workspace not found")
+                .into_response()
+        }
         Err(err) => return runtime_error_response(err),
     };
 
@@ -9541,12 +9556,16 @@ async fn revoke_credential_handler(
     let credential_id = CredentialId::new(id);
     let existing = match state.runtime.credentials.get(&credential_id).await {
         Ok(Some(record)) => record,
-        Ok(None) => return (StatusCode::NOT_FOUND, "credential not found").into_response(),
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "credential not found")
+                .into_response()
+        }
         Err(err) => return runtime_error_response(err),
     };
 
     if existing.tenant_id != TenantId::new(tenant_id) {
-        return (StatusCode::NOT_FOUND, "credential not found").into_response();
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "credential not found")
+            .into_response();
     }
 
     match state.runtime.credentials.revoke(&credential_id).await {
@@ -9578,7 +9597,10 @@ async fn recover_run_handler(
     let run_id = RunId::new(id);
     match state.runtime.runs.get(&run_id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return (StatusCode::NOT_FOUND, "run not found").into_response(),
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response()
+        }
         Err(err) => return runtime_error_response(err),
     }
 
@@ -9603,7 +9625,10 @@ async fn get_run_recovery_status_handler(
     let run_id = RunId::new(id);
     match state.runtime.runs.get(&run_id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return (StatusCode::NOT_FOUND, "run not found").into_response(),
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response()
+        }
         Err(err) => return runtime_error_response(err),
     }
 
@@ -9752,7 +9777,12 @@ async fn mark_mailbox_delivered_handler(
             message.delivered = true;
             (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "mailbox message not found").into_response(),
+        None => AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "mailbox message not found",
+        )
+        .into_response(),
     }
 }
 
@@ -9784,7 +9814,7 @@ async fn mark_feed_item_read_handler(
 ) -> impl IntoResponse {
     match state.feed.mark_read(&id).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
-        Err(err) => (StatusCode::NOT_FOUND, err).into_response(),
+        Err(err) => AppApiError::new(StatusCode::NOT_FOUND, "not_found", err).into_response(),
     }
 }
 
@@ -12908,7 +12938,10 @@ async fn complete_task_handler(
     let task_id = TaskId::new(id);
     let current_task = match state.runtime.tasks.get(&task_id).await {
         Ok(Some(task)) => task,
-        Ok(None) => return (StatusCode::NOT_FOUND, "task not found").into_response(),
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "task not found")
+                .into_response()
+        }
         Err(err) => return runtime_error_response(err),
     };
 
@@ -13220,16 +13253,24 @@ async fn create_tool_invocation_handler(
             publish_runtime_frames_since(&state, before).await;
             match ToolInvocationReadModel::get(state.runtime.store.as_ref(), &invocation_id).await {
                 Ok(Some(record)) => (StatusCode::CREATED, Json(record)).into_response(),
-                Ok(None) => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "tool invocation not found after create",
-                )
-                    .into_response(),
-                Err(err) => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": err.to_string() })),
-                )
-                    .into_response(),
+                Ok(None) => {
+                    tracing::error!("tool invocation not found after create: {invocation_id}");
+                    AppApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "internal_error",
+                        "tool invocation not found after create",
+                    )
+                    .into_response()
+                }
+                Err(err) => {
+                    tracing::error!("tool invocation read after create failed: {err}");
+                    AppApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "internal_error",
+                        err.to_string(),
+                    )
+                    .into_response()
+                }
             }
         }
         Err(err) => runtime_error_response(err),
@@ -13276,11 +13317,15 @@ async fn complete_tool_invocation_handler(
             publish_runtime_frames_since(&state, before).await;
             match ToolInvocationReadModel::get(state.runtime.store.as_ref(), &invocation_id).await {
                 Ok(Some(updated)) => (StatusCode::OK, Json(updated)).into_response(),
-                Ok(None) => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "tool invocation not found after completion",
-                )
-                    .into_response(),
+                Ok(None) => {
+                    tracing::error!("tool invocation not found after completion: {invocation_id}");
+                    AppApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "internal_error",
+                        "tool invocation not found after completion",
+                    )
+                    .into_response()
+                }
                 Err(err) => store_error_response(err),
             }
         }
@@ -13442,13 +13487,18 @@ async fn save_checkpoint_handler(
     let run_id = RunId::new(run_id);
     let run = match RunReadModel::get(state.runtime.store.as_ref(), &run_id).await {
         Ok(Some(run)) => run,
-        Ok(None) => return (StatusCode::NOT_FOUND, "run not found").into_response(),
+        Ok(None) => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "run not found")
+                .into_response()
+        }
         Err(err) => {
-            return (
+            tracing::error!("checkpoint save: failed to read run: {err}");
+            return AppApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": err.to_string() })),
+                "internal_error",
+                err.to_string(),
             )
-                .into_response();
+            .into_response();
         }
     };
 
@@ -13559,22 +13609,21 @@ async fn create_plugin_handler(
     Json(manifest): Json<PluginManifest>,
 ) -> impl IntoResponse {
     if let Err(err) = state.plugin_registry.register(manifest.clone()) {
-        return (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response();
+        tracing::warn!("plugin register conflict: {err}");
+        return AppApiError::new(StatusCode::CONFLICT, "conflict", err.to_string()).into_response();
     }
 
     let host_result = match state.plugin_host.lock() {
         Ok(mut host) => host.register(manifest.clone()),
         Err(_) => {
             let _ = state.plugin_registry.unregister(&manifest.id);
-            return (
+            tracing::error!("plugin host mutex poisoned during register");
+            return AppApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "plugin host unavailable" })),
+                "internal_error",
+                "plugin host unavailable",
             )
-                .into_response();
+            .into_response();
         }
     };
 
@@ -13582,10 +13631,7 @@ async fn create_plugin_handler(
         Ok(()) => (StatusCode::CREATED, Json(manifest)).into_response(),
         Err(err) => {
             let _ = state.plugin_registry.unregister(&manifest.id);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": err.to_string() })),
-            )
+            AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
                 .into_response()
         }
     }
@@ -13596,26 +13642,26 @@ async fn get_plugin_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let Some(manifest) = state.plugin_registry.get(&id) else {
-        return (StatusCode::NOT_FOUND, "plugin not found").into_response();
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found")
+            .into_response();
     };
 
     let lifecycle = match state.plugin_host.lock() {
         Ok(host) => match host.lifecycle_snapshot(&id) {
             Ok(snapshot) => snapshot,
             Err(err) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({ "error": err.to_string() })),
-                )
+                return AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
                     .into_response();
             }
         },
         Err(_) => {
-            return (
+            tracing::error!("plugin host mutex poisoned during lifecycle_snapshot");
+            return AppApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "plugin host unavailable" })),
+                "internal_error",
+                "plugin host unavailable",
             )
-                .into_response();
+            .into_response();
         }
     };
 
@@ -13636,7 +13682,8 @@ async fn delete_plugin_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     if state.plugin_registry.get(&id).is_none() {
-        return (StatusCode::NOT_FOUND, "plugin not found").into_response();
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found")
+            .into_response();
     }
 
     if let Ok(mut host) = state.plugin_host.lock() {
@@ -13647,10 +13694,7 @@ async fn delete_plugin_handler(
 
     match state.plugin_registry.unregister(&id) {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -13660,23 +13704,25 @@ async fn plugin_health_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     if state.plugin_registry.get(&id).is_none() {
-        return (StatusCode::NOT_FOUND, "plugin not found").into_response();
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found")
+            .into_response();
     }
 
     match state.plugin_host.lock() {
         Ok(mut host) => match host.health_check(&id) {
             Ok(response) => (StatusCode::OK, Json(response)).into_response(),
-            Err(err) => (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": err.to_string() })),
-            )
+            Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
                 .into_response(),
         },
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "plugin host unavailable" })),
-        )
-            .into_response(),
+        Err(_) => {
+            tracing::error!("plugin host mutex poisoned during health_check");
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "plugin host unavailable",
+            )
+            .into_response()
+        }
     }
 }
 
@@ -13685,7 +13731,8 @@ async fn plugin_metrics_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     if state.plugin_registry.get(&id).is_none() {
-        return (StatusCode::NOT_FOUND, "plugin not found").into_response();
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found")
+            .into_response();
     }
     (
         StatusCode::OK,
@@ -13843,26 +13890,28 @@ async fn plugin_capabilities_handler(
 ) -> impl IntoResponse {
     let manifest = match state.plugin_registry.get(&id) {
         Some(m) => m,
-        None => return (StatusCode::NOT_FOUND, "plugin not found").into_response(),
+        None => {
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found")
+                .into_response()
+        }
     };
 
     let verifications = match state.plugin_host.lock() {
         Ok(host) => match host.capability_verification(&id) {
             Ok(v) => v,
             Err(err) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({ "error": err.to_string() })),
-                )
+                return AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
                     .into_response();
             }
         },
         Err(_) => {
-            return (
+            tracing::error!("plugin host mutex poisoned during capability_verification");
+            return AppApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "plugin host unavailable" })),
+                "internal_error",
+                "plugin host unavailable",
             )
-                .into_response();
+            .into_response();
         }
     };
 
@@ -13896,7 +13945,8 @@ async fn plugin_tools_handler(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     if state.plugin_registry.get(&id).is_none() {
-        return (StatusCode::NOT_FOUND, "plugin not found").into_response();
+        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "plugin not found")
+            .into_response();
     }
     match state.plugin_host.lock() {
         Ok(host) => match host.get_tools(&id) {
@@ -13908,17 +13958,18 @@ async fn plugin_tools_handler(
                 }),
             )
                 .into_response(),
-            Err(err) => (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": err.to_string() })),
-            )
+            Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
                 .into_response(),
         },
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "plugin host unavailable" })),
-        )
-            .into_response(),
+        Err(_) => {
+            tracing::error!("plugin host mutex poisoned during get_tools");
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "plugin host unavailable",
+            )
+            .into_response()
+        }
     }
 }
 
@@ -15678,7 +15729,7 @@ async fn validate_bundle_handler(
     match state.bundle_import.validate(&bundle).await {
         Ok(report) if report.valid => (StatusCode::OK, Json(report)).into_response(),
         Ok(report) => (StatusCode::UNPROCESSABLE_ENTITY, Json(report)).into_response(),
-        Err(err) => (StatusCode::BAD_REQUEST, err).into_response(),
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err).into_response(),
     }
 }
 
@@ -15688,7 +15739,9 @@ async fn plan_bundle_handler(
 ) -> impl IntoResponse {
     let validation = match state.bundle_import.validate(&bundle).await {
         Ok(report) => report,
-        Err(err) => return (StatusCode::BAD_REQUEST, err).into_response(),
+        Err(err) => {
+            return AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err).into_response()
+        }
     };
     if !validation.valid {
         return (StatusCode::UNPROCESSABLE_ENTITY, Json(validation)).into_response();
@@ -15700,7 +15753,7 @@ async fn plan_bundle_handler(
         .await
     {
         Ok(plan) => (StatusCode::OK, Json(plan)).into_response(),
-        Err(err) => (StatusCode::BAD_REQUEST, err).into_response(),
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err).into_response(),
     }
 }
 
@@ -15711,7 +15764,9 @@ async fn apply_bundle_handler(
     let bundle = request.bundle;
     let validation = match state.bundle_import.validate(&bundle).await {
         Ok(report) => report,
-        Err(err) => return (StatusCode::BAD_REQUEST, err).into_response(),
+        Err(err) => {
+            return AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err).into_response()
+        }
     };
     if !validation.valid {
         return (StatusCode::UNPROCESSABLE_ENTITY, Json(validation)).into_response();
@@ -15726,12 +15781,14 @@ async fn apply_bundle_handler(
             plan.conflict_resolution = request.conflict_resolution;
             plan
         }
-        Err(err) => return (StatusCode::BAD_REQUEST, err).into_response(),
+        Err(err) => {
+            return AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err).into_response()
+        }
     };
 
     match state.bundle_import.apply(&plan, &bundle).await {
         Ok(report) => (StatusCode::OK, Json(report)).into_response(),
-        Err(err) => (StatusCode::BAD_REQUEST, err).into_response(),
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err).into_response(),
     }
 }
 
@@ -15762,7 +15819,7 @@ async fn export_bundle_handler(
         .await
     {
         Ok(bundle) => (StatusCode::OK, Json(bundle)).into_response(),
-        Err(err) => (StatusCode::BAD_REQUEST, err).into_response(),
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err).into_response(),
     }
 }
 
@@ -15837,7 +15894,7 @@ async fn export_filtered_bundle_handler(
         .await
     {
         Ok(bundle) => (StatusCode::OK, Json(bundle)).into_response(),
-        Err(err) => (StatusCode::BAD_REQUEST, err).into_response(),
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err).into_response(),
     }
 }
 
@@ -15851,7 +15908,7 @@ async fn export_prompt_bundle_handler(
         .await
     {
         Ok(bundle) => (StatusCode::OK, Json(bundle)).into_response(),
-        Err(err) => (StatusCode::BAD_REQUEST, err).into_response(),
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err).into_response(),
     }
 }
 
@@ -15886,10 +15943,7 @@ async fn get_eval_run_handler(
 ) -> impl IntoResponse {
     match state.evals.get(&EvalRunId::new(id)) {
         Some(run) => (StatusCode::OK, Json(run)).into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "eval run not found" })),
-        )
+        None => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "eval run not found")
             .into_response(),
     }
 }
@@ -15934,10 +15988,7 @@ async fn get_eval_dataset_handler(
 ) -> impl IntoResponse {
     match state.eval_datasets.get(&id) {
         Some(dataset) => (StatusCode::OK, Json(dataset)).into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "eval dataset not found" })),
-        )
+        None => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "eval dataset not found")
             .into_response(),
     }
 }
@@ -15952,11 +16003,9 @@ async fn add_eval_dataset_entry_handler(
         .add_entry(&id, body.input, body.expected_output, body.tags)
     {
         Ok(dataset) => (StatusCode::CREATED, Json(dataset)).into_response(),
-        Err(err) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
+        Err(err) => {
+            AppApiError::new(StatusCode::NOT_FOUND, "not_found", err.to_string()).into_response()
+        }
     }
 }
 
@@ -15979,11 +16028,12 @@ async fn get_eval_baseline_handler(
 ) -> impl IntoResponse {
     match state.eval_baselines.get(&id) {
         Some(baseline) => (StatusCode::OK, Json(baseline)).into_response(),
-        None => (
+        None => AppApiError::new(
             StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "eval baseline not found" })),
+            "not_found",
+            "eval baseline not found",
         )
-            .into_response(),
+        .into_response(),
     }
 }
 
@@ -16004,10 +16054,7 @@ async fn get_eval_rubric_handler(
 ) -> impl IntoResponse {
     match state.eval_rubrics.get(&id) {
         Some(rubric) => (StatusCode::OK, Json(rubric)).into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "eval rubric not found" })),
-        )
+        None => AppApiError::new(StatusCode::NOT_FOUND, "not_found", "eval rubric not found")
             .into_response(),
     }
 }
@@ -16027,10 +16074,7 @@ async fn create_eval_run_handler(
 
     if let Some(dataset_id) = body.dataset_id.as_deref() {
         if state.eval_datasets.get(dataset_id).is_none() {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "eval dataset not found" })),
-            )
+            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "eval dataset not found")
                 .into_response();
         }
     }
@@ -16091,10 +16135,7 @@ async fn start_eval_run_handler(
 ) -> impl IntoResponse {
     match state.evals.start_run(&EvalRunId::new(id)) {
         Ok(run) => (StatusCode::OK, Json(run)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -16109,10 +16150,7 @@ async fn complete_eval_run_handler(
         .complete_run(&EvalRunId::new(id), body.metrics, body.cost)
     {
         Ok(run) => (StatusCode::OK, Json(run)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -16124,10 +16162,7 @@ async fn score_eval_run_handler(
 ) -> impl IntoResponse {
     match state.evals.record_score(&EvalRunId::new(id), body.metrics) {
         Ok(run) => (StatusCode::OK, Json(run)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -16143,10 +16178,7 @@ async fn score_eval_rubric_handler(
         .await
     {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -16160,10 +16192,7 @@ async fn compare_eval_baseline_handler(
         .compare_to_baseline(&EvalRunId::new(id))
     {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -16315,11 +16344,12 @@ async fn compare_eval_runs_handler(
     let mut runs = Vec::new();
     for run_id in &run_ids {
         let Some(run) = state.evals.get(run_id) else {
-            return (
+            return AppApiError::new(
                 StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": format!("eval run not found: {run_id}") })),
+                "not_found",
+                format!("eval run not found: {run_id}"),
             )
-                .into_response();
+            .into_response();
         };
         runs.push(run);
     }
@@ -16414,11 +16444,15 @@ async fn get_memory_quality_matrix_handler(
             Json::<cairn_evals::MemorySourceQualityMatrix>(matrix),
         )
             .into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
+        Err(err) => {
+            tracing::error!("build_memory_quality_matrix failed: {err}");
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
+        }
     }
 }
 
@@ -16435,11 +16469,15 @@ async fn get_guardrail_matrix_handler(
         .await
     {
         Ok(matrix) => (StatusCode::OK, Json::<GuardrailMatrix>(matrix)).into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
+        Err(err) => {
+            tracing::error!("build_guardrail_matrix failed: {err}");
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
+        }
     }
 }
 
@@ -16456,11 +16494,15 @@ async fn get_skill_health_matrix_handler(
         .await
     {
         Ok(matrix) => (StatusCode::OK, Json::<SkillHealthMatrix>(matrix)).into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
+        Err(err) => {
+            tracing::error!("build_skill_health_matrix failed: {err}");
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
+        }
     }
 }
 
@@ -16573,10 +16615,7 @@ async fn get_eval_asset_trend_handler(
         days,
     ) {
         Ok(points) => (StatusCode::OK, Json(points)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -16591,11 +16630,12 @@ async fn get_eval_asset_winner_handler(
         &PromptAssetId::new(asset_id),
     );
     let Some(best) = scorecard.entries.first() else {
-        return (
+        return AppApiError::new(
             StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "no completed eval runs for prompt asset" })),
+            "not_found",
+            "no completed eval runs for prompt asset",
         )
-            .into_response();
+        .into_response();
     };
 
     (
@@ -16920,11 +16960,7 @@ async fn delete_source_handler(
     if state.document_store.deactivate_source(&SourceId::new(id)) {
         (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
     } else {
-        (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "source not found" })),
-        )
-            .into_response()
+        AppApiError::new(StatusCode::NOT_FOUND, "not_found", "source not found").into_response()
     }
 }
 
@@ -17093,10 +17129,7 @@ async fn memory_search_handler(
             )
                 .into_response()
         }
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -17185,12 +17218,13 @@ async fn get_memory_document_handler(
             }
         }
         Err(err) => {
-            let _unused: &str = err.to_string().as_str();
-            (
+            tracing::error!("memory document version lookup failed: {err}");
+            AppApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "internal error" })),
+                "internal_error",
+                "internal error",
             )
-                .into_response()
+            .into_response()
         }
     }
 }
@@ -17208,11 +17242,15 @@ async fn list_memory_document_versions_handler(
     .await
     {
         Ok(versions) => (StatusCode::OK, Json(versions)).into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
+        Err(err) => {
+            tracing::error!("list_memory_document_versions failed: {err}");
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
+        }
     }
 }
 
@@ -17277,10 +17315,7 @@ async fn memory_ingest_handler(
             )
                 .into_response()
         }
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -17820,11 +17855,13 @@ async fn get_trace_handler(
     let events = match state.runtime.store.read_stream(None, usize::MAX).await {
         Ok(events) => events,
         Err(err) => {
-            return (
+            tracing::error!("trace read_stream failed: {err}");
+            return AppApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": err.to_string() })),
+                "internal_error",
+                err.to_string(),
             )
-                .into_response();
+            .into_response();
         }
     };
 
@@ -17957,11 +17994,15 @@ async fn graph_query_response(
 ) -> axum::response::Response {
     match graph.query(query).await {
         Ok(subgraph) => (StatusCode::OK, Json(GraphResponse::from(subgraph))).into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
+        Err(err) => {
+            tracing::error!("graph query failed: {err}");
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
+        }
     }
 }
 
@@ -18262,10 +18303,7 @@ async fn list_provider_connections_handler(
             }),
         )
             .into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -18386,10 +18424,7 @@ async fn create_provider_connection_handler(
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::CREATED, Json(record)).into_response()
         }
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -18515,10 +18550,7 @@ async fn update_provider_connection_handler(
             publish_runtime_frames_since(&state, before).await;
             (StatusCode::OK, Json(record)).into_response()
         }
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -18612,10 +18644,7 @@ async fn list_provider_bindings_handler(
             }),
         )
             .into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -18701,10 +18730,7 @@ async fn create_provider_binding_handler(
         .await
     {
         Ok(record) => (StatusCode::CREATED, Json(record)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -18729,11 +18755,15 @@ async fn list_route_policies_handler(
             }),
         )
             .into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
+        Err(err) => {
+            tracing::error!("list_route_policies failed: {err}");
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
+        }
     }
 }
 
@@ -18749,10 +18779,7 @@ async fn create_route_policy_handler(
         .await
     {
         Ok(record) => (StatusCode::CREATED, Json(record)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -18768,10 +18795,7 @@ async fn create_guardrail_policy_handler(
         .await
     {
         Ok(record) => (StatusCode::CREATED, Json(record)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -18792,10 +18816,7 @@ async fn evaluate_guardrail_policy_handler(
         .await
     {
         Ok(decision) => (StatusCode::OK, Json(decision)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
@@ -19265,7 +19286,15 @@ async fn derive_recovery_status(
         .store
         .read_stream(None, 10_000)
         .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response())?;
+        .map_err(|err| {
+            tracing::error!("derive_recovery_status read_stream failed: {err}");
+            AppApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            )
+            .into_response()
+        })?;
 
     let mut last_attempt_reason = None;
     let mut last_recovered = None;
@@ -19829,10 +19858,7 @@ async fn compare_eval_run_baseline_handler(
         .compare_to_baseline(&EvalRunId::new(id))
     {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
+        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "bad_request", err.to_string())
             .into_response(),
     }
 }
