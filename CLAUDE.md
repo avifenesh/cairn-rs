@@ -1,6 +1,7 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+AGENTS.md is a symlink to this file — one source of truth for all AI agents.
 
 ## Hard Rules
 
@@ -14,6 +15,27 @@ These are non-negotiable. Every instance MUST follow them.
 6. **Be proactive.** Check what can be improved. Propose enhancements. Find the gaps. But confirm direction before large changes.
 
 *WHY: Cairn serves engineering teams who need a single all-in-one control plane for agent operations. Every feature must serve that vision — integrate everything teams need in one place. Quality is the product.*
+
+## Source of Truth Order
+
+When there is ambiguity, resolve in this order:
+
+1. The relevant RFCs under `docs/design/rfcs/`
+2. Compatibility docs under `docs/design/`
+3. This file (CLAUDE.md)
+4. The current Go implementation in `../cairn` only where preserved behavior or fixtures need to be checked
+
+If the docs disagree, fix the docs before inventing local behavior.
+
+## Core Project Rules
+
+- One codebase and one product binary
+- Local mode and self-hosted team mode are first-class in v1
+- Managed cloud and hybrid are later motions, not v1 foundations
+- Do not introduce a separate enterprise architecture fork
+- Do not move canonical runtime truth into queues, plugins, or transient workers
+- Do not bypass tenant/workspace/project scoping
+- Do not re-open preserved route or SSE contracts casually
 
 ## Build & Run
 
@@ -67,7 +89,7 @@ After `npm run build`, `cargo build -p cairn-app` embeds the new UI assets.
 
 ## Architecture
 
-18-crate Rust workspace. Each crate owns one bounded context. No circular dependencies.
+20-crate Rust workspace. Each crate owns one bounded context. No circular dependencies.
 
 ```
 domain → store → runtime → {memory, graph, evals, tools, agent, signal, channels} → api/plugin-proto → app
@@ -84,8 +106,15 @@ domain → store → runtime → {memory, graph, evals, tools, agent, signal, ch
 | `cairn-evals` | Prompt registry, version/release lifecycle, scorecards, bandit experiments. |
 | `cairn-tools` | Tool invocation, stdio JSON-RPC plugin host, permission gates, concurrency limits. |
 | `cairn-orchestrator` | Agent orchestration loop, step execution, event emission. |
+| `cairn-agent` | Higher-level agent patterns: ReAct, reflection, streaming, subagent spawning. |
 | `cairn-workspace` | Sandbox workspace primitive (RFC 016): repo store, clone cache, sandbox lifecycle. |
+| `cairn-integrations` | Integration plugin framework: GitHub, Linear, Notion, Obsidian, generic webhook. |
+| `cairn-providers` | Unified LLM provider abstraction: 12+ backends (OpenAI, Bedrock, Vertex, Ollama, etc.). |
+| `cairn-github` | GitHub App client: JWT auth, installation tokens, REST API, webhook verification. |
 | `cairn-plugin-catalog` | Plugin marketplace and catalog (RFC 015): discovery, publishing, reviews. |
+| `cairn-api` | Extracted HTTP route handlers (admin, evals, graph, memory, triggers, etc.). |
+| `cairn-signal` | Signal detection and routing for event-driven automation (RFC 022). |
+| `cairn-channels` | Notification channels: Slack, email, webhook delivery. |
 
 ### Event Sourcing
 

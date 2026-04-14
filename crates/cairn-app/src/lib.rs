@@ -783,7 +783,12 @@ async fn working_dir_for_run(
     };
     let repo_ids = state.project_repo_access.list_for_project(&repo_ctx).await;
     let Some(repo_id) = repo_ids.first().cloned() else {
-        return Ok(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        return Err(cairn_workspace::WorkspaceError::RepoStore(
+            cairn_workspace::RepoStoreError::NotAllowedForProject {
+                repo_id: cairn_workspace::RepoId::new("(none)"),
+                project: run.project.clone(),
+            },
+        ));
     };
 
     if repo_ids.len() > 1 {
