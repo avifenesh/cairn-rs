@@ -51,3 +51,9 @@ changelog-session/
 # Legacy / deprecated
 RALPH-PROGRESS.md
 scripts/ralph.sh
+
+# Generated knowledge (from /learn skill)
+agent-knowledge/
+
+# Playwright MCP artifacts
+.playwright-mcp/
