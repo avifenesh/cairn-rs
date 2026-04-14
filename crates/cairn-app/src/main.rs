@@ -3452,7 +3452,7 @@ async fn ollama_generate_handler(
     };
     let start = std::time::Instant::now();
 
-    match provider.generate(&model_id, messages, &settings).await {
+    match provider.generate(&model_id, messages, &settings, &[]).await {
         Ok(resp) => {
             let latency_ms = start.elapsed().as_millis() as u64;
             (
@@ -3641,7 +3641,7 @@ fn stream_generation_provider_as_sse(
     tokio::spawn(async move {
         let start = std::time::Instant::now();
         let settings = cairn_domain::providers::ProviderBindingSettings::default();
-        match provider.generate(&model_id, messages, &settings).await {
+        match provider.generate(&model_id, messages, &settings, &[]).await {
             Ok(resp) => {
                 let _ = tx
                     .send(Ok(Event::default()

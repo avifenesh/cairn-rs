@@ -154,22 +154,31 @@ docker compose exec ollama ollama pull nomic-embed-text  # embeddings
 
 ## Architecture
 
-cairn-rs is a 13-crate Rust workspace. Each crate owns one bounded context with no circular dependencies.
+cairn-rs currently spans 20 local Rust crates. Nineteen are workspace members,
+and `cairn-providers` is a repo-local path crate consumed by the app/runtime
+surface. Each crate owns one bounded context with no circular dependencies.
 
 ```
 cairn-domain       pure domain types, events, lifecycle rules, RFC contracts
 cairn-store        append-only event log + synchronous projections (InMemory / Postgres / SQLite)
 cairn-runtime      service implementations: sessions, runs, tasks, approvals, routing, evals
+cairn-providers    unified chat/completion/embedding provider abstraction
 cairn-api          HTTP types, SSE payloads, auth, bootstrap config, API error shapes
 cairn-app          axum HTTP server, startup wiring, all route handlers, embedded React UI
 cairn-memory       knowledge pipeline: ingest, chunking, retrieval, graph-backed expansion
 cairn-graph        entity relationship graph: nodes, edges, traversal, proximity scoring
 cairn-evals        eval runs, rubrics, baselines, scorecard matrices, bandit experiments
 cairn-tools        tool invocation, plugin host (stdio JSON-RPC), capability verification
+cairn-tools-derive proc-macro helpers for built-in and plugin-exposed tools
 cairn-agent        agent orchestration loop, reflection, hook pipeline
+cairn-orchestrator gather/decide/execute loop runner over the runtime spine
 cairn-signal       signal ingestion and routing between agents
 cairn-channels     async message channels between agents
+cairn-plugin-catalog bundled marketplace catalog descriptors for RFC 015
 cairn-plugin-proto plugin wire protocol types and capability declarations
+cairn-workspace    repo clone cache and sandbox lifecycle primitives
+cairn-github       standalone GitHub App auth, webhook, and REST client SDK
+cairn-integrations integration registry and per-service plugin surfaces
 ```
 
 ### Data flow

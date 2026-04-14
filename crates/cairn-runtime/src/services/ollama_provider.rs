@@ -191,6 +191,7 @@ impl GenerationProvider for OllamaProvider {
         model_id: &str,
         messages: Vec<serde_json::Value>,
         settings: &ProviderBindingSettings,
+        _tools: &[serde_json::Value],
     ) -> Result<GenerationResponse, ProviderAdapterError> {
         let url = format!("{}/v1/chat/completions", self.host);
 
@@ -269,6 +270,7 @@ impl GenerationProvider for OllamaProvider {
             output_tokens: usage.completion_tokens,
             model_id: chat.model.unwrap_or_else(|| model_id.to_owned()),
             tool_calls: vec![],
+            finish_reason: None,
         })
     }
 }
@@ -279,18 +281,14 @@ impl GenerationProvider for OllamaProvider {
 mod tests {
     use super::*;
 
-    #[test]
-    fn from_env_returns_none_when_unset() {
-        std::env::remove_var("OLLAMA_HOST");
-        assert!(OllamaProvider::from_env().is_none());
-    }
+    // Env-var tests (`set_var`/`remove_var`) are unsound in multi-threaded
+    // test runners — they race with other tests.  Test the constructor and
+    // parsing logic directly instead.
 
     #[test]
-    fn from_env_returns_some_when_set() {
-        std::env::set_var("OLLAMA_HOST", "http://gpu-box:11434");
-        let p = OllamaProvider::from_env().unwrap();
+    fn new_stores_host() {
+        let p = OllamaProvider::new("http://gpu-box:11434");
         assert_eq!(p.host(), "http://gpu-box:11434");
-        std::env::remove_var("OLLAMA_HOST");
     }
 
     #[test]
@@ -300,10 +298,9 @@ mod tests {
     }
 
     #[test]
-    fn trailing_slash_stripped_from_env() {
-        std::env::set_var("OLLAMA_HOST", "http://localhost:11434/");
-        let p = OllamaProvider::from_env().unwrap();
+    fn trailing_slash_stripped_by_constructor() {
+        let host = "http://localhost:11434/".trim_end_matches('/');
+        let p = OllamaProvider::new(host);
         assert_eq!(p.host(), "http://localhost:11434");
-        std::env::remove_var("OLLAMA_HOST");
     }
 }

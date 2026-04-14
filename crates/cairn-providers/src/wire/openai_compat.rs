@@ -577,6 +577,7 @@ pub struct WireChatResponse {
 #[derive(Deserialize, Debug)]
 pub struct WireChatChoice {
     pub message: WireChatMsg,
+    pub finish_reason: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -605,6 +606,9 @@ impl ChatResponse for WireChatResponse {
     }
     fn usage(&self) -> Option<Usage> {
         self.usage.clone()
+    }
+    fn finish_reason(&self) -> Option<String> {
+        self.choices.first().and_then(|c| c.finish_reason.clone())
     }
 }
 

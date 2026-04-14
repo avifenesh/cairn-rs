@@ -1,6 +1,6 @@
 # Cairn Rewrite RFCs
 
-Status: Phase 2 implemented  
+Status: active RFC set for the cairn-rs rewrite  
 Purpose: concrete architecture decisions for the cairn-rs control plane
 
 ## Phase 1 RFCs (implemented)
@@ -24,7 +24,7 @@ Purpose: concrete architecture decisions for the cairn-rs control plane
 
 15. [RFC 015 - Plugin Marketplace and Scoping](./015-plugin-marketplace-and-scoping.md) — VisibilityContext, plugin catalog, marketplace routes
 16. [RFC 016 - Sandbox Workspace Primitive](./016-sandbox-workspace-primitive.md) — cairn-workspace crate, repo store, sandbox lifecycle
-17. [RFC 017 - Triggers](./022-triggers.md) — signal routing, webhook dedup, trigger evaluation
+17. [RFC 017 - GitHub Reference Plugin](./017-github-reference-plugin.md) — marketplace reference plugin, GitHub App auth, webhook normalization
 18. [RFC 018 - Agent Loop Enhancements](./018-agent-loop-enhancements.md) — RunMode (Plan/Execute/Direct), Guardian resolver, context compaction, tool visibility
 19. [RFC 019 - Unified Decision Layer](./019-unified-decision-layer.md) — DecisionService, 8-step pipeline, singleflight cache, learned rules
 20. [RFC 020 - Durable Recovery](./020-durable-recovery.md) — startup dependency graph, dual checkpoint, ToolCallId idempotency, RetrySafety enforcement

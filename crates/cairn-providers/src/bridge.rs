@@ -12,7 +12,7 @@ use cairn_domain::providers::{
 use serde_json::Value;
 
 use crate::backends::bedrock::Bedrock;
-use crate::chat::{ChatMessage, ChatRole, MessageContent};
+use crate::chat::{ChatMessage, ChatRole, FunctionDef, MessageContent, Tool};
 use crate::error::truncate_raw_response;
 use crate::wire::openai_compat::OpenAiCompat;
 use crate::{FunctionCall, ToolCall};
@@ -56,6 +56,40 @@ fn json_tool_calls(value: &Value) -> Option<Vec<ToolCall>> {
             })
             .collect()
     })
+}
+
+/// Convert OpenAI-format tool definitions (`[{type: "function", function: {name, description, parameters}}]`)
+/// into the cairn-providers `Tool` type for passing to `chat_with_tools_for_model`.
+fn json_tools_to_tools(tools: &[Value]) -> Option<Vec<Tool>> {
+    if tools.is_empty() {
+        return None;
+    }
+    let converted: Vec<Tool> = tools
+        .iter()
+        .filter_map(|t| {
+            let func = t.get("function")?;
+            Some(Tool {
+                tool_type: "function".to_owned(),
+                function: FunctionDef {
+                    name: func.get("name")?.as_str()?.to_owned(),
+                    description: func
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("")
+                        .to_owned(),
+                    parameters: func
+                        .get("parameters")
+                        .cloned()
+                        .unwrap_or(serde_json::json!({"type": "object", "properties": {}})),
+                },
+            })
+        })
+        .collect();
+    if converted.is_empty() {
+        None
+    } else {
+        Some(converted)
+    }
 }
 
 fn json_messages_to_chat_messages(messages: &[Value]) -> Vec<ChatMessage> {
@@ -118,15 +152,17 @@ impl GenerationProvider for OpenAiCompat {
         model_id: &str,
         messages: Vec<serde_json::Value>,
         _settings: &ProviderBindingSettings,
+        tools: &[serde_json::Value],
     ) -> Result<GenerationResponse, ProviderAdapterError> {
         let chat_messages = json_messages_to_chat_messages(&messages);
         let effective_model = model_id.trim();
 
+        let native_tools = json_tools_to_tools(tools);
         let response = self
             .chat_with_tools_for_model(
                 (!effective_model.is_empty()).then_some(effective_model),
                 &chat_messages,
-                None,
+                native_tools.as_deref(),
                 None,
             )
             .await
@@ -143,6 +179,7 @@ impl GenerationProvider for OpenAiCompat {
 
         let text = response.text().unwrap_or_default();
         let usage = response.usage();
+        let finish_reason = response.finish_reason();
         let tool_calls: Vec<serde_json::Value> = response
             .tool_calls()
             .unwrap_or_default()
@@ -169,6 +206,7 @@ impl GenerationProvider for OpenAiCompat {
                 effective_model.to_owned()
             },
             tool_calls,
+            finish_reason,
         })
     }
 }
@@ -183,6 +221,7 @@ impl GenerationProvider for Bedrock {
         model_id: &str,
         messages: Vec<serde_json::Value>,
         _settings: &ProviderBindingSettings,
+        tools: &[serde_json::Value],
     ) -> Result<GenerationResponse, ProviderAdapterError> {
         let chat_messages = json_messages_to_chat_messages(&messages);
         let effective_model = if model_id.trim().is_empty() {
@@ -191,8 +230,14 @@ impl GenerationProvider for Bedrock {
             model_id.trim()
         };
 
+        let native_tools = json_tools_to_tools(tools);
         let response = self
-            .chat_with_tools_for_model(Some(effective_model), &chat_messages, None, None)
+            .chat_with_tools_for_model(
+                Some(effective_model),
+                &chat_messages,
+                native_tools.as_deref(),
+                None,
+            )
             .await
             .map_err(|e| match e {
                 crate::error::ProviderError::RateLimited => ProviderAdapterError::RateLimited,
@@ -204,12 +249,30 @@ impl GenerationProvider for Bedrock {
 
         let text = response.text().unwrap_or_default();
         let usage = response.usage();
+        let finish_reason = response.finish_reason();
+        let tool_calls: Vec<serde_json::Value> = response
+            .tool_calls()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|tc| {
+                serde_json::json!({
+                    "id": tc.id,
+                    "type": tc.call_type,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    }
+                })
+            })
+            .collect();
+
         Ok(GenerationResponse {
             text,
             input_tokens: usage.as_ref().map(|u| u.prompt_tokens),
             output_tokens: usage.as_ref().map(|u| u.completion_tokens),
             model_id: effective_model.to_owned(),
-            tool_calls: vec![],
+            tool_calls,
+            finish_reason,
         })
     }
 }

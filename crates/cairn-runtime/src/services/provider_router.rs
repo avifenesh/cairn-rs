@@ -239,7 +239,7 @@ impl ProviderRouter {
 
             let start = Instant::now();
             let result = provider
-                .generate(model_id, messages.clone(), settings)
+                .generate(model_id, messages.clone(), settings, &[])
                 .await;
             let latency_ms = start.elapsed().as_millis() as u64;
 
@@ -496,6 +496,7 @@ mod tests {
             model_id: &str,
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             if self.should_fail {
                 return Err(ProviderAdapterError::TransportFailure(
@@ -508,6 +509,7 @@ mod tests {
                 output_tokens: Some(5),
                 model_id: model_id.to_owned(),
                 tool_calls: vec![],
+                finish_reason: None,
             })
         }
     }

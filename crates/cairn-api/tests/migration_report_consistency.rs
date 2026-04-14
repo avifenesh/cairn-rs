@@ -291,8 +291,8 @@ fn owner_map_and_http_gap_report_agree_on_explicit_route_seams() {
         "owner map should reflect the explicit memory search API seam",
     );
     assert!(
-        memory_gap.contains("`dedicated_endpoint_trait_present_followup_remaining`"),
-        "HTTP gap report should keep the memory response follow-up explicit",
+        memory_gap.contains("`dedicated_endpoint_trait_present`"),
+        "HTTP gap report should reflect the current preserved memory-search response shape",
     );
 
     let assistant_owner = markdown_row_prefix(

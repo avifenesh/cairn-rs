@@ -8,7 +8,7 @@ use cairn_domain::providers::{
     ProviderConnectionStatus,
 };
 use cairn_domain::{CredentialId, ProviderConnectionId, TenantId};
-use cairn_providers::chat::{ChatMessage, ChatProvider};
+use cairn_providers::chat::{ChatMessage, ChatProvider, FunctionDef, Tool};
 use cairn_providers::wire::openai_compat::OpenAiCompat;
 use cairn_providers::{Backend, ProviderBuilder};
 use cairn_store::projections::{
@@ -693,15 +693,48 @@ impl GenerationProvider for ChatProviderGenerationAdapter {
         model_id: &str,
         messages: Vec<serde_json::Value>,
         _settings: &ProviderBindingSettings,
+        tools: &[serde_json::Value],
     ) -> Result<GenerationResponse, ProviderAdapterError> {
         let chat_messages = json_messages_to_chat_messages(&messages);
+        let native_tools: Option<Vec<Tool>> = if tools.is_empty() {
+            None
+        } else {
+            let converted: Vec<Tool> = tools
+                .iter()
+                .filter_map(|t| {
+                    let func = t.get("function")?;
+                    Some(Tool {
+                        tool_type: "function".to_owned(),
+                        function: FunctionDef {
+                            name: func.get("name")?.as_str()?.to_owned(),
+                            description: func
+                                .get("description")
+                                .and_then(|d| d.as_str())
+                                .unwrap_or("")
+                                .to_owned(),
+                            parameters: func
+                                .get("parameters")
+                                .cloned()
+                                .unwrap_or(serde_json::json!({"type": "object", "properties": {}})),
+                        },
+                    })
+                })
+                .collect();
+            if converted.is_empty() {
+                None
+            } else {
+                Some(converted)
+            }
+        };
+
         let response = self
             .chat
-            .chat_with_tools(&chat_messages, None, None)
+            .chat_with_tools(&chat_messages, native_tools.as_deref(), None)
             .await
             .map_err(map_provider_error)?;
 
         let usage = response.usage();
+        let finish_reason = response.finish_reason();
         Ok(GenerationResponse {
             text: response.text().unwrap_or_default(),
             input_tokens: usage.as_ref().map(|usage| usage.prompt_tokens),
@@ -726,6 +759,7 @@ impl GenerationProvider for ChatProviderGenerationAdapter {
                     })
                 })
                 .collect(),
+            finish_reason,
         })
     }
 }
@@ -958,6 +992,7 @@ mod tests {
             model_id: &str,
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Ok(GenerationResponse {
                 text: self.label.to_owned(),
@@ -965,6 +1000,7 @@ mod tests {
                 output_tokens: None,
                 model_id: model_id.to_owned(),
                 tool_calls: Vec::new(),
+                finish_reason: None,
             })
         }
     }

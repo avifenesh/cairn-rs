@@ -278,6 +278,7 @@ async fn e2e_provider_fallback() {
             _model_id: &str,
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Err(ProviderAdapterError::TransportFailure(
                 "primary down".into(),
@@ -294,6 +295,7 @@ async fn e2e_provider_fallback() {
             model_id: &str,
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, ProviderAdapterError> {
             Ok(GenerationResponse {
                 text: "fallback response".into(),
@@ -301,6 +303,7 @@ async fn e2e_provider_fallback() {
                 output_tokens: Some(5),
                 model_id: model_id.to_owned(),
                 tool_calls: vec![],
+                finish_reason: None,
             })
         }
     }

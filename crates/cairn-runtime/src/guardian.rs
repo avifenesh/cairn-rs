@@ -156,13 +156,16 @@ impl ApprovalResolver for GuardianResolver {
         };
 
         // Call the provider. On any error, fail closed (fall through).
-        let response: GenerationResponse =
-            match self.provider.generate(&model_id, messages, &settings).await {
-                Ok(resp) => resp,
-                Err(_) => {
-                    return (DecisionOutcome::Allowed, DecisionSource::FreshEvaluation);
-                }
-            };
+        let response: GenerationResponse = match self
+            .provider
+            .generate(&model_id, messages, &settings, &[])
+            .await
+        {
+            Ok(resp) => resp,
+            Err(_) => {
+                return (DecisionOutcome::Allowed, DecisionSource::FreshEvaluation);
+            }
+        };
 
         // Parse the structured response.
         let (outcome, risk_level, rationale) = match Self::parse_response(&response.text) {
@@ -266,6 +269,7 @@ mod tests {
             _model: &str,
             _messages: Vec<serde_json::Value>,
             _settings: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, cairn_domain::providers::ProviderAdapterError> {
             Ok(GenerationResponse {
                 text: self.response.clone(),
@@ -273,6 +277,7 @@ mod tests {
                 output_tokens: Some(50),
                 model_id: "test-guardian".to_owned(),
                 tool_calls: vec![],
+                finish_reason: None,
             })
         }
     }
@@ -286,6 +291,7 @@ mod tests {
             _: &str,
             _: Vec<serde_json::Value>,
             _: &ProviderBindingSettings,
+            _tools: &[serde_json::Value],
         ) -> Result<GenerationResponse, cairn_domain::providers::ProviderAdapterError> {
             Err(
                 cairn_domain::providers::ProviderAdapterError::TransportFailure(

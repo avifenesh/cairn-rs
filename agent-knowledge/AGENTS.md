@@ -11,6 +11,7 @@
 | AI Observability & LLM Ops UX Patterns | ai-observability-ux-patterns.md | 25 | deep | 2026-04-05 |
 | Agent Control Plane Use Cases | agent-control-plane-use-cases.md | 12 | deep | 2026-04-08 |
 | Revenue Models for Open-Source Developer Infrastructure | infrastructure-revenue-models.md | 47 | deep | 2026-04-10 |
+| Native Tool Calling for LLM APIs | native-tool-calling.md | 22 | medium | 2026-04-14 |
 
 ## Trigger Phrases
 
@@ -40,6 +41,22 @@ Use this knowledge when the user asks about:
 - "agent infrastructure monetization" → infrastructure-revenue-models.md
 - "early stage open source revenue" → infrastructure-revenue-models.md
 - "CrewAI LangChain business model" → infrastructure-revenue-models.md
+- "native tool calling LLM" → native-tool-calling.md
+- "function calling API" → native-tool-calling.md
+- "OpenAI tool_calls format" → native-tool-calling.md
+- "Anthropic tool_use content blocks" → native-tool-calling.md
+- "tool definitions JSON schema" → native-tool-calling.md
+- "parallel tool calls" → native-tool-calling.md
+- "structured tool calling vs raw JSON" → native-tool-calling.md
+- "provider-agnostic tool calling" → native-tool-calling.md
+- "Bedrock Converse API tools" → native-tool-calling.md
+- "Vertex Gemini function calling" → native-tool-calling.md
+- "tool_choice parameter" → native-tool-calling.md
+- "strict mode tool calling" → native-tool-calling.md
+- "fallback for models without tool support" → native-tool-calling.md
+- "parse tool_calls from response" → native-tool-calling.md
+- "send tool results back to LLM" → native-tool-calling.md
+- "GenerationProvider tools parameter" → native-tool-calling.md
 
 ## Quick Lookup
 
@@ -63,6 +80,17 @@ Use this knowledge when the user asks about:
 | Temporal, Dagster, Prefect, Hatchet, Inngest | infrastructure-revenue-models.md |
 | LangSmith, Langfuse, CrewAI, LlamaIndex pricing | infrastructure-revenue-models.md |
 | GitLab, Grafana, HashiCorp, Airbyte, Mattermost | infrastructure-revenue-models.md |
+| tool calling, function calling, tool_calls | native-tool-calling.md |
+| OpenAI tools, Anthropic tool_use, Bedrock toolConfig | native-tool-calling.md |
+| tool definitions, input_schema, parameters | native-tool-calling.md |
+| parallel tool calls, disable_parallel_tool_use | native-tool-calling.md |
+| tool_choice, auto, required, any, none | native-tool-calling.md |
+| strict mode, constrained decoding, schema adherence | native-tool-calling.md |
+| tool results, tool_call_id, tool_use_id | native-tool-calling.md |
+| provider adapter, format translation, normalization | native-tool-calling.md |
+| Groq, Mistral, xAI, DeepSeek, Ollama, Together | native-tool-calling.md |
+| fallback, prompt injection, parse_proposals | native-tool-calling.md |
+| async-openai, aws-sdk-bedrockruntime, Rust tool types | native-tool-calling.md |
 
 ## How to Use
 

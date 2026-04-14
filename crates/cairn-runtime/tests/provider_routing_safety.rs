@@ -55,6 +55,7 @@ impl GenerationProvider for IdentifiableProvider {
         model_id: &str,
         _messages: Vec<serde_json::Value>,
         _settings: &ProviderBindingSettings,
+        _tools: &[serde_json::Value],
     ) -> Result<GenerationResponse, ProviderAdapterError> {
         if self.should_fail {
             return Err(ProviderAdapterError::TransportFailure(format!(
@@ -68,6 +69,7 @@ impl GenerationProvider for IdentifiableProvider {
             output_tokens: Some(5),
             model_id: model_id.to_owned(),
             tool_calls: vec![],
+            finish_reason: None,
         })
     }
 }
