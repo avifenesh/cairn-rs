@@ -21114,6 +21114,26 @@ async fn orchestrate_single_issue(
         status: cairn_integrations::WorkItemStatus::Processing,
     };
 
+    // Allowlist the target repo so working_dir_for_run can clone + sandbox it.
+    // Without this, working_dir_for_run falls back to the server's CWD and the
+    // agent's file/git tools operate on the wrong directory.
+    let repo_id = cairn_workspace::RepoId::parse(&entry.repo)
+        .map_err(|e| format!("invalid repo id '{}': {}", entry.repo, e.reason()))?;
+    let repo_ctx = cairn_domain::RepoAccessContext {
+        project: run.project.clone(),
+    };
+    state
+        .project_repo_access
+        .allow(
+            &repo_ctx,
+            &repo_id,
+            cairn_domain::ActorRef::Operator {
+                operator_id: cairn_domain::OperatorId::new("webhook-pipeline"),
+            },
+        )
+        .await
+        .map_err(|e| format!("repo allowlist failed: {}", e.client_message()))?;
+
     webhook_trigger_orchestration(
         state,
         &run,
