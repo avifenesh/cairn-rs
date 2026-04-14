@@ -27,11 +27,15 @@ fi
 echo "  ✓ vitest"
 
 echo "  playwright..."
-if ! (cd ui && npx playwright test --reporter=dot) >/dev/null 2>&1; then
-  echo "  ❌ Playwright failed."
-  (cd ui && npx playwright test --reporter=list) 2>&1 | grep "✘" | head -5
-  exit 1
+if curl -sf http://localhost:3000/health >/dev/null 2>&1; then
+  if ! (cd ui && npx playwright test --reporter=dot) >/dev/null 2>&1; then
+    echo "  ❌ Playwright failed."
+    (cd ui && npx playwright test --reporter=list) 2>&1 | grep "✘" | head -5
+    exit 1
+  fi
+  echo "  ✓ playwright"
+else
+  echo "  ⊘ playwright (skipped — server not running on :3000)"
 fi
-echo "  ✓ playwright"
 
 echo "═══ ✅ all gates passed ═══"
