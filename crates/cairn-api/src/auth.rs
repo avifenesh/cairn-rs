@@ -109,7 +109,7 @@ impl Authenticator for ServiceTokenAuthenticator {
     fn authenticate(&self, token: &str) -> Result<AuthPrincipal, Self::Error> {
         self.registry
             .validate(token)
-            .ok_or_else(|| format!("invalid service token: {token}"))
+            .ok_or_else(|| "invalid service token".to_owned())
     }
 }
 

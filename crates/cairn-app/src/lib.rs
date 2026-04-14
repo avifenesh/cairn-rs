@@ -8503,7 +8503,10 @@ async fn set_license_override_handler(
         .await
     {
         Ok(record) => (StatusCode::OK, Json(record)).into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        Err(err) => {
+            tracing::error!("set_license_override failed: {err}");
+            AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string()).into_response()
+        }
     }
 }
 
@@ -9758,7 +9761,10 @@ async fn list_feed_handler(
         .await
     {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+        Err(err) => {
+            tracing::error!("list_feed failed: {err}");
+            AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string()).into_response()
+        }
     }
 }
 
@@ -9782,7 +9788,10 @@ async fn mark_all_feed_items_read_handler(
             Json(serde_json::json!({ "changed": changed })),
         )
             .into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+        Err(err) => {
+            tracing::error!("mark_all_feed_items_read failed: {err}");
+            AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string()).into_response()
+        }
     }
 }
 
@@ -10045,7 +10054,10 @@ async fn delete_signal_subscription_handler(
 ) -> impl IntoResponse {
     match state.runtime.store.delete_signal_subscription(&id).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        Err(err) => {
+            tracing::error!("delete_signal_subscription failed: {err}");
+            AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string()).into_response()
+        }
     }
 }
 
@@ -11454,7 +11466,9 @@ async fn orchestrate_run_handler(
                 ),
             );
             let payload = event.payload.clone();
-            let _ = self.store.append(&[event]).await;
+            if let Err(e) = self.store.append(&[event]).await {
+                tracing::warn!("event store append failed (non-fatal): {e}");
+            }
             let _ = self.exporter.export_event(&payload).await;
 
             // Insert into the LlmCallTrace read model so /v1/traces is populated.
@@ -12929,7 +12943,8 @@ async fn complete_task_handler(
                     }
                     Ok(true) => {}
                     Err(err) => {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                        tracing::error!("complete_task check non-terminal children failed: {err}");
+                        return AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err.to_string())
                             .into_response();
                     }
                 }
@@ -16785,7 +16800,9 @@ async fn create_source_handler(
             },
         );
     let summary = state.document_store.register_source(&project, &source_id);
-    let _ = project_source_in_graph(&state, &project, &source_id).await;
+    if let Err(e) = project_source_in_graph(&state, &project, &source_id).await {
+        tracing::warn!("graph projection failed (non-fatal): {e}");
+    }
     (StatusCode::CREATED, Json(summary)).into_response()
 }
 
@@ -17211,7 +17228,7 @@ async fn memory_ingest_handler(
             state
                 .diagnostics
                 .record_ingest(&source_id, &project, chunk_count);
-            let _ = project_document_in_graph(
+            if let Err(e) = project_document_in_graph(
                 &state,
                 &project,
                 &source_id,
@@ -17221,7 +17238,10 @@ async fn memory_ingest_handler(
                     .map(|chunk| chunk.chunk_id.as_str().to_owned())
                     .collect(),
             )
-            .await;
+            .await
+            {
+                tracing::warn!("graph projection failed (non-fatal): {e}");
+            }
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
@@ -17254,7 +17274,9 @@ async fn create_ingest_job_handler(
     );
 
     state.document_store.register_source(&project, &source_id);
-    let _ = project_source_in_graph(&state, &project, &source_id).await;
+    if let Err(e) = project_source_in_graph(&state, &project, &source_id).await {
+        tracing::warn!("graph projection failed (non-fatal): {e}");
+    }
     state
         .pending_ingest_jobs
         .lock()
@@ -17380,7 +17402,7 @@ async fn complete_ingest_job_handler(
                 &pending.project,
                 chunks.len() as u64,
             );
-            let _ = project_document_in_graph(
+            if let Err(e) = project_document_in_graph(
                 &state,
                 &pending.project,
                 &pending.source_id,
@@ -17390,7 +17412,10 @@ async fn complete_ingest_job_handler(
                     .map(|chunk| chunk.chunk_id.as_str().to_owned())
                     .collect(),
             )
-            .await;
+            .await
+            {
+                tracing::warn!("graph projection failed (non-fatal): {e}");
+            }
         }
     }
 
@@ -20685,7 +20710,7 @@ async fn github_scan_handler(
     // Store the queue in AppState and spawn the sequential processor.
     if !queued.is_empty() {
         {
-            let mut queue = state.github.as_ref().unwrap().issue_queue.write().await;
+            let mut queue = github.issue_queue.write().await;
             for item in &queued {
                 queue.push_back(IssueQueueEntry {
                     repo: body.repo.clone(),
@@ -21187,7 +21212,9 @@ fn build_orchestrator_emitter(
                 ),
             );
             let payload = event.payload.clone();
-            let _ = self.store.append(&[event]).await;
+            if let Err(e) = self.store.append(&[event]).await {
+                tracing::warn!("event store append failed (non-fatal): {e}");
+            }
             let _ = self.exporter.export_event(&payload).await;
 
             use cairn_store::projections::LlmCallTraceReadModel;
