@@ -1591,10 +1591,10 @@ impl AppState {
             Ok(events) => {
                 let projector = RuntimeGraphProjector::new(self.graph.clone());
                 if let Err(e) = projector.project_events(&events).await {
-                    eprintln!("graph replay: projection error: {e:?}");
+                    tracing::warn!("graph replay: projection error: {e:?}");
                 }
             }
-            Err(e) => eprintln!("graph replay: failed to read events: {e}"),
+            Err(e) => tracing::warn!("graph replay: failed to read events: {e}"),
         }
     }
 
@@ -1613,7 +1613,7 @@ impl AppState {
         let events = match self.runtime.store.read_stream(None, usize::MAX).await {
             Ok(e) => e,
             Err(e) => {
-                eprintln!("eval replay: failed to read events: {e}");
+                tracing::warn!("eval replay: failed to read events: {e}");
                 return;
             }
         };
@@ -1666,7 +1666,7 @@ impl AppState {
         }
 
         if created > 0 || completed > 0 {
-            eprintln!("eval replay: restored {created} runs ({completed} completed)");
+            tracing::info!("eval replay: restored {created} runs ({completed} completed)");
         }
     }
 
@@ -1677,7 +1677,7 @@ impl AppState {
         let events = match self.runtime.store.read_stream(None, usize::MAX).await {
             Ok(events) => events,
             Err(error) => {
-                eprintln!("trigger replay: failed to read events: {error}");
+                tracing::warn!("trigger replay: failed to read events: {error}");
                 return;
             }
         };
@@ -1723,7 +1723,7 @@ impl AppState {
                     let conditions = match trigger_conditions_from_values(&event.conditions) {
                         Ok(conditions) => conditions,
                         Err(error) => {
-                            eprintln!(
+                            tracing::warn!(
                                 "trigger replay: failed to decode conditions for {}: {error}",
                                 event.trigger_id
                             );
@@ -1752,7 +1752,7 @@ impl AppState {
                         updated_at: event.created_at,
                     }) {
                         Ok(_) => restored_triggers += 1,
-                        Err(error) => eprintln!(
+                        Err(error) => tracing::warn!(
                             "trigger replay: failed to restore trigger {}: {error}",
                             event.trigger_id
                         ),
@@ -1813,7 +1813,7 @@ impl AppState {
         }
 
         if restored_templates > 0 || restored_triggers > 0 || restored_fires > 0 {
-            eprintln!(
+            tracing::info!(
                 "trigger replay: restored {restored_templates} templates, {restored_triggers} triggers, {restored_fires} fires"
             );
         }
@@ -6028,7 +6028,7 @@ impl ServerBootstrap for AppBootstrap {
             .map_err(|err| format!("failed to build tokio runtime: {err}"))?;
 
         if config.mode == DeploymentMode::SelfHostedTeam && !config.tls_enabled {
-            eprintln!("WARNING: TLS disabled in team mode — not recommended for production");
+            tracing::warn!("TLS disabled in team mode — not recommended for production");
         }
 
         runtime.block_on(async {
@@ -9468,89 +9468,6 @@ async fn revoke_workspace_share_handler(
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
         Err(err) => runtime_error_response(err),
     }
-}
-
-/// `DELETE /v1/credentials/:id` — revoke (soft-delete) a credential by ID.
-///
-/// Credential deletion is modelled as a revoke: the record is retained with
-/// `active = false` for audit history.  Returns 404 when the credential does
-/// not exist or was already revoked.
-#[allow(dead_code)]
-async fn delete_credential_handler(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<AuthPrincipal>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
-    if let Some(denied) = require_feature(&state.config, CREDENTIAL_MANAGEMENT) {
-        return denied;
-    }
-    let credential_id = CredentialId::new(id);
-    let existing = match state.runtime.credentials.get(&credential_id).await {
-        Ok(Some(record)) => record,
-        Ok(None) => {
-            return AppApiError::new(StatusCode::NOT_FOUND, "not_found", "credential not found")
-                .into_response();
-        }
-        Err(err) => return runtime_error_response(err),
-    };
-    match state.runtime.credentials.revoke(&credential_id).await {
-        Ok(record) => {
-            let _ = state
-                .runtime
-                .audit
-                .record(
-                    existing.tenant_id.clone(),
-                    audit_actor_id(&principal),
-                    "delete_credential".to_owned(),
-                    "credential".to_owned(),
-                    credential_id.to_string(),
-                    AuditOutcome::Success,
-                    serde_json::json!({ "provider_id": existing.name }),
-                )
-                .await;
-            (StatusCode::OK, Json(credential_summary(record))).into_response()
-        }
-        Err(err) => runtime_error_response(err),
-    }
-}
-
-/// `POST /v1/resources/:id/share` — share a resource with another workspace.
-///
-/// Generic per-resource sharing requires the multi-tenant sharing
-/// infrastructure defined in RFC 008.  Workspace-scoped shares are already
-/// available via `POST /v1/admin/workspaces/:id/shares`.
-/// This endpoint is reserved for the future per-resource surface.
-#[allow(dead_code)]
-async fn share_resource_handler(
-    State(_state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
-) -> impl IntoResponse {
-    AppApiError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        "not_implemented",
-        "generic resource sharing is not yet implemented; \
-         use POST /v1/admin/workspaces/:id/shares for workspace-scoped shares",
-    )
-    .into_response()
-}
-
-/// `POST /v1/resources/shares/:id/revoke` — revoke a generic resource share.
-///
-/// Workspace share revocation is available at
-/// `DELETE /v1/admin/workspaces/:id/shares/:share_id`.
-/// This endpoint is reserved for the future per-resource sharing surface.
-#[allow(dead_code)]
-async fn revoke_resource_share_handler(
-    State(_state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
-) -> impl IntoResponse {
-    AppApiError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        "not_implemented",
-        "generic resource share revocation is not yet implemented; \
-         use DELETE /v1/admin/workspaces/:id/shares/:share_id for workspace-scoped shares",
-    )
-    .into_response()
 }
 
 async fn store_credential_handler(
@@ -15908,69 +15825,6 @@ async fn not_found_handler() -> impl IntoResponse {
     AppApiError::new(StatusCode::NOT_FOUND, "not_found", "route not found")
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
-#[allow(dead_code)]
-struct CreateModelComparisonRequest {
-    tenant_id: Option<String>,
-    dataset_id: String,
-    model_a_binding_id: String,
-    model_b_binding_id: String,
-}
-
-#[derive(Clone, Debug, serde::Deserialize)]
-#[allow(dead_code)]
-struct SubmitModelComparisonResultRequest {
-    binding_id: String,
-    metrics: EvalMetrics,
-}
-
-#[allow(dead_code)]
-async fn create_model_comparison_handler(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<CreateModelComparisonRequest>,
-) -> impl IntoResponse {
-    let tenant_id = TenantId::new(body.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID));
-    let comparison = state.model_comparisons.create(
-        tenant_id,
-        body.dataset_id,
-        body.model_a_binding_id,
-        body.model_b_binding_id,
-    );
-    (StatusCode::CREATED, Json(comparison)).into_response()
-}
-
-#[allow(dead_code)]
-async fn get_model_comparison_handler(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
-    match state.model_comparisons.get(&id) {
-        Some(comparison) => (StatusCode::OK, Json(comparison)).into_response(),
-        None => AppApiError::new(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "model comparison not found",
-        )
-        .into_response(),
-    }
-}
-
-#[allow(dead_code)]
-async fn submit_model_comparison_result_handler(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Json(body): Json<SubmitModelComparisonResultRequest>,
-) -> impl IntoResponse {
-    match state
-        .model_comparisons
-        .submit_result(&id, &body.binding_id, body.metrics)
-    {
-        Ok(comparison) => (StatusCode::OK, Json(comparison)).into_response(),
-        Err(err) => AppApiError::new(StatusCode::BAD_REQUEST, "comparison_error", err.to_string())
-            .into_response(),
-    }
-}
-
 async fn list_eval_runs_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<OptionalProjectScopedQuery>,
@@ -16183,7 +16037,7 @@ async fn create_eval_run_handler(
     );
     // Best-effort: log warning but don't fail the request if event write fails.
     if let Err(e) = state.runtime.store.append(&[ev]).await {
-        eprintln!("eval_run event write failed (non-fatal): {e}");
+        tracing::warn!("eval_run event write failed (non-fatal): {e}");
     }
 
     (StatusCode::CREATED, Json(run)).into_response()
@@ -19578,19 +19432,6 @@ fn parse_tool_invocation_state(value: &str) -> Result<ToolInvocationState, Strin
         .map_err(|_| format!("invalid tool invocation state: {value}"))
 }
 
-#[allow(dead_code)]
-fn prompt_release_state_to_string(state: cairn_domain::PromptReleaseState) -> String {
-    match state {
-        cairn_domain::PromptReleaseState::Draft => "draft",
-        cairn_domain::PromptReleaseState::Proposed => "proposed",
-        cairn_domain::PromptReleaseState::Approved => "approved",
-        cairn_domain::PromptReleaseState::Active => "active",
-        cairn_domain::PromptReleaseState::Rejected => "rejected",
-        cairn_domain::PromptReleaseState::Archived => "archived",
-    }
-    .to_owned()
-}
-
 fn latest_eval_score_for_release(
     evals: &ProductEvalRunService,
     release: &cairn_store::projections::PromptReleaseRecord,
@@ -19666,16 +19507,6 @@ fn storage_backend_label(storage: &StorageBackend) -> &'static str {
         StorageBackend::Sqlite { .. } => "sqlite",
         StorageBackend::Postgres { .. } => "postgres",
     }
-}
-
-#[allow(dead_code)]
-fn product_tier_label(tier: ProductTier) -> String {
-    match tier {
-        ProductTier::LocalEval => "local_eval",
-        ProductTier::TeamSelfHosted => "team_self_hosted",
-        ProductTier::EnterpriseSelfHosted => "enterprise_self_hosted",
-    }
-    .to_owned()
 }
 
 fn now_ms() -> u64 {
@@ -19870,71 +19701,6 @@ async fn check_provider_health_handler(State(state): State<Arc<AppState>>) -> im
     }
 }
 
-// ── send_notification_handler ────────────────────────────────────────────────
-
-#[derive(serde::Deserialize)]
-#[allow(dead_code)]
-struct SendNotificationRequest {
-    /// Target operator ID. Defaults to "system" for broadcast notifications.
-    #[serde(default = "default_operator_id")]
-    operator_id: String,
-    /// Free-form event type string, e.g. `"alert.custom"` or `"run.failed"`.
-    event_type: String,
-    /// Human-readable message (stored in the payload).
-    message: String,
-    /// Optional severity tag: "info" | "warning" | "error". Stored in payload.
-    #[serde(default = "default_severity")]
-    severity: String,
-}
-
-#[allow(dead_code)]
-fn default_operator_id() -> String {
-    "system".to_owned()
-}
-#[allow(dead_code)]
-fn default_severity() -> String {
-    "info".to_owned()
-}
-
-/// `POST /v1/notifications/send` — dispatch an ad-hoc notification through
-/// the operator notification service.
-///
-/// Calls `notify_if_applicable` so only operators subscribed to `event_type`
-/// receive the notification. Returns the list of dispatched records.
-#[allow(dead_code)]
-async fn send_notification_handler(
-    State(state): State<Arc<AppState>>,
-    tenant_scope: TenantScope,
-    Json(body): Json<SendNotificationRequest>,
-) -> impl IntoResponse {
-    let payload = serde_json::json!({
-        "message":  body.message,
-        "severity": body.severity,
-        "operator_id": body.operator_id,
-    });
-
-    match state
-        .runtime
-        .notifications
-        .notify_if_applicable(tenant_scope.tenant_id(), &body.event_type, payload)
-        .await
-    {
-        Ok(records) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "dispatched": records.len(),
-                "records":    records,
-            })),
-        )
-            .into_response(),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
-        )
-            .into_response(),
-    }
-}
-
 // ── Stub handlers for routes added to catalog but not yet implemented ───────
 
 #[allow(unused_macros)]
@@ -19970,36 +19736,6 @@ async fn start_rollout_handler(
     body: Json<StartRolloutRequest>,
 ) -> impl IntoResponse {
     start_prompt_rollout_handler(state, path, body).await
-}
-
-/// `POST /v1/admin/tenants/:id/snapshot` — create a tenant state snapshot.
-/// Delegates to create_snapshot_handler (catalog-compatibility alias).
-#[allow(dead_code)]
-async fn create_tenant_snapshot_handler(
-    state: State<Arc<AppState>>,
-    path: Path<String>,
-) -> impl IntoResponse {
-    create_snapshot_handler(state, path).await
-}
-
-/// `POST /v1/admin/tenants/:id/restore` — restore tenant state from latest snapshot.
-/// Delegates to restore_from_snapshot_handler (catalog-compatibility alias).
-#[allow(dead_code)]
-async fn restore_tenant_snapshot_handler(
-    state: State<Arc<AppState>>,
-    path: Path<String>,
-) -> impl IntoResponse {
-    restore_from_snapshot_handler(state, path).await
-}
-
-/// `POST /v1/prompts/releases/:id/request-approval` — request approval for a release.
-/// Delegates to request_prompt_release_approval_handler (catalog-compatibility alias).
-#[allow(dead_code)]
-async fn request_approval_for_release_handler(
-    state: State<Arc<AppState>>,
-    path: Path<String>,
-) -> impl IntoResponse {
-    request_prompt_release_approval_handler(state, path).await
 }
 
 /// `GET /v1/export/:format` — export tenant data in the requested format.
