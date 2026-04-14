@@ -58,7 +58,7 @@ async fn mark_read_and_read_all() {
 async fn feed_update_sse_from_feed_item() {
     let item = make_item("101", "slack", false);
 
-    let frame = cairn_api::sse_payloads::build_feed_update_frame(item, None);
+    let frame = cairn_api::sse_payloads::build_feed_update_frame(item, None).unwrap();
     assert_eq!(frame.event, cairn_api::sse::SseEventName::FeedUpdate);
     assert_eq!(frame.data["item"]["id"], "101");
     assert_eq!(frame.data["item"]["source"], "slack");

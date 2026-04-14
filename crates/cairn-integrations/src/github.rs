@@ -73,13 +73,15 @@ impl GitHubPlugin {
         config: crate::config::GitHubConfig,
     ) -> Result<Self, crate::IntegrationError> {
         let pem_bytes = std::fs::read(&config.private_key_file).map_err(|e| {
-            crate::IntegrationError::Other(format!(
+            crate::IntegrationError::KeyFormatInvalid(format!(
                 "cannot read private key file {}: {e}",
                 config.private_key_file
             ))
         })?;
-        let credentials = cairn_github::AppCredentials::new(config.app_id, &pem_bytes)
-            .map_err(|e| crate::IntegrationError::Other(format!("invalid GitHub App key: {e}")))?;
+        let credentials =
+            cairn_github::AppCredentials::new(config.app_id, &pem_bytes).map_err(|e| {
+                crate::IntegrationError::KeyFormatInvalid(format!("invalid GitHub App key: {e}"))
+            })?;
         Ok(Self::new(
             credentials,
             config.webhook_secret,

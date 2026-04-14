@@ -41,6 +41,10 @@ pub enum IntegrationError {
     NotConfigured(String),
     #[error("external API error: {0}")]
     ApiError(String),
+    #[error("invalid config: {0}")]
+    ConfigInvalid(String),
+    #[error("invalid key/credential format: {0}")]
+    KeyFormatInvalid(String),
     #[error("{0}")]
     Other(String),
 }

@@ -64,7 +64,10 @@ impl SseMemoryProposalHook {
     }
 
     pub fn collected_frames(&self) -> Vec<SseFrame> {
-        self.frames.lock().unwrap().clone()
+        self.frames
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
@@ -72,7 +75,10 @@ pub struct SharedMemoryProposalHook(pub Arc<SseMemoryProposalHook>);
 
 impl MemoryProposalHook for SseMemoryProposalHook {
     fn on_proposed(&self, item: &MemoryItem) {
-        let mut frame = build_memory_proposed_frame(item.clone(), None);
+        let mut frame = match build_memory_proposed_frame(item.clone(), None) {
+            Some(f) => f,
+            None => return, // warning already logged by build_memory_proposed_frame
+        };
 
         // Assign sequence ID and broadcast if wired to the SSE channel.
         if let (Some(tx), Some(buffer), Some(seq)) = (&self.sse_tx, &self.sse_buffer, &self.sse_seq)
@@ -91,7 +97,10 @@ impl MemoryProposalHook for SseMemoryProposalHook {
             let _ = tx.send(frame.clone());
         }
 
-        self.frames.lock().unwrap().push(frame);
+        self.frames
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(frame);
     }
 }
 

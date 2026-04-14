@@ -132,7 +132,9 @@ impl IntegrationRegistry {
         match config.provider_type.as_str() {
             "github" => {
                 let gh_config: GitHubConfig = serde_json::from_value(config.config.clone())
-                    .map_err(|e| IntegrationError::Other(format!("invalid github config: {e}")))?;
+                    .map_err(|e| {
+                        IntegrationError::ConfigInvalid(format!("invalid github config: {e}"))
+                    })?;
                 let plugin = crate::github::GitHubPlugin::from_config(&config.id, gh_config)?;
                 self.register(std::sync::Arc::new(plugin)).await;
                 // Store the config for retrieval via GET /v1/integrations/{id}.
@@ -143,7 +145,7 @@ impl IntegrationRegistry {
             "notion" => {
                 let notion_config: crate::notion::NotionConfig =
                     serde_json::from_value(config.config.clone()).map_err(|e| {
-                        IntegrationError::Other(format!("invalid notion config: {e}"))
+                        IntegrationError::ConfigInvalid(format!("invalid notion config: {e}"))
                     })?;
                 let plugin = crate::notion::NotionPlugin::new(notion_config);
                 self.register(std::sync::Arc::new(plugin)).await;
@@ -154,7 +156,7 @@ impl IntegrationRegistry {
             "obsidian" => {
                 let obs_config: crate::obsidian::ObsidianConfig =
                     serde_json::from_value(config.config.clone()).map_err(|e| {
-                        IntegrationError::Other(format!("invalid obsidian config: {e}"))
+                        IntegrationError::ConfigInvalid(format!("invalid obsidian config: {e}"))
                     })?;
                 let plugin = crate::obsidian::ObsidianPlugin::new(obs_config);
                 self.register(std::sync::Arc::new(plugin)).await;
@@ -165,7 +167,7 @@ impl IntegrationRegistry {
             "linear" => {
                 let lin_config: crate::linear::LinearConfig =
                     serde_json::from_value(config.config.clone()).map_err(|e| {
-                        IntegrationError::Other(format!("invalid linear config: {e}"))
+                        IntegrationError::ConfigInvalid(format!("invalid linear config: {e}"))
                     })?;
                 let plugin = crate::linear::LinearPlugin::new(lin_config);
                 self.register(std::sync::Arc::new(plugin)).await;
@@ -175,19 +177,21 @@ impl IntegrationRegistry {
             }
             "webhook" => {
                 let wh_config: WebhookConfig = serde_json::from_value(config.config.clone())
-                    .map_err(|e| IntegrationError::Other(format!("invalid webhook config: {e}")))?;
+                    .map_err(|e| {
+                        IntegrationError::ConfigInvalid(format!("invalid webhook config: {e}"))
+                    })?;
                 let plugin = crate::webhook::GenericWebhookPlugin::new(&config.id, wh_config);
                 self.register(std::sync::Arc::new(plugin)).await;
                 let id = config.id.clone();
                 self.store_config(&id, config).await;
                 Ok(())
             }
-            "plugin" => Err(IntegrationError::Other(
+            "plugin" => Err(IntegrationError::ConfigInvalid(
                 "JSON-RPC plugin integrations not yet implemented. \
                  Use type \"webhook\" for config-driven integrations."
                     .into(),
             )),
-            other => Err(IntegrationError::Other(format!(
+            other => Err(IntegrationError::ConfigInvalid(format!(
                 "unknown integration type: \"{other}\". Valid types: github, webhook, plugin"
             ))),
         }
