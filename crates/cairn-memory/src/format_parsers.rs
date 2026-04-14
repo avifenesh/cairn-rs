@@ -386,7 +386,8 @@ impl HtmlParser {
                         if next_ch == '<' {
                             break;
                         }
-                        heading_text.push(chars.next().unwrap());
+                        let Some(ch) = chars.next() else { break; };
+                        heading_text.push(ch);
                     }
                     let heading_text = heading_text.trim().to_owned();
                     if !heading_text.is_empty() {
