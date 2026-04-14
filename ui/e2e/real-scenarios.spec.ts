@@ -40,14 +40,36 @@ function items(resp: any): any[] {
 async function signIn(page: Page) {
   await page.goto("/");
   await page.waitForLoadState("domcontentloaded");
-  const input = page.getByTestId("login-token-input");
   const sidebar = page.getByTestId("sidebar");
-  if (await sidebar.isVisible({ timeout: 2000 }).catch(() => false)) return;
-  if (await input.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await input.fill(TOKEN);
-    await page.getByTestId("login-submit-btn").click();
-    await sidebar.waitFor({ state: "visible", timeout: 10_000 });
+
+  await expect
+    .poll(async () => {
+      if (await sidebar.isVisible().catch(() => false)) return "sidebar";
+      if (await page.getByTestId("login-token-input").isVisible().catch(() => false)) return "login";
+      return "loading";
+    }, { timeout: 10_000 })
+    .not.toBe("loading");
+
+  if (await sidebar.isVisible({ timeout: 1000 }).catch(() => false)) return;
+
+  const input = page.getByTestId("login-token-input");
+  const devShortcut = page.getByRole("button", { name: TOKEN });
+  if (await devShortcut.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await devShortcut.click();
+  } else {
+    await input.click();
+    await input.fill("");
+    await input.pressSequentially(TOKEN, { delay: 10 });
   }
+
+  await expect
+    .poll(() => input.inputValue(), { timeout: 5_000 })
+    .toBe(TOKEN);
+
+  const submitBtn = page.getByTestId("login-submit-btn");
+  await expect(submitBtn).toBeEnabled({ timeout: 3_000 });
+  await submitBtn.click({ timeout: 5_000 });
+  await expect(sidebar).toBeVisible({ timeout: 10_000 });
 }
 
 async function nav(page: Page, hash: string) {
