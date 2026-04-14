@@ -34,10 +34,20 @@ ui/playwright-report/
 # Coordination (ephemeral multi-agent state)
 .coordination/
 
-# Remember (session logs)
-.remember/logs/
-.remember/tmp/
+# Remember (session state)
+.remember/
 
-# Claude Code
-.claude/repo-intel.json
-.claude/web-ctl/
+# Claude Code / AI agent state
+.claude/
+.codex
+.mcp/
+playwright-mcp/
+changelog-session/
+
+# Secrets / credentials
+*.pem
+!crates/*/tests/fixtures/*.pem
+
+# Legacy / deprecated
+RALPH-PROGRESS.md
+scripts/ralph.sh

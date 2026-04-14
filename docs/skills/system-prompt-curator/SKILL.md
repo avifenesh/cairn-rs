@@ -312,18 +312,3 @@ question and must provide a thorough, evidence-based answer.
 - Always include completion criteria that require concrete artifacts.
 - When improving, never remove content without explaining why.
 
-## References
-
-This skill is based on research from:
-- SWE-agent (princeton-nlp/SWE-agent) — ACI design, submission review, demonstrations
-- OpenHands (All-Hands-AI/OpenHands) — CodeAct, think tool, troubleshooting, task tracker
-- Aider (paul-gauthier/aider) — SEARCH/REPLACE, repo map, architect+editor split, lazy prompt
-- Claude Code (Anthropic) — TodoWrite, subagents, git safety, verbosity calibration
-- Cursor — parallel tool calls, todo reconciliation, self-correction, status micro-narratives
-- Devin (Cognition) — mandatory think transitions, planning mode, find_and_edit, LSP
-- Windsurf (Codeium) — memory system, command safety, plan-as-artifact
-- Anthropic guides — "Building Effective Agents", "Writing Tools for Agents", prompting best practices
-- Mini-SWE-agent — magic string completion, bash-only simplicity, 74% SWE-bench Verified
-
-Full research documents: `docs/research/swe-agent-prompts.md`, `docs/research/openhands-aider-prompts.md`,
-`docs/research/prompt-best-practices.md`, `docs/research/real-world-agent-prompts.md`
