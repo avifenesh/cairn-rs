@@ -302,16 +302,15 @@ impl DecidePhase for LlmDecidePhase {
 /// the matching role.  Falls back to a generic orchestrator prompt if the role
 /// is not registered.
 fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> String {
-    // Role identity — use registered role prompt or a directive default.
+    // Role identity — use registered role prompt or a sensible default.
     let role_prompt = default_roles()
         .into_iter()
         .find(|r: &AgentRole| r.role_id == agent_type)
         .and_then(|r| r.system_prompt)
         .unwrap_or_else(|| {
-            // Directive default: tools first, complete when done, delegate only when necessary.
-            "You are a focused AI agent. Your job is to complete the given goal \
-             directly using the available tools. Do not delegate work to sub-agents \
-             unless the task is clearly multi-part and genuinely requires parallel execution."
+            "You are an autonomous agent working on a task end-to-end. \
+             Use the available tools to understand the problem, take action, \
+             and deliver concrete results."
                 .to_owned()
         });
 
@@ -328,18 +327,8 @@ fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> Str
              Use invoke_tool with one of these tool_name values:\n\
              {lines}\n\
              \n\
-             ## Tool usage rules — FOLLOW THESE EXACTLY\n\
-             1. ONLY call tools whose tool_name appears in the Available Tools list above.\n\
-             2. ALWAYS search memory first: invoke_tool memory_search before answering any question.\n\
-             3. If memory is empty or insufficient, try web_fetch or other listed tools.\n\
-             4. After gathering information, use create_memory to store key findings.\n\
-             5. When you have enough information to answer the goal, return complete_run immediately.\n\
-             6. If memory is empty AND no other tool can help, return complete_run with your best answer.\n\
-             7. ONLY use spawn_subagent when the goal explicitly requires separate parallel tasks.\n\
-             8. Do NOT invent tool names. Do NOT spawn sub-agents for simple retrieval or summarisation.\n\
-             9. Set requires_approval=false for ALL read/search/fetch/summarise actions.\n\
-                Set requires_approval=true ONLY for: file_write, shell_exec, cancel_task, \
-                or any action that modifies external state irreversibly."
+             Only call tools listed above. Do not invent tool names.\n\
+             Use tool_search to discover additional tools if the ones above are insufficient."
         )
     } else {
         String::new()
@@ -349,28 +338,63 @@ fn build_system_prompt(agent_type: &str, tools: &[BuiltinToolDescriptor]) -> Str
         "{role_prompt}\
          {tools_section}\n\
          \n\
-         ## Decision rules\n\
-         - If the goal can be answered with available information → complete_run with summary.\n\
-         - If tools are available → invoke_tool before concluding you lack information.\n\
-         - If the task is clearly multi-part requiring separate agents → spawn_subagent per part.\n\
+         ## Workflow\n\
+         Follow these phases in order:\n\
+         \n\
+         ### Phase 1: Understand\n\
+         Read the goal carefully. Use tools to gather context — search memory, \
+         read files, explore the codebase. Identify what needs to happen.\n\
+         \n\
+         ### Phase 2: Act\n\
+         Take concrete actions toward the goal. Write files, run commands, \
+         make API calls — whatever the task requires. Reading and analysing \
+         alone is not sufficient if the goal requires producing artifacts.\n\
+         \n\
+         ### Phase 3: Verify\n\
+         Check that your actions achieved the goal. Run tests, read the \
+         output, confirm the result. If something failed, fix it before \
+         moving on.\n\
+         \n\
+         ### Phase 4: Complete\n\
+         Only after you have taken action and verified the result, call \
+         complete_run with a summary of what you accomplished.\n\
+         \n\
+         ## Tool usage\n\
+         - Set requires_approval=false for read/search/fetch actions.\n\
+         - Set requires_approval=true for writes, code execution, \
+           sending messages, or destructive actions.\n\
+         - Store key findings with create_memory so they persist.\n\
+         - Use spawn_subagent only when the task is genuinely multi-part \
+           and benefits from parallel execution.\n\
          - If blocked and need human input → escalate_to_operator.\n\
-         - Prefer completing in fewer iterations; do not defer work unnecessarily.\n\
+         \n\
+         ## Completion criteria\n\
+         Before calling complete_run, verify:\n\
+         - You have taken action toward the goal (not just read/searched).\n\
+         - If the goal requires artifacts (code, files, PRs), they exist.\n\
+         - You have verified the result where possible.\n\
+         If any criterion is not met, continue working.\n\
+         \n\
+         ## Tips\n\
+         - If a tool call fails, analyse the error and try a different approach. \
+           Do not retry the same failing call.\n\
+         - When reading large outputs, focus on the relevant sections.\n\
+         - If stuck, search for similar patterns or ask for help via \
+           escalate_to_operator.\n\
          \n\
          ## Response format\n\
          Respond ONLY with a JSON array of action objects. Each object MUST have:\n\
          - \"action_type\": one of {action_types}\n\
          - \"description\": concise explanation\n\
          - \"confidence\": float 0.0–1.0\n\
-         - \"requires_approval\": false for read/search/fetch/summarise actions; true ONLY for \
-           file writes, code execution, sending messages, or destructive actions\n\
+         - \"requires_approval\": boolean\n\
          - \"tool_name\" (for invoke_tool/spawn_subagent): tool ID or sub-agent role\n\
          - \"tool_args\" (for invoke_tool/spawn_subagent/create_memory): JSON arguments\n\
          \n\
          Field conventions:\n\
          - invoke_tool:    tool_name = tool ID,  tool_args = {{...}}\n\
-         - complete_run:   description = full answer/summary of what was accomplished\n\
-         - spawn_subagent: tool_name = \"researcher\"|\"executor\"|\"reviewer\",\
-           tool_args = {{\"goal\": \"specific sub-task goal\"}}\n\
+         - complete_run:   description = summary of what was accomplished\n\
+         - spawn_subagent: tool_name = role,  tool_args = {{\"goal\": \"...\"}}\n\
          - create_memory:  tool_args = {{\"content\": \"...\"}}\n\
          \n\
          Return ONLY the JSON array — no markdown fences, no explanation text.",
@@ -402,19 +426,16 @@ fn build_user_message(
     );
     let has_memory = !gather.memory_chunks.is_empty();
     let memory_hint = if has_memory {
-        "Memory contains relevant information — use it to answer the goal, then complete_run."
-            .to_owned()
+        "Memory contains relevant context above. Use it to inform your next action.".to_owned()
     } else {
-        "Memory is empty. You have enough knowledge to answer this goal directly. \
-         Return complete_run immediately with your best answer — do NOT call memory_search again \
-         if you already tried it and got no results."
-            .to_owned()
+        "No relevant memories found. Use other available tools to gather what you need.".to_owned()
     };
     let footer = format!(
-        "## What should happen next?\n\
+        "## Next step\n\
          {memory_hint}\n\
-         Return a JSON action array. Use complete_run as soon as you can answer the goal. \
-         Do not spawn sub-agents for simple retrieval or summarisation."
+         Decide your next action based on the workflow phases: \
+         Understand → Act → Verify → Complete.\n\
+         Return a JSON action array."
     );
 
     // ── Compute how many tokens are available for optional content ────────────
@@ -909,8 +930,8 @@ mod tests {
     fn system_prompt_references_orchestrator_role() {
         let sys = build_system_prompt("orchestrator", &[]);
         assert!(
-            sys.contains("orchestrator"),
-            "should mention orchestrator role"
+            sys.contains("technical lead"),
+            "should use orchestrator role identity"
         );
         assert!(
             sys.contains("JSON array"),
@@ -926,6 +947,10 @@ mod tests {
         assert!(
             sys.contains("JSON array"),
             "fallback must still instruct JSON return"
+        );
+        assert!(
+            sys.contains("autonomous agent"),
+            "fallback should use generic autonomous identity"
         );
     }
 

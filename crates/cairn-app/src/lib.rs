@@ -1074,7 +1074,10 @@ pub struct AppState {
     /// by the observability middleware.  Consumed by `GET /v1/admin/logs`.
     pub request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
     /// GitHub App integration — set by main.rs when GITHUB_APP_ID + private key are configured.
+    /// DEPRECATED: use `integrations` registry instead. Kept during migration.
     pub github: Option<Arc<GitHubIntegration>>,
+    /// Integration plugin registry — holds all configured integrations (GitHub, Linear, etc.).
+    pub integrations: Arc<cairn_integrations::IntegrationRegistry>,
 }
 
 /// GitHub App integration state.
@@ -1443,6 +1446,7 @@ impl AppState {
             tool_registry: None,
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
             github: None,
+            integrations: Arc::new(cairn_integrations::IntegrationRegistry::new()),
         };
         state.runtime.store.reset_usage_counters();
         Ok(state)
@@ -5224,7 +5228,9 @@ impl AppBootstrap {
             )
             // ── GitHub Webhooks & Integrations ───────────────────────────────
             .route("/v1/providers/registry", get(provider_registry_handler))
-            .route("/v1/webhooks/github", post(github_webhook_handler))
+            // Legacy GitHub webhook handler — will be removed when all handlers
+            // migrate to the integration registry.
+            .route("/v1/webhooks/github/webhook", post(github_webhook_handler))
             .route(
                 "/v1/webhooks/github/actions",
                 get(list_webhook_actions_handler).put(set_webhook_actions_handler),
@@ -5254,6 +5260,26 @@ impl AppBootstrap {
             .route(
                 "/v1/webhooks/github/queue/concurrency",
                 put(set_queue_concurrency_handler),
+            )
+            // ── Integration Plugin Registry (runtime CRUD) ─────────────────────
+            .route(
+                "/v1/integrations",
+                get(list_integrations_handler).post(register_integration_handler),
+            )
+            .route(
+                "/v1/integrations/:integration_id",
+                get(get_integration_handler).delete(delete_integration_handler),
+            )
+            .route(
+                "/v1/integrations/:integration_id/overrides",
+                get(get_integration_overrides_handler)
+                    .put(set_integration_overrides_handler)
+                    .delete(clear_integration_overrides_handler),
+            )
+            // Dynamic webhook receiver — delegates to the registered integration.
+            .route(
+                "/v1/webhooks/:integration_id",
+                post(dynamic_webhook_handler),
             )
     }
 
@@ -5573,6 +5599,11 @@ fn auth_exempt_path(path: &str) -> bool {
             | "/v1/docs"
             | "/v1/webhooks/github"
     ) {
+        return true;
+    }
+    // Dynamic webhook receivers — all integration webhooks use their own
+    // verification (HMAC, etc.) instead of bearer token auth.
+    if path.starts_with("/v1/webhooks/") {
         return true;
     }
 
@@ -7302,9 +7333,14 @@ fn agent_template_catalog() -> Vec<AgentTemplate> {
                           and fetches web pages to answer questions with cited sources."
                 .to_owned(),
             icon: "BookOpen".to_owned(),
-            default_prompt: "You are a helpful knowledge assistant. Search memory for relevant \
-                             information before answering. Store any new facts you discover. \
-                             Always cite your sources."
+            default_prompt: "You are a knowledgeable research assistant. When given a question:\n\
+                             1. Search memory for relevant context before answering.\n\
+                             2. If memory is insufficient, use web_fetch to find current information.\n\
+                             3. Synthesise findings into a clear, evidence-based answer.\n\
+                             4. Store key discoveries in memory for future reference.\n\
+                             5. Cite your sources — include where each fact came from.\n\n\
+                             Be thorough: check multiple sources before concluding. If information \
+                             is uncertain or conflicting, say so."
                 .to_owned(),
             default_tools: vec![
                 "memory_search".to_owned(),
@@ -7321,9 +7357,17 @@ fn agent_template_catalog() -> Vec<AgentTemplate> {
                           scores code quality. Requires approval before posting comments."
                 .to_owned(),
             icon: "Code2".to_owned(),
-            default_prompt: "You are a thorough code reviewer. Read files under review, search \
-                             for anti-patterns, inspect recent git changes, and produce a \
-                             structured review with severity ratings."
+            default_prompt: "You are an expert code reviewer. When given code to review:\n\
+                             1. Read all relevant files — the changed files and their context.\n\
+                             2. Search for anti-patterns, security issues, and performance concerns.\n\
+                             3. Inspect recent git changes to understand the intent.\n\
+                             4. Produce a structured review with severity ratings:\n\
+                                - **critical**: bugs, security vulnerabilities, data loss risks\n\
+                                - **warning**: performance issues, maintainability concerns\n\
+                                - **suggestion**: style improvements, better alternatives\n\
+                             5. Be constructive — explain why something is a problem and \
+                                suggest a concrete fix.\n\n\
+                             Reference specific files and line numbers in every finding."
                 .to_owned(),
             default_tools: vec![
                 "file_read".to_owned(),
@@ -7341,9 +7385,14 @@ fn agent_template_catalog() -> Vec<AgentTemplate> {
                           performs calculations, and reads reference files."
                 .to_owned(),
             icon: "BarChart3".to_owned(),
-            default_prompt: "You are a data analyst. Fetch data from the provided endpoints, \
-                             extract relevant fields, perform calculations, and summarise \
-                             your findings clearly with numbers."
+            default_prompt: "You are a data analyst. When given an analysis task:\n\
+                             1. Fetch data from the provided endpoints using http_request.\n\
+                             2. Extract relevant fields with json_extract.\n\
+                             3. Perform calculations — averages, trends, comparisons.\n\
+                             4. Read any reference files for context or baselines.\n\
+                             5. Summarise findings clearly with concrete numbers.\n\n\
+                             Always validate data before drawing conclusions. Note any \
+                             anomalies, missing data, or limitations in your analysis."
                 .to_owned(),
             default_tools: vec![
                 "http_request".to_owned(),
@@ -19664,13 +19713,15 @@ async fn process_webhook_orchestrate(
     }
 
     // Trigger orchestration.
-    webhook_trigger_orchestration(state, &run, &goal).await
+    webhook_trigger_orchestration(state, &run, &goal, None, None).await
 }
 
 async fn webhook_trigger_orchestration(
     state: &AppState,
     run: &cairn_store::projections::RunRecord,
     goal: &str,
+    _installation_id: Option<u64>,
+    work_item: Option<&cairn_integrations::WorkItem>,
 ) -> Result<(), String> {
     use cairn_orchestrator::{
         LlmDecidePhase, LoopConfig, LoopTermination, OrchestrationContext, OrchestratorLoop,
@@ -19706,6 +19757,7 @@ async fn webhook_trigger_orchestration(
     let working_dir = working_dir_for_run(state, run)
         .await
         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+    let working_dir_for_tools = working_dir.clone();
 
     let ctx = OrchestrationContext {
         project: run.project.clone(),
@@ -19766,9 +19818,20 @@ async fn webhook_trigger_orchestration(
         .with_checkpoints(state.runtime.store.clone())
         .build();
 
-    // Build the tool registry — reuse the startup-wired registry (has memory tools,
-    // register-repo, etc.) and add GitHub API tools for webhook-triggered runs.
-    let registry = build_webhook_tool_registry(state);
+    // Build the full tool registry with Core tier tools (file, shell, git, grep)
+    // always available in the system prompt. Then let the integration plugin add
+    // its specific tools (github_api.* etc.) on top.
+    let base = state
+        .tool_registry
+        .as_deref()
+        .unwrap_or_else(|| Box::leak(Box::new(cairn_tools::BuiltinToolRegistry::new())));
+    let full = crate::tool_impls::build_full_tool_registry(base, working_dir_for_tools);
+    let registry = if let Some(item) = work_item {
+        // Integration plugin adds its tools on top of the full Core set.
+        build_integration_tool_registry_from_base(state, &item.integration_id, item, &full).await
+    } else {
+        Arc::new(full)
+    };
 
     let decide = LlmDecidePhase::new(brain, model_id).with_tools(registry.clone());
 
@@ -20317,15 +20380,45 @@ async fn orchestrate_single_issue(
         Ok(issue) => {
             let body = issue.body.as_deref().unwrap_or("");
             format!(
-                "GitHub Issue #{}: {}\n\nRepository: {}\n\n{}\n\n\
-                Instructions: Analyze this issue, implement the fix or feature, \
-                create a branch, commit the changes, and open a pull request. \
-                Use the github_api tools to interact with the repository.",
-                issue.number, issue.title, entry.repo, body
+                "## Task\n\
+                 Resolve GitHub Issue #{number} in repository `{repo}` by writing code \
+                 and opening a pull request.\n\n\
+                 ## Issue\n\
+                 **{title}**\n\n\
+                 {body}\n\n\
+                 ## Workflow\n\
+                 Follow these steps in order.\n\n\
+                 1. **Explore** — Use tool_search to find available tools. Use file-reading \
+                 and search tools to understand the repo structure and find relevant code. \
+                 Read at least 3-5 files before planning changes.\n\n\
+                 2. **Plan** — Identify which files need to change and what the fix or \
+                 feature looks like. Think through edge cases.\n\n\
+                 3. **Branch** — Create a feature branch (e.g. `cairn/issue-{number}`).\n\n\
+                 4. **Implement** — Write the code. Make minimal, focused changes. Follow \
+                 existing code style and conventions in the repo.\n\n\
+                 5. **Verify** — If the project has tests, run them. Fix any failures.\n\n\
+                 6. **Deliver** — Commit your changes, push the branch, and open a PR \
+                 that references issue #{number} in the title or body.\n\n\
+                 7. **Complete** — After the PR is open, call escalate_to_operator for \
+                 review, then complete_run with a summary.\n\n\
+                 ## Tips\n\
+                 - Start by exploring. Do not write code until you understand the codebase.\n\
+                 - If a tool call fails, read the error and try a different approach. \
+                 A command that failed once will fail again unless you change something.\n\
+                 - Write real, working code — not pseudocode or TODO comments.\n\
+                 - Keep changes focused on this issue only.\n\
+                 - All tool calls targeting this repo need: repo=\"{repo}\".\n\
+                 - Do not call complete_run until you have opened a PR.",
+                number = issue.number,
+                repo = entry.repo,
+                title = issue.title,
+                body = body,
             )
         }
         Err(_) => format!(
-            "GitHub Issue #{} in {}: implement and open a PR",
+            "Resolve GitHub Issue #{} in repository `{}`. \
+             Explore the codebase, write a fix, and open a pull request. \
+             Use tool_search to discover available tools.",
             entry.issue_number, entry.repo
         ),
     };
@@ -20336,7 +20429,27 @@ async fn orchestrate_single_issue(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("run {} not found", entry.run_id))?;
 
-    webhook_trigger_orchestration(state, &run, &goal).await?;
+    // Build a WorkItem so the integration plugin can prepare the right tool registry.
+    let work_item = cairn_integrations::WorkItem {
+        integration_id: "github".into(),
+        source_id: entry.installation_id.to_string(),
+        external_id: entry.issue_number.to_string(),
+        repo: entry.repo.clone(),
+        title: entry.title.clone(),
+        body: String::new(),
+        run_id: entry.run_id.clone(),
+        session_id: entry.session_id.clone(),
+        status: cairn_integrations::WorkItemStatus::Processing,
+    };
+
+    webhook_trigger_orchestration(
+        state,
+        &run,
+        &goal,
+        Some(entry.installation_id),
+        Some(&work_item),
+    )
+    .await?;
 
     let final_state =
         cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id)
@@ -20379,40 +20492,23 @@ async fn update_queue_status(
     }
 }
 
-/// Build the tool registry for webhook-triggered orchestration runs.
+/// Build the tool registry for integration-triggered orchestration runs.
 ///
-/// Uses the startup-wired tool registry (which has all core + memory tools)
-/// and adds GitHub API tools for code operations.
-fn build_webhook_tool_registry(state: &AppState) -> Arc<cairn_tools::BuiltinToolRegistry> {
-    use cairn_tools::*;
-
-    let gh_provider = Arc::new(GitHubClientProvider::new());
-
-    // If we have a startup-wired registry, clone all its tools and add GH API tools.
-    // Otherwise build a minimal registry with just the GH tools.
-    if let Some(ref base) = state.tool_registry {
-        // The base registry has ~25 tools wired at startup (memory, file, shell, etc.)
-        // We add the GitHub API tools on top.
-        Arc::new(
-            BuiltinToolRegistry::from_existing(base)
-                .register(Arc::new(GhApiCreateBranchTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiReadFileTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiWriteFileTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiCreatePrTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiMergePrTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiListContentsTool::new(gh_provider))),
-        )
+/// Takes a pre-built full registry (Core tools + ToolSearchTool) and lets the
+/// integration plugin add its specific tools on top (github_api.*, etc.).
+async fn build_integration_tool_registry_from_base(
+    state: &AppState,
+    integration_id: &str,
+    work_item: &cairn_integrations::WorkItem,
+    full_base: &cairn_tools::BuiltinToolRegistry,
+) -> Arc<cairn_tools::BuiltinToolRegistry> {
+    if let Some(integration) = state.integrations.get(integration_id).await {
+        integration
+            .prepare_tool_registry(full_base, work_item)
+            .await
     } else {
-        // Fallback: just the GitHub tools — won't have memory/file tools.
-        Arc::new(
-            BuiltinToolRegistry::new()
-                .register(Arc::new(GhApiCreateBranchTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiReadFileTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiWriteFileTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiCreatePrTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiMergePrTool::new(gh_provider.clone())))
-                .register(Arc::new(GhApiListContentsTool::new(gh_provider))),
-        )
+        // No integration registered — return the full base as-is.
+        Arc::new(cairn_tools::BuiltinToolRegistry::from_existing(full_base))
     }
 }
 
@@ -20830,6 +20926,224 @@ async fn set_queue_concurrency_handler(
         "previous": old,
     }))
     .into_response()
+}
+
+// ── Integration Plugin Registry — Runtime CRUD API ──────────────────────────
+
+/// POST /v1/integrations — register a new integration at runtime.
+async fn register_integration_handler(
+    State(state): State<Arc<AppState>>,
+    Json(config): Json<cairn_integrations::IntegrationConfig>,
+) -> impl IntoResponse {
+    match state.integrations.register_from_config(config).await {
+        Ok(()) => {
+            let statuses = state.integrations.all_statuses().await;
+            Json(serde_json::json!({
+                "status": "registered",
+                "integrations": statuses,
+            }))
+            .into_response()
+        }
+        Err(e) => AppApiError::new(
+            StatusCode::BAD_REQUEST,
+            "integration_registration_failed",
+            e.to_string(),
+        )
+        .into_response(),
+    }
+}
+
+/// GET /v1/integrations — list all registered integrations + status.
+async fn list_integrations_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let statuses = state.integrations.all_statuses().await;
+    Json(serde_json::json!({ "integrations": statuses })).into_response()
+}
+
+/// GET /v1/integrations/:integration_id — get integration detail + config.
+async fn get_integration_handler(
+    State(state): State<Arc<AppState>>,
+    Path(integration_id): Path<String>,
+) -> impl IntoResponse {
+    let integration = match state.integrations.get(&integration_id).await {
+        Some(i) => i,
+        None => {
+            return AppApiError::new(
+                StatusCode::NOT_FOUND,
+                "integration_not_found",
+                format!("no integration with id '{integration_id}'"),
+            )
+            .into_response();
+        }
+    };
+    let config = state.integrations.get_config(&integration_id).await;
+    let overrides = state.integrations.get_overrides(&integration_id).await;
+    let stats = integration.queue_stats().await;
+    Json(serde_json::json!({
+        "id": integration.id(),
+        "display_name": integration.display_name(),
+        "configured": integration.is_configured(),
+        "config": config,
+        "overrides": overrides,
+        "queue_stats": stats,
+        "default_agent_prompt": integration.default_agent_prompt(),
+        "auth_exempt_paths": integration.auth_exempt_paths(),
+    }))
+    .into_response()
+}
+
+/// DELETE /v1/integrations/:integration_id — remove an integration.
+async fn delete_integration_handler(
+    State(state): State<Arc<AppState>>,
+    Path(integration_id): Path<String>,
+) -> impl IntoResponse {
+    match state.integrations.unregister(&integration_id).await {
+        Ok(()) => Json(serde_json::json!({
+            "status": "removed",
+            "id": integration_id,
+        }))
+        .into_response(),
+        Err(e) => AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "integration_not_found",
+            e.to_string(),
+        )
+        .into_response(),
+    }
+}
+
+/// GET /v1/integrations/:integration_id/overrides
+async fn get_integration_overrides_handler(
+    State(state): State<Arc<AppState>>,
+    Path(integration_id): Path<String>,
+) -> impl IntoResponse {
+    let overrides = state.integrations.get_overrides(&integration_id).await;
+    Json(serde_json::json!({ "overrides": overrides })).into_response()
+}
+
+/// PUT /v1/integrations/:integration_id/overrides — set operator overrides.
+async fn set_integration_overrides_handler(
+    State(state): State<Arc<AppState>>,
+    Path(integration_id): Path<String>,
+    Json(overrides): Json<cairn_integrations::IntegrationOverrides>,
+) -> impl IntoResponse {
+    if state.integrations.get(&integration_id).await.is_none() {
+        return AppApiError::new(
+            StatusCode::NOT_FOUND,
+            "integration_not_found",
+            format!("no integration with id '{integration_id}'"),
+        )
+        .into_response();
+    }
+    state
+        .integrations
+        .set_overrides(&integration_id, overrides)
+        .await;
+    Json(serde_json::json!({
+        "status": "overrides_set",
+        "id": integration_id,
+    }))
+    .into_response()
+}
+
+/// DELETE /v1/integrations/:integration_id/overrides — reset to defaults.
+async fn clear_integration_overrides_handler(
+    State(state): State<Arc<AppState>>,
+    Path(integration_id): Path<String>,
+) -> impl IntoResponse {
+    state.integrations.clear_overrides(&integration_id).await;
+    Json(serde_json::json!({
+        "status": "overrides_cleared",
+        "id": integration_id,
+    }))
+    .into_response()
+}
+
+/// POST /v1/webhooks/:integration_id — dynamic webhook receiver.
+///
+/// Looks up the integration in the registry, delegates verification and
+/// event parsing to the plugin, then dispatches based on event→action mappings.
+async fn dynamic_webhook_handler(
+    State(state): State<Arc<AppState>>,
+    Path(integration_id): Path<String>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> impl IntoResponse {
+    let integration = match state.integrations.get(&integration_id).await {
+        Some(i) => i,
+        None => {
+            return AppApiError::new(
+                StatusCode::NOT_FOUND,
+                "integration_not_found",
+                format!("no integration with id '{integration_id}'"),
+            )
+            .into_response();
+        }
+    };
+
+    // Verify the webhook signature.
+    if let Err(e) = integration.verify_webhook(&headers, &body).await {
+        return AppApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "webhook_verification_failed",
+            e.to_string(),
+        )
+        .into_response();
+    }
+
+    // Parse the event.
+    let event = match integration.parse_event(&headers, &body).await {
+        Ok(e) => e,
+        Err(e) => {
+            return AppApiError::new(StatusCode::BAD_REQUEST, "event_parse_failed", e.to_string())
+                .into_response();
+        }
+    };
+
+    // Match against event→action mappings (use overrides if set, else defaults).
+    let actions = state
+        .integrations
+        .effective_event_actions(&integration_id)
+        .await;
+    let matched = actions.iter().find(|a| {
+        cairn_integrations::github::GitHubPlugin::event_matches(&event.event_key, &a.event_pattern)
+    });
+
+    match matched.map(|a| &a.action) {
+        Some(cairn_integrations::EventAction::Ignore) | None => Json(serde_json::json!({
+            "status": "ignored",
+            "event": event.event_key,
+            "integration": integration_id,
+        }))
+        .into_response(),
+        Some(cairn_integrations::EventAction::Acknowledge) => {
+            tracing::info!(
+                integration = %integration_id,
+                event = %event.event_key,
+                "Webhook acknowledged"
+            );
+            Json(serde_json::json!({
+                "status": "acknowledged",
+                "event": event.event_key,
+                "integration": integration_id,
+            }))
+            .into_response()
+        }
+        Some(cairn_integrations::EventAction::CreateAndOrchestrate) => {
+            tracing::info!(
+                integration = %integration_id,
+                event = %event.event_key,
+                title = ?event.title,
+                "Webhook → create and orchestrate"
+            );
+            Json(serde_json::json!({
+                "status": "queued",
+                "event": event.event_key,
+                "integration": integration_id,
+                "title": event.title,
+            }))
+            .into_response()
+        }
+    }
 }
 
 #[cfg(test)]

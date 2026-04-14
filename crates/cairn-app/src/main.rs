@@ -5322,8 +5322,8 @@ async fn main() {
                     Ok(pem_bytes) => match cairn_github::AppCredentials::new(app_id, &pem_bytes) {
                         Ok(credentials) => {
                             let github = cairn_app::GitHubIntegration {
-                                credentials,
-                                webhook_secret,
+                                credentials: credentials.clone(),
+                                webhook_secret: webhook_secret.clone(),
                                 installations: tokio::sync::RwLock::new(
                                     std::collections::HashMap::new(),
                                 ),
@@ -5337,9 +5337,19 @@ async fn main() {
                                 run_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(3)),
                                 http: reqwest::Client::new(),
                             };
+                            // Register GitHub plugin in the integration registry.
+                            let github_plugin = cairn_integrations::github::GitHubPlugin::new(
+                                credentials,
+                                webhook_secret,
+                                3,
+                            );
                             let lib_mut = Arc::get_mut(&mut lib_state)
                                 .expect("lib_state must not be cloned before github is wired");
                             lib_mut.github = Some(Arc::new(github));
+                            // Register in the integration registry (sync — we have exclusive access at startup).
+                            let registry = Arc::get_mut(&mut lib_mut.integrations)
+                                .expect("integrations registry must not be cloned yet");
+                            registry.register_sync(Arc::new(github_plugin));
                             eprintln!("GitHub App: wired (app_id={app_id})");
                         }
                         Err(e) => {

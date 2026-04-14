@@ -432,6 +432,9 @@ pub fn build_tool_registry(
     project_repo_access: Arc<ProjectRepoAccessService>,
     repo_clone_cache: Arc<RepoCloneCache>,
 ) -> BuiltinToolRegistry {
+    // Base registry with memory tools only — used at startup before
+    // working_dir is known. The full tool set with file/shell/git is
+    // built per-run by `build_full_tool_registry`.
     BuiltinToolRegistry::new()
         .register(Arc::new(ConcreteMemorySearchTool::new(retrieval)))
         .register(Arc::new(ConcreteMemoryStoreTool::new(ingest)))
@@ -439,6 +442,41 @@ pub fn build_tool_registry(
             project_repo_access,
             repo_clone_cache,
         )))
+}
+
+/// Build the full tool registry with all Core tier tools for a specific run.
+///
+/// Core tools are always in the system prompt — the agent doesn't need to
+/// call tool_search to discover file_read, shell_exec, git_operations, etc.
+/// Integration-specific tools (github_api.*) are added separately by the
+/// integration plugin's `prepare_tool_registry()`.
+pub fn build_full_tool_registry(
+    base: &BuiltinToolRegistry,
+    working_dir: std::path::PathBuf,
+) -> BuiltinToolRegistry {
+    use cairn_tools::builtins::{
+        FileReadTool, FileWriteTool, GitOperationsTool, GlobFindTool, GrepSearchTool,
+        ScratchPadTool, ShellExecTool, ToolSearchTool, WebFetchTool,
+    };
+
+    // Inner registry: all Core tools (listed upfront in prompt).
+    let inner = Arc::new(
+        BuiltinToolRegistry::from_existing(base)
+            // File operations
+            .register(Arc::new(FileReadTool::new(working_dir.clone())))
+            .register(Arc::new(FileWriteTool::new(working_dir.clone())))
+            .register(Arc::new(GlobFindTool))
+            .register(Arc::new(GrepSearchTool))
+            // Shell & Git
+            .register(Arc::new(ShellExecTool))
+            .register(Arc::new(GitOperationsTool::new(working_dir)))
+            // Utilities
+            .register(Arc::new(WebFetchTool::default()))
+            .register(Arc::new(ScratchPadTool::new())),
+    );
+
+    // Outer registry: all Core tools + ToolSearchTool for discovering Deferred tools.
+    BuiltinToolRegistry::from_existing(&inner).register(Arc::new(ToolSearchTool::new(inner)))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
