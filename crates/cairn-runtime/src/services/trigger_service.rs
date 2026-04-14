@@ -762,6 +762,84 @@ impl TriggerService {
             .push(fired_at);
     }
 
+    /// Preview which triggers are eligible for decision-layer evaluation for a signal.
+    ///
+    /// This runs the pre-decision checks without mutating trigger state so callers
+    /// can consult an async decision service outside the trigger mutex, then call
+    /// `evaluate_signal()` with the resulting outcomes to apply the durable events.
+    pub fn decision_candidates_for_signal(
+        &self,
+        project: &ProjectKey,
+        signal_id: &SignalId,
+        signal_type: &str,
+        plugin_id: &str,
+        payload: &serde_json::Value,
+        source_run_chain_depth: Option<u8>,
+    ) -> Vec<TriggerId> {
+        let now = now_ms();
+        let mut candidates = Vec::new();
+
+        for trigger in self.triggers.values().filter(|t| {
+            &t.project == project
+                && matches!(t.state, TriggerState::Enabled)
+                && t.signal_pattern.signal_type == signal_type
+                && t.signal_pattern
+                    .plugin_id
+                    .as_ref()
+                    .is_none_or(|pid| pid == plugin_id)
+        }) {
+            let ledger_key = (trigger.id.clone(), signal_id.clone());
+            if self.fire_ledger.contains_key(&ledger_key) {
+                continue;
+            }
+
+            if !evaluate_conditions(&trigger.conditions, payload) {
+                continue;
+            }
+
+            let next_depth = source_run_chain_depth.map_or(1u8, |depth| depth.saturating_add(1));
+            if next_depth > trigger.max_chain_depth {
+                continue;
+            }
+
+            let window_start = now.saturating_sub(60_000);
+            let current_trigger_count = self
+                .fire_counts
+                .get(&trigger.id)
+                .map(|counts| counts.iter().filter(|&&ts| ts > window_start).count())
+                .unwrap_or(0);
+            if current_trigger_count as u32 >= trigger.rate_limit.max_per_minute {
+                continue;
+            }
+
+            let hour_ago = now.saturating_sub(3_600_000);
+            let current_project_budget = self
+                .project_budgets
+                .get(project)
+                .map(|entries| entries.iter().filter(|&&ts| ts > hour_ago).count())
+                .unwrap_or(0);
+            if current_project_budget as u32 >= self.default_project_budget {
+                continue;
+            }
+
+            let Some(template) = self.templates.get(&trigger.run_template_id) else {
+                continue;
+            };
+
+            if template
+                .required_fields
+                .iter()
+                .any(|field| resolve_path(payload, field).is_none())
+            {
+                continue;
+            }
+
+            candidates.push(trigger.id.clone());
+        }
+
+        candidates
+    }
+
     // ── Trigger Evaluation ──────────────────────────────────────────
 
     /// Evaluate a signal against all enabled triggers in the project.
@@ -840,7 +918,7 @@ impl TriggerService {
             }
 
             // Chain depth check
-            let next_depth = source_run_chain_depth.map_or(1u8, |d| d + 1);
+            let next_depth = source_run_chain_depth.map_or(1u8, |d| d.saturating_add(1));
             if next_depth > max_depth {
                 events.push(TriggerEvent::TriggerSkipped {
                     trigger_id,
