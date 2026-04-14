@@ -6,22 +6,41 @@
 //!   cairn-app --port 8080             # custom port
 //!   cairn-app --addr 0.0.0.0          # bind all interfaces
 
+pub mod errors;
+pub mod extractors;
 pub mod marketplace_routes;
+pub mod metrics;
 pub mod repo_routes;
 pub mod sse_hooks;
+pub mod state;
 pub mod telemetry_routes;
+pub mod tokens;
 pub mod tool_impls;
 pub mod trigger_routes;
+
+// Re-exports for backward compatibility
+pub use errors::AppApiError;
+#[allow(unused_imports)]
+pub(crate) use errors::*;
+#[allow(unused_imports)]
+pub(crate) use extractors::*;
+#[allow(unused_imports)]
+pub(crate) use metrics::*;
+#[allow(unused_imports)]
+pub(crate) use state::*;
+pub use state::{
+    AppState, GitHubEventAction, GitHubIntegration, IssueQueueEntry, IssueQueueStatus,
+    WebhookAction,
+};
+#[allow(unused_imports)]
+pub use tokens::*;
 
 use async_trait::async_trait;
 use axum::{
     body::{to_bytes, Body},
     extract::rejection::JsonRejection,
-    extract::{
-        DefaultBodyLimit, Extension, FromRequest, FromRequestParts, MatchedPath, Path, Query,
-        Request, State,
-    },
-    http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode},
+    extract::{DefaultBodyLimit, Extension, MatchedPath, Path, Query, Request, State},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     middleware::{from_fn, from_fn_with_state, Next},
     response::sse::{Event as SseEvent, Sse},
     response::{IntoResponse, Response},
@@ -35,15 +54,11 @@ use cairn_api::auth::{
 use cairn_api::bootstrap::{
     BootstrapConfig, DeploymentMode, EncryptionKeySource, ServerBootstrap, StorageBackend,
 };
-use cairn_api::endpoints::ListQuery;
 use cairn_api::feed::{FeedEndpoints, FeedItem, FeedQuery};
 use cairn_api::http::{preserved_route_catalog, ApiError, HttpMethod, ListResponse};
-use cairn_api::memory_api::{
-    CreateMemoryRequest, MemoryEndpoints, MemoryItem, MemorySearchQuery, MemoryStatus,
-};
+use cairn_api::memory_api::{CreateMemoryRequest, MemoryEndpoints, MemoryItem, MemoryStatus};
 use cairn_api::onboarding::{
     create_onboarding_checklist, materialize_template, ProviderBindingBootstrapService,
-    StarterTemplateRegistry,
 };
 use cairn_api::settings_api::SettingsSummary;
 use cairn_api::sse::SseFrame;
@@ -54,28 +69,26 @@ use cairn_domain::providers::{
     OperationKind, ProviderBudget, ProviderBudgetPeriod, ProviderHealthRecord,
     ProviderModelCapability, RoutePolicyRule,
 };
-use cairn_domain::tool_invocation::{ToolInvocationState, ToolInvocationTarget};
+use cairn_domain::tool_invocation::ToolInvocationTarget;
 use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerRecord, ExternalWorkerReport};
+#[cfg(test)]
+use cairn_domain::Entitlement;
 use cairn_domain::{
     ApprovalDecision, ApprovalId, ApprovalRequirement, AuditLogEntry, AuditOutcome, ChannelId,
     ChannelRecord, CheckpointId, CheckpointStrategy, CheckpointStrategySet, CredentialId,
-    DefaultFeatureGate, Entitlement, EntitlementSet, EvalRunId, EventEnvelope, EventId,
-    EventSource, ExecutionClass, FeatureGate, FeatureGateResult, IngestJobId, IngestJobState,
-    KnowledgeDocumentId, MailboxMessageId, OperatorId, OwnershipKey, PauseReason, PauseReasonKind,
-    ProductTier, ProjectId, ProjectKey, PromptAssetId, PromptReleaseId, PromptTemplateVar,
-    PromptVersionId, ProviderBindingId, ProviderBindingRecord, ProviderConnectionId,
-    ProviderModelId, ResumeTrigger, RouteDecisionId, RunId, RunResumeTarget, RunState,
-    RunStateChanged, RuntimeEvent, Scope, SessionId, SessionState, SignalId, SourceId,
-    StateTransition, TaskId, TaskState, TaskStateChanged, TenantId, ToolInvocationId, WorkerId,
-    WorkspaceId, WorkspaceKey, WorkspaceRole, CREDENTIAL_MANAGEMENT, EVAL_MATRICES, MULTI_PROVIDER,
+    EvalRunId, EventEnvelope, EventId, EventSource, ExecutionClass, IngestJobId, IngestJobState,
+    KnowledgeDocumentId, MailboxMessageId, OwnershipKey, PauseReason, PauseReasonKind, ProjectId,
+    ProjectKey, PromptAssetId, PromptReleaseId, PromptTemplateVar, PromptVersionId,
+    ProviderBindingId, ProviderBindingRecord, ProviderConnectionId, ProviderModelId, ResumeTrigger,
+    RouteDecisionId, RunId, RunResumeTarget, RunState, RunStateChanged, RuntimeEvent, Scope,
+    SessionId, SignalId, SourceId, StateTransition, TaskId, TaskState, TaskStateChanged, TenantId,
+    ToolInvocationId, WorkerId, WorkspaceId, WorkspaceKey, WorkspaceRole, CREDENTIAL_MANAGEMENT,
+    EVAL_MATRICES, MULTI_PROVIDER,
 };
-use cairn_evals::services::eval_service::{MemoryDiagnosticsSource, SourceQualitySnapshot};
 use cairn_evals::{
-    EvalBaselineServiceImpl, EvalDatasetServiceImpl, EvalMetrics, EvalRubricServiceImpl,
-    EvalRun as ProductEvalRun, EvalRunService as ProductEvalRunService, EvalRunStatus,
-    EvalSubjectKind, GraphIntegration as EvalGraphIntegration, GuardrailMatrix,
-    ModelComparisonServiceImpl, PluginDimensionScore, PluginRubricScorer, PromptComparisonMatrix,
-    ProviderRoutingMatrix, ProviderRoutingRow, RubricDimension, SkillHealthMatrix,
+    EvalMetrics, EvalRun as ProductEvalRun, EvalSubjectKind, GuardrailMatrix,
+    PromptComparisonMatrix, ProviderRoutingMatrix, ProviderRoutingRow, RubricDimension,
+    SkillHealthMatrix,
 };
 use cairn_graph::event_projector::EventProjector as RuntimeGraphProjector;
 use cairn_graph::graph_provenance::GraphProvenanceService;
@@ -84,33 +97,24 @@ use cairn_graph::projections::{GraphEdge, GraphNode, NodeKind};
 use cairn_graph::provenance::ProvenanceService;
 use cairn_graph::retrieval_projector::RetrievalGraphProjector;
 use cairn_graph::{GraphQuery, GraphQueryService, TraversalDirection};
-use cairn_memory::api_impl::MemoryApiImpl;
 use cairn_memory::bundles::{
     BundleEnvelope, ConflictResolutionStrategy, DocumentExportFilters, ImportService,
 };
 use cairn_memory::deep_search::{DeepSearchRequest, DeepSearchService};
-use cairn_memory::deep_search_impl::{IterativeDeepSearch, KeywordDecomposer};
 use cairn_memory::diagnostics::{DiagnosticsService, IndexStatus, SourceQualityRecord};
-use cairn_memory::diagnostics_impl::InMemoryDiagnostics;
-use cairn_memory::export_service_impl::InMemoryExportService;
-use cairn_memory::feed_impl::FeedStore;
-use cairn_memory::graph_expansion::GraphBackedExpansion;
-use cairn_memory::import_service_impl::InMemoryImportService;
-use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
+use cairn_memory::in_memory::InMemoryDocumentStore;
 use cairn_memory::ingest::{DocumentVersionReadModel, IngestRequest, IngestService, SourceType};
-use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_memory::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
 use cairn_runtime::{
     set_current_trace_id, ApprovalPolicyService, ApprovalService, AuditService, BudgetService,
     ChannelService, CheckpointService, CredentialService, DecisionService, DefaultsService,
     ExternalWorkerService, GuardrailService, InMemoryServices, IngestJobService, LicenseService,
-    MailboxService, MarketplaceService, NotificationService, OperatorProfileService,
-    ProjectService, PromptAssetService, PromptReleaseService, PromptVersionService,
-    ProviderBindingService, ProviderConnectionConfig, ProviderConnectionService,
-    ProviderHealthService, QuotaService, RecoveryService, RetentionService, RoutePolicyService,
-    RunCostAlertService, RunService, RunSlaService, RuntimeError, SessionService,
-    SignalRouterService, SignalService, TaskService, TenantService, ToolInvocationService,
-    TriggerService, WorkspaceMembershipService, WorkspaceService,
+    MailboxService, NotificationService, OperatorProfileService, ProjectService,
+    PromptAssetService, PromptReleaseService, PromptVersionService, ProviderBindingService,
+    ProviderConnectionConfig, ProviderConnectionService, ProviderHealthService, QuotaService,
+    RecoveryService, RetentionService, RoutePolicyService, RunCostAlertService, RunService,
+    RunSlaService, RuntimeError, SessionService, SignalRouterService, SignalService, TaskService,
+    TenantService, ToolInvocationService, WorkspaceMembershipService, WorkspaceService,
 };
 use cairn_store::projections::{
     AuditLogReadModel, CheckpointReadModel, CheckpointStrategyReadModel, LlmCallTraceReadModel,
@@ -122,11 +126,10 @@ use cairn_store::projections::{
 };
 use cairn_store::{EntityRef, EventLog, EventPosition, StoredEvent};
 use cairn_tools::{
-    build_eval_score_request, cancel_plugin_invocation, execute_eval_score, InMemoryPluginRegistry,
-    PluginCapability, PluginHost, PluginLifecycleSnapshot, PluginLogEntry, PluginManifest,
-    PluginMetrics, PluginRegistry, PluginState, PluginToolDescriptor, StdioPluginHost,
+    build_eval_score_request, cancel_plugin_invocation, PluginCapability, PluginHost,
+    PluginLifecycleSnapshot, PluginLogEntry, PluginManifest, PluginMetrics, PluginRegistry,
+    PluginState, PluginToolDescriptor,
 };
-use serde::de::DeserializeOwned;
 use std::{
     collections::{HashMap, HashSet},
     convert::Infallible,
@@ -135,13 +138,9 @@ use std::{
     io::BufReader,
     net::SocketAddr,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     time::Instant,
 };
-use tokio::sync::broadcast;
 use tokio::{net::TcpListener, runtime::Builder, task::JoinSet};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
@@ -149,138 +148,16 @@ use utoipa::{OpenApi, ToSchema};
 use uuid::Uuid;
 use x509_parser::parse_x509_certificate;
 
-type AppDeepSearch = IterativeDeepSearch<
-    InMemoryRetrieval,
-    KeywordDecomposer,
-    GraphBackedExpansion<Arc<InMemoryGraphStore>>,
->;
-
-/// Adapts `InMemoryDiagnostics` to `cairn_evals::MemoryDiagnosticsSource`, breaking the
-/// circular dependency by not requiring `cairn-evals` to depend on `cairn-memory`.
-struct DiagnosticsAdapter(Arc<InMemoryDiagnostics>);
-
-#[async_trait::async_trait]
-impl MemoryDiagnosticsSource for DiagnosticsAdapter {
-    async fn list_source_quality(
-        &self,
-        project: &cairn_domain::ProjectKey,
-        limit: usize,
-    ) -> Result<Vec<SourceQualitySnapshot>, String> {
-        use cairn_memory::diagnostics::DiagnosticsService;
-        let records = DiagnosticsService::list_source_quality(self.0.as_ref(), project, limit)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(records
-            .into_iter()
-            .map(|r| SourceQualitySnapshot {
-                source_id: r.source_id.clone(),
-                total_chunks: r.total_chunks,
-                credibility_score: Some(r.credibility_score),
-                retrieval_count: r.retrieval_count,
-                query_hit_rate: r.query_hit_rate,
-                error_rate: r.error_rate,
-                last_ingested_at: Some(r.last_ingested_at),
-            })
-            .collect())
-    }
-}
-
-struct AppPluginRubricScorer {
-    plugin_registry: Arc<InMemoryPluginRegistry>,
-}
-
-#[async_trait]
-impl PluginRubricScorer for AppPluginRubricScorer {
-    async fn score(
-        &self,
-        plugin_id: &str,
-        input: &serde_json::Value,
-        expected_output: Option<&serde_json::Value>,
-        actual_output: &serde_json::Value,
-    ) -> Result<PluginDimensionScore, cairn_evals::services::rubric_impl::EvalRubricError> {
-        let result = execute_eval_score(
-            self.plugin_registry.as_ref(),
-            plugin_id,
-            input.clone(),
-            expected_output.cloned(),
-            actual_output.clone(),
-        )
-        .await
-        .map_err(|err| {
-            cairn_evals::services::rubric_impl::EvalRubricError::PluginScoreFailed(err.to_string())
-        })?;
-        Ok(PluginDimensionScore {
-            score: result.score,
-            passed: result.passed,
-            feedback: result.reasoning,
-        })
-    }
-}
+// DiagnosticsAdapter, AppPluginRubricScorer → state.rs
 
 const DEFAULT_TENANT_ID: &str = "default_tenant";
 const DEFAULT_WORKSPACE_ID: &str = "default_workspace";
 const DEFAULT_PROJECT_ID: &str = "default_project";
-type AppIngestPipeline = IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>;
+// AppIngestPipeline, SqEqSessionBinding, A2aTaskBinding, MailboxMessageView,
+// AppMailboxMessage, AppSourceMetadata, AppVersionContent, PendingIngestJobPayload,
+// RateLimitBucket → state.rs
 
-#[derive(Clone, Debug)]
-struct SqEqSessionBinding {
-    project: ProjectKey,
-}
-
-#[derive(Clone, Debug)]
-struct A2aTaskBinding {
-    task_id: TaskId,
-    project: ProjectKey,
-}
-
-#[derive(Clone, Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MailboxMessageView {
-    message_id: String,
-    run_id: Option<String>,
-    task_id: Option<String>,
-    sender_id: Option<String>,
-    body: Option<String>,
-    delivered: bool,
-    created_at: u64,
-}
-
-#[derive(Clone, Debug)]
-pub struct AppMailboxMessage {
-    sender_id: Option<String>,
-    body: Option<String>,
-    delivered: bool,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct AppSourceMetadata {
-    name: Option<String>,
-    description: Option<String>,
-}
-
-/// Cached prompt version content and template vars (not in event payload).
-#[derive(Clone, Debug, Default)]
-pub struct AppVersionContent {
-    content: String,
-    template_vars: Vec<PromptTemplateVar>,
-}
-
-#[derive(Clone, Debug)]
-pub struct PendingIngestJobPayload {
-    project: ProjectKey,
-    source_id: SourceId,
-    document_id: KnowledgeDocumentId,
-    content: String,
-    source_type: SourceType,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct RateLimitBucket {
-    count: u32,
-    window_started_ms: u64,
-}
-
-const HTTP_DURATION_BUCKETS_MS: [u64; 10] = [5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000];
+// HTTP_DURATION_BUCKETS_MS → metrics.rs
 
 #[derive(Clone, Debug, serde::Serialize, ToSchema)]
 struct HealthCheck {
@@ -353,340 +230,11 @@ struct PluginDetailResponse {
     metrics: PluginMetrics,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct RequestCountKey {
-    method: String,
-    path: String,
-    status: u16,
-}
+// RequestCountKey, RequestDurationKey, HistogramSample, AppMetrics → metrics.rs
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct RequestDurationKey {
-    method: String,
-    path: String,
-}
+// OperatorTokenStore, OperatorTokenRecord, RequestLogEntry, RequestLogBuffer → tokens.rs
 
-#[derive(Clone, Debug)]
-struct HistogramSample {
-    bucket_counts: [u64; HTTP_DURATION_BUCKETS_MS.len()],
-    sum_ms: u64,
-    count: u64,
-}
-
-impl Default for HistogramSample {
-    fn default() -> Self {
-        Self {
-            bucket_counts: [0; HTTP_DURATION_BUCKETS_MS.len()],
-            sum_ms: 0,
-            count: 0,
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct AppMetrics {
-    request_totals: Mutex<HashMap<RequestCountKey, u64>>,
-    request_durations: Mutex<HashMap<RequestDurationKey, HistogramSample>>,
-    active_runs_total: AtomicU64,
-    active_tasks_total: AtomicU64,
-    startup_complete: AtomicBool,
-}
-
-impl AppMetrics {
-    fn mark_started(&self) {
-        self.startup_complete.store(true, Ordering::Relaxed);
-    }
-
-    fn is_started(&self) -> bool {
-        self.startup_complete.load(Ordering::Relaxed)
-    }
-
-    fn record_request(&self, method: &str, path: &str, status: u16, latency_ms: u64) {
-        {
-            let mut totals = self
-                .request_totals
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            let key = RequestCountKey {
-                method: method.to_owned(),
-                path: path.to_owned(),
-                status,
-            };
-            *totals.entry(key).or_insert(0) += 1;
-        }
-
-        let mut durations = self
-            .request_durations
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let sample = durations
-            .entry(RequestDurationKey {
-                method: method.to_owned(),
-                path: path.to_owned(),
-            })
-            .or_default();
-        sample.count += 1;
-        sample.sum_ms = sample.sum_ms.saturating_add(latency_ms);
-        for (idx, bucket) in HTTP_DURATION_BUCKETS_MS.iter().enumerate() {
-            if latency_ms <= *bucket {
-                sample.bucket_counts[idx] += 1;
-            }
-        }
-    }
-
-    fn set_active_counts(&self, runs: usize, tasks: usize) {
-        self.active_runs_total.store(runs as u64, Ordering::Relaxed);
-        self.active_tasks_total
-            .store(tasks as u64, Ordering::Relaxed);
-    }
-
-    /// Approximate latency percentile (p50 or p95) from histogram buckets.
-    /// Returns `None` when no requests have been recorded.
-    fn latency_percentile(&self, p: f64) -> Option<u64> {
-        let durations = self
-            .request_durations
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let mut total_count: u64 = 0;
-        let mut merged = [0u64; HTTP_DURATION_BUCKETS_MS.len()];
-        for sample in durations.values() {
-            total_count += sample.count;
-            for (i, &c) in sample.bucket_counts.iter().enumerate() {
-                merged[i] += c;
-            }
-        }
-        if total_count == 0 {
-            return None;
-        }
-        let target = ((p / 100.0) * total_count as f64).ceil() as u64;
-        let mut cumulative = 0u64;
-        for (i, &c) in merged.iter().enumerate() {
-            cumulative += c;
-            if cumulative >= target {
-                return Some(HTTP_DURATION_BUCKETS_MS[i]);
-            }
-        }
-        Some(*HTTP_DURATION_BUCKETS_MS.last().unwrap())
-    }
-
-    /// Fraction of requests with status >= 400 (0.0–1.0).
-    fn error_rate(&self) -> f32 {
-        let totals = self
-            .request_totals
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let mut total: u64 = 0;
-        let mut errors: u64 = 0;
-        for (key, &count) in totals.iter() {
-            total += count;
-            if key.status >= 400 {
-                errors += count;
-            }
-        }
-        if total == 0 {
-            0.0
-        } else {
-            errors as f32 / total as f32
-        }
-    }
-
-    fn render_prometheus(&self) -> String {
-        let totals = self
-            .request_totals
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let durations = self
-            .request_durations
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-
-        let mut lines = vec![
-            "# HELP http_requests_total Total HTTP responses by method, path, and status."
-                .to_owned(),
-            "# TYPE http_requests_total counter".to_owned(),
-        ];
-        for (key, value) in totals {
-            lines.push(format!(
-                "http_requests_total{{method=\"{}\",path=\"{}\",status=\"{}\"}} {}",
-                prometheus_label(&key.method),
-                prometheus_label(&key.path),
-                key.status,
-                value
-            ));
-        }
-
-        lines.push(
-            "# HELP http_request_duration_ms Request duration histogram in milliseconds."
-                .to_owned(),
-        );
-        lines.push("# TYPE http_request_duration_ms histogram".to_owned());
-        for (key, value) in durations {
-            for (idx, bucket) in HTTP_DURATION_BUCKETS_MS.iter().enumerate() {
-                lines.push(format!(
-                    "http_request_duration_ms_bucket{{method=\"{}\",path=\"{}\",le=\"{}\"}} {}",
-                    prometheus_label(&key.method),
-                    prometheus_label(&key.path),
-                    bucket,
-                    value.bucket_counts[idx]
-                ));
-            }
-            lines.push(format!(
-                "http_request_duration_ms_bucket{{method=\"{}\",path=\"{}\",le=\"+Inf\"}} {}",
-                prometheus_label(&key.method),
-                prometheus_label(&key.path),
-                value.count
-            ));
-            lines.push(format!(
-                "http_request_duration_ms_sum{{method=\"{}\",path=\"{}\"}} {}",
-                prometheus_label(&key.method),
-                prometheus_label(&key.path),
-                value.sum_ms
-            ));
-            lines.push(format!(
-                "http_request_duration_ms_count{{method=\"{}\",path=\"{}\"}} {}",
-                prometheus_label(&key.method),
-                prometheus_label(&key.path),
-                value.count
-            ));
-        }
-
-        lines.push("# HELP active_runs_total Active non-terminal runs.".to_owned());
-        lines.push("# TYPE active_runs_total gauge".to_owned());
-        lines.push(format!(
-            "active_runs_total {}",
-            self.active_runs_total.load(Ordering::Relaxed)
-        ));
-        lines.push("# HELP active_tasks_total Active non-terminal tasks.".to_owned());
-        lines.push("# TYPE active_tasks_total gauge".to_owned());
-        lines.push(format!(
-            "active_tasks_total {}",
-            self.active_tasks_total.load(Ordering::Relaxed)
-        ));
-        lines.join("\n")
-    }
-}
-
-// ── OperatorTokenStore ────────────────────────────────────────────────────────
-
-/// Metadata for one operator API token.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct OperatorTokenRecord {
-    /// Opaque token identifier (e.g. `tok_<uuid>`). Used as the delete key.
-    pub token_id: String,
-    pub operator_id: String,
-    pub tenant_id: String,
-    /// Human-readable label.
-    pub name: String,
-    /// Unix-ms creation timestamp.
-    pub created_at: u64,
-    /// Optional expiry (Unix ms). `None` = never expires.
-    pub expires_at: Option<u64>,
-}
-
-/// Per-operator API token store — metadata + raw-token lookup for revocation.
-#[derive(Debug, Default)]
-pub struct OperatorTokenStore {
-    inner: std::sync::RwLock<std::collections::HashMap<String, (String, OperatorTokenRecord)>>,
-}
-
-impl OperatorTokenStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn insert(&self, raw_token: String, record: OperatorTokenRecord) {
-        self.inner
-            .write()
-            .unwrap()
-            .insert(record.token_id.clone(), (raw_token, record));
-    }
-
-    /// Raw token string for revocation — not exposed via API.
-    pub fn raw_token(&self, token_id: &str) -> Option<String> {
-        self.inner
-            .read()
-            .unwrap()
-            .get(token_id)
-            .map(|(t, _)| t.clone())
-    }
-
-    pub fn remove(&self, token_id: &str) -> bool {
-        self.inner.write().unwrap().remove(token_id).is_some()
-    }
-
-    pub fn list(&self) -> Vec<OperatorTokenRecord> {
-        self.inner
-            .read()
-            .unwrap()
-            .values()
-            .map(|(_, r)| r.clone())
-            .collect()
-    }
-}
-
-// ── Request log ring buffer ──────────────────────────────────────────────────
-
-const REQUEST_LOG_RING_SIZE: usize = 2_000;
-
-/// Structured log entry written by the observability middleware for every request.
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct RequestLogEntry {
-    pub timestamp: String,
-    pub level: &'static str,
-    pub message: String,
-    pub request_id: String,
-    pub method: String,
-    pub path: String,
-    pub query: Option<String>,
-    pub status: u16,
-    pub latency_ms: u64,
-}
-
-/// Fixed-capacity FIFO ring buffer of structured request log entries.
-#[derive(Clone)]
-pub struct RequestLogBuffer {
-    entries: std::collections::VecDeque<RequestLogEntry>,
-}
-
-impl Default for RequestLogBuffer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl RequestLogBuffer {
-    pub fn new() -> Self {
-        Self {
-            entries: std::collections::VecDeque::with_capacity(REQUEST_LOG_RING_SIZE),
-        }
-    }
-
-    pub fn push(&mut self, entry: RequestLogEntry) {
-        if self.entries.len() == REQUEST_LOG_RING_SIZE {
-            self.entries.pop_front();
-        }
-        self.entries.push_back(entry);
-    }
-
-    /// Return the last `n` entries whose level matches the filter (empty = all).
-    pub fn tail(&self, n: usize, level_filter: &[&str]) -> Vec<&RequestLogEntry> {
-        self.entries
-            .iter()
-            .rev()
-            .filter(|e| level_filter.is_empty() || level_filter.contains(&e.level))
-            .take(n)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect()
-    }
-}
-
-fn default_sandbox_base_dir() -> PathBuf {
-    std::env::temp_dir().join("cairn-workspace-sandboxes")
-}
+// default_sandbox_base_dir moved to state.rs
 
 fn default_sandbox_strategy() -> cairn_workspace::SandboxStrategyRequest {
     #[cfg(target_os = "linux")]
@@ -1406,846 +954,15 @@ async fn trigger_decision_outcomes_for_signal(
     outcomes
 }
 
-#[derive(Clone)]
-pub struct AppState {
-    pub config: BootstrapConfig,
-    pub runtime: Arc<InMemoryServices>,
-    pub evals: Arc<ProductEvalRunService>,
-    pub eval_baselines: Arc<EvalBaselineServiceImpl>,
-    pub eval_datasets: Arc<EvalDatasetServiceImpl>,
-    #[allow(dead_code)]
-    pub model_comparisons: Arc<ModelComparisonServiceImpl>,
-    pub eval_rubrics: Arc<EvalRubricServiceImpl>,
-    pub runtime_sse_tx: broadcast::Sender<SseFrame>,
-    /// Ring buffer of the last 10,000 SSE frames with monotonic sequence IDs.
-    /// Clients use Last-Event-ID to replay missed events after reconnect (RFC 002).
-    pub sse_event_buffer: Arc<std::sync::RwLock<std::collections::VecDeque<(u64, SseFrame)>>>,
-    /// Monotonic counter for SSE frame sequence IDs.
-    pub sse_seq: Arc<std::sync::atomic::AtomicU64>,
-    pub graph: Arc<InMemoryGraphStore>,
-    pub document_store: Arc<InMemoryDocumentStore>,
-    pub retrieval: Arc<InMemoryRetrieval>,
-    pub deep_search: Arc<AppDeepSearch>,
-    pub ingest: Arc<AppIngestPipeline>,
-    pub diagnostics: Arc<InMemoryDiagnostics>,
-    pub feed: Arc<FeedStore>,
-    pub bundle_import: Arc<InMemoryImportService>,
-    pub bundle_export: Arc<InMemoryExportService>,
-    pub source_metadata: Arc<Mutex<HashMap<String, AppSourceMetadata>>>,
-    /// Cache of prompt version content + template vars, keyed by version_id.
-    pub version_content: Arc<Mutex<HashMap<String, AppVersionContent>>>,
-    pub pending_ingest_jobs: Arc<Mutex<HashMap<String, PendingIngestJobPayload>>>,
-    pub mailbox_messages: Arc<Mutex<HashMap<String, AppMailboxMessage>>>,
-    pub templates: Arc<StarterTemplateRegistry>,
-    pub service_tokens: Arc<ServiceTokenRegistry>,
-    /// Per-operator API token metadata store (token_id → record + raw token).
-    /// Separate from `service_tokens` which only holds the auth lookup map.
-    pub operator_tokens: Arc<OperatorTokenStore>,
-    pub plugin_registry: Arc<InMemoryPluginRegistry>,
-    pub plugin_host: Arc<Mutex<StdioPluginHost>>,
-    /// RFC 015: plugin marketplace service — manages discover/install/enable lifecycle.
-    pub marketplace: Arc<Mutex<MarketplaceService<cairn_store::InMemoryStore>>>,
-    /// RFC 022: trigger service — manages triggers and run templates.
-    pub triggers: Arc<Mutex<TriggerService>>,
-    pub repo_clone_cache: Arc<cairn_workspace::RepoCloneCache>,
-    pub project_repo_access: Arc<cairn_workspace::ProjectRepoAccessService>,
-    pub sandbox_service: Arc<cairn_workspace::SandboxService>,
-    sqeq_sessions: Arc<Mutex<HashMap<String, SqEqSessionBinding>>>,
-    a2a_tasks: Arc<Mutex<HashMap<String, A2aTaskBinding>>>,
-    pub rate_limits: Arc<Mutex<HashMap<String, RateLimitBucket>>>,
-    pub metrics: Arc<AppMetrics>,
-    pub memory_api: Arc<MemoryApiImpl<InMemoryRetrieval>>,
-    #[allow(dead_code)]
-    pub memory_proposal_hook: Arc<sse_hooks::SseMemoryProposalHook>,
-    pub started_at: Instant,
-    /// OTLP span exporter (RFC 021). Disabled by default.
-    pub otlp_exporter: Arc<cairn_runtime::telemetry::OtlpExporter>,
-    /// Brain LLM provider for orchestration — set post-construction by main.rs
-    /// once the concrete provider (Ollama or OpenAI-compat) is configured.
-    /// `None` means orchestration is unavailable until a provider is configured.
-    pub brain_provider: Option<Arc<dyn cairn_domain::providers::GenerationProvider>>,
-    /// Bedrock provider — used when the model_id is a Bedrock model (e.g. minimax.minimax-m2.5).
-    pub bedrock_provider: Option<Arc<dyn cairn_domain::providers::GenerationProvider>>,
-    /// Built-in tool registry wired by main.rs with real memory backends.
-    /// `None` until set — orchestrate handler falls back to stub dispatcher.
-    pub tool_registry: Option<Arc<cairn_tools::BuiltinToolRegistry>>,
-    /// Ring buffer of the last 2,000 structured request log entries, populated
-    /// by the observability middleware.  Consumed by `GET /v1/admin/logs`.
-    pub request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
-    /// GitHub App integration — set by main.rs when GITHUB_APP_ID + private key are configured.
-    ///
-    /// DEPRECATED: the canonical registration lives in `self.integrations` (the
-    /// `IntegrationRegistry`).  This field is kept ONLY because the legacy webhook,
-    /// queue, scan, and installation handlers below access `GitHubIntegration`
-    /// fields directly (credentials, installations, issue_queue, etc.) and the
-    /// `Integration` trait does not yet expose them.
-    ///
-    /// TODO(integration-migration): add `as_any()` to the `Integration` trait (or
-    /// surface the needed fields through trait methods), migrate the handlers to
-    /// look up GitHub via `state.integrations.get("github")`, then delete this
-    /// field and the `GitHubIntegration` struct.
-    pub github: Option<Arc<GitHubIntegration>>,
-    /// Integration plugin registry — holds all configured integrations (GitHub, Linear, etc.).
-    pub integrations: Arc<cairn_integrations::IntegrationRegistry>,
-}
+// AppState struct → state.rs
 
-/// GitHub App integration state.
-pub struct GitHubIntegration {
-    pub credentials: cairn_github::AppCredentials,
-    pub webhook_secret: String,
-    /// Map of installation_id → InstallationToken (auto-refreshing).
-    pub installations:
-        tokio::sync::RwLock<std::collections::HashMap<u64, cairn_github::InstallationToken>>,
-    /// Operator-configured event→action mappings.
-    pub event_actions: tokio::sync::RwLock<Vec<GitHubEventAction>>,
-    /// Issue processing queue.
-    pub issue_queue: tokio::sync::RwLock<std::collections::VecDeque<IssueQueueEntry>>,
-    /// Whether the queue dispatcher is paused.
-    pub queue_paused: std::sync::atomic::AtomicBool,
-    /// Whether the queue dispatcher loop is running.
-    pub queue_running: std::sync::atomic::AtomicBool,
-    /// Max concurrent orchestration runs (operator-configurable).
-    pub max_concurrent: std::sync::atomic::AtomicU32,
-    /// Semaphore controlling concurrent run slots.
-    pub run_semaphore: Arc<tokio::sync::Semaphore>,
-    pub http: reqwest::Client,
-}
+// GitHubIntegration, GitHubEventAction, WebhookAction → state.rs
 
-impl std::fmt::Debug for GitHubIntegration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GitHubIntegration")
-            .field("app_id", &self.credentials.app_id)
-            .finish()
-    }
-}
+// impl AppState (replay_graph, replay_evals, replay_triggers, new) → state.rs
 
-impl GitHubIntegration {
-    /// Get or create an InstallationToken for the given installation ID.
-    pub async fn token_for_installation(
-        &self,
-        installation_id: u64,
-    ) -> cairn_github::InstallationToken {
-        {
-            let cache = self.installations.read().await;
-            if let Some(token) = cache.get(&installation_id) {
-                return token.clone();
-            }
-        }
-        let token = cairn_github::InstallationToken::new(
-            self.credentials.clone(),
-            installation_id,
-            self.http.clone(),
-        );
-        let mut cache = self.installations.write().await;
-        cache.insert(installation_id, token.clone());
-        token
-    }
-
-    /// Get a GitHubClient for the given installation.
-    pub async fn client_for_installation(
-        &self,
-        installation_id: u64,
-    ) -> cairn_github::GitHubClient {
-        let token = self.token_for_installation(installation_id).await;
-        cairn_github::GitHubClient::with_http(token, self.http.clone())
-    }
-}
-
-/// Configurable event→action mapping for GitHub webhooks.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct GitHubEventAction {
-    /// Event key pattern to match (e.g., "issues.opened", "issues.labeled", "push").
-    /// Supports "*" as wildcard (e.g., "issues.*" matches all issue events).
-    pub event_pattern: String,
-    /// Optional label filter — only trigger if the issue/PR has this label.
-    #[serde(default)]
-    pub label_filter: Option<String>,
-    /// Optional repo filter — only trigger for this repo (owner/repo).
-    #[serde(default)]
-    pub repo_filter: Option<String>,
-    /// What to do when the event matches.
-    pub action: WebhookAction,
-}
-
-/// What to do when a webhook event matches a configured pattern.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WebhookAction {
-    /// Create a session + run and trigger orchestration.
-    /// The goal is derived from the issue/PR title + body.
-    CreateAndOrchestrate,
-    /// Post a comment acknowledging the event.
-    Acknowledge,
-    /// Ignore the event (useful for explicit deny rules).
-    Ignore,
-}
-
-impl AppState {
-    /// Replay all events from the store into the graph projector.
-    ///
-    /// Call this after any external seeding (e.g. demo data) that writes
-    /// to the runtime store outside of the normal API write path.  The
-    /// graph is otherwise populated lazily — only when API handlers call
-    /// `publish_runtime_frames_since` — so startup seeding leaves it empty
-    /// until this is called.
-    pub async fn replay_graph(&self) {
-        use cairn_store::event_log::EventLog;
-        match self.runtime.store.read_stream(None, usize::MAX).await {
-            Ok(events) => {
-                let projector = RuntimeGraphProjector::new(self.graph.clone());
-                if let Err(e) = projector.project_events(&events).await {
-                    tracing::warn!("graph replay: projection error: {e:?}");
-                }
-            }
-            Err(e) => tracing::warn!("graph replay: failed to read events: {e}"),
-        }
-    }
-
-    /// Replay `EvalRunStarted` / `EvalRunCompleted` events from the event log
-    /// into the in-memory eval service.
-    ///
-    /// `state.evals` is a standalone in-memory service — it does NOT read from
-    /// the event log on its own.  API handlers that create eval runs now write
-    /// an `EvalRunStarted` event alongside their in-memory insert; this method
-    /// reconstructs that state on boot so eval runs survive restarts.
-    ///
-    /// Note: metrics recorded via `/v1/evals/runs/:id/score` are NOT yet in the
-    /// event log, so they will not be visible after a restart.
-    pub async fn replay_evals(&self) {
-        use cairn_store::event_log::EventLog;
-        let events = match self.runtime.store.read_stream(None, usize::MAX).await {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::warn!("eval replay: failed to read events: {e}");
-                return;
-            }
-        };
-
-        let mut created: u32 = 0;
-        let mut completed: u32 = 0;
-
-        for stored in &events {
-            match &stored.envelope.payload {
-                cairn_domain::RuntimeEvent::EvalRunStarted(e) => {
-                    // Skip if already present (could have been created before replay).
-                    if self.evals.get(&e.eval_run_id).is_some() {
-                        continue;
-                    }
-                    // Reconstruct the EvalRun with what the event carries.
-                    // Metrics are not in the event — they default to empty.
-                    let subject_kind: EvalSubjectKind =
-                        serde_json::from_str(&format!("\"{}\"", e.subject_kind))
-                            .unwrap_or(EvalSubjectKind::PromptRelease);
-
-                    self.evals.create_run(
-                        e.eval_run_id.clone(),
-                        ProjectId::new(e.project.project_id.as_str()),
-                        subject_kind,
-                        e.evaluator_type.clone(),
-                        e.prompt_asset_id.clone(),
-                        e.prompt_version_id.clone(),
-                        e.prompt_release_id.clone(),
-                        e.created_by.clone(),
-                    );
-                    created += 1;
-                }
-                cairn_domain::RuntimeEvent::EvalRunCompleted(e) => {
-                    // Transition to completed state if the run exists.
-                    // Best-effort: ignore if run not found (could be from a different
-                    // code path that didn't write EvalRunStarted).
-                    if let Some(run) = self.evals.get(&e.eval_run_id) {
-                        if run.status == EvalRunStatus::Running {
-                            let _ = self.evals.complete_run(
-                                &e.eval_run_id,
-                                Default::default(), // metrics not in event
-                                None,
-                            );
-                            completed += 1;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if created > 0 || completed > 0 {
-            tracing::info!("eval replay: restored {created} runs ({completed} completed)");
-        }
-    }
-
-    /// Replay trigger/template lifecycle and fire outcomes into the in-memory trigger service.
-    pub async fn replay_triggers(&self) {
-        use cairn_store::event_log::EventLog;
-
-        let events = match self.runtime.store.read_stream(None, usize::MAX).await {
-            Ok(events) => events,
-            Err(error) => {
-                tracing::warn!("trigger replay: failed to read events: {error}");
-                return;
-            }
-        };
-
-        let mut triggers = self.triggers.lock().unwrap_or_else(|e| e.into_inner());
-        *triggers = TriggerService::new();
-
-        let mut restored_templates = 0u32;
-        let mut restored_triggers = 0u32;
-        let mut restored_fires = 0u32;
-
-        for stored in &events {
-            match &stored.envelope.payload {
-                RuntimeEvent::RunTemplateCreated(event) => {
-                    triggers.create_template(cairn_runtime::RunTemplate {
-                        id: event.template_id.clone(),
-                        project: event.project.clone(),
-                        name: event.name.clone(),
-                        description: event.description.clone(),
-                        default_mode: event.default_mode.clone(),
-                        system_prompt: event.system_prompt.clone(),
-                        initial_user_message: event.initial_user_message.clone(),
-                        plugin_allowlist: event.plugin_allowlist.clone(),
-                        tool_allowlist: event.tool_allowlist.clone(),
-                        budget: cairn_runtime::TemplateBudget {
-                            max_tokens: event.budget_max_tokens,
-                            max_wall_clock_ms: event.budget_max_wall_clock_ms,
-                            max_iterations: event.budget_max_iterations,
-                            exploration_budget_share: event.budget_exploration_budget_share,
-                        },
-                        sandbox_hint: event.sandbox_hint.clone(),
-                        required_fields: event.required_fields.clone(),
-                        created_by: event.created_by.clone(),
-                        created_at: event.created_at,
-                        updated_at: event.created_at,
-                    });
-                    restored_templates += 1;
-                }
-                RuntimeEvent::RunTemplateDeleted(event) => {
-                    let _ = triggers.delete_template(&event.template_id, event.by.clone());
-                }
-                RuntimeEvent::TriggerCreated(event) => {
-                    let conditions = match trigger_conditions_from_values(&event.conditions) {
-                        Ok(conditions) => conditions,
-                        Err(error) => {
-                            tracing::warn!(
-                                "trigger replay: failed to decode conditions for {}: {error}",
-                                event.trigger_id
-                            );
-                            continue;
-                        }
-                    };
-                    match triggers.create_trigger(cairn_runtime::Trigger {
-                        id: event.trigger_id.clone(),
-                        project: event.project.clone(),
-                        name: event.name.clone(),
-                        description: event.description.clone(),
-                        signal_pattern: cairn_runtime::SignalPattern {
-                            signal_type: event.signal_type.clone(),
-                            plugin_id: event.plugin_id.clone(),
-                        },
-                        conditions,
-                        run_template_id: event.run_template_id.clone(),
-                        state: cairn_runtime::TriggerState::Enabled,
-                        rate_limit: cairn_runtime::RateLimitConfig {
-                            max_per_minute: event.max_per_minute,
-                            max_burst: event.max_burst,
-                        },
-                        max_chain_depth: event.max_chain_depth,
-                        created_by: event.created_by.clone(),
-                        created_at: event.created_at,
-                        updated_at: event.created_at,
-                    }) {
-                        Ok(_) => restored_triggers += 1,
-                        Err(error) => tracing::warn!(
-                            "trigger replay: failed to restore trigger {}: {error}",
-                            event.trigger_id
-                        ),
-                    }
-                }
-                RuntimeEvent::TriggerEnabled(event) => {
-                    let _ = triggers.restore_trigger_state(
-                        &event.trigger_id,
-                        cairn_runtime::TriggerState::Enabled,
-                        event.at,
-                    );
-                }
-                RuntimeEvent::TriggerDisabled(event) => {
-                    let _ = triggers.restore_trigger_state(
-                        &event.trigger_id,
-                        cairn_runtime::TriggerState::Disabled {
-                            reason: event.reason.clone(),
-                            since: event.at,
-                        },
-                        event.at,
-                    );
-                }
-                RuntimeEvent::TriggerSuspended(event) => {
-                    let _ = triggers.restore_trigger_state(
-                        &event.trigger_id,
-                        cairn_runtime::TriggerState::Suspended {
-                            reason: runtime_trigger_suspension_reason(&event.reason),
-                            since: event.at,
-                        },
-                        event.at,
-                    );
-                }
-                RuntimeEvent::TriggerResumed(event) => {
-                    let _ = triggers.restore_trigger_state(
-                        &event.trigger_id,
-                        cairn_runtime::TriggerState::Enabled,
-                        event.at,
-                    );
-                }
-                RuntimeEvent::TriggerDeleted(event) => {
-                    let _ = triggers.delete_trigger(&event.trigger_id, event.by.clone());
-                }
-                RuntimeEvent::TriggerFired(event) => {
-                    triggers.restore_fired_trigger(
-                        &event.project,
-                        &event.trigger_id,
-                        &event.signal_id,
-                        event.fired_at,
-                    );
-                    restored_fires += 1;
-                }
-                RuntimeEvent::TriggerSkipped(_)
-                | RuntimeEvent::TriggerDenied(_)
-                | RuntimeEvent::TriggerRateLimited(_)
-                | RuntimeEvent::TriggerPendingApproval(_) => {}
-                _ => {}
-            }
-        }
-
-        if restored_templates > 0 || restored_triggers > 0 || restored_fires > 0 {
-            tracing::info!(
-                "trigger replay: restored {restored_templates} templates, {restored_triggers} triggers, {restored_fires} fires"
-            );
-        }
-    }
-
-    pub async fn new(config: BootstrapConfig) -> Result<Self, String> {
-        let runtime = Arc::new(InMemoryServices::new());
-        let graph = Arc::new(InMemoryGraphStore::new());
-        let plugin_registry = Arc::new(InMemoryPluginRegistry::new());
-        let document_store = Arc::new(InMemoryDocumentStore::new());
-        let diagnostics = Arc::new(InMemoryDiagnostics::new());
-        let evals = Arc::new(
-            ProductEvalRunService::with_graph_and_event_log(
-                Arc::new(EvalGraphIntegration::new(graph.clone())),
-                runtime.store.clone(),
-            )
-            .with_memory_diagnostics(Arc::new(DiagnosticsAdapter(diagnostics.clone()))),
-        );
-        let eval_baselines = Arc::new(EvalBaselineServiceImpl::new(evals.clone()));
-        let eval_datasets = Arc::new(EvalDatasetServiceImpl::new());
-        let model_comparisons = Arc::new(ModelComparisonServiceImpl::new());
-        let eval_rubrics = Arc::new(EvalRubricServiceImpl::with_plugin_scorer(
-            evals.clone(),
-            eval_datasets.clone(),
-            Arc::new(AppPluginRubricScorer {
-                plugin_registry: plugin_registry.clone(),
-            }),
-        ));
-        let retrieval = Arc::new(
-            InMemoryRetrieval::with_diagnostics(document_store.clone(), diagnostics.clone())
-                .with_graph(graph.clone()),
-        );
-        let deep_search = Arc::new(
-            IterativeDeepSearch::new(InMemoryRetrieval::new(document_store.clone()))
-                .with_graph_hook(GraphBackedExpansion::new(graph.clone())),
-        );
-        let ingest = Arc::new(IngestPipeline::new(
-            document_store.clone(),
-            ParagraphChunker::default(),
-        ));
-        let feed = Arc::new(FeedStore::new());
-        let bundle_import = Arc::new(InMemoryImportService::new(document_store.clone()));
-        let bundle_export = Arc::new(InMemoryExportService::new(
-            document_store.clone(),
-            runtime.store.clone(),
-            "cairn-app",
-        ));
-        let source_metadata = Arc::new(Mutex::new(HashMap::new()));
-        let version_content: Arc<Mutex<HashMap<String, AppVersionContent>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let pending_ingest_jobs = Arc::new(Mutex::new(HashMap::new()));
-        let mailbox_messages = Arc::new(Mutex::new(HashMap::new()));
-        let service_tokens = Arc::new(ServiceTokenRegistry::new());
-        let plugin_host = Arc::new(Mutex::new(StdioPluginHost::new()));
-        let repo_clone_cache = Arc::new(cairn_workspace::RepoCloneCache::default());
-        let project_repo_access = Arc::new(cairn_workspace::ProjectRepoAccessService::new());
-        let sqeq_sessions = Arc::new(Mutex::new(HashMap::new()));
-        let a2a_tasks = Arc::new(Mutex::new(HashMap::new()));
-        let sandbox_repo_source = Arc::new(cairn_workspace::providers::RepoCloneCacheSource::new(
-            repo_clone_cache.clone(),
-        ));
-        let sandbox_event_sink = Arc::new(telemetry_routes::UsageSandboxEventSink::new(
-            runtime.store.clone(),
-            Arc::new(cairn_workspace::BufferedSandboxEventSink::default()),
-        ));
-        let sandbox_service = Arc::new(cairn_workspace::SandboxService::new(
-            HashMap::from([
-                (
-                    cairn_workspace::SandboxStrategy::Overlay,
-                    Box::new(cairn_workspace::OverlayProvider::with_repo_source(
-                        default_sandbox_base_dir(),
-                        sandbox_repo_source.clone(),
-                    )) as Box<dyn cairn_workspace::SandboxProvider>,
-                ),
-                (
-                    cairn_workspace::SandboxStrategy::Reflink,
-                    Box::new(cairn_workspace::ReflinkProvider::with_repo_source(
-                        default_sandbox_base_dir(),
-                        sandbox_repo_source,
-                    )) as Box<dyn cairn_workspace::SandboxProvider>,
-                ),
-            ]),
-            sandbox_event_sink,
-            default_sandbox_base_dir(),
-            Arc::new(cairn_workspace::SystemClock),
-        ));
-        // RFC 015: marketplace service wrapping the plugin host.
-        let marketplace = {
-            let mut svc = MarketplaceService::new(runtime.store.clone());
-            svc.load_bundled_catalog();
-            Arc::new(Mutex::new(svc))
-        };
-        let rate_limits = Arc::new(Mutex::new(HashMap::new()));
-        let metrics = Arc::new(AppMetrics::default());
-        let (runtime_sse_tx, _) = broadcast::channel(256);
-        let sse_event_buffer = Arc::new(std::sync::RwLock::new(std::collections::VecDeque::<(
-            u64,
-            SseFrame,
-        )>::with_capacity(10_000)));
-        let sse_seq = Arc::new(std::sync::atomic::AtomicU64::new(1));
-        let memory_proposal_hook = Arc::new(sse_hooks::SseMemoryProposalHook::with_sse_channel(
-            runtime_sse_tx.clone(),
-            sse_event_buffer.clone(),
-            sse_seq.clone(),
-        ));
-        let memory_api = Arc::new(
-            MemoryApiImpl::new(
-                InMemoryRetrieval::with_diagnostics(document_store.clone(), diagnostics.clone())
-                    .with_graph(graph.clone()),
-                document_store.clone(),
-            )
-            .with_proposal_hook(Box::new(sse_hooks::SharedMemoryProposalHook(
-                memory_proposal_hook.clone(),
-            ))),
-        );
-
-        runtime
-            .tenants
-            .create(
-                TenantId::new(DEFAULT_TENANT_ID),
-                "Default Tenant".to_owned(),
-            )
-            .await
-            .map_err(|err| format!("failed to seed default tenant: {err}"))?;
-        runtime
-            .workspaces
-            .create(
-                TenantId::new(DEFAULT_TENANT_ID),
-                WorkspaceId::new(DEFAULT_WORKSPACE_ID),
-                "Default Workspace".to_owned(),
-            )
-            .await
-            .map_err(|err| format!("failed to seed default workspace: {err}"))?;
-        runtime
-            .projects
-            .create(
-                ProjectKey::new(DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID),
-                "Default Project".to_owned(),
-            )
-            .await
-            .map_err(|err| format!("failed to seed default project: {err}"))?;
-        runtime
-            .licenses
-            .activate(
-                TenantId::new(DEFAULT_TENANT_ID),
-                deployment_mode_tier(config.mode),
-                None,
-            )
-            .await
-            .map_err(|err| format!("failed to seed default license: {err}"))?;
-
-        let state = Self {
-            config,
-            document_store,
-            retrieval,
-            deep_search,
-            ingest,
-            diagnostics,
-            feed,
-            bundle_import,
-            bundle_export,
-            source_metadata,
-            version_content,
-            pending_ingest_jobs,
-            mailbox_messages,
-            templates: Arc::new(StarterTemplateRegistry::v1_defaults()),
-            service_tokens,
-            operator_tokens: Arc::new(OperatorTokenStore::new()),
-            plugin_registry,
-            plugin_host,
-            marketplace,
-            triggers: Arc::new(Mutex::new(TriggerService::new())),
-            repo_clone_cache,
-            project_repo_access,
-            sandbox_service,
-            sqeq_sessions,
-            a2a_tasks,
-            rate_limits,
-            metrics,
-            memory_api,
-            memory_proposal_hook,
-            started_at: Instant::now(),
-            otlp_exporter: Arc::new(cairn_runtime::telemetry::OtlpExporter::disabled()),
-            runtime_sse_tx,
-            sse_event_buffer,
-            sse_seq,
-            runtime,
-            evals,
-            eval_baselines,
-            eval_datasets,
-            model_comparisons,
-            eval_rubrics,
-            graph,
-            brain_provider: None,
-            bedrock_provider: None,
-            tool_registry: None,
-            request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
-            github: None,
-            integrations: Arc::new(cairn_integrations::IntegrationRegistry::new()),
-        };
-        state.runtime.store.reset_usage_counters();
-        Ok(state)
-    }
-}
-
-#[derive(Clone, Debug, serde::Deserialize)]
-struct ProjectScopedQuery {
-    tenant_id: String,
-    workspace_id: String,
-    project_id: String,
-    limit: Option<usize>,
-    offset: Option<usize>,
-}
-
-#[derive(Clone, Debug, Default, serde::Deserialize)]
-struct OptionalProjectScopedQuery {
-    tenant_id: Option<String>,
-    workspace_id: Option<String>,
-    project_id: Option<String>,
-    limit: Option<usize>,
-    offset: Option<usize>,
-}
-
-impl OptionalProjectScopedQuery {
-    fn project(&self) -> ProjectKey {
-        ProjectKey::new(
-            self.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
-            self.workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID),
-            self.project_id.as_deref().unwrap_or(DEFAULT_PROJECT_ID),
-        )
-    }
-
-    fn limit(&self) -> usize {
-        self.limit.unwrap_or(100)
-    }
-
-    fn offset(&self) -> usize {
-        self.offset.unwrap_or(0)
-    }
-}
-
-#[derive(Clone, Debug, Default, serde::Deserialize)]
-struct PreservedMemoryListQuery {
-    tenant_id: Option<String>,
-    workspace_id: Option<String>,
-    project_id: Option<String>,
-    limit: Option<usize>,
-    offset: Option<usize>,
-    status: Option<String>,
-    category: Option<String>,
-}
-
-impl PreservedMemoryListQuery {
-    fn project(&self) -> ProjectKey {
-        ProjectKey::new(
-            self.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
-            self.workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID),
-            self.project_id.as_deref().unwrap_or(DEFAULT_PROJECT_ID),
-        )
-    }
-
-    fn list_query(&self) -> ListQuery {
-        ListQuery {
-            limit: self.limit,
-            offset: self.offset,
-            status: self.status.clone(),
-            category: self.category.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, serde::Deserialize)]
-struct PreservedMemorySearchParams {
-    q: String,
-    limit: Option<usize>,
-    tenant_id: Option<String>,
-    workspace_id: Option<String>,
-    project_id: Option<String>,
-}
-
-impl PreservedMemorySearchParams {
-    fn project(&self) -> ProjectKey {
-        ProjectKey::new(
-            self.tenant_id.as_deref().unwrap_or(DEFAULT_TENANT_ID),
-            self.workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID),
-            self.project_id.as_deref().unwrap_or(DEFAULT_PROJECT_ID),
-        )
-    }
-
-    fn search_query(&self) -> MemorySearchQuery {
-        MemorySearchQuery {
-            q: self.q.clone(),
-            limit: self.limit,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, serde::Deserialize)]
-struct TenantCostQuery {
-    since_ms: Option<u64>,
-}
-
-impl ProjectScopedQuery {
-    fn project(&self) -> ProjectKey {
-        ProjectKey::new(
-            self.tenant_id.as_str(),
-            self.workspace_id.as_str(),
-            self.project_id.as_str(),
-        )
-    }
-
-    fn limit(&self) -> usize {
-        self.limit.unwrap_or(100)
-    }
-
-    fn offset(&self) -> usize {
-        self.offset.unwrap_or(0)
-    }
-}
-
-trait HasProjectScope {
-    fn project(&self) -> ProjectKey;
-}
-
-impl HasProjectScope for OptionalProjectScopedQuery {
-    fn project(&self) -> ProjectKey {
-        Self::project(self)
-    }
-}
-
-impl HasProjectScope for PreservedMemoryListQuery {
-    fn project(&self) -> ProjectKey {
-        Self::project(self)
-    }
-}
-
-impl HasProjectScope for PreservedMemorySearchParams {
-    fn project(&self) -> ProjectKey {
-        Self::project(self)
-    }
-}
-
-#[derive(Clone, Debug)]
-struct TenantScope {
-    tenant_id: TenantId,
-    /// `true` when the request was authenticated with the admin service account.
-    /// Admin tokens bypass per-tenant scope checks so they can access any tenant.
-    is_admin: bool,
-}
-
-impl TenantScope {
-    fn tenant_id(&self) -> &TenantId {
-        &self.tenant_id
-    }
-}
-
-struct WorkspaceRoleGuard<const MIN_ROLE: u8>;
-#[allow(dead_code)]
-type MemberRoleGuard = WorkspaceRoleGuard<1>;
-type ReviewerRoleGuard = WorkspaceRoleGuard<2>;
-type AdminRoleGuard = WorkspaceRoleGuard<3>;
-
-#[derive(Clone, Debug)]
-struct ProjectScope<T> {
-    tenant: TenantScope,
-    #[allow(dead_code)]
-    project: ProjectKey,
-    value: T,
-}
-
-impl<T> ProjectScope<T> {
-    #[allow(dead_code)]
-    fn project(&self) -> &ProjectKey {
-        &self.project
-    }
-
-    fn into_inner(self) -> T {
-        self.value
-    }
-
-    #[allow(dead_code)]
-    fn tenant_scope(&self) -> &TenantScope {
-        &self.tenant
-    }
-}
-
-#[derive(Clone, Debug)]
-struct ProjectJson<T> {
-    tenant: TenantScope,
-    #[allow(dead_code)]
-    project: ProjectKey,
-    value: T,
-}
-
-impl<T> ProjectJson<T> {
-    #[allow(dead_code)]
-    fn project(&self) -> &ProjectKey {
-        &self.project
-    }
-
-    fn into_inner(self) -> T {
-        self.value
-    }
-
-    #[allow(dead_code)]
-    fn tenant_scope(&self) -> &TenantScope {
-        &self.tenant
-    }
-}
-
-fn unauthorized_api_error() -> AppApiError {
-    AppApiError::new(StatusCode::UNAUTHORIZED, "unauthorized", "unauthorized")
-}
-
-fn tenant_scope_mismatch_error() -> AppApiError {
-    AppApiError::new(
-        StatusCode::FORBIDDEN,
-        "tenant_scope_mismatch",
-        "requested project does not belong to authenticated tenant",
-    )
-}
-
-fn query_rejection_error(message: impl Into<String>) -> AppApiError {
-    AppApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        message,
-    )
-}
+// ProjectScopedQuery, OptionalProjectScopedQuery, PreservedMemoryListQuery,
+// PreservedMemorySearchParams, TenantCostQuery, HasProjectScope impls,
+// unauthorized_api_error, tenant_scope_mismatch_error, query_rejection_error → extractors.rs / errors.rs
 
 async fn load_run_visible_to_tenant(
     state: &AppState,
@@ -2311,124 +1028,8 @@ async fn load_run_visible_to_tenant(
         .filter(|run| tenant_scope.is_admin || run.project.tenant_id == *tenant_scope.tenant_id()))
 }
 
-fn forbidden_api_error(message: impl Into<String>) -> AppApiError {
-    AppApiError::new(StatusCode::FORBIDDEN, "forbidden", message)
-}
-
-fn validate_project_scope<T: HasProjectScope>(
-    tenant: TenantScope,
-    value: T,
-) -> Result<(TenantScope, ProjectKey, T), AppApiError> {
-    let project = value.project();
-    // Admin tokens have cross-tenant access — skip the scope check.
-    if !tenant.is_admin && project.tenant_id != *tenant.tenant_id() {
-        return Err(tenant_scope_mismatch_error());
-    }
-
-    Ok((tenant, project, value))
-}
-
-#[axum::async_trait]
-impl<S> FromRequestParts<S> for TenantScope
-where
-    S: Send + Sync,
-{
-    type Rejection = AppApiError;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let tenant_id = parts
-            .extensions
-            .get::<TenantId>()
-            .cloned()
-            .ok_or_else(unauthorized_api_error)?;
-        // Admin service account bypasses per-tenant scope checks.
-        let is_admin = parts
-            .extensions
-            .get::<AuthPrincipal>()
-            .map(is_admin_principal)
-            .unwrap_or(false);
-        Ok(Self {
-            tenant_id,
-            is_admin,
-        })
-    }
-}
-
-#[axum::async_trait]
-impl<S, T> FromRequestParts<S> for ProjectScope<T>
-where
-    S: Send + Sync,
-    T: HasProjectScope + DeserializeOwned + Send,
-{
-    type Rejection = AppApiError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let tenant = TenantScope::from_request_parts(parts, state).await?;
-        let Query(value) = Query::<T>::from_request_parts(parts, state)
-            .await
-            .map_err(|err| query_rejection_error(err.to_string()))?;
-        let (tenant, project, value) = validate_project_scope(tenant, value)?;
-        Ok(Self {
-            tenant,
-            project,
-            value,
-        })
-    }
-}
-
-#[axum::async_trait]
-impl<S, T> FromRequest<S> for ProjectJson<T>
-where
-    S: Send + Sync,
-    T: HasProjectScope + DeserializeOwned + Send,
-{
-    type Rejection = AppApiError;
-
-    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
-        let is_admin = request
-            .extensions()
-            .get::<AuthPrincipal>()
-            .map(is_admin_principal)
-            .unwrap_or(false);
-        let tenant = request
-            .extensions()
-            .get::<TenantId>()
-            .cloned()
-            .map(|tenant_id| TenantScope {
-                tenant_id,
-                is_admin,
-            })
-            .ok_or_else(unauthorized_api_error)?;
-        let Json(value) = Json::<T>::from_request(request, state)
-            .await
-            .map_err(|err| query_rejection_error(err.body_text()))?;
-        let (tenant, project, value) = validate_project_scope(tenant, value)?;
-        Ok(Self {
-            tenant,
-            project,
-            value,
-        })
-    }
-}
-
-#[axum::async_trait]
-impl<S, const MIN_ROLE: u8> FromRequestParts<S> for WorkspaceRoleGuard<MIN_ROLE>
-where
-    S: Send + Sync,
-{
-    type Rejection = AppApiError;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let Some(role) = parts.extensions.get::<WorkspaceRole>().copied() else {
-            // No workspace role attached — membership not found; treat as unrestricted.
-            return Ok(Self);
-        };
-        if (role as u8) < MIN_ROLE {
-            return Err(forbidden_api_error("insufficient workspace role"));
-        }
-        Ok(Self)
-    }
-}
+// forbidden_api_error, validate_project_scope, TenantScope, WorkspaceRoleGuard,
+// ProjectScope, ProjectJson, FromRequestParts impls → extractors.rs
 
 #[derive(Clone, Debug, serde::Deserialize)]
 #[allow(dead_code)]
@@ -6557,9 +5158,7 @@ fn parse_csv_values(raw: &str) -> Vec<String> {
         .collect()
 }
 
-fn prometheus_label(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
+// fn prometheus_label → metrics.rs
 
 fn eval_metric_rows(run_ids: &[String], runs: &[ProductEvalRun]) -> Vec<EvalCompareRow> {
     type EvalMetricExtractor = fn(&EvalMetrics) -> Option<serde_json::Value>;
@@ -19373,239 +17972,13 @@ fn config_socket_addr(config: &BootstrapConfig) -> Result<SocketAddr, String> {
         })
 }
 
-#[derive(Clone, Debug)]
-struct AppApiError {
-    status: StatusCode,
-    error: ApiError,
-}
-
-impl AppApiError {
-    fn new(status: StatusCode, code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            error: ApiError {
-                status_code: status.as_u16(),
-                code: code.into(),
-                message: message.into(),
-                request_id: None,
-            },
-        }
-    }
-}
-
-impl IntoResponse for AppApiError {
-    fn into_response(self) -> Response {
-        (self.status, Json(self.error)).into_response()
-    }
-}
-
-fn validation_error_response(message: impl Into<String>) -> Response {
-    AppApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        message,
-    )
-    .into_response()
-}
-
-fn bad_request_response(message: impl Into<String>) -> axum::response::Response {
-    validation_error_response(message)
-}
-
-fn memory_api_error_response(err: String) -> Response {
-    if err.starts_with("memory not found:") {
-        return AppApiError::new(StatusCode::NOT_FOUND, "not_found", err).into_response();
-    }
-
-    if err.starts_with("invalid memory status:") {
-        return bad_request_response(err);
-    }
-
-    AppApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", err).into_response()
-}
-
-fn runtime_error_response(err: cairn_runtime::RuntimeError) -> axum::response::Response {
-    match err {
-        cairn_runtime::RuntimeError::NotFound { .. } => {
-            AppApiError::new(StatusCode::NOT_FOUND, "not_found", err.to_string()).into_response()
-        }
-        cairn_runtime::RuntimeError::Conflict { .. } => {
-            AppApiError::new(StatusCode::CONFLICT, "conflict", err.to_string()).into_response()
-        }
-        cairn_runtime::RuntimeError::PolicyDenied { .. } => {
-            AppApiError::new(StatusCode::FORBIDDEN, "permission_denied", err.to_string())
-                .into_response()
-        }
-        cairn_runtime::RuntimeError::QuotaExceeded { .. } => AppApiError::new(
-            StatusCode::TOO_MANY_REQUESTS,
-            "quota_exceeded",
-            err.to_string(),
-        )
-        .into_response(),
-        cairn_runtime::RuntimeError::InvalidTransition { .. }
-        | cairn_runtime::RuntimeError::LeaseExpired { .. }
-        | cairn_runtime::RuntimeError::Validation { .. } => {
-            validation_error_response(err.to_string())
-        }
-        cairn_runtime::RuntimeError::Store(store_err) => store_error_response(store_err),
-        cairn_runtime::RuntimeError::Internal(_) => AppApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            err.to_string(),
-        )
-        .into_response(),
-    }
-}
-
-fn store_error_response(err: cairn_store::StoreError) -> Response {
-    match err {
-        cairn_store::StoreError::NotFound { .. } => {
-            AppApiError::new(StatusCode::NOT_FOUND, "not_found", err.to_string()).into_response()
-        }
-        cairn_store::StoreError::Conflict { .. } => {
-            AppApiError::new(StatusCode::CONFLICT, "conflict", err.to_string()).into_response()
-        }
-        cairn_store::StoreError::Connection(_)
-        | cairn_store::StoreError::Migration(_)
-        | cairn_store::StoreError::Serialization(_)
-        | cairn_store::StoreError::Internal(_) => AppApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            err.to_string(),
-        )
-        .into_response(),
-    }
-}
-
-fn json_rejection_response(err: JsonRejection) -> Response {
-    AppApiError::new(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "validation_error",
-        err.body_text(),
-    )
-    .into_response()
-}
-
-fn parse_run_state(value: &str) -> Result<RunState, String> {
-    serde_json::from_value::<RunState>(serde_json::Value::String(value.to_owned()))
-        .map_err(|_| format!("invalid run status: {value}"))
-}
-
-fn parse_session_state(value: &str) -> Result<SessionState, String> {
-    serde_json::from_value::<SessionState>(serde_json::Value::String(value.to_owned()))
-        .map_err(|_| format!("invalid session status: {value}"))
-}
-
-fn parse_task_state(value: &str) -> Result<TaskState, String> {
-    serde_json::from_value::<TaskState>(serde_json::Value::String(value.to_owned()))
-        .map_err(|_| format!("invalid task state: {value}"))
-}
-
-fn parse_eval_subject_kind(value: &str) -> Result<cairn_domain::EvalSubjectKind, String> {
-    serde_json::from_value::<cairn_domain::EvalSubjectKind>(serde_json::Value::String(
-        value.to_owned(),
-    ))
-    .map_err(|_| format!("invalid eval subject_kind: {value}"))
-}
-
-fn parse_tool_invocation_state(value: &str) -> Result<ToolInvocationState, String> {
-    serde_json::from_value::<ToolInvocationState>(serde_json::Value::String(value.to_owned()))
-        .map_err(|_| format!("invalid tool invocation state: {value}"))
-}
-
-fn latest_eval_score_for_release(
-    evals: &ProductEvalRunService,
-    release: &cairn_store::projections::PromptReleaseRecord,
-) -> Option<f64> {
-    let mut runs = evals
-        .list_by_project(&ProjectId::new(release.project.project_id.as_str()))
-        .into_iter()
-        .filter(|run| run.prompt_release_id.as_ref() == Some(&release.prompt_release_id))
-        .collect::<Vec<_>>();
-    runs.sort_by_key(|run| run.completed_at.unwrap_or(run.created_at));
-    runs.into_iter()
-        .rev()
-        .find_map(|run| run.metrics.task_success_rate)
-}
-
-fn deployment_mode_tier(mode: DeploymentMode) -> ProductTier {
-    match mode {
-        DeploymentMode::Local => ProductTier::LocalEval,
-        DeploymentMode::SelfHostedTeam => ProductTier::TeamSelfHosted,
-    }
-}
-
-/// Build the active EntitlementSet for the current deployment config.
-/// Self-hosted team mode gets DeploymentTier by default. Local in-memory dev
-/// runs also get DeploymentTier when credentials are available so operator
-/// flows can exercise credential management without a paid license.
-fn local_dev_deployment_entitlements(config: &BootstrapConfig) -> bool {
-    matches!(config.mode, DeploymentMode::Local)
-        && matches!(config.storage, StorageBackend::InMemory)
-        && config.credentials_available()
-}
-
-fn app_entitlements(config: &BootstrapConfig) -> EntitlementSet {
-    let tier = deployment_mode_tier(config.mode);
-    let base = EntitlementSet::new(TenantId::new("bootstrap"), tier);
-    if local_dev_deployment_entitlements(config) {
-        return base.with_entitlement(Entitlement::DeploymentTier);
-    }
-    match config.mode {
-        DeploymentMode::SelfHostedTeam => base.with_entitlement(Entitlement::DeploymentTier),
-        DeploymentMode::Local => base,
-    }
-}
-
-/// Check a feature gate, returning a 403 response if the feature is not allowed.
-fn require_feature(config: &BootstrapConfig, feature: &str) -> Option<Response> {
-    let gate = DefaultFeatureGate::v1_defaults();
-    match gate.check(&app_entitlements(config), feature) {
-        FeatureGateResult::Allowed => None,
-        FeatureGateResult::Denied { reason } | FeatureGateResult::Degraded { reason } => Some(
-            (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "error": reason,
-                    "code": "entitlement_required"
-                })),
-            )
-                .into_response(),
-        ),
-    }
-}
-
-fn deployment_mode_label(mode: DeploymentMode) -> &'static str {
-    match mode {
-        DeploymentMode::Local => "local",
-        DeploymentMode::SelfHostedTeam => "self_hosted_team",
-    }
-}
-
-fn storage_backend_label(storage: &StorageBackend) -> &'static str {
-    match storage {
-        StorageBackend::InMemory => "memory",
-        StorageBackend::Sqlite { .. } => "sqlite",
-        StorageBackend::Postgres { .. } => "postgres",
-    }
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
-fn operator_event_envelope(payload: RuntimeEvent) -> EventEnvelope<RuntimeEvent> {
-    EventEnvelope::for_runtime_event(
-        EventId::new(format!("evt_operator_{}", Uuid::new_v4())),
-        EventSource::Operator {
-            operator_id: OperatorId::new("operator_api"),
-        },
-        payload,
-    )
-}
+// AppApiError, validation_error_response, bad_request_response,
+// memory_api_error_response, runtime_error_response, store_error_response,
+// json_rejection_response, parse_run_state, parse_session_state, parse_task_state,
+// parse_eval_subject_kind, parse_tool_invocation_state, latest_eval_score_for_release,
+// deployment_mode_tier, local_dev_deployment_entitlements, app_entitlements,
+// require_feature, deployment_mode_label, storage_backend_label, now_ms,
+// operator_event_envelope → errors.rs
 
 async fn shutdown_signal() {
     #[cfg(unix)]
@@ -20029,14 +18402,7 @@ async fn delete_auth_token_handler(
         .into_response()
 }
 
-/// `true` for the bootstrap admin service account or the System principal.
-fn is_admin_principal(principal: &AuthPrincipal) -> bool {
-    match principal {
-        AuthPrincipal::System => true,
-        AuthPrincipal::ServiceAccount { name, .. } => name == "admin",
-        AuthPrincipal::Operator { .. } => false,
-    }
-}
+// fn is_admin_principal → extractors.rs
 
 // ── GitHub webhook handlers ──────────────────────────────────────────────────
 
@@ -20865,25 +19231,7 @@ struct QueuedIssue {
     run_id: String,
 }
 
-#[derive(Clone, Debug)]
-pub struct IssueQueueEntry {
-    pub repo: String,
-    pub installation_id: u64,
-    pub issue_number: u64,
-    pub title: String,
-    pub session_id: String,
-    pub run_id: String,
-    pub status: IssueQueueStatus,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum IssueQueueStatus {
-    Pending,
-    Processing,
-    WaitingApproval,
-    Completed,
-    Failed(String),
-}
+// IssueQueueEntry, IssueQueueStatus → state.rs
 
 /// Concurrent queue dispatcher — fills up to `max_concurrent` run slots.
 ///
