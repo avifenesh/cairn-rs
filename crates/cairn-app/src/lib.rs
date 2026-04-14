@@ -47,7 +47,6 @@ use cairn_api::onboarding::{
 };
 use cairn_api::settings_api::SettingsSummary;
 use cairn_api::sse::SseFrame;
-use cairn_api::sse_publisher::build_sse_frame_with_current_state;
 use cairn_api::{CriticalEventSummary, DashboardOverview};
 use cairn_domain::credentials::CredentialRecord;
 use cairn_domain::policy::{GuardrailRule, GuardrailSubjectType};
@@ -114,12 +113,12 @@ use cairn_runtime::{
     TriggerService, WorkspaceMembershipService, WorkspaceService,
 };
 use cairn_store::projections::{
-    ApprovalReadModel, AuditLogReadModel, CheckpointReadModel, CheckpointStrategyReadModel,
-    LlmCallTraceReadModel, OperatorInterventionReadModel, PauseScheduleReadModel,
-    PromptReleaseReadModel, PromptVersionReadModel, QuotaReadModel, RecoveryEscalationReadModel,
-    RetentionPolicyReadModel, RoutePolicyReadModel, RunCostReadModel, RunReadModel, RunRecord,
-    SessionCostReadModel, SessionRecord, TaskDependencyReadModel, TaskLeaseExpiredReadModel,
-    TaskReadModel, TaskRecord, ToolInvocationReadModel, WorkspaceMembershipReadModel,
+    AuditLogReadModel, CheckpointReadModel, CheckpointStrategyReadModel, LlmCallTraceReadModel,
+    OperatorInterventionReadModel, PauseScheduleReadModel, PromptReleaseReadModel,
+    PromptVersionReadModel, QuotaReadModel, RecoveryEscalationReadModel, RetentionPolicyReadModel,
+    RoutePolicyReadModel, RunCostReadModel, RunReadModel, RunRecord, SessionCostReadModel,
+    SessionRecord, TaskDependencyReadModel, TaskLeaseExpiredReadModel, TaskReadModel, TaskRecord,
+    ToolInvocationReadModel, WorkspaceMembershipReadModel,
 };
 use cairn_store::{EntityRef, EventLog, EventPosition, StoredEvent};
 use cairn_tools::{
@@ -6738,42 +6737,13 @@ async fn build_runtime_sse_frame(
     state: &Arc<AppState>,
     stored: &cairn_store::StoredEvent,
 ) -> Option<SseFrame> {
-    let task_id = match &stored.envelope.payload {
-        cairn_domain::RuntimeEvent::TaskCreated(event) => Some(event.task_id.clone()),
-        cairn_domain::RuntimeEvent::TaskStateChanged(event) => Some(event.task_id.clone()),
-        cairn_domain::RuntimeEvent::TaskDependencyAdded(event) => {
-            Some(event.dependent_task_id.clone())
-        }
-        cairn_domain::RuntimeEvent::TaskDependencyResolved(event) => {
-            Some(event.dependent_task_id.clone())
-        }
-        cairn_domain::RuntimeEvent::TaskLeaseClaimed(event) => Some(event.task_id.clone()),
-        cairn_domain::RuntimeEvent::TaskLeaseHeartbeated(event) => Some(event.task_id.clone()),
-        _ => None,
-    };
-    let task_record = match task_id {
-        Some(task_id) => TaskReadModel::get(state.runtime.store.as_ref(), &task_id)
-            .await
-            .ok()
-            .flatten(),
-        None => None,
-    };
-
-    let approval_id = match &stored.envelope.payload {
-        cairn_domain::RuntimeEvent::ApprovalRequested(event) => Some(event.approval_id.clone()),
-        cairn_domain::RuntimeEvent::ApprovalResolved(event) => Some(event.approval_id.clone()),
-        _ => None,
-    };
-    let approval_record = match approval_id {
-        Some(approval_id) => ApprovalReadModel::get(state.runtime.store.as_ref(), &approval_id)
-            .await
-            .ok()
-            .flatten(),
-        None => None,
-    };
-
-    let mut frame =
-        build_sse_frame_with_current_state(stored, task_record.as_ref(), approval_record.as_ref())?;
+    let mut frame = cairn_api::sse_publisher::build_sse_frame_with_store_state(
+        state.runtime.store.as_ref(),
+        stored,
+    )
+    .await
+    .ok()
+    .flatten()?;
 
     if let Some(correlation_id) = stored.envelope.correlation_id.as_ref() {
         match &mut frame.data {

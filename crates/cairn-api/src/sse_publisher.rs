@@ -1,8 +1,11 @@
 use async_trait::async_trait;
 use cairn_domain::events::RuntimeEvent;
+use cairn_domain::{ApprovalId, TaskId};
 use cairn_store::error::StoreError;
 use cairn_store::event_log::{EventPosition, StoredEvent};
-use cairn_store::projections::{ApprovalRecord, TaskRecord};
+use cairn_store::projections::{ApprovalReadModel, ApprovalRecord, TaskReadModel, TaskRecord};
+use cairn_store::EventLog;
+use std::sync::Arc;
 
 use crate::sse::{SseEventName, SseFrame};
 
@@ -80,6 +83,50 @@ pub fn build_sse_frame_with_current_state(
     })
 }
 
+fn task_id_for_event(event: &RuntimeEvent) -> Option<TaskId> {
+    match event {
+        RuntimeEvent::TaskCreated(event) => Some(event.task_id.clone()),
+        RuntimeEvent::TaskStateChanged(event) => Some(event.task_id.clone()),
+        RuntimeEvent::TaskLeaseClaimed(event) => Some(event.task_id.clone()),
+        RuntimeEvent::TaskLeaseHeartbeated(event) => Some(event.task_id.clone()),
+        _ => None,
+    }
+}
+
+fn approval_id_for_event(event: &RuntimeEvent) -> Option<ApprovalId> {
+    match event {
+        RuntimeEvent::ApprovalRequested(event) => Some(event.approval_id.clone()),
+        RuntimeEvent::ApprovalResolved(event) => Some(event.approval_id.clone()),
+        _ => None,
+    }
+}
+
+/// Builds an SSE frame by hydrating task/approval current-state records from the store
+/// before falling back to the thinner raw runtime-event payload path.
+pub async fn build_sse_frame_with_store_state<S>(
+    store: &S,
+    stored: &StoredEvent,
+) -> Result<Option<SseFrame>, StoreError>
+where
+    S: TaskReadModel + ApprovalReadModel + Send + Sync,
+{
+    let task_record = match task_id_for_event(&stored.envelope.payload) {
+        Some(task_id) => TaskReadModel::get(store, &task_id).await?,
+        None => None,
+    };
+
+    let approval_record = match approval_id_for_event(&stored.envelope.payload) {
+        Some(approval_id) => ApprovalReadModel::get(store, &approval_id).await?,
+        None => None,
+    };
+
+    Ok(build_sse_frame_with_current_state(
+        stored,
+        task_record.as_ref(),
+        approval_record.as_ref(),
+    ))
+}
+
 /// Replay query for SSE reconnection via `lastEventId`.
 #[derive(Clone, Debug)]
 pub struct SseReplayQuery {
@@ -116,6 +163,44 @@ pub trait SsePublisher: Send + Sync {
     async fn head_position(&self) -> Result<Option<EventPosition>, StoreError>;
 }
 
+/// Store-backed SSE replay publisher that enriches task and approval events from current-state
+/// read models before serializing them to preserved SSE frames.
+pub struct ReadModelBackedSsePublisher<S> {
+    store: Arc<S>,
+}
+
+impl<S> ReadModelBackedSsePublisher<S> {
+    pub fn new(store: Arc<S>) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait]
+impl<S> SsePublisher for ReadModelBackedSsePublisher<S>
+where
+    S: EventLog + TaskReadModel + ApprovalReadModel + Send + Sync,
+{
+    async fn replay(&self, query: &SseReplayQuery) -> Result<Vec<SseFrame>, StoreError> {
+        let events = self
+            .store
+            .read_stream(query.after_position, query.limit)
+            .await?;
+        let mut frames = Vec::with_capacity(events.len());
+        for stored in events {
+            if let Some(frame) =
+                build_sse_frame_with_store_state(self.store.as_ref(), &stored).await?
+            {
+                frames.push(frame);
+            }
+        }
+        Ok(frames)
+    }
+
+    async fn head_position(&self) -> Result<Option<EventPosition>, StoreError> {
+        self.store.head_position().await
+    }
+}
+
 /// Builds the initial `ready` SSE frame with the current head position.
 pub fn build_ready_frame(client_id: &str) -> SseFrame {
     SseFrame {
@@ -137,6 +222,7 @@ mod tests {
     use cairn_domain::policy::ApprovalRequirement;
     use cairn_domain::tenancy::ProjectKey;
     use cairn_store::event_log::{EventPosition, StoredEvent};
+    use cairn_store::InMemoryStore;
 
     fn test_stored_event(payload: RuntimeEvent, position: u64) -> StoredEvent {
         StoredEvent {
@@ -312,5 +398,62 @@ mod tests {
         assert_eq!(frame.event, SseEventName::Ready);
         assert_eq!(frame.data["clientId"], "client_abc");
         assert!(frame.id.is_none());
+    }
+
+    #[tokio::test]
+    async fn build_sse_frame_with_store_state_uses_task_projection() {
+        let store = InMemoryStore::new();
+        let project = ProjectKey::new("t", "w", "p");
+        let envelope = EventEnvelope::for_runtime_event(
+            EventId::new("evt_task_store"),
+            EventSource::Runtime,
+            RuntimeEvent::TaskCreated(TaskCreated {
+                project: project.clone(),
+                task_id: TaskId::new("task_store"),
+                parent_run_id: None,
+                parent_task_id: None,
+                prompt_release_id: None,
+            }),
+        );
+        let positions = store.append(&[envelope]).await.unwrap();
+        let stored = store
+            .read_stream(Some(EventPosition(positions[0].0.saturating_sub(1))), 1)
+            .await
+            .unwrap()
+            .pop()
+            .expect("stored event");
+
+        let frame = build_sse_frame_with_store_state(&store, &stored)
+            .await
+            .unwrap()
+            .expect("task frame");
+        assert_eq!(frame.event, SseEventName::TaskUpdate);
+        assert!(frame.data["task"]["createdAt"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn read_model_backed_sse_publisher_replays_enriched_approval_frames() {
+        let store = Arc::new(InMemoryStore::new());
+        let project = ProjectKey::new("t", "w", "p");
+        let envelope = EventEnvelope::for_runtime_event(
+            EventId::new("evt_approval_store"),
+            EventSource::Runtime,
+            RuntimeEvent::ApprovalRequested(ApprovalRequested {
+                project,
+                approval_id: ApprovalId::new("appr_store"),
+                run_id: None,
+                task_id: Some(TaskId::new("task_store")),
+                requirement: ApprovalRequirement::Required,
+                title: None,
+                description: None,
+            }),
+        );
+        store.append(&[envelope]).await.unwrap();
+
+        let publisher = ReadModelBackedSsePublisher::new(store);
+        let frames = publisher.replay(&SseReplayQuery::default()).await.unwrap();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].event, SseEventName::ApprovalRequired);
+        assert!(frames[0].data["approval"]["createdAt"].as_str().is_some());
     }
 }
