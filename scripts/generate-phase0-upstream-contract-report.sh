@@ -89,7 +89,7 @@ collect_sse_evidence() {
   printf 'Status: generated  \n'
   printf 'Purpose: confirm that the preserved Phase 0 HTTP/SSE fixture set is backed by the upstream frontend and protocol contract even when direct server-side captures are not available locally.\n\n'
   printf 'Current reading:\n\n'
-  printf -- '- the local `../cairn` checkout currently exposes preserved `/v1/*` contract evidence through frontend usage and protocol docs\n'
+  printf -- '- the local `../cairn-sdk` checkout currently exposes preserved `/v1/*` contract evidence through frontend usage and protocol docs\n'
   printf -- '- Worker 1 did not find a concrete legacy backend handler surface for these routes/events in the local checkout, so this report is intentionally protocol-backed\n'
   printf -- '- if direct handler captures become available later, they should tighten these fixtures rather than replace the compatibility contract casually\n\n'
 

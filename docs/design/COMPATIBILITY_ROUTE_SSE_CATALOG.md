@@ -1,7 +1,7 @@
 # Compatibility Route and SSE Catalog
 
 Status: draft  
-Reference surface: local `../cairn/frontend/src/lib/api/client.ts` and `../cairn/frontend/src/lib/stores/sse.svelte.ts`  
+Reference surface: local `../cairn-sdk/frontend/src/lib/api/client.ts` and `../cairn-sdk/frontend/src/lib/stores/sse.svelte.ts`  
 Purpose: make Phase 0 compatibility concrete enough for parallel runtime/API workers
 
 ## Rule

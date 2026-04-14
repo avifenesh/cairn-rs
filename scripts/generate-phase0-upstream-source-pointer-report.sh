@@ -103,7 +103,7 @@ sse_pointer_set() {
 {
   printf '# Phase 0 Upstream Source Pointers\n\n'
   printf 'Status: generated  \n'
-  printf 'Purpose: pin the preserved Phase 0 compatibility contract to exact upstream files and line numbers in `../cairn`, so Worker 1 evidence stays auditable even without direct legacy backend handler captures.\n\n'
+  printf 'Purpose: pin the preserved Phase 0 compatibility contract to exact upstream files and line numbers in `../cairn-sdk`, so Worker 1 evidence stays auditable even without direct legacy backend handler captures.\n\n'
   printf 'Current reading:\n\n'
   printf -- '- these pointers intentionally reference frontend and protocol sources because the local upstream checkout still does not expose concrete handler implementations for the preserved `/v1/*` surfaces\n'
   printf -- '- if direct backend capture becomes available later, it should supplement these pointers rather than erase the preserved frontend contract lineage\n\n'

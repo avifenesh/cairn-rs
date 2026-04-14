@@ -56,7 +56,7 @@ with Rust-native implementations.
 
 ## Current Reference Inventory
 
-The current `../cairn` reference uses sidecar-facing code for:
+The current `../cairn-sdk` reference uses sidecar-facing code for:
 
 - `/health` probing
 - queue job enqueue and queue counts

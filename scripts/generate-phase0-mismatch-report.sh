@@ -55,7 +55,7 @@ cat >> "$OUT" <<'EOF'
 ## Current Reading
 
 - The minimum preserved Phase 0 set now has seeded fixtures for every required HTTP and SSE surface.
-- The next Worker 1 task is to replace or confirm these seeded fixtures with direct backend captures from `../cairn` where possible.
+- The next Worker 1 task is to replace or confirm these seeded fixtures with direct backend captures from `../cairn-sdk` where possible.
 - Any later mismatch between Rust behavior and these fixtures should be classified as:
   - preserve bug
   - intentional break

@@ -98,7 +98,7 @@ The goal is to establish:
 
 #### Worker 1
 
-- harvest first golden fixtures from `../cairn`
+- harvest first golden fixtures from `../cairn-sdk`
 - turn preserved SSE names and payload families into assertions
 
 #### Worker 2

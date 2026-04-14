@@ -1,6 +1,6 @@
 # Fixtures
 
-This directory holds fixture data harvested from the current Go implementation in [`../cairn`](../cairn).
+This directory holds fixture data harvested from the current Go implementation in [`../cairn-sdk`](../cairn-sdk).
 
 Use it for:
 
