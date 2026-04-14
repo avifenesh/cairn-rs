@@ -1,1 +1,0 @@
-{"from":"worker-3","body":"DONE — scripts/e2e-cost-tracking.sh (UC-15). Creates session+run, sets cost alert via POST /v1/runs/:id/cost-alert, checks run cost, tenant costs /v1/costs, stats /v1/stats, run SLA, provider bindings list, binding cost-stats, cost-ranking /v1/providers/bindings/cost-ranking, session cost. All unimplemented SKIP not FAIL. Bash syntax OK."}
