@@ -12,36 +12,34 @@ use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use std::sync::Arc;
 
 /// Proves MemoryEndpoints::search goes through RetrievalService,
-/// not a route-local stub. Ingesting a doc then searching for it
-/// must return results — which only works if search delegates to
-/// the real retrieval backend sharing the same document store.
+/// not a route-local stub. Creating a memory item via the API then
+/// searching must return results — which only works if search delegates
+/// to the real retrieval backend sharing the same document store.
 #[tokio::test]
 async fn memory_search_flows_through_real_retrieval_service() {
+    use cairn_api::memory_api::{CreateMemoryRequest, MemoryEndpoints};
+
     let store = Arc::new(InMemoryDocumentStore::new());
-    let pipeline = IngestPipeline::new(store.clone(), ParagraphChunker::default());
     let project = ProjectKey::new("t", "w", "p");
 
-    // Ingest through the pipeline.
-    pipeline
-        .submit(IngestRequest {
-            document_id: KnowledgeDocumentId::new("audit_doc"),
-            source_id: SourceId::new("audit_src"),
-            source_type: SourceType::PlainText,
-            project: project.clone(),
-            content: "Kubernetes pod scheduling uses node affinity rules.".to_owned(),
-            import_id: None,
-            corpus_id: None,
-            bundle_source_id: None,
-            tags: vec![],
-        })
-        .await
-        .unwrap();
-
-    // Build MemoryApiImpl with same backing store.
     let retrieval = InMemoryRetrieval::new(store.clone());
     let api = MemoryApiImpl::new(retrieval, store);
 
-    // Search through the API trait — must find the doc.
+    // Create via MemoryEndpoints::create (sets __cairn_memory source ID
+    // and provenance_metadata type=memory_item so search can find it).
+    let item = api
+        .create(
+            &project,
+            &CreateMemoryRequest {
+                content: "Kubernetes pod scheduling uses node affinity rules.".to_owned(),
+                category: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(item.id.starts_with("mem_"), "should get a memory item ID");
+
+    // Search through the API trait — must find the stored memory.
     let results = api
         .search(
             &project,

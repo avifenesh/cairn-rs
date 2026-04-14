@@ -783,12 +783,15 @@ async fn working_dir_for_run(
     };
     let repo_ids = state.project_repo_access.list_for_project(&repo_ctx).await;
     let Some(repo_id) = repo_ids.first().cloned() else {
-        return Err(cairn_workspace::WorkspaceError::RepoStore(
-            cairn_workspace::RepoStoreError::NotAllowedForProject {
-                repo_id: cairn_workspace::RepoId::new("(none)"),
-                project: run.project.clone(),
-            },
-        ));
+        // No repo allowlisted — use CWD. This is expected for API-driven
+        // orchestration (POST /v1/runs/:id/orchestrate) where the operator
+        // hasn't registered a repo. Webhook-driven orchestration (GitHub
+        // pipeline) allowlists the repo before calling this function.
+        tracing::debug!(
+            run_id = %run.run_id,
+            "no repo allowlisted for project; using process working directory"
+        );
+        return Ok(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     };
 
     if repo_ids.len() > 1 {

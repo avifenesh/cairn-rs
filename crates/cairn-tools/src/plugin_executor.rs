@@ -276,7 +276,6 @@ pub fn handle_notification(
             if let Some(pct) = percent {
                 progress.set(invocation_id.clone(), *pct);
             }
-            // Also surface as a stderr line so operators see real-time progress.
             let pct_str = percent.map(|p| format!(" ({p}%)")).unwrap_or_default();
             eprintln!("[plugin:{plugin_name}] progress{pct_str}: {message}");
         }
