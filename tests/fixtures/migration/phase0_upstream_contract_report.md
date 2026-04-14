@@ -5,7 +5,7 @@ Purpose: confirm that the preserved Phase 0 HTTP/SSE fixture set is backed by th
 
 Current reading:
 
-- the local `../cairn` checkout currently exposes preserved `/v1/*` contract evidence through frontend usage and protocol docs
+- the local `../cairn-sdk` checkout currently exposes preserved `/v1/*` contract evidence through frontend usage and protocol docs
 - Worker 1 did not find a concrete legacy backend handler surface for these routes/events in the local checkout, so this report is intentionally protocol-backed
 - if direct handler captures become available later, they should tighten these fixtures rather than replace the compatibility contract casually
 

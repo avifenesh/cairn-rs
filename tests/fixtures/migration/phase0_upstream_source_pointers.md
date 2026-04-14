@@ -1,7 +1,7 @@
 # Phase 0 Upstream Source Pointers
 
 Status: generated  
-Purpose: pin the preserved Phase 0 compatibility contract to exact upstream files and line numbers in `../cairn`, so Worker 1 evidence stays auditable even without direct legacy backend handler captures.
+Purpose: pin the preserved Phase 0 compatibility contract to exact upstream files and line numbers in `../cairn-sdk`, so Worker 1 evidence stays auditable even without direct legacy backend handler captures.
 
 Current reading:
 

@@ -70,7 +70,7 @@ For every crate:
 - create `tests/compat`
 - create `tests/fixtures`
 - add fixture naming and preserved-surface conventions
-- add comparison harness layout for `../cairn`
+- add comparison harness layout for `../cairn-sdk`
 
 ### Worker 2
 

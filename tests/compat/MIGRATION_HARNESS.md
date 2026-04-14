@@ -5,7 +5,7 @@ This directory is Worker 1's compatibility and migration harness root.
 ## Goals
 
 - keep preserved and transitional surfaces executable
-- compare Rust behavior against fixture expectations harvested from `../cairn`
+- compare Rust behavior against fixture expectations harvested from `../cairn-sdk`
 - give runtime/API workers a concrete contract instead of prose-only compatibility notes
 
 ## Layout
@@ -71,7 +71,7 @@ Examples:
 
 ## Current Worker 1 Constraint
 
-The local `../cairn` checkout currently provides preserved-route and SSE evidence
+The local `../cairn-sdk` checkout currently provides preserved-route and SSE evidence
 primarily through:
 
 - frontend API usage in `frontend/src/lib/api/client.ts`

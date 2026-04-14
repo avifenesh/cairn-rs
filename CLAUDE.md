@@ -23,7 +23,7 @@ When there is ambiguity, resolve in this order:
 1. The relevant RFCs under `docs/design/rfcs/`
 2. Compatibility docs under `docs/design/`
 3. This file (CLAUDE.md)
-4. The current Go implementation in `../cairn` only where preserved behavior or fixtures need to be checked
+4. The current Go implementation in `../cairn-sdk` only where preserved behavior or fixtures need to be checked
 
 If the docs disagree, fix the docs before inventing local behavior.
 
