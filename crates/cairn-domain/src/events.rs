@@ -1,9 +1,10 @@
 use crate::errors::RuntimeEntityRef;
 use crate::ids::{
-    ApprovalId, CheckpointId, EvalRunId, EventId, IngestJobId, MailboxMessageId, OperatorId,
-    OutcomeId, PromptAssetId, PromptReleaseId, PromptVersionId, ProviderBindingId, ProviderCallId,
-    ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId, ScheduledTaskId,
-    SessionId, SignalId, TaskId, TenantId, ToolInvocationId, WorkspaceId,
+    ApprovalId, CheckpointId, DecisionId, EvalRunId, EventId, IngestJobId, MailboxMessageId,
+    OperatorId, OutcomeId, PromptAssetId, PromptReleaseId, PromptVersionId, ProviderBindingId,
+    ProviderCallId, ProviderConnectionId, ProviderModelId, RouteAttemptId, RouteDecisionId, RunId,
+    RunTemplateId, ScheduledTaskId, SessionId, SignalId, TaskId, TenantId, ToolInvocationId,
+    TriggerId, WorkspaceId,
 };
 use crate::lifecycle::{
     CheckpointDisposition, FailureClass, PauseReason, ResumeTrigger, RunState, SessionState,
@@ -198,6 +199,19 @@ pub enum RuntimeEvent {
     RunSlaSet(RunSlaSet),
     SignalRouted(SignalRouted),
     SignalSubscriptionCreated(SignalSubscriptionCreated),
+    TriggerCreated(TriggerCreated),
+    TriggerEnabled(TriggerEnabled),
+    TriggerDisabled(TriggerDisabled),
+    TriggerSuspended(TriggerSuspended),
+    TriggerResumed(TriggerResumed),
+    TriggerDeleted(TriggerDeleted),
+    TriggerFired(TriggerFired),
+    TriggerSkipped(TriggerSkipped),
+    TriggerDenied(TriggerDenied),
+    TriggerRateLimited(TriggerRateLimited),
+    TriggerPendingApproval(TriggerPendingApproval),
+    RunTemplateCreated(RunTemplateCreated),
+    RunTemplateDeleted(RunTemplateDeleted),
     SnapshotCreated(SnapshotCreated),
     TaskDependencyAdded(TaskDependencyAdded),
     TaskDependencyResolved(TaskDependencyResolved),
@@ -272,6 +286,19 @@ impl RuntimeEvent {
             RuntimeEvent::PlanApproved(event) => &event.project,
             RuntimeEvent::PlanRejected(event) => &event.project,
             RuntimeEvent::PlanRevisionRequested(event) => &event.project,
+            RuntimeEvent::TriggerCreated(event) => &event.project,
+            RuntimeEvent::TriggerEnabled(event) => &event.project,
+            RuntimeEvent::TriggerDisabled(event) => &event.project,
+            RuntimeEvent::TriggerSuspended(event) => &event.project,
+            RuntimeEvent::TriggerResumed(event) => &event.project,
+            RuntimeEvent::TriggerDeleted(event) => &event.project,
+            RuntimeEvent::TriggerFired(event) => &event.project,
+            RuntimeEvent::TriggerSkipped(event) => &event.project,
+            RuntimeEvent::TriggerDenied(event) => &event.project,
+            RuntimeEvent::TriggerRateLimited(event) => &event.project,
+            RuntimeEvent::TriggerPendingApproval(event) => &event.project,
+            RuntimeEvent::RunTemplateCreated(event) => &event.project,
+            RuntimeEvent::RunTemplateDeleted(event) => &event.project,
             RuntimeEvent::ProviderBudgetSet(_)
             | RuntimeEvent::ChannelCreated(_)
             | RuntimeEvent::ChannelMessageSent(_)
@@ -556,6 +583,19 @@ impl RuntimeEvent {
             | RuntimeEvent::RunSlaSet(_)
             | RuntimeEvent::SignalRouted(_)
             | RuntimeEvent::SignalSubscriptionCreated(_)
+            | RuntimeEvent::TriggerCreated(_)
+            | RuntimeEvent::TriggerEnabled(_)
+            | RuntimeEvent::TriggerDisabled(_)
+            | RuntimeEvent::TriggerSuspended(_)
+            | RuntimeEvent::TriggerResumed(_)
+            | RuntimeEvent::TriggerDeleted(_)
+            | RuntimeEvent::TriggerFired(_)
+            | RuntimeEvent::TriggerSkipped(_)
+            | RuntimeEvent::TriggerDenied(_)
+            | RuntimeEvent::TriggerRateLimited(_)
+            | RuntimeEvent::TriggerPendingApproval(_)
+            | RuntimeEvent::RunTemplateCreated(_)
+            | RuntimeEvent::RunTemplateDeleted(_)
             | RuntimeEvent::SnapshotCreated(_)
             | RuntimeEvent::TaskDependencyAdded(_)
             | RuntimeEvent::TaskDependencyResolved(_)
@@ -1794,6 +1834,161 @@ pub struct SignalSubscriptionCreated {
     pub filter_expression: Option<String>,
     #[serde(default)]
     pub created_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerSkipReason {
+    ConditionMismatch,
+    ChainTooDeep,
+    AlreadyFired,
+    MissingRequiredField { field: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerSuspensionReason {
+    RateLimitExceeded,
+    BudgetExceeded,
+    RepeatedFailures { failure_count: u32 },
+    OperatorPaused,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerCreated {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub name: String,
+    pub description: Option<String>,
+    pub signal_type: String,
+    pub plugin_id: Option<String>,
+    pub conditions: Vec<serde_json::Value>,
+    pub run_template_id: RunTemplateId,
+    pub max_per_minute: u32,
+    pub max_burst: u32,
+    pub max_chain_depth: u8,
+    pub created_by: OperatorId,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerEnabled {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub by: OperatorId,
+    pub at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerDisabled {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub by: OperatorId,
+    pub reason: Option<String>,
+    pub at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerSuspended {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub reason: TriggerSuspensionReason,
+    pub at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerResumed {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerDeleted {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub by: OperatorId,
+    pub at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerFired {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub signal_id: SignalId,
+    pub signal_type: String,
+    pub run_id: RunId,
+    pub chain_depth: u8,
+    pub fired_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerSkipped {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub signal_id: SignalId,
+    pub reason: TriggerSkipReason,
+    pub skipped_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerDenied {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub signal_id: SignalId,
+    pub decision_id: DecisionId,
+    pub reason: String,
+    pub denied_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerRateLimited {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub signal_id: SignalId,
+    pub bucket_remaining: u32,
+    pub bucket_capacity: u32,
+    pub rate_limited_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerPendingApproval {
+    pub project: ProjectKey,
+    pub trigger_id: TriggerId,
+    pub signal_id: SignalId,
+    pub approval_id: ApprovalId,
+    pub pending_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RunTemplateCreated {
+    pub project: ProjectKey,
+    pub template_id: RunTemplateId,
+    pub name: String,
+    pub description: Option<String>,
+    pub default_mode: crate::decisions::RunMode,
+    pub system_prompt: String,
+    pub initial_user_message: Option<String>,
+    pub plugin_allowlist: Option<Vec<String>>,
+    pub tool_allowlist: Option<Vec<String>>,
+    pub budget_max_tokens: Option<u64>,
+    pub budget_max_wall_clock_ms: Option<u64>,
+    pub budget_max_iterations: Option<u32>,
+    pub budget_exploration_budget_share: Option<f32>,
+    pub sandbox_hint: Option<String>,
+    pub required_fields: Vec<String>,
+    pub created_by: OperatorId,
+    pub created_at: u64,
+}
+
+impl Eq for RunTemplateCreated {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunTemplateDeleted {
+    pub project: ProjectKey,
+    pub template_id: RunTemplateId,
+    pub by: OperatorId,
+    pub at: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

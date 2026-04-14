@@ -690,6 +690,22 @@ impl TriggerService {
         })
     }
 
+    /// Restore a trigger state from durable event history.
+    pub fn restore_trigger_state(
+        &mut self,
+        id: &TriggerId,
+        state: TriggerState,
+        updated_at: u64,
+    ) -> Result<(), TriggerError> {
+        let trigger = self
+            .triggers
+            .get_mut(id)
+            .ok_or_else(|| TriggerError::TriggerNotFound(id.clone()))?;
+        trigger.state = state;
+        trigger.updated_at = updated_at;
+        Ok(())
+    }
+
     pub fn delete_trigger(
         &mut self,
         id: &TriggerId,
@@ -724,6 +740,26 @@ impl TriggerService {
     /// Used during recovery to prevent duplicate fires after restart.
     pub fn restore_fire_ledger(&mut self, ledger: HashMap<(TriggerId, SignalId), u64>) {
         self.fire_ledger = ledger;
+    }
+
+    /// Rebuild fire-ledger and rolling counters from a durable TriggerFired event.
+    pub fn restore_fired_trigger(
+        &mut self,
+        project: &ProjectKey,
+        trigger_id: &TriggerId,
+        signal_id: &SignalId,
+        fired_at: u64,
+    ) {
+        self.fire_ledger
+            .insert((trigger_id.clone(), signal_id.clone()), fired_at);
+        self.fire_counts
+            .entry(trigger_id.clone())
+            .or_default()
+            .push(fired_at);
+        self.project_budgets
+            .entry(project.clone())
+            .or_default()
+            .push(fired_at);
     }
 
     // ── Trigger Evaluation ──────────────────────────────────────────

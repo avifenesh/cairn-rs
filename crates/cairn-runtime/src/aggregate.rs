@@ -100,7 +100,7 @@ pub struct InMemoryServices {
     pub resource_sharing: ResourceSharingServiceImpl<InMemoryStore>,
 
     // ── Decision layer (RFC 019) ─────────────────────────────────────────
-    pub decisions: crate::decisions::DecisionServiceImpl,
+    pub decisions: std::sync::Arc<crate::decisions::DecisionServiceImpl>,
     /// Arc-wrapped decision service for injection into the execute phase.
     pub decision_service: std::sync::Arc<dyn crate::decisions::DecisionService>,
 
@@ -121,6 +121,9 @@ impl InMemoryServices {
 
     /// Create a bundle wired to an existing store (useful for testing).
     pub fn with_store(store: Arc<InMemoryStore>) -> Self {
+        let decisions = Arc::new(crate::decisions::DecisionServiceImpl::new());
+        let decision_service: Arc<dyn crate::decisions::DecisionService> = decisions.clone();
+
         Self {
             runs: RunServiceImpl::new(store.clone()),
             tasks: TaskServiceImpl::new(store.clone()),
@@ -165,8 +168,8 @@ impl InMemoryServices {
             audit: AuditServiceImpl::new(store.clone()),
             tool_invocations: ToolInvocationServiceImpl::new(store.clone()),
             resource_sharing: ResourceSharingServiceImpl::new(store.clone()),
-            decisions: crate::decisions::DecisionServiceImpl::new(),
-            decision_service: std::sync::Arc::new(crate::decisions::DecisionServiceImpl::new()),
+            decisions,
+            decision_service,
             runtime_config: std::sync::Arc::new(crate::runtime_config::RuntimeConfig::new(
                 store.clone(),
             )),
@@ -178,5 +181,69 @@ impl InMemoryServices {
 impl Default for InMemoryServices {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InMemoryServices;
+    use crate::decisions::DecisionService;
+    use cairn_domain::decisions::{
+        DecisionEvent, DecisionKind, DecisionOutcome, DecisionRequest, DecisionSource,
+        DecisionSubject, Principal, ToolEffect,
+    };
+    use cairn_domain::ids::{CorrelationId, RunId};
+    use cairn_domain::ProjectKey;
+
+    fn observational_request() -> DecisionRequest {
+        DecisionRequest {
+            kind: DecisionKind::ToolInvocation {
+                tool_name: "grep_search".into(),
+                effect: ToolEffect::Observational,
+            },
+            principal: Principal::Run {
+                run_id: RunId::new("run_1"),
+            },
+            subject: DecisionSubject::ToolCall {
+                tool_name: "grep_search".into(),
+                args: serde_json::json!({"pattern": "TODO"}),
+            },
+            scope: ProjectKey::new("t", "w", "p"),
+            cost_estimate: None,
+            requested_at: 1_700_000_000_000,
+            correlation_id: CorrelationId::new("cor_aggregate"),
+        }
+    }
+
+    #[tokio::test]
+    async fn decision_service_handles_share_cache() {
+        let runtime = InMemoryServices::new();
+        let request = observational_request();
+        let scope = request.scope.clone();
+
+        let initial = runtime
+            .decision_service
+            .evaluate(request.clone())
+            .await
+            .unwrap();
+        assert_eq!(initial.outcome, DecisionOutcome::Allowed);
+
+        let cached = runtime.decisions.list_cached(&scope, 10).await.unwrap();
+        assert!(
+            cached
+                .iter()
+                .any(|entry| entry.decision_id == initial.decision_id),
+            "expected cache entries from the injected decision service to be visible through runtime.decisions",
+        );
+
+        let second = runtime.decisions.evaluate(request).await.unwrap();
+        if let DecisionEvent::DecisionRecorded { source, .. } = &second.event {
+            assert!(
+                matches!(source, DecisionSource::CacheHit { .. }),
+                "expected runtime.decisions to reuse cache populated via runtime.decision_service",
+            );
+        } else {
+            panic!("expected DecisionRecorded");
+        }
     }
 }

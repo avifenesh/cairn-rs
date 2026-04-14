@@ -359,6 +359,7 @@ fn node_kind_str(kind: NodeKind) -> &'static str {
         NodeKind::Task => "task",
         NodeKind::Approval => "approval",
         NodeKind::Checkpoint => "checkpoint",
+        NodeKind::Trigger => "trigger",
         NodeKind::MailboxMessage => "mailbox_message",
         NodeKind::ToolInvocation => "tool_invocation",
         NodeKind::Memory => "memory",
@@ -383,6 +384,7 @@ fn parse_node_kind(s: &str) -> Option<NodeKind> {
         "task" => Some(NodeKind::Task),
         "approval" => Some(NodeKind::Approval),
         "checkpoint" => Some(NodeKind::Checkpoint),
+        "trigger" => Some(NodeKind::Trigger),
         "mailbox_message" => Some(NodeKind::MailboxMessage),
         "tool_invocation" => Some(NodeKind::ToolInvocation),
         "memory" => Some(NodeKind::Memory),
@@ -404,6 +406,8 @@ fn parse_node_kind(s: &str) -> Option<NodeKind> {
 fn edge_kind_str(kind: EdgeKind) -> &'static str {
     match kind {
         EdgeKind::Triggered => "triggered",
+        EdgeKind::MatchedBy => "matched_by",
+        EdgeKind::Fired => "fired",
         EdgeKind::Spawned => "spawned",
         EdgeKind::DependedOn => "depended_on",
         EdgeKind::ApprovedBy => "approved_by",
@@ -425,6 +429,8 @@ fn edge_kind_str(kind: EdgeKind) -> &'static str {
 fn parse_edge_kind(s: &str) -> Option<EdgeKind> {
     match s {
         "triggered" => Some(EdgeKind::Triggered),
+        "matched_by" => Some(EdgeKind::MatchedBy),
+        "fired" => Some(EdgeKind::Fired),
         "spawned" => Some(EdgeKind::Spawned),
         "depended_on" => Some(EdgeKind::DependedOn),
         "approved_by" => Some(EdgeKind::ApprovedBy),

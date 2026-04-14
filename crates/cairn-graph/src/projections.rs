@@ -11,6 +11,7 @@ pub enum NodeKind {
     Task,
     Approval,
     Checkpoint,
+    Trigger,
     MailboxMessage,
     ToolInvocation,
     Memory,
@@ -34,6 +35,8 @@ pub enum NodeKind {
 #[serde(rename_all = "snake_case")]
 pub enum EdgeKind {
     Triggered,
+    MatchedBy,
+    Fired,
     Spawned,
     DependedOn,
     ApprovedBy,
@@ -126,15 +129,17 @@ mod tests {
             NodeKind::Task,
             NodeKind::Approval,
             NodeKind::Checkpoint,
+            NodeKind::Trigger,
             NodeKind::MailboxMessage,
             NodeKind::ToolInvocation,
         ];
-        assert_eq!(kinds.len(), 7);
+        assert_eq!(kinds.len(), 8);
     }
 
     #[test]
     fn edge_kinds_are_distinct() {
         assert_ne!(EdgeKind::Triggered, EdgeKind::Spawned);
+        assert_ne!(EdgeKind::MatchedBy, EdgeKind::Fired);
         assert_ne!(EdgeKind::Cited, EdgeKind::DerivedFrom);
     }
 }

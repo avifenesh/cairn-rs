@@ -5555,6 +5555,7 @@ async fn main() {
     // requiring an SSE connection first.
     lib_state.replay_graph().await;
     lib_state.replay_evals().await;
+    lib_state.replay_triggers().await;
     lib_state.runtime.store.reset_usage_counters();
 
     eprintln!("cairn-app starting with role: {}", config.process_role);

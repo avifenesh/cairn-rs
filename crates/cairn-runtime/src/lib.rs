@@ -161,8 +161,8 @@ pub use services::parse_outcome;
 pub use services::{
     CredentialScopeKey, CredentialValue, GraphNodeId, MarketplaceCommand, MarketplaceError,
     MarketplaceEvent, MarketplaceRecord, MarketplaceService, MarketplaceState, RateLimitConfig,
-    RunTemplate, SignalPattern, TemplateBudget, Trigger, TriggerCondition, TriggerError,
-    TriggerEvent, TriggerService, TriggerState,
+    RunTemplate, SignalPattern, SkipReason, SuspensionReason, TemplateBudget, Trigger,
+    TriggerCondition, TriggerError, TriggerEvent, TriggerService, TriggerState,
 };
 
 // ── RFC 009: Provider routing + health tracking ──────────────────────────────

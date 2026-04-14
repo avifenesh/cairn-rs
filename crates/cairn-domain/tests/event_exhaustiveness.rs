@@ -30,7 +30,7 @@ use cairn_domain::{
     ApprovalDelegated, ApprovalId, ApprovalPolicyCreated, ApprovalRequested, AuditLogEntryRecorded,
     ChannelCreated, ChannelId, ChannelMessageConsumed, ChannelMessageSent, CheckpointId,
     CheckpointRecorded, CheckpointRestored, CheckpointStrategySet, CredentialId,
-    CredentialKeyRotated, CredentialRevoked, CredentialStored, DefaultSettingCleared,
+    CredentialKeyRotated, CredentialRevoked, CredentialStored, DecisionId, DefaultSettingCleared,
     DefaultSettingSet, EntitlementOverrideSet, EvalBaselineLocked, EvalBaselineSet,
     EvalDatasetCreated, EvalDatasetEntryAdded, EvalRubricCreated, EvalRunCompleted, EvalRunId,
     EvalRunStarted, EventEnvelope, EventId, EventLogCompacted, EventSource, ExecutionClass,
@@ -50,14 +50,18 @@ use cairn_domain::{
     RecoveryAttempted, RecoveryCompleted, RecoveryEscalated, ResourceShareRevoked, ResourceShared,
     RetentionPolicySet, RouteAttemptId, RouteDecisionId, RouteDecisionMade, RoutePolicyCreated,
     RoutePolicyUpdated, RunCostAlertSet, RunCostAlertTriggered, RunCostUpdated, RunCreated, RunId,
-    RunSlaBreached, RunSlaSet, RunStateChanged, RuntimeEvent, SessionCostUpdated, SessionCreated,
-    SessionId, SessionStateChanged, SignalId, SignalIngested, SignalRouted,
-    SignalSubscriptionCreated, SnapshotCreated, SoulPatchApplied, SoulPatchProposed,
-    SpendAlertTriggered, SubagentSpawned, TaskCreated, TaskDependencyAdded, TaskDependencyResolved,
-    TaskId, TaskLeaseExpired, TaskPriorityChanged, TaskStateChanged, TenantCreated, TenantId,
-    TenantQuotaSet, TenantQuotaViolated, ToolInvocationCompleted, ToolInvocationFailed,
-    ToolInvocationId, ToolInvocationProgressUpdated, ToolInvocationStarted, UserMessageAppended,
-    WorkerId, WorkspaceCreated, WorkspaceId, WorkspaceMemberAdded, WorkspaceMemberRemoved,
+    RunSlaBreached, RunSlaSet, RunStateChanged, RunTemplateCreated, RunTemplateDeleted,
+    RunTemplateId, RuntimeEvent, SessionCostUpdated, SessionCreated, SessionId,
+    SessionStateChanged, SignalId, SignalIngested, SignalRouted, SignalSubscriptionCreated,
+    SnapshotCreated, SoulPatchApplied, SoulPatchProposed, SpendAlertTriggered, SubagentSpawned,
+    TaskCreated, TaskDependencyAdded, TaskDependencyResolved, TaskId, TaskLeaseExpired,
+    TaskPriorityChanged, TaskStateChanged, TenantCreated, TenantId, TenantQuotaSet,
+    TenantQuotaViolated, ToolInvocationCompleted, ToolInvocationFailed, ToolInvocationId,
+    ToolInvocationProgressUpdated, ToolInvocationStarted, TriggerCreated, TriggerDeleted,
+    TriggerDenied, TriggerDisabled, TriggerEnabled, TriggerFired, TriggerId,
+    TriggerPendingApproval, TriggerRateLimited, TriggerResumed, TriggerSkipReason, TriggerSkipped,
+    TriggerSuspended, TriggerSuspensionReason, UserMessageAppended, WorkerId, WorkspaceCreated,
+    WorkspaceId, WorkspaceMemberAdded, WorkspaceMemberRemoved,
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -270,6 +274,45 @@ fn assert_all_variants_covered(event: &RuntimeEvent) {
             assert!(eref.is_none());
         }
         RuntimeEvent::SignalSubscriptionCreated(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerCreated(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerEnabled(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerDisabled(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerSuspended(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerResumed(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerDeleted(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerFired(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerSkipped(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerDenied(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerRateLimited(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::TriggerPendingApproval(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::RunTemplateCreated(_) => {
+            assert!(eref.is_none());
+        }
+        RuntimeEvent::RunTemplateDeleted(_) => {
             assert!(eref.is_none());
         }
         RuntimeEvent::ProviderBindingCreated(_) => {
@@ -1329,6 +1372,119 @@ fn all_variants() -> Vec<RuntimeEvent> {
             filter_expression: None,
             created_at_ms: ts,
         }),
+        RuntimeEvent::RunTemplateCreated(RunTemplateCreated {
+            project: p(),
+            template_id: RunTemplateId::new("tmpl1"),
+            name: "GitHub issue triage".to_owned(),
+            description: Some("Template for RFC 022 trigger tests".to_owned()),
+            default_mode: cairn_domain::decisions::RunMode::Plan,
+            system_prompt: "Investigate the triggering signal.".to_owned(),
+            initial_user_message: Some("Please triage this signal.".to_owned()),
+            plugin_allowlist: Some(vec!["github".to_owned()]),
+            tool_allowlist: Some(vec!["read_file".to_owned()]),
+            budget_max_tokens: Some(8_000),
+            budget_max_wall_clock_ms: Some(30_000),
+            budget_max_iterations: Some(12),
+            budget_exploration_budget_share: Some(0.25),
+            sandbox_hint: Some("repo".to_owned()),
+            required_fields: vec!["issue.number".to_owned()],
+            created_by: OperatorId::new("op1"),
+            created_at: ts,
+        }),
+        RuntimeEvent::TriggerCreated(TriggerCreated {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            name: "Issue labeled".to_owned(),
+            description: Some("Fire on cairn-ready".to_owned()),
+            signal_type: "github.issue.labeled".to_owned(),
+            plugin_id: Some("github".to_owned()),
+            conditions: vec![serde_json::json!({
+                "type": "contains",
+                "path": "labels[].name",
+                "value": "cairn-ready"
+            })],
+            run_template_id: RunTemplateId::new("tmpl1"),
+            max_per_minute: 10,
+            max_burst: 20,
+            max_chain_depth: 5,
+            created_by: OperatorId::new("op1"),
+            created_at: ts,
+        }),
+        RuntimeEvent::TriggerEnabled(TriggerEnabled {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            by: OperatorId::new("op1"),
+            at: ts,
+        }),
+        RuntimeEvent::TriggerDisabled(TriggerDisabled {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            by: OperatorId::new("op1"),
+            reason: Some("maintenance".to_owned()),
+            at: ts,
+        }),
+        RuntimeEvent::TriggerSuspended(TriggerSuspended {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            reason: TriggerSuspensionReason::RateLimitExceeded,
+            at: ts,
+        }),
+        RuntimeEvent::TriggerResumed(TriggerResumed {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            at: ts,
+        }),
+        RuntimeEvent::TriggerDeleted(TriggerDeleted {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            by: OperatorId::new("op1"),
+            at: ts,
+        }),
+        RuntimeEvent::TriggerFired(TriggerFired {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            signal_id: SignalId::new("sig1"),
+            signal_type: "github.issue.labeled".to_owned(),
+            run_id: run(),
+            chain_depth: 1,
+            fired_at: ts,
+        }),
+        RuntimeEvent::TriggerSkipped(TriggerSkipped {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            signal_id: SignalId::new("sig1"),
+            reason: TriggerSkipReason::AlreadyFired,
+            skipped_at: ts,
+        }),
+        RuntimeEvent::TriggerDenied(TriggerDenied {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            signal_id: SignalId::new("sig1"),
+            decision_id: DecisionId::new("dec1"),
+            reason: "operator denied".to_owned(),
+            denied_at: ts,
+        }),
+        RuntimeEvent::TriggerRateLimited(TriggerRateLimited {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            signal_id: SignalId::new("sig1"),
+            bucket_remaining: 0,
+            bucket_capacity: 20,
+            rate_limited_at: ts,
+        }),
+        RuntimeEvent::TriggerPendingApproval(TriggerPendingApproval {
+            project: p(),
+            trigger_id: TriggerId::new("tr1"),
+            signal_id: SignalId::new("sig1"),
+            approval_id: ApprovalId::new("a1"),
+            pending_at: ts,
+        }),
+        RuntimeEvent::RunTemplateDeleted(RunTemplateDeleted {
+            project: p(),
+            template_id: RunTemplateId::new("tmpl1"),
+            by: OperatorId::new("op1"),
+            at: ts,
+        }),
         RuntimeEvent::SnapshotCreated(SnapshotCreated {
             snapshot_id: "snap1".to_owned(),
             created_at_ms: ts,
@@ -1401,11 +1557,11 @@ fn all_variants() -> Vec<RuntimeEvent> {
 #[test]
 fn all_runtime_event_variants_covered_count() {
     let variants = all_variants();
-    // 117 variants in the RuntimeEvent enum (113 original + 4 plan review events).
+    // 130 variants in the RuntimeEvent enum, including trigger/template lifecycle events.
     assert_eq!(
         variants.len(),
-        117,
-        "all_variants() must construct exactly 117 RuntimeEvent instances"
+        130,
+        "all_variants() must construct exactly 130 RuntimeEvent instances"
     );
 }
 
