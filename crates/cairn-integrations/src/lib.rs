@@ -20,7 +20,7 @@ pub mod obsidian;
 pub mod types;
 pub mod webhook;
 
-pub use config::IntegrationConfig;
+pub use config::{IntegrationConfig, ToolConfig};
 pub use types::*;
 
 use std::collections::HashMap;
@@ -197,6 +197,25 @@ impl IntegrationRegistry {
     /// Reset operator overrides for an integration (revert to defaults).
     pub async fn clear_overrides(&self, id: &str) {
         self.overrides.write().await.remove(id);
+    }
+
+    /// Get the effective tool config for an integration.
+    ///
+    /// Priority: operator overrides → registration config → default (include all Core).
+    pub async fn effective_tool_config(&self, id: &str) -> config::ToolConfig {
+        let overrides = self.overrides.read().await;
+        if let Some(o) = overrides.get(id)
+            && let Some(ref tc) = o.tools
+        {
+            return tc.clone();
+        }
+        let configs = self.configs.read().await;
+        if let Some(c) = configs.get(id)
+            && let Some(ref tc) = c.tools
+        {
+            return tc.clone();
+        }
+        config::ToolConfig::default()
     }
 
     /// Collect all auth-exempt paths from all registered integrations.

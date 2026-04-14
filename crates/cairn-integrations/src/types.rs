@@ -96,6 +96,10 @@ pub struct IntegrationOverrides {
     /// Max concurrent runs for this integration.
     #[serde(default)]
     pub max_concurrent: Option<u32>,
+    /// Per-integration tool set customization.
+    /// When set, overrides the integration's default tool config.
+    #[serde(default)]
+    pub tools: Option<crate::config::ToolConfig>,
 }
 
 /// Status summary for an integration, returned by the API.

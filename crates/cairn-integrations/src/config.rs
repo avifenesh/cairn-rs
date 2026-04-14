@@ -8,6 +8,41 @@ use serde::{Deserialize, Serialize};
 
 use crate::{IntegrationError, IntegrationRegistry};
 
+/// Per-integration tool set configuration.
+///
+/// Operators can customize which tools an agent receives for each integration:
+/// - `include_core: true` — include Core tier tools (file_read, shell_exec, git, etc.)
+/// - `add` — additional tool names to include beyond defaults
+/// - `remove` — tool names to exclude from the default set
+///
+/// Example: a read-only reviewer agent might use `remove: ["file_write", "shell_exec"]`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolConfig {
+    /// Include Core tier tools (default: true).
+    #[serde(default = "default_true")]
+    pub include_core: bool,
+    /// Additional tool names to include beyond the integration's defaults.
+    #[serde(default)]
+    pub add: Vec<String>,
+    /// Tool names to exclude from the default set.
+    #[serde(default)]
+    pub remove: Vec<String>,
+}
+
+impl Default for ToolConfig {
+    fn default() -> Self {
+        Self {
+            include_core: true,
+            add: Vec::new(),
+            remove: Vec::new(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
 /// Serializable integration configuration — the payload operators POST.
 ///
 /// Built-in provider types:
@@ -24,6 +59,9 @@ pub struct IntegrationConfig {
     /// Provider-specific configuration (varies by type).
     #[serde(default)]
     pub config: serde_json::Value,
+    /// Per-integration tool set customization.
+    #[serde(default)]
+    pub tools: Option<ToolConfig>,
 }
 
 /// GitHub-specific configuration fields.
@@ -201,6 +239,7 @@ mod tests {
                     "action": "create_and_orchestrate"
                 }]
             }),
+            tools: None,
         };
         registry.register_from_config(config).await.unwrap();
 
@@ -216,6 +255,7 @@ mod tests {
             id: "test".into(),
             provider_type: "unknown".into(),
             config: serde_json::json!({}),
+            tools: None,
         };
         let result = registry.register_from_config(config).await;
         assert!(result.is_err());
@@ -228,6 +268,7 @@ mod tests {
             id: "test-wh".into(),
             provider_type: "webhook".into(),
             config: serde_json::json!({}),
+            tools: None,
         };
         registry.register_from_config(config).await.unwrap();
         assert!(registry.get("test-wh").await.is_some());
@@ -250,6 +291,7 @@ mod tests {
             id: "test-cfg".into(),
             provider_type: "webhook".into(),
             config: serde_json::json!({"display_name": "Test"}),
+            tools: None,
         };
         registry.register_from_config(config).await.unwrap();
 
@@ -276,5 +318,122 @@ mod tests {
         assert_eq!(config.signature_header, "X-Signature-256");
         assert_eq!(config.event_type_path, "action");
         assert_eq!(config.max_concurrent, 3);
+    }
+
+    #[test]
+    fn tool_config_defaults_to_include_core() {
+        let tc = ToolConfig::default();
+        assert!(tc.include_core);
+        assert!(tc.add.is_empty());
+        assert!(tc.remove.is_empty());
+    }
+
+    #[test]
+    fn tool_config_deserializes_from_json() {
+        let json = serde_json::json!({
+            "include_core": true,
+            "add": ["github_api.create_pr"],
+            "remove": ["shell_exec"]
+        });
+        let tc: ToolConfig = serde_json::from_value(json).unwrap();
+        assert!(tc.include_core);
+        assert_eq!(tc.add, vec!["github_api.create_pr"]);
+        assert_eq!(tc.remove, vec!["shell_exec"]);
+    }
+
+    #[test]
+    fn tool_config_empty_json_uses_defaults() {
+        let tc: ToolConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(tc.include_core);
+        assert!(tc.add.is_empty());
+    }
+
+    #[test]
+    fn integration_config_with_tools() {
+        let config: IntegrationConfig = serde_json::from_value(serde_json::json!({
+            "id": "github",
+            "type": "github",
+            "config": {"app_id": 123, "private_key_file": "/key.pem", "webhook_secret": "s"},
+            "tools": {
+                "include_core": true,
+                "remove": ["file_write"],
+                "add": ["github_api.create_branch"]
+            }
+        }))
+        .unwrap();
+        let tc = config.tools.unwrap();
+        assert!(tc.include_core);
+        assert_eq!(tc.remove, vec!["file_write"]);
+        assert_eq!(tc.add, vec!["github_api.create_branch"]);
+    }
+
+    #[test]
+    fn integration_config_without_tools_is_none() {
+        let config: IntegrationConfig = serde_json::from_value(serde_json::json!({
+            "id": "test",
+            "type": "webhook",
+            "config": {}
+        }))
+        .unwrap();
+        assert!(config.tools.is_none());
+    }
+
+    #[tokio::test]
+    async fn effective_tool_config_returns_default_when_no_config() {
+        let registry = IntegrationRegistry::new();
+        let tc = registry.effective_tool_config("nonexistent").await;
+        assert!(tc.include_core);
+        assert!(tc.add.is_empty());
+    }
+
+    #[tokio::test]
+    async fn effective_tool_config_uses_registration_config() {
+        let registry = IntegrationRegistry::new();
+        let config = IntegrationConfig {
+            id: "test-tools".into(),
+            provider_type: "webhook".into(),
+            config: serde_json::json!({}),
+            tools: Some(ToolConfig {
+                include_core: true,
+                add: vec!["custom_tool".into()],
+                remove: vec![],
+            }),
+        };
+        registry.register_from_config(config).await.unwrap();
+        let tc = registry.effective_tool_config("test-tools").await;
+        assert_eq!(tc.add, vec!["custom_tool"]);
+    }
+
+    #[tokio::test]
+    async fn effective_tool_config_override_takes_precedence() {
+        let registry = IntegrationRegistry::new();
+        let config = IntegrationConfig {
+            id: "test-override".into(),
+            provider_type: "webhook".into(),
+            config: serde_json::json!({}),
+            tools: Some(ToolConfig {
+                include_core: true,
+                add: vec!["from_config".into()],
+                remove: vec![],
+            }),
+        };
+        registry.register_from_config(config).await.unwrap();
+        registry
+            .set_overrides(
+                "test-override",
+                crate::IntegrationOverrides {
+                    tools: Some(ToolConfig {
+                        include_core: false,
+                        add: vec!["from_override".into()],
+                        remove: vec!["shell_exec".into()],
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let tc = registry.effective_tool_config("test-override").await;
+        assert!(!tc.include_core);
+        assert_eq!(tc.add, vec!["from_override"]);
+        assert_eq!(tc.remove, vec!["shell_exec"]);
     }
 }
