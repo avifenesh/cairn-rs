@@ -80,8 +80,8 @@ async fn accept_and_reject_memory() {
         .await
         .unwrap();
 
-    api.accept(&item1.id).await.unwrap();
-    api.reject(&item2.id).await.unwrap();
+    api.accept(&project(), &item1.id).await.unwrap();
+    api.reject(&project(), &item2.id).await.unwrap();
 
     let list = api
         .list(&project(), &cairn_api::endpoints::ListQuery::default())

@@ -19,7 +19,9 @@ use cairn_domain::{ChunkId, KnowledgeDocumentId, ProjectKey, SourceId};
 use crate::in_memory::InMemoryDocumentStore;
 use crate::ingest::{ChunkRecord, SourceType};
 use crate::pipeline::DocumentStore;
-use crate::retrieval::{RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService};
+use crate::retrieval::{
+    MetadataFilter, RerankerStrategy, RetrievalMode, RetrievalQuery, RetrievalService,
+};
 
 /// Source ID marker for memory items stored in the document store.
 const MEMORY_SOURCE_ID: &str = "__cairn_memory";
@@ -133,16 +135,25 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
 
     async fn list(
         &self,
-        _project: &ProjectKey,
+        project: &ProjectKey,
         query: &ListQuery,
     ) -> Result<ListResponse<MemoryItem>, Self::Error> {
         let chunks = self.store.all_chunks();
         let limit = query.limit.unwrap_or(20).min(100);
         let offset = query.offset.unwrap_or(0);
 
-        let mut results: Vec<MemoryItem> = chunks
+        let mut memory_chunks: Vec<&ChunkRecord> = chunks
             .iter()
-            .filter(|c| c.source_id.as_str() == MEMORY_SOURCE_ID)
+            .filter(|c| c.source_id.as_str() == MEMORY_SOURCE_ID && &c.project == project)
+            .collect();
+        memory_chunks.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.chunk_id.as_str().cmp(a.chunk_id.as_str()))
+        });
+
+        let mut results: Vec<MemoryItem> = memory_chunks
+            .into_iter()
             .map(chunk_to_memory_item)
             .collect();
 
@@ -156,7 +167,9 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
             results.retain(|item| item.status == expected);
         }
 
-        results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        if let Some(category) = query.category.as_deref() {
+            results.retain(|item| item.category.as_deref() == Some(category));
+        }
 
         let total = results.len();
         let page: Vec<MemoryItem> = results.into_iter().skip(offset).take(limit).collect();
@@ -180,7 +193,10 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
                 mode: RetrievalMode::LexicalOnly,
                 reranker: RerankerStrategy::None,
                 limit: query.effective_limit(),
-                metadata_filters: vec![],
+                metadata_filters: vec![MetadataFilter {
+                    key: "type".to_owned(),
+                    value: "memory_item".to_owned(),
+                }],
                 scoring_policy: None,
             })
             .await
@@ -263,11 +279,15 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
         Ok(item)
     }
 
-    async fn accept(&self, memory_id: &str) -> Result<(), Self::Error> {
+    async fn accept(&self, project: &ProjectKey, memory_id: &str) -> Result<(), Self::Error> {
         let mut chunks = self.store.chunks_mut();
         let chunk = chunks
             .iter_mut()
-            .find(|c| c.chunk_id.as_str() == memory_id && c.source_id.as_str() == MEMORY_SOURCE_ID)
+            .find(|c| {
+                c.chunk_id.as_str() == memory_id
+                    && c.source_id.as_str() == MEMORY_SOURCE_ID
+                    && &c.project == project
+            })
             .ok_or_else(|| format!("memory not found: {memory_id}"))?;
 
         if let Some(obj) = chunk
@@ -280,11 +300,15 @@ impl<R: RetrievalService + 'static> MemoryEndpoints for MemoryApiImpl<R> {
         Ok(())
     }
 
-    async fn reject(&self, memory_id: &str) -> Result<(), Self::Error> {
+    async fn reject(&self, project: &ProjectKey, memory_id: &str) -> Result<(), Self::Error> {
         let mut chunks = self.store.chunks_mut();
         let chunk = chunks
             .iter_mut()
-            .find(|c| c.chunk_id.as_str() == memory_id && c.source_id.as_str() == MEMORY_SOURCE_ID)
+            .find(|c| {
+                c.chunk_id.as_str() == memory_id
+                    && c.source_id.as_str() == MEMORY_SOURCE_ID
+                    && &c.project == project
+            })
             .ok_or_else(|| format!("memory not found: {memory_id}"))?;
 
         if let Some(obj) = chunk
@@ -521,38 +545,28 @@ mod tests {
     use crate::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
     use crate::ingest::{IngestRequest, IngestService, SourceType};
     use crate::pipeline::{IngestPipeline, ParagraphChunker};
-    use cairn_domain::{KnowledgeDocumentId, SourceId};
     use std::sync::Arc;
 
     #[tokio::test]
     async fn memory_search_delegates_to_retrieval() {
         let store = Arc::new(InMemoryDocumentStore::new());
-        let chunker = ParagraphChunker {
-            max_chunk_size: 200,
-        };
-        let pipeline = IngestPipeline::new(store.clone(), chunker);
-
-        pipeline
-            .submit(IngestRequest {
-                document_id: KnowledgeDocumentId::new("doc_1"),
-                source_id: SourceId::new("src_1"),
-                source_type: SourceType::PlainText,
-                project: ProjectKey::new("t", "w", "p"),
-                content: "Rust borrow checker ensures memory safety.".to_owned(),
-                import_id: None,
-                corpus_id: None,
-                bundle_source_id: None,
-                tags: vec![],
-            })
-            .await
-            .unwrap();
-
+        let project = ProjectKey::new("t", "w", "p");
         let retrieval = InMemoryRetrieval::new(store.clone());
         let api = MemoryApiImpl::new(retrieval, store);
 
+        api.create(
+            &project,
+            &CreateMemoryRequest {
+                content: "Rust borrow checker ensures memory safety.".to_owned(),
+                category: Some("facts".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
         let results = api
             .search(
-                &ProjectKey::new("t", "w", "p"),
+                &project,
                 &MemorySearchQuery {
                     q: "borrow checker".to_owned(),
                     limit: Some(5),
@@ -585,10 +599,235 @@ mod tests {
 
         assert_eq!(item.status, MemoryStatus::Proposed);
 
-        api.accept(&item.id).await.unwrap();
+        api.accept(&project, &item.id).await.unwrap();
 
         let list = api.list(&project, &ListQuery::default()).await.unwrap();
         assert_eq!(list.items.len(), 1);
         assert_eq!(list.items[0].status, MemoryStatus::Accepted);
+    }
+
+    #[tokio::test]
+    async fn memory_list_filters_category_before_paginating() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let retrieval = InMemoryRetrieval::new(store.clone());
+        let api = MemoryApiImpl::new(retrieval, store);
+        let project = ProjectKey::new("t", "w", "p");
+
+        api.create(
+            &project,
+            &CreateMemoryRequest {
+                content: "Project memory one".to_owned(),
+                category: Some("project".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+        api.create(
+            &project,
+            &CreateMemoryRequest {
+                content: "Ops memory".to_owned(),
+                category: Some("ops".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+        api.create(
+            &project,
+            &CreateMemoryRequest {
+                content: "Project memory two".to_owned(),
+                category: Some("project".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let list = api
+            .list(
+                &project,
+                &ListQuery {
+                    limit: Some(2),
+                    offset: Some(0),
+                    status: None,
+                    category: Some("project".to_owned()),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(list.items.len(), 2);
+        assert!(list
+            .items
+            .iter()
+            .all(|item| item.category.as_deref() == Some("project")));
+        assert!(!list.has_more);
+    }
+
+    #[tokio::test]
+    async fn memory_list_and_mutations_enforce_project_scope() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let retrieval = InMemoryRetrieval::new(store.clone());
+        let api = MemoryApiImpl::new(retrieval, store);
+        let project_a = ProjectKey::new("t", "w", "project-a");
+        let project_b = ProjectKey::new("t", "w", "project-b");
+
+        let item_a = api
+            .create(
+                &project_a,
+                &CreateMemoryRequest {
+                    content: "Project A memory".to_owned(),
+                    category: Some("project".to_owned()),
+                },
+            )
+            .await
+            .unwrap();
+
+        api.create(
+            &project_b,
+            &CreateMemoryRequest {
+                content: "Project B memory".to_owned(),
+                category: Some("project".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let list_a = api.list(&project_a, &ListQuery::default()).await.unwrap();
+        assert_eq!(list_a.items.len(), 1);
+        assert_eq!(list_a.items[0].id, item_a.id);
+
+        let accept_err = api.accept(&project_b, &item_a.id).await.unwrap_err();
+        assert!(accept_err.starts_with("memory not found:"));
+
+        let reject_err = api.reject(&project_b, &item_a.id).await.unwrap_err();
+        assert!(reject_err.starts_with("memory not found:"));
+
+        api.accept(&project_a, &item_a.id).await.unwrap();
+        let accepted = api
+            .list(
+                &project_a,
+                &ListQuery {
+                    status: Some("accepted".to_owned()),
+                    ..ListQuery::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(accepted.items.len(), 1);
+        assert_eq!(accepted.items[0].id, item_a.id);
+    }
+
+    #[tokio::test]
+    async fn memory_search_applies_memory_filter_before_limit() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let retrieval = InMemoryRetrieval::new(store.clone());
+        let pipeline = IngestPipeline::new(store.clone(), ParagraphChunker::default());
+        let api = MemoryApiImpl::new(retrieval, store);
+        let project = ProjectKey::new("t", "w", "p");
+
+        pipeline
+            .submit(IngestRequest {
+                document_id: KnowledgeDocumentId::new("doc_1"),
+                source_id: SourceId::new("src_regular"),
+                source_type: SourceType::PlainText,
+                project: project.clone(),
+                content: "Borrow checker guides regular documentation.".to_owned(),
+                import_id: None,
+                corpus_id: None,
+                bundle_source_id: None,
+                tags: vec![],
+            })
+            .await
+            .unwrap();
+
+        let created = api
+            .create(
+                &project,
+                &CreateMemoryRequest {
+                    content: "Borrow checker is a memory worth keeping.".to_owned(),
+                    category: Some("facts".to_owned()),
+                },
+            )
+            .await
+            .unwrap();
+
+        let results = api
+            .search(
+                &project,
+                &MemorySearchQuery {
+                    q: "borrow checker".to_owned(),
+                    limit: Some(1),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, created.id);
+    }
+
+    #[tokio::test]
+    async fn memory_list_sorts_by_raw_timestamp_not_truncated_string() {
+        let store = Arc::new(InMemoryDocumentStore::new());
+        let retrieval = InMemoryRetrieval::new(store.clone());
+        let api = MemoryApiImpl::new(retrieval, store.clone());
+        let project = ProjectKey::new("t", "w", "p");
+
+        store
+            .insert_chunks(&[
+                ChunkRecord {
+                    chunk_id: ChunkId::new("mem_1"),
+                    document_id: KnowledgeDocumentId::new("mem_1"),
+                    source_id: SourceId::new(MEMORY_SOURCE_ID),
+                    source_type: SourceType::PlainText,
+                    project: project.clone(),
+                    text: "Older same-second memory".to_owned(),
+                    position: 0,
+                    created_at: 1_700_000_000_123,
+                    updated_at: None,
+                    provenance_metadata: Some(serde_json::json!({
+                        "type": "memory_item",
+                        "status": "proposed",
+                        "category": "project",
+                        "source": "assistant",
+                    })),
+                    credibility_score: None,
+                    graph_linkage: None,
+                    embedding: None,
+                    content_hash: None,
+                    entities: vec![],
+                    embedding_model_id: None,
+                    needs_reembed: false,
+                },
+                ChunkRecord {
+                    chunk_id: ChunkId::new("mem_2"),
+                    document_id: KnowledgeDocumentId::new("mem_2"),
+                    source_id: SourceId::new(MEMORY_SOURCE_ID),
+                    source_type: SourceType::PlainText,
+                    project: project.clone(),
+                    text: "Newer same-second memory".to_owned(),
+                    position: 0,
+                    created_at: 1_700_000_000_456,
+                    updated_at: None,
+                    provenance_metadata: Some(serde_json::json!({
+                        "type": "memory_item",
+                        "status": "proposed",
+                        "category": "project",
+                        "source": "assistant",
+                    })),
+                    credibility_score: None,
+                    graph_linkage: None,
+                    embedding: None,
+                    content_hash: None,
+                    entities: vec![],
+                    embedding_model_id: None,
+                    needs_reembed: false,
+                },
+            ])
+            .await
+            .unwrap();
+
+        let list = api.list(&project, &ListQuery::default()).await.unwrap();
+        assert_eq!(list.items.len(), 2);
+        assert_eq!(list.items[0].id, "mem_2");
+        assert_eq!(list.items[1].id, "mem_1");
     }
 }

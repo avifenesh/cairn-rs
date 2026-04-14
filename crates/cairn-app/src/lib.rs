@@ -2075,6 +2075,7 @@ impl PreservedMemoryListQuery {
             limit: self.limit,
             offset: self.offset,
             status: self.status.clone(),
+            category: self.category.clone(),
         }
     }
 }
@@ -2130,6 +2131,24 @@ impl ProjectScopedQuery {
 
 trait HasProjectScope {
     fn project(&self) -> ProjectKey;
+}
+
+impl HasProjectScope for OptionalProjectScopedQuery {
+    fn project(&self) -> ProjectKey {
+        Self::project(self)
+    }
+}
+
+impl HasProjectScope for PreservedMemoryListQuery {
+    fn project(&self) -> ProjectKey {
+        Self::project(self)
+    }
+}
+
+impl HasProjectScope for PreservedMemorySearchParams {
+    fn project(&self) -> ProjectKey {
+        Self::project(self)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -5100,12 +5119,6 @@ impl AppBootstrap {
                     }
                     (HttpMethod::Post, "/v1/memories") => {
                         router.route(&path, post(create_memory_preserved_handler))
-                    }
-                    (HttpMethod::Post, "/v1/memories/:id/accept") => {
-                        router.route(&path, post(accept_memory_preserved_handler))
-                    }
-                    (HttpMethod::Post, "/v1/memories/:id/reject") => {
-                        router.route(&path, post(reject_memory_preserved_handler))
                     }
                     (HttpMethod::Get, "/v1/graph/trace") => {
                         router.route(&path, get(graph_trace_preserved_handler))
@@ -13058,37 +13071,32 @@ async fn list_tool_invocations_handler(
 
 async fn list_memories_preserved_handler(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<PreservedMemoryListQuery>,
+    project_scope: ProjectScope<PreservedMemoryListQuery>,
 ) -> impl IntoResponse {
+    let query = project_scope.into_inner();
     match state
         .memory_api
         .list(&query.project(), &query.list_query())
         .await
     {
-        Ok(mut list) => {
-            if let Some(category) = query.category.as_deref() {
-                list.items
-                    .retain(|item| item.category.as_deref() == Some(category));
-            }
-
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "items": list.items,
-                    "hasMore": list.has_more,
-                    "has_more": list.has_more,
-                })),
-            )
-                .into_response()
-        }
+        Ok(list) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "items": list.items,
+                "hasMore": list.has_more,
+                "has_more": list.has_more,
+            })),
+        )
+            .into_response(),
         Err(err) => memory_api_error_response(err),
     }
 }
 
 async fn search_memories_preserved_handler(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<PreservedMemorySearchParams>,
+    project_scope: ProjectScope<PreservedMemorySearchParams>,
 ) -> impl IntoResponse {
+    let query = project_scope.into_inner();
     if query.q.trim().is_empty() {
         return bad_request_response("query parameter q is required");
     }
@@ -13105,9 +13113,10 @@ async fn search_memories_preserved_handler(
 
 async fn create_memory_preserved_handler(
     State(state): State<Arc<AppState>>,
-    Query(scope): Query<OptionalProjectScopedQuery>,
+    project_scope: ProjectScope<OptionalProjectScopedQuery>,
     Json(body): Json<CreateMemoryRequest>,
 ) -> impl IntoResponse {
+    let scope = project_scope.into_inner();
     match state.memory_api.create(&scope.project(), &body).await {
         Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
         Err(err) => memory_api_error_response(err),
@@ -13117,8 +13126,10 @@ async fn create_memory_preserved_handler(
 async fn accept_memory_preserved_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    project_scope: ProjectScope<OptionalProjectScopedQuery>,
 ) -> impl IntoResponse {
-    match state.memory_api.accept(&id).await {
+    let scope = project_scope.into_inner();
+    match state.memory_api.accept(&scope.project(), &id).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
         Err(err) => memory_api_error_response(err),
     }
@@ -13127,8 +13138,10 @@ async fn accept_memory_preserved_handler(
 async fn reject_memory_preserved_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    project_scope: ProjectScope<OptionalProjectScopedQuery>,
 ) -> impl IntoResponse {
-    match state.memory_api.reject(&id).await {
+    let scope = project_scope.into_inner();
+    match state.memory_api.reject(&scope.project(), &id).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
         Err(err) => memory_api_error_response(err),
     }
@@ -23538,6 +23551,131 @@ mod tests {
         assert_eq!(rejected_items.len(), 1);
         assert_eq!(rejected_items[0]["id"], rejected_id);
         assert_eq!(rejected_items[0]["status"], "rejected");
+    }
+
+    #[tokio::test]
+    async fn preserved_memory_category_filter_paginates_before_limit() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "memory-category-token");
+
+        for (content, category) in [
+            ("Project memory one", "project"),
+            ("Ops memory", "ops"),
+            ("Project memory two", "project"),
+        ] {
+            let response = post_json(
+                AppBootstrap::build_router(state.clone()),
+                "/v1/memories",
+                "memory-category-token",
+                serde_json::json!({
+                    "content": content,
+                    "category": category
+                }),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
+
+        let list = get_json(
+            AppBootstrap::build_router(state),
+            "/v1/memories?category=project&limit=2",
+            "memory-category-token",
+        )
+        .await;
+        let items = list["items"].as_array().expect("items");
+        assert_eq!(items.len(), 2);
+        assert!(items
+            .iter()
+            .all(|item| item["category"].as_str() == Some("project")));
+        assert_eq!(list["hasMore"], false);
+        assert_eq!(list["has_more"], false);
+    }
+
+    #[tokio::test]
+    async fn preserved_memory_routes_enforce_project_scope() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "memory-project-scope-token");
+
+        let created = response_json(
+            post_json(
+                AppBootstrap::build_router(state.clone()),
+                "/v1/memories?project_id=project-a",
+                "memory-project-scope-token",
+                serde_json::json!({
+                    "content": "Only project A should see this memory.",
+                    "category": "project"
+                }),
+            )
+            .await,
+        )
+        .await;
+        let memory_id = created["id"].as_str().expect("memory id").to_owned();
+
+        let project_b_list = get_json(
+            AppBootstrap::build_router(state.clone()),
+            "/v1/memories?project_id=project-b",
+            "memory-project-scope-token",
+        )
+        .await;
+        let project_b_items = project_b_list["items"].as_array().expect("items");
+        assert!(project_b_items.is_empty());
+
+        let wrong_project_accept = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/memories/{memory_id}/accept?project_id=project-b"),
+            "memory-project-scope-token",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(wrong_project_accept.status(), StatusCode::NOT_FOUND);
+
+        let wrong_project_reject = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/memories/{memory_id}/reject?project_id=project-b"),
+            "memory-project-scope-token",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(wrong_project_reject.status(), StatusCode::NOT_FOUND);
+
+        let right_project_accept = post_json(
+            AppBootstrap::build_router(state.clone()),
+            &format!("/v1/memories/{memory_id}/accept?project_id=project-a"),
+            "memory-project-scope-token",
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(right_project_accept.status(), StatusCode::OK);
+
+        let project_a_accepted = get_json(
+            AppBootstrap::build_router(state),
+            "/v1/memories?project_id=project-a&status=accepted",
+            "memory-project-scope-token",
+        )
+        .await;
+        let project_a_items = project_a_accepted["items"].as_array().expect("items");
+        assert_eq!(project_a_items.len(), 1);
+        assert_eq!(project_a_items[0]["id"], memory_id);
+        assert_eq!(project_a_items[0]["status"], "accepted");
+    }
+
+    #[tokio::test]
+    async fn preserved_memory_routes_reject_cross_tenant_scope_override() {
+        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
+        register_token(&state, "memory-tenant-scope-token");
+
+        let response = post_json(
+            AppBootstrap::build_router(state),
+            "/v1/memories?tenant_id=other-tenant",
+            "memory-tenant-scope-token",
+            serde_json::json!({
+                "content": "Cross-tenant memory writes should be forbidden.",
+                "category": "project"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[derive(Clone)]

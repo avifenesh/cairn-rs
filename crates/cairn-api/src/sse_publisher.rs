@@ -19,6 +19,8 @@ pub fn map_event_to_sse_name(event: &RuntimeEvent) -> Option<SseEventName> {
         RuntimeEvent::RunStateChanged(_) => None,
         RuntimeEvent::TaskCreated(_)
         | RuntimeEvent::TaskStateChanged(_)
+        | RuntimeEvent::TaskDependencyAdded(_)
+        | RuntimeEvent::TaskDependencyResolved(_)
         | RuntimeEvent::TaskLeaseClaimed(_)
         | RuntimeEvent::TaskLeaseHeartbeated(_) => Some(SseEventName::TaskUpdate),
         RuntimeEvent::ApprovalRequested(_) => Some(SseEventName::ApprovalRequired),
@@ -87,6 +89,20 @@ fn task_id_for_event(event: &RuntimeEvent) -> Option<TaskId> {
     match event {
         RuntimeEvent::TaskCreated(event) => Some(event.task_id.clone()),
         RuntimeEvent::TaskStateChanged(event) => Some(event.task_id.clone()),
+        RuntimeEvent::TaskDependencyAdded(event) => {
+            Some(if event.dependent_task_id.as_str().is_empty() {
+                event.task_id.clone()
+            } else {
+                event.dependent_task_id.clone()
+            })
+        }
+        RuntimeEvent::TaskDependencyResolved(event) => {
+            Some(if event.dependent_task_id.as_str().is_empty() {
+                event.task_id.clone()
+            } else {
+                event.dependent_task_id.clone()
+            })
+        }
         RuntimeEvent::TaskLeaseClaimed(event) => Some(event.task_id.clone()),
         RuntimeEvent::TaskLeaseHeartbeated(event) => Some(event.task_id.clone()),
         _ => None,
@@ -111,12 +127,18 @@ where
     S: TaskReadModel + ApprovalReadModel + Send + Sync,
 {
     let task_record = match task_id_for_event(&stored.envelope.payload) {
-        Some(task_id) => TaskReadModel::get(store, &task_id).await?,
+        Some(task_id) => match TaskReadModel::get(store, &task_id).await {
+            Ok(record) => record,
+            Err(_) => return Ok(build_sse_frame(stored)),
+        },
         None => None,
     };
 
     let approval_record = match approval_id_for_event(&stored.envelope.payload) {
-        Some(approval_id) => ApprovalReadModel::get(store, &approval_id).await?,
+        Some(approval_id) => match ApprovalReadModel::get(store, &approval_id).await {
+            Ok(record) => record,
+            Err(_) => return Ok(build_sse_frame(stored)),
+        },
         None => None,
     };
 
@@ -213,6 +235,7 @@ pub fn build_ready_frame(client_id: &str) -> SseFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use cairn_domain::events::StateTransition;
     use cairn_domain::events::{
         ApprovalRequested, EventEnvelope, EventSource, RuntimeEvent, TaskCreated, TaskStateChanged,
@@ -429,6 +452,196 @@ mod tests {
             .expect("task frame");
         assert_eq!(frame.event, SseEventName::TaskUpdate);
         assert!(frame.data["task"]["createdAt"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn build_sse_frame_with_store_state_enriches_task_dependency_events() {
+        let store = InMemoryStore::new();
+        let project = ProjectKey::new("t", "w", "p");
+        let created = EventEnvelope::for_runtime_event(
+            EventId::new("evt_task_dependency_created"),
+            EventSource::Runtime,
+            RuntimeEvent::TaskCreated(TaskCreated {
+                project: project.clone(),
+                task_id: TaskId::new("task_dependency"),
+                parent_run_id: None,
+                parent_task_id: None,
+                prompt_release_id: None,
+            }),
+        );
+        let dependency = EventEnvelope::for_runtime_event(
+            EventId::new("evt_task_dependency_added"),
+            EventSource::Runtime,
+            RuntimeEvent::TaskDependencyAdded(cairn_domain::events::TaskDependencyAdded {
+                task_id: TaskId::new("task_dependency"),
+                depends_on: TaskId::new("task_upstream"),
+                added_at_ms: 123,
+                dependent_task_id: TaskId::new("task_dependency"),
+                depends_on_task_id: TaskId::new("task_upstream"),
+            }),
+        );
+        store.append(&[created, dependency]).await.unwrap();
+        let stored = store
+            .read_stream(Some(EventPosition(0)), 16)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|event| event.envelope.event_id.as_str() == "evt_task_dependency_added")
+            .expect("dependency event");
+
+        let frame = build_sse_frame_with_store_state(&store, &stored)
+            .await
+            .unwrap()
+            .expect("task dependency frame");
+        assert_eq!(frame.event, SseEventName::TaskUpdate);
+        assert_eq!(frame.data["task"]["id"], "task_dependency");
+        assert!(frame.data["task"]["createdAt"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn task_dependency_events_fall_back_to_task_id_when_aliases_are_missing() {
+        let store = InMemoryStore::new();
+        let project = ProjectKey::new("t", "w", "p");
+        let created = EventEnvelope::for_runtime_event(
+            EventId::new("evt_task_dependency_created_legacy"),
+            EventSource::Runtime,
+            RuntimeEvent::TaskCreated(TaskCreated {
+                project: project.clone(),
+                task_id: TaskId::new("task_dependency_legacy"),
+                parent_run_id: None,
+                parent_task_id: None,
+                prompt_release_id: None,
+            }),
+        );
+        let dependency = EventEnvelope::for_runtime_event(
+            EventId::new("evt_task_dependency_added_legacy"),
+            EventSource::Runtime,
+            RuntimeEvent::TaskDependencyAdded(cairn_domain::events::TaskDependencyAdded {
+                task_id: TaskId::new("task_dependency_legacy"),
+                depends_on: TaskId::new("task_upstream"),
+                added_at_ms: 456,
+                dependent_task_id: TaskId::default(),
+                depends_on_task_id: TaskId::default(),
+            }),
+        );
+        store.append(&[created, dependency]).await.unwrap();
+        let stored = store
+            .read_stream(Some(EventPosition(0)), 16)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|event| event.envelope.event_id.as_str() == "evt_task_dependency_added_legacy")
+            .expect("dependency event");
+
+        let frame = build_sse_frame_with_store_state(&store, &stored)
+            .await
+            .unwrap()
+            .expect("task dependency frame");
+        assert_eq!(frame.event, SseEventName::TaskUpdate);
+        assert_eq!(frame.data["task"]["id"], "task_dependency_legacy");
+        assert!(frame.data["task"]["createdAt"].as_str().is_some());
+    }
+
+    struct FailingProjectionStore;
+
+    #[async_trait]
+    impl TaskReadModel for FailingProjectionStore {
+        async fn get(&self, _task_id: &TaskId) -> Result<Option<TaskRecord>, StoreError> {
+            Err(StoreError::Internal(
+                "task projection unavailable".to_owned(),
+            ))
+        }
+
+        async fn list_by_state(
+            &self,
+            _project: &ProjectKey,
+            _state: TaskState,
+            _limit: usize,
+        ) -> Result<Vec<TaskRecord>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_expired_leases(
+            &self,
+            _now: u64,
+            _limit: usize,
+        ) -> Result<Vec<TaskRecord>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_by_parent_run(
+            &self,
+            _parent_run_id: &cairn_domain::RunId,
+            _limit: usize,
+        ) -> Result<Vec<TaskRecord>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn any_non_terminal_children(
+            &self,
+            _parent_run_id: &cairn_domain::RunId,
+        ) -> Result<bool, StoreError> {
+            Ok(false)
+        }
+    }
+
+    #[async_trait]
+    impl ApprovalReadModel for FailingProjectionStore {
+        async fn get(
+            &self,
+            _approval_id: &ApprovalId,
+        ) -> Result<Option<ApprovalRecord>, StoreError> {
+            Err(StoreError::Internal(
+                "approval projection unavailable".to_owned(),
+            ))
+        }
+
+        async fn list_pending(
+            &self,
+            _project: &ProjectKey,
+            _limit: usize,
+            _offset: usize,
+        ) -> Result<Vec<ApprovalRecord>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_all(
+            &self,
+            _project: &ProjectKey,
+            _limit: usize,
+            _offset: usize,
+        ) -> Result<Vec<ApprovalRecord>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn has_pending_for_run(
+            &self,
+            _run_id: &cairn_domain::RunId,
+        ) -> Result<bool, StoreError> {
+            Ok(false)
+        }
+    }
+
+    #[tokio::test]
+    async fn build_sse_frame_with_store_state_falls_back_when_projection_lookup_fails() {
+        let stored = test_stored_event(
+            RuntimeEvent::TaskCreated(TaskCreated {
+                project: ProjectKey::new("t", "w", "p"),
+                task_id: TaskId::new("task_projection_error"),
+                parent_run_id: None,
+                parent_task_id: None,
+                prompt_release_id: None,
+            }),
+            9,
+        );
+
+        let frame = build_sse_frame_with_store_state(&FailingProjectionStore, &stored)
+            .await
+            .unwrap()
+            .expect("fallback frame");
+        assert_eq!(frame.event, SseEventName::TaskUpdate);
+        assert_eq!(frame.data["task"]["id"], "task_projection_error");
+        assert!(frame.data["task"]["createdAt"].is_null());
     }
 
     #[tokio::test]
