@@ -877,7 +877,7 @@ impl AppBootstrap {
                         router.route(&path, post(register_provider_model_handler))
                     }
                     (HttpMethod::Get, "/v1/providers/connections/:id/models") => {
-                        router.route(&path, post(list_provider_models_handler))
+                        router.route(&path, get(list_provider_models_handler))
                     }
                     (HttpMethod::Post, "/v1/providers/connections/:id/health-schedule") => {
                         router.route(&path, post(set_provider_health_schedule_handler))
@@ -1807,7 +1807,7 @@ fn config_socket_addr(config: &BootstrapConfig) -> Result<SocketAddr, String> {
         .parse::<SocketAddr>()
         .map_err(|_err| {
             format!(
-                "invalid listen address {}:{}: :err",
+                "invalid listen address {}:{}: {_err}",
                 config.listen_addr, config.listen_port
             )
         })
