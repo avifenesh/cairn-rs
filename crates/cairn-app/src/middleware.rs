@@ -429,6 +429,10 @@ pub(crate) async fn observability_middleware(
         .get::<RequestId>()
         .map(|r| r.0.clone())
         .unwrap_or_default();
+    let start_time_unix_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
     let start = Instant::now();
     let response = next.run(request).await;
     let latency_ms = start.elapsed().as_millis() as u64;
@@ -459,6 +463,7 @@ pub(crate) async fn observability_middleware(
             query,
             status,
             latency_ms,
+            start_time_unix_ns,
         });
     }
 

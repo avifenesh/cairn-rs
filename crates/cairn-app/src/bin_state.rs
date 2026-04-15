@@ -102,11 +102,9 @@ pub(crate) struct AppState {
     pub(crate) openai_compat: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
     pub(crate) metrics: Arc<RwLock<AppMetrics>>,
     pub(crate) rate_limits: RateLimitTable,
-    /// Binary-local request log for OTLP export. Note: the observability
-    /// middleware writes to lib_state.request_log (different type/instance).
-    /// TODO: unify lib and binary RequestLogBuffer types so OTLP export
-    /// reads from the middleware-populated buffer.
-    pub(crate) request_log: Arc<RwLock<RequestLogBuffer>>,
+    /// Shared with lib_state — the observability middleware populates this
+    /// buffer and the OTLP export handler reads from it.
+    pub(crate) request_log: Arc<RwLock<cairn_app::tokens::RequestLogBuffer>>,
     pub(crate) notifications: Arc<RwLock<NotificationBuffer>>,
     pub(crate) templates: Arc<templates::TemplateRegistry>,
     pub(crate) entitlements: Arc<entitlements::EntitlementService>,
@@ -237,48 +235,5 @@ impl AppMetrics {
     }
 }
 
-// ── Request log ring buffer ───────────────────────────────────────────────────
-
-/// Maximum number of structured log entries retained in memory.
-pub(crate) const LOG_RING_SIZE: usize = 2_000;
-
-/// One structured request log entry.
-#[derive(Clone, Serialize)]
-pub(crate) struct LogEntry {
-    pub(crate) timestamp: String,
-    pub(crate) level: &'static str,
-    pub(crate) message: String,
-    pub(crate) request_id: String,
-    pub(crate) method: String,
-    pub(crate) path: String,
-    pub(crate) query: Option<String>,
-    pub(crate) status: u16,
-    pub(crate) latency_ms: u64,
-    /// Wall-clock start time in Unix nanoseconds.  Used for OTLP span export.
-    pub(crate) start_time_unix_ns: u64,
-}
-
-/// Fixed-capacity FIFO ring buffer of structured log entries.
-pub(crate) struct RequestLogBuffer {
-    pub(crate) entries: VecDeque<LogEntry>,
-}
-
-impl RequestLogBuffer {
-    pub(crate) fn new() -> Self {
-        Self {
-            entries: VecDeque::with_capacity(LOG_RING_SIZE),
-        }
-    }
-    /// Return the last `n` entries whose level matches the filter (empty = all).
-    pub(crate) fn tail(&self, n: usize, level_filter: &[&str]) -> Vec<&LogEntry> {
-        let mut result: Vec<&LogEntry> = self
-            .entries
-            .iter()
-            .rev()
-            .filter(|e| level_filter.is_empty() || level_filter.contains(&e.level))
-            .take(n)
-            .collect();
-        result.reverse();
-        result
-    }
-}
+// LogEntry and RequestLogBuffer removed — now shared from lib crate
+// (cairn_app::tokens::RequestLogEntry / cairn_app::tokens::RequestLogBuffer)
