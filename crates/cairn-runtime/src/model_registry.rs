@@ -177,6 +177,24 @@ impl ModelRegistry {
         inner.models.insert(entry.id.clone(), entry);
     }
 
+    /// Remove a model entry by ID. Returns the removed entry, or `None`.
+    pub fn unregister(&self, model_id: &str) -> Option<ModelEntry> {
+        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        inner.models.remove(model_id)
+    }
+
+    /// Import models from LiteLLM's JSON format, adding/overriding existing
+    /// entries.  Returns the number of models imported.
+    pub fn import_litellm(&self, json: &str) -> usize {
+        let entries = cairn_domain::model_catalog::import_litellm_json(json);
+        let count = entries.len();
+        let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        for entry in entries {
+            inner.models.insert(entry.id.clone(), entry);
+        }
+        count
+    }
+
     /// Look up a model by its ID. Returns `None` if not found.
     pub fn get(&self, model_id: &str) -> Option<ModelEntry> {
         let inner = self.inner.read().unwrap_or_else(|e| e.into_inner());

@@ -1208,6 +1208,18 @@ impl AppBootstrap {
                 "/v1/admin/notifications/:id/retry",
                 post(retry_notification_handler),
             )
+            // ── Model pricing admin (CRUD) ────────────────────────────────────────────
+            .route("/v1/admin/models", get(list_models_handler))
+            .route(
+                "/v1/admin/models/import-litellm",
+                post(import_litellm_handler),
+            )
+            .route(
+                "/v1/admin/models/:id",
+                get(get_model_handler)
+                    .put(set_model_handler)
+                    .delete(delete_model_handler),
+            )
             // ── Settings ──────────────────────────────────────────────────────────────
             .route("/v1/settings/defaults/all", get(list_all_defaults_handler))
             .route(

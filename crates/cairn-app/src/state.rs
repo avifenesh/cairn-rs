@@ -48,8 +48,8 @@ use cairn_memory::ingest::SourceType;
 use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 
 use cairn_runtime::{
-    InMemoryServices, LicenseService, MarketplaceService, ProjectService, TenantService,
-    TriggerService, WorkspaceService,
+    InMemoryServices, LicenseService, MarketplaceService, ModelRegistry, ProjectService,
+    TenantService, TriggerService, WorkspaceService,
 };
 
 use cairn_tools::{execute_eval_score, InMemoryPluginRegistry, StdioPluginHost};
@@ -285,6 +285,9 @@ pub struct AppState {
     pub github: Option<Arc<GitHubIntegration>>,
     /// Integration plugin registry -- holds all configured integrations (GitHub, Linear, etc.).
     pub integrations: Arc<cairn_integrations::IntegrationRegistry>,
+    /// Model catalog — per-model metadata including cost rates and capabilities.
+    /// Operators can override entries at runtime via the admin API.
+    pub model_registry: ModelRegistry,
 }
 
 // ── GitHubIntegration ────────────────────────────────────────────────────────
@@ -843,6 +846,8 @@ impl AppState {
             request_log: Arc::new(std::sync::RwLock::new(RequestLogBuffer::new())),
             github: None,
             integrations: Arc::new(cairn_integrations::IntegrationRegistry::new()),
+            model_registry: ModelRegistry::with_bundled()
+                .unwrap_or_else(|_| ModelRegistry::empty()),
         };
         state.runtime.store.reset_usage_counters();
         Ok(state)

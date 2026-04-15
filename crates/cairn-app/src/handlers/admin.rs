@@ -1243,3 +1243,62 @@ pub(crate) async fn retry_notification_handler(
         Err(err) => runtime_error_response(err),
     }
 }
+
+// ── Model pricing CRUD ──────────────────────────────────────────────────────
+
+/// `GET /v1/admin/models` — List all model entries in the registry.
+pub(crate) async fn list_models_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let entries = state.model_registry.all();
+    (StatusCode::OK, Json(entries)).into_response()
+}
+
+/// `GET /v1/admin/models/:id` — Get a specific model entry by ID.
+pub(crate) async fn get_model_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.model_registry.get(&id) {
+        Some(entry) => (StatusCode::OK, Json(entry)).into_response(),
+        None => {
+            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "model not found").into_response()
+        }
+    }
+}
+
+/// `PUT /v1/admin/models/:id` — Create or update a model entry (operator override).
+pub(crate) async fn set_model_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(mut entry): Json<cairn_domain::model_catalog::ModelEntry>,
+) -> impl IntoResponse {
+    // Ensure the body ID matches the path parameter.
+    entry.id = id;
+    state.model_registry.register(entry.clone());
+    (StatusCode::OK, Json(entry)).into_response()
+}
+
+/// `DELETE /v1/admin/models/:id` — Remove a model entry.
+pub(crate) async fn delete_model_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.model_registry.unregister(&id) {
+        Some(removed) => (StatusCode::OK, Json(removed)).into_response(),
+        None => {
+            AppApiError::new(StatusCode::NOT_FOUND, "not_found", "model not found").into_response()
+        }
+    }
+}
+
+/// `POST /v1/admin/models/import-litellm` — Import models from LiteLLM JSON body.
+pub(crate) async fn import_litellm_handler(
+    State(state): State<Arc<AppState>>,
+    body: String,
+) -> impl IntoResponse {
+    let count = state.model_registry.import_litellm(&body);
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "imported": count })),
+    )
+        .into_response()
+}
