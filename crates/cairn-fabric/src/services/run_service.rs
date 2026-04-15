@@ -63,6 +63,9 @@ impl FabricRunService {
         let public_state_str = fields.get("public_state").cloned().unwrap_or_default();
         let public_state = parse_public_state(&public_state_str);
         let (run_state, failure_class) = state_map::ff_public_state_to_run_state(public_state);
+        let blocking_reason = fields.get("blocking_reason").cloned().unwrap_or_default();
+        let run_state =
+            state_map::adjust_run_state_for_blocking_reason(run_state, &blocking_reason);
 
         let created_at = fields
             .get("created_at")

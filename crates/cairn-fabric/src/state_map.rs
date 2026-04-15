@@ -17,6 +17,22 @@ pub fn ff_public_state_to_run_state(state: PublicState) -> (RunState, Option<Fai
     }
 }
 
+pub fn adjust_run_state_for_blocking_reason(state: RunState, blocking_reason: &str) -> RunState {
+    if state == RunState::Paused && blocking_reason == "waiting_for_approval" {
+        RunState::WaitingApproval
+    } else {
+        state
+    }
+}
+
+pub fn adjust_task_state_for_blocking_reason(state: TaskState, blocking_reason: &str) -> TaskState {
+    if state == TaskState::Paused && blocking_reason == "waiting_for_approval" {
+        TaskState::WaitingApproval
+    } else {
+        state
+    }
+}
+
 pub fn ff_public_state_to_task_state(state: PublicState) -> (TaskState, Option<FailureClass>) {
     match state {
         PublicState::Waiting | PublicState::Delayed | PublicState::RateLimited => {
@@ -140,6 +156,52 @@ mod tests {
         let (task, fc) = ff_public_state_to_task_state(PublicState::Expired);
         assert_eq!(task, TaskState::Failed);
         assert_eq!(fc, Some(FailureClass::TimedOut));
+    }
+
+    #[test]
+    fn adjust_run_paused_to_waiting_approval() {
+        let adjusted =
+            adjust_run_state_for_blocking_reason(RunState::Paused, "waiting_for_approval");
+        assert_eq!(adjusted, RunState::WaitingApproval);
+    }
+
+    #[test]
+    fn adjust_run_paused_other_reason_stays_paused() {
+        let adjusted = adjust_run_state_for_blocking_reason(RunState::Paused, "waiting_for_signal");
+        assert_eq!(adjusted, RunState::Paused);
+    }
+
+    #[test]
+    fn adjust_run_non_paused_unchanged() {
+        let adjusted =
+            adjust_run_state_for_blocking_reason(RunState::Running, "waiting_for_approval");
+        assert_eq!(adjusted, RunState::Running);
+    }
+
+    #[test]
+    fn adjust_task_paused_to_waiting_approval() {
+        let adjusted =
+            adjust_task_state_for_blocking_reason(TaskState::Paused, "waiting_for_approval");
+        assert_eq!(adjusted, TaskState::WaitingApproval);
+    }
+
+    #[test]
+    fn adjust_task_paused_other_reason_stays_paused() {
+        let adjusted = adjust_task_state_for_blocking_reason(TaskState::Paused, "operator_hold");
+        assert_eq!(adjusted, TaskState::Paused);
+    }
+
+    #[test]
+    fn adjust_task_non_paused_unchanged() {
+        let adjusted =
+            adjust_task_state_for_blocking_reason(TaskState::Running, "waiting_for_approval");
+        assert_eq!(adjusted, TaskState::Running);
+    }
+
+    #[test]
+    fn adjust_run_empty_reason_stays_paused() {
+        let adjusted = adjust_run_state_for_blocking_reason(RunState::Paused, "");
+        assert_eq!(adjusted, RunState::Paused);
     }
 
     #[test]

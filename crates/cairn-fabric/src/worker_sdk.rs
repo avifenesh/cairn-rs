@@ -207,6 +207,10 @@ impl CairnTask {
         Ok(())
     }
 
+    /// Fail the execution. Returns `RetryScheduled` if FF's retry policy
+    /// allows another attempt (execution re-enters the delayed queue and will
+    /// be offered via `claim_next` when backoff expires), or `TerminalFailed`
+    /// if retries are exhausted. Consumes self either way — don't hold state.
     pub async fn fail_with_retry(
         self,
         reason: &str,

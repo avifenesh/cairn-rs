@@ -61,6 +61,9 @@ impl FabricTaskService {
         let public_state_str = fields.get("public_state").cloned().unwrap_or_default();
         let public_state = parse_public_state(&public_state_str);
         let (task_state, failure_class) = state_map::ff_public_state_to_task_state(public_state);
+        let blocking_reason = fields.get("blocking_reason").cloned().unwrap_or_default();
+        let task_state =
+            state_map::adjust_task_state_for_blocking_reason(task_state, &blocking_reason);
 
         let created_at = fields
             .get("created_at")
@@ -120,6 +123,7 @@ impl FabricTaskService {
         parent_run_id: Option<RunId>,
         parent_task_id: Option<TaskId>,
         priority: u32,
+        session_id: Option<&SessionId>,
     ) -> Result<TaskRecord, FabricError> {
         let eid = self.task_to_execution_id(&task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
@@ -137,6 +141,9 @@ impl FabricTaskService {
                 project.tenant_id, project.workspace_id, project.project_id
             ),
         );
+        if let Some(sid) = session_id {
+            tags.insert("cairn.session_id".to_owned(), sid.as_str().to_owned());
+        }
         if let Some(ref run_id) = parent_run_id {
             tags.insert("cairn.parent_run_id".to_owned(), run_id.as_str().to_owned());
         }
@@ -166,17 +173,12 @@ impl FabricTaskService {
             idx.execution_deadline(),
             idx.all_executions(),
         ];
-        let now_ms = ff_core::types::TimestampMs::now().0 as u64;
-        let priority_score =
-            crate::services::scheduler_service::FabricSchedulerService::priority_score(
-                priority, now_ms,
-            );
         let args: Vec<String> = vec![
             eid.to_string(),
             namespace.to_string(),
             lane_id.to_string(),
             "cairn_task".to_owned(),
-            priority_score.to_string(),
+            priority.to_string(),
             "cairn".to_owned(),
             policy_json,
             String::new(),
@@ -744,11 +746,25 @@ impl FabricTaskService {
         let params = match reason.kind {
             PauseReasonKind::OperatorPause => crate::suspension::for_operator_hold(),
             PauseReasonKind::ToolRequestedSuspension => {
-                let invocation_id = reason.detail.as_deref().unwrap_or("unknown");
+                let invocation_id = reason
+                    .detail
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| FabricError::Validation {
+                        reason: "ToolRequestedSuspension requires invocation_id in reason.detail"
+                            .to_owned(),
+                    })?;
                 crate::suspension::for_tool_result(invocation_id, reason.resume_after_ms)
             }
             PauseReasonKind::RuntimeSuspension => {
-                let signal_name = reason.detail.as_deref().unwrap_or("runtime_signal");
+                let signal_name = reason
+                    .detail
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| FabricError::Validation {
+                        reason: "RuntimeSuspension requires signal_name in reason.detail"
+                            .to_owned(),
+                    })?;
                 crate::suspension::SuspensionParams {
                     reason_code: "waiting_for_signal".into(),
                     condition_matchers: vec![ff_sdk::task::ConditionMatcher {

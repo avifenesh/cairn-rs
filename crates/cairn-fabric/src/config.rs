@@ -51,19 +51,7 @@ impl FabricConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(4);
 
-        if valkey_port == 0 {
-            return Err(FabricError::Config("port must be > 0".into()));
-        }
-        if lease_ttl_ms < 1000 {
-            return Err(FabricError::Config("lease_ttl_ms must be >= 1000".into()));
-        }
-        if max_concurrent_tasks < 1 {
-            return Err(FabricError::Config(
-                "max_concurrent_tasks must be >= 1".into(),
-            ));
-        }
-
-        Ok(Self {
+        let config = Self {
             valkey_host,
             valkey_port,
             tls,
@@ -74,7 +62,24 @@ impl FabricConfig {
             namespace,
             lease_ttl_ms,
             max_concurrent_tasks,
-        })
+        };
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub fn validate(&self) -> Result<(), FabricError> {
+        if self.valkey_port == 0 {
+            return Err(FabricError::Config("port must be > 0".into()));
+        }
+        if self.lease_ttl_ms < 1000 {
+            return Err(FabricError::Config("lease_ttl_ms must be >= 1000".into()));
+        }
+        if self.max_concurrent_tasks < 1 {
+            return Err(FabricError::Config(
+                "max_concurrent_tasks must be >= 1".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub fn valkey_url(&self) -> String {
@@ -141,18 +146,7 @@ mod tests {
             lease_ttl_ms,
             max_concurrent_tasks: max_tasks,
         };
-        // Re-run the same validation from_env uses
-        if config.valkey_port == 0 {
-            return Err(FabricError::Config("port must be > 0".into()));
-        }
-        if config.lease_ttl_ms < 1000 {
-            return Err(FabricError::Config("lease_ttl_ms must be >= 1000".into()));
-        }
-        if config.max_concurrent_tasks < 1 {
-            return Err(FabricError::Config(
-                "max_concurrent_tasks must be >= 1".into(),
-            ));
-        }
+        config.validate()?;
         Ok(config)
     }
 
