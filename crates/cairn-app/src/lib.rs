@@ -32,6 +32,7 @@ pub use errors::AppApiError;
 pub(crate) use errors::*;
 #[allow(unused_imports)]
 pub(crate) use extractors::*;
+pub use helpers::event_type_name;
 #[allow(unused_imports)]
 pub(crate) use helpers::*;
 #[allow(unused_imports)]

@@ -157,14 +157,9 @@ impl NotificationBuffer {
     }
 
     pub(crate) fn list(&self, limit: usize) -> Vec<&Notification> {
-        self.entries
-            .iter()
-            .rev()
-            .take(limit)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect()
+        let len = self.entries.len();
+        let start = len.saturating_sub(limit);
+        self.entries.iter().skip(start).collect()
     }
 
     pub(crate) fn mark_read(&mut self, id: &str) -> bool {
@@ -272,14 +267,14 @@ impl RequestLogBuffer {
     }
     /// Return the last `n` entries whose level matches the filter (empty = all).
     pub(crate) fn tail(&self, n: usize, level_filter: &[&str]) -> Vec<&LogEntry> {
-        self.entries
+        let mut result: Vec<&LogEntry> = self
+            .entries
             .iter()
             .rev()
             .filter(|e| level_filter.is_empty() || level_filter.contains(&e.level))
             .take(n)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect()
+            .collect();
+        result.reverse();
+        result
     }
 }

@@ -67,29 +67,9 @@ pub(crate) async fn list_events_handler(
     }
 }
 
-pub(crate) fn event_type_name(event: &cairn_domain::RuntimeEvent) -> &'static str {
-    use cairn_domain::RuntimeEvent as E;
-    match event {
-        E::SessionCreated(_) => "session_created",
-        E::SessionStateChanged(_) => "session_state_changed",
-        E::RunCreated(_) => "run_created",
-        E::RunStateChanged(_) => "run_state_changed",
-        E::TaskCreated(_) => "task_created",
-        E::TaskStateChanged(_) => "task_state_changed",
-        E::TaskLeaseClaimed(_) => "task_lease_claimed",
-        E::TaskLeaseHeartbeated(_) => "task_lease_heartbeated",
-        E::TaskLeaseExpired(_) => "task_lease_expired",
-        E::ApprovalRequested(_) => "approval_requested",
-        E::ApprovalResolved(_) => "approval_resolved",
-        E::CheckpointRecorded(_) => "checkpoint_recorded",
-        E::CheckpointStrategySet(_) => "checkpoint_strategy_set",
-        E::ProviderCallCompleted(_) => "provider_call_completed",
-        E::RunCostUpdated(_) => "run_cost_updated",
-        E::OperatorIntervention(_) => "operator_intervention",
-        E::RecoveryEscalated(_) => "recovery_escalated",
-        _ => "runtime_event",
-    }
-}
+// event_type_name is the canonical copy from the lib crate (helpers.rs).
+// Re-exported here so binary modules can use it via `use crate::*`.
+pub(crate) use cairn_app::event_type_name;
 
 // ── Event append handler (RFC 002) ────────────────────────────────────────────
 

@@ -100,7 +100,7 @@ domain → store → runtime → {memory, graph, evals, tools, agent, signal, ch
 | `cairn-domain` | Pure types: IDs, commands (30+), events (56+), state machines, policy. No IO. |
 | `cairn-store` | Append-only event log + sync projections. Backends: Postgres (default via `DATABASE_URL`) / SQLite / InMemory (`--db memory`). |
 | `cairn-runtime` | Service layer: sessions, runs, tasks, approvals, checkpoints, mailbox, recovery. |
-| `cairn-app` | Axum HTTP server. `router.rs` has route catalog, `middleware.rs` has auth/rate-limit, `bootstrap.rs` has CLI parsing. `main.rs` has binary wiring + embedded UI. |
+| `cairn-app` | Axum HTTP server. Lib: `router.rs` (route catalog), `middleware.rs` (auth/rate-limit), `bootstrap.rs` (CLI), 23 handler modules. Binary: 12 `bin_*` modules (state, providers, admin, events, WebSocket, frontend). `main.rs` has startup + tests. |
 | `cairn-memory` | Knowledge pipeline: ingest → chunk → embed → index → score → rerank → retrieve. |
 | `cairn-graph` | Entity/provenance graph: nodes, edges, 6 query families, graph-backed expansion. |
 | `cairn-evals` | Prompt registry, version/release lifecycle, scorecards, bandit experiments. |

@@ -1287,7 +1287,7 @@ pub(crate) async fn chat_stream_handler(
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(180))
             .build()
-            .expect("reqwest client");
+            .unwrap_or_default();
 
         let mut req_body = serde_json::json!({
             "model":    model_id,
@@ -1483,7 +1483,7 @@ pub(crate) async fn ollama_delete_model_handler(
     {
         Ok(resp) => {
             let status = resp.status();
-            if status.is_success() || status == reqwest::StatusCode::OK {
+            if status.is_success() {
                 (
                     StatusCode::OK,
                     axum::Json(serde_json::json!({"status": "deleted", "model": body.model})),

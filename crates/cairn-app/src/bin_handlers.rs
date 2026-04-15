@@ -660,7 +660,7 @@ pub(crate) async fn list_notifications_handler(
     let buf = state
         .notifications
         .read()
-        .expect("notification lock poisoned");
+        .unwrap_or_else(|e| e.into_inner());
     let notifications: Vec<Notification> = buf.list(limit).into_iter().cloned().collect();
     let unread_count = buf.unread_count();
     Json(NotifListResponse {
@@ -677,7 +677,7 @@ pub(crate) async fn mark_notification_read_handler(
     let found = state
         .notifications
         .write()
-        .expect("notification lock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .mark_read(&id);
     if found {
         StatusCode::NO_CONTENT.into_response()
@@ -700,7 +700,7 @@ pub(crate) async fn mark_all_notifications_read_handler(
     state
         .notifications
         .write()
-        .expect("notification lock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .mark_all_read();
     StatusCode::NO_CONTENT
 }
@@ -911,7 +911,7 @@ pub(crate) async fn apply_template_handler(
 ///
 /// Compatible with Prometheus scrape configs and Grafana data sources.
 pub(crate) async fn metrics_prometheus_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let m = state.metrics.read().unwrap();
+    let m = state.metrics.read().unwrap_or_else(|e| e.into_inner());
     let mut out = String::with_capacity(1024);
 
     out.push_str("# HELP cairn_http_requests_total Total HTTP requests handled\n");
@@ -973,66 +973,6 @@ pub(crate) async fn metrics_prometheus_handler(State(state): State<AppState>) ->
             "text/plain; version=0.0.4; charset=utf-8",
         )],
         out,
-    )
-}
-
-// ── Request log handler (now served by lib.rs catalog; kept for OTLP export) ─
-
-#[allow(dead_code)]
-#[derive(Deserialize)]
-pub(crate) struct LogsQuery {
-    /// Maximum entries to return (default 100, max 500).
-    #[serde(default = "default_logs_limit")]
-    limit: usize,
-    /// Comma-separated level filter: "info", "warn", "error".  Omit = all levels.
-    level: Option<String>,
-}
-
-#[allow(dead_code)]
-fn default_logs_limit() -> usize {
-    100
-}
-
-/// `GET /v1/admin/logs` — now served by the catalog-driven handler in lib.rs.
-/// This handler is retained for the OTLP export endpoint which also reads request logs.
-#[allow(dead_code)]
-pub(crate) async fn list_request_logs_handler(
-    State(state): State<AppState>,
-    Query(q): Query<LogsQuery>,
-) -> impl IntoResponse {
-    let limit = q.limit.min(500);
-    let level_filter: Vec<&'static str> = q
-        .level
-        .as_deref()
-        .map(|s| {
-            s.split(',')
-                .filter_map(|l| match l.trim() {
-                    "info" => Some("info"),
-                    "warn" => Some("warn"),
-                    "error" => Some("error"),
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let entries: Vec<LogEntry> = match state.request_log.read() {
-        Ok(log) => log
-            .tail(limit, &level_filter)
-            .into_iter()
-            .cloned()
-            .collect(),
-        Err(_) => vec![],
-    };
-
-    let total = entries.len();
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "entries": entries,
-            "total":   total,
-            "limit":   limit,
-        })),
     )
 }
 

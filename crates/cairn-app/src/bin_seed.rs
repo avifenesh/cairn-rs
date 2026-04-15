@@ -34,7 +34,7 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
             .create(&project, SessionId::new(*id))
             .await
         {
-            eprintln!("seed: session {id}: {e}");
+            tracing::warn!("seed: session {id}: {e}");
         }
     }
 
@@ -58,7 +58,7 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
             .start(&project, &SessionId::new(*sess), RunId::new(*run), None)
             .await
         {
-            eprintln!("seed: run {run}: {e}");
+            tracing::warn!("seed: run {run}: {e}");
         }
     }
     let _ = state.runtime.runs.complete(&RunId::new("run_a")).await;
@@ -105,7 +105,7 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
             .submit(&project, TaskId::new(*tid), Some(RunId::new(*rid)), None, 0)
             .await
         {
-            eprintln!("seed: task {tid}: {e}");
+            tracing::warn!("seed: task {tid}: {e}");
         }
     }
     // Complete task_01–04
@@ -172,7 +172,7 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
             )
             .await
         {
-            eprintln!("seed: approval {aid}: {e}");
+            tracing::warn!("seed: approval {aid}: {e}");
         }
     }
     let _ = state
@@ -274,11 +274,11 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
             )
             .await
         {
-            eprintln!("seed: audit {action}/{rid}: {e}");
+            tracing::warn!("seed: audit {action}/{rid}: {e}");
         }
     }
 
-    eprintln!(
+    tracing::info!(
         "seed: demo data ready — {} sessions, {} runs, {} tasks, {} approvals, {} audit entries",
         s_ids.len(),
         run_defs.len(),
