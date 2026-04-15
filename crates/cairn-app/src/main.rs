@@ -6,6 +6,8 @@
 //!   cairn-app --port 8080             # custom port
 //!   cairn-app --addr 0.0.0.0          # bind all interfaces
 //!
+mod bin_state;
+mod bin_types;
 #[allow(dead_code)]
 mod bundles;
 #[allow(dead_code)]
@@ -17,6 +19,11 @@ mod sse_hooks;
 mod templates;
 #[allow(dead_code)]
 mod validate;
+
+#[allow(unused_imports)]
+use bin_state::*;
+#[allow(unused_imports)]
+use bin_types::*;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -35,18 +42,18 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Json;
 use axum::Router;
+#[allow(unused_imports)]
 use cairn_api::auth::{
     AuthPrincipal, Authenticator, ServiceTokenAuthenticator, ServiceTokenRegistry,
 };
 use cairn_api::bootstrap::{BootstrapConfig, DeploymentMode, EncryptionKeySource, StorageBackend};
 use cairn_domain::{ApprovalDecision, ApprovalId, ProjectKey, RunId, TaskId};
-use cairn_memory::in_memory::{InMemoryDocumentStore, InMemoryRetrieval};
-use cairn_memory::pipeline::{IngestPipeline, ParagraphChunker};
 use cairn_runtime::approvals::ApprovalService;
 use cairn_runtime::provider_health::ProviderHealthService;
 use cairn_runtime::sessions::SessionService;
 use cairn_runtime::tasks::TaskService;
 use cairn_runtime::{CredentialService, DefaultsService, RecoveryService};
+#[allow(unused_imports)]
 use cairn_runtime::{InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider};
 use cairn_store::pg::PgMigrationRunner;
 use cairn_store::pg::{PgAdapter, PgEventLog};
@@ -64,399 +71,9 @@ use sqlx::sqlite::SqlitePoolOptions;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
-// ── Postgres backend ──────────────────────────────────────────────────────────
-
-/// Bundled Postgres connection handles.
-///
-/// Created at startup when `--db postgres://...` is supplied.
-/// Appends go to both Postgres (durable) and InMemory (read models + SSE);
-/// event log replays (GET /v1/events) are served from Postgres when present.
-#[derive(Clone)]
-struct PgBackend {
-    event_log: Arc<PgEventLog>,
-    adapter: Arc<PgAdapter>,
-}
-
-/// Bundled SQLite connection handles.
-///
-/// Created at startup when `--db sqlite:path` or a bare `.db` path is supplied.
-/// Appends go to both SQLite (durable) and InMemory (read models + SSE).
-#[derive(Clone)]
-struct SqliteBackend {
-    event_log: Arc<SqliteEventLog>,
-    adapter: Arc<SqliteAdapter>,
-    path: PathBuf,
-}
-
-// ── Rate limiting ─────────────────────────────────────────────────────────────
-
-/// One sliding-window bucket per identity key (token or IP).
-#[derive(Clone)]
-struct RateBucket {
-    /// Number of requests in the current 60-second window.
-    count: u32,
-    /// When the current window started (used to decide when to reset).
-    window_start: Instant,
-}
-/// Shared rate-limit table.  Keyed by token (preferred) or IP address.
-type RateLimitTable = Arc<Mutex<HashMap<String, RateBucket>>>;
-
-/// Per-token limit: requests per minute.
-const RATE_LIMIT_TOKEN: u32 = 1_000;
-/// Per-IP limit when no token is present: requests per minute.
-const RATE_LIMIT_IP: u32 = 100;
-/// Window duration.
-const RATE_WINDOW: Duration = Duration::from_secs(60);
-
-// ── App state ────────────────────────────────────────────────────────────────
-
-#[derive(Clone)]
-/// Binary-specific state for routes not covered by the lib.rs catalog.
-///
-/// Why the split: `cairn_app::AppState` (lib.rs) owns the catalog of 197+
-/// provider-agnostic routes. This struct adds binary-specific routes that
-/// depend on concrete store backends (Postgres/SQLite), WebSocket, or system
-/// introspection. Collapsing them would leak backend deps into the lib.
-///
-/// Shares `runtime` and `tokens` with `cairn_app::AppState` (same Arc).
-/// Fields like `document_store`, `retrieval`, and `ingest` are served
-/// exclusively by the catalog router and are NOT duplicated here.
-struct AppState {
-    runtime: Arc<InMemoryServices>,
-    started_at: Arc<Instant>,
-    tokens: Arc<ServiceTokenRegistry>,
-    pg: Option<Arc<PgBackend>>,
-    sqlite: Option<Arc<SqliteBackend>>,
-    mode: DeploymentMode,
-    /// Shared with lib.rs AppState — kept for seed_demo_data and dead handlers
-    /// pending cleanup.
-    #[allow(dead_code)]
-    document_store: Arc<InMemoryDocumentStore>,
-    #[allow(dead_code)]
-    retrieval: Arc<InMemoryRetrieval>,
-    #[allow(dead_code)]
-    ingest: Arc<IngestPipeline<Arc<InMemoryDocumentStore>, ParagraphChunker>>,
-    ollama: Option<Arc<OllamaProvider>>,
-    /// Heavy/generate provider: CAIRN_BRAIN_URL (gemma4 31B etc.)
-    openai_compat_brain: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
-    /// Light/embed+worker provider: CAIRN_WORKER_URL (qwen3.5, qwen3-embedding)
-    openai_compat_worker: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
-    /// OpenRouter provider: OPENROUTER_API_KEY activates https://openrouter.ai/api/v1
-    openai_compat_openrouter: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
-    /// Backward-compat alias: first of brain/worker/openrouter that is configured.
-    openai_compat: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
-    metrics: Arc<std::sync::RwLock<AppMetrics>>,
-    rate_limits: RateLimitTable,
-    request_log: Arc<std::sync::RwLock<RequestLogBuffer>>,
-    notifications: Arc<std::sync::RwLock<NotificationBuffer>>,
-    templates: Arc<templates::TemplateRegistry>,
-    entitlements: Arc<entitlements::EntitlementService>,
-    bedrock: Option<Arc<cairn_providers::backends::bedrock::Bedrock>>,
-    process_role: cairn_api::bootstrap::ProcessRole,
-}
-
-// ── Notification buffer ───────────────────────────────────────────────────────
-
-const NOTIF_RING_SIZE: usize = 200;
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NotifType {
-    ApprovalRequested,
-    ApprovalResolved,
-    RunCompleted,
-    RunFailed,
-    TaskStuck,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct Notification {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub notif_type: NotifType,
-    pub message: String,
-    /// Entity ID the notification links to (run_id, approval_id, task_id, …).
-    pub entity_id: Option<String>,
-    /// Hash navigation target for the UI (e.g. "runs", "approvals").
-    pub href: String,
-    pub read: bool,
-    pub created_at: u64,
-}
-
-pub struct NotificationBuffer {
-    entries: std::collections::VecDeque<Notification>,
-}
-
-impl NotificationBuffer {
-    fn new() -> Self {
-        Self {
-            entries: std::collections::VecDeque::with_capacity(NOTIF_RING_SIZE),
-        }
-    }
-
-    fn push(&mut self, n: Notification) {
-        if self.entries.len() == NOTIF_RING_SIZE {
-            self.entries.pop_front();
-        }
-        self.entries.push_back(n);
-    }
-
-    fn list(&self, limit: usize) -> Vec<&Notification> {
-        self.entries
-            .iter()
-            .rev()
-            .take(limit)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect()
-    }
-
-    fn mark_read(&mut self, id: &str) -> bool {
-        if let Some(n) = self.entries.iter_mut().find(|n| n.id == id) {
-            n.read = true;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn mark_all_read(&mut self) {
-        for n in &mut self.entries {
-            n.read = true;
-        }
-    }
-
-    fn unread_count(&self) -> usize {
-        self.entries.iter().filter(|n| !n.read).count()
-    }
-}
-
-// ── Request metrics ──────────────────────────────────────────────────────────
-
-/// Rolling-window request metrics.  No external crates required.
-///
-/// Latency samples are stored in a fixed-size ring buffer; percentiles are
-/// computed on-demand from a sorted copy of the buffer (cheap for N=1000).
-const LATENCY_RING_SIZE: usize = 1_000;
-
-struct AppMetrics {
-    total_requests: u64,
-    requests_by_path: std::collections::HashMap<String, u64>,
-    errors_by_status: std::collections::HashMap<u16, u64>,
-    /// Rolling window — LATENCY_RING_SIZE most-recent latencies in ms.
-    latency_ring: std::collections::VecDeque<u64>,
-}
-
-impl AppMetrics {
-    fn new() -> Self {
-        Self {
-            total_requests: 0,
-            requests_by_path: std::collections::HashMap::new(),
-            errors_by_status: std::collections::HashMap::new(),
-            latency_ring: std::collections::VecDeque::with_capacity(LATENCY_RING_SIZE),
-        }
-    }
-    fn percentile(&self, p: f64) -> u64 {
-        if self.latency_ring.is_empty() {
-            return 0;
-        }
-        let mut sorted: Vec<u64> = self.latency_ring.iter().copied().collect();
-        sorted.sort_unstable();
-        let idx = ((p / 100.0) * (sorted.len() as f64 - 1.0)).round() as usize;
-        sorted[idx.min(sorted.len() - 1)]
-    }
-
-    fn avg_latency_ms(&self) -> u64 {
-        if self.latency_ring.is_empty() {
-            return 0;
-        }
-        self.latency_ring.iter().sum::<u64>() / self.latency_ring.len() as u64
-    }
-
-    fn error_rate(&self) -> f64 {
-        if self.total_requests == 0 {
-            return 0.0;
-        }
-        let errors: u64 = self.errors_by_status.values().sum();
-        errors as f64 / self.total_requests as f64
-    }
-}
-
-// ── Request log ring buffer ───────────────────────────────────────────────────
-
-/// Maximum number of structured log entries retained in memory.
-const LOG_RING_SIZE: usize = 2_000;
-
-/// One structured request log entry.
-#[derive(Clone, Serialize)]
-pub struct LogEntry {
-    pub timestamp: String,
-    pub level: &'static str,
-    pub message: String,
-    pub request_id: String,
-    pub method: String,
-    pub path: String,
-    pub query: Option<String>,
-    pub status: u16,
-    pub latency_ms: u64,
-    /// Wall-clock start time in Unix nanoseconds.  Used for OTLP span export.
-    pub start_time_unix_ns: u64,
-}
-
-/// Fixed-capacity FIFO ring buffer of structured log entries.
-pub struct RequestLogBuffer {
-    entries: std::collections::VecDeque<LogEntry>,
-}
-
-impl RequestLogBuffer {
-    fn new() -> Self {
-        Self {
-            entries: std::collections::VecDeque::with_capacity(LOG_RING_SIZE),
-        }
-    }
-    /// Return the last `n` entries whose level matches the filter (empty = all).
-    fn tail(&self, n: usize, level_filter: &[&str]) -> Vec<&LogEntry> {
-        self.entries
-            .iter()
-            .rev()
-            .filter(|e| level_filter.is_empty() || level_filter.contains(&e.level))
-            .take(n)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect()
-    }
-}
-
-// ── Request-ID type ──────────────────────────────────────────────────────────
-
-/// A per-request correlation ID stored in request extensions.
-///
-/// Populated by `metrics_middleware` before calling `next.run()` so every
-/// downstream handler and future middleware can read it without re-extracting
-/// from the response (which is unavailable until after the handler returns).
-///
-/// Preference order:
-///   1. Client-supplied `X-Request-ID` header (validated: ASCII, ≤ 128 chars).
-///   2. Freshly generated UUID v4.
-#[derive(Clone, Debug)]
-pub struct RequestId(pub String);
-
-// ── Response types ───────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-struct ApiError {
-    code: &'static str,
-    message: String,
-}
-
-fn not_found(message: impl Into<String>) -> (StatusCode, Json<ApiError>) {
-    (
-        StatusCode::NOT_FOUND,
-        Json(ApiError {
-            code: "not_found",
-            message: message.into(),
-        }),
-    )
-}
-
-fn internal_error(message: impl Into<String>) -> (StatusCode, Json<ApiError>) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiError {
-            code: "internal_error",
-            message: message.into(),
-        }),
-    )
-}
-
-fn bad_request(message: impl Into<String>) -> (StatusCode, Json<ApiError>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(ApiError {
-            code: "bad_request",
-            message: message.into(),
-        }),
-    )
-}
-
-// ── Pagination headers ────────────────────────────────────────────────────────
-
-/// Build the four standard pagination response headers.
-///
-/// Returned as an `AppendHeaders` value that axum can include in a response
-/// tuple alongside the body — e.g. `Ok((pagination_headers(...), Json(page)))`.
-///
-/// - `X-Total-Count` — total items across all pages
-/// - `X-Page`        — 1-based current page number
-/// - `X-Per-Page`    — items per page (the effective limit)
-/// - `Link`          — RFC 5988 next/last relations for cursor navigation
-fn pagination_headers(
-    path: &str,
-    total: usize,
-    offset: usize,
-    limit: usize,
-) -> axum::response::AppendHeaders<[(String, String); 4]> {
-    let per_page = limit.max(1);
-    let page = offset / per_page + 1;
-    let last_page = total.max(1).div_ceil(per_page);
-    let has_next = offset + per_page < total;
-
-    let link = if has_next {
-        format!(
-            "<{path}?page={next}>; rel=\"next\", <{path}?page={last}>; rel=\"last\"",
-            next = page + 1,
-            last = last_page,
-        )
-    } else {
-        format!("<{path}?page={last_page}>; rel=\"last\"")
-    };
-
-    axum::response::AppendHeaders([
-        ("X-Total-Count".to_owned(), total.to_string()),
-        ("X-Page".to_owned(), page.to_string()),
-        ("X-Per-Page".to_owned(), per_page.to_string()),
-        ("Link".to_owned(), link),
-    ])
-}
-
-// ── Query param structs ───────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct PaginationQuery {
-    #[serde(default = "default_limit")]
-    limit: usize,
-    #[serde(default)]
-    offset: usize,
-}
-
-fn default_limit() -> usize {
-    50
-}
-
-/// Optional project scope for filtered queries.
-#[derive(Deserialize)]
-struct ProjectQuery {
-    tenant_id: Option<String>,
-    workspace_id: Option<String>,
-    project_id: Option<String>,
-    #[serde(default = "default_limit")]
-    limit: usize,
-    #[serde(default)]
-    offset: usize,
-}
-
-impl ProjectQuery {
-    fn project_key(&self) -> Option<ProjectKey> {
-        match (&self.tenant_id, &self.workspace_id, &self.project_id) {
-            (Some(t), Some(w), Some(p)) => {
-                Some(ProjectKey::new(t.as_str(), w.as_str(), p.as_str()))
-            }
-            _ => None,
-        }
-    }
-}
+// PgBackend, SqliteBackend, RateBucket, AppState, NotificationBuffer,
+// AppMetrics, RequestLogBuffer → bin_state.rs
+// RequestId, ApiError, pagination_headers, PaginationQuery, ProjectQuery → bin_types.rs
 
 // ── Metrics middleware ────────────────────────────────────────────────────────
 
