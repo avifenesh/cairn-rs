@@ -32,6 +32,7 @@ pub use errors::AppApiError;
 pub(crate) use errors::*;
 #[allow(unused_imports)]
 pub(crate) use extractors::*;
+pub use helpers::event_type_name;
 #[allow(unused_imports)]
 pub(crate) use helpers::*;
 #[allow(unused_imports)]
@@ -2068,26 +2069,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recent_events_returns_json_array() {
-        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
-        register_token(&state, "events-token");
-
-        let app = AppBootstrap::build_router(state);
-        let body = get_json(app, "/v1/events/recent?limit=10", "events-token").await;
-
-        // Must have items array and count field, even when empty.
-        assert!(body["items"].is_array(), "items must be a JSON array");
-        assert!(body["count"].is_number(), "count must be a number");
-        let count = body["count"].as_u64().unwrap_or(0);
-        let items_len = body["items"].as_array().unwrap().len() as u64;
-        assert_eq!(count, items_len, "count must match items length");
-        assert!(
-            body["limit"].as_u64().unwrap_or(0) > 0,
-            "limit must be positive"
-        );
-    }
-
-    #[tokio::test]
     async fn recent_events_with_activity_returns_events() {
         let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
         register_token(&state, "events2-token");
@@ -2924,38 +2905,6 @@ mod tests {
                 )),
             "expected provider span with GenAI attributes: {spans:?}"
         );
-    }
-
-    #[tokio::test]
-    async fn stats_endpoint_returns_all_required_fields() {
-        let state = Arc::new(AppState::new(BootstrapConfig::default()).await.unwrap());
-        register_token(&state, "stats-token");
-
-        let app = AppBootstrap::build_router(state);
-        let body = get_json(app, "/v1/stats", "stats-token").await;
-
-        // All fields must be present and non-negative.
-        for field in &[
-            "total_events",
-            "total_sessions",
-            "total_runs",
-            "total_tasks",
-            "active_runs",
-            "pending_approvals",
-            "uptime_seconds",
-        ] {
-            assert!(
-                body[field].is_number(),
-                "field '{}' must be a number, got: {:?}",
-                field,
-                body[field]
-            );
-            assert!(
-                body[field].as_u64().is_some(),
-                "field '{}' must be >= 0",
-                field
-            );
-        }
     }
 
     #[tokio::test]

@@ -480,3 +480,183 @@ pub(crate) async fn refresh_activity_metrics(state: &AppState) {
 fn unauthorized_response() -> Response {
     AppApiError::new(StatusCode::UNAUTHORIZED, "unauthorized", "unauthorized").into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Request;
+
+    // ── auth_exempt_path ───────────────────────────────────────────────
+
+    #[test]
+    fn exempt_infra_endpoints() {
+        for path in &[
+            "/health",
+            "/healthz",
+            "/ready",
+            "/metrics",
+            "/version",
+            "/openapi.json",
+            "/docs",
+        ] {
+            assert!(auth_exempt_path(path), "{path} should be auth-exempt");
+        }
+    }
+
+    #[test]
+    fn exempt_public_api_endpoints() {
+        assert!(auth_exempt_path("/v1/onboarding/templates"));
+        assert!(auth_exempt_path("/v1/stream"));
+        assert!(auth_exempt_path("/v1/docs"));
+    }
+
+    #[test]
+    fn exempt_webhook_paths() {
+        assert!(auth_exempt_path("/v1/webhooks/github"));
+        assert!(auth_exempt_path("/v1/webhooks/slack"));
+        assert!(auth_exempt_path("/v1/webhooks/any-integration"));
+    }
+
+    #[test]
+    fn exempt_static_ui_paths() {
+        assert!(auth_exempt_path("/"));
+        assert!(auth_exempt_path("/index.html"));
+        assert!(auth_exempt_path("/favicon.svg"));
+        assert!(auth_exempt_path("/assets/index-abc123.js"));
+        assert!(auth_exempt_path("/assets/style.css"));
+    }
+
+    #[test]
+    fn exempt_spa_fallback_non_v1() {
+        // Any path that does NOT start with /v1/ is SPA fallback.
+        assert!(auth_exempt_path("/settings"));
+        assert!(auth_exempt_path("/runs/abc"));
+        assert!(auth_exempt_path("/dashboard"));
+    }
+
+    #[test]
+    fn not_exempt_v1_api_routes() {
+        assert!(!auth_exempt_path("/v1/runs"));
+        assert!(!auth_exempt_path("/v1/prompts"));
+        assert!(!auth_exempt_path("/v1/admin/settings"));
+        assert!(!auth_exempt_path("/v1/agents"));
+        assert!(!auth_exempt_path("/v1/sessions"));
+    }
+
+    // ── bearer_token ───────────────────────────────────────────────────
+
+    fn make_request(uri: &str, auth_header: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder().uri(uri);
+        if let Some(header) = auth_header {
+            builder = builder.header("Authorization", header);
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn bearer_from_auth_header() {
+        let req = make_request("/v1/runs", Some("Bearer my-secret-token"));
+        assert_eq!(bearer_token(&req), Some("my-secret-token"));
+    }
+
+    #[test]
+    fn bearer_from_query_param() {
+        let req = make_request("/v1/stream?token=sse-token-123", None);
+        assert_eq!(bearer_token(&req), Some("sse-token-123"));
+    }
+
+    #[test]
+    fn bearer_from_query_with_other_params() {
+        let req = make_request("/v1/stream?follow=true&token=t1&limit=10", None);
+        assert_eq!(bearer_token(&req), Some("t1"));
+    }
+
+    #[test]
+    fn bearer_header_takes_priority_over_query() {
+        let req = make_request("/v1/stream?token=query-tok", Some("Bearer header-tok"));
+        assert_eq!(bearer_token(&req), Some("header-tok"));
+    }
+
+    #[test]
+    fn bearer_none_when_missing() {
+        let req = make_request("/v1/runs", None);
+        assert_eq!(bearer_token(&req), None);
+    }
+
+    #[test]
+    fn bearer_none_for_non_bearer_auth() {
+        let req = make_request("/v1/runs", Some("Basic dXNlcjpwYXNz"));
+        assert_eq!(bearer_token(&req), None);
+    }
+
+    #[test]
+    fn bearer_none_for_empty_query_token() {
+        let req = make_request("/v1/stream?token=", None);
+        assert_eq!(bearer_token(&req), None);
+    }
+
+    // ── request_rate_limit_key ─────────────────────────────────────────
+
+    #[test]
+    fn rate_limit_key_from_forwarded_for() {
+        let req = Request::builder()
+            .uri("/v1/runs")
+            .header("x-forwarded-for", "10.0.0.1")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(request_rate_limit_key(&req), Some("10.0.0.1".to_owned()));
+    }
+
+    #[test]
+    fn rate_limit_key_none_without_header() {
+        let req = Request::builder()
+            .uri("/v1/runs")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(request_rate_limit_key(&req), None);
+    }
+
+    #[test]
+    fn rate_limit_key_none_for_empty_header() {
+        let req = Request::builder()
+            .uri("/v1/runs")
+            .header("x-forwarded-for", "  ")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(request_rate_limit_key(&req), None);
+    }
+
+    // ── principal_member_id ────────────────────────────────────────────
+
+    use cairn_domain::ids::{OperatorId, TenantId};
+    use cairn_domain::tenancy::TenantKey;
+
+    fn test_tenant() -> TenantKey {
+        TenantKey {
+            tenant_id: TenantId::new("t"),
+        }
+    }
+
+    #[test]
+    fn member_id_for_operator() {
+        let principal = AuthPrincipal::Operator {
+            operator_id: OperatorId::new("op-1"),
+            tenant: test_tenant(),
+        };
+        assert_eq!(principal_member_id(&principal), Some("op-1"));
+    }
+
+    #[test]
+    fn member_id_for_service_account() {
+        let principal = AuthPrincipal::ServiceAccount {
+            name: "sa-ci".into(),
+            tenant: test_tenant(),
+        };
+        assert_eq!(principal_member_id(&principal), Some("sa-ci"));
+    }
+
+    #[test]
+    fn member_id_none_for_system() {
+        assert_eq!(principal_member_id(&AuthPrincipal::System), None);
+    }
+}
