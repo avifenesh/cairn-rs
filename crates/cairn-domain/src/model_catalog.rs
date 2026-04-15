@@ -500,6 +500,12 @@ pub fn import_litellm_json(json: &str) -> Vec<ModelEntry> {
             continue;
         }
 
+        // Filter out non-chat models (embedding, image_generation, rerank, tts, moderation)
+        let mode = val.get("mode").and_then(|v| v.as_str()).unwrap_or("chat");
+        if mode != "chat" && mode != "completion" {
+            continue;
+        }
+
         let provider = val
             .get("litellm_provider")
             .and_then(|v| v.as_str())
@@ -566,6 +572,11 @@ pub fn import_litellm_json(json: &str) -> Vec<ModelEntry> {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
+        let reasoning = val
+            .get("supports_reasoning")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         let mut input_modalities = vec!["text".to_owned()];
         if supports_vision {
             input_modalities.push("image".to_owned());
@@ -603,7 +614,7 @@ pub fn import_litellm_json(json: &str) -> Vec<ModelEntry> {
             max_tokens: max_output,
             min_cacheable_tokens: 1024,
             cache_type: "automatic".to_owned(),
-            reasoning: false,
+            reasoning,
             supports_tools,
             supports_streaming: true,
             supports_json_mode: supports_json,
