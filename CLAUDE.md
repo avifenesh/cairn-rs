@@ -105,6 +105,7 @@ domain → store → runtime → {memory, graph, evals, tools, agent, signal, ch
 | `cairn-graph` | Entity/provenance graph: nodes, edges, 6 query families, graph-backed expansion. |
 | `cairn-evals` | Prompt registry, version/release lifecycle, scorecards, bandit experiments. |
 | `cairn-tools` | Tool invocation, stdio JSON-RPC plugin host, permission gates, concurrency limits. |
+| `cairn-tools-derive` | Proc-macro helpers for built-in and plugin-exposed tool definitions. |
 | `cairn-orchestrator` | Agent orchestration loop, step execution, event emission. |
 | `cairn-agent` | Higher-level agent patterns: ReAct, reflection, streaming, subagent spawning. |
 | `cairn-workspace` | Sandbox workspace primitive (RFC 016): repo store, clone cache, sandbox lifecycle. |
@@ -115,6 +116,7 @@ domain → store → runtime → {memory, graph, evals, tools, agent, signal, ch
 | `cairn-api` | Extracted HTTP route handlers (admin, evals, graph, memory, triggers, etc.). |
 | `cairn-signal` | Signal detection and routing for event-driven automation (RFC 022). |
 | `cairn-channels` | Notification channels: Slack, email, webhook delivery. |
+| `cairn-plugin-proto` | Plugin wire protocol types and capability declarations. |
 
 ### Event Sourcing
 

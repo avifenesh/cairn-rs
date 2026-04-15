@@ -30,6 +30,7 @@ Purpose: concrete architecture decisions for the cairn-rs control plane
 20. [RFC 020 - Durable Recovery](./020-durable-recovery.md) — startup dependency graph, dual checkpoint, ToolCallId idempotency, RetrySafety enforcement
 21. [RFC 021 - Control Plane Protocols](./021-control-plane-protocols.md) — SQ/EQ protocol, A2A Agent Card, OTLP GenAI export
 22. [RFC 022 - Triggers](./022-triggers.md) — signal capture, trigger evaluation, fire-once semantics
+23. [RFC 023 - Business Model and Cloud Architecture](./023-business-model-and-cloud-architecture.md) — BSL 1.1 licensing, cloud architecture, commercial packaging
 
 ## How To Use These RFCs
 
