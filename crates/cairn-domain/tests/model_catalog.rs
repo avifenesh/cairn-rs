@@ -5,12 +5,16 @@
 //! expected models, filtering works correctly, and `capabilities()` maps
 //! each entry's boolean flags to the right `ProviderCapability` set.
 //!
-//! Built-in catalog snapshot (5 models as of GAP-001):
-//!   claude-3-5-sonnet-20241022  anthropic  Brain   200k ctx
-//!   claude-3-haiku-20240307     anthropic  Light   200k ctx
-//!   gpt-4o                      openai     Brain   128k ctx
-//!   gpt-4o-mini                 openai     Light   128k ctx
-//!   meta-llama/llama-3.1-…:free openrouter Light   131k ctx  Free
+//! Built-in catalog snapshot (9 models):
+//!   gpt-4o                                  openai     Brain  128k ctx
+//!   gpt-4o-mini                             openai     Light  128k ctx
+//!   claude-opus-4-6                         anthropic  Brain  1M   ctx
+//!   claude-sonnet-4-6                       anthropic  Mid    1M   ctx
+//!   claude-haiku-4-5                        anthropic  Light  1M   ctx
+//!   us.anthropic.claude-sonnet-4-6          bedrock    Mid    1M   ctx
+//!   us.anthropic.claude-haiku-4-5-20251001  bedrock    Light  1M   ctx
+//!   meta-llama/llama-3.3-70b-instruct:free  openrouter Mid    65k  ctx  Free
+//!   google/gemma-3-27b-it:free              openrouter Mid    131k ctx  Free
 
 use cairn_domain::{
     model_catalog::{builtin_catalog, ModelEntry, ModelRegistry, ModelTier},
@@ -46,15 +50,15 @@ fn entry(id: &str, provider: &str, tier: ModelTier) -> ModelEntry {
     }
 }
 
-// ── 1. builtin_catalog() ships exactly 5 models ───────────────────────────────
+// ── 1. builtin_catalog() ships exactly 9 models ───────────────────────────────
 
 #[test]
-fn builtin_catalog_has_exactly_five_models() {
+fn builtin_catalog_has_exactly_nine_models() {
     let cat = builtin_catalog();
     assert_eq!(
         cat.len(),
-        5,
-        "GAP-001 requires 5 bundled models; got {}",
+        9,
+        "catalog requires 9 bundled models; got {}",
         cat.len()
     );
 }
@@ -62,19 +66,23 @@ fn builtin_catalog_has_exactly_five_models() {
 // ── 2. ModelRegistry loads builtin_catalog correctly ─────────────────────────
 
 #[test]
-fn registry_with_builtin_catalog_has_all_five_entries() {
+fn registry_with_builtin_catalog_has_all_nine_entries() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
 
-    assert_eq!(reg.len(), 5);
+    assert_eq!(reg.len(), 9);
     assert!(!reg.is_empty());
 
-    // All 5 bundled IDs must be retrievable.
+    // All 9 bundled IDs must be retrievable.
     for id in [
-        "claude-3-5-sonnet-20241022",
-        "claude-3-haiku-20240307",
         "gpt-4o",
         "gpt-4o-mini",
-        "meta-llama/llama-3.1-8b-instruct:free",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-haiku-4-5-20251001",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "google/gemma-3-27b-it:free",
     ] {
         assert!(reg.get(id).is_some(), "missing expected model: {id}");
     }
@@ -90,10 +98,7 @@ fn list_by_tier_brain_returns_two_models() {
     assert_eq!(brain.len(), 2, "Brain tier must have exactly 2 models");
 
     let ids: Vec<_> = brain.iter().map(|e| e.id.as_str()).collect();
-    assert!(
-        ids.contains(&"claude-3-5-sonnet-20241022"),
-        "Sonnet must be Brain"
-    );
+    assert!(ids.contains(&"claude-opus-4-6"), "Opus must be Brain");
     assert!(ids.contains(&"gpt-4o"), "GPT-4o must be Brain");
 }
 
@@ -105,23 +110,35 @@ fn list_by_tier_light_returns_three_models() {
     assert_eq!(light.len(), 3, "Light tier must have exactly 3 models");
 
     let ids: Vec<_> = light.iter().map(|e| e.id.as_str()).collect();
-    assert!(
-        ids.contains(&"claude-3-haiku-20240307"),
-        "Haiku must be Light"
-    );
+    assert!(ids.contains(&"claude-haiku-4-5"), "Haiku must be Light");
     assert!(ids.contains(&"gpt-4o-mini"), "GPT-4o Mini must be Light");
     assert!(
-        ids.contains(&"meta-llama/llama-3.1-8b-instruct:free"),
-        "Llama must be Light"
+        ids.contains(&"us.anthropic.claude-haiku-4-5-20251001"),
+        "Bedrock Haiku must be Light"
     );
 }
 
 #[test]
-fn list_by_tier_mid_returns_empty_for_builtin_catalog() {
+fn list_by_tier_mid_returns_four_models() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
     let mid = reg.by_tier(ModelTier::Mid);
 
-    assert!(mid.is_empty(), "no builtin models are in the Mid tier");
+    assert_eq!(mid.len(), 4, "Mid tier must have exactly 4 models");
+
+    let ids: Vec<_> = mid.iter().map(|e| e.id.as_str()).collect();
+    assert!(ids.contains(&"claude-sonnet-4-6"), "Sonnet must be Mid");
+    assert!(
+        ids.contains(&"us.anthropic.claude-sonnet-4-6"),
+        "Bedrock Sonnet must be Mid"
+    );
+    assert!(
+        ids.contains(&"meta-llama/llama-3.3-70b-instruct:free"),
+        "Llama must be Mid"
+    );
+    assert!(
+        ids.contains(&"google/gemma-3-27b-it:free"),
+        "Gemma must be Mid"
+    );
 }
 
 #[test]
@@ -129,9 +146,9 @@ fn list_by_tier_excludes_disabled_entries() {
     let mut reg = ModelRegistry::with_entries(builtin_catalog());
 
     // Disable one Brain model.
-    let mut sonnet = reg.get("claude-3-5-sonnet-20241022").unwrap().clone();
-    sonnet.enabled = false;
-    reg.register(sonnet);
+    let mut opus = reg.get("claude-opus-4-6").unwrap().clone();
+    opus.enabled = false;
+    reg.register(opus);
 
     let brain = reg.by_tier(ModelTier::Brain);
     assert_eq!(brain.len(), 1, "disabled model excluded from by_tier");
@@ -141,16 +158,17 @@ fn list_by_tier_excludes_disabled_entries() {
 // ── 4. list_by_provider filters correctly ────────────────────────────────────
 
 #[test]
-fn list_by_provider_anthropic_returns_two_models() {
+fn list_by_provider_anthropic_returns_three_models() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
     let anthropic = reg.by_provider("anthropic");
 
-    assert_eq!(anthropic.len(), 2);
+    assert_eq!(anthropic.len(), 3);
     assert!(anthropic.iter().all(|e| e.provider == "anthropic"));
 
     let ids: Vec<_> = anthropic.iter().map(|e| e.id.as_str()).collect();
-    assert!(ids.contains(&"claude-3-5-sonnet-20241022"));
-    assert!(ids.contains(&"claude-3-haiku-20240307"));
+    assert!(ids.contains(&"claude-opus-4-6"));
+    assert!(ids.contains(&"claude-sonnet-4-6"));
+    assert!(ids.contains(&"claude-haiku-4-5"));
 }
 
 #[test]
@@ -165,13 +183,18 @@ fn list_by_provider_openai_returns_two_models() {
 }
 
 #[test]
-fn list_by_provider_openrouter_returns_one_model() {
+fn list_by_provider_openrouter_returns_two_models() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
     let openrouter = reg.by_provider("openrouter");
 
-    assert_eq!(openrouter.len(), 1);
-    assert_eq!(openrouter[0].id, "meta-llama/llama-3.1-8b-instruct:free");
-    assert_eq!(openrouter[0].cost_type, ProviderCostType::Free);
+    assert_eq!(openrouter.len(), 2);
+    assert!(openrouter
+        .iter()
+        .all(|e| e.cost_type == ProviderCostType::Free));
+
+    let ids: Vec<_> = openrouter.iter().map(|e| e.id.as_str()).collect();
+    assert!(ids.contains(&"meta-llama/llama-3.3-70b-instruct:free"));
+    assert!(ids.contains(&"google/gemma-3-27b-it:free"));
 }
 
 #[test]
@@ -185,7 +208,7 @@ fn list_by_provider_unknown_returns_empty() {
 #[test]
 fn reload_replaces_all_existing_entries() {
     let mut reg = ModelRegistry::with_entries(builtin_catalog());
-    assert_eq!(reg.len(), 5);
+    assert_eq!(reg.len(), 9);
 
     // After reload only the two new entries remain.
     reg.reload(vec![
@@ -196,7 +219,7 @@ fn reload_replaces_all_existing_entries() {
     assert_eq!(reg.len(), 2, "reload must discard old entries");
 
     // Old entries gone.
-    for old_id in ["claude-3-5-sonnet-20241022", "gpt-4o"] {
+    for old_id in ["claude-opus-4-6", "gpt-4o"] {
         assert!(
             reg.get(old_id).is_none(),
             "{old_id} must be absent after reload"
@@ -226,8 +249,8 @@ fn reload_then_repopulate_gives_fresh_catalog() {
 
     assert_eq!(
         reg.len(),
-        5,
-        "reloading same catalog must restore 5 entries"
+        9,
+        "reloading same catalog must restore 9 entries"
     );
     assert!(reg.get("gpt-4o").is_some());
 }
@@ -237,11 +260,11 @@ fn reload_then_repopulate_gives_fresh_catalog() {
 #[test]
 fn claude_sonnet_capabilities() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
-    let sonnet = reg.get("claude-3-5-sonnet-20241022").unwrap();
+    let sonnet = reg.get("claude-sonnet-4-6").unwrap();
     let caps = sonnet.capabilities();
 
-    // claude-3-5-sonnet: streaming=true, tools=true, json_mode=true,
-    //                    reasoning=false, image input, context=200k
+    // claude-sonnet-4-6: streaming=true, tools=true, json_mode=false,
+    //                    reasoning=false, image input, context=1M
     assert!(
         caps.contains(&ProviderCapability::Streaming),
         "Sonnet: Streaming"
@@ -251,8 +274,8 @@ fn claude_sonnet_capabilities() {
         "Sonnet: ToolUse"
     );
     assert!(
-        caps.contains(&ProviderCapability::StructuredOutput),
-        "Sonnet: StructuredOutput (json_mode)"
+        !caps.contains(&ProviderCapability::StructuredOutput),
+        "Sonnet: no StructuredOutput (json_mode=false)"
     );
     assert!(
         caps.contains(&ProviderCapability::ImageInput),
@@ -260,7 +283,7 @@ fn claude_sonnet_capabilities() {
     );
     assert!(
         caps.contains(&ProviderCapability::HighContextWindow),
-        "Sonnet: HighContextWindow (200k)"
+        "Sonnet: HighContextWindow (1M)"
     );
     assert!(
         !caps.contains(&ProviderCapability::ReasoningTrace),
@@ -271,10 +294,10 @@ fn claude_sonnet_capabilities() {
 #[test]
 fn claude_haiku_capabilities() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
-    let haiku = reg.get("claude-3-haiku-20240307").unwrap();
+    let haiku = reg.get("claude-haiku-4-5").unwrap();
     let caps = haiku.capabilities();
 
-    // haiku: streaming=true, tools=true, json_mode=false, image input, context=200k
+    // haiku: streaming=true, tools=true, json_mode=false, image input, context=1M
     assert!(caps.contains(&ProviderCapability::Streaming));
     assert!(caps.contains(&ProviderCapability::ToolUse));
     assert!(caps.contains(&ProviderCapability::ImageInput));
@@ -304,15 +327,15 @@ fn gpt4o_capabilities() {
 #[test]
 fn llama_free_capabilities() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
-    let llama = reg.get("meta-llama/llama-3.1-8b-instruct:free").unwrap();
+    let llama = reg.get("meta-llama/llama-3.3-70b-instruct:free").unwrap();
     let caps = llama.capabilities();
 
-    // llama: streaming=true, tools=true, json_mode=false, text-only, 131k ctx
+    // llama 3.3: streaming=true, tools=true, json_mode=false, text-only, 65k ctx
     assert!(caps.contains(&ProviderCapability::Streaming));
     assert!(caps.contains(&ProviderCapability::ToolUse));
     assert!(
-        caps.contains(&ProviderCapability::HighContextWindow),
-        "131k >= 100k threshold"
+        !caps.contains(&ProviderCapability::HighContextWindow),
+        "65k < 100k threshold"
     );
     assert!(
         !caps.contains(&ProviderCapability::StructuredOutput),
@@ -382,7 +405,7 @@ fn all_returns_entries_sorted_by_id() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
     let all = reg.all();
 
-    assert_eq!(all.len(), 5);
+    assert_eq!(all.len(), 9);
     for window in all.windows(2) {
         assert!(window[0].id <= window[1].id, "all() must be sorted by id");
     }
@@ -402,11 +425,11 @@ fn user_entry_overrides_builtin_on_same_id() {
     custom.display_name = "GPT-4o (custom)".to_owned();
     reg.register(custom);
 
-    assert_eq!(reg.len(), 5, "override must not add a duplicate");
+    assert_eq!(reg.len(), 9, "override must not add a duplicate");
     assert_eq!(reg.get("gpt-4o").unwrap().tier, ModelTier::Mid);
     assert_eq!(reg.get("gpt-4o").unwrap().display_name, "GPT-4o (custom)");
 
-    // Brain tier should now only have Sonnet.
+    // Brain tier should now only have Opus.
     assert_eq!(reg.by_tier(ModelTier::Brain).len(), 1);
 }
 
@@ -415,7 +438,7 @@ fn user_entry_overrides_builtin_on_same_id() {
 #[test]
 fn estimate_cost_metered_on_claude_sonnet() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
-    let sonnet = reg.get("claude-3-5-sonnet-20241022").unwrap();
+    let sonnet = reg.get("claude-sonnet-4-6").unwrap();
 
     // input: 1M tokens at $3/M = $3.00
     // output: 1M tokens at $15/M = $15.00
@@ -427,7 +450,7 @@ fn estimate_cost_metered_on_claude_sonnet() {
 #[test]
 fn estimate_cost_zero_for_free_model() {
     let reg = ModelRegistry::with_entries(builtin_catalog());
-    let llama = reg.get("meta-llama/llama-3.1-8b-instruct:free").unwrap();
+    let llama = reg.get("meta-llama/llama-3.3-70b-instruct:free").unwrap();
 
     assert_eq!(llama.cost_type, ProviderCostType::Free);
     assert_eq!(
@@ -451,7 +474,7 @@ fn enabled_excludes_disabled_models() {
     }
 
     let enabled = reg.enabled();
-    assert_eq!(enabled.len(), 3, "3 models remain enabled");
+    assert_eq!(enabled.len(), 7, "7 models remain enabled");
     assert!(enabled.iter().all(|e| e.enabled));
     assert!(!enabled
         .iter()

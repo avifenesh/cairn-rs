@@ -184,7 +184,7 @@ async fn timed_out_call_stores_timeout_error_class() {
             "e1",
             "call_timeout",
             "rd_to",
-            "claude-3-haiku-20240307",
+            "claude-haiku-4-5",
             default_project(),
             ProviderCallStatus::Failed,
             None, // timeout = no measured latency
