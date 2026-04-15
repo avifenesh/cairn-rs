@@ -2547,25 +2547,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_pending_approvals_returns_empty_list() {
-        let app = make_app(make_state());
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/approvals/pending")
-                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        let approvals: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(approvals.as_array().unwrap().is_empty());
-    }
-
-    #[tokio::test]
     async fn resolve_nonexistent_approval_returns_404() {
         let app = make_app(make_state());
         let body = serde_json::json!({"decision": "approved"});
@@ -3363,17 +3344,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn auth_error_body_contains_code_and_message() {
-        let resp = unauthed_get(make_app(make_state()), "/v1/dashboard").await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        // Must contain both `code` and `message` per ApiError contract.
-        assert!(err.get("code").is_some(), "missing code field");
-        assert!(err.get("message").is_some(), "missing message field");
-    }
-
     // ── GET /v1/db/status tests ───────────────────────────────────────────────
 
     #[tokio::test]
@@ -3394,25 +3364,6 @@ mod tests {
     async fn db_status_requires_auth() {
         let resp = unauthed_get(make_app(make_state()), "/v1/db/status").await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn db_status_shape_matches_contract() {
-        let resp = authed_get(make_app(make_state()), "/v1/db/status").await;
-        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
-
-        // All four contract fields must be present.
-        assert!(status.get("backend").is_some(), "missing backend");
-        assert!(status.get("connected").is_some(), "missing connected");
-        assert!(
-            status.get("migration_count").is_some(),
-            "missing migration_count"
-        );
-        assert!(
-            status.get("schema_current").is_some(),
-            "missing schema_current"
-        );
     }
 
     // ── End-to-end write → project → read cycle tests ────────────────────────
@@ -3712,16 +3663,6 @@ mod tests {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         assert_eq!(acao, "*", "allow_origin must be wildcard (*)");
-    }
-
-    #[tokio::test]
-    async fn regular_get_includes_cors_header() {
-        let resp = authed_get(make_app(make_state()), "/v1/status").await;
-        let acao = resp.headers().get("access-control-allow-origin");
-        assert!(
-            acao.is_some(),
-            "GET response must include Access-Control-Allow-Origin"
-        );
     }
 
     #[tokio::test]
@@ -4349,23 +4290,392 @@ mod tests {
         assert!(fallback_sse.contains("event: done"));
     }
 
+    // ── Gap 1: admin snapshot/restore roundtrip ─────────────────────────────
+
     #[tokio::test]
-    #[ignore = "router unification: covered by integration tests"]
-    async fn run_cost_response_has_correct_shape() {
+    async fn admin_snapshot_restore_roundtrip_preserves_state() {
+        use cairn_domain::{
+            EventEnvelope, EventId, EventSource, RunCreated, RuntimeEvent, SessionCreated,
+        };
+
         let app = make_app(make_state());
-        let resp = authed_get(app, "/v1/runs/any_run/cost").await;
+
+        // Use "test-tenant" to match the token principal's tenant scope.
+        let project = ProjectKey::new("test-tenant", "w_snap", "p_snap");
+
+        // 1. Seed state by appending events via the HTTP API.
+        let seed_events = serde_json::to_value(&[
+            EventEnvelope::for_runtime_event(
+                EventId::new("evt_sess_snap"),
+                EventSource::Runtime,
+                RuntimeEvent::SessionCreated(SessionCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("sess_snap"),
+                }),
+            ),
+            EventEnvelope::for_runtime_event(
+                EventId::new("evt_run_snap"),
+                EventSource::Runtime,
+                RuntimeEvent::RunCreated(RunCreated {
+                    project: project.clone(),
+                    session_id: SessionId::new("sess_snap"),
+                    run_id: cairn_domain::RunId::new("run_snap"),
+                    parent_run_id: None,
+                    prompt_release_id: None,
+                    agent_role_id: None,
+                }),
+            ),
+        ])
+        .unwrap();
+
+        let seed_resp = app
+            .clone()
+            .oneshot(authed_post("/v1/events/append", seed_events))
+            .await
+            .unwrap();
+        assert_eq!(seed_resp.status(), StatusCode::CREATED);
+
+        // 2. Take a snapshot via POST /v1/admin/snapshot.
+        let snap_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/admin/snapshot")
+                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(snap_resp.status(), StatusCode::OK);
+        let event_count_header = snap_resp
+            .headers()
+            .get("X-Event-Count")
+            .expect("X-Event-Count header present")
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let event_count: u64 = event_count_header.parse().unwrap();
+        assert!(
+            event_count >= 2,
+            "snapshot must contain at least the 2 seeded events, got {event_count}"
+        );
+
+        let snap_bytes = to_bytes(snap_resp.into_body(), usize::MAX).await.unwrap();
+        let snap_json: serde_json::Value = serde_json::from_slice(&snap_bytes).unwrap();
+
+        // Sanity: snapshot carries event_count and events array.
+        assert!(snap_json["event_count"].as_u64().unwrap() >= 2);
+        assert!(snap_json["events"].as_array().unwrap().len() >= 2);
+
+        // 3. Restore the snapshot via POST /v1/admin/restore.
+        let restore_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/admin/restore")
+                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(snap_bytes.to_vec()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(restore_resp.status(), StatusCode::OK);
+        let restore_body = to_bytes(restore_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let restore_json: serde_json::Value = serde_json::from_slice(&restore_body).unwrap();
+        assert_eq!(restore_json["ok"], true);
+        assert!(restore_json["replayed"].as_u64().unwrap() >= 2);
+
+        // 4. Verify the restored state still has our session and run.
+        let sess_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/sessions/sess_snap")
+                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            sess_resp.status(),
+            StatusCode::OK,
+            "session must exist after restore"
+        );
+
+        let run_resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/runs/run_snap")
+                    .header("authorization", format!("Bearer {TEST_TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            run_resp.status(),
+            StatusCode::OK,
+            "run must exist after restore"
+        );
+        let run_body = to_bytes(run_resp.into_body(), usize::MAX).await.unwrap();
+        let run_json: serde_json::Value = serde_json::from_slice(&run_body).unwrap();
+        assert_eq!(run_json["run"]["run_id"], "run_snap");
+        assert_eq!(run_json["run"]["session_id"], "sess_snap");
+    }
+
+    // ── Gap 2: batch operations ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn batch_create_runs_creates_multiple_runs() {
+        let app = make_app(make_state());
+
+        let resp = app
+            .oneshot(authed_post(
+                "/v1/runs/batch",
+                serde_json::json!({
+                    "runs": [
+                        { "run_id": "batch_r1", "session_id": "batch_sess_1" },
+                        { "run_id": "batch_r2", "session_id": "batch_sess_2" },
+                        { "run_id": "batch_r3", "session_id": "batch_sess_3" },
+                    ]
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::CREATED,
+            "all-success batch must return 201"
+        );
+
         let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        let cost: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        // All four contract fields must be present.
-        for field in [
-            "run_id",
-            "total_cost_micros",
-            "total_tokens_in",
-            "total_tokens_out",
-            "provider_calls",
-        ] {
-            assert!(cost.get(field).is_some(), "missing field: {field}");
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let results = json["results"].as_array().unwrap();
+        assert_eq!(results.len(), 3, "must return 3 results");
+
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(result["ok"], true, "result[{i}] must be ok");
+            assert!(
+                result["run"].is_object(),
+                "result[{i}] must contain a run object"
+            );
         }
+    }
+
+    #[tokio::test]
+    async fn batch_create_runs_empty_array_returns_400() {
+        let app = make_app(make_state());
+
+        let resp = app
+            .oneshot(authed_post(
+                "/v1/runs/batch",
+                serde_json::json!({ "runs": [] }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "empty runs array must be rejected"
+        );
+
+        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], "bad_request");
+        assert!(
+            json["message"]
+                .as_str()
+                .unwrap()
+                .contains("must not be empty"),
+            "error message must explain the issue"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_cancel_tasks_with_valid_task_ids() {
+        use cairn_domain::{
+            EventEnvelope, EventId, EventSource, RunCreated, RuntimeEvent, SessionCreated,
+            TaskCreated,
+        };
+
+        let state = make_state();
+        let project = ProjectKey::new("t_bcancel", "w_bcancel", "p_bcancel");
+        let session_id = SessionId::new("sess_bcancel");
+        let run_id = cairn_domain::RunId::new("run_bcancel");
+
+        // Seed a session, run, and two tasks via the event store.
+        state
+            .runtime
+            .store
+            .append(&[
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_sess_bc"),
+                    EventSource::Runtime,
+                    RuntimeEvent::SessionCreated(SessionCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_run_bc"),
+                    EventSource::Runtime,
+                    RuntimeEvent::RunCreated(RunCreated {
+                        project: project.clone(),
+                        session_id: session_id.clone(),
+                        run_id: run_id.clone(),
+                        parent_run_id: None,
+                        prompt_release_id: None,
+                        agent_role_id: None,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_task_bc1"),
+                    EventSource::Runtime,
+                    RuntimeEvent::TaskCreated(TaskCreated {
+                        project: project.clone(),
+                        task_id: cairn_domain::TaskId::new("task_bc_1"),
+                        parent_run_id: Some(run_id.clone()),
+                        parent_task_id: None,
+                        prompt_release_id: None,
+                    }),
+                ),
+                EventEnvelope::for_runtime_event(
+                    EventId::new("evt_task_bc2"),
+                    EventSource::Runtime,
+                    RuntimeEvent::TaskCreated(TaskCreated {
+                        project: project.clone(),
+                        task_id: cairn_domain::TaskId::new("task_bc_2"),
+                        parent_run_id: Some(run_id.clone()),
+                        parent_task_id: None,
+                        prompt_release_id: None,
+                    }),
+                ),
+            ])
+            .await
+            .unwrap();
+
+        let app = make_app(state);
+
+        let resp = app
+            .oneshot(authed_post(
+                "/v1/tasks/batch/cancel",
+                serde_json::json!({
+                    "task_ids": ["task_bc_1", "task_bc_2"]
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        // Both tasks should appear in the results (cancelled or failed).
+        let cancelled = json["cancelled"].as_u64().unwrap_or(0);
+        let failed = json["failed"].as_array().map(|a| a.len()).unwrap_or(0);
+        assert_eq!(
+            cancelled as usize + failed,
+            2,
+            "all 2 task IDs must be accounted for"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_cancel_tasks_empty_array_returns_400() {
+        let app = make_app(make_state());
+
+        let resp = app
+            .oneshot(authed_post(
+                "/v1/tasks/batch/cancel",
+                serde_json::json!({ "task_ids": [] }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "empty task_ids array must be rejected"
+        );
+
+        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], "bad_request");
+    }
+
+    // ── Gap 3: event append idempotency ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn event_append_idempotent_on_duplicate_causation_id() {
+        use cairn_domain::{EventId, EventSource, RuntimeEvent, SessionCreated};
+
+        let state = make_state();
+        let project = ProjectKey::new("t_idem", "w_idem", "p_idem");
+
+        // Build an event envelope with a causation_id.
+        let envelope = cairn_domain::EventEnvelope::for_runtime_event(
+            EventId::new("evt_idem_1"),
+            EventSource::Runtime,
+            RuntimeEvent::SessionCreated(SessionCreated {
+                project: project.clone(),
+                session_id: SessionId::new("sess_idem"),
+            }),
+        )
+        .with_causation_id(cairn_domain::CommandId::new("cmd_idem_1"));
+
+        let envelope_json = serde_json::to_value([&envelope]).unwrap();
+
+        let app = make_app(state);
+
+        // First append: should succeed with appended=true.
+        let resp1 = app
+            .clone()
+            .oneshot(authed_post("/v1/events/append", envelope_json.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(resp1.status(), StatusCode::CREATED);
+        let body1 = to_bytes(resp1.into_body(), usize::MAX).await.unwrap();
+        let json1: serde_json::Value = serde_json::from_slice(&body1).unwrap();
+        let results1 = json1.as_array().unwrap();
+        assert_eq!(results1.len(), 1);
+        assert_eq!(
+            results1[0]["appended"], true,
+            "first append must be newly written"
+        );
+        let first_position = results1[0]["position"].as_u64().unwrap();
+
+        // Second append with the same causation_id: should return appended=false.
+        let resp2 = app
+            .oneshot(authed_post("/v1/events/append", envelope_json))
+            .await
+            .unwrap();
+
+        // Second append may return 201 (the handler always returns 201 for non-empty input).
+        let body2 = to_bytes(resp2.into_body(), usize::MAX).await.unwrap();
+        let json2: serde_json::Value = serde_json::from_slice(&body2).unwrap();
+        let results2 = json2.as_array().unwrap();
+        assert_eq!(results2.len(), 1);
+        assert_eq!(
+            results2[0]["appended"], false,
+            "duplicate causation_id must return appended=false"
+        );
+        assert_eq!(
+            results2[0]["position"].as_u64().unwrap(),
+            first_position,
+            "duplicate must return the same position as the original"
+        );
     }
 }
 

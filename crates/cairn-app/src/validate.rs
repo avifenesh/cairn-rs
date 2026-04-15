@@ -97,3 +97,193 @@ pub fn check_all(checks: &[Result<(), String>]) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── valid_id ───────────────────────────────────────────────────────
+
+    #[test]
+    fn valid_id_accepts_normal_id() {
+        assert!(valid_id("run_id", &Some("run-abc-123".into())).is_ok());
+    }
+
+    #[test]
+    fn valid_id_allows_absent() {
+        // None is treated as optional → ok
+        assert!(valid_id("run_id", &None).is_ok());
+    }
+
+    #[test]
+    fn valid_id_allows_empty_string() {
+        // Empty string treated same as absent
+        assert!(valid_id("run_id", &Some(String::new())).is_ok());
+    }
+
+    #[test]
+    fn valid_id_rejects_too_long() {
+        let long = "x".repeat(MAX_ID_LEN + 1);
+        let result = valid_id("run_id", &Some(long));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("maximum length"));
+    }
+
+    #[test]
+    fn valid_id_accepts_at_max_len() {
+        let exact = "a".repeat(MAX_ID_LEN);
+        assert!(valid_id("run_id", &Some(exact)).is_ok());
+    }
+
+    #[test]
+    fn valid_id_rejects_control_characters() {
+        let with_null = "run-\x00-id".to_string();
+        let result = valid_id("run_id", &Some(with_null));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("control characters"));
+    }
+
+    #[test]
+    fn valid_id_rejects_newline() {
+        let with_newline = "run\nid".to_string();
+        let result = valid_id("run_id", &Some(with_newline));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("control characters"));
+    }
+
+    #[test]
+    fn valid_id_rejects_tab() {
+        let result = valid_id("f", &Some("a\tb".into()));
+        assert!(result.is_err());
+    }
+
+    // ── require_id ─────────────────────────────────────────────────────
+
+    #[test]
+    fn require_id_accepts_normal() {
+        assert!(require_id("tenant_id", "default_tenant").is_ok());
+    }
+
+    #[test]
+    fn require_id_rejects_empty() {
+        let result = require_id("tenant_id", "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("required"));
+    }
+
+    #[test]
+    fn require_id_rejects_whitespace_only() {
+        let result = require_id("tenant_id", "   ");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("required"));
+    }
+
+    #[test]
+    fn require_id_rejects_too_long() {
+        let long = "z".repeat(MAX_ID_LEN + 1);
+        let result = require_id("tenant_id", &long);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("maximum length"));
+    }
+
+    #[test]
+    fn require_id_rejects_control_chars() {
+        let result = require_id("tenant_id", "ok\x07id");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("control characters"));
+    }
+
+    // ── require ────────────────────────────────────────────────────────
+
+    #[test]
+    fn require_accepts_present_value() {
+        assert!(require("name", &Some("hello".into())).is_ok());
+    }
+
+    #[test]
+    fn require_rejects_none() {
+        let result = require("name", &None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("required"));
+    }
+
+    #[test]
+    fn require_rejects_whitespace_only() {
+        let result = require("name", &Some("   ".into()));
+        assert!(result.is_err());
+    }
+
+    // ── max_len (Option<String>) ───────────────────────────────────────
+
+    #[test]
+    fn max_len_ok_within_limit() {
+        assert!(max_len("desc", &Some("short".into()), 100).is_ok());
+    }
+
+    #[test]
+    fn max_len_ok_when_none() {
+        assert!(max_len("desc", &None, 100).is_ok());
+    }
+
+    #[test]
+    fn max_len_rejects_over_limit() {
+        let result = max_len("desc", &Some("x".repeat(101)), 100);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("maximum length"));
+    }
+
+    #[test]
+    fn max_len_ok_at_exact_limit() {
+        assert!(max_len("desc", &Some("x".repeat(100)), 100).is_ok());
+    }
+
+    // ── max_len_str ────────────────────────────────────────────────────
+
+    #[test]
+    fn max_len_str_ok_within() {
+        assert!(max_len_str("field", "hello", 10).is_ok());
+    }
+
+    #[test]
+    fn max_len_str_rejects_over() {
+        assert!(max_len_str("field", &"x".repeat(11), 10).is_err());
+    }
+
+    // ── positive_u64 ───────────────────────────────────────────────────
+
+    #[test]
+    fn positive_u64_accepts_nonzero() {
+        assert!(positive_u64("count", 1).is_ok());
+        assert!(positive_u64("count", 999).is_ok());
+    }
+
+    #[test]
+    fn positive_u64_rejects_zero() {
+        let result = positive_u64("count", 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("greater than 0"));
+    }
+
+    // ── check_all ──────────────────────────────────────────────────────
+
+    #[test]
+    fn check_all_passes_when_all_ok() {
+        assert!(check_all(&[Ok(()), Ok(()), Ok(())]).is_ok());
+    }
+
+    #[test]
+    fn check_all_returns_first_error() {
+        let checks = vec![
+            Ok(()),
+            Err("first error".to_string()),
+            Err("second error".to_string()),
+        ];
+        let result = check_all(&checks);
+        assert_eq!(result.unwrap_err(), "first error");
+    }
+
+    #[test]
+    fn check_all_passes_on_empty() {
+        assert!(check_all(&[]).is_ok());
+    }
+}
