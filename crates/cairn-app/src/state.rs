@@ -58,7 +58,12 @@ use cairn_tools::{execute_eval_score, InMemoryPluginRegistry, StdioPluginHost};
 
 use crate::metrics::AppMetrics;
 use crate::tokens::{OperatorTokenStore, RequestLogBuffer};
-use crate::{DEFAULT_PROJECT_ID, DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID};
+#[allow(dead_code)] // Used by submodules via crate::DEFAULT_*
+pub(crate) const DEFAULT_TENANT_ID: &str = "default_tenant";
+#[allow(dead_code)]
+pub(crate) const DEFAULT_WORKSPACE_ID: &str = "default_workspace";
+#[allow(dead_code)]
+pub(crate) const DEFAULT_PROJECT_ID: &str = "default_project";
 
 // ── Type aliases ─────────────────────────────────────────────────────────────
 
