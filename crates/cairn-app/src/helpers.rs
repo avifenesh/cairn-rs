@@ -60,7 +60,6 @@ pub(crate) struct ActivityEntry {
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
-#[allow(dead_code)]
 pub(crate) struct ReplayTaskStateView {
     pub(crate) task_id: String,
     pub(crate) state: String,

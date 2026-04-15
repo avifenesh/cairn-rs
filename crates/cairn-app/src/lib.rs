@@ -54,6 +54,9 @@ pub(crate) use tokens::*;
 #[allow(unused_imports)]
 pub(crate) use triggers::*;
 
+pub(crate) use cairn_runtime::RuntimeError;
+pub(crate) use cairn_tools::cancel_plugin_invocation;
+
 #[cfg(test)]
 use axum::http::StatusCode;
 #[cfg(test)]
@@ -62,25 +65,12 @@ use cairn_api::auth::AuthPrincipal;
 use cairn_api::bootstrap::{BootstrapConfig, DeploymentMode, ServerBootstrap, StorageBackend};
 #[cfg(test)]
 use cairn_domain::{RunState, TaskState};
-use cairn_runtime::RuntimeError;
-use cairn_tools::cancel_plugin_invocation;
 #[cfg(test)]
 use cairn_tools::{PluginCapability, PluginManifest, PluginToolDescriptor};
 #[cfg(test)]
 use std::sync::Arc;
 
-// DiagnosticsAdapter, AppPluginRubricScorer → state.rs
-
-// DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, DEFAULT_PROJECT_ID → state.rs (re-exported via pub(crate) use state::*)
-// AppIngestPipeline, SqEqSessionBinding, A2aTaskBinding, MailboxMessageView,
-// AppMailboxMessage, AppSourceMetadata, AppVersionContent, PendingIngestJobPayload,
-// RateLimitBucket → state.rs
-
-// HTTP_DURATION_BUCKETS_MS → metrics.rs
-
 // ── Handler re-exports ─────────────────────────────────────────────────────────
-// Handler functions and their DTOs have been extracted into crate::handlers::*.
-// Wildcard re-exports bring them into scope for the router and tests.
 #[allow(unused_imports)]
 pub(crate) use handlers::admin::*;
 #[allow(unused_imports)]
@@ -127,12 +117,6 @@ pub(crate) use handlers::tasks::*;
 pub(crate) use handlers::tools::*;
 #[allow(unused_imports)]
 pub(crate) use handlers::workers::*;
-
-// Handler DTOs moved to crate::handlers::* (health, admin, evals, runs, sessions, etc.)
-
-// Shared response/query DTOs → handlers/runs.rs, handlers/sessions.rs, handlers/prompts.rs, helpers.rs
-// OpenAPI doc types, AppBootstrap, router code → router.rs
-// CLI args, bootstrap utilities → bootstrap.rs
 
 #[cfg(test)]
 mod tests {
