@@ -1,8 +1,12 @@
-//! Model registry — TOML-backed, in-memory model catalog (GAP-001).
+//! Model registry — LiteLLM + TOML-backed, in-memory model catalog (GAP-001).
 //!
-//! The bundled `cairn-domain/assets/models.toml` is embedded at compile time.
-//! An optional user-override file (default `~/.cairn/models.toml`) may add or
-//! replace entries at runtime; user entries win on id conflict.
+//! The base catalog comes from LiteLLM's community-maintained pricing database
+//! (2,600+ models, embedded at compile time). A bundled TOML overlay adds
+//! cairn-specific metadata (tiers, tags, capability flags) and pricing
+//! corrections.  An optional user-override file (`~/.cairn/models.toml`) may
+//! add or replace entries; user entries win on id conflict.
+//!
+//! Priority chain: user TOML > bundled TOML > LiteLLM JSON.
 //!
 //! `ModelRegistry` is `Send + Sync`; interior mutability uses `RwLock`.
 
@@ -14,7 +18,11 @@ use cairn_domain::model_catalog::{ModelEntry, ModelTier};
 use cairn_domain::providers::ProviderCostType;
 use serde::Deserialize;
 
-/// Embedded bundled catalog — loaded from `cairn-domain/assets/models.toml`.
+/// Embedded LiteLLM pricing database (2,600+ models, community-maintained).
+const BUNDLED_LITELLM_JSON: &str =
+    include_str!("../../cairn-domain/assets/litellm_model_prices.json");
+
+/// Embedded TOML overlay — cairn-specific tiers, tags, and pricing corrections.
 const BUNDLED_TOML: &str = include_str!("../../cairn-domain/assets/models.toml");
 
 /// TOML-facing representation of a model entry.
@@ -142,13 +150,26 @@ impl ModelRegistry {
         }
     }
 
-    /// Create a registry pre-populated with the bundled `models.toml`.
+    /// Create a registry pre-populated with the bundled catalogs.
+    ///
+    /// Load order (later entries override earlier on id conflict):
+    /// 1. LiteLLM JSON (2,600+ models — base pricing + capabilities)
+    /// 2. Bundled TOML (cairn-specific tiers, tags, pricing corrections)
     pub fn with_bundled() -> Result<Self, String> {
-        let entries = parse_toml(BUNDLED_TOML)?;
-        let mut models = HashMap::with_capacity(entries.len());
-        for e in entries {
+        // Base: LiteLLM community pricing database
+        let litellm_entries =
+            cairn_domain::model_catalog::import_litellm_json(BUNDLED_LITELLM_JSON);
+        let mut models = HashMap::with_capacity(litellm_entries.len() + 20);
+        for e in litellm_entries {
             models.insert(e.id.clone(), e);
         }
+
+        // Overlay: cairn-specific TOML with tiers, tags, and corrections
+        let toml_entries = parse_toml(BUNDLED_TOML)?;
+        for e in toml_entries {
+            models.insert(e.id.clone(), e);
+        }
+
         Ok(Self {
             inner: Arc::new(RwLock::new(Inner { models })),
         })
