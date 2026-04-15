@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use cairn_domain::events::EventEnvelope;
 use cairn_domain::events::{
-    EventSource, RunCreated, RunStateChanged, RuntimeEvent, StateTransition,
+    EventSource, RunCreated, RunStateChanged, RuntimeEvent, StateTransition, TaskCreated,
+    TaskLeaseClaimed, TaskStateChanged,
 };
-use cairn_domain::ids::{EventId, RunId, SessionId};
-use cairn_domain::lifecycle::{FailureClass, RunState};
+use cairn_domain::ids::{EventId, RunId, SessionId, TaskId};
+use cairn_domain::lifecycle::{FailureClass, RunState, TaskState};
 use cairn_domain::tenancy::ProjectKey;
 use cairn_store::event_log::EventLog;
 use tokio::sync::mpsc;
@@ -42,6 +43,28 @@ pub enum BridgeEvent {
         run_id: RunId,
         project: ProjectKey,
         prev_state: Option<RunState>,
+    },
+    TaskCreated {
+        task_id: TaskId,
+        project: ProjectKey,
+        parent_run_id: Option<RunId>,
+        parent_task_id: Option<TaskId>,
+    },
+    TaskLeaseClaimed {
+        task_id: TaskId,
+        project: ProjectKey,
+        lease_owner: String,
+        lease_expires_at_ms: u64,
+    },
+    TaskStateChanged {
+        task_id: TaskId,
+        project: ProjectKey,
+        to: TaskState,
+        failure_class: Option<FailureClass>,
+    },
+    SessionArchived {
+        session_id: SessionId,
+        project: ProjectKey,
     },
 }
 
@@ -86,6 +109,10 @@ fn bridge_event_type_name(event: &BridgeEvent) -> &'static str {
         BridgeEvent::ExecutionCancelled { .. } => "ExecutionCancelled",
         BridgeEvent::ExecutionSuspended { .. } => "ExecutionSuspended",
         BridgeEvent::ExecutionResumed { .. } => "ExecutionResumed",
+        BridgeEvent::TaskCreated { .. } => "TaskCreated",
+        BridgeEvent::TaskLeaseClaimed { .. } => "TaskLeaseClaimed",
+        BridgeEvent::TaskStateChanged { .. } => "TaskStateChanged",
+        BridgeEvent::SessionArchived { .. } => "SessionArchived",
     }
 }
 
@@ -176,6 +203,60 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
                 to: RunState::Running,
             },
             failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+        BridgeEvent::TaskCreated {
+            task_id,
+            project,
+            parent_run_id,
+            parent_task_id,
+        } => RuntimeEvent::TaskCreated(TaskCreated {
+            project: project.clone(),
+            task_id: task_id.clone(),
+            parent_run_id: parent_run_id.clone(),
+            parent_task_id: parent_task_id.clone(),
+            prompt_release_id: None,
+        }),
+        BridgeEvent::TaskLeaseClaimed {
+            task_id,
+            project,
+            lease_owner,
+            lease_expires_at_ms,
+        } => RuntimeEvent::TaskLeaseClaimed(TaskLeaseClaimed {
+            project: project.clone(),
+            task_id: task_id.clone(),
+            lease_owner: lease_owner.clone(),
+            lease_token: 1,
+            lease_expires_at_ms: *lease_expires_at_ms,
+        }),
+        BridgeEvent::TaskStateChanged {
+            task_id,
+            project,
+            to,
+            failure_class,
+        } => RuntimeEvent::TaskStateChanged(TaskStateChanged {
+            project: project.clone(),
+            task_id: task_id.clone(),
+            transition: StateTransition {
+                from: None,
+                to: *to,
+            },
+            failure_class: *failure_class,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+        BridgeEvent::SessionArchived {
+            session_id,
+            project,
+        } => RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: RunId::new(format!("session:{}", session_id.as_str())),
+            transition: StateTransition {
+                from: Some(RunState::Running),
+                to: RunState::Canceled,
+            },
+            failure_class: Some(FailureClass::CanceledByOperator),
             pause_reason: None,
             resume_trigger: None,
         }),

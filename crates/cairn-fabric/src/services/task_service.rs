@@ -5,6 +5,7 @@ use cairn_domain::*;
 use cairn_store::projections::{TaskDependencyRecord, TaskRecord};
 
 use crate::error::FabricError;
+use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{parse_project_key, parse_public_state};
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
@@ -18,11 +19,20 @@ use crate::state_map;
 pub struct FabricTaskService {
     runtime: Arc<FabricRuntime>,
     registry: Arc<ActiveTaskRegistry>,
+    bridge: Arc<EventBridge>,
 }
 
 impl FabricTaskService {
-    pub fn new(runtime: Arc<FabricRuntime>, registry: Arc<ActiveTaskRegistry>) -> Self {
-        Self { runtime, registry }
+    pub fn new(
+        runtime: Arc<FabricRuntime>,
+        registry: Arc<ActiveTaskRegistry>,
+        bridge: Arc<EventBridge>,
+    ) -> Self {
+        Self {
+            runtime,
+            registry,
+            bridge,
+        }
     }
 
     fn task_to_execution_id(&self, task_id: &TaskId) -> ExecutionId {
@@ -187,6 +197,13 @@ impl FabricTaskService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
 
+        self.bridge.emit(BridgeEvent::TaskCreated {
+            task_id: task_id.clone(),
+            project: project.clone(),
+            parent_run_id: parent_run_id.clone(),
+            parent_task_id: parent_task_id.clone(),
+        });
+
         self.read_task_record(&task_id).await
     }
 
@@ -328,7 +345,14 @@ impl FabricTaskService {
             ActiveTaskHandle::new_without_claimed_task(eid.clone(), lease_id, lease_epoch, att_idx);
         self.registry.register(task_id, handle);
 
-        self.read_task_record(task_id).await
+        let record = self.read_task_record(task_id).await?;
+        self.bridge.emit(BridgeEvent::TaskLeaseClaimed {
+            task_id: task_id.clone(),
+            project: record.project.clone(),
+            lease_owner: self.runtime.config.worker_instance_id.to_string(),
+            lease_expires_at_ms: record.lease_expires_at.unwrap_or(0),
+        });
+        Ok(record)
     }
 
     pub async fn heartbeat(
@@ -457,7 +481,14 @@ impl FabricTaskService {
         // Remove from active registry
         let _ = self.registry.take(task_id);
 
-        self.read_task_record(task_id).await
+        let record = self.read_task_record(task_id).await?;
+        self.bridge.emit(BridgeEvent::TaskStateChanged {
+            task_id: task_id.clone(),
+            project: record.project.clone(),
+            to: TaskState::Completed,
+            failure_class: None,
+        });
+        Ok(record)
     }
 
     pub async fn fail(
@@ -541,7 +572,14 @@ impl FabricTaskService {
 
         let _ = self.registry.take(task_id);
 
-        self.read_task_record(task_id).await
+        let record = self.read_task_record(task_id).await?;
+        self.bridge.emit(BridgeEvent::TaskStateChanged {
+            task_id: task_id.clone(),
+            project: record.project.clone(),
+            to: TaskState::Failed,
+            failure_class: Some(failure_class),
+        });
+        Ok(record)
     }
 
     pub async fn cancel(&self, task_id: &TaskId) -> Result<TaskRecord, FabricError> {
@@ -645,7 +683,14 @@ impl FabricTaskService {
 
         let _ = self.registry.take(task_id);
 
-        self.read_task_record(task_id).await
+        let record = self.read_task_record(task_id).await?;
+        self.bridge.emit(BridgeEvent::TaskStateChanged {
+            task_id: task_id.clone(),
+            project: record.project.clone(),
+            to: TaskState::Canceled,
+            failure_class: None,
+        });
+        Ok(record)
     }
 
     pub async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, FabricError> {
@@ -847,12 +892,27 @@ impl FabricTaskService {
             .unwrap_or(None);
         let lane_id = ff_core::types::LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
+        let wp_id_str: Option<String> = self
+            .runtime
+            .client
+            .hget(&ctx.core(), "current_waitpoint_id")
+            .await
+            .unwrap_or(None);
+        let wp_id = wp_id_str
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| ff_core::types::WaitpointId::parse(s).ok())
+            .unwrap_or_default();
+
         let keys: Vec<String> = vec![
             ctx.core(),
             ctx.suspension_current(),
+            ctx.waitpoint(&wp_id),
+            ctx.waitpoint_condition(&wp_id),
             idx.lane_suspended(&lane_id),
             idx.lane_eligible(&lane_id),
             idx.lane_delayed(&lane_id),
+            idx.suspension_timeout(),
         ];
         let args: Vec<String> = vec![eid.to_string(), "operator".to_owned(), "0".to_owned()];
 

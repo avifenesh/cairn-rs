@@ -37,8 +37,8 @@ impl FabricServices {
         let registry = Arc::new(ActiveTaskRegistry::new());
 
         let runs = FabricRunService::new(runtime.clone(), bridge.clone());
-        let tasks = FabricTaskService::new(runtime.clone(), registry.clone());
-        let sessions = FabricSessionService::new(runtime.clone());
+        let tasks = FabricTaskService::new(runtime.clone(), registry.clone(), bridge.clone());
+        let sessions = FabricSessionService::new(runtime.clone(), bridge.clone());
         let scheduler = FabricSchedulerService::new(&runtime);
         let worker = FabricWorkerService::new(runtime.clone(), registry.clone());
         let budgets = FabricBudgetService::new(runtime.clone());

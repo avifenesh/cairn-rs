@@ -11,16 +11,18 @@ use ff_core::types::{FlowId, Namespace, TimestampMs};
 
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
+use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::parse_project_key;
 use crate::id_map;
 
 pub struct FabricSessionService {
     runtime: Arc<FabricRuntime>,
+    bridge: Arc<EventBridge>,
 }
 
 impl FabricSessionService {
-    pub fn new(runtime: Arc<FabricRuntime>) -> Self {
-        Self { runtime }
+    pub fn new(runtime: Arc<FabricRuntime>, bridge: Arc<EventBridge>) -> Self {
+        Self { runtime, bridge }
     }
 
     fn flow_id(&self, session_id: &SessionId) -> FlowId {
@@ -203,7 +205,13 @@ impl FabricSessionService {
             .map_err(|e| FabricError::Internal(format!("hset cairn.archived: {e}")))?;
 
         match self.read_session_record(session_id).await? {
-            Some(record) => Ok(record),
+            Some(record) => {
+                self.bridge.emit(BridgeEvent::SessionArchived {
+                    session_id: session_id.clone(),
+                    project: record.project.clone(),
+                });
+                Ok(record)
+            }
             None => Err(FabricError::NotFound {
                 entity: "session",
                 id: session_id.to_string(),

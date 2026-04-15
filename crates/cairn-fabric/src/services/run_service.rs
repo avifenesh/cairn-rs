@@ -658,12 +658,30 @@ impl FabricRunService {
             .unwrap_or(None);
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
+        let wp_id_str: Option<String> = self
+            .runtime
+            .client
+            .hget(&ctx.core(), "current_waitpoint_id")
+            .await
+            .unwrap_or(None);
+        let wp_id = wp_id_str
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| ff_core::types::WaitpointId::parse(s).ok())
+            .unwrap_or_default();
+
+        // FF ff_resume_execution KEYS(8): exec_core, suspension_current,
+        // waitpoint_hash, waitpoint_signals, suspension_timeout_zset,
+        // eligible_zset, delayed_zset, suspended_zset
         let keys: Vec<String> = vec![
             ctx.core(),
             ctx.suspension_current(),
-            idx.lane_suspended(&lane_id),
+            ctx.waitpoint(&wp_id),
+            ctx.waitpoint_signals(&wp_id),
+            idx.suspension_timeout(),
             idx.lane_eligible(&lane_id),
             idx.lane_delayed(&lane_id),
+            idx.lane_suspended(&lane_id),
         ];
         let args: Vec<String> = vec![eid.to_string(), "operator".to_owned(), "0".to_owned()];
 
@@ -687,16 +705,133 @@ impl FabricRunService {
     }
 
     pub async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, FabricError> {
-        self.pause(
-            run_id,
-            PauseReason {
-                kind: PauseReasonKind::PolicyHold,
-                detail: Some("waiting_for_approval".to_owned()),
-                resume_after_ms: None,
-                actor: None,
-            },
-        )
-        .await
+        let params = crate::suspension::for_approval(run_id.as_str(), None);
+
+        let eid = self.execution_id(run_id);
+        let partition = self.partition(&eid);
+        let ctx = ExecKeyContext::new(&partition, &eid);
+        let idx = IndexKeys::new(&partition);
+
+        let fields: std::collections::HashMap<String, String> = self
+            .runtime
+            .client
+            .hgetall(&ctx.core())
+            .await
+            .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
+
+        let lane_id = LaneId::new(fields.get("lane_id").map(|s| s.as_str()).unwrap_or("cairn"));
+        let att_idx = ff_core::types::AttemptIndex::new(
+            fields
+                .get("current_attempt_index")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+        );
+        let lease_id_str = fields.get("current_lease_id").cloned().unwrap_or_default();
+        let lease_epoch_str = fields
+            .get("lease_epoch")
+            .cloned()
+            .unwrap_or_else(|| "1".to_owned());
+        let attempt_id_str = fields
+            .get("current_attempt_id")
+            .cloned()
+            .unwrap_or_default();
+        let worker_instance_id = ff_core::types::WorkerInstanceId::new(
+            fields
+                .get("worker_instance_id")
+                .map(|s| s.as_str())
+                .unwrap_or("cairn"),
+        );
+
+        let suspension_id = ff_core::types::SuspensionId::new();
+        let waitpoint_id = ff_core::types::WaitpointId::new();
+        let waitpoint_key = format!("wpk:{waitpoint_id}");
+
+        let signal_names: Vec<&str> = params
+            .condition_matchers
+            .iter()
+            .map(|m| m.signal_name.as_str())
+            .collect();
+        let timeout_behavior_str = match params.timeout_behavior {
+            ff_sdk::task::TimeoutBehavior::Fail => "fail",
+            ff_sdk::task::TimeoutBehavior::Escalate => "escalate",
+            ff_sdk::task::TimeoutBehavior::Expire => "expire",
+            ff_sdk::task::TimeoutBehavior::Cancel => "cancel",
+            ff_sdk::task::TimeoutBehavior::AutoResume => "auto_resume_with_timeout_signal",
+        };
+
+        let resume_condition_json = serde_json::json!({
+            "condition_type": "signal_set",
+            "required_signal_names": signal_names,
+            "signal_match_mode": "any",
+            "minimum_signal_count": 1,
+            "timeout_behavior": timeout_behavior_str,
+            "allow_operator_override": true,
+        })
+        .to_string();
+
+        let resume_policy_json = serde_json::json!({
+            "resume_target": "runnable",
+            "close_waitpoint_on_resume": true,
+            "consume_matched_signals": true,
+            "retain_signal_buffer_until_closed": true,
+        })
+        .to_string();
+
+        let keys: Vec<String> = vec![
+            ctx.core(),
+            ctx.attempt_hash(att_idx),
+            ctx.lease_current(),
+            ctx.lease_history(),
+            idx.lease_expiry(),
+            idx.worker_leases(&worker_instance_id),
+            ctx.suspension_current(),
+            ctx.waitpoint(&waitpoint_id),
+            ctx.waitpoint_signals(&waitpoint_id),
+            idx.suspension_timeout(),
+            idx.pending_waitpoint_expiry(),
+            idx.lane_active(&lane_id),
+            idx.lane_suspended(&lane_id),
+            ctx.waitpoints(),
+            ctx.waitpoint_condition(&waitpoint_id),
+            idx.attempt_timeout(),
+        ];
+        let args: Vec<String> = vec![
+            eid.to_string(),
+            att_idx.to_string(),
+            attempt_id_str,
+            lease_id_str,
+            lease_epoch_str,
+            suspension_id.to_string(),
+            waitpoint_id.to_string(),
+            waitpoint_key,
+            params.reason_code,
+            "cairn".to_owned(),
+            String::new(),
+            resume_condition_json,
+            resume_policy_json,
+            String::new(),
+            String::new(),
+            timeout_behavior_str.to_owned(),
+            "1000".to_owned(),
+        ];
+
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let _: ferriskey::Value = self
+            .runtime
+            .client
+            .fcall("ff_suspend_execution", &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
+
+        let record = self.read_run_record(run_id).await?;
+        self.bridge.emit(BridgeEvent::ExecutionSuspended {
+            run_id: run_id.clone(),
+            project: record.project.clone(),
+            prev_state: Some(RunState::Running),
+        });
+        Ok(record)
     }
 
     pub async fn resolve_approval(
