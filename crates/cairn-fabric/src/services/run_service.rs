@@ -11,7 +11,7 @@ use ff_core::types::{ExecutionId, LaneId, Namespace, TimestampMs};
 
 use crate::boot::FabricRuntime;
 use crate::event_bridge::{BridgeEvent, EventBridge};
-use crate::helpers::{parse_project_key, parse_public_state};
+use crate::helpers::{is_duplicate_result, parse_project_key, parse_public_state};
 use crate::id_map;
 use crate::state_map;
 
@@ -191,7 +191,7 @@ impl FabricRunService {
         project: &ProjectKey,
         run_id: &RunId,
         function: &str,
-    ) -> Result<(), FabricError> {
+    ) -> Result<RunState, FabricError> {
         let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
@@ -203,6 +203,10 @@ impl FabricRunService {
             .hgetall(&ctx.core())
             .await
             .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
+
+        let prev_public =
+            parse_public_state(&fields.get("public_state").cloned().unwrap_or_default());
+        let (prev_run_state, _) = state_map::ff_public_state_to_run_state(prev_public);
 
         let lane_id = LaneId::new(fields.get("lane_id").map(|s| s.as_str()).unwrap_or("cairn"));
         let att_idx = ff_core::types::AttemptIndex::new(
@@ -317,7 +321,7 @@ impl FabricRunService {
             }
         }
 
-        Ok(())
+        Ok(prev_run_state)
     }
 }
 
@@ -373,14 +377,15 @@ impl FabricRunService {
         project: &ProjectKey,
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
-        self.terminal_execution(project, run_id, "ff_complete_execution")
+        let prev = self
+            .terminal_execution(project, run_id, "ff_complete_execution")
             .await?;
 
         let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionCompleted {
             run_id: run_id.clone(),
             project: record.project.clone(),
-            prev_state: None,
+            prev_state: Some(prev),
         });
         Ok(record)
     }
@@ -396,53 +401,32 @@ impl FabricRunService {
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
 
-        let lane_str: Option<String> = self
+        let fields: HashMap<String, String> = self
             .runtime
             .client
-            .hget(&ctx.core(), "lane_id")
+            .hgetall(&ctx.core())
             .await
-            .unwrap_or(None);
-        let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
+            .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
 
-        let att_idx_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "current_attempt_index")
-            .await
-            .unwrap_or(None);
+        let prev_public =
+            parse_public_state(&fields.get("public_state").cloned().unwrap_or_default());
+        let (prev_run_state, _) = state_map::ff_public_state_to_run_state(prev_public);
+
+        let lane_id = LaneId::new(fields.get("lane_id").map(|s| s.as_str()).unwrap_or("cairn"));
         let att_idx = ff_core::types::AttemptIndex::new(
-            att_idx_str
-                .as_deref()
+            fields
+                .get("current_attempt_index")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
         );
-
-        let lease_id_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "current_lease_id")
-            .await
-            .unwrap_or(None);
-        let lease_epoch_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "lease_epoch")
-            .await
-            .unwrap_or(None);
-        let attempt_id_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "current_attempt_id")
-            .await
-            .unwrap_or(None);
-        let worker_instance_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "worker_instance_id")
-            .await
-            .unwrap_or(None);
+        let lease_id_str = fields.get("current_lease_id").cloned();
+        let lease_epoch_str = fields.get("lease_epoch").cloned();
+        let attempt_id_str = fields.get("current_attempt_id").cloned();
         let worker_instance_id = ff_core::types::WorkerInstanceId::new(
-            worker_instance_str.as_deref().unwrap_or("cairn"),
+            fields
+                .get("worker_instance_id")
+                .map(|s| s.as_str())
+                .unwrap_or("cairn"),
         );
 
         let reason = format!("{failure_class:?}");
@@ -495,7 +479,7 @@ impl FabricRunService {
             run_id: run_id.clone(),
             project: record.project.clone(),
             failure_class,
-            prev_state: None,
+            prev_state: Some(prev_run_state),
         });
         Ok(record)
     }
@@ -505,14 +489,15 @@ impl FabricRunService {
         project: &ProjectKey,
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
-        self.terminal_execution(project, run_id, "ff_cancel_execution")
+        let prev = self
+            .terminal_execution(project, run_id, "ff_cancel_execution")
             .await?;
 
         let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionCancelled {
             run_id: run_id.clone(),
             project: record.project.clone(),
-            prev_state: None,
+            prev_state: Some(prev),
         });
         Ok(record)
     }
@@ -528,53 +513,29 @@ impl FabricRunService {
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
 
-        let lane_str: Option<String> = self
+        let fields: HashMap<String, String> = self
             .runtime
             .client
-            .hget(&ctx.core(), "lane_id")
+            .hgetall(&ctx.core())
             .await
-            .unwrap_or(None);
-        let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
+            .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
 
-        let att_idx_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "current_attempt_index")
-            .await
-            .unwrap_or(None);
+        let prev_public =
+            parse_public_state(&fields.get("public_state").cloned().unwrap_or_default());
+        let (prev_run_state, _) = state_map::ff_public_state_to_run_state(prev_public);
+
+        let lane_id = LaneId::new(fields.get("lane_id").map(|s| s.as_str()).unwrap_or("cairn"));
         let att_idx = ff_core::types::AttemptIndex::new(
-            att_idx_str
-                .as_deref()
+            fields
+                .get("current_attempt_index")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
         );
-
-        let lease_id_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "current_lease_id")
-            .await
-            .unwrap_or(None);
-        let lease_epoch_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "lease_epoch")
-            .await
-            .unwrap_or(None);
-        let attempt_id_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "current_attempt_id")
-            .await
-            .unwrap_or(None);
-        let worker_instance_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "worker_instance_id")
-            .await
-            .unwrap_or(None);
         let worker_instance_id = ff_core::types::WorkerInstanceId::new(
-            worker_instance_str.as_deref().unwrap_or("cairn"),
+            fields
+                .get("worker_instance_id")
+                .map(|s| s.as_str())
+                .unwrap_or("cairn"),
         );
 
         let (reason_code, timeout_behavior_str) = match reason.kind {
@@ -632,9 +593,15 @@ impl FabricRunService {
         let args: Vec<String> = vec![
             eid.to_string(),
             att_idx.to_string(),
-            attempt_id_str.unwrap_or_default(),
-            lease_id_str.unwrap_or_default(),
-            lease_epoch_str.unwrap_or_else(|| "1".to_owned()),
+            fields
+                .get("current_attempt_id")
+                .cloned()
+                .unwrap_or_default(),
+            fields.get("current_lease_id").cloned().unwrap_or_default(),
+            fields
+                .get("lease_epoch")
+                .cloned()
+                .unwrap_or_else(|| "1".to_owned()),
             suspension_id.to_string(),
             waitpoint_id.to_string(),
             waitpoint_key,
@@ -663,7 +630,7 @@ impl FabricRunService {
         self.bridge.emit(BridgeEvent::ExecutionSuspended {
             run_id: run_id.clone(),
             project: record.project.clone(),
-            prev_state: None,
+            prev_state: Some(prev_run_state),
         });
         Ok(record)
     }
@@ -718,6 +685,15 @@ impl FabricRunService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
+        let prev_str: Option<String> = self
+            .runtime
+            .client
+            .hget(&ctx.core(), "public_state")
+            .await
+            .unwrap_or(None);
+        let prev_public = parse_public_state(&prev_str.unwrap_or_default());
+        let (prev_run_state, _) = state_map::ff_public_state_to_run_state(prev_public);
+
         let _: ferriskey::Value = self
             .runtime
             .client
@@ -729,7 +705,7 @@ impl FabricRunService {
         self.bridge.emit(BridgeEvent::ExecutionResumed {
             run_id: run_id.clone(),
             project: record.project.clone(),
-            prev_state: None,
+            prev_state: Some(prev_run_state),
         });
         Ok(record)
     }
@@ -962,7 +938,7 @@ impl FabricRunService {
                 self.bridge.emit(BridgeEvent::ExecutionResumed {
                     run_id: run_id.clone(),
                     project: record.project.clone(),
-                    prev_state: None,
+                    prev_state: Some(RunState::WaitingApproval),
                 });
                 Ok(record)
             }
@@ -974,37 +950,22 @@ impl FabricRunService {
     }
 }
 
-fn is_duplicate_result(raw: &ferriskey::Value) -> bool {
-    if let ferriskey::Value::Array(arr) = raw {
-        if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(1) {
-            return &**b == b"DUPLICATE";
-        }
-        if let Some(Ok(ferriskey::Value::SimpleString(s))) = arr.get(1) {
-            return s == "DUPLICATE";
-        }
-    }
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn is_duplicate_detects_duplicate() {
-        let raw = ferriskey::Value::Array(vec![
+    fn is_duplicate_delegates_to_helpers() {
+        let dup = ferriskey::Value::Array(vec![
             Ok(ferriskey::Value::Int(1)),
             Ok(ferriskey::Value::SimpleString("DUPLICATE".to_owned())),
         ]);
-        assert!(is_duplicate_result(&raw));
-    }
+        assert!(is_duplicate_result(&dup));
 
-    #[test]
-    fn is_duplicate_detects_ok() {
-        let raw = ferriskey::Value::Array(vec![
+        let ok = ferriskey::Value::Array(vec![
             Ok(ferriskey::Value::Int(1)),
             Ok(ferriskey::Value::SimpleString("OK".to_owned())),
         ]);
-        assert!(!is_duplicate_result(&raw));
+        assert!(!is_duplicate_result(&ok));
     }
 }

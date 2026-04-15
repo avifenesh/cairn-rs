@@ -11,7 +11,7 @@ const CAIRN_NAMESPACE: Uuid = Uuid::from_bytes([
 
 pub fn run_to_execution_id(project: &ProjectKey, run_id: &RunId) -> ExecutionId {
     let input = format!(
-        "run:{}:{}:{}:{}",
+        "run:\0{}\0{}\0{}\0{}",
         project.tenant_id, project.workspace_id, project.project_id, run_id
     );
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
@@ -20,7 +20,7 @@ pub fn run_to_execution_id(project: &ProjectKey, run_id: &RunId) -> ExecutionId 
 
 pub fn session_to_flow_id(project: &ProjectKey, session_id: &SessionId) -> FlowId {
     let input = format!(
-        "session:{}:{}:{}:{}",
+        "session:\0{}\0{}\0{}\0{}",
         project.tenant_id, project.workspace_id, project.project_id, session_id
     );
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
@@ -113,6 +113,24 @@ mod tests {
         let eid = run_to_execution_id(&p, &RunId::new("abc"));
         let fid = session_to_flow_id(&p, &SessionId::new("abc"));
         assert_ne!(eid.to_string(), fid.to_string());
+    }
+
+    #[test]
+    fn delimiter_collision_impossible() {
+        let p1 = ProjectKey::new("a:b", "c", "d");
+        let p2 = ProjectKey::new("a", "b:c", "d");
+        let eid1 = run_to_execution_id(&p1, &RunId::new("run_1"));
+        let eid2 = run_to_execution_id(&p2, &RunId::new("run_1"));
+        assert_ne!(eid1, eid2);
+    }
+
+    #[test]
+    fn session_delimiter_collision_impossible() {
+        let p1 = ProjectKey::new("a:b", "c", "d");
+        let p2 = ProjectKey::new("a", "b:c", "d");
+        let fid1 = session_to_flow_id(&p1, &SessionId::new("sess_1"));
+        let fid2 = session_to_flow_id(&p2, &SessionId::new("sess_1"));
+        assert_ne!(fid1, fid2);
     }
 
     #[test]

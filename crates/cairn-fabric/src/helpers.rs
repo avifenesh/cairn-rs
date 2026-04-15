@@ -32,6 +32,18 @@ pub fn read_hgetall_field(
     fields.get(key).filter(|v| !v.is_empty()).cloned()
 }
 
+pub fn is_duplicate_result(raw: &ferriskey::Value) -> bool {
+    if let ferriskey::Value::Array(arr) = raw {
+        if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(1) {
+            return &**b == b"DUPLICATE";
+        }
+        if let Some(Ok(ferriskey::Value::SimpleString(s))) = arr.get(1) {
+            return s == "DUPLICATE";
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +118,44 @@ mod tests {
     fn parse_project_key_invalid() {
         let pk = parse_project_key("bad");
         assert_eq!(pk.tenant_id.as_str(), "default_tenant");
+    }
+
+    #[test]
+    fn is_duplicate_detects_duplicate_simple_string() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("DUPLICATE".to_owned())),
+        ]);
+        assert!(is_duplicate_result(&raw));
+    }
+
+    #[test]
+    fn is_duplicate_detects_duplicate_bulk_string() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::BulkString(b"DUPLICATE".to_vec().into())),
+        ]);
+        assert!(is_duplicate_result(&raw));
+    }
+
+    #[test]
+    fn is_duplicate_returns_false_for_ok() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+        ]);
+        assert!(!is_duplicate_result(&raw));
+    }
+
+    #[test]
+    fn is_duplicate_returns_false_for_non_array() {
+        let raw = ferriskey::Value::SimpleString("not an array".to_owned());
+        assert!(!is_duplicate_result(&raw));
+    }
+
+    #[test]
+    fn is_duplicate_returns_false_for_empty_array() {
+        let raw = ferriskey::Value::Array(vec![]);
+        assert!(!is_duplicate_result(&raw));
     }
 }

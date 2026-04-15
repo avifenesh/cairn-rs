@@ -6,7 +6,7 @@ use cairn_store::projections::{TaskDependencyRecord, TaskRecord};
 
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
-use crate::helpers::{parse_project_key, parse_public_state};
+use crate::helpers::{is_duplicate_result, parse_project_key, parse_public_state};
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
 use ff_core::types::{ExecutionId, LaneId};
@@ -264,7 +264,7 @@ impl FabricTaskService {
             .client
             .hget(&ctx.core(), "lane_id")
             .await
-            .unwrap_or(None);
+            .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
         // Step 1: Issue claim grant
@@ -448,7 +448,7 @@ impl FabricTaskService {
             .client
             .hget(&ctx.core(), "lane_id")
             .await
-            .unwrap_or(None);
+            .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
         let (lid, epoch, att_idx) =
@@ -530,7 +530,7 @@ impl FabricTaskService {
             .client
             .hget(&ctx.core(), "lane_id")
             .await
-            .unwrap_or(None);
+            .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
         let (lid, epoch, att_idx) =
@@ -621,10 +621,10 @@ impl FabricTaskService {
             .client
             .hget(&ctx.core(), "lane_id")
             .await
-            .unwrap_or(None);
+            .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let (lid, epoch, _att_idx) =
+        let (lid, epoch, att_idx) =
             self.registry
                 .get_lease_context(task_id)
                 .ok_or_else(|| FabricError::NotFound {
@@ -632,28 +632,7 @@ impl FabricTaskService {
                     id: task_id.to_string(),
                 })?;
 
-        let att_idx_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "current_attempt_index")
-            .await
-            .unwrap_or(None);
-        let att_idx = ff_core::types::AttemptIndex::new(
-            att_idx_str
-                .as_deref()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-        );
-
-        let worker_instance_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "worker_instance_id")
-            .await
-            .unwrap_or(None);
-        let worker_instance_id = ff_core::types::WorkerInstanceId::new(
-            worker_instance_str.as_deref().unwrap_or("cairn"),
-        );
+        let worker_instance_id = &self.runtime.config.worker_instance_id;
 
         let wp_id_str: Option<String> = self
             .runtime
@@ -675,7 +654,7 @@ impl FabricTaskService {
             ctx.lease_current(),
             ctx.lease_history(),
             idx.lease_expiry(),
-            idx.worker_leases(&worker_instance_id),
+            idx.worker_leases(worker_instance_id),
             ctx.suspension_current(),
             ctx.waitpoint(&wp_id),
             ctx.waitpoint_condition(&wp_id),
@@ -937,7 +916,7 @@ impl FabricTaskService {
             .client
             .hget(&ctx.core(), "lane_id")
             .await
-            .unwrap_or(None);
+            .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = ff_core::types::LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
         let wp_id_str: Option<String> = self
@@ -1019,18 +998,6 @@ fn parse_claim_lease_epoch(raw: &ferriskey::Value) -> ff_core::types::LeaseEpoch
         }
     }
     ff_core::types::LeaseEpoch::new(1)
-}
-
-fn is_duplicate_result(raw: &ferriskey::Value) -> bool {
-    if let ferriskey::Value::Array(arr) = raw {
-        if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(1) {
-            return &**b == b"DUPLICATE";
-        }
-        if let Some(Ok(ferriskey::Value::SimpleString(s))) = arr.get(1) {
-            return s == "DUPLICATE";
-        }
-    }
-    false
 }
 
 #[cfg(test)]
