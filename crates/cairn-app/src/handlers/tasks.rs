@@ -13,19 +13,18 @@ use cairn_api::auth::AuthPrincipal;
 use cairn_api::http::ApiError;
 use cairn_api::http::ListResponse;
 use cairn_domain::{
-    AuditOutcome, CheckpointId, EventEnvelope, EventId, EventSource, ProjectKey, RunId, RunState,
-    RuntimeEvent, StateTransition, TaskId, TaskState, TaskStateChanged,
+    AuditOutcome, EventEnvelope, EventId, EventSource, ProjectKey, RunId, RunState, RuntimeEvent,
+    StateTransition, TaskId, TaskState, TaskStateChanged,
 };
-use cairn_runtime::{AuditService, CheckpointService, RunService, TaskService};
+use cairn_runtime::{AuditService, RunService, TaskService};
 use cairn_store::projections::{
-    CheckpointStrategyReadModel, TaskDependencyReadModel, TaskLeaseExpiredReadModel, TaskReadModel,
-    TaskRecord,
+    TaskDependencyReadModel, TaskLeaseExpiredReadModel, TaskReadModel, TaskRecord,
 };
 use cairn_store::EventLog;
 use utoipa::ToSchema;
 
 use crate::errors::{
-    bad_request_response, now_ms, parse_task_state, runtime_error_response, store_error_response,
+    bad_request_response, parse_task_state, runtime_error_response, store_error_response,
     AppApiError,
 };
 use crate::extractors::{HasProjectScope, ProjectJson, ProjectScope, TenantScope};
@@ -537,29 +536,8 @@ pub(crate) async fn complete_task_handler(
 
     match state.runtime.tasks.complete(&task_id).await {
         Ok(task) => {
-            // Auto-checkpoint if the run has trigger_on_task_complete strategy.
-            if let Some(ref parent_run_id) = task.parent_run_id {
-                if let Ok(Some(strategy)) = CheckpointStrategyReadModel::get_by_run(
-                    state.runtime.store.as_ref(),
-                    parent_run_id,
-                )
-                .await
-                {
-                    if strategy.trigger_on_task_complete {
-                        let cp_id = CheckpointId::new(format!(
-                            "cp_auto_{}_{}_{}",
-                            parent_run_id,
-                            task_id,
-                            now_ms()
-                        ));
-                        let _ = state
-                            .runtime
-                            .checkpoints
-                            .save(&task.project, parent_run_id, cp_id)
-                            .await;
-                    }
-                }
-            }
+            // Auto-checkpoint on task_complete is handled inside
+            // TaskServiceImpl::complete() to avoid double-checkpoint races.
 
             if let Some(parent_run_id) = task.parent_run_id.clone() {
                 match TaskReadModel::any_non_terminal_children(
