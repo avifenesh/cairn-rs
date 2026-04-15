@@ -100,7 +100,7 @@ domain → store → runtime → {memory, graph, evals, tools, agent, signal, ch
 | `cairn-domain` | Pure types: IDs, commands (30+), events (56+), state machines, policy. No IO. |
 | `cairn-store` | Append-only event log + sync projections. Backends: Postgres (default via `DATABASE_URL`) / SQLite / InMemory (`--db memory`). |
 | `cairn-runtime` | Service layer: sessions, runs, tasks, approvals, checkpoints, mailbox, recovery. |
-| `cairn-app` | Axum HTTP server. `lib.rs` has route catalog + middleware. `main.rs` has binary wiring + embedded UI. |
+| `cairn-app` | Axum HTTP server. `router.rs` has route catalog, `middleware.rs` has auth/rate-limit, `bootstrap.rs` has CLI parsing. `main.rs` has binary wiring + embedded UI. |
 | `cairn-memory` | Knowledge pipeline: ingest → chunk → embed → index → score → rerank → retrieve. |
 | `cairn-graph` | Entity/provenance graph: nodes, edges, 6 query families, graph-backed expansion. |
 | `cairn-evals` | Prompt registry, version/release lifecycle, scorecards, bandit experiments. |
@@ -126,7 +126,7 @@ Every entity scoped by `ProjectKey { tenant_id, workspace_id, project_id }`. All
 
 ### Auth
 
-`auth_middleware` in `lib.rs`: checks `Authorization: Bearer <token>` header. Fallback: `?token=` query param (for SSE EventSource). Static UI paths and `/health` are exempt — the React LoginPage handles token collection client-side.
+`auth_middleware` in `middleware.rs`: checks `Authorization: Bearer <token>` header. Fallback: `?token=` query param (for SSE EventSource). Static UI paths and `/health` are exempt — the React LoginPage handles token collection client-side.
 
 ### Provider Abstraction
 
