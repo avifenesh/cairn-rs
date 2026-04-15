@@ -350,6 +350,7 @@ impl FabricTaskService {
             task_id: task_id.clone(),
             project: record.project.clone(),
             lease_owner: self.runtime.config.worker_instance_id.to_string(),
+            lease_epoch: record.version,
             lease_expires_at_ms: record.lease_expires_at.unwrap_or(0),
         });
         Ok(record)
@@ -908,11 +909,11 @@ impl FabricTaskService {
             ctx.core(),
             ctx.suspension_current(),
             ctx.waitpoint(&wp_id),
-            ctx.waitpoint_condition(&wp_id),
-            idx.lane_suspended(&lane_id),
+            ctx.waitpoint_signals(&wp_id),
+            idx.suspension_timeout(),
             idx.lane_eligible(&lane_id),
             idx.lane_delayed(&lane_id),
-            idx.suspension_timeout(),
+            idx.lane_suspended(&lane_id),
         ];
         let args: Vec<String> = vec![eid.to_string(), "operator".to_owned(), "0".to_owned()];
 
