@@ -35,12 +35,16 @@ impl FabricTaskService {
         }
     }
 
-    fn task_to_execution_id(&self, task_id: &TaskId) -> ExecutionId {
-        id_map::run_to_execution_id(&RunId::new(task_id.as_str()))
+    fn task_to_execution_id(&self, project: &ProjectKey, task_id: &TaskId) -> ExecutionId {
+        id_map::run_to_execution_id(project, &RunId::new(task_id.as_str()))
     }
 
-    async fn read_task_record(&self, task_id: &TaskId) -> Result<TaskRecord, FabricError> {
-        let eid = self.task_to_execution_id(task_id);
+    async fn read_task_record(
+        &self,
+        project: &ProjectKey,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, FabricError> {
+        let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
         let ctx = ExecKeyContext::new(&partition, &eid);
 
@@ -125,7 +129,7 @@ impl FabricTaskService {
         priority: u32,
         session_id: Option<&SessionId>,
     ) -> Result<TaskRecord, FabricError> {
-        let eid = self.task_to_execution_id(&task_id);
+        let eid = self.task_to_execution_id(project, &task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -192,21 +196,23 @@ impl FabricTaskService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_create_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
 
-        self.bridge.emit(BridgeEvent::TaskCreated {
-            task_id: task_id.clone(),
-            project: project.clone(),
-            parent_run_id: parent_run_id.clone(),
-            parent_task_id: parent_task_id.clone(),
-        });
+        if !is_duplicate_result(&raw) {
+            self.bridge.emit(BridgeEvent::TaskCreated {
+                task_id: task_id.clone(),
+                project: project.clone(),
+                parent_run_id: parent_run_id.clone(),
+                parent_task_id: parent_task_id.clone(),
+            });
+        }
 
-        self.read_task_record(&task_id).await
+        self.read_task_record(project, &task_id).await
     }
 
     pub async fn declare_dependency(
@@ -229,8 +235,12 @@ impl FabricTaskService {
         Ok(Vec::new())
     }
 
-    pub async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, FabricError> {
-        match self.read_task_record(task_id).await {
+    pub async fn get(
+        &self,
+        project: &ProjectKey,
+        task_id: &TaskId,
+    ) -> Result<Option<TaskRecord>, FabricError> {
+        match self.read_task_record(project, task_id).await {
             Ok(record) => Ok(Some(record)),
             Err(FabricError::NotFound { .. }) => Ok(None),
             Err(e) => Err(e),
@@ -239,11 +249,12 @@ impl FabricTaskService {
 
     pub async fn claim(
         &self,
+        project: &ProjectKey,
         task_id: &TaskId,
         _lease_owner: String,
         lease_duration_ms: u64,
     ) -> Result<TaskRecord, FabricError> {
-        let eid = self.task_to_execution_id(task_id);
+        let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -347,7 +358,7 @@ impl FabricTaskService {
             ActiveTaskHandle::new_without_claimed_task(eid.clone(), lease_id, lease_epoch, att_idx);
         self.registry.register(task_id, handle);
 
-        let record = self.read_task_record(task_id).await?;
+        let record = self.read_task_record(project, task_id).await?;
         self.bridge.emit(BridgeEvent::TaskLeaseClaimed {
             task_id: task_id.clone(),
             project: record.project.clone(),
@@ -360,6 +371,7 @@ impl FabricTaskService {
 
     pub async fn heartbeat(
         &self,
+        project: &ProjectKey,
         task_id: &TaskId,
         lease_extension_ms: u64,
     ) -> Result<TaskRecord, FabricError> {
@@ -371,7 +383,7 @@ impl FabricTaskService {
                     id: task_id.to_string(),
                 })?;
 
-        let eid = self.task_to_execution_id(task_id);
+        let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -409,16 +421,24 @@ impl FabricTaskService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_renew_lease: {e}")))?;
 
-        self.read_task_record(task_id).await
+        self.read_task_record(project, task_id).await
     }
 
-    pub async fn start(&self, task_id: &TaskId) -> Result<TaskRecord, FabricError> {
+    pub async fn start(
+        &self,
+        project: &ProjectKey,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, FabricError> {
         // FF transitions to active on claim — no separate start step needed.
-        self.read_task_record(task_id).await
+        self.read_task_record(project, task_id).await
     }
 
-    pub async fn complete(&self, task_id: &TaskId) -> Result<TaskRecord, FabricError> {
-        let eid = self.task_to_execution_id(task_id);
+    pub async fn complete(
+        &self,
+        project: &ProjectKey,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, FabricError> {
+        let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -484,7 +504,7 @@ impl FabricTaskService {
         // Remove from active registry
         let _ = self.registry.take(task_id);
 
-        let record = self.read_task_record(task_id).await?;
+        let record = self.read_task_record(project, task_id).await?;
         self.bridge.emit(BridgeEvent::TaskStateChanged {
             task_id: task_id.clone(),
             project: record.project.clone(),
@@ -496,10 +516,11 @@ impl FabricTaskService {
 
     pub async fn fail(
         &self,
+        project: &ProjectKey,
         task_id: &TaskId,
         failure_class: FailureClass,
     ) -> Result<TaskRecord, FabricError> {
-        let eid = self.task_to_execution_id(task_id);
+        let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -575,7 +596,7 @@ impl FabricTaskService {
 
         let _ = self.registry.take(task_id);
 
-        let record = self.read_task_record(task_id).await?;
+        let record = self.read_task_record(project, task_id).await?;
         self.bridge.emit(BridgeEvent::TaskStateChanged {
             task_id: task_id.clone(),
             project: record.project.clone(),
@@ -585,8 +606,12 @@ impl FabricTaskService {
         Ok(record)
     }
 
-    pub async fn cancel(&self, task_id: &TaskId) -> Result<TaskRecord, FabricError> {
-        let eid = self.task_to_execution_id(task_id);
+    pub async fn cancel(
+        &self,
+        project: &ProjectKey,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, FabricError> {
+        let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -686,7 +711,7 @@ impl FabricTaskService {
 
         let _ = self.registry.take(task_id);
 
-        let record = self.read_task_record(task_id).await?;
+        let record = self.read_task_record(project, task_id).await?;
         self.bridge.emit(BridgeEvent::TaskStateChanged {
             task_id: task_id.clone(),
             project: record.project.clone(),
@@ -696,8 +721,12 @@ impl FabricTaskService {
         Ok(record)
     }
 
-    pub async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, FabricError> {
-        self.read_task_record(task_id).await
+    pub async fn dead_letter(
+        &self,
+        project: &ProjectKey,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, FabricError> {
+        self.read_task_record(project, task_id).await
     }
 
     pub async fn list_dead_lettered(
@@ -712,10 +741,11 @@ impl FabricTaskService {
 
     pub async fn pause(
         &self,
+        project: &ProjectKey,
         task_id: &TaskId,
         reason: PauseReason,
     ) -> Result<TaskRecord, FabricError> {
-        let eid = self.task_to_execution_id(task_id);
+        let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -887,16 +917,17 @@ impl FabricTaskService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
 
-        self.read_task_record(task_id).await
+        self.read_task_record(project, task_id).await
     }
 
     pub async fn resume(
         &self,
+        project: &ProjectKey,
         task_id: &TaskId,
         _trigger: ResumeTrigger,
         _target: TaskResumeTarget,
     ) -> Result<TaskRecord, FabricError> {
-        let eid = self.task_to_execution_id(task_id);
+        let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -943,7 +974,7 @@ impl FabricTaskService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
 
-        self.read_task_record(task_id).await
+        self.read_task_record(project, task_id).await
     }
 
     pub async fn list_by_state(
@@ -966,9 +997,13 @@ impl FabricTaskService {
         Ok(Vec::new())
     }
 
-    pub async fn release_lease(&self, task_id: &TaskId) -> Result<TaskRecord, FabricError> {
+    pub async fn release_lease(
+        &self,
+        project: &ProjectKey,
+        task_id: &TaskId,
+    ) -> Result<TaskRecord, FabricError> {
         let _ = self.registry.take(task_id);
-        self.read_task_record(task_id).await
+        self.read_task_record(project, task_id).await
     }
 }
 
@@ -984,6 +1019,18 @@ fn parse_claim_lease_epoch(raw: &ferriskey::Value) -> ff_core::types::LeaseEpoch
         }
     }
     ff_core::types::LeaseEpoch::new(1)
+}
+
+fn is_duplicate_result(raw: &ferriskey::Value) -> bool {
+    if let ferriskey::Value::Array(arr) = raw {
+        if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(1) {
+            return &**b == b"DUPLICATE";
+        }
+        if let Some(Ok(ferriskey::Value::SimpleString(s))) = arr.get(1) {
+            return s == "DUPLICATE";
+        }
+    }
+    false
 }
 
 #[cfg(test)]

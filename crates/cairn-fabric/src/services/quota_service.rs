@@ -177,12 +177,13 @@ impl FabricQuotaService {
     pub async fn check_admission_for_run(
         &self,
         quota_policy_id: &QuotaPolicyId,
+        project: &cairn_domain::tenancy::ProjectKey,
         run_id: &cairn_domain::RunId,
         window_seconds: u64,
         rate_limit: u64,
         concurrency_cap: u64,
     ) -> Result<AdmissionResult, FabricError> {
-        let eid = id_map::run_to_execution_id(run_id);
+        let eid = id_map::run_to_execution_id(project, run_id);
         self.check_admission(
             quota_policy_id,
             &eid,

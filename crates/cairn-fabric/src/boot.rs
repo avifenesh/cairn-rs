@@ -51,6 +51,9 @@ impl FabricRuntime {
         })
     }
 
+    // TODO: add health_check() -> Result<(), FabricError> that PINGs Valkey.
+    // Wire into cairn-app /health endpoint as fabric_ok.
+
     pub async fn shutdown(self) {
         tracing::info!("shutting down fabric runtime");
         self.engine.shutdown().await;

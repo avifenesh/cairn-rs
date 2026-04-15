@@ -74,6 +74,9 @@ pub struct EventBridge {
 }
 
 impl EventBridge {
+    // TODO: batch consumer appends for throughput — currently one EventLog::append
+    // per event (~200-1000 events/sec with Postgres round-trips). Accumulate for
+    // 10-50ms or batch_size=64, then append as a single &[EventEnvelope] call.
     pub fn new(event_log: Arc<dyn EventLog>) -> Self {
         let (tx, mut rx) = mpsc::channel::<BridgeEvent>(256);
 

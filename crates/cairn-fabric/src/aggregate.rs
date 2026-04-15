@@ -13,6 +13,8 @@ use crate::services::{
 };
 use crate::signal_bridge::SignalBridge;
 
+// TODO: circuit breaker for Valkey unavailability — fail-fast after N consecutive
+// errors instead of letting every request hit TCP timeout and pile up.
 pub struct FabricServices {
     pub runtime: Arc<FabricRuntime>,
     pub bridge: Arc<EventBridge>,

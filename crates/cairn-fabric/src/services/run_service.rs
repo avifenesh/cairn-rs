@@ -25,8 +25,8 @@ impl FabricRunService {
         Self { runtime, bridge }
     }
 
-    fn execution_id(&self, run_id: &RunId) -> ExecutionId {
-        id_map::run_to_execution_id(run_id)
+    fn execution_id(&self, project: &ProjectKey, run_id: &RunId) -> ExecutionId {
+        id_map::run_to_execution_id(project, run_id)
     }
 
     fn partition(&self, eid: &ExecutionId) -> Partition {
@@ -41,8 +41,12 @@ impl FabricRunService {
         id_map::project_to_lane(project)
     }
 
-    async fn read_run_record(&self, run_id: &RunId) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(run_id);
+    async fn read_run_record(
+        &self,
+        project: &ProjectKey,
+        run_id: &RunId,
+    ) -> Result<RunRecord, FabricError> {
+        let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
 
@@ -108,8 +112,8 @@ impl FabricRunService {
         session_id: &SessionId,
         run_id: &RunId,
         parent_run_id: Option<&RunId>,
-    ) -> Result<(), FabricError> {
-        let eid = self.execution_id(run_id);
+    ) -> Result<bool, FabricError> {
+        let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -172,18 +176,23 @@ impl FabricRunService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _raw: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_create_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
 
-        Ok(())
+        Ok(!is_duplicate_result(&raw))
     }
 
-    async fn terminal_execution(&self, run_id: &RunId, function: &str) -> Result<(), FabricError> {
-        let eid = self.execution_id(run_id);
+    async fn terminal_execution(
+        &self,
+        project: &ProjectKey,
+        run_id: &RunId,
+        function: &str,
+    ) -> Result<(), FabricError> {
+        let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -320,20 +329,27 @@ impl FabricRunService {
         run_id: RunId,
         parent_run_id: Option<RunId>,
     ) -> Result<RunRecord, FabricError> {
-        self.create_execution(project, session_id, &run_id, parent_run_id.as_ref())
+        let created = self
+            .create_execution(project, session_id, &run_id, parent_run_id.as_ref())
             .await?;
 
-        self.bridge.emit(BridgeEvent::ExecutionCreated {
-            run_id: run_id.clone(),
-            session_id: session_id.clone(),
-            project: project.clone(),
-        });
+        if created {
+            self.bridge.emit(BridgeEvent::ExecutionCreated {
+                run_id: run_id.clone(),
+                session_id: session_id.clone(),
+                project: project.clone(),
+            });
+        }
 
-        self.read_run_record(&run_id).await
+        self.read_run_record(project, &run_id).await
     }
 
-    pub async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, FabricError> {
-        match self.read_run_record(run_id).await {
+    pub async fn get(
+        &self,
+        project: &ProjectKey,
+        run_id: &RunId,
+    ) -> Result<Option<RunRecord>, FabricError> {
+        match self.read_run_record(project, run_id).await {
             Ok(record) => Ok(Some(record)),
             Err(FabricError::NotFound { .. }) => Ok(None),
             Err(e) => Err(e),
@@ -352,11 +368,15 @@ impl FabricRunService {
         Ok(Vec::new())
     }
 
-    pub async fn complete(&self, run_id: &RunId) -> Result<RunRecord, FabricError> {
-        self.terminal_execution(run_id, "ff_complete_execution")
+    pub async fn complete(
+        &self,
+        project: &ProjectKey,
+        run_id: &RunId,
+    ) -> Result<RunRecord, FabricError> {
+        self.terminal_execution(project, run_id, "ff_complete_execution")
             .await?;
 
-        let record = self.read_run_record(run_id).await?;
+        let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionCompleted {
             run_id: run_id.clone(),
             project: record.project.clone(),
@@ -367,10 +387,11 @@ impl FabricRunService {
 
     pub async fn fail(
         &self,
+        project: &ProjectKey,
         run_id: &RunId,
         failure_class: FailureClass,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(run_id);
+        let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -469,7 +490,7 @@ impl FabricRunService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_fail_execution: {e}")))?;
 
-        let record = self.read_run_record(run_id).await?;
+        let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionFailed {
             run_id: run_id.clone(),
             project: record.project.clone(),
@@ -479,11 +500,15 @@ impl FabricRunService {
         Ok(record)
     }
 
-    pub async fn cancel(&self, run_id: &RunId) -> Result<RunRecord, FabricError> {
-        self.terminal_execution(run_id, "ff_cancel_execution")
+    pub async fn cancel(
+        &self,
+        project: &ProjectKey,
+        run_id: &RunId,
+    ) -> Result<RunRecord, FabricError> {
+        self.terminal_execution(project, run_id, "ff_cancel_execution")
             .await?;
 
-        let record = self.read_run_record(run_id).await?;
+        let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionCancelled {
             run_id: run_id.clone(),
             project: record.project.clone(),
@@ -494,10 +519,11 @@ impl FabricRunService {
 
     pub async fn pause(
         &self,
+        project: &ProjectKey,
         run_id: &RunId,
         reason: PauseReason,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(run_id);
+        let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -633,7 +659,7 @@ impl FabricRunService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
 
-        let record = self.read_run_record(run_id).await?;
+        let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionSuspended {
             run_id: run_id.clone(),
             project: record.project.clone(),
@@ -644,11 +670,12 @@ impl FabricRunService {
 
     pub async fn resume(
         &self,
+        project: &ProjectKey,
         run_id: &RunId,
         _trigger: ResumeTrigger,
         _target: RunResumeTarget,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(run_id);
+        let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -698,7 +725,7 @@ impl FabricRunService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
 
-        let record = self.read_run_record(run_id).await?;
+        let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionResumed {
             run_id: run_id.clone(),
             project: record.project.clone(),
@@ -707,10 +734,14 @@ impl FabricRunService {
         Ok(record)
     }
 
-    pub async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, FabricError> {
+    pub async fn enter_waiting_approval(
+        &self,
+        project: &ProjectKey,
+        run_id: &RunId,
+    ) -> Result<RunRecord, FabricError> {
         let params = crate::suspension::for_approval(run_id.as_str(), None);
 
-        let eid = self.execution_id(run_id);
+        let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -828,7 +859,7 @@ impl FabricRunService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
 
-        let record = self.read_run_record(run_id).await?;
+        let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionSuspended {
             run_id: run_id.clone(),
             project: record.project.clone(),
@@ -839,10 +870,11 @@ impl FabricRunService {
 
     pub async fn resolve_approval(
         &self,
+        project: &ProjectKey,
         run_id: &RunId,
         decision: ApprovalDecision,
     ) -> Result<RunRecord, FabricError> {
-        let eid = self.execution_id(run_id);
+        let eid = self.execution_id(project, run_id);
         let partition = self.partition(&eid);
         let ctx = ExecKeyContext::new(&partition, &eid);
         let idx = IndexKeys::new(&partition);
@@ -926,7 +958,7 @@ impl FabricRunService {
 
         match decision {
             ApprovalDecision::Approved => {
-                let record = self.read_run_record(run_id).await?;
+                let record = self.read_run_record(project, run_id).await?;
                 self.bridge.emit(BridgeEvent::ExecutionResumed {
                     run_id: run_id.clone(),
                     project: record.project.clone(),
@@ -934,7 +966,45 @@ impl FabricRunService {
                 });
                 Ok(record)
             }
-            ApprovalDecision::Rejected => self.fail(run_id, FailureClass::ApprovalRejected).await,
+            ApprovalDecision::Rejected => {
+                self.fail(project, run_id, FailureClass::ApprovalRejected)
+                    .await
+            }
         }
+    }
+}
+
+fn is_duplicate_result(raw: &ferriskey::Value) -> bool {
+    if let ferriskey::Value::Array(arr) = raw {
+        if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(1) {
+            return &**b == b"DUPLICATE";
+        }
+        if let Some(Ok(ferriskey::Value::SimpleString(s))) = arr.get(1) {
+            return s == "DUPLICATE";
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_duplicate_detects_duplicate() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("DUPLICATE".to_owned())),
+        ]);
+        assert!(is_duplicate_result(&raw));
+    }
+
+    #[test]
+    fn is_duplicate_detects_ok() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+        ]);
+        assert!(!is_duplicate_result(&raw));
     }
 }

@@ -9,14 +9,20 @@ const CAIRN_NAMESPACE: Uuid = Uuid::from_bytes([
     0xa3, 0x4e, 0x7c, 0x01, 0xf8, 0x2d, 0x4b, 0x9a, 0x91, 0x5c, 0xd7, 0x6e, 0x3a, 0x1b, 0x58, 0xf0,
 ]);
 
-pub fn run_to_execution_id(run_id: &RunId) -> ExecutionId {
-    let input = format!("run:{}", run_id.as_str());
+pub fn run_to_execution_id(project: &ProjectKey, run_id: &RunId) -> ExecutionId {
+    let input = format!(
+        "run:{}:{}:{}:{}",
+        project.tenant_id, project.workspace_id, project.project_id, run_id
+    );
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
     ExecutionId::from_uuid(uuid)
 }
 
-pub fn session_to_flow_id(session_id: &SessionId) -> FlowId {
-    let input = format!("session:{}", session_id.as_str());
+pub fn session_to_flow_id(project: &ProjectKey, session_id: &SessionId) -> FlowId {
+    let input = format!(
+        "session:{}:{}:{}:{}",
+        project.tenant_id, project.workspace_id, project.project_id, session_id
+    );
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
     FlowId::from_uuid(uuid)
 }
@@ -36,40 +42,76 @@ pub fn project_to_lane(project: &ProjectKey) -> LaneId {
 mod tests {
     use super::*;
 
+    fn test_project() -> ProjectKey {
+        ProjectKey::new("t1", "w1", "p1")
+    }
+
     #[test]
     fn run_to_execution_id_deterministic() {
+        let p = test_project();
         let run_id = RunId::new("run_123");
-        let eid1 = run_to_execution_id(&run_id);
-        let eid2 = run_to_execution_id(&run_id);
+        let eid1 = run_to_execution_id(&p, &run_id);
+        let eid2 = run_to_execution_id(&p, &run_id);
         assert_eq!(eid1, eid2);
     }
 
     #[test]
     fn different_runs_produce_different_ids() {
-        let eid1 = run_to_execution_id(&RunId::new("run_a"));
-        let eid2 = run_to_execution_id(&RunId::new("run_b"));
+        let p = test_project();
+        let eid1 = run_to_execution_id(&p, &RunId::new("run_a"));
+        let eid2 = run_to_execution_id(&p, &RunId::new("run_b"));
+        assert_ne!(eid1, eid2);
+    }
+
+    #[test]
+    fn same_run_different_tenants_no_collision() {
+        let p1 = ProjectKey::new("tenant_a", "w", "p");
+        let p2 = ProjectKey::new("tenant_b", "w", "p");
+        let eid1 = run_to_execution_id(&p1, &RunId::new("run_1"));
+        let eid2 = run_to_execution_id(&p2, &RunId::new("run_1"));
+        assert_ne!(eid1, eid2);
+    }
+
+    #[test]
+    fn same_run_different_projects_no_collision() {
+        let p1 = ProjectKey::new("t", "w", "project_a");
+        let p2 = ProjectKey::new("t", "w", "project_b");
+        let eid1 = run_to_execution_id(&p1, &RunId::new("run_1"));
+        let eid2 = run_to_execution_id(&p2, &RunId::new("run_1"));
         assert_ne!(eid1, eid2);
     }
 
     #[test]
     fn session_to_flow_id_deterministic() {
+        let p = test_project();
         let sid = SessionId::new("sess_1");
-        let fid1 = session_to_flow_id(&sid);
-        let fid2 = session_to_flow_id(&sid);
+        let fid1 = session_to_flow_id(&p, &sid);
+        let fid2 = session_to_flow_id(&p, &sid);
         assert_eq!(fid1, fid2);
     }
 
     #[test]
     fn different_sessions_produce_different_flow_ids() {
-        let fid1 = session_to_flow_id(&SessionId::new("sess_a"));
-        let fid2 = session_to_flow_id(&SessionId::new("sess_b"));
+        let p = test_project();
+        let fid1 = session_to_flow_id(&p, &SessionId::new("sess_a"));
+        let fid2 = session_to_flow_id(&p, &SessionId::new("sess_b"));
+        assert_ne!(fid1, fid2);
+    }
+
+    #[test]
+    fn same_session_different_tenants_no_collision() {
+        let p1 = ProjectKey::new("tenant_a", "w", "p");
+        let p2 = ProjectKey::new("tenant_b", "w", "p");
+        let fid1 = session_to_flow_id(&p1, &SessionId::new("sess_1"));
+        let fid2 = session_to_flow_id(&p2, &SessionId::new("sess_1"));
         assert_ne!(fid1, fid2);
     }
 
     #[test]
     fn same_string_different_entity_no_collision() {
-        let eid = run_to_execution_id(&RunId::new("abc"));
-        let fid = session_to_flow_id(&SessionId::new("abc"));
+        let p = test_project();
+        let eid = run_to_execution_id(&p, &RunId::new("abc"));
+        let fid = session_to_flow_id(&p, &SessionId::new("abc"));
         assert_ne!(eid.to_string(), fid.to_string());
     }
 

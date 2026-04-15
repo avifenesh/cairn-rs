@@ -129,7 +129,7 @@ impl SignalBridge {
             .client
             .hget(&ctx.core(), "lane_id")
             .await
-            .unwrap_or(None);
+            .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = ff_core::types::LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
         let idem_key = if let Some(ref ik) = signal.idempotency_key {

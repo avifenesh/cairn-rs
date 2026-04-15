@@ -17,6 +17,8 @@ pub fn ff_public_state_to_run_state(state: PublicState) -> (RunState, Option<Fai
     }
 }
 
+// Coupled to FF Lua's REASON_TO_BLOCKING table in helpers.lua. If cairn adds
+// new pause reasons that map to new blocking_reason strings, add entries here.
 pub fn adjust_run_state_for_blocking_reason(state: RunState, blocking_reason: &str) -> RunState {
     if state == RunState::Paused && blocking_reason == "waiting_for_approval" {
         RunState::WaitingApproval

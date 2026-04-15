@@ -25,8 +25,8 @@ impl FabricSessionService {
         Self { runtime, bridge }
     }
 
-    fn flow_id(&self, session_id: &SessionId) -> FlowId {
-        id_map::session_to_flow_id(session_id)
+    fn flow_id(&self, project: &ProjectKey, session_id: &SessionId) -> FlowId {
+        id_map::session_to_flow_id(project, session_id)
     }
 
     fn flow_partition(&self, fid: &FlowId) -> Partition {
@@ -39,9 +39,10 @@ impl FabricSessionService {
 
     async fn read_flow_summary(
         &self,
+        project: &ProjectKey,
         session_id: &SessionId,
     ) -> Result<Option<HashMap<String, String>>, FabricError> {
-        let fid = self.flow_id(session_id);
+        let fid = self.flow_id(project, session_id);
         let partition = self.flow_partition(&fid);
         let fctx = FlowKeyContext::new(&partition, &fid);
 
@@ -60,9 +61,10 @@ impl FabricSessionService {
 
     async fn read_session_record(
         &self,
+        project: &ProjectKey,
         session_id: &SessionId,
     ) -> Result<Option<SessionRecord>, FabricError> {
-        let fid = self.flow_id(session_id);
+        let fid = self.flow_id(project, session_id);
         let partition = self.flow_partition(&fid);
         let fctx = FlowKeyContext::new(&partition, &fid);
 
@@ -78,7 +80,7 @@ impl FabricSessionService {
         }
 
         let summary = self
-            .read_flow_summary(session_id)
+            .read_flow_summary(project, session_id)
             .await?
             .unwrap_or_default();
 
@@ -90,7 +92,7 @@ impl FabricSessionService {
         project: &ProjectKey,
         session_id: SessionId,
     ) -> Result<SessionRecord, FabricError> {
-        let fid = self.flow_id(&session_id);
+        let fid = self.flow_id(project, &session_id);
         let partition = self.flow_partition(&fid);
         let fctx = FlowKeyContext::new(&partition, &fid);
         let namespace = self.namespace(project);
@@ -143,8 +145,12 @@ impl FabricSessionService {
         })
     }
 
-    pub async fn get(&self, session_id: &SessionId) -> Result<Option<SessionRecord>, FabricError> {
-        self.read_session_record(session_id).await
+    pub async fn get(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionRecord>, FabricError> {
+        self.read_session_record(project, session_id).await
     }
 
     pub async fn list(
@@ -158,8 +164,12 @@ impl FabricSessionService {
         Ok(Vec::new())
     }
 
-    pub async fn archive(&self, session_id: &SessionId) -> Result<SessionRecord, FabricError> {
-        let fid = self.flow_id(session_id);
+    pub async fn archive(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+    ) -> Result<SessionRecord, FabricError> {
+        let fid = self.flow_id(project, session_id);
         let partition = self.flow_partition(&fid);
         let fctx = FlowKeyContext::new(&partition, &fid);
 
@@ -204,7 +214,7 @@ impl FabricSessionService {
             .await
             .map_err(|e| FabricError::Internal(format!("hset cairn.archived: {e}")))?;
 
-        match self.read_session_record(session_id).await? {
+        match self.read_session_record(project, session_id).await? {
             Some(record) => {
                 self.bridge.emit(BridgeEvent::SessionArchived {
                     session_id: session_id.clone(),
@@ -305,16 +315,18 @@ mod tests {
 
     #[test]
     fn session_id_maps_to_stable_flow_id() {
+        let p = ProjectKey::new("t", "w", "p");
         let sid = SessionId::new("sess_42");
-        let fid1 = id_map::session_to_flow_id(&sid);
-        let fid2 = id_map::session_to_flow_id(&sid);
+        let fid1 = id_map::session_to_flow_id(&p, &sid);
+        let fid2 = id_map::session_to_flow_id(&p, &sid);
         assert_eq!(fid1, fid2);
     }
 
     #[test]
     fn different_sessions_different_flows() {
-        let fid1 = id_map::session_to_flow_id(&SessionId::new("sess_a"));
-        let fid2 = id_map::session_to_flow_id(&SessionId::new("sess_b"));
+        let p = ProjectKey::new("t", "w", "p");
+        let fid1 = id_map::session_to_flow_id(&p, &SessionId::new("sess_a"));
+        let fid2 = id_map::session_to_flow_id(&p, &SessionId::new("sess_b"));
         assert_ne!(fid1, fid2);
     }
 
