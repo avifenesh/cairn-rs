@@ -1268,6 +1268,7 @@ pub(crate) async fn get_model_handler(
 /// `PUT /v1/admin/models/:id` — Create or update a model entry (operator override).
 pub(crate) async fn set_model_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(id): Path<String>,
     Json(mut entry): Json<cairn_domain::model_catalog::ModelEntry>,
 ) -> impl IntoResponse {
@@ -1280,6 +1281,7 @@ pub(crate) async fn set_model_handler(
 /// `DELETE /v1/admin/models/:id` — Remove a model entry.
 pub(crate) async fn delete_model_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.model_registry.unregister(&id) {
@@ -1295,6 +1297,7 @@ pub(crate) async fn delete_model_handler(
 /// Returns 400 if the body is not valid JSON (a HashMap of model objects).
 pub(crate) async fn import_litellm_handler(
     State(state): State<Arc<AppState>>,
+    _role: AdminRoleGuard,
     body: String,
 ) -> impl IntoResponse {
     // Pre-validate: body must parse as a JSON object (HashMap).
