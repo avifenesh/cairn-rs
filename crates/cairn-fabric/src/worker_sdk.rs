@@ -136,8 +136,38 @@ impl CairnTask {
         name: &str,
         args: &serde_json::Value,
     ) -> Result<(), FabricError> {
-        let writer = self.stream_writer();
-        writer.log_tool_call(name, args).await?;
+        self.stream_writer().log_tool_call(name, args).await?;
+        Ok(())
+    }
+
+    pub async fn log_tool_result(
+        &self,
+        tool_name: &str,
+        output: &serde_json::Value,
+        success: bool,
+        duration_ms: u64,
+    ) -> Result<(), FabricError> {
+        self.stream_writer()
+            .log_tool_result(tool_name, output, success, duration_ms)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn log_llm_response(
+        &self,
+        model: &str,
+        tokens_in: u64,
+        tokens_out: u64,
+        latency_ms: u64,
+    ) -> Result<(), FabricError> {
+        self.stream_writer()
+            .log_llm_response(model, tokens_in, tokens_out, latency_ms)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn save_checkpoint(&self, context_json: &[u8]) -> Result<(), FabricError> {
+        self.stream_writer().save_checkpoint(context_json).await?;
         Ok(())
     }
 
@@ -265,6 +295,36 @@ impl CairnTask {
             )
             .await
             .map_err(|e| FabricError::Bridge(format!("suspend_for_subagent: {e}")))?;
+
+        if let (Some(rid), Some(proj)) = (run_id, project) {
+            bridge.emit(BridgeEvent::ExecutionSuspended {
+                run_id: rid,
+                project: proj,
+            });
+        }
+
+        Ok(outcome)
+    }
+    pub async fn suspend_for_tool_result(
+        self,
+        invocation_id: &str,
+        timeout_ms: Option<u64>,
+    ) -> Result<SuspendOutcome, FabricError> {
+        let run_id = self.run_id.clone();
+        let project = self.project.clone();
+        let bridge = self.bridge.clone();
+
+        let params = suspension::for_tool_result(invocation_id, timeout_ms);
+        let outcome = self
+            .task
+            .suspend(
+                &params.reason_code,
+                &params.condition_matchers,
+                params.timeout_ms,
+                params.timeout_behavior,
+            )
+            .await
+            .map_err(|e| FabricError::Bridge(format!("suspend_for_tool_result: {e}")))?;
 
         if let (Some(rid), Some(proj)) = (run_id, project) {
             bridge.emit(BridgeEvent::ExecutionSuspended {

@@ -4,10 +4,8 @@ use crate::error::FabricError;
 
 pub const FRAME_TOOL_CALL: &str = "tool_call";
 pub const FRAME_TOOL_RESULT: &str = "tool_result";
-pub const FRAME_LLM_REQUEST: &str = "llm_request";
 pub const FRAME_LLM_RESPONSE: &str = "llm_response";
 pub const FRAME_CHECKPOINT: &str = "checkpoint";
-pub const FRAME_PROGRESS: &str = "progress";
 
 pub struct StreamWriter<'a> {
     task: &'a ClaimedTask,
@@ -109,10 +107,8 @@ mod tests {
     fn frame_type_constants() {
         assert_eq!(FRAME_TOOL_CALL, "tool_call");
         assert_eq!(FRAME_TOOL_RESULT, "tool_result");
-        assert_eq!(FRAME_LLM_REQUEST, "llm_request");
         assert_eq!(FRAME_LLM_RESPONSE, "llm_response");
         assert_eq!(FRAME_CHECKPOINT, "checkpoint");
-        assert_eq!(FRAME_PROGRESS, "progress");
     }
 
     #[test]

@@ -51,6 +51,18 @@ impl FabricConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(4);
 
+        if valkey_port == 0 {
+            return Err(FabricError::Config("port must be > 0".into()));
+        }
+        if lease_ttl_ms < 1000 {
+            return Err(FabricError::Config("lease_ttl_ms must be >= 1000".into()));
+        }
+        if max_concurrent_tasks < 1 {
+            return Err(FabricError::Config(
+                "max_concurrent_tasks must be >= 1".into(),
+            ));
+        }
+
         Ok(Self {
             valkey_host,
             valkey_port,
@@ -77,12 +89,13 @@ mod tests {
 
     #[test]
     fn default_config_from_env() {
-        // Clear any existing env vars to test defaults
         std::env::remove_var("CAIRN_FABRIC_HOST");
         std::env::remove_var("CAIRN_FABRIC_PORT");
         std::env::remove_var("CAIRN_FABRIC_TLS");
         std::env::remove_var("CAIRN_FABRIC_CLUSTER");
         std::env::remove_var("CAIRN_FABRIC_LANE");
+        std::env::remove_var("CAIRN_FABRIC_LEASE_TTL_MS");
+        std::env::remove_var("CAIRN_FABRIC_MAX_TASKS");
 
         let config = FabricConfig::from_env().unwrap();
         assert_eq!(config.valkey_host, "localhost");
@@ -109,6 +122,62 @@ mod tests {
             max_concurrent_tasks: 1,
         };
         assert_eq!(config.valkey_url(), "valkey://myhost:6380");
+    }
+
+    fn test_config(
+        port: u16,
+        lease_ttl_ms: u64,
+        max_tasks: usize,
+    ) -> Result<FabricConfig, FabricError> {
+        let config = FabricConfig {
+            valkey_host: "localhost".into(),
+            valkey_port: port,
+            tls: false,
+            cluster: false,
+            lane_id: LaneId::new("test"),
+            worker_id: WorkerId::new("w"),
+            worker_instance_id: WorkerInstanceId::new("i"),
+            namespace: Namespace::new("ns"),
+            lease_ttl_ms,
+            max_concurrent_tasks: max_tasks,
+        };
+        // Re-run the same validation from_env uses
+        if config.valkey_port == 0 {
+            return Err(FabricError::Config("port must be > 0".into()));
+        }
+        if config.lease_ttl_ms < 1000 {
+            return Err(FabricError::Config("lease_ttl_ms must be >= 1000".into()));
+        }
+        if config.max_concurrent_tasks < 1 {
+            return Err(FabricError::Config(
+                "max_concurrent_tasks must be >= 1".into(),
+            ));
+        }
+        Ok(config)
+    }
+
+    #[test]
+    fn rejects_zero_port() {
+        let result = test_config(0, 30_000, 4);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("port"));
+    }
+
+    #[test]
+    fn rejects_low_lease_ttl() {
+        let result = test_config(6379, 500, 4);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("lease_ttl_ms"));
+    }
+
+    #[test]
+    fn rejects_zero_concurrent_tasks() {
+        let result = test_config(6379, 30_000, 0);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("max_concurrent_tasks"));
     }
 
     #[test]

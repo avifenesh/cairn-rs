@@ -59,6 +59,7 @@ pub mod boot;
 pub mod config;
 pub mod error;
 pub mod event_bridge;
+pub mod helpers;
 pub mod id_map;
 pub mod services;
 pub mod signal_bridge;

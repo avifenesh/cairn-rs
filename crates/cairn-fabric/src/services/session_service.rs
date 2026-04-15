@@ -11,6 +11,7 @@ use ff_core::types::{FlowId, Namespace, TimestampMs};
 
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
+use crate::helpers::parse_project_key;
 use crate::id_map;
 
 pub struct FabricSessionService {
@@ -179,11 +180,15 @@ impl FabricSessionService {
             .await
             .map_err(|e| FabricError::Internal(format!("ff_cancel_flow: {e}")))?;
 
+        let _: i64 = self
+            .runtime
+            .client
+            .hset(&fctx.core(), "cairn.archived", "true")
+            .await
+            .map_err(|e| FabricError::Internal(format!("hset cairn.archived: {e}")))?;
+
         match self.read_session_record(session_id).await? {
-            Some(mut record) => {
-                record.state = SessionState::Archived;
-                Ok(record)
-            }
+            Some(record) => Ok(record),
             None => Err(FabricError::NotFound {
                 entity: "session",
                 id: session_id.to_string(),
@@ -196,16 +201,8 @@ fn flow_state_to_session_state(state: &str) -> SessionState {
     match state {
         "completed" => SessionState::Completed,
         "failed" => SessionState::Failed,
-        "cancelled" => SessionState::Completed,
+        "cancelled" => SessionState::Failed,
         _ => SessionState::Open,
-    }
-}
-
-fn parse_project_key(s: &str) -> ProjectKey {
-    let parts: Vec<&str> = s.splitn(3, '/').collect();
-    match parts.as_slice() {
-        [t, w, p] => ProjectKey::new(*t, *w, *p),
-        _ => ProjectKey::new("default_tenant", "default_workspace", "default_project"),
     }
 }
 
@@ -217,12 +214,20 @@ fn build_session_record(
     let project_str = core.get("cairn.project").cloned().unwrap_or_default();
     let project = parse_project_key(&project_str);
 
-    let flow_state = summary
-        .get("public_state")
-        .or_else(|| core.get("state"))
-        .cloned()
-        .unwrap_or_default();
-    let state = flow_state_to_session_state(&flow_state);
+    let is_archived = core
+        .get("cairn.archived")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    let state = if is_archived {
+        SessionState::Archived
+    } else {
+        let flow_state = summary
+            .get("public_state")
+            .or_else(|| core.get("state"))
+            .cloned()
+            .unwrap_or_default();
+        flow_state_to_session_state(&flow_state)
+    };
 
     let created_at = core
         .get("created_at")
@@ -271,24 +276,8 @@ mod tests {
         assert_eq!(flow_state_to_session_state("failed"), SessionState::Failed);
         assert_eq!(
             flow_state_to_session_state("cancelled"),
-            SessionState::Completed
+            SessionState::Failed
         );
-    }
-
-    #[test]
-    fn parse_project_key_valid() {
-        let pk = parse_project_key("acme/eng/backend");
-        assert_eq!(pk.tenant_id.as_str(), "acme");
-        assert_eq!(pk.workspace_id.as_str(), "eng");
-        assert_eq!(pk.project_id.as_str(), "backend");
-    }
-
-    #[test]
-    fn parse_project_key_invalid_defaults() {
-        let pk = parse_project_key("bad_format");
-        assert_eq!(pk.tenant_id.as_str(), "default_tenant");
-        assert_eq!(pk.workspace_id.as_str(), "default_workspace");
-        assert_eq!(pk.project_id.as_str(), "default_project");
     }
 
     #[test]
@@ -398,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn build_record_cancelled_maps_to_completed() {
+    fn build_record_cancelled_maps_to_failed() {
         let sid = SessionId::new("sess_cancel");
         let mut core = HashMap::new();
         core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
@@ -406,6 +395,35 @@ mod tests {
 
         let mut summary = HashMap::new();
         summary.insert("public_state".to_owned(), "cancelled".to_owned());
+
+        let record = build_session_record(&sid, &core, &summary);
+        assert_eq!(record.state, SessionState::Failed);
+    }
+
+    #[test]
+    fn build_record_archived_overrides_flow_state() {
+        let sid = SessionId::new("sess_archived");
+        let mut core = HashMap::new();
+        core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
+        core.insert("created_at".to_owned(), "100".to_owned());
+        core.insert("cairn.archived".to_owned(), "true".to_owned());
+
+        let mut summary = HashMap::new();
+        summary.insert("public_state".to_owned(), "cancelled".to_owned());
+
+        let record = build_session_record(&sid, &core, &summary);
+        assert_eq!(record.state, SessionState::Archived);
+    }
+
+    #[test]
+    fn build_record_not_archived_when_flag_absent() {
+        let sid = SessionId::new("sess_not_archived");
+        let mut core = HashMap::new();
+        core.insert("cairn.project".to_owned(), "t/w/p".to_owned());
+        core.insert("created_at".to_owned(), "100".to_owned());
+
+        let mut summary = HashMap::new();
+        summary.insert("public_state".to_owned(), "completed".to_owned());
 
         let record = build_session_record(&sid, &core, &summary);
         assert_eq!(record.state, SessionState::Completed);

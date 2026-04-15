@@ -53,7 +53,7 @@ impl EventBridge {
                 let runtime_event = bridge_event_to_runtime_event(&event);
                 let envelope = EventEnvelope::for_runtime_event(
                     EventId::new(uuid::Uuid::new_v4().to_string()),
-                    EventSource::System,
+                    EventSource::Runtime,
                     runtime_event,
                 );
                 if let Err(e) = event_log.append(&[envelope]).await {
@@ -66,9 +66,21 @@ impl EventBridge {
     }
 
     pub fn emit(&self, event: BridgeEvent) {
+        let event_type = bridge_event_type_name(&event);
         if let Err(e) = self.tx.try_send(event) {
-            tracing::warn!(error = %e, "event bridge: channel full or closed, dropping event");
+            tracing::warn!(error = %e, event_type, "event bridge: dropping event");
         }
+    }
+}
+
+fn bridge_event_type_name(event: &BridgeEvent) -> &'static str {
+    match event {
+        BridgeEvent::ExecutionCreated { .. } => "ExecutionCreated",
+        BridgeEvent::ExecutionCompleted { .. } => "ExecutionCompleted",
+        BridgeEvent::ExecutionFailed { .. } => "ExecutionFailed",
+        BridgeEvent::ExecutionCancelled { .. } => "ExecutionCancelled",
+        BridgeEvent::ExecutionSuspended { .. } => "ExecutionSuspended",
+        BridgeEvent::ExecutionResumed { .. } => "ExecutionResumed",
     }
 }
 

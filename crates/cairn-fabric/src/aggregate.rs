@@ -11,6 +11,7 @@ use crate::services::{
     FabricBudgetService, FabricQuotaService, FabricRunService, FabricSchedulerService,
     FabricSessionService, FabricTaskService, FabricWorkerService,
 };
+use crate::signal_bridge::SignalBridge;
 
 pub struct FabricServices {
     pub runtime: Arc<FabricRuntime>,
@@ -23,6 +24,7 @@ pub struct FabricServices {
     pub worker: FabricWorkerService,
     pub budgets: FabricBudgetService,
     pub quotas: FabricQuotaService,
+    pub signals: SignalBridge,
 }
 
 impl FabricServices {
@@ -41,6 +43,7 @@ impl FabricServices {
         let worker = FabricWorkerService::new(runtime.clone(), registry.clone());
         let budgets = FabricBudgetService::new(runtime.clone());
         let quotas = FabricQuotaService::new(runtime.clone());
+        let signals = SignalBridge::new(&runtime);
 
         tracing::info!("fabric services aggregate ready");
 
@@ -55,16 +58,34 @@ impl FabricServices {
             worker,
             budgets,
             quotas,
+            signals,
         })
     }
 
+    /// Shut down the Fabric runtime and all background scanners.
+    ///
+    /// Drops all service fields first to release their Arc<FabricRuntime> clones,
+    /// then unwraps the sole remaining Arc to call Engine::shutdown().
     pub async fn shutdown(self) {
-        // Engine holds background scanners — shut them down.
-        // shutdown() consumes FabricRuntime, so we need sole ownership.
-        match Arc::try_unwrap(self.runtime) {
+        let Self {
+            runtime,
+            bridge: _,
+            registry: _,
+            runs: _,
+            tasks: _,
+            sessions: _,
+            scheduler: _,
+            worker: _,
+            budgets: _,
+            quotas: _,
+            signals: _,
+        } = self;
+
+        match Arc::try_unwrap(runtime) {
             Ok(rt) => rt.shutdown().await,
-            Err(_) => {
+            Err(arc) => {
                 tracing::warn!(
+                    refs = Arc::strong_count(&arc),
                     "fabric runtime has outstanding references, skipping engine shutdown"
                 );
             }
@@ -87,6 +108,8 @@ mod tests {
     fn fabric_config_from_env_defaults() {
         std::env::remove_var("CAIRN_FABRIC_HOST");
         std::env::remove_var("CAIRN_FABRIC_PORT");
+        std::env::remove_var("CAIRN_FABRIC_LEASE_TTL_MS");
+        std::env::remove_var("CAIRN_FABRIC_MAX_TASKS");
         let config = FabricConfig::from_env().unwrap();
         assert_eq!(config.valkey_host, "localhost");
         assert_eq!(config.valkey_port, 6379);

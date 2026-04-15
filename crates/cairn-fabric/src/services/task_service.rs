@@ -5,6 +5,7 @@ use cairn_domain::*;
 use cairn_store::projections::{TaskDependencyRecord, TaskRecord};
 
 use crate::error::FabricError;
+use crate::helpers::{parse_project_key, parse_public_state};
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
 use ff_core::types::{ExecutionId, LaneId};
@@ -271,7 +272,7 @@ impl FabricTaskService {
 
         let lease_id = ff_core::types::LeaseId::new();
         let attempt_id = ff_core::types::AttemptId::new();
-        let renew_before_ms = lease_duration_ms * 2 / 3;
+        let renew_before_ms = lease_duration_ms / 3;
 
         let claim_keys: Vec<String> = vec![
             ctx.core(),
@@ -329,11 +330,54 @@ impl FabricTaskService {
     pub async fn heartbeat(
         &self,
         task_id: &TaskId,
-        _lease_extension_ms: u64,
+        lease_extension_ms: u64,
     ) -> Result<TaskRecord, FabricError> {
-        // FF auto-renews leases at ttl/3 via the ClaimedTask background task.
-        // For direct FCALL claims, we'd call ff_renew_lease here, but the
-        // registry doesn't hold ClaimedTask handles for these. Return current state.
+        let (lid, epoch, att_idx) =
+            self.registry
+                .get_lease_context(task_id)
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "task_lease",
+                    id: task_id.to_string(),
+                })?;
+
+        let eid = self.task_to_execution_id(task_id);
+        let partition = execution_partition(&eid, &self.runtime.partition_config);
+        let ctx = ExecKeyContext::new(&partition, &eid);
+        let idx = IndexKeys::new(&partition);
+
+        let attempt_id_str: Option<String> = self
+            .runtime
+            .client
+            .hget(&ctx.core(), "current_attempt_id")
+            .await
+            .unwrap_or(None);
+
+        let keys: Vec<String> = vec![
+            ctx.core(),
+            ctx.lease_current(),
+            ctx.lease_history(),
+            idx.lease_expiry(),
+        ];
+        let args: Vec<String> = vec![
+            eid.to_string(),
+            att_idx.to_string(),
+            attempt_id_str.unwrap_or_default(),
+            lid.to_string(),
+            epoch.to_string(),
+            lease_extension_ms.to_string(),
+            "5000".to_owned(),
+        ];
+
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let _: ferriskey::Value = self
+            .runtime
+            .client
+            .fcall("ff_renew_lease", &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_renew_lease: {e}")))?;
+
         self.read_task_record(task_id).await
     }
 
@@ -356,14 +400,13 @@ impl FabricTaskService {
             .unwrap_or(None);
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let lease_ctx = self.registry.get_lease_context(task_id);
-        let (lid, epoch, att_idx) = lease_ctx.unwrap_or_else(|| {
-            (
-                ff_core::types::LeaseId::new(),
-                ff_core::types::LeaseEpoch::new(1),
-                ff_core::types::AttemptIndex::new(0),
-            )
-        });
+        let (lid, epoch, att_idx) =
+            self.registry
+                .get_lease_context(task_id)
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "task_lease",
+                    id: task_id.to_string(),
+                })?;
 
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
@@ -431,14 +474,13 @@ impl FabricTaskService {
             .unwrap_or(None);
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let lease_ctx = self.registry.get_lease_context(task_id);
-        let (lid, epoch, att_idx) = lease_ctx.unwrap_or_else(|| {
-            (
-                ff_core::types::LeaseId::new(),
-                ff_core::types::LeaseEpoch::new(1),
-                ff_core::types::AttemptIndex::new(0),
-            )
-        });
+        let (lid, epoch, att_idx) =
+            self.registry
+                .get_lease_context(task_id)
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "task_lease",
+                    id: task_id.to_string(),
+                })?;
 
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
@@ -512,14 +554,13 @@ impl FabricTaskService {
             .unwrap_or(None);
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let lease_ctx = self.registry.get_lease_context(task_id);
-        let (lid, epoch, _att_idx) = lease_ctx.unwrap_or_else(|| {
-            (
-                ff_core::types::LeaseId::new(),
-                ff_core::types::LeaseEpoch::new(1),
-                ff_core::types::AttemptIndex::new(0),
-            )
-        });
+        let (lid, epoch, _att_idx) =
+            self.registry
+                .get_lease_context(task_id)
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "task_lease",
+                    id: task_id.to_string(),
+                })?;
 
         let att_idx_str: Option<String> = self
             .runtime
@@ -603,28 +644,8 @@ impl FabricTaskService {
         self.read_task_record(task_id).await
     }
 
-    pub async fn dead_letter(&self, _task_id: &TaskId) -> Result<TaskRecord, FabricError> {
-        // FF's terminal_failed after max_retries IS the dead letter.
-        // No separate dead-letter action needed.
-        Ok(TaskRecord {
-            task_id: TaskId::new("noop"),
-            project: ProjectKey::new("default_tenant", "default_workspace", "default_project"),
-            parent_run_id: None,
-            parent_task_id: None,
-            state: TaskState::DeadLettered,
-            prompt_release_id: None,
-            failure_class: None,
-            pause_reason: None,
-            resume_trigger: None,
-            retry_count: 0,
-            lease_owner: None,
-            lease_expires_at: None,
-            title: None,
-            description: None,
-            version: 0,
-            created_at: 0,
-            updated_at: 0,
-        })
+    pub async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, FabricError> {
+        self.read_task_record(task_id).await
     }
 
     pub async fn list_dead_lettered(
@@ -639,25 +660,167 @@ impl FabricTaskService {
 
     pub async fn pause(
         &self,
-        _task_id: &TaskId,
-        _reason: PauseReason,
+        task_id: &TaskId,
+        reason: PauseReason,
     ) -> Result<TaskRecord, FabricError> {
-        // Task pause maps to FF suspend — use suspension.rs (Worker 3's domain).
-        // For now, delegate up to the run-level pause.
-        Err(FabricError::Internal(
-            "task pause delegates to suspension layer".to_owned(),
-        ))
+        let eid = self.task_to_execution_id(task_id);
+        let partition = execution_partition(&eid, &self.runtime.partition_config);
+        let ctx = ExecKeyContext::new(&partition, &eid);
+        let idx = IndexKeys::new(&partition);
+
+        let fields: HashMap<String, String> = self
+            .runtime
+            .client
+            .hgetall(&ctx.core())
+            .await
+            .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
+
+        let lane_id = ff_core::types::LaneId::new(
+            fields.get("lane_id").map(|s| s.as_str()).unwrap_or("cairn"),
+        );
+        let att_idx = ff_core::types::AttemptIndex::new(
+            fields
+                .get("current_attempt_index")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+        );
+        let worker_instance_id = ff_core::types::WorkerInstanceId::new(
+            fields
+                .get("worker_instance_id")
+                .map(|s| s.as_str())
+                .unwrap_or("cairn"),
+        );
+
+        let (reason_code, timeout_behavior_str) = match reason.kind {
+            PauseReasonKind::OperatorPause => ("operator_hold", "escalate"),
+            PauseReasonKind::RuntimeSuspension => ("waiting_for_signal", "fail"),
+            PauseReasonKind::ToolRequestedSuspension => ("waiting_for_tool_result", "fail"),
+            PauseReasonKind::PolicyHold => ("paused_by_policy", "fail"),
+        };
+
+        let suspension_id = ff_core::types::SuspensionId::new();
+        let waitpoint_id = ff_core::types::WaitpointId::new();
+        let waitpoint_key = format!("wpk:{waitpoint_id}");
+
+        let resume_condition_json = serde_json::json!({
+            "condition_type": "signal_set",
+            "required_signal_names": [reason_code],
+            "signal_match_mode": "any",
+            "minimum_signal_count": 1,
+            "timeout_behavior": timeout_behavior_str,
+            "allow_operator_override": true,
+        })
+        .to_string();
+
+        let resume_policy_json = serde_json::json!({
+            "resume_target": "runnable",
+            "close_waitpoint_on_resume": true,
+            "consume_matched_signals": true,
+            "retain_signal_buffer_until_closed": true,
+        })
+        .to_string();
+
+        let timeout_at = reason.resume_after_ms.map(|ms| {
+            let now = ff_core::types::TimestampMs::now().0;
+            now.saturating_add(ms as i64).to_string()
+        });
+
+        let keys: Vec<String> = vec![
+            ctx.core(),
+            ctx.attempt_hash(att_idx),
+            ctx.lease_current(),
+            ctx.lease_history(),
+            idx.lease_expiry(),
+            idx.worker_leases(&worker_instance_id),
+            ctx.suspension_current(),
+            ctx.waitpoint(&waitpoint_id),
+            ctx.waitpoint_signals(&waitpoint_id),
+            idx.suspension_timeout(),
+            idx.pending_waitpoint_expiry(),
+            idx.lane_active(&lane_id),
+            idx.lane_suspended(&lane_id),
+            ctx.waitpoints(),
+            ctx.waitpoint_condition(&waitpoint_id),
+            idx.attempt_timeout(),
+        ];
+        let args: Vec<String> = vec![
+            eid.to_string(),
+            att_idx.to_string(),
+            fields
+                .get("current_attempt_id")
+                .cloned()
+                .unwrap_or_default(),
+            fields.get("current_lease_id").cloned().unwrap_or_default(),
+            fields
+                .get("lease_epoch")
+                .cloned()
+                .unwrap_or_else(|| "1".to_owned()),
+            suspension_id.to_string(),
+            waitpoint_id.to_string(),
+            waitpoint_key,
+            reason_code.to_owned(),
+            "cairn".to_owned(),
+            timeout_at.unwrap_or_default(),
+            resume_condition_json,
+            resume_policy_json,
+            String::new(),
+            String::new(),
+            timeout_behavior_str.to_owned(),
+            "1000".to_owned(),
+        ];
+
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let _: ferriskey::Value = self
+            .runtime
+            .client
+            .fcall("ff_suspend_execution", &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
+
+        self.read_task_record(task_id).await
     }
 
     pub async fn resume(
         &self,
-        _task_id: &TaskId,
+        task_id: &TaskId,
         _trigger: ResumeTrigger,
         _target: TaskResumeTarget,
     ) -> Result<TaskRecord, FabricError> {
-        Err(FabricError::Internal(
-            "task resume delegates to suspension layer".to_owned(),
-        ))
+        let eid = self.task_to_execution_id(task_id);
+        let partition = execution_partition(&eid, &self.runtime.partition_config);
+        let ctx = ExecKeyContext::new(&partition, &eid);
+        let idx = IndexKeys::new(&partition);
+
+        let lane_str: Option<String> = self
+            .runtime
+            .client
+            .hget(&ctx.core(), "lane_id")
+            .await
+            .unwrap_or(None);
+        let lane_id = ff_core::types::LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
+
+        let keys: Vec<String> = vec![
+            ctx.core(),
+            ctx.suspension_current(),
+            idx.lane_suspended(&lane_id),
+            idx.lane_eligible(&lane_id),
+            idx.lane_delayed(&lane_id),
+        ];
+        let args: Vec<String> = vec![eid.to_string(), "operator".to_owned(), "0".to_owned()];
+
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let _: ferriskey::Value = self
+            .runtime
+            .client
+            .fcall("ff_resume_execution", &key_refs, &arg_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
+
+        self.read_task_record(task_id).await
     }
 
     pub async fn list_by_state(
@@ -686,31 +849,6 @@ impl FabricTaskService {
     }
 }
 
-fn parse_public_state(s: &str) -> ff_core::state::PublicState {
-    match s {
-        "waiting" => ff_core::state::PublicState::Waiting,
-        "delayed" => ff_core::state::PublicState::Delayed,
-        "rate_limited" => ff_core::state::PublicState::RateLimited,
-        "waiting_children" => ff_core::state::PublicState::WaitingChildren,
-        "active" => ff_core::state::PublicState::Active,
-        "suspended" => ff_core::state::PublicState::Suspended,
-        "completed" => ff_core::state::PublicState::Completed,
-        "failed" => ff_core::state::PublicState::Failed,
-        "cancelled" => ff_core::state::PublicState::Cancelled,
-        "expired" => ff_core::state::PublicState::Expired,
-        "skipped" => ff_core::state::PublicState::Skipped,
-        _ => ff_core::state::PublicState::Waiting,
-    }
-}
-
-fn parse_project_key(s: &str) -> ProjectKey {
-    let parts: Vec<&str> = s.splitn(3, '/').collect();
-    match parts.as_slice() {
-        [t, w, p] => ProjectKey::new(*t, *w, *p),
-        _ => ProjectKey::new("default_tenant", "default_workspace", "default_project"),
-    }
-}
-
 fn parse_claim_lease_epoch(raw: &ferriskey::Value) -> ff_core::types::LeaseEpoch {
     if let ferriskey::Value::Array(arr) = raw {
         if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(3) {
@@ -728,30 +866,6 @@ fn parse_claim_lease_epoch(raw: &ferriskey::Value) -> ff_core::types::LeaseEpoch
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_public_state_roundtrip() {
-        assert_eq!(
-            parse_public_state("active"),
-            ff_core::state::PublicState::Active
-        );
-        assert_eq!(
-            parse_public_state("completed"),
-            ff_core::state::PublicState::Completed
-        );
-        assert_eq!(
-            parse_public_state("unknown"),
-            ff_core::state::PublicState::Waiting
-        );
-    }
-
-    #[test]
-    fn parse_project_key_roundtrip() {
-        let pk = parse_project_key("t/w/p");
-        assert_eq!(pk.tenant_id.as_str(), "t");
-        assert_eq!(pk.workspace_id.as_str(), "w");
-        assert_eq!(pk.project_id.as_str(), "p");
-    }
 
     #[test]
     fn parse_claim_epoch_from_int() {

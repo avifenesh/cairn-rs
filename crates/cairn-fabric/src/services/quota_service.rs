@@ -33,8 +33,6 @@ impl FabricQuotaService {
         max_requests_per_window: u64,
         max_concurrent: u64,
     ) -> Result<QuotaPolicyId, FabricError> {
-        let _ = (scope_type, scope_id);
-
         let qid = QuotaPolicyId::new();
         let partition = quota_partition(&qid, &self.runtime.partition_config);
         let ctx = QuotaKeyContext::new(&partition, &qid);
@@ -67,6 +65,18 @@ impl FabricQuotaService {
             .fcall("ff_create_quota_policy", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_quota_policy: {e}")))?;
+
+        let def_key = ctx.definition();
+        self.runtime
+            .client
+            .hset(&def_key, "scope_type", scope_type)
+            .await
+            .map_err(|e| FabricError::Valkey(format!("HSET scope_type: {e}")))?;
+        self.runtime
+            .client
+            .hset(&def_key, "scope_id", scope_id)
+            .await
+            .map_err(|e| FabricError::Valkey(format!("HSET scope_id: {e}")))?;
 
         Ok(qid)
     }

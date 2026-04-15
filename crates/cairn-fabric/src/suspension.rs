@@ -8,15 +8,15 @@ pub struct SuspensionParams {
     pub timeout_behavior: TimeoutBehavior,
 }
 
-pub fn for_approval(_approval_id: &str, timeout_ms: Option<u64>) -> SuspensionParams {
+pub fn for_approval(approval_id: &str, timeout_ms: Option<u64>) -> SuspensionParams {
     SuspensionParams {
         reason_code: "waiting_for_approval".into(),
         condition_matchers: vec![
             ConditionMatcher {
-                signal_name: "approval_granted".into(),
+                signal_name: format!("approval_granted:{approval_id}"),
             },
             ConditionMatcher {
-                signal_name: "approval_rejected".into(),
+                signal_name: format!("approval_rejected:{approval_id}"),
             },
         ],
         timeout_ms,
@@ -64,10 +64,13 @@ mod tests {
         let params = for_approval("appr_1", Some(60_000));
         assert_eq!(params.reason_code, "waiting_for_approval");
         assert_eq!(params.condition_matchers.len(), 2);
-        assert_eq!(params.condition_matchers[0].signal_name, "approval_granted");
+        assert_eq!(
+            params.condition_matchers[0].signal_name,
+            "approval_granted:appr_1"
+        );
         assert_eq!(
             params.condition_matchers[1].signal_name,
-            "approval_rejected"
+            "approval_rejected:appr_1"
         );
         assert_eq!(params.timeout_ms, Some(60_000));
         assert_eq!(params.timeout_behavior, TimeoutBehavior::Escalate);

@@ -35,6 +35,9 @@ impl FabricSchedulerService {
             .map_err(|e| FabricError::Bridge(format!("scheduler claim_for_worker: {e}")))
     }
 
+    /// Compute eligible ZSET score: -(priority * 1T) + created_at_ms.
+    /// Lower score = claimed first. Valid priority range: 0–9223 for exact
+    /// arithmetic. Values above 9223 saturate to i64::MIN (still highest priority).
     pub fn priority_score(priority: u32, created_at_ms: u64) -> i64 {
         -(priority as i64).saturating_mul(1_000_000_000_000) + created_at_ms as i64
     }

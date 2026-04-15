@@ -3,17 +3,21 @@ use cairn_domain::{RunId, SessionId, TenantId};
 use ff_core::types::{ExecutionId, FlowId, LaneId, Namespace};
 use uuid::Uuid;
 
+// Project-specific namespace UUID for deterministic v5 generation.
+// Generated once, never changes — all cairn ID mappings derive from this.
 const CAIRN_NAMESPACE: Uuid = Uuid::from_bytes([
-    0x6b, 0xa7, 0xb8, 0x14, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8,
+    0xa3, 0x4e, 0x7c, 0x01, 0xf8, 0x2d, 0x4b, 0x9a, 0x91, 0x5c, 0xd7, 0x6e, 0x3a, 0x1b, 0x58, 0xf0,
 ]);
 
 pub fn run_to_execution_id(run_id: &RunId) -> ExecutionId {
-    let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, run_id.as_str().as_bytes());
+    let input = format!("run:{}", run_id.as_str());
+    let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
     ExecutionId::from_uuid(uuid)
 }
 
 pub fn session_to_flow_id(session_id: &SessionId) -> FlowId {
-    let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, session_id.as_str().as_bytes());
+    let input = format!("session:{}", session_id.as_str());
+    let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
     FlowId::from_uuid(uuid)
 }
 
@@ -60,6 +64,13 @@ mod tests {
         let fid1 = session_to_flow_id(&SessionId::new("sess_a"));
         let fid2 = session_to_flow_id(&SessionId::new("sess_b"));
         assert_ne!(fid1, fid2);
+    }
+
+    #[test]
+    fn same_string_different_entity_no_collision() {
+        let eid = run_to_execution_id(&RunId::new("abc"));
+        let fid = session_to_flow_id(&SessionId::new("abc"));
+        assert_ne!(eid.to_string(), fid.to_string());
     }
 
     #[test]
