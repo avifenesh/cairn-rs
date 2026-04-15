@@ -264,7 +264,12 @@ pub(crate) async fn webhook_trigger_orchestration(
 
     let working_dir = crate::helpers::working_dir_for_run(state, run)
         .await
-        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+        .unwrap_or_else(|e| {
+            tracing::warn!(run_id = %run.run_id, error = %e, "workspace setup failed; using ephemeral dir");
+            let fallback = std::env::temp_dir().join("cairn-runs").join(run.run_id.as_str());
+            let _ = std::fs::create_dir_all(&fallback);
+            fallback
+        });
     let working_dir_for_tools = working_dir.clone();
 
     let ctx = OrchestrationContext {

@@ -105,15 +105,29 @@ pub(crate) async fn working_dir_for_run(
     };
     let repo_ids = state.project_repo_access.list_for_project(&repo_ctx).await;
     let Some(repo_id) = repo_ids.first().cloned() else {
-        // No repo allowlisted — use CWD. This is expected for API-driven
-        // orchestration (POST /v1/runs/:id/orchestrate) where the operator
-        // hasn't registered a repo. Webhook-driven orchestration (GitHub
-        // pipeline) allowlists the repo before calling this function.
+        // No repo allowlisted — create an isolated ephemeral directory for
+        // this run.  This is expected for API-driven orchestration where the
+        // agent works on external systems (APIs, infra) and doesn't need a
+        // repo checkout.  We NEVER fall back to the server process CWD
+        // because that would expose cairn's own filesystem to agent tools.
+        let ephemeral = std::env::temp_dir()
+            .join("cairn-runs")
+            .join(run.run_id.as_str());
+        if let Err(e) = std::fs::create_dir_all(&ephemeral) {
+            tracing::warn!(
+                run_id = %run.run_id,
+                path = %ephemeral.display(),
+                error = %e,
+                "failed to create ephemeral run directory; falling back to temp root"
+            );
+            return Ok(std::env::temp_dir().join("cairn-runs"));
+        }
         tracing::debug!(
             run_id = %run.run_id,
-            "no repo allowlisted for project; using process working directory"
+            path = %ephemeral.display(),
+            "no repo allowlisted for project; using ephemeral run directory"
         );
-        return Ok(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        return Ok(ephemeral);
     };
 
     if repo_ids.len() > 1 {
