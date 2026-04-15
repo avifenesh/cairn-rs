@@ -649,8 +649,8 @@ crates/cairn-orchestrator/
       tokio
 ```
 
-The HTTP handler (`POST /v1/runs/:id/execute` or similar) in `cairn-app/src/main.rs`
-will:
+The HTTP handler (`POST /v1/runs/:id/execute` or similar) in `cairn-app/src/`
+(routed via `bin_handlers.rs` and the `handlers/` directory) will:
 1. Look up the run and task
 2. Claim the task lease
 3. Build `OrchestrationContext` from the run record

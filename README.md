@@ -154,9 +154,9 @@ docker compose exec ollama ollama pull nomic-embed-text  # embeddings
 
 ## Architecture
 
-cairn-rs currently spans 20 local Rust crates. Nineteen are workspace members,
-and `cairn-providers` is a repo-local path crate consumed by the app/runtime
-surface. Each crate owns one bounded context with no circular dependencies.
+cairn-rs currently spans a 20-crate workspace plus `cairn-providers` as a
+repo-local path crate consumed by the app/runtime surface. Each crate owns
+one bounded context with no circular dependencies.
 
 ```
 cairn-domain       pure domain types, events, lifecycle rules, RFC contracts
@@ -272,7 +272,7 @@ cargo build --workspace
 # Run the server (Postgres via DATABASE_URL, or in-memory fallback)
 cargo run -p cairn-app
 
-# Run all 3 300+ tests
+# Run all 3,300+ tests
 cargo test --workspace
 
 # Run the end-to-end integration suite (6 full-workflow tests)
@@ -304,13 +304,19 @@ crates/
   cairn-graph/     Entity graph (nodes, edges, traversal)
   cairn-evals/     Eval framework, rubrics, bandit experiments
   cairn-tools/     Tool invocation, plugin host
+  cairn-tools-derive/ Proc-macro helpers for tools
   cairn-agent/     Agent orchestration loop
+  cairn-orchestrator/ Gather/decide/execute loop runner
   cairn-signal/    Signal routing
   cairn-channels/  Agent message channels
   cairn-plugin-proto/ Plugin wire protocol
+  cairn-plugin-catalog/ Marketplace catalog descriptors
+  cairn-workspace/ Repo clone cache and sandbox lifecycle
+  cairn-github/    GitHub App auth, webhook, REST client
+  cairn-integrations/ Integration registry and plugin surfaces
 ui/                React + TypeScript operator dashboard
 docs/
-  design/rfcs/     RFC specifications (002–014)
+  design/rfcs/     RFC specifications (001–023)
   api-reference.md Full endpoint reference
   deployment.md    Docker, Postgres, TLS, production hardening
 ```

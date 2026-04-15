@@ -49,8 +49,10 @@ These are the live half-finished or still-explicit seams worth tracking.
 
    - [`crates/cairn-app/src/lib.rs`](../../crates/cairn-app/src/lib.rs)
    - [`crates/cairn-app/src/main.rs`](../../crates/cairn-app/src/main.rs)
+   - `crates/cairn-app/src/bin_*.rs` modules (12 binary-only modules extracted from main.rs)
+   - `crates/cairn-app/src/handlers/` (23 handler modules extracted from lib.rs)
 
-   The binary now starts the server and layers binary-specific routes on top of `AppBootstrap::build_catalog_routes()`. The remaining seam is surface truth living across both files, which makes route and composition drift easier to miss.
+   The binary now starts the server and layers binary-specific routes (via `bin_router.rs` / `bin_handlers.rs`) on top of `AppBootstrap::build_catalog_routes()`. lib.rs delegates to handler modules under `handlers/`. The remaining seam is surface truth living across both files, which makes route and composition drift easier to miss.
 
 2. `MemoryApiImpl` is now composed through the app surface, but it still relies on the in-memory document store plus generated IDs/timestamps instead of a canonical durable backing path.
 
