@@ -900,7 +900,7 @@ pub(crate) fn graph_trace_snapshot(
     GraphTraceResponse { nodes, edges, root }
 }
 
-pub(crate) fn event_type_name(event: &RuntimeEvent) -> &'static str {
+pub fn event_type_name(event: &RuntimeEvent) -> &'static str {
     match event {
         RuntimeEvent::SessionCreated(_) => "session_created",
         RuntimeEvent::SessionStateChanged(_) => "session_state_changed",

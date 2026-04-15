@@ -16,9 +16,3 @@ async fn skill_health_matrix_stub_returns_empty() {
     let matrix: SkillHealthMatrix = svc.build_skill_health_matrix(&tenant_id).await.unwrap();
     assert!(matrix.rows.is_empty(), "stub returns empty matrix");
 }
-
-#[test]
-fn skill_health_matrix_default_is_empty() {
-    let matrix = SkillHealthMatrix { rows: vec![] };
-    assert!(matrix.rows.is_empty());
-}
