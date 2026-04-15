@@ -45,18 +45,104 @@ use crate::state::AppState;
 use crate::{
     append_run_intervention_event, current_event_head, event_message, event_type_name,
     persist_run_mode_default, publish_runtime_frames_since, resolve_run_mode_default,
-    resolve_run_string_default, AuditEntry, AuditTrail, EventSummary, EventsPage, EventsPageQuery,
-    PaginationQuery, ReplayToCheckpointQuery, RunDetailResponse, RunInterventionResponse,
-    RunReplayQuery, ScheduledResumeProcessResponse, SpawnSubagentRunResponse, StalledRunsQuery,
+    resolve_run_string_default, PaginationQuery, RunRecordView,
 };
 #[allow(unused_imports)]
 use crate::{RunListResponseDoc, RunRecordDoc};
+use cairn_store::projections::{RunRecord, TaskRecord};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 use crate::DEFAULT_TENANT_ID;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct SpawnSubagentRunResponse {
+    pub(crate) parent_run_id: String,
+    pub(crate) child_run_id: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct RunDetailResponse {
+    pub(crate) run: RunRecordView,
+    pub(crate) tasks: Vec<TaskRecord>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct AuditEntry {
+    #[serde(rename = "type")]
+    pub(crate) entry_type: String,
+    pub(crate) timestamp_ms: u64,
+    pub(crate) description: String,
+    pub(crate) actor: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct AuditTrail {
+    pub(crate) run_id: String,
+    pub(crate) entries: Vec<AuditEntry>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RunInterventionResponse {
+    pub(crate) ok: bool,
+    pub(crate) run: Option<RunRecord>,
+    pub(crate) message_id: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScheduledResumeProcessResponse {
+    pub(crate) resumed_count: usize,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub(crate) struct RunReplayQuery {
+    pub(crate) from_position: Option<u64>,
+    pub(crate) to_position: Option<u64>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub(crate) struct StalledRunsQuery {
+    pub(crate) minutes: Option<u64>,
+}
+
+impl StalledRunsQuery {
+    pub(crate) fn stale_after_ms(&self) -> u64 {
+        self.minutes.unwrap_or(30).saturating_mul(60_000)
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub(crate) struct ReplayToCheckpointQuery {
+    pub(crate) checkpoint_id: String,
+}
+
+/// Paginated event query params: cursor (exclusive lower bound) + limit.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub(crate) struct EventsPageQuery {
+    pub(crate) cursor: Option<u64>,
+    /// Alias for cursor (legacy/test compatibility): return events as a plain array.
+    pub(crate) from: Option<u64>,
+    pub(crate) limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct EventSummary {
+    pub(crate) position: u64,
+    pub(crate) event_type: String,
+    pub(crate) occurred_at_ms: u64,
+    pub(crate) description: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct EventsPage {
+    pub(crate) events: Vec<EventSummary>,
+    pub(crate) next_cursor: Option<u64>,
+    pub(crate) has_more: bool,
+}
 
 #[derive(Clone, Debug, serde::Deserialize, ToSchema)]
 pub(crate) struct RunListQuery {

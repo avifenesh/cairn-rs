@@ -27,12 +27,31 @@ use crate::extractors::{HasProjectScope, ProjectJson, ProjectScope, TenantScope}
 use crate::state::AppState;
 use crate::{
     event_message, event_type_name, runtime_event_to_activity_entry, ActivityEntry, EventSummary,
-    EventsPage, EventsPageQuery, SessionActivity, SessionCostResponse, SessionDetailResponse,
+    EventsPage, EventsPageQuery,
 };
 #[allow(unused_imports)]
 use crate::{SessionListResponseDoc, SessionRecordDoc};
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct SessionDetailResponse {
+    pub(crate) session: SessionRecord,
+    pub(crate) runs: Vec<RunRecord>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct SessionActivity {
+    pub(crate) session_id: String,
+    pub(crate) entries: Vec<ActivityEntry>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct SessionCostResponse {
+    #[serde(flatten)]
+    pub(crate) summary: cairn_domain::providers::SessionCostRecord,
+    pub(crate) run_breakdown: Vec<cairn_domain::providers::RunCostRecord>,
+}
 
 #[derive(Clone, Debug, serde::Deserialize, ToSchema)]
 pub(crate) struct CreateSessionRequest {

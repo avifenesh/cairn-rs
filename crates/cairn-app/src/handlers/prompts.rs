@@ -25,13 +25,42 @@ use crate::errors::{runtime_error_response, store_error_response, AppApiError};
 use crate::extractors::{OptionalProjectScopedQuery, ReviewerRoleGuard};
 use crate::state::{AppState, AppVersionContent};
 use crate::{
-    audit_actor_id, latest_eval_score_for_release, CompareResponse, PromptVersionDiffResponse,
-    ReleaseCompareEntry, TransitionRecord, DEFAULT_PROJECT_ID, DEFAULT_TENANT_ID,
+    audit_actor_id, latest_eval_score_for_release, DEFAULT_PROJECT_ID, DEFAULT_TENANT_ID,
     DEFAULT_WORKSPACE_ID,
 };
 use cairn_domain::RuntimeEvent;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct ReleaseCompareEntry {
+    pub(crate) release_id: String,
+    pub(crate) state: String,
+    pub(crate) version_number: Option<u32>,
+    pub(crate) content_preview: String,
+    pub(crate) eval_score: Option<f64>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct CompareResponse {
+    pub(crate) releases: Vec<ReleaseCompareEntry>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct TransitionRecord {
+    pub(crate) from_state: String,
+    pub(crate) to_state: String,
+    pub(crate) actor: Option<String>,
+    pub(crate) timestamp: u64,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct PromptVersionDiffResponse {
+    pub(crate) added_lines: Vec<String>,
+    pub(crate) removed_lines: Vec<String>,
+    pub(crate) unchanged_lines: Vec<String>,
+    pub(crate) similarity_score: f64,
+}
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(crate) struct CreatePromptAssetRequest {

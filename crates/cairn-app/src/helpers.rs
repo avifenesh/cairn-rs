@@ -17,15 +17,81 @@ use cairn_runtime::{DefaultsService, RunService};
 use cairn_store::projections::{RunReadModel, RunRecord, TaskReadModel};
 use cairn_store::{EntityRef, EventLog, EventPosition, StoredEvent};
 
+use crate::default_repo_sandbox_policy;
 use crate::errors::{
     now_ms, operator_event_envelope, runtime_error_response, store_error_response, AppApiError,
 };
 use crate::extractors::TenantScope;
 use crate::state::{AppState, MailboxMessageView};
-use crate::{
-    default_repo_sandbox_policy, ActivityEntry, DiagnosedTaskActivity, DiagnosisReport,
-    RecoveryStatusResponse, ReplayResult, ReplayTaskStateView, RunRecordView,
-};
+
+// ── Shared DTOs used across multiple handlers ───────────────────────────────
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct RunRecordView {
+    #[serde(flatten)]
+    pub(crate) run: RunRecord,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) mode: Option<cairn_domain::decisions::RunMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) created_by_trigger_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sandbox_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sandbox_path: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RecoveryStatusResponse {
+    pub(crate) run_id: String,
+    pub(crate) last_attempt_reason: Option<String>,
+    pub(crate) last_recovered: Option<bool>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct ActivityEntry {
+    #[serde(rename = "type")]
+    pub(crate) entry_type: String,
+    pub(crate) timestamp_ms: u64,
+    pub(crate) run_id: Option<String>,
+    pub(crate) task_id: Option<String>,
+    pub(crate) state: Option<String>,
+    pub(crate) description: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[allow(dead_code)]
+pub(crate) struct ReplayTaskStateView {
+    pub(crate) task_id: String,
+    pub(crate) state: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct ReplayResult {
+    pub(crate) events_replayed: u32,
+    pub(crate) final_run_state: Option<String>,
+    pub(crate) final_task_states: Vec<ReplayTaskStateView>,
+    pub(crate) checkpoints_found: u32,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct DiagnosedTaskActivity {
+    pub(crate) task_id: String,
+    pub(crate) state: TaskState,
+    pub(crate) last_activity_ms: u64,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct DiagnosisReport {
+    pub(crate) run_id: String,
+    pub(crate) state: RunState,
+    pub(crate) duration_ms: u64,
+    pub(crate) active_tasks: Vec<DiagnosedTaskActivity>,
+    pub(crate) stalled_tasks: Vec<String>,
+    pub(crate) last_event_type: String,
+    pub(crate) last_event_ms: u64,
+    pub(crate) suggested_action: String,
+}
 
 // ---------------------------------------------------------------------------
 // Run helpers
