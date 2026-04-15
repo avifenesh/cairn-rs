@@ -78,6 +78,8 @@ pub struct RequestLogEntry {
     pub query: Option<String>,
     pub status: u16,
     pub latency_ms: u64,
+    /// Wall-clock start time in Unix nanoseconds. Used for OTLP span export.
+    pub start_time_unix_ns: u64,
 }
 
 /// Fixed-capacity FIFO ring buffer of structured request log entries.

@@ -1003,8 +1003,8 @@ fn ns_to_otlp_time(ns: u64) -> String {
     ns.to_string()
 }
 
-/// Build a single OTLP JSON span from a `LogEntry`.
-fn log_entry_to_otlp_span(entry: &LogEntry) -> serde_json::Value {
+/// Build a single OTLP JSON span from a `cairn_app::tokens::RequestLogEntry`.
+fn log_entry_to_otlp_span(entry: &cairn_app::tokens::RequestLogEntry) -> serde_json::Value {
     let trace_id = uuid_to_trace_id(&entry.request_id);
     let span_id = uuid_to_span_id(&entry.request_id);
 
@@ -1075,7 +1075,7 @@ pub(crate) async fn export_otlp_handler(
 
     let limit = q.limit.unwrap_or(200).min(2_000);
 
-    let entries: Vec<LogEntry> = match state.request_log.read() {
+    let entries: Vec<cairn_app::tokens::RequestLogEntry> = match state.request_log.read() {
         Ok(log) => log.tail(limit, &[]).into_iter().cloned().collect(),
         Err(_) => vec![],
     };
