@@ -4,6 +4,7 @@
 //! a shared `InMemoryStore`. cairn-app constructs one instance at startup and
 //! passes it to all HTTP handlers via `Arc<AppState>`.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use cairn_store::InMemoryStore;
@@ -99,6 +100,11 @@ pub struct InMemoryServices {
     // ── Resource sharing ──────────────────────────────────────────────────
     pub resource_sharing: ResourceSharingServiceImpl<InMemoryStore>,
 
+    // ── Fabric (FlowFabric bridge) ─────────────────────────────────────
+    // Stored as `dyn Any` to avoid cairn-runtime → cairn-fabric cycle.
+    // Downcast to `cairn_fabric::FabricServices` via `fabric::<T>()`.
+    pub fabric: Option<Arc<dyn Any + Send + Sync>>,
+
     // ── Decision layer (RFC 019) ─────────────────────────────────────────
     pub decisions: std::sync::Arc<crate::decisions::DecisionServiceImpl>,
     /// Arc-wrapped decision service for injection into the execute phase.
@@ -168,6 +174,7 @@ impl InMemoryServices {
             audit: AuditServiceImpl::new(store.clone()),
             tool_invocations: ToolInvocationServiceImpl::new(store.clone()),
             resource_sharing: ResourceSharingServiceImpl::new(store.clone()),
+            fabric: None,
             decisions,
             decision_service,
             runtime_config: std::sync::Arc::new(crate::runtime_config::RuntimeConfig::new(
@@ -175,6 +182,25 @@ impl InMemoryServices {
             )),
             store,
         }
+    }
+
+    /// Create a bundle wired to an existing store with Fabric services attached.
+    ///
+    /// The `fabric` argument is type-erased to avoid a cairn-runtime -> cairn-fabric
+    /// cyclic dependency. Callers pass `Arc<cairn_fabric::FabricServices>` and
+    /// retrieve it later via `fabric::<T>()`.
+    pub fn with_fabric(store: Arc<InMemoryStore>, fabric: Arc<dyn Any + Send + Sync>) -> Self {
+        let mut services = Self::with_store(store);
+        services.fabric = Some(fabric);
+        services
+    }
+
+    /// Downcast the Fabric services to a concrete type.
+    ///
+    /// Returns `None` if no fabric was configured or if `T` doesn't match.
+    /// Typical usage: `services.fabric::<cairn_fabric::FabricServices>()`.
+    pub fn fabric<T: Any + Send + Sync>(&self) -> Option<&T> {
+        self.fabric.as_ref().and_then(|f| f.downcast_ref::<T>())
     }
 }
 

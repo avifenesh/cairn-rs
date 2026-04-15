@@ -1,0 +1,29 @@
+[package]
+name = "cairn-fabric"
+version = "0.1.0"
+edition = "2021"
+license = "BSL-1.1"
+publish = false
+
+[dependencies]
+# FlowFabric crates (path deps to external repo)
+ff-core = { path = "/tmp/FlowFabric/crates/ff-core" }
+ff-sdk = { path = "/tmp/FlowFabric/crates/ff-sdk" }
+ff-engine = { path = "/tmp/FlowFabric/crates/ff-engine" }
+ff-scheduler = { path = "/tmp/FlowFabric/crates/ff-scheduler" }
+ff-script = { path = "/tmp/FlowFabric/crates/ff-script" }
+ferriskey = { path = "/tmp/FlowFabric/ferriskey" }
+
+# Cairn crates
+cairn-domain = { path = "../cairn-domain" }
+cairn-store = { path = "../cairn-store" }
+
+# External
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+tokio = { version = "1", features = ["rt", "sync", "macros"] }
+tracing = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+dashmap = "6"
+async-trait = "0.1"
