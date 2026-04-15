@@ -102,6 +102,10 @@ pub(crate) struct AppState {
     pub(crate) openai_compat: Option<Arc<cairn_providers::wire::openai_compat::OpenAiCompat>>,
     pub(crate) metrics: Arc<RwLock<AppMetrics>>,
     pub(crate) rate_limits: RateLimitTable,
+    /// Binary-local request log for OTLP export. Note: the observability
+    /// middleware writes to lib_state.request_log (different type/instance).
+    /// TODO: unify lib and binary RequestLogBuffer types so OTLP export
+    /// reads from the middleware-populated buffer.
     pub(crate) request_log: Arc<RwLock<RequestLogBuffer>>,
     pub(crate) notifications: Arc<RwLock<NotificationBuffer>>,
     pub(crate) templates: Arc<templates::TemplateRegistry>,
