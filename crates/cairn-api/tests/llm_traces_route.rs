@@ -99,7 +99,7 @@ fn llm_traces_response_wraps_array_in_traces_key() {
         },
         LlmCallTrace {
             trace_id: "t2".to_owned(),
-            model_id: "claude-3-haiku-20240307".to_owned(),
+            model_id: "claude-haiku-4-5".to_owned(),
             prompt_tokens: 50,
             completion_tokens: 20,
             latency_ms: 80,

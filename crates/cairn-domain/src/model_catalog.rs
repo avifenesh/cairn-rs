@@ -39,7 +39,7 @@ fn default_text_modality() -> Vec<String> {
 /// One entry in the model catalog.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelEntry {
-    /// Unique model ID (e.g. `gpt-4o`, `claude-3-5-sonnet-20241022`).
+    /// Unique model ID (e.g. `gpt-4o`, `claude-sonnet-4-6`).
     pub id: String,
     /// Provider family (e.g. `openai`, `anthropic`, `openrouter`).
     pub provider: String,
@@ -218,6 +218,18 @@ impl ModelRegistry {
         self.entries.is_empty()
     }
 
+    /// Import models from LiteLLM's JSON format, adding/overriding existing entries.
+    ///
+    /// Returns the number of models imported.
+    pub fn import_litellm(&mut self, json: &str) -> usize {
+        let entries = import_litellm_json(json);
+        let count = entries.len();
+        for entry in entries {
+            self.entries.insert(entry.id.clone(), entry);
+        }
+        count
+    }
+
     /// Replace all entries atomically (used on hot-reload).
     pub fn reload(&mut self, new_entries: impl IntoIterator<Item = ModelEntry>) {
         self.entries.clear();
@@ -234,70 +246,26 @@ pub trait ModelCatalogObserver: Send + Sync {
 
 /// Built-in starter catalog shipped with cairn-rs.
 ///
-/// Mirrors key models from `cairn/internal/modelreg/assets/models.toml`.
-/// Operators can override any entry by registering a user entry with the same `id`.
+/// Mirrors `crates/cairn-domain/assets/models.toml`.  Kept in sync so that
+/// tests and offline builds have a compiled-in fallback with current pricing.
+/// Operators can override any entry via `~/.cairn/models.toml` or the admin API.
 pub fn builtin_catalog() -> Vec<ModelEntry> {
     vec![
-        ModelEntry {
-            id: "claude-3-5-sonnet-20241022".to_owned(),
-            provider: "anthropic".to_owned(),
-            display_name: "Claude 3.5 Sonnet".to_owned(),
-            context_len: 200_000,
-            tier: ModelTier::Brain,
-            tags: vec!["coding".to_owned(), "reasoning".to_owned()],
-            enabled: true,
-            cost_type: ProviderCostType::Metered,
-            cost_per_1m_input: 3.0,
-            cost_per_1m_output: 15.0,
-            cache_read_per_1m: 0.3,
-            cache_write_per_1m: 3.75,
-            max_tokens: 8192,
-            min_cacheable_tokens: 1024,
-            cache_type: "automatic".to_owned(),
-            reasoning: false,
-            supports_tools: true,
-            supports_streaming: true,
-            supports_json_mode: true,
-            input_modalities: vec!["text".to_owned(), "image".to_owned()],
-            output_modalities: vec!["text".to_owned()],
-        },
-        ModelEntry {
-            id: "claude-3-haiku-20240307".to_owned(),
-            provider: "anthropic".to_owned(),
-            display_name: "Claude 3 Haiku".to_owned(),
-            context_len: 200_000,
-            tier: ModelTier::Light,
-            tags: vec!["fast".to_owned()],
-            enabled: true,
-            cost_type: ProviderCostType::Metered,
-            cost_per_1m_input: 0.25,
-            cost_per_1m_output: 1.25,
-            cache_read_per_1m: 0.03,
-            cache_write_per_1m: 0.30,
-            max_tokens: 4096,
-            min_cacheable_tokens: 1024,
-            cache_type: "automatic".to_owned(),
-            reasoning: false,
-            supports_tools: true,
-            supports_streaming: true,
-            supports_json_mode: false,
-            input_modalities: vec!["text".to_owned(), "image".to_owned()],
-            output_modalities: vec!["text".to_owned()],
-        },
+        // ── OpenAI ───────────────────────────────────────────────────────
         ModelEntry {
             id: "gpt-4o".to_owned(),
             provider: "openai".to_owned(),
             display_name: "GPT-4o".to_owned(),
             context_len: 128_000,
             tier: ModelTier::Brain,
-            tags: vec!["multimodal".to_owned()],
+            tags: vec!["chat".to_owned(), "code".to_owned(), "vision".to_owned()],
             enabled: true,
             cost_type: ProviderCostType::Metered,
-            cost_per_1m_input: 2.5,
+            cost_per_1m_input: 2.50,
             cost_per_1m_output: 10.0,
             cache_read_per_1m: 1.25,
             cache_write_per_1m: 0.0,
-            max_tokens: 16384,
+            max_tokens: 16_384,
             min_cacheable_tokens: 1024,
             cache_type: "automatic".to_owned(),
             reasoning: false,
@@ -313,14 +281,18 @@ pub fn builtin_catalog() -> Vec<ModelEntry> {
             display_name: "GPT-4o Mini".to_owned(),
             context_len: 128_000,
             tier: ModelTier::Light,
-            tags: vec!["fast".to_owned(), "cheap".to_owned()],
+            tags: vec![
+                "chat".to_owned(),
+                "fast".to_owned(),
+                "extraction".to_owned(),
+            ],
             enabled: true,
             cost_type: ProviderCostType::Metered,
             cost_per_1m_input: 0.15,
             cost_per_1m_output: 0.60,
             cache_read_per_1m: 0.075,
             cache_write_per_1m: 0.0,
-            max_tokens: 16384,
+            max_tokens: 16_384,
             min_cacheable_tokens: 1024,
             cache_type: "automatic".to_owned(),
             reasoning: false,
@@ -330,20 +302,161 @@ pub fn builtin_catalog() -> Vec<ModelEntry> {
             input_modalities: vec!["text".to_owned(), "image".to_owned()],
             output_modalities: vec!["text".to_owned()],
         },
+        // ── Anthropic (direct API) ───────────────────────────────────────
         ModelEntry {
-            id: "meta-llama/llama-3.1-8b-instruct:free".to_owned(),
-            provider: "openrouter".to_owned(),
-            display_name: "Llama 3.1 8B (free)".to_owned(),
-            context_len: 131_072,
+            id: "claude-opus-4-6".to_owned(),
+            provider: "anthropic".to_owned(),
+            display_name: "Claude Opus 4.6".to_owned(),
+            context_len: 1_000_000,
+            tier: ModelTier::Brain,
+            tags: vec!["chat".to_owned(), "code".to_owned(), "reasoning".to_owned()],
+            enabled: true,
+            cost_type: ProviderCostType::Metered,
+            cost_per_1m_input: 5.0,
+            cost_per_1m_output: 25.0,
+            cache_read_per_1m: 0.50,
+            cache_write_per_1m: 6.25,
+            max_tokens: 128_000,
+            min_cacheable_tokens: 1024,
+            cache_type: "automatic".to_owned(),
+            reasoning: true,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_json_mode: false,
+            input_modalities: vec!["text".to_owned(), "image".to_owned()],
+            output_modalities: vec!["text".to_owned()],
+        },
+        ModelEntry {
+            id: "claude-sonnet-4-6".to_owned(),
+            provider: "anthropic".to_owned(),
+            display_name: "Claude Sonnet 4.6".to_owned(),
+            context_len: 1_000_000,
+            tier: ModelTier::Mid,
+            tags: vec!["chat".to_owned(), "code".to_owned()],
+            enabled: true,
+            cost_type: ProviderCostType::Metered,
+            cost_per_1m_input: 3.0,
+            cost_per_1m_output: 15.0,
+            cache_read_per_1m: 0.30,
+            cache_write_per_1m: 3.75,
+            max_tokens: 64_000,
+            min_cacheable_tokens: 1024,
+            cache_type: "automatic".to_owned(),
+            reasoning: false,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_json_mode: false,
+            input_modalities: vec!["text".to_owned(), "image".to_owned()],
+            output_modalities: vec!["text".to_owned()],
+        },
+        ModelEntry {
+            id: "claude-haiku-4-5".to_owned(),
+            provider: "anthropic".to_owned(),
+            display_name: "Claude Haiku 4.5".to_owned(),
+            context_len: 200_000,
             tier: ModelTier::Light,
-            tags: vec!["open-source".to_owned(), "free".to_owned()],
+            tags: vec!["fast".to_owned(), "extraction".to_owned()],
+            enabled: true,
+            cost_type: ProviderCostType::Metered,
+            cost_per_1m_input: 1.0,
+            cost_per_1m_output: 5.0,
+            cache_read_per_1m: 0.10,
+            cache_write_per_1m: 1.25,
+            max_tokens: 64_000,
+            min_cacheable_tokens: 1024,
+            cache_type: "automatic".to_owned(),
+            reasoning: false,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_json_mode: false,
+            input_modalities: vec!["text".to_owned(), "image".to_owned()],
+            output_modalities: vec!["text".to_owned()],
+        },
+        // ── Bedrock: Claude ──────────────────────────────────────────────
+        ModelEntry {
+            id: "us.anthropic.claude-sonnet-4-6".to_owned(),
+            provider: "bedrock".to_owned(),
+            display_name: "Claude Sonnet 4.6 (Bedrock)".to_owned(),
+            context_len: 1_000_000,
+            tier: ModelTier::Mid,
+            tags: vec!["chat".to_owned(), "code".to_owned()],
+            enabled: true,
+            cost_type: ProviderCostType::Metered,
+            cost_per_1m_input: 3.0,
+            cost_per_1m_output: 15.0,
+            cache_read_per_1m: 0.30,
+            cache_write_per_1m: 3.75,
+            max_tokens: 64_000,
+            min_cacheable_tokens: 1024,
+            cache_type: "automatic".to_owned(),
+            reasoning: false,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_json_mode: false,
+            input_modalities: vec!["text".to_owned(), "image".to_owned()],
+            output_modalities: vec!["text".to_owned()],
+        },
+        ModelEntry {
+            id: "us.anthropic.claude-haiku-4-5-20251001".to_owned(),
+            provider: "bedrock".to_owned(),
+            display_name: "Claude Haiku 4.5 (Bedrock)".to_owned(),
+            context_len: 200_000,
+            tier: ModelTier::Light,
+            tags: vec!["fast".to_owned(), "extraction".to_owned()],
+            enabled: true,
+            cost_type: ProviderCostType::Metered,
+            cost_per_1m_input: 1.0,
+            cost_per_1m_output: 5.0,
+            cache_read_per_1m: 0.10,
+            cache_write_per_1m: 1.25,
+            max_tokens: 64_000,
+            min_cacheable_tokens: 1024,
+            cache_type: "automatic".to_owned(),
+            reasoning: false,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_json_mode: false,
+            input_modalities: vec!["text".to_owned(), "image".to_owned()],
+            output_modalities: vec!["text".to_owned()],
+        },
+        // ── OpenRouter: free tier ────────────────────────────────────────
+        ModelEntry {
+            id: "meta-llama/llama-3.3-70b-instruct:free".to_owned(),
+            provider: "openrouter".to_owned(),
+            display_name: "Llama 3.3 70B Instruct (free)".to_owned(),
+            context_len: 65_536,
+            tier: ModelTier::Mid,
+            tags: vec!["chat".to_owned(), "free".to_owned()],
             enabled: true,
             cost_type: ProviderCostType::Free,
             cost_per_1m_input: 0.0,
             cost_per_1m_output: 0.0,
             cache_read_per_1m: 0.0,
             cache_write_per_1m: 0.0,
-            max_tokens: 4096,
+            max_tokens: 8192,
+            min_cacheable_tokens: 1024,
+            cache_type: "automatic".to_owned(),
+            reasoning: false,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_json_mode: false,
+            input_modalities: vec!["text".to_owned()],
+            output_modalities: vec!["text".to_owned()],
+        },
+        ModelEntry {
+            id: "google/gemma-3-27b-it:free".to_owned(),
+            provider: "openrouter".to_owned(),
+            display_name: "Gemma 3 27B (free)".to_owned(),
+            context_len: 131_072,
+            tier: ModelTier::Mid,
+            tags: vec!["chat".to_owned(), "free".to_owned()],
+            enabled: true,
+            cost_type: ProviderCostType::Free,
+            cost_per_1m_input: 0.0,
+            cost_per_1m_output: 0.0,
+            cache_read_per_1m: 0.0,
+            cache_write_per_1m: 0.0,
+            max_tokens: 8192,
             min_cacheable_tokens: 1024,
             cache_type: "automatic".to_owned(),
             reasoning: false,
@@ -354,6 +467,147 @@ pub fn builtin_catalog() -> Vec<ModelEntry> {
             output_modalities: vec!["text".to_owned()],
         },
     ]
+}
+
+// ── LiteLLM JSON importer ───────────────────────────────────────────────────
+
+/// Import models from LiteLLM's `model_prices_and_context_window.json`.
+///
+/// LiteLLM's community-maintained JSON is the de facto open-source pricing
+/// registry (350+ models).  This function converts their format into cairn's
+/// `ModelEntry` type.  Entries with missing or zero pricing are treated as
+/// free.  Provider is inferred from the `litellm_provider` field.
+///
+/// Usage:
+/// ```ignore
+/// let json = std::fs::read_to_string("model_prices_and_context_window.json")?;
+/// let entries = import_litellm_json(&json);
+/// for entry in entries {
+///     registry.register(entry);
+/// }
+/// ```
+pub fn import_litellm_json(json: &str) -> Vec<ModelEntry> {
+    let map: std::collections::HashMap<String, serde_json::Value> = match serde_json::from_str(json)
+    {
+        Ok(m) => m,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut entries = Vec::new();
+    for (key, val) in &map {
+        // Skip the metadata key that LiteLLM includes
+        if key == "sample_spec" || !val.is_object() {
+            continue;
+        }
+
+        let provider = val
+            .get("litellm_provider")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_owned();
+
+        let input_cost = val
+            .get("input_cost_per_token")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+            * 1_000_000.0; // per-token → per-million-tokens
+
+        let output_cost = val
+            .get("output_cost_per_token")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+            * 1_000_000.0;
+
+        let cache_read = val
+            .get("cache_read_input_token_cost")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+            * 1_000_000.0;
+
+        let cache_write = val
+            .get("cache_creation_input_token_cost")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+            * 1_000_000.0;
+
+        let max_input = val
+            .get("max_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(4096) as u32;
+
+        let max_output = val
+            .get("max_output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(4096) as u32;
+
+        let cost_type = if input_cost == 0.0 && output_cost == 0.0 {
+            ProviderCostType::Free
+        } else {
+            ProviderCostType::Metered
+        };
+
+        let supports_vision = val
+            .get("supports_vision")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let supports_tools = val
+            .get("supports_function_calling")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let supports_json = val
+            .get("supports_response_schema")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let mut input_modalities = vec!["text".to_owned()];
+        if supports_vision {
+            input_modalities.push("image".to_owned());
+        }
+
+        // Infer display name from key: "openai/gpt-4o" → "gpt-4o"
+        let display_name = key
+            .rsplit_once('/')
+            .map(|(_, name)| name)
+            .unwrap_or(key)
+            .to_owned();
+
+        // Infer tier from context length and cost
+        let tier = if max_input >= 100_000 && input_cost >= 5.0 {
+            ModelTier::Brain
+        } else if input_cost < 0.5 || cost_type == ProviderCostType::Free {
+            ModelTier::Light
+        } else {
+            ModelTier::Mid
+        };
+
+        entries.push(ModelEntry {
+            id: key.clone(),
+            provider,
+            display_name,
+            context_len: max_input,
+            tier,
+            tags: Vec::new(),
+            enabled: true,
+            cost_type,
+            cost_per_1m_input: input_cost,
+            cost_per_1m_output: output_cost,
+            cache_read_per_1m: cache_read,
+            cache_write_per_1m: cache_write,
+            max_tokens: max_output,
+            min_cacheable_tokens: 1024,
+            cache_type: "automatic".to_owned(),
+            reasoning: false,
+            supports_tools,
+            supports_streaming: true,
+            supports_json_mode: supports_json,
+            input_modalities,
+            output_modalities: vec!["text".to_owned()],
+        });
+    }
+
+    entries
 }
 
 #[cfg(test)]

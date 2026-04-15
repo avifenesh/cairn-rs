@@ -703,9 +703,9 @@ async fn provider_model_id_preserved_in_audit_record() {
     let ts = now_ms();
 
     let models = [
-        ("call_m1", "rd_m1", "claude-3-5-sonnet-20241022"),
+        ("call_m1", "rd_m1", "claude-sonnet-4-6"),
         ("call_m2", "rd_m2", "gpt-4o"),
-        ("call_m3", "rd_m3", "meta-llama/llama-3.1-8b-instruct:free"),
+        ("call_m3", "rd_m3", "meta-llama/llama-3.3-70b-instruct:free"),
     ];
 
     for (i, (call_id, rd_id, model)) in models.iter().enumerate() {
