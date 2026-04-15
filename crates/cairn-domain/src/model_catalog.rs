@@ -540,6 +540,11 @@ pub fn import_litellm_json(json: &str) -> Vec<ModelEntry> {
             .and_then(|v| v.as_u64())
             .unwrap_or(4096) as u32;
 
+        // context_len = total context window (input + output).
+        // LiteLLM's `max_tokens` is a legacy field equal to max_output_tokens,
+        // NOT the total window, so we always sum max_input + max_output.
+        let context_len = max_input.saturating_add(max_output);
+
         let cost_type = if input_cost == 0.0 && output_cost == 0.0 {
             ProviderCostType::Free
         } else {
@@ -586,7 +591,7 @@ pub fn import_litellm_json(json: &str) -> Vec<ModelEntry> {
             id: key.clone(),
             provider,
             display_name,
-            context_len: max_input,
+            context_len,
             tier,
             tags: Vec::new(),
             enabled: true,
@@ -775,5 +780,129 @@ mod tests {
         assert_ne!(ModelTier::Brain, ModelTier::Mid);
         assert_ne!(ModelTier::Mid, ModelTier::Light);
         assert_ne!(ModelTier::Brain, ModelTier::Light);
+    }
+
+    // ── LiteLLM import tests ────────────────────────────────────────────────
+
+    #[test]
+    fn import_litellm_valid_json() {
+        let json = serde_json::json!({
+            "gpt-4o": {
+                "input_cost_per_token": 0.0000025,
+                "output_cost_per_token": 0.00001,
+                "max_input_tokens": 128000,
+                "max_output_tokens": 16384,
+                "max_tokens": 16384,
+                "litellm_provider": "openai",
+                "supports_vision": true,
+                "supports_function_calling": true,
+                "supports_response_schema": true
+            },
+            "claude-sonnet-4-6": {
+                "input_cost_per_token": 0.000003,
+                "output_cost_per_token": 0.000015,
+                "cache_read_input_token_cost": 0.0000003,
+                "cache_creation_input_token_cost": 0.00000375,
+                "max_input_tokens": 1000000,
+                "max_output_tokens": 64000,
+                "max_tokens": 64000,
+                "litellm_provider": "anthropic",
+                "supports_function_calling": true
+            },
+            "sample_spec": {
+                "note": "should be skipped"
+            }
+        });
+        let entries = import_litellm_json(&json.to_string());
+        assert_eq!(entries.len(), 2, "sample_spec must be skipped");
+
+        let gpt = entries.iter().find(|e| e.id == "gpt-4o").unwrap();
+        assert_eq!(gpt.provider, "openai");
+        // per-token to per-million: 0.0000025 * 1_000_000 = 2.5
+        assert!((gpt.cost_per_1m_input - 2.5).abs() < 0.001);
+        // per-token to per-million: 0.00001 * 1_000_000 = 10.0
+        assert!((gpt.cost_per_1m_output - 10.0).abs() < 0.001);
+        assert_eq!(gpt.cost_type, ProviderCostType::Metered);
+        assert!(gpt.supports_tools);
+        assert!(gpt.supports_json_mode);
+        assert!(gpt.input_modalities.contains(&"image".to_owned()));
+
+        let claude = entries
+            .iter()
+            .find(|e| e.id == "claude-sonnet-4-6")
+            .unwrap();
+        assert_eq!(claude.provider, "anthropic");
+        assert!((claude.cost_per_1m_input - 3.0).abs() < 0.001);
+        assert!((claude.cost_per_1m_output - 15.0).abs() < 0.001);
+        // cache costs
+        assert!((claude.cache_read_per_1m - 0.3).abs() < 0.001);
+        assert!((claude.cache_write_per_1m - 3.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn import_litellm_malformed_json() {
+        let entries = import_litellm_json("this is not json at all {{{");
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn import_litellm_missing_fields() {
+        // Model with only provider — everything else should get defaults.
+        let json = serde_json::json!({
+            "bare-model": {
+                "litellm_provider": "custom"
+            }
+        });
+        let entries = import_litellm_json(&json.to_string());
+        assert_eq!(entries.len(), 1);
+        let m = &entries[0];
+        assert_eq!(m.id, "bare-model");
+        assert_eq!(m.provider, "custom");
+        // Costs default to zero → Free
+        assert_eq!(m.cost_type, ProviderCostType::Free);
+        assert!((m.cost_per_1m_input - 0.0).abs() < f64::EPSILON);
+        // Default context: max_input(4096) + max_output(4096) = 8192
+        assert_eq!(m.context_len, 8192);
+        assert_eq!(m.max_tokens, 4096);
+    }
+
+    #[test]
+    fn import_litellm_free_model() {
+        let json = serde_json::json!({
+            "meta-llama/llama-3.3-70b-instruct:free": {
+                "input_cost_per_token": 0.0,
+                "output_cost_per_token": 0.0,
+                "max_input_tokens": 65536,
+                "max_output_tokens": 8192,
+                "litellm_provider": "openrouter"
+            }
+        });
+        let entries = import_litellm_json(&json.to_string());
+        assert_eq!(entries.len(), 1);
+        let m = &entries[0];
+        assert_eq!(m.cost_type, ProviderCostType::Free);
+        assert_eq!(m.provider, "openrouter");
+    }
+
+    #[test]
+    fn import_litellm_context_len() {
+        // context_len must be max_input + max_output, NOT max_tokens (legacy).
+        let json = serde_json::json!({
+            "test-model": {
+                "max_input_tokens": 128000,
+                "max_output_tokens": 16384,
+                "max_tokens": 16384,
+                "litellm_provider": "openai",
+                "input_cost_per_token": 0.000001,
+                "output_cost_per_token": 0.000002
+            }
+        });
+        let entries = import_litellm_json(&json.to_string());
+        assert_eq!(entries.len(), 1);
+        let m = &entries[0];
+        // context_len = 128000 + 16384 = 144384
+        assert_eq!(m.context_len, 144384);
+        // max_tokens (output cap) should still be the output value
+        assert_eq!(m.max_tokens, 16384);
     }
 }

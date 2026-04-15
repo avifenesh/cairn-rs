@@ -1291,10 +1291,22 @@ pub(crate) async fn delete_model_handler(
 }
 
 /// `POST /v1/admin/models/import-litellm` — Import models from LiteLLM JSON body.
+///
+/// Returns 400 if the body is not valid JSON (a HashMap of model objects).
 pub(crate) async fn import_litellm_handler(
     State(state): State<Arc<AppState>>,
     body: String,
 ) -> impl IntoResponse {
+    // Pre-validate: body must parse as a JSON object (HashMap).
+    if serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&body).is_err()
+    {
+        return AppApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_json",
+            "request body is not valid LiteLLM JSON (expected a JSON object)",
+        )
+        .into_response();
+    }
     let count = state.model_registry.import_litellm(&body);
     (
         StatusCode::OK,
