@@ -124,7 +124,13 @@ impl SignalBridge {
 
         let signal_id = SignalId::new();
         let now = TimestampMs::now();
-        let lane_id = ff_core::types::LaneId::new("cairn");
+
+        let lane_str: Option<String> = self
+            .client
+            .hget(&ctx.core(), "lane_id")
+            .await
+            .unwrap_or(None);
+        let lane_id = ff_core::types::LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
         let idem_key = if let Some(ref ik) = signal.idempotency_key {
             ctx.signal_dedup(waitpoint_id, ik)
@@ -217,7 +223,7 @@ fn parse_signal_result(raw: &ferriskey::Value) -> Result<SignalOutcome, FabricEr
     let signal_id_str = extract_str(arr, 2).unwrap_or_default();
     let effect = extract_str(arr, 3).unwrap_or_default();
     let signal_id = ff_core::types::SignalId::parse(&signal_id_str)
-        .unwrap_or_else(|_| ff_core::types::SignalId::new());
+        .map_err(|e| FabricError::Bridge(format!("bad signal_id in response: {e}")))?;
 
     if effect == "resume_condition_satisfied" {
         Ok(SignalOutcome::TriggeredResume { signal_id })

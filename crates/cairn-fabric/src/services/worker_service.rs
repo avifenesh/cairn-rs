@@ -44,22 +44,26 @@ impl FabricWorkerService {
         let worker_key = keys::worker_key(instance_id);
         let now_ms = now_ms();
 
-        let fields: Vec<(&str, String)> = vec![
-            ("worker_id", worker_id.to_string()),
-            ("instance_id", instance_id.to_string()),
-            ("capabilities", capabilities.join(",")),
-            ("last_heartbeat_ms", now_ms.to_string()),
-            ("is_alive", "true".into()),
-            ("registered_at_ms", now_ms.to_string()),
-        ];
-
-        for (field, value) in &fields {
-            self.runtime
-                .client
-                .hset(&worker_key, field, value)
-                .await
-                .map_err(|e| FabricError::Valkey(format!("HSET {worker_key} {field}: {e}")))?;
-        }
+        let now_str = now_ms.to_string();
+        self.runtime
+            .client
+            .cmd("HSET")
+            .arg(&worker_key)
+            .arg("worker_id")
+            .arg(worker_id.to_string())
+            .arg("instance_id")
+            .arg(instance_id.to_string())
+            .arg("capabilities")
+            .arg(capabilities.join(","))
+            .arg("last_heartbeat_ms")
+            .arg(&now_str)
+            .arg("is_alive")
+            .arg("true")
+            .arg("registered_at_ms")
+            .arg(&now_str)
+            .execute::<u64>()
+            .await
+            .map_err(|e| FabricError::Valkey(format!("HSET {worker_key}: {e}")))?;
 
         let workers_index = keys::workers_index_key();
         self.runtime

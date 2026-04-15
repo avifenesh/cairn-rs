@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use cairn_domain::ids::{RunId, SessionId};
-use cairn_domain::lifecycle::FailureClass;
+use cairn_domain::lifecycle::{FailureClass, RunState};
 use cairn_domain::tenancy::ProjectKey;
 use ff_sdk::task::{ClaimedTask, FailOutcome, SuspendOutcome};
 use ff_sdk::{FlowFabricWorker, WorkerConfig};
@@ -10,6 +10,7 @@ use crate::active_tasks::{ActiveTaskHandle, ActiveTaskRegistry};
 use crate::config::FabricConfig;
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
+use crate::helpers;
 use crate::stream::StreamWriter;
 use crate::suspension;
 
@@ -68,6 +69,9 @@ impl CairnWorker {
         let lease_epoch = task.lease_epoch();
         let attempt_index = task.attempt_index();
 
+        // Store lightweight handle for lease context queries by other services.
+        // CairnTask owns the ClaimedTask directly — registry.take() returns None
+        // for CairnWorker-claimed tasks, which is expected.
         let context_handle = ActiveTaskHandle::new_without_claimed_task(
             execution_id,
             lease_id,
@@ -79,8 +83,12 @@ impl CairnWorker {
         let session_id = extract_tag(task.tags(), "cairn.session_id");
         let project_str = extract_tag(task.tags(), "cairn.project");
 
-        if let Some(ref rid) = run_id {
-            let task_id = cairn_domain::ids::TaskId::new(rid);
+        // Register in ActiveTaskRegistry using cairn.task_id if present,
+        // falling back to cairn.run_id. cairn-fabric task submissions always
+        // set cairn.task_id; run submissions use cairn.run_id as the key.
+        let registry_key = extract_tag(task.tags(), "cairn.task_id").or_else(|| run_id.clone());
+        if let Some(ref key) = registry_key {
+            let task_id = cairn_domain::ids::TaskId::new(key);
             self.registry.register(&task_id, context_handle);
         }
 
@@ -89,7 +97,7 @@ impl CairnWorker {
             bridge: self.bridge.clone(),
             run_id: run_id.map(RunId::new),
             session_id: session_id.map(SessionId::new),
-            project: project_str.map(|s| parse_project_key(&s)),
+            project: project_str.map(|s| helpers::parse_project_key(&s)),
         }))
     }
 
@@ -192,6 +200,7 @@ impl CairnTask {
             bridge.emit(BridgeEvent::ExecutionCompleted {
                 run_id: rid,
                 project: proj,
+                prev_state: Some(RunState::Running),
             });
         }
 
@@ -213,12 +222,15 @@ impl CairnTask {
             .await
             .map_err(|e| FabricError::Bridge(format!("fail: {e}")))?;
 
-        if let (Some(rid), Some(proj)) = (run_id, project) {
-            bridge.emit(BridgeEvent::ExecutionFailed {
-                run_id: rid,
-                project: proj,
-                failure_class: FailureClass::ExecutionError,
-            });
+        if matches!(outcome, FailOutcome::TerminalFailed) {
+            if let (Some(rid), Some(proj)) = (run_id, project) {
+                bridge.emit(BridgeEvent::ExecutionFailed {
+                    run_id: rid,
+                    project: proj,
+                    failure_class: FailureClass::ExecutionError,
+                    prev_state: Some(RunState::Running),
+                });
+            }
         }
 
         Ok(outcome)
@@ -238,6 +250,7 @@ impl CairnTask {
             bridge.emit(BridgeEvent::ExecutionCancelled {
                 run_id: rid,
                 project: proj,
+                prev_state: Some(RunState::Running),
             });
         }
 
@@ -269,6 +282,7 @@ impl CairnTask {
             bridge.emit(BridgeEvent::ExecutionSuspended {
                 run_id: rid,
                 project: proj,
+                prev_state: Some(RunState::Running),
             });
         }
 
@@ -300,6 +314,7 @@ impl CairnTask {
             bridge.emit(BridgeEvent::ExecutionSuspended {
                 run_id: rid,
                 project: proj,
+                prev_state: Some(RunState::Running),
             });
         }
 
@@ -330,6 +345,7 @@ impl CairnTask {
             bridge.emit(BridgeEvent::ExecutionSuspended {
                 run_id: rid,
                 project: proj,
+                prev_state: Some(RunState::Running),
             });
         }
 
@@ -339,14 +355,6 @@ impl CairnTask {
 
 fn extract_tag(tags: &std::collections::HashMap<String, String>, key: &str) -> Option<String> {
     tags.get(key).filter(|v| !v.is_empty()).cloned()
-}
-
-fn parse_project_key(s: &str) -> ProjectKey {
-    let parts: Vec<&str> = s.splitn(3, '/').collect();
-    match parts.as_slice() {
-        [t, w, p] => ProjectKey::new(*t, *w, *p),
-        _ => ProjectKey::new("default_tenant", "default_workspace", "default_project"),
-    }
 }
 
 #[cfg(test)]
@@ -375,33 +383,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_project_key_valid() {
-        let pk = parse_project_key("t1/w1/p1");
+    fn parse_project_key_delegates_to_helpers() {
+        let pk = helpers::parse_project_key("t1/w1/p1");
         assert_eq!(pk.tenant_id.as_str(), "t1");
         assert_eq!(pk.workspace_id.as_str(), "w1");
         assert_eq!(pk.project_id.as_str(), "p1");
-    }
-
-    #[test]
-    fn parse_project_key_with_slashes_in_project() {
-        let pk = parse_project_key("t1/w1/p1/extra");
-        assert_eq!(pk.tenant_id.as_str(), "t1");
-        assert_eq!(pk.workspace_id.as_str(), "w1");
-        assert_eq!(pk.project_id.as_str(), "p1/extra");
-    }
-
-    #[test]
-    fn parse_project_key_invalid_defaults() {
-        let pk = parse_project_key("bad");
-        assert_eq!(pk.tenant_id.as_str(), "default_tenant");
-        assert_eq!(pk.workspace_id.as_str(), "default_workspace");
-        assert_eq!(pk.project_id.as_str(), "default_project");
-    }
-
-    #[test]
-    fn parse_project_key_two_parts_defaults() {
-        let pk = parse_project_key("t1/w1");
-        assert_eq!(pk.tenant_id.as_str(), "default_tenant");
     }
 
     #[test]
@@ -424,11 +410,5 @@ mod tests {
         let mut tags = HashMap::new();
         tags.insert("other.key".into(), "value".into());
         assert_eq!(extract_tag(&tags, "cairn.run_id"), None);
-    }
-
-    #[test]
-    fn parse_project_key_empty_string() {
-        let pk = parse_project_key("");
-        assert_eq!(pk.tenant_id.as_str(), "default_tenant");
     }
 }

@@ -156,7 +156,11 @@ impl FabricTaskService {
             idx.execution_deadline(),
             idx.all_executions(),
         ];
-        let priority_score = -(priority as i64);
+        let now_ms = ff_core::types::TimestampMs::now().0 as u64;
+        let priority_score =
+            crate::services::scheduler_service::FabricSchedulerService::priority_score(
+                priority, now_ms,
+            );
         let args: Vec<String> = vec![
             eid.to_string(),
             namespace.to_string(),
@@ -691,21 +695,63 @@ impl FabricTaskService {
                 .unwrap_or("cairn"),
         );
 
-        let (reason_code, timeout_behavior_str) = match reason.kind {
-            PauseReasonKind::OperatorPause => ("operator_hold", "escalate"),
-            PauseReasonKind::RuntimeSuspension => ("waiting_for_signal", "fail"),
-            PauseReasonKind::ToolRequestedSuspension => ("waiting_for_tool_result", "fail"),
-            PauseReasonKind::PolicyHold => ("paused_by_policy", "fail"),
+        let params = match reason.kind {
+            PauseReasonKind::OperatorPause => crate::suspension::for_operator_hold(),
+            PauseReasonKind::ToolRequestedSuspension => {
+                let invocation_id = reason.detail.as_deref().unwrap_or("unknown");
+                crate::suspension::for_tool_result(invocation_id, reason.resume_after_ms)
+            }
+            PauseReasonKind::RuntimeSuspension => {
+                let signal_name = reason.detail.as_deref().unwrap_or("runtime_signal");
+                crate::suspension::SuspensionParams {
+                    reason_code: "waiting_for_signal".into(),
+                    condition_matchers: vec![ff_sdk::task::ConditionMatcher {
+                        signal_name: signal_name.to_owned(),
+                    }],
+                    timeout_ms: reason.resume_after_ms,
+                    timeout_behavior: ff_sdk::task::TimeoutBehavior::Fail,
+                }
+            }
+            PauseReasonKind::PolicyHold => {
+                let detail = reason.detail.as_deref().unwrap_or("policy");
+                crate::suspension::SuspensionParams {
+                    reason_code: "paused_by_policy".into(),
+                    condition_matchers: vec![ff_sdk::task::ConditionMatcher {
+                        signal_name: format!("policy_resolved:{detail}"),
+                    }],
+                    timeout_ms: reason.resume_after_ms,
+                    timeout_behavior: ff_sdk::task::TimeoutBehavior::Fail,
+                }
+            }
+        };
+
+        let timeout_behavior_str = match params.timeout_behavior {
+            ff_sdk::task::TimeoutBehavior::Fail => "fail",
+            ff_sdk::task::TimeoutBehavior::Cancel => "cancel",
+            ff_sdk::task::TimeoutBehavior::Expire => "expire",
+            ff_sdk::task::TimeoutBehavior::AutoResume => "auto_resume_with_timeout_signal",
+            ff_sdk::task::TimeoutBehavior::Escalate => "escalate",
         };
 
         let suspension_id = ff_core::types::SuspensionId::new();
         let waitpoint_id = ff_core::types::WaitpointId::new();
         let waitpoint_key = format!("wpk:{waitpoint_id}");
 
+        let required_names: Vec<&str> = params
+            .condition_matchers
+            .iter()
+            .map(|m| m.signal_name.as_str())
+            .collect();
+        let match_mode = if required_names.len() <= 1 {
+            "any"
+        } else {
+            "all"
+        };
+
         let resume_condition_json = serde_json::json!({
             "condition_type": "signal_set",
-            "required_signal_names": [reason_code],
-            "signal_match_mode": "any",
+            "required_signal_names": required_names,
+            "signal_match_mode": match_mode,
             "minimum_signal_count": 1,
             "timeout_behavior": timeout_behavior_str,
             "allow_operator_override": true,
@@ -720,7 +766,7 @@ impl FabricTaskService {
         })
         .to_string();
 
-        let timeout_at = reason.resume_after_ms.map(|ms| {
+        let timeout_at = params.timeout_ms.map(|ms| {
             let now = ff_core::types::TimestampMs::now().0;
             now.saturating_add(ms as i64).to_string()
         });
@@ -758,7 +804,7 @@ impl FabricTaskService {
             suspension_id.to_string(),
             waitpoint_id.to_string(),
             waitpoint_key,
-            reason_code.to_owned(),
+            params.reason_code.clone(),
             "cairn".to_owned(),
             timeout_at.unwrap_or_default(),
             resume_condition_json,

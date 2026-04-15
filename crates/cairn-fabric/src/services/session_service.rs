@@ -160,6 +160,21 @@ impl FabricSessionService {
         let fid = self.flow_id(session_id);
         let partition = self.flow_partition(&fid);
         let fctx = FlowKeyContext::new(&partition, &fid);
+
+        let exists: std::collections::HashMap<String, String> = self
+            .runtime
+            .client
+            .hgetall(&fctx.core())
+            .await
+            .map_err(|e| FabricError::Internal(format!("valkey HGETALL flow core: {e}")))?;
+
+        if exists.is_empty() {
+            return Err(FabricError::NotFound {
+                entity: "session",
+                id: session_id.to_string(),
+            });
+        }
+
         let now = TimestampMs::now();
 
         let keys: Vec<String> = vec![fctx.core(), fctx.members()];

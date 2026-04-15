@@ -231,7 +231,6 @@ impl FabricRunService {
                     lease_epoch_str.unwrap_or_else(|| "1".to_owned()),
                     attempt_id_str.unwrap_or_default(),
                     String::new(),
-                    TimestampMs::now().to_string(),
                 ];
 
                 let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
@@ -358,6 +357,7 @@ impl FabricRunService {
         self.bridge.emit(BridgeEvent::ExecutionCompleted {
             run_id: run_id.clone(),
             project: record.project.clone(),
+            prev_state: None,
         });
         Ok(record)
     }
@@ -471,6 +471,7 @@ impl FabricRunService {
             run_id: run_id.clone(),
             project: record.project.clone(),
             failure_class,
+            prev_state: None,
         });
         Ok(record)
     }
@@ -483,6 +484,7 @@ impl FabricRunService {
         self.bridge.emit(BridgeEvent::ExecutionCancelled {
             run_id: run_id.clone(),
             project: record.project.clone(),
+            prev_state: None,
         });
         Ok(record)
     }
@@ -632,6 +634,7 @@ impl FabricRunService {
         self.bridge.emit(BridgeEvent::ExecutionSuspended {
             run_id: run_id.clone(),
             project: record.project.clone(),
+            prev_state: None,
         });
         Ok(record)
     }
@@ -678,6 +681,7 @@ impl FabricRunService {
         self.bridge.emit(BridgeEvent::ExecutionResumed {
             run_id: run_id.clone(),
             project: record.project.clone(),
+            prev_state: None,
         });
         Ok(record)
     }
@@ -727,14 +731,15 @@ impl FabricRunService {
             .unwrap_or_default();
 
         let signal_name = match decision {
-            ApprovalDecision::Approved => "approval_granted",
-            ApprovalDecision::Rejected => "approval_rejected",
+            ApprovalDecision::Approved => format!("approval_granted:{}", run_id.as_str()),
+            ApprovalDecision::Rejected => format!("approval_rejected:{}", run_id.as_str()),
         };
 
         let signal_id = ff_core::types::SignalId::new();
         let now = TimestampMs::now();
 
-        let idem_key = ctx.noop();
+        let idem_str = format!("approval:{}", run_id.as_str());
+        let idem_key = ctx.signal_dedup(&waitpoint_id, &idem_str);
 
         let keys: Vec<String> = vec![
             ctx.core(),
@@ -761,7 +766,7 @@ impl FabricRunService {
             "cairn".to_owned(),
             String::new(),
             "json".to_owned(),
-            String::new(),
+            idem_str,
             String::new(),
             "waitpoint".to_owned(),
             now.to_string(),
@@ -787,6 +792,7 @@ impl FabricRunService {
                 self.bridge.emit(BridgeEvent::ExecutionResumed {
                     run_id: run_id.clone(),
                     project: record.project.clone(),
+                    prev_state: None,
                 });
                 Ok(record)
             }

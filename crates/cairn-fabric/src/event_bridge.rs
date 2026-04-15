@@ -20,23 +20,28 @@ pub enum BridgeEvent {
     ExecutionCompleted {
         run_id: RunId,
         project: ProjectKey,
+        prev_state: Option<RunState>,
     },
     ExecutionFailed {
         run_id: RunId,
         project: ProjectKey,
         failure_class: FailureClass,
+        prev_state: Option<RunState>,
     },
     ExecutionCancelled {
         run_id: RunId,
         project: ProjectKey,
+        prev_state: Option<RunState>,
     },
     ExecutionSuspended {
         run_id: RunId,
         project: ProjectKey,
+        prev_state: Option<RunState>,
     },
     ExecutionResumed {
         run_id: RunId,
         project: ProjectKey,
+        prev_state: Option<RunState>,
     },
 }
 
@@ -98,73 +103,82 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
             prompt_release_id: None,
             agent_role_id: None,
         }),
-        BridgeEvent::ExecutionCompleted { run_id, project } => {
-            RuntimeEvent::RunStateChanged(RunStateChanged {
-                project: project.clone(),
-                run_id: run_id.clone(),
-                transition: StateTransition {
-                    from: Some(RunState::Running),
-                    to: RunState::Completed,
-                },
-                failure_class: None,
-                pause_reason: None,
-                resume_trigger: None,
-            })
-        }
-        BridgeEvent::ExecutionFailed {
+        BridgeEvent::ExecutionCompleted {
             run_id,
             project,
-            failure_class,
+            prev_state,
         } => RuntimeEvent::RunStateChanged(RunStateChanged {
             project: project.clone(),
             run_id: run_id.clone(),
             transition: StateTransition {
-                from: Some(RunState::Running),
+                from: *prev_state,
+                to: RunState::Completed,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+        BridgeEvent::ExecutionFailed {
+            run_id,
+            project,
+            failure_class,
+            prev_state,
+        } => RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: *prev_state,
                 to: RunState::Failed,
             },
             failure_class: Some(*failure_class),
             pause_reason: None,
             resume_trigger: None,
         }),
-        BridgeEvent::ExecutionCancelled { run_id, project } => {
-            RuntimeEvent::RunStateChanged(RunStateChanged {
-                project: project.clone(),
-                run_id: run_id.clone(),
-                transition: StateTransition {
-                    from: Some(RunState::Running),
-                    to: RunState::Canceled,
-                },
-                failure_class: Some(FailureClass::CanceledByOperator),
-                pause_reason: None,
-                resume_trigger: None,
-            })
-        }
-        BridgeEvent::ExecutionSuspended { run_id, project } => {
-            RuntimeEvent::RunStateChanged(RunStateChanged {
-                project: project.clone(),
-                run_id: run_id.clone(),
-                transition: StateTransition {
-                    from: Some(RunState::Running),
-                    to: RunState::Paused,
-                },
-                failure_class: None,
-                pause_reason: None,
-                resume_trigger: None,
-            })
-        }
-        BridgeEvent::ExecutionResumed { run_id, project } => {
-            RuntimeEvent::RunStateChanged(RunStateChanged {
-                project: project.clone(),
-                run_id: run_id.clone(),
-                transition: StateTransition {
-                    from: Some(RunState::Paused),
-                    to: RunState::Running,
-                },
-                failure_class: None,
-                pause_reason: None,
-                resume_trigger: None,
-            })
-        }
+        BridgeEvent::ExecutionCancelled {
+            run_id,
+            project,
+            prev_state,
+        } => RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: *prev_state,
+                to: RunState::Canceled,
+            },
+            failure_class: Some(FailureClass::CanceledByOperator),
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+        BridgeEvent::ExecutionSuspended {
+            run_id,
+            project,
+            prev_state,
+        } => RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: *prev_state,
+                to: RunState::Paused,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+        BridgeEvent::ExecutionResumed {
+            run_id,
+            project,
+            prev_state,
+        } => RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: *prev_state,
+                to: RunState::Running,
+            },
+            failure_class: None,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
     }
 }
 
@@ -188,12 +202,31 @@ mod tests {
         let event = BridgeEvent::ExecutionCompleted {
             run_id: RunId::new("run_1"),
             project: ProjectKey::new("t", "w", "p"),
+            prev_state: Some(RunState::Running),
         };
         let runtime = bridge_event_to_runtime_event(&event);
         match runtime {
             RuntimeEvent::RunStateChanged(rsc) => {
+                assert_eq!(rsc.transition.from, Some(RunState::Running));
                 assert_eq!(rsc.transition.to, RunState::Completed);
                 assert!(rsc.failure_class.is_none());
+            }
+            _ => panic!("expected RunStateChanged"),
+        }
+    }
+
+    #[test]
+    fn bridge_event_to_runtime_completed_from_waiting() {
+        let event = BridgeEvent::ExecutionCompleted {
+            run_id: RunId::new("run_1"),
+            project: ProjectKey::new("t", "w", "p"),
+            prev_state: Some(RunState::WaitingDependency),
+        };
+        let runtime = bridge_event_to_runtime_event(&event);
+        match runtime {
+            RuntimeEvent::RunStateChanged(rsc) => {
+                assert_eq!(rsc.transition.from, Some(RunState::WaitingDependency));
+                assert_eq!(rsc.transition.to, RunState::Completed);
             }
             _ => panic!("expected RunStateChanged"),
         }
@@ -205,10 +238,12 @@ mod tests {
             run_id: RunId::new("run_1"),
             project: ProjectKey::new("t", "w", "p"),
             failure_class: FailureClass::TimedOut,
+            prev_state: Some(RunState::Running),
         };
         let runtime = bridge_event_to_runtime_event(&event);
         match runtime {
             RuntimeEvent::RunStateChanged(rsc) => {
+                assert_eq!(rsc.transition.from, Some(RunState::Running));
                 assert_eq!(rsc.transition.to, RunState::Failed);
                 assert_eq!(rsc.failure_class, Some(FailureClass::TimedOut));
             }
@@ -221,10 +256,12 @@ mod tests {
         let event = BridgeEvent::ExecutionCancelled {
             run_id: RunId::new("run_1"),
             project: ProjectKey::new("t", "w", "p"),
+            prev_state: Some(RunState::Running),
         };
         let runtime = bridge_event_to_runtime_event(&event);
         match runtime {
             RuntimeEvent::RunStateChanged(rsc) => {
+                assert_eq!(rsc.transition.from, Some(RunState::Running));
                 assert_eq!(rsc.transition.to, RunState::Canceled);
             }
             _ => panic!("expected RunStateChanged"),
@@ -236,10 +273,12 @@ mod tests {
         let event = BridgeEvent::ExecutionSuspended {
             run_id: RunId::new("run_1"),
             project: ProjectKey::new("t", "w", "p"),
+            prev_state: Some(RunState::Running),
         };
         let runtime = bridge_event_to_runtime_event(&event);
         match runtime {
             RuntimeEvent::RunStateChanged(rsc) => {
+                assert_eq!(rsc.transition.from, Some(RunState::Running));
                 assert_eq!(rsc.transition.to, RunState::Paused);
             }
             _ => panic!("expected RunStateChanged"),
@@ -251,12 +290,30 @@ mod tests {
         let event = BridgeEvent::ExecutionResumed {
             run_id: RunId::new("run_1"),
             project: ProjectKey::new("t", "w", "p"),
+            prev_state: Some(RunState::Paused),
         };
         let runtime = bridge_event_to_runtime_event(&event);
         match runtime {
             RuntimeEvent::RunStateChanged(rsc) => {
                 assert_eq!(rsc.transition.from, Some(RunState::Paused));
                 assert_eq!(rsc.transition.to, RunState::Running);
+            }
+            _ => panic!("expected RunStateChanged"),
+        }
+    }
+
+    #[test]
+    fn bridge_event_prev_state_none_produces_none_from() {
+        let event = BridgeEvent::ExecutionCompleted {
+            run_id: RunId::new("run_1"),
+            project: ProjectKey::new("t", "w", "p"),
+            prev_state: None,
+        };
+        let runtime = bridge_event_to_runtime_event(&event);
+        match runtime {
+            RuntimeEvent::RunStateChanged(rsc) => {
+                assert!(rsc.transition.from.is_none());
+                assert_eq!(rsc.transition.to, RunState::Completed);
             }
             _ => panic!("expected RunStateChanged"),
         }

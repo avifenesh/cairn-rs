@@ -3,8 +3,8 @@ use cairn_domain::{RunId, SessionId, TenantId};
 use ff_core::types::{ExecutionId, FlowId, LaneId, Namespace};
 use uuid::Uuid;
 
-// Project-specific namespace UUID for deterministic v5 generation.
-// Generated once, never changes — all cairn ID mappings derive from this.
+// FINAL — changing this UUID orphans all existing execution/flow IDs in Valkey.
+// All cairn ID mappings derive from this namespace via UUID v5.
 const CAIRN_NAMESPACE: Uuid = Uuid::from_bytes([
     0xa3, 0x4e, 0x7c, 0x01, 0xf8, 0x2d, 0x4b, 0x9a, 0x91, 0x5c, 0xd7, 0x6e, 0x3a, 0x1b, 0x58, 0xf0,
 ]);
