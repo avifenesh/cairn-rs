@@ -28,3 +28,6 @@ serde_json = "1"
 thiserror = "2"
 dashmap = "6"
 async-trait = "0.1"
+
+[dev-dependencies]
+url = "2"

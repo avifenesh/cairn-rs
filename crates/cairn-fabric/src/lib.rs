@@ -60,6 +60,7 @@ pub mod config;
 pub mod constants;
 pub mod error;
 pub mod event_bridge;
+pub mod fcall;
 pub mod helpers;
 pub mod id_map;
 pub mod services;

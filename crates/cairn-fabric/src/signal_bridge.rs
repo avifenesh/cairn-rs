@@ -177,7 +177,7 @@ impl SignalBridge {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_deliver_signal", &key_refs, &arg_refs)
+            .fcall(crate::fcall::names::FF_DELIVER_SIGNAL, &key_refs, &arg_refs)
             .await?;
 
         parse_signal_result(&raw)

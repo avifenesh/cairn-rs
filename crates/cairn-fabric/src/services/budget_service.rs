@@ -67,37 +67,28 @@ impl FabricBudgetService {
         let resets_zset = budget_resets_key(&partition.hash_tag());
         let now = TimestampMs::now();
 
-        let dim_count = dimensions.len();
-        let mut argv: Vec<String> = Vec::with_capacity(9 + dim_count * 3);
-        argv.push(budget_id.to_string());
-        argv.push(scope_type.to_owned());
-        argv.push(scope_id.to_owned());
-        argv.push(enforcement_mode.to_owned());
-        argv.push("block".to_owned());
-        argv.push("log".to_owned());
-        argv.push(reset_interval_ms.to_string());
-        argv.push(now.to_string());
-        argv.push(dim_count.to_string());
-        for dim in dimensions {
-            argv.push((*dim).to_owned());
-        }
-        for &hard in hard_limits {
-            argv.push(hard.to_string());
-        }
-        for &soft in soft_limits {
-            argv.push(soft.to_string());
-        }
-
-        let keys: Vec<String> = vec![ctx.definition(), ctx.limits(), ctx.usage(), resets_zset];
-
+        let (keys, argv) = crate::fcall::budget::build_create_budget(
+            &ctx,
+            &resets_zset,
+            &budget_id,
+            scope_type,
+            scope_id,
+            enforcement_mode,
+            "block",
+            "log",
+            reset_interval_ms,
+            now,
+            dimensions,
+            hard_limits,
+            soft_limits,
+        );
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
 
         let _: ferriskey::Value = self
             .runtime
-            .fcall("ff_create_budget", &key_refs, &argv_refs)
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_create_budget: {e}")))?;
+            .fcall(crate::fcall::names::FF_CREATE_BUDGET, &key_refs, &argv_refs)
+            .await?;
 
         Ok(budget_id)
     }
@@ -163,9 +154,8 @@ impl FabricBudgetService {
 
         let _: ferriskey::Value = self
             .runtime
-            .fcall("ff_reset_budget", &key_refs, &argv_refs)
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_reset_budget: {e}")))?;
+            .fcall(crate::fcall::names::FF_RESET_BUDGET, &key_refs, &argv_refs)
+            .await?;
 
         Ok(())
     }
@@ -179,27 +169,18 @@ impl FabricBudgetService {
         let ctx = BudgetKeyContext::new(&partition, budget_id);
         let now = TimestampMs::now();
 
-        let dim_count = dimension_deltas.len();
-        let mut argv: Vec<String> = Vec::with_capacity(2 + dim_count * 2);
-        argv.push(dim_count.to_string());
-        for (dim, _) in dimension_deltas {
-            argv.push((*dim).to_owned());
-        }
-        for (_, delta) in dimension_deltas {
-            argv.push(delta.to_string());
-        }
-        argv.push(now.to_string());
-
-        let keys: Vec<String> = vec![ctx.usage(), ctx.limits(), ctx.definition()];
-
+        let (keys, argv) = crate::fcall::budget::build_report_usage(&ctx, dimension_deltas, now);
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_report_usage_and_check", &key_refs, &argv_refs)
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_report_usage_and_check: {e}")))?;
+            .fcall(
+                crate::fcall::names::FF_REPORT_USAGE_AND_CHECK,
+                &key_refs,
+                &argv_refs,
+            )
+            .await?;
 
         parse_spend_result(&raw)
     }

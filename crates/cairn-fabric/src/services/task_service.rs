@@ -327,7 +327,11 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_create_execution", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_CREATE_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
 
@@ -417,11 +421,15 @@ impl FabricTaskService {
 
         let raw_grant: ferriskey::Value = self
             .runtime
-            .fcall("ff_issue_claim_grant", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_ISSUE_CLAIM_GRANT,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_issue_claim_grant: {e}")))?;
 
-        check_fcall_success(&raw_grant, "ff_issue_claim_grant")?;
+        check_fcall_success(&raw_grant, crate::fcall::names::FF_ISSUE_CLAIM_GRANT)?;
 
         // Step 2: Claim execution
         let total_str: Option<String> = self
@@ -476,11 +484,15 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_claim_execution", &key_refs2, &arg_refs2)
+            .fcall(
+                crate::fcall::names::FF_CLAIM_EXECUTION,
+                &key_refs2,
+                &arg_refs2,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_claim_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_claim_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_CLAIM_EXECUTION)?;
 
         let lease_epoch = parse_claim_lease_epoch(&raw)?;
 
@@ -544,11 +556,11 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_renew_lease", &key_refs, &arg_refs)
+            .fcall(crate::fcall::names::FF_RENEW_LEASE, &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_renew_lease: {e}")))?;
 
-        check_fcall_success(&raw, "ff_renew_lease")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_RENEW_LEASE)?;
 
         self.read_task_record(project, task_id).await
     }
@@ -619,11 +631,15 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_complete_execution", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_COMPLETE_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_complete_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_complete_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_COMPLETE_EXECUTION)?;
 
         let was_registered = self.registry.take(task_id).is_some();
 
@@ -718,11 +734,11 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_fail_execution", &key_refs, &arg_refs)
+            .fcall(crate::fcall::names::FF_FAIL_EXECUTION, &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_fail_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_fail_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_FAIL_EXECUTION)?;
 
         let terminal = parse_fail_outcome(&raw) == FailOutcome::TerminalFailed;
 
@@ -817,11 +833,15 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_cancel_execution", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_CANCEL_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_cancel_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_cancel_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_CANCEL_EXECUTION)?;
 
         let was_registered = self.registry.take(task_id).is_some();
 
@@ -1030,11 +1050,15 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_suspend_execution", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_SUSPEND_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_suspend_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
         self.read_task_record(project, task_id).await
     }
@@ -1088,11 +1112,15 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_resume_execution", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_RESUME_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_resume_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_RESUME_EXECUTION)?;
 
         self.read_task_record(project, task_id).await
     }

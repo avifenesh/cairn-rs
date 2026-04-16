@@ -105,24 +105,17 @@ impl FabricSessionService {
             project.tenant_id, project.workspace_id, project.project_id
         );
 
-        let keys: Vec<String> = vec![fctx.core(), fctx.members()];
-        let args: Vec<String> = vec![
-            fid.to_string(),
-            "cairn_session".to_owned(),
-            namespace.to_string(),
-            now.to_string(),
-        ];
-
+        let (keys, args) =
+            crate::fcall::session::build_create_flow(&fctx, &fid, "cairn_session", &namespace, now);
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_create_flow", &key_refs, &arg_refs)
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_create_flow: {e}")))?;
+            .fcall(crate::fcall::names::FF_CREATE_FLOW, &key_refs, &arg_refs)
+            .await?;
 
-        crate::helpers::check_fcall_success(&raw, "ff_create_flow")?;
+        crate::helpers::check_fcall_success(&raw, crate::fcall::names::FF_CREATE_FLOW)?;
 
         let _: i64 = self
             .runtime
@@ -192,26 +185,26 @@ impl FabricSessionService {
 
         let now = TimestampMs::now();
 
-        let keys: Vec<String> = vec![fctx.core(), fctx.members()];
-        let args: Vec<String> = vec![
-            fid.to_string(),
-            "session archived".to_owned(),
-            "cancel_all".to_owned(),
-            now.to_string(),
-        ];
-
+        let (keys, args) = crate::fcall::session::build_cancel_flow(
+            &fctx,
+            &fid,
+            "session archived",
+            "cancel_all",
+            now,
+        );
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_cancel_flow", &key_refs, &arg_refs)
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_cancel_flow: {e}")))?;
+            .fcall(crate::fcall::names::FF_CANCEL_FLOW, &key_refs, &arg_refs)
+            .await?;
 
         // flow_already_terminal is acceptable — the flow may already be
         // completed/cancelled, but cairn still needs to mark it archived.
-        if let Err(e) = crate::helpers::check_fcall_success(&raw, "ff_cancel_flow") {
+        if let Err(e) =
+            crate::helpers::check_fcall_success(&raw, crate::fcall::names::FF_CANCEL_FLOW)
+        {
             let msg = e.to_string();
             if !msg.contains("flow_already_terminal") {
                 return Err(e);

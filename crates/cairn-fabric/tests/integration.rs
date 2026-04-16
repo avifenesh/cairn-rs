@@ -1,0 +1,77 @@
+// Integration tests for cairn-fabric against a live Valkey instance.
+//
+// All tests are #[ignore] by default — they require a running Valkey.
+//
+// Run with:
+//   CAIRN_TEST_VALKEY_URL=valkey://localhost:6379 cargo test -p cairn-fabric --test integration -- --ignored
+//
+// Single test:
+//   CAIRN_TEST_VALKEY_URL=valkey://localhost:6379 cargo test -p cairn-fabric --test integration test_create_and_read_run -- --ignored
+
+mod integration {
+    pub mod test_budget;
+    pub mod test_run_lifecycle;
+}
+
+use std::sync::Arc;
+
+use cairn_domain::tenancy::ProjectKey;
+use cairn_domain::{RunId, SessionId};
+use cairn_fabric::{FabricConfig, FabricServices};
+use cairn_store::InMemoryStore;
+
+pub struct TestHarness {
+    pub fabric: FabricServices,
+    pub project: ProjectKey,
+}
+
+impl TestHarness {
+    pub async fn setup() -> Self {
+        let url = std::env::var("CAIRN_TEST_VALKEY_URL")
+            .unwrap_or_else(|_| "valkey://localhost:6379".into());
+
+        let parsed = url::Url::parse(&url).expect("invalid CAIRN_TEST_VALKEY_URL");
+        let host = parsed.host_str().unwrap_or("localhost").to_owned();
+        let port = parsed.port().unwrap_or(6379);
+        let tls = parsed.scheme() == "valkeys";
+
+        let config = FabricConfig {
+            valkey_host: host,
+            valkey_port: port,
+            tls,
+            cluster: false,
+            lane_id: ff_core::types::LaneId::new("integration_test"),
+            worker_id: ff_core::types::WorkerId::new("test-worker"),
+            worker_instance_id: ff_core::types::WorkerInstanceId::new(
+                uuid::Uuid::new_v4().to_string(),
+            ),
+            namespace: ff_core::types::Namespace::new("test"),
+            lease_ttl_ms: 30_000,
+            grant_ttl_ms: 5_000,
+            max_concurrent_tasks: 4,
+            signal_dedup_ttl_ms: 86_400_000,
+            fcall_timeout_ms: 5_000,
+        };
+
+        let event_log = Arc::new(InMemoryStore::default());
+        let fabric = FabricServices::start(config, event_log)
+            .await
+            .expect("failed to connect to Valkey — is it running?");
+
+        let project = ProjectKey::new("test_tenant", "test_workspace", "test_project");
+
+        Self { fabric, project }
+    }
+
+    pub fn unique_run_id(&self) -> RunId {
+        RunId::new(format!("integ_run_{}", uuid::Uuid::new_v4()))
+    }
+
+    pub fn unique_session_id(&self) -> SessionId {
+        SessionId::new(format!("integ_sess_{}", uuid::Uuid::new_v4()))
+    }
+
+    pub async fn teardown(self) {
+        self.fabric.shutdown().await;
+    }
+}

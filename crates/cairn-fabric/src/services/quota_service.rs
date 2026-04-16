@@ -41,29 +41,27 @@ impl FabricQuotaService {
         let dimension = "default";
         let policies_index = quota_policies_index(&partition.hash_tag());
 
-        let keys: Vec<String> = vec![
-            ctx.definition(),
-            ctx.window(dimension),
-            ctx.concurrency(),
-            ctx.admitted_set(),
-            policies_index,
-        ];
-        let args: Vec<String> = vec![
-            qid.to_string(),
-            window_seconds.to_string(),
-            max_requests_per_window.to_string(),
-            max_concurrent.to_string(),
-            now.to_string(),
-        ];
-
+        let (keys, args) = crate::fcall::quota::build_create_quota_policy(
+            &ctx,
+            &policies_index,
+            &qid,
+            window_seconds,
+            max_requests_per_window,
+            max_concurrent,
+            now,
+            dimension,
+        );
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
         let _: ferriskey::Value = self
             .runtime
-            .fcall("ff_create_quota_policy", &key_refs, &arg_refs)
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_create_quota_policy: {e}")))?;
+            .fcall(
+                crate::fcall::names::FF_CREATE_QUOTA_POLICY,
+                &key_refs,
+                &arg_refs,
+            )
+            .await?;
 
         let def_key = ctx.definition();
         self.runtime
@@ -144,30 +142,26 @@ impl FabricQuotaService {
         let now = TimestampMs::now();
         let dimension = "default";
 
-        let keys: Vec<String> = vec![
-            ctx.window(dimension),
-            ctx.concurrency(),
-            ctx.definition(),
-            ctx.admitted(execution_id),
-            ctx.admitted_set(),
-        ];
-        let args: Vec<String> = vec![
-            now.to_string(),
-            window_seconds.to_string(),
-            rate_limit.to_string(),
-            concurrency_cap.to_string(),
-            execution_id.to_string(),
-            "0".to_owned(),
-        ];
-
+        let (keys, args) = crate::fcall::quota::build_check_admission(
+            &ctx,
+            execution_id,
+            now,
+            window_seconds,
+            rate_limit,
+            concurrency_cap,
+            dimension,
+        );
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_check_admission_and_record", &key_refs, &arg_refs)
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_check_admission_and_record: {e}")))?;
+            .fcall(
+                crate::fcall::names::FF_CHECK_ADMISSION_AND_RECORD,
+                &key_refs,
+                &arg_refs,
+            )
+            .await?;
 
         parse_admission_result(&raw)
     }

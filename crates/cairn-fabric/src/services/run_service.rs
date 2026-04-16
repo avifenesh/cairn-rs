@@ -203,7 +203,11 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_create_execution", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_CREATE_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
 
@@ -257,7 +261,7 @@ impl FabricRunService {
         );
 
         match function {
-            "ff_complete_execution" => {
+            crate::fcall::names::FF_COMPLETE_EXECUTION => {
                 let keys: Vec<String> = vec![
                     ctx.core(),
                     ctx.attempt_hash(att_idx),
@@ -285,13 +289,17 @@ impl FabricRunService {
 
                 let raw: ferriskey::Value = self
                     .runtime
-                    .fcall("ff_complete_execution", &key_refs, &arg_refs)
+                    .fcall(
+                        crate::fcall::names::FF_COMPLETE_EXECUTION,
+                        &key_refs,
+                        &arg_refs,
+                    )
                     .await
                     .map_err(|e| FabricError::Internal(format!("ff_complete_execution: {e}")))?;
 
-                check_fcall_success(&raw, "ff_complete_execution")?;
+                check_fcall_success(&raw, crate::fcall::names::FF_COMPLETE_EXECUTION)?;
             }
-            "ff_cancel_execution" => {
+            crate::fcall::names::FF_CANCEL_EXECUTION => {
                 let wp_id_str: Option<String> = self
                     .runtime
                     .client
@@ -341,11 +349,15 @@ impl FabricRunService {
 
                 let raw: ferriskey::Value = self
                     .runtime
-                    .fcall("ff_cancel_execution", &key_refs, &arg_refs)
+                    .fcall(
+                        crate::fcall::names::FF_CANCEL_EXECUTION,
+                        &key_refs,
+                        &arg_refs,
+                    )
                     .await
                     .map_err(|e| FabricError::Internal(format!("ff_cancel_execution: {e}")))?;
 
-                check_fcall_success(&raw, "ff_cancel_execution")?;
+                check_fcall_success(&raw, crate::fcall::names::FF_CANCEL_EXECUTION)?;
             }
             _ => {
                 return Err(FabricError::Internal(format!(
@@ -413,7 +425,7 @@ impl FabricRunService {
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
         let prev = self
-            .terminal_execution(project, run_id, "ff_complete_execution")
+            .terminal_execution(project, run_id, crate::fcall::names::FF_COMPLETE_EXECUTION)
             .await?;
 
         let record = self.read_run_record(project, run_id).await?;
@@ -521,11 +533,11 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_fail_execution", &key_refs, &arg_refs)
+            .fcall(crate::fcall::names::FF_FAIL_EXECUTION, &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_fail_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_fail_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_FAIL_EXECUTION)?;
 
         let record = self.read_run_record(project, run_id).await?;
         if parse_fail_outcome(&raw) == FailOutcome::TerminalFailed {
@@ -547,7 +559,7 @@ impl FabricRunService {
         run_id: &RunId,
     ) -> Result<RunRecord, FabricError> {
         let prev = self
-            .terminal_execution(project, run_id, "ff_cancel_execution")
+            .terminal_execution(project, run_id, crate::fcall::names::FF_CANCEL_EXECUTION)
             .await?;
 
         let record = self.read_run_record(project, run_id).await?;
@@ -736,11 +748,15 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_suspend_execution", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_SUSPEND_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_suspend_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
         let record = self.read_run_record(project, run_id).await?;
         if !is_already_satisfied(&raw) {
@@ -816,11 +832,15 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_resume_execution", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_RESUME_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_resume_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_RESUME_EXECUTION)?;
 
         let record = self.read_run_record(project, run_id).await?;
         self.bridge
@@ -957,11 +977,15 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_suspend_execution", &key_refs, &arg_refs)
+            .fcall(
+                crate::fcall::names::FF_SUSPEND_EXECUTION,
+                &key_refs,
+                &arg_refs,
+            )
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
 
-        check_fcall_success(&raw, "ff_suspend_execution")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_SUSPEND_EXECUTION)?;
 
         let record = self.read_run_record(project, run_id).await?;
         if !is_already_satisfied(&raw) {
@@ -1059,11 +1083,11 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .fcall("ff_deliver_signal", &key_refs, &arg_refs)
+            .fcall(crate::fcall::names::FF_DELIVER_SIGNAL, &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_deliver_signal: {e}")))?;
 
-        check_fcall_success(&raw, "ff_deliver_signal")?;
+        check_fcall_success(&raw, crate::fcall::names::FF_DELIVER_SIGNAL)?;
 
         match decision {
             ApprovalDecision::Approved => {
