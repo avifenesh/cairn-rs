@@ -478,12 +478,14 @@ impl FabricTaskService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_renew_lease", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_renew_lease: {e}")))?;
+
+        check_fcall_success(&raw, "ff_renew_lease")?;
 
         self.read_task_record(project, task_id).await
     }
