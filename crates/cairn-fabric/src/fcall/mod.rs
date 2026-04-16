@@ -41,14 +41,61 @@ pub const CRITICAL_CONTRACTS: &[FcallContract] = &[
         expected_args: suspension::SUSPEND_EXECUTION_ARGS,
     },
     FcallContract {
+        name: names::FF_RESUME_EXECUTION,
+        expected_keys: suspension::RESUME_EXECUTION_KEYS,
+        expected_args: suspension::RESUME_EXECUTION_ARGS,
+    },
+    FcallContract {
         name: names::FF_DELIVER_SIGNAL,
         expected_keys: suspension::DELIVER_SIGNAL_KEYS,
         expected_args: suspension::DELIVER_SIGNAL_ARGS,
     },
     FcallContract {
+        name: names::FF_ISSUE_CLAIM_GRANT,
+        expected_keys: claim::ISSUE_CLAIM_GRANT_KEYS,
+        expected_args: claim::ISSUE_CLAIM_GRANT_ARGS,
+    },
+    FcallContract {
         name: names::FF_CLAIM_EXECUTION,
         expected_keys: claim::CLAIM_EXECUTION_KEYS,
         expected_args: claim::CLAIM_EXECUTION_ARGS,
+    },
+    FcallContract {
+        name: names::FF_RENEW_LEASE,
+        expected_keys: claim::RENEW_LEASE_KEYS,
+        expected_args: claim::RENEW_LEASE_ARGS,
+    },
+    FcallContract {
+        name: names::FF_CREATE_FLOW,
+        expected_keys: session::CREATE_FLOW_KEYS,
+        expected_args: session::CREATE_FLOW_ARGS,
+    },
+    FcallContract {
+        name: names::FF_CANCEL_FLOW,
+        expected_keys: session::CANCEL_FLOW_KEYS,
+        expected_args: session::CANCEL_FLOW_ARGS,
+    },
+    FcallContract {
+        name: names::FF_CREATE_BUDGET,
+        expected_keys: budget::CREATE_BUDGET_KEYS,
+        expected_args: 0, // variable: 9 + dim_count * 3
+    },
+    // NOTE: ff_report_usage_and_check has variable-length args (depends on
+    // dimension count). Cannot be statically verified — KEYS-only check.
+    FcallContract {
+        name: names::FF_REPORT_USAGE_AND_CHECK,
+        expected_keys: budget::REPORT_USAGE_KEYS,
+        expected_args: 0, // variable: 1 + dim_count * 2 + 1
+    },
+    FcallContract {
+        name: names::FF_CREATE_QUOTA_POLICY,
+        expected_keys: quota::CREATE_QUOTA_POLICY_KEYS,
+        expected_args: quota::CREATE_QUOTA_POLICY_ARGS,
+    },
+    FcallContract {
+        name: names::FF_CHECK_ADMISSION_AND_RECORD,
+        expected_keys: quota::CHECK_ADMISSION_KEYS,
+        expected_args: quota::CHECK_ADMISSION_ARGS,
     },
 ];
 
@@ -66,7 +113,7 @@ pub fn verify_builder_counts(
                     actual = keys.len(),
                 )));
             }
-            if args.len() != contract.expected_args {
+            if contract.expected_args > 0 && args.len() != contract.expected_args {
                 return Err(FabricError::Internal(format!(
                     "{function_name}: expected {expected} ARGS, got {actual}",
                     expected = contract.expected_args,
@@ -116,10 +163,18 @@ mod tests {
     }
 
     #[test]
-    fn all_critical_contracts_have_nonzero_counts() {
+    fn all_critical_contracts_have_nonzero_key_counts() {
         for c in CRITICAL_CONTRACTS {
             assert!(c.expected_keys > 0, "{} has 0 keys", c.name);
-            assert!(c.expected_args > 0, "{} has 0 args", c.name);
+        }
+    }
+
+    #[test]
+    fn fixed_arg_contracts_have_nonzero_arg_counts() {
+        for c in CRITICAL_CONTRACTS {
+            if c.expected_args > 0 {
+                assert!(c.expected_args >= 3, "{} has suspiciously few args", c.name);
+            }
         }
     }
 }

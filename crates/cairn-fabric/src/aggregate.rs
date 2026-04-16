@@ -45,8 +45,9 @@ impl FabricServices {
                 tracing::info!("fabric services aggregate ready");
                 Ok(services)
             }
-            Err(e) => {
+            Err((e, handle)) => {
                 bridge.stop();
+                handle.abort();
                 drop(bridge);
                 Err(e)
             }
@@ -57,7 +58,7 @@ impl FabricServices {
         runtime: Arc<FabricRuntime>,
         bridge: Arc<EventBridge>,
         bridge_handle: JoinHandle<()>,
-    ) -> Result<Self, FabricError> {
+    ) -> Result<Self, (FabricError, JoinHandle<()>)> {
         let registry = Arc::new(ActiveTaskRegistry::new());
 
         let runs = FabricRunService::new(runtime.clone(), bridge.clone());

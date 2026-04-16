@@ -146,7 +146,7 @@ impl FabricBudgetService {
         let resets_zset = budget_resets_key(&partition.hash_tag());
         let now = TimestampMs::now();
 
-        let keys: Vec<String> = vec![ctx.usage(), ctx.definition(), resets_zset];
+        let keys: Vec<String> = vec![ctx.definition(), ctx.usage(), resets_zset];
         let argv: Vec<String> = vec![budget_id.to_string(), now.to_string()];
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();

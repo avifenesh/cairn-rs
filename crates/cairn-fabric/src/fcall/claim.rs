@@ -95,7 +95,7 @@ pub fn build_renew_lease(
         lease_id.to_owned(),
         lease_epoch.to_owned(),
         lease_extension_ms.to_string(),
-        "5000".to_owned(),
+        crate::constants::DEFAULT_LEASE_HISTORY_GRACE_MS.to_owned(),
     ];
     (keys, args)
 }

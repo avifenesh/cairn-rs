@@ -797,36 +797,19 @@ impl FabricTaskService {
             .and_then(|s| ff_core::types::WaitpointId::parse(s).ok())
             .unwrap_or_default();
 
-        let keys: Vec<String> = vec![
-            ctx.core(),
-            ctx.attempt_hash(att_idx),
-            ctx.stream_meta(att_idx),
-            ctx.lease_current(),
-            ctx.lease_history(),
-            idx.lease_expiry(),
-            idx.worker_leases(worker_instance_id),
-            ctx.suspension_current(),
-            ctx.waitpoint(&wp_id),
-            ctx.waitpoint_condition(&wp_id),
-            idx.suspension_timeout(),
-            idx.lane_terminal(&lane_id),
-            idx.attempt_timeout(),
-            idx.execution_deadline(),
-            idx.lane_eligible(&lane_id),
-            idx.lane_delayed(&lane_id),
-            idx.lane_blocked_dependencies(&lane_id),
-            idx.lane_blocked_budget(&lane_id),
-            idx.lane_blocked_quota(&lane_id),
-            idx.lane_blocked_route(&lane_id),
-            idx.lane_blocked_operator(&lane_id),
-        ];
-        let args: Vec<String> = vec![
-            eid.to_string(),
-            crate::constants::CANCEL_REASON_OPERATOR.to_owned(),
-            crate::constants::CANCEL_SOURCE_OVERRIDE.to_owned(),
-            lid.to_string(),
-            epoch.to_string(),
-        ];
+        let (keys, args) = crate::fcall::execution::build_cancel_execution(
+            &ctx,
+            &idx,
+            att_idx,
+            worker_instance_id,
+            &lane_id,
+            &wp_id,
+            &eid,
+            crate::constants::CANCEL_REASON_OPERATOR,
+            crate::constants::CANCEL_SOURCE_OVERRIDE,
+            &lid.to_string(),
+            &epoch.to_string(),
+        );
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -1001,49 +984,35 @@ impl FabricTaskService {
             now.saturating_add(ms as i64).to_string()
         });
 
-        let keys: Vec<String> = vec![
-            ctx.core(),
-            ctx.attempt_hash(att_idx),
-            ctx.lease_current(),
-            ctx.lease_history(),
-            idx.lease_expiry(),
-            idx.worker_leases(&worker_instance_id),
-            ctx.suspension_current(),
-            ctx.waitpoint(&waitpoint_id),
-            ctx.waitpoint_signals(&waitpoint_id),
-            idx.suspension_timeout(),
-            idx.pending_waitpoint_expiry(),
-            idx.lane_active(&lane_id),
-            idx.lane_suspended(&lane_id),
-            ctx.waitpoints(),
-            ctx.waitpoint_condition(&waitpoint_id),
-            idx.attempt_timeout(),
-        ];
-        let args: Vec<String> = vec![
-            eid.to_string(),
-            att_idx.to_string(),
-            fields
-                .get("current_attempt_id")
-                .cloned()
-                .unwrap_or_default(),
-            fields.get("current_lease_id").cloned().unwrap_or_default(),
-            fields
-                .get("current_lease_epoch")
-                .cloned()
-                .unwrap_or_else(|| "1".to_owned()),
-            suspension_id.to_string(),
-            waitpoint_id.to_string(),
-            waitpoint_key,
-            params.reason_code.clone(),
-            "cairn".to_owned(),
-            timeout_at.unwrap_or_default(),
-            resume_condition_json,
-            resume_policy_json,
-            String::new(),
-            String::new(),
-            timeout_behavior_str.to_owned(),
-            "1000".to_owned(),
-        ];
+        let attempt_id = fields
+            .get("current_attempt_id")
+            .cloned()
+            .unwrap_or_default();
+        let lease_id = fields.get("current_lease_id").cloned().unwrap_or_default();
+        let lease_epoch = fields
+            .get("current_lease_epoch")
+            .cloned()
+            .unwrap_or_else(|| "1".to_owned());
+
+        let (keys, args) = crate::fcall::suspension::build_suspend_execution(
+            &ctx,
+            &idx,
+            att_idx,
+            &worker_instance_id,
+            &lane_id,
+            &waitpoint_id,
+            &eid,
+            &attempt_id,
+            &lease_id,
+            &lease_epoch,
+            &suspension_id,
+            &waitpoint_key,
+            &params.reason_code,
+            &timeout_at.unwrap_or_default(),
+            &resume_condition_json,
+            &resume_policy_json,
+            timeout_behavior_str,
+        );
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();

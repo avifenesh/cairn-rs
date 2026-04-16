@@ -55,9 +55,33 @@ impl FabricRuntime {
         }
         let client = client.ok_or(FabricError::Valkey(last_err))?;
 
-        ff_script::loader::ensure_library(&client)
-            .await
-            .map_err(|e| FabricError::Valkey(format!("script load: {e}")))?;
+        let mut lib_loaded = false;
+        for attempt in 0..CONNECT_MAX_ATTEMPTS {
+            match ff_script::loader::ensure_library(&client).await {
+                Ok(()) => {
+                    lib_loaded = true;
+                    break;
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    if attempt + 1 < CONNECT_MAX_ATTEMPTS {
+                        let backoff = 500 * (1 << attempt);
+                        tracing::warn!(
+                            attempt = attempt + 1,
+                            error = %msg,
+                            backoff_ms = backoff,
+                            "ensure_library failed, retrying"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                    } else {
+                        return Err(FabricError::Valkey(format!("script load: {msg}")));
+                    }
+                }
+            }
+        }
+        if !lib_loaded {
+            return Err(FabricError::Valkey("script load: retries exhausted".into()));
+        }
 
         let partition_config = PartitionConfig::default();
         let engine_config = EngineConfig {
@@ -83,6 +107,11 @@ impl FabricRuntime {
         keys: &[&str],
         args: &[&str],
     ) -> Result<ferriskey::Value, FabricError> {
+        if cfg!(debug_assertions) {
+            let k: Vec<String> = keys.iter().map(|s| s.to_string()).collect();
+            let a: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+            crate::fcall::verify_builder_counts(function, &k, &a)?;
+        }
         let timeout = std::time::Duration::from_millis(self.config.fcall_timeout_ms);
         match tokio::time::timeout(timeout, self.client.fcall(function, keys, args)).await {
             Ok(Ok(val)) => Ok(val),

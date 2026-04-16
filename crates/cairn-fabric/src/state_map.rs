@@ -51,6 +51,9 @@ pub fn ff_public_state_to_task_state(state: PublicState) -> (TaskState, Option<F
     }
 }
 
+/// Maps a cairn RunState to the FF PublicState(s) it could correspond to.
+/// WaitingApproval and Paused both map to `[Suspended]` — callers querying
+/// Valkey indexes MUST also filter by `blocking_reason` to distinguish them.
 pub fn ff_run_state_to_public_states(state: RunState) -> &'static [PublicState] {
     match state {
         RunState::Pending => &[
@@ -72,6 +75,9 @@ pub fn ff_run_state_to_public_states(state: RunState) -> &'static [PublicState] 
     }
 }
 
+/// Maps a cairn TaskState to the FF PublicState(s) it could correspond to.
+/// WaitingApproval and Paused both map to `[Suspended]` — callers querying
+/// Valkey indexes MUST also filter by `blocking_reason` to distinguish them.
 pub fn ff_task_state_to_public_states(state: TaskState) -> &'static [PublicState] {
     match state {
         TaskState::Queued => &[

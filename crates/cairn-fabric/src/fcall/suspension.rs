@@ -52,14 +52,14 @@ pub fn build_suspend_execution(
         waitpoint_id.to_string(),
         waitpoint_key.to_owned(),
         reason_code.to_owned(),
-        "cairn".to_owned(),
+        crate::constants::SOURCE_IDENTITY.to_owned(),
         timeout_at.to_owned(),
         resume_condition_json.to_owned(),
         resume_policy_json.to_owned(),
-        String::new(),
-        String::new(),
+        String::new(), // continuation_metadata_pointer (unused in v1)
+        String::new(), // use_pending_waitpoint (unused in v1)
         timeout_behavior.to_owned(),
-        "1000".to_owned(),
+        crate::constants::DEFAULT_LEASE_HISTORY_MAXLEN.to_owned(),
     ];
     (keys, args)
 }

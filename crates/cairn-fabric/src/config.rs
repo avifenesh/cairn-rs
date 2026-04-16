@@ -97,6 +97,17 @@ impl FabricConfig {
                 "max_concurrent_tasks must be >= 1".into(),
             ));
         }
+        if self.grant_ttl_ms == 0 {
+            return Err(FabricError::Config("grant_ttl_ms must be > 0".into()));
+        }
+        if self.fcall_timeout_ms == 0 {
+            return Err(FabricError::Config("fcall_timeout_ms must be > 0".into()));
+        }
+        if self.signal_dedup_ttl_ms == 0 {
+            return Err(FabricError::Config(
+                "signal_dedup_ttl_ms must be > 0".into(),
+            ));
+        }
         Ok(())
     }
 
