@@ -12,8 +12,10 @@ pub struct FabricConfig {
     pub worker_instance_id: WorkerInstanceId,
     pub namespace: Namespace,
     pub lease_ttl_ms: u64,
+    pub grant_ttl_ms: u64,
     pub max_concurrent_tasks: usize,
     pub signal_dedup_ttl_ms: u64,
+    pub fcall_timeout_ms: u64,
 }
 
 impl FabricConfig {
@@ -47,6 +49,10 @@ impl FabricConfig {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(30_000);
+        let grant_ttl_ms = std::env::var("CAIRN_FABRIC_GRANT_TTL_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5_000);
         let max_concurrent_tasks = std::env::var("CAIRN_FABRIC_MAX_TASKS")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -55,6 +61,10 @@ impl FabricConfig {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(86_400_000);
+        let fcall_timeout_ms = std::env::var("CAIRN_FABRIC_FCALL_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5_000);
 
         let config = Self {
             valkey_host,
@@ -66,8 +76,10 @@ impl FabricConfig {
             worker_instance_id,
             namespace,
             lease_ttl_ms,
+            grant_ttl_ms,
             max_concurrent_tasks,
             signal_dedup_ttl_ms,
+            fcall_timeout_ms,
         };
         config.validate()?;
         Ok(config)
@@ -111,9 +123,13 @@ fn load_or_generate_instance_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn default_config_from_env() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("CAIRN_FABRIC_HOST");
         std::env::remove_var("CAIRN_FABRIC_PORT");
         std::env::remove_var("CAIRN_FABRIC_TLS");
@@ -121,6 +137,7 @@ mod tests {
         std::env::remove_var("CAIRN_FABRIC_LANE");
         std::env::remove_var("CAIRN_FABRIC_LEASE_TTL_MS");
         std::env::remove_var("CAIRN_FABRIC_MAX_TASKS");
+        std::env::remove_var("CAIRN_FABRIC_GRANT_TTL_MS");
 
         let config = FabricConfig::from_env().unwrap();
         assert_eq!(config.valkey_host, "localhost");
@@ -144,8 +161,10 @@ mod tests {
             worker_instance_id: WorkerInstanceId::new("inst1"),
             namespace: Namespace::new("ns"),
             lease_ttl_ms: 30_000,
+            grant_ttl_ms: 5_000,
             max_concurrent_tasks: 1,
             signal_dedup_ttl_ms: 86_400_000,
+            fcall_timeout_ms: 5_000,
         };
         assert_eq!(config.valkey_url(), "valkey://myhost:6380");
     }
@@ -165,8 +184,10 @@ mod tests {
             worker_instance_id: WorkerInstanceId::new("i"),
             namespace: Namespace::new("ns"),
             lease_ttl_ms,
+            grant_ttl_ms: 5_000,
             max_concurrent_tasks: max_tasks,
             signal_dedup_ttl_ms: 86_400_000,
+            fcall_timeout_ms: 5_000,
         };
         config.validate()?;
         Ok(config)
@@ -208,8 +229,10 @@ mod tests {
             worker_instance_id: WorkerInstanceId::new("inst1"),
             namespace: Namespace::new("ns"),
             lease_ttl_ms: 30_000,
+            grant_ttl_ms: 5_000,
             max_concurrent_tasks: 1,
             signal_dedup_ttl_ms: 86_400_000,
+            fcall_timeout_ms: 5_000,
         };
         assert_eq!(config.valkey_url(), "valkeys://secure.host:6379");
     }

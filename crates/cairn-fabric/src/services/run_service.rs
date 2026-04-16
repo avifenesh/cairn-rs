@@ -99,10 +99,23 @@ impl FabricRunService {
 
         let session_id_str = tags.get("cairn.session_id").cloned().unwrap_or_default();
         let parent_run_id_str = tags.get("cairn.parent_run_id").cloned();
-        let tag_project = tags
+        let tag_project = match tags
             .get("cairn.project")
             .and_then(|s| try_parse_project_key(s))
-            .unwrap_or_else(|| project.clone());
+        {
+            Some(tp) => {
+                if tp != *project {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        caller = %format!("{}/{}/{}", project.tenant_id, project.workspace_id, project.project_id),
+                        tag = %format!("{}/{}/{}", tp.tenant_id, tp.workspace_id, tp.project_id),
+                        "run tag project does not match caller project"
+                    );
+                }
+                tp
+            }
+            None => project.clone(),
+        };
 
         Ok(RunRecord {
             run_id: run_id.clone(),
@@ -173,7 +186,7 @@ impl FabricRunService {
             eid.to_string(),
             namespace.to_string(),
             lane_id.to_string(),
-            "cairn_run".to_owned(),
+            crate::constants::EXECUTION_KIND_RUN.to_owned(),
             "0".to_owned(),
             "cairn".to_owned(),
             policy_json,
@@ -190,7 +203,6 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_create_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
@@ -273,7 +285,6 @@ impl FabricRunService {
 
                 let raw: ferriskey::Value = self
                     .runtime
-                    .client
                     .fcall("ff_complete_execution", &key_refs, &arg_refs)
                     .await
                     .map_err(|e| FabricError::Internal(format!("ff_complete_execution: {e}")))?;
@@ -319,8 +330,8 @@ impl FabricRunService {
                 ];
                 let args: Vec<String> = vec![
                     eid.to_string(),
-                    "operator_override".to_owned(),
-                    "operator_override".to_owned(),
+                    crate::constants::CANCEL_SOURCE_OVERRIDE.to_owned(),
+                    crate::constants::CANCEL_SOURCE_OVERRIDE.to_owned(),
                     lease_id_str.unwrap_or_default(),
                     lease_epoch_str.unwrap_or_else(|| "1".to_owned()),
                 ];
@@ -330,7 +341,6 @@ impl FabricRunService {
 
                 let raw: ferriskey::Value = self
                     .runtime
-                    .client
                     .fcall("ff_cancel_execution", &key_refs, &arg_refs)
                     .await
                     .map_err(|e| FabricError::Internal(format!("ff_cancel_execution: {e}")))?;
@@ -511,7 +521,6 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_fail_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_fail_execution: {e}")))?;
@@ -727,7 +736,6 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_suspend_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
@@ -808,7 +816,6 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_resume_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
@@ -950,7 +957,6 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_suspend_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
@@ -1053,7 +1059,6 @@ impl FabricRunService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_deliver_signal", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_deliver_signal: {e}")))?;

@@ -42,7 +42,30 @@ impl FabricTaskService {
         id_map::task_to_execution_id(project, task_id)
     }
 
-    async fn resolve_lease_context(
+    async fn read_valkey_lease_fields(
+        &self,
+        task_id: &TaskId,
+        project: &ProjectKey,
+    ) -> Result<HashMap<String, String>, FabricError> {
+        let eid = self.task_to_execution_id(project, task_id);
+        let partition = execution_partition(&eid, &self.runtime.partition_config);
+        let exec_ctx = ExecKeyContext::new(&partition, &eid);
+        let fields: HashMap<String, String> =
+            self.runtime
+                .client
+                .hgetall(&exec_ctx.core())
+                .await
+                .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
+        if fields.is_empty() {
+            return Err(FabricError::NotFound {
+                entity: "task",
+                id: task_id.to_string(),
+            });
+        }
+        Ok(fields)
+    }
+
+    async fn resolve_active_lease(
         &self,
         task_id: &TaskId,
         project: &ProjectKey,
@@ -57,23 +80,48 @@ impl FabricTaskService {
         if let Some(ctx) = self.registry.get_lease_context(task_id) {
             return Ok(ctx);
         }
-        let eid = self.task_to_execution_id(project, task_id);
-        let partition = execution_partition(&eid, &self.runtime.partition_config);
-        let exec_ctx = ExecKeyContext::new(&partition, &eid);
-        let fields: HashMap<String, String> =
-            self.runtime
-                .client
-                .hgetall(&exec_ctx.core())
-                .await
-                .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
+        let fields = self.read_valkey_lease_fields(task_id, project).await?;
+        let lease_id = ff_core::types::LeaseId::parse(
+            fields
+                .get("current_lease_id")
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "task_lease",
+                    id: task_id.to_string(),
+                })?,
+        )
+        .map_err(|e| FabricError::Internal(format!("bad lease_id: {e}")))?;
+        let epoch = ff_core::types::LeaseEpoch::new(
+            fields
+                .get("current_lease_epoch")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1),
+        );
+        let att_idx = ff_core::types::AttemptIndex::new(
+            fields
+                .get("current_attempt_index")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+        );
+        Ok((lease_id, epoch, att_idx))
+    }
 
-        if fields.is_empty() {
-            return Err(FabricError::NotFound {
-                entity: "task",
-                id: task_id.to_string(),
-            });
+    async fn resolve_lease_or_placeholder(
+        &self,
+        task_id: &TaskId,
+        project: &ProjectKey,
+    ) -> Result<
+        (
+            ff_core::types::LeaseId,
+            ff_core::types::LeaseEpoch,
+            ff_core::types::AttemptIndex,
+        ),
+        FabricError,
+    > {
+        if let Some(ctx) = self.registry.get_lease_context(task_id) {
+            return Ok(ctx);
         }
-
+        let fields = self.read_valkey_lease_fields(task_id, project).await?;
         let lease_id = match fields.get("current_lease_id").filter(|s| !s.is_empty()) {
             Some(s) => ff_core::types::LeaseId::parse(s)
                 .map_err(|e| FabricError::Internal(format!("bad lease_id: {e}")))?,
@@ -83,7 +131,7 @@ impl FabricTaskService {
             fields
                 .get("current_lease_epoch")
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(1),
+                .unwrap_or(0),
         );
         let att_idx = ff_core::types::AttemptIndex::new(
             fields
@@ -149,10 +197,23 @@ impl FabricTaskService {
 
         let parent_run_id_str = tags.get("cairn.parent_run_id").cloned();
         let parent_task_id_str = tags.get("cairn.parent_task_id").cloned();
-        let tag_project = tags
+        let tag_project = match tags
             .get("cairn.project")
             .and_then(|s| try_parse_project_key(s))
-            .unwrap_or_else(|| project.clone());
+        {
+            Some(tp) => {
+                if tp != *project {
+                    tracing::warn!(
+                        task_id = %task_id,
+                        caller = %format!("{}/{}/{}", project.tenant_id, project.workspace_id, project.project_id),
+                        tag = %format!("{}/{}/{}", tp.tenant_id, tp.workspace_id, tp.project_id),
+                        "task tag project does not match caller project"
+                    );
+                }
+                tp
+            }
+            None => project.clone(),
+        };
 
         let lease_owner = fields.get("current_worker_instance_id").cloned();
         let lease_expires_at = fields.get("lease_expires_at").and_then(|v| v.parse().ok());
@@ -249,7 +310,7 @@ impl FabricTaskService {
             eid.to_string(),
             namespace.to_string(),
             lane_id.to_string(),
-            "cairn_task".to_owned(),
+            crate::constants::EXECUTION_KIND_TASK.to_owned(),
             priority.to_string(),
             "cairn".to_owned(),
             policy_json,
@@ -266,7 +327,6 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_create_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
@@ -337,7 +397,8 @@ impl FabricTaskService {
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        // Step 1: Issue claim grant
+        // Cancel-safety: if dropped between grant and claim, the grant TTL expires automatically.
+        let grant_ttl = self.runtime.config.grant_ttl_ms;
         let grant_keys: Vec<String> =
             vec![ctx.core(), ctx.claim_grant(), idx.lane_eligible(&lane_id)];
         let grant_args: Vec<String> = vec![
@@ -346,7 +407,7 @@ impl FabricTaskService {
             self.runtime.config.worker_instance_id.to_string(),
             lane_id.to_string(),
             String::new(),
-            "5000".to_owned(),
+            grant_ttl.to_string(),
             String::new(),
             String::new(),
         ];
@@ -356,7 +417,6 @@ impl FabricTaskService {
 
         let raw_grant: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_issue_claim_grant", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_issue_claim_grant: {e}")))?;
@@ -416,15 +476,13 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_claim_execution", &key_refs2, &arg_refs2)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_claim_execution: {e}")))?;
 
         check_fcall_success(&raw, "ff_claim_execution")?;
 
-        // Parse claim result for lease_epoch
-        let lease_epoch = parse_claim_lease_epoch(&raw);
+        let lease_epoch = parse_claim_lease_epoch(&raw)?;
 
         // We don't get a ClaimedTask from the SDK here (we're calling FCALL
         // directly), so we store a lightweight handle for terminal ops.
@@ -451,7 +509,7 @@ impl FabricTaskService {
         task_id: &TaskId,
         lease_extension_ms: u64,
     ) -> Result<TaskRecord, FabricError> {
-        let (lid, epoch, att_idx) = self.resolve_lease_context(task_id, project).await?;
+        let (lid, epoch, att_idx) = self.resolve_active_lease(task_id, project).await?;
 
         let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
@@ -486,7 +544,6 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_renew_lease", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_renew_lease: {e}")))?;
@@ -523,7 +580,7 @@ impl FabricTaskService {
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let (lid, epoch, att_idx) = self.resolve_lease_context(task_id, project).await?;
+        let (lid, epoch, att_idx) = self.resolve_active_lease(task_id, project).await?;
 
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
@@ -562,7 +619,6 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_complete_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_complete_execution: {e}")))?;
@@ -604,7 +660,7 @@ impl FabricTaskService {
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let (lid, epoch, att_idx) = self.resolve_lease_context(task_id, project).await?;
+        let (lid, epoch, att_idx) = self.resolve_active_lease(task_id, project).await?;
 
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
@@ -662,7 +718,6 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_fail_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_fail_execution: {e}")))?;
@@ -709,7 +764,7 @@ impl FabricTaskService {
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let (lid, epoch, att_idx) = self.resolve_lease_context(task_id, project).await?;
+        let (lid, epoch, att_idx) = self.resolve_lease_or_placeholder(task_id, project).await?;
 
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
@@ -751,8 +806,8 @@ impl FabricTaskService {
         ];
         let args: Vec<String> = vec![
             eid.to_string(),
-            "operator_cancel".to_owned(),
-            "operator_override".to_owned(),
+            crate::constants::CANCEL_REASON_OPERATOR.to_owned(),
+            crate::constants::CANCEL_SOURCE_OVERRIDE.to_owned(),
             lid.to_string(),
             epoch.to_string(),
         ];
@@ -762,7 +817,6 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_cancel_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_cancel_execution: {e}")))?;
@@ -976,7 +1030,6 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_suspend_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
@@ -1035,7 +1088,6 @@ impl FabricTaskService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_resume_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
@@ -1075,18 +1127,22 @@ impl FabricTaskService {
     }
 }
 
-fn parse_claim_lease_epoch(raw: &ferriskey::Value) -> ff_core::types::LeaseEpoch {
+fn parse_claim_lease_epoch(
+    raw: &ferriskey::Value,
+) -> Result<ff_core::types::LeaseEpoch, FabricError> {
     if let ferriskey::Value::Array(arr) = raw {
         if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(3) {
             if let Ok(n) = String::from_utf8_lossy(b).parse::<u64>() {
-                return ff_core::types::LeaseEpoch::new(n);
+                return Ok(ff_core::types::LeaseEpoch::new(n));
             }
         }
         if let Some(Ok(ferriskey::Value::Int(n))) = arr.get(3) {
-            return ff_core::types::LeaseEpoch::new(*n as u64);
+            return Ok(ff_core::types::LeaseEpoch::new(*n as u64));
         }
     }
-    ff_core::types::LeaseEpoch::new(1)
+    Err(FabricError::Internal(
+        "ff_claim_execution: missing lease_epoch in response".to_owned(),
+    ))
 }
 
 #[cfg(test)]
@@ -1101,7 +1157,16 @@ mod tests {
             Ok(ferriskey::Value::BulkString(b"lease_abc".to_vec().into())),
             Ok(ferriskey::Value::Int(5)),
         ]);
-        let epoch = parse_claim_lease_epoch(&raw);
+        let epoch = parse_claim_lease_epoch(&raw).unwrap();
         assert_eq!(epoch.0, 5);
+    }
+
+    #[test]
+    fn parse_claim_epoch_missing_returns_err() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+        ]);
+        assert!(parse_claim_lease_epoch(&raw).is_err());
     }
 }

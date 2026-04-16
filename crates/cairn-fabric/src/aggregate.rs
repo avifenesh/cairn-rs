@@ -37,6 +37,27 @@ impl FabricServices {
         let runtime = Arc::new(FabricRuntime::start(config).await?);
         let (bridge, bridge_handle) = EventBridge::start(event_log);
         let bridge = Arc::new(bridge);
+
+        let result = Self::build_services(runtime.clone(), bridge.clone(), bridge_handle);
+
+        match result {
+            Ok(services) => {
+                tracing::info!("fabric services aggregate ready");
+                Ok(services)
+            }
+            Err(e) => {
+                bridge.stop();
+                drop(bridge);
+                Err(e)
+            }
+        }
+    }
+
+    fn build_services(
+        runtime: Arc<FabricRuntime>,
+        bridge: Arc<EventBridge>,
+        bridge_handle: JoinHandle<()>,
+    ) -> Result<Self, FabricError> {
         let registry = Arc::new(ActiveTaskRegistry::new());
 
         let runs = FabricRunService::new(runtime.clone(), bridge.clone());
@@ -47,8 +68,6 @@ impl FabricServices {
         let budgets = FabricBudgetService::new(runtime.clone());
         let quotas = FabricQuotaService::new(runtime.clone());
         let signals = SignalBridge::new(&runtime);
-
-        tracing::info!("fabric services aggregate ready");
 
         Ok(Self {
             runtime,
@@ -113,10 +132,14 @@ mod tests {
 
     #[test]
     fn fabric_config_from_env_defaults() {
+        use std::sync::Mutex;
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("CAIRN_FABRIC_HOST");
         std::env::remove_var("CAIRN_FABRIC_PORT");
         std::env::remove_var("CAIRN_FABRIC_LEASE_TTL_MS");
         std::env::remove_var("CAIRN_FABRIC_MAX_TASKS");
+        std::env::remove_var("CAIRN_FABRIC_GRANT_TTL_MS");
         let config = FabricConfig::from_env().unwrap();
         assert_eq!(config.valkey_host, "localhost");
         assert_eq!(config.valkey_port, 6379);

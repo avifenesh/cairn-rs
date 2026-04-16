@@ -118,7 +118,6 @@ impl FabricSessionService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_create_flow", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_flow: {e}")))?;
@@ -206,7 +205,6 @@ impl FabricSessionService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_cancel_flow", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_cancel_flow: {e}")))?;

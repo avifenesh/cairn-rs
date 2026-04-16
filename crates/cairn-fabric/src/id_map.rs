@@ -3,15 +3,19 @@ use cairn_domain::{RunId, SessionId, TaskId, TenantId};
 use ff_core::types::{ExecutionId, FlowId, LaneId, Namespace};
 use uuid::Uuid;
 
-// FINAL — changing this UUID orphans all existing execution/flow IDs in Valkey.
-// All cairn ID mappings derive from this namespace via UUID v5.
+// Stable namespace UUID for all cairn→FF ID mappings (UUID v5).
+// Changing this orphans all existing execution/flow IDs in Valkey.
+// Migration path: increment NAMESPACE_VERSION, rebuild executions from
+// cairn's EventLog (which retains the original RunId/TaskId/SessionId).
 const CAIRN_NAMESPACE: Uuid = Uuid::from_bytes([
     0xa3, 0x4e, 0x7c, 0x01, 0xf8, 0x2d, 0x4b, 0x9a, 0x91, 0x5c, 0xd7, 0x6e, 0x3a, 0x1b, 0x58, 0xf0,
 ]);
 
+const NAMESPACE_VERSION: u8 = 1;
+
 pub fn run_to_execution_id(project: &ProjectKey, run_id: &RunId) -> ExecutionId {
     let input = format!(
-        "run:\0{}\0{}\0{}\0{}",
+        "v{NAMESPACE_VERSION}:run:\0{}\0{}\0{}\0{}",
         project.tenant_id, project.workspace_id, project.project_id, run_id
     );
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
@@ -20,7 +24,7 @@ pub fn run_to_execution_id(project: &ProjectKey, run_id: &RunId) -> ExecutionId 
 
 pub fn task_to_execution_id(project: &ProjectKey, task_id: &TaskId) -> ExecutionId {
     let input = format!(
-        "task:\0{}\0{}\0{}\0{}",
+        "v{NAMESPACE_VERSION}:task:\0{}\0{}\0{}\0{}",
         project.tenant_id, project.workspace_id, project.project_id, task_id
     );
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
@@ -29,7 +33,7 @@ pub fn task_to_execution_id(project: &ProjectKey, task_id: &TaskId) -> Execution
 
 pub fn session_to_flow_id(project: &ProjectKey, session_id: &SessionId) -> FlowId {
     let input = format!(
-        "session:\0{}\0{}\0{}\0{}",
+        "v{NAMESPACE_VERSION}:session:\0{}\0{}\0{}\0{}",
         project.tenant_id, project.workspace_id, project.project_id, session_id
     );
     let uuid = Uuid::new_v5(&CAIRN_NAMESPACE, input.as_bytes());
@@ -37,7 +41,12 @@ pub fn session_to_flow_id(project: &ProjectKey, session_id: &SessionId) -> FlowI
 }
 
 pub fn tenant_to_namespace(tenant_id: &TenantId) -> Namespace {
-    Namespace::new(tenant_id.as_str())
+    let s = tenant_id.as_str().trim();
+    if s.is_empty() {
+        Namespace::new("default")
+    } else {
+        Namespace::new(s)
+    }
 }
 
 pub fn project_to_lane(project: &ProjectKey) -> LaneId {

@@ -72,6 +72,20 @@ impl ActiveTaskRegistry {
             .and_then(|(_, mut handle)| handle.claimed_task.take())
     }
 
+    pub fn take_with_context(
+        &self,
+        task_id: &TaskId,
+    ) -> Option<(Option<ClaimedTask>, LeaseId, LeaseEpoch, AttemptIndex)> {
+        self.tasks.remove(&task_id.to_string()).map(|(_, mut h)| {
+            (
+                h.claimed_task.take(),
+                h.lease_id,
+                h.lease_epoch,
+                h.attempt_index,
+            )
+        })
+    }
+
     pub fn get_lease_context(
         &self,
         task_id: &TaskId,
@@ -131,5 +145,33 @@ mod tests {
         assert!(registry
             .get_execution_id(&TaskId::new("nonexistent"))
             .is_none());
+    }
+
+    #[test]
+    fn take_with_context_nonexistent_returns_none() {
+        let registry = ActiveTaskRegistry::new();
+        assert!(registry
+            .take_with_context(&TaskId::new("nonexistent"))
+            .is_none());
+    }
+
+    #[test]
+    fn take_with_context_removes_and_returns_context() {
+        let registry = ActiveTaskRegistry::new();
+        let eid = ExecutionId::from_uuid(uuid::Uuid::nil());
+        let lid = LeaseId::new();
+        let epoch = LeaseEpoch::new(3);
+        let att = AttemptIndex::new(1);
+        let handle = ActiveTaskHandle::new_without_claimed_task(eid, lid.clone(), epoch, att);
+        let tid = TaskId::new("t1");
+        registry.register(&tid, handle);
+        assert_eq!(registry.len(), 1);
+
+        let (_, lease_id, lease_epoch, att_idx) =
+            registry.take_with_context(&tid).expect("should exist");
+        assert_eq!(lease_id, lid);
+        assert_eq!(lease_epoch.0, 3);
+        assert_eq!(att_idx.0, 1);
+        assert!(registry.is_empty());
     }
 }

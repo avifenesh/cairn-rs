@@ -95,7 +95,6 @@ impl FabricBudgetService {
 
         let _: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_create_budget", &key_refs, &argv_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_budget: {e}")))?;
@@ -150,6 +149,27 @@ impl FabricBudgetService {
         .await
     }
 
+    pub async fn release_budget(&self, budget_id: &BudgetId) -> Result<(), FabricError> {
+        let partition = budget_partition(budget_id, &self.runtime.partition_config);
+        let ctx = BudgetKeyContext::new(&partition, budget_id);
+        let resets_zset = budget_resets_key(&partition.hash_tag());
+        let now = TimestampMs::now();
+
+        let keys: Vec<String> = vec![ctx.usage(), ctx.definition(), resets_zset];
+        let argv: Vec<String> = vec![budget_id.to_string(), now.to_string()];
+
+        let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+        let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
+
+        let _: ferriskey::Value = self
+            .runtime
+            .fcall("ff_reset_budget", &key_refs, &argv_refs)
+            .await
+            .map_err(|e| FabricError::Internal(format!("ff_reset_budget: {e}")))?;
+
+        Ok(())
+    }
+
     pub async fn record_spend(
         &self,
         budget_id: &BudgetId,
@@ -177,7 +197,6 @@ impl FabricBudgetService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_report_usage_and_check", &key_refs, &argv_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_report_usage_and_check: {e}")))?;

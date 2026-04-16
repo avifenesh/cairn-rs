@@ -61,7 +61,6 @@ impl FabricQuotaService {
 
         let _: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_create_quota_policy", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_quota_policy: {e}")))?;
@@ -166,7 +165,6 @@ impl FabricQuotaService {
 
         let raw: ferriskey::Value = self
             .runtime
-            .client
             .fcall("ff_check_admission_and_record", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_check_admission_and_record: {e}")))?;

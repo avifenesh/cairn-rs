@@ -65,6 +65,18 @@ impl FabricWorkerService {
             .await
             .map_err(|e| FabricError::Valkey(format!("HSET {worker_key}: {e}")))?;
 
+        // TTL-based expiry: dead workers auto-expire if heartbeat stops.
+        // mark_worker_dead is explicit opt-out; this is the implicit safety net.
+        let ttl_ms = self.runtime.config.lease_ttl_ms * 3;
+        self.runtime
+            .client
+            .cmd("PEXPIRE")
+            .arg(&worker_key)
+            .arg(ttl_ms.to_string())
+            .execute::<u64>()
+            .await
+            .map_err(|e| FabricError::Valkey(format!("PEXPIRE {worker_key}: {e}")))?;
+
         let workers_index = keys::workers_index_key();
         self.runtime
             .client
@@ -108,6 +120,17 @@ impl FabricWorkerService {
             .hset(&worker_key, "last_heartbeat_ms", &now)
             .await
             .map_err(|e| FabricError::Valkey(format!("HSET heartbeat: {e}")))?;
+
+        let ttl_ms = self.runtime.config.lease_ttl_ms * 3;
+        self.runtime
+            .client
+            .cmd("PEXPIRE")
+            .arg(&worker_key)
+            .arg(ttl_ms.to_string())
+            .execute::<u64>()
+            .await
+            .map_err(|e| FabricError::Valkey(format!("PEXPIRE heartbeat: {e}")))?;
+
         Ok(())
     }
 
@@ -132,7 +155,12 @@ impl FabricWorkerService {
     ) -> Result<Option<ClaimResult>, FabricError> {
         let grant = self
             .scheduler
-            .claim_for_worker(lane_id, worker_id, instance_id, 5000)
+            .claim_for_worker(
+                lane_id,
+                worker_id,
+                instance_id,
+                self.runtime.config.grant_ttl_ms,
+            )
             .await?;
 
         let grant = match grant {

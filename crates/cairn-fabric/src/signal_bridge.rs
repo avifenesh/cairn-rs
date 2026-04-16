@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use ferriskey::Client;
-use ff_core::partition::PartitionConfig;
 use ff_core::types::{ExecutionId, SignalId, TimestampMs, WaitpointId};
 use ff_sdk::task::{Signal, SignalOutcome};
 
@@ -10,25 +8,13 @@ use crate::error::FabricError;
 use crate::helpers::sanitize_signal_component;
 
 pub struct SignalBridge {
-    client: Client,
-    partition_config: PartitionConfig,
-    signal_dedup_ttl_ms: u64,
+    runtime: Arc<FabricRuntime>,
 }
 
 impl SignalBridge {
     pub fn new(runtime: &Arc<FabricRuntime>) -> Self {
         Self {
-            client: runtime.client.clone(),
-            partition_config: runtime.partition_config,
-            signal_dedup_ttl_ms: runtime.config.signal_dedup_ttl_ms,
-        }
-    }
-
-    pub fn from_parts(client: Client, partition_config: PartitionConfig) -> Self {
-        Self {
-            client,
-            partition_config,
-            signal_dedup_ttl_ms: 86_400_000,
+            runtime: runtime.clone(),
         }
     }
 
@@ -125,7 +111,7 @@ impl SignalBridge {
         signal: Signal,
     ) -> Result<SignalOutcome, FabricError> {
         let partition =
-            ff_core::partition::execution_partition(execution_id, &self.partition_config);
+            ff_core::partition::execution_partition(execution_id, &self.runtime.partition_config);
         let ctx = ff_core::keys::ExecKeyContext::new(&partition, execution_id);
         let idx = ff_core::keys::IndexKeys::new(&partition);
 
@@ -133,6 +119,7 @@ impl SignalBridge {
         let now = TimestampMs::now();
 
         let lane_str: Option<String> = self
+            .runtime
             .client
             .hget(&ctx.core(), "lane_id")
             .await
@@ -179,20 +166,19 @@ impl SignalBridge {
             String::new(),
             "waitpoint".to_owned(),
             now.to_string(),
-            self.signal_dedup_ttl_ms.to_string(),
+            self.runtime.config.signal_dedup_ttl_ms.to_string(),
             "0".to_owned(),
-            "1000".to_owned(),
-            "10000".to_owned(),
+            crate::constants::DEFAULT_SIGNAL_MAXLEN.to_owned(),
+            crate::constants::DEFAULT_MAX_SIGNALS_PER_EXECUTION.to_owned(),
         ];
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
         let raw: ferriskey::Value = self
-            .client
+            .runtime
             .fcall("ff_deliver_signal", &key_refs, &arg_refs)
-            .await
-            .map_err(|e| FabricError::Bridge(format!("ff_deliver_signal: {e}")))?;
+            .await?;
 
         parse_signal_result(&raw)
     }

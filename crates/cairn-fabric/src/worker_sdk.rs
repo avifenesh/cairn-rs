@@ -215,8 +215,9 @@ impl CairnTask {
     }
 
     pub async fn log_progress(&self, pct: u8, message: &str) -> Result<(), FabricError> {
+        let clamped = pct.min(100);
         self.task()
-            .update_progress(pct, message)
+            .update_progress(clamped, message)
             .await
             .map_err(|e| FabricError::Bridge(format!("update_progress: {e}")))
     }
@@ -407,7 +408,10 @@ impl CairnTask {
 }
 
 fn extract_tag(tags: &std::collections::HashMap<String, String>, key: &str) -> Option<String> {
-    tags.get(key).filter(|v| !v.is_empty()).cloned()
+    tags.get(key)
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_owned())
 }
 
 #[cfg(test)]
