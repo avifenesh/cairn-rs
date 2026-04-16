@@ -1,5 +1,7 @@
 use ff_sdk::task::{ConditionMatcher, TimeoutBehavior};
 
+use crate::helpers::sanitize_signal_component;
+
 #[derive(Clone, Debug)]
 pub struct SuspensionParams {
     pub reason_code: String,
@@ -9,14 +11,15 @@ pub struct SuspensionParams {
 }
 
 pub fn for_approval(approval_id: &str, timeout_ms: Option<u64>) -> SuspensionParams {
+    let safe_id = sanitize_signal_component(approval_id);
     SuspensionParams {
         reason_code: "waiting_for_approval".into(),
         condition_matchers: vec![
             ConditionMatcher {
-                signal_name: format!("approval_granted:{approval_id}"),
+                signal_name: format!("approval_granted:{safe_id}"),
             },
             ConditionMatcher {
-                signal_name: format!("approval_rejected:{approval_id}"),
+                signal_name: format!("approval_rejected:{safe_id}"),
             },
         ],
         timeout_ms,
@@ -25,10 +28,11 @@ pub fn for_approval(approval_id: &str, timeout_ms: Option<u64>) -> SuspensionPar
 }
 
 pub fn for_subagent(child_task_id: &str, deadline_ms: Option<u64>) -> SuspensionParams {
+    let safe_id = sanitize_signal_component(child_task_id);
     SuspensionParams {
         reason_code: "waiting_for_children".into(),
         condition_matchers: vec![ConditionMatcher {
-            signal_name: format!("child_completed:{child_task_id}"),
+            signal_name: format!("child_completed:{safe_id}"),
         }],
         timeout_ms: deadline_ms,
         timeout_behavior: TimeoutBehavior::Fail,
@@ -36,10 +40,11 @@ pub fn for_subagent(child_task_id: &str, deadline_ms: Option<u64>) -> Suspension
 }
 
 pub fn for_tool_result(invocation_id: &str, timeout_ms: Option<u64>) -> SuspensionParams {
+    let safe_id = sanitize_signal_component(invocation_id);
     SuspensionParams {
         reason_code: "waiting_for_tool_result".into(),
         condition_matchers: vec![ConditionMatcher {
-            signal_name: format!("tool_result:{invocation_id}"),
+            signal_name: format!("tool_result:{safe_id}"),
         }],
         timeout_ms,
         timeout_behavior: TimeoutBehavior::Expire,

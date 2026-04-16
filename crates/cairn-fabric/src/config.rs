@@ -13,6 +13,7 @@ pub struct FabricConfig {
     pub namespace: Namespace,
     pub lease_ttl_ms: u64,
     pub max_concurrent_tasks: usize,
+    pub signal_dedup_ttl_ms: u64,
 }
 
 impl FabricConfig {
@@ -37,7 +38,7 @@ impl FabricConfig {
         );
         let worker_instance_id = WorkerInstanceId::new(
             std::env::var("CAIRN_FABRIC_INSTANCE_ID")
-                .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string()),
+                .unwrap_or_else(|_| load_or_generate_instance_id()),
         );
         let namespace = Namespace::new(
             std::env::var("CAIRN_FABRIC_NAMESPACE").unwrap_or_else(|_| "cairn".into()),
@@ -50,6 +51,10 @@ impl FabricConfig {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(4);
+        let signal_dedup_ttl_ms = std::env::var("CAIRN_FABRIC_SIGNAL_DEDUP_TTL_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(86_400_000);
 
         let config = Self {
             valkey_host,
@@ -62,6 +67,7 @@ impl FabricConfig {
             namespace,
             lease_ttl_ms,
             max_concurrent_tasks,
+            signal_dedup_ttl_ms,
         };
         config.validate()?;
         Ok(config)
@@ -86,6 +92,20 @@ impl FabricConfig {
         let scheme = if self.tls { "valkeys" } else { "valkey" };
         format!("{}://{}:{}", scheme, self.valkey_host, self.valkey_port)
     }
+}
+
+const INSTANCE_ID_FILE: &str = "/tmp/cairn-fabric-instance-id";
+
+fn load_or_generate_instance_id() -> String {
+    if let Ok(id) = std::fs::read_to_string(INSTANCE_ID_FILE) {
+        let id = id.trim().to_owned();
+        if !id.is_empty() {
+            return id;
+        }
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let _ = std::fs::write(INSTANCE_ID_FILE, &id);
+    id
 }
 
 #[cfg(test)]
@@ -125,6 +145,7 @@ mod tests {
             namespace: Namespace::new("ns"),
             lease_ttl_ms: 30_000,
             max_concurrent_tasks: 1,
+            signal_dedup_ttl_ms: 86_400_000,
         };
         assert_eq!(config.valkey_url(), "valkey://myhost:6380");
     }
@@ -145,6 +166,7 @@ mod tests {
             namespace: Namespace::new("ns"),
             lease_ttl_ms,
             max_concurrent_tasks: max_tasks,
+            signal_dedup_ttl_ms: 86_400_000,
         };
         config.validate()?;
         Ok(config)
@@ -187,6 +209,7 @@ mod tests {
             namespace: Namespace::new("ns"),
             lease_ttl_ms: 30_000,
             max_concurrent_tasks: 1,
+            signal_dedup_ttl_ms: 86_400_000,
         };
         assert_eq!(config.valkey_url(), "valkeys://secure.host:6379");
     }

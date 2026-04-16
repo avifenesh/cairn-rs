@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use cairn_domain::events::EventEnvelope;
@@ -10,6 +11,8 @@ use cairn_domain::lifecycle::{FailureClass, RunState, SessionState, TaskState};
 use cairn_domain::tenancy::ProjectKey;
 use cairn_store::event_log::EventLog;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
 pub enum BridgeEvent {
@@ -63,6 +66,11 @@ pub enum BridgeEvent {
         to: TaskState,
         failure_class: Option<FailureClass>,
     },
+    ExecutionRetryScheduled {
+        run_id: RunId,
+        project: ProjectKey,
+        attempt: u32,
+    },
     SessionArchived {
         session_id: SessionId,
         project: ProjectKey,
@@ -71,37 +79,116 @@ pub enum BridgeEvent {
 
 pub struct EventBridge {
     tx: mpsc::Sender<BridgeEvent>,
+    cancel: CancellationToken,
+    append_failures: Arc<AtomicU64>,
 }
 
+const MAX_RETRY_ATTEMPTS: u32 = 3;
+const RETRY_BACKOFF_MS: u64 = 100;
+
 impl EventBridge {
-    // TODO: batch consumer appends for throughput — currently one EventLog::append
-    // per event (~200-1000 events/sec with Postgres round-trips). Accumulate for
-    // 10-50ms or batch_size=64, then append as a single &[EventEnvelope] call.
-    pub fn new(event_log: Arc<dyn EventLog>) -> Self {
-        let (tx, mut rx) = mpsc::channel::<BridgeEvent>(256);
+    pub fn start(event_log: Arc<dyn EventLog + Send + Sync>) -> (Self, JoinHandle<()>) {
+        let (tx, rx) = mpsc::channel::<BridgeEvent>(1024);
+        let cancel = CancellationToken::new();
+        let append_failures = Arc::new(AtomicU64::new(0));
 
-        tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                let runtime_event = bridge_event_to_runtime_event(&event);
-                let envelope = EventEnvelope::for_runtime_event(
-                    EventId::new(uuid::Uuid::new_v4().to_string()),
-                    EventSource::Runtime,
-                    runtime_event,
-                );
-                if let Err(e) = event_log.append(&[envelope]).await {
-                    tracing::error!(error = %e, "event bridge: failed to append event");
-                }
-            }
-        });
+        let handle = tokio::spawn(Self::run_consumer(
+            rx,
+            event_log,
+            cancel.clone(),
+            append_failures.clone(),
+        ));
 
-        Self { tx }
+        let bridge = Self {
+            tx,
+            cancel,
+            append_failures,
+        };
+        (bridge, handle)
     }
 
-    pub fn emit(&self, event: BridgeEvent) {
-        let event_type = bridge_event_type_name(&event);
-        if let Err(e) = self.tx.try_send(event) {
-            tracing::warn!(error = %e, event_type, "event bridge: dropping event");
+    async fn run_consumer(
+        mut rx: mpsc::Receiver<BridgeEvent>,
+        event_log: Arc<dyn EventLog + Send + Sync>,
+        cancel: CancellationToken,
+        append_failures: Arc<AtomicU64>,
+    ) {
+        loop {
+            let event = tokio::select! {
+                biased;
+                ev = rx.recv() => match ev {
+                    Some(e) => e,
+                    None => break,
+                },
+                () = cancel.cancelled() => {
+                    break;
+                }
+            };
+            Self::append_with_retry(&event_log, &event, &append_failures).await;
         }
+
+        // Drain remaining events after stop signal.
+        rx.close();
+        while let Some(event) = rx.recv().await {
+            Self::append_with_retry(&event_log, &event, &append_failures).await;
+        }
+    }
+
+    async fn append_with_retry(
+        event_log: &Arc<dyn EventLog + Send + Sync>,
+        event: &BridgeEvent,
+        append_failures: &AtomicU64,
+    ) {
+        let runtime_event = bridge_event_to_runtime_event(event);
+        let envelope = EventEnvelope::for_runtime_event(
+            EventId::new(uuid::Uuid::new_v4().to_string()),
+            EventSource::Runtime,
+            runtime_event,
+        );
+        let event_type = bridge_event_type_name(event);
+
+        for attempt in 0..MAX_RETRY_ATTEMPTS {
+            match event_log.append(std::slice::from_ref(&envelope)).await {
+                Ok(_) => return,
+                Err(e) => {
+                    if attempt + 1 < MAX_RETRY_ATTEMPTS {
+                        tracing::warn!(
+                            attempt = attempt + 1,
+                            event_type,
+                            error = %e,
+                            "event bridge: append failed, retrying"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(
+                            RETRY_BACKOFF_MS * (1 << attempt) as u64,
+                        ))
+                        .await;
+                    } else {
+                        append_failures.fetch_add(1, Ordering::Relaxed);
+                        tracing::error!(
+                            event_type,
+                            error = %e,
+                            total_failures = append_failures.load(Ordering::Relaxed),
+                            "event bridge: append failed after {MAX_RETRY_ATTEMPTS} attempts"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn emit(&self, event: BridgeEvent) {
+        let event_type = bridge_event_type_name(&event);
+        if let Err(e) = self.tx.send(event).await {
+            tracing::error!(event_type, error = %e, "event bridge: channel closed");
+        }
+    }
+
+    pub fn stop(&self) {
+        self.cancel.cancel();
+    }
+
+    pub fn append_failure_count(&self) -> u64 {
+        self.append_failures.load(Ordering::Relaxed)
     }
 }
 
@@ -116,6 +203,7 @@ fn bridge_event_type_name(event: &BridgeEvent) -> &'static str {
         BridgeEvent::TaskCreated { .. } => "TaskCreated",
         BridgeEvent::TaskLeaseClaimed { .. } => "TaskLeaseClaimed",
         BridgeEvent::TaskStateChanged { .. } => "TaskStateChanged",
+        BridgeEvent::ExecutionRetryScheduled { .. } => "ExecutionRetryScheduled",
         BridgeEvent::SessionArchived { .. } => "SessionArchived",
     }
 }
@@ -248,6 +336,19 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
                 to: *to,
             },
             failure_class: *failure_class,
+            pause_reason: None,
+            resume_trigger: None,
+        }),
+        BridgeEvent::ExecutionRetryScheduled {
+            run_id, project, ..
+        } => RuntimeEvent::RunStateChanged(RunStateChanged {
+            project: project.clone(),
+            run_id: run_id.clone(),
+            transition: StateTransition {
+                from: Some(RunState::Running),
+                to: RunState::Pending,
+            },
+            failure_class: None,
             pause_reason: None,
             resume_trigger: None,
         }),

@@ -41,11 +41,13 @@ pub fn parse_public_state(s: &str) -> ff_core::state::PublicState {
     }
 }
 
-pub fn parse_project_key(s: &str) -> ProjectKey {
+pub fn try_parse_project_key(s: &str) -> Option<ProjectKey> {
     let parts: Vec<&str> = s.splitn(3, '/').collect();
     match parts.as_slice() {
-        [t, w, p] => ProjectKey::new(*t, *w, *p),
-        _ => ProjectKey::new("default_tenant", "default_workspace", "default_project"),
+        [t, w, p] if !t.is_empty() && !w.is_empty() && !p.is_empty() => {
+            Some(ProjectKey::new(*t, *w, *p))
+        }
+        _ => None,
     }
 }
 
@@ -88,6 +90,10 @@ pub fn parse_fail_outcome(raw: &ferriskey::Value) -> FailOutcome {
         }
     }
     FailOutcome::TerminalFailed
+}
+
+pub fn sanitize_signal_component(s: &str) -> String {
+    s.replace(':', "_")
 }
 
 pub fn is_duplicate_result(raw: &ferriskey::Value) -> bool {
@@ -159,23 +165,33 @@ mod tests {
     }
 
     #[test]
-    fn parse_project_key_valid() {
-        let pk = parse_project_key("t/w/p");
+    fn try_parse_project_key_valid() {
+        let pk = try_parse_project_key("t/w/p").unwrap();
         assert_eq!(pk.tenant_id.as_str(), "t");
         assert_eq!(pk.workspace_id.as_str(), "w");
         assert_eq!(pk.project_id.as_str(), "p");
     }
 
     #[test]
-    fn parse_project_key_with_slashes() {
-        let pk = parse_project_key("t/w/p/extra");
+    fn try_parse_project_key_with_slashes() {
+        let pk = try_parse_project_key("t/w/p/extra").unwrap();
         assert_eq!(pk.project_id.as_str(), "p/extra");
     }
 
     #[test]
-    fn parse_project_key_invalid() {
-        let pk = parse_project_key("bad");
-        assert_eq!(pk.tenant_id.as_str(), "default_tenant");
+    fn try_parse_project_key_invalid_returns_none() {
+        assert!(try_parse_project_key("bad").is_none());
+    }
+
+    #[test]
+    fn try_parse_project_key_empty_returns_none() {
+        assert!(try_parse_project_key("").is_none());
+    }
+
+    #[test]
+    fn try_parse_project_key_empty_parts_returns_none() {
+        assert!(try_parse_project_key("t//p").is_none());
+        assert!(try_parse_project_key("/w/p").is_none());
     }
 
     #[test]

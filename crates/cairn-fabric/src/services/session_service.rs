@@ -12,7 +12,7 @@ use ff_core::types::{FlowId, Namespace, TimestampMs};
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
-use crate::helpers::parse_project_key;
+use crate::helpers::try_parse_project_key;
 use crate::id_map;
 
 pub struct FabricSessionService {
@@ -84,7 +84,9 @@ impl FabricSessionService {
             .await?
             .unwrap_or_default();
 
-        Ok(Some(build_session_record(session_id, &core, &summary)))
+        Ok(Some(build_session_record(
+            session_id, project, &core, &summary,
+        )))
     }
 
     pub async fn create(
@@ -227,10 +229,12 @@ impl FabricSessionService {
 
         match self.read_session_record(project, session_id).await? {
             Some(record) => {
-                self.bridge.emit(BridgeEvent::SessionArchived {
-                    session_id: session_id.clone(),
-                    project: record.project.clone(),
-                });
+                self.bridge
+                    .emit(BridgeEvent::SessionArchived {
+                        session_id: session_id.clone(),
+                        project: record.project.clone(),
+                    })
+                    .await;
                 Ok(record)
             }
             None => Err(FabricError::NotFound {
@@ -252,11 +256,14 @@ fn flow_state_to_session_state(state: &str) -> SessionState {
 
 fn build_session_record(
     session_id: &SessionId,
+    caller_project: &ProjectKey,
     core: &HashMap<String, String>,
     summary: &HashMap<String, String>,
 ) -> SessionRecord {
-    let project_str = core.get("cairn.project").cloned().unwrap_or_default();
-    let project = parse_project_key(&project_str);
+    let project = core
+        .get("cairn.project")
+        .and_then(|s| try_parse_project_key(s))
+        .unwrap_or_else(|| caller_project.clone());
 
     let is_archived = core
         .get("cairn.archived")
@@ -300,6 +307,10 @@ fn build_session_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_project() -> ProjectKey {
+        ProjectKey::new("t", "w", "p")
+    }
 
     #[test]
     fn flow_state_open_variants() {
@@ -353,7 +364,7 @@ mod tests {
         summary.insert("public_state".to_owned(), "completed".to_owned());
         summary.insert("last_mutation_at".to_owned(), "2000".to_owned());
 
-        let record = build_session_record(&sid, &core, &summary);
+        let record = build_session_record(&sid, &test_project(), &core, &summary);
         assert_eq!(record.session_id.as_str(), "sess_test");
         assert_eq!(record.project.tenant_id.as_str(), "t");
         assert_eq!(record.project.workspace_id.as_str(), "w");
@@ -374,7 +385,7 @@ mod tests {
         let mut summary = HashMap::new();
         summary.insert("public_state".to_owned(), "running".to_owned());
 
-        let record = build_session_record(&sid, &core, &summary);
+        let record = build_session_record(&sid, &test_project(), &core, &summary);
         assert_eq!(record.state, SessionState::Open);
     }
 
@@ -388,7 +399,7 @@ mod tests {
 
         let summary = HashMap::new();
 
-        let record = build_session_record(&sid, &core, &summary);
+        let record = build_session_record(&sid, &test_project(), &core, &summary);
         assert_eq!(record.state, SessionState::Failed);
     }
 
@@ -398,9 +409,9 @@ mod tests {
         let core = HashMap::new();
         let summary = HashMap::new();
 
-        let record = build_session_record(&sid, &core, &summary);
+        let record = build_session_record(&sid, &test_project(), &core, &summary);
         assert_eq!(record.state, SessionState::Open);
-        assert_eq!(record.project.tenant_id.as_str(), "default_tenant");
+        assert_eq!(record.project.tenant_id.as_str(), "t");
         assert_eq!(record.version, 1);
         assert_eq!(record.created_at, 0);
     }
@@ -414,7 +425,7 @@ mod tests {
 
         let summary = HashMap::new();
 
-        let record = build_session_record(&sid, &core, &summary);
+        let record = build_session_record(&sid, &test_project(), &core, &summary);
         assert_eq!(record.updated_at, 999);
     }
 
@@ -428,7 +439,7 @@ mod tests {
         let mut summary = HashMap::new();
         summary.insert("public_state".to_owned(), "failed".to_owned());
 
-        let record = build_session_record(&sid, &core, &summary);
+        let record = build_session_record(&sid, &test_project(), &core, &summary);
         assert_eq!(record.state, SessionState::Failed);
     }
 
@@ -442,7 +453,7 @@ mod tests {
         let mut summary = HashMap::new();
         summary.insert("public_state".to_owned(), "cancelled".to_owned());
 
-        let record = build_session_record(&sid, &core, &summary);
+        let record = build_session_record(&sid, &test_project(), &core, &summary);
         assert_eq!(record.state, SessionState::Failed);
     }
 
@@ -457,7 +468,7 @@ mod tests {
         let mut summary = HashMap::new();
         summary.insert("public_state".to_owned(), "cancelled".to_owned());
 
-        let record = build_session_record(&sid, &core, &summary);
+        let record = build_session_record(&sid, &test_project(), &core, &summary);
         assert_eq!(record.state, SessionState::Archived);
     }
 
@@ -471,7 +482,7 @@ mod tests {
         let mut summary = HashMap::new();
         summary.insert("public_state".to_owned(), "completed".to_owned());
 
-        let record = build_session_record(&sid, &core, &summary);
+        let record = build_session_record(&sid, &test_project(), &core, &summary);
         assert_eq!(record.state, SessionState::Completed);
     }
 }

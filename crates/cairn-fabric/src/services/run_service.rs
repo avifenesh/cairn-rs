@@ -13,7 +13,7 @@ use crate::boot::FabricRuntime;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
     check_fcall_success, is_already_satisfied, is_duplicate_result, parse_fail_outcome,
-    parse_project_key, parse_public_state, FailOutcome,
+    parse_public_state, try_parse_project_key, FailOutcome,
 };
 use crate::id_map;
 use crate::state_map;
@@ -99,14 +99,16 @@ impl FabricRunService {
 
         let session_id_str = tags.get("cairn.session_id").cloned().unwrap_or_default();
         let parent_run_id_str = tags.get("cairn.parent_run_id").cloned();
-        let project_str = tags.get("cairn.project").cloned().unwrap_or_default();
-        let project = parse_project_key(&project_str);
+        let tag_project = tags
+            .get("cairn.project")
+            .and_then(|s| try_parse_project_key(s))
+            .unwrap_or_else(|| project.clone());
 
         Ok(RunRecord {
             run_id: run_id.clone(),
             session_id: SessionId::new(session_id_str),
             parent_run_id: parent_run_id_str.filter(|s| !s.is_empty()).map(RunId::new),
-            project,
+            project: tag_project,
             state: run_state,
             prompt_release_id: None,
             agent_role_id: None,
@@ -359,11 +361,13 @@ impl FabricRunService {
             .await?;
 
         if created {
-            self.bridge.emit(BridgeEvent::ExecutionCreated {
-                run_id: run_id.clone(),
-                session_id: session_id.clone(),
-                project: project.clone(),
-            });
+            self.bridge
+                .emit(BridgeEvent::ExecutionCreated {
+                    run_id: run_id.clone(),
+                    session_id: session_id.clone(),
+                    project: project.clone(),
+                })
+                .await;
         }
 
         self.read_run_record(project, &run_id).await
@@ -403,11 +407,13 @@ impl FabricRunService {
             .await?;
 
         let record = self.read_run_record(project, run_id).await?;
-        self.bridge.emit(BridgeEvent::ExecutionCompleted {
-            run_id: run_id.clone(),
-            project: record.project.clone(),
-            prev_state: Some(prev),
-        });
+        self.bridge
+            .emit(BridgeEvent::ExecutionCompleted {
+                run_id: run_id.clone(),
+                project: record.project.clone(),
+                prev_state: Some(prev),
+            })
+            .await;
         Ok(record)
     }
 
@@ -514,12 +520,14 @@ impl FabricRunService {
 
         let record = self.read_run_record(project, run_id).await?;
         if parse_fail_outcome(&raw) == FailOutcome::TerminalFailed {
-            self.bridge.emit(BridgeEvent::ExecutionFailed {
-                run_id: run_id.clone(),
-                project: record.project.clone(),
-                failure_class,
-                prev_state: Some(prev_run_state),
-            });
+            self.bridge
+                .emit(BridgeEvent::ExecutionFailed {
+                    run_id: run_id.clone(),
+                    project: record.project.clone(),
+                    failure_class,
+                    prev_state: Some(prev_run_state),
+                })
+                .await;
         }
         Ok(record)
     }
@@ -534,11 +542,13 @@ impl FabricRunService {
             .await?;
 
         let record = self.read_run_record(project, run_id).await?;
-        self.bridge.emit(BridgeEvent::ExecutionCancelled {
-            run_id: run_id.clone(),
-            project: record.project.clone(),
-            prev_state: Some(prev),
-        });
+        self.bridge
+            .emit(BridgeEvent::ExecutionCancelled {
+                run_id: run_id.clone(),
+                project: record.project.clone(),
+                prev_state: Some(prev),
+            })
+            .await;
         Ok(record)
     }
 
@@ -726,11 +736,13 @@ impl FabricRunService {
 
         let record = self.read_run_record(project, run_id).await?;
         if !is_already_satisfied(&raw) {
-            self.bridge.emit(BridgeEvent::ExecutionSuspended {
-                run_id: run_id.clone(),
-                project: record.project.clone(),
-                prev_state: Some(prev_run_state),
-            });
+            self.bridge
+                .emit(BridgeEvent::ExecutionSuspended {
+                    run_id: run_id.clone(),
+                    project: record.project.clone(),
+                    prev_state: Some(prev_run_state),
+                })
+                .await;
         }
         Ok(record)
     }
@@ -804,11 +816,13 @@ impl FabricRunService {
         check_fcall_success(&raw, "ff_resume_execution")?;
 
         let record = self.read_run_record(project, run_id).await?;
-        self.bridge.emit(BridgeEvent::ExecutionResumed {
-            run_id: run_id.clone(),
-            project: record.project.clone(),
-            prev_state: Some(prev_run_state),
-        });
+        self.bridge
+            .emit(BridgeEvent::ExecutionResumed {
+                run_id: run_id.clone(),
+                project: record.project.clone(),
+                prev_state: Some(prev_run_state),
+            })
+            .await;
         Ok(record)
     }
 
@@ -945,11 +959,13 @@ impl FabricRunService {
 
         let record = self.read_run_record(project, run_id).await?;
         if !is_already_satisfied(&raw) {
-            self.bridge.emit(BridgeEvent::ExecutionSuspended {
-                run_id: run_id.clone(),
-                project: record.project.clone(),
-                prev_state: Some(prev_run_state),
-            });
+            self.bridge
+                .emit(BridgeEvent::ExecutionSuspended {
+                    run_id: run_id.clone(),
+                    project: record.project.clone(),
+                    prev_state: Some(prev_run_state),
+                })
+                .await;
         }
         Ok(record)
     }
@@ -1047,11 +1063,13 @@ impl FabricRunService {
         match decision {
             ApprovalDecision::Approved => {
                 let record = self.read_run_record(project, run_id).await?;
-                self.bridge.emit(BridgeEvent::ExecutionResumed {
-                    run_id: run_id.clone(),
-                    project: record.project.clone(),
-                    prev_state: Some(RunState::WaitingApproval),
-                });
+                self.bridge
+                    .emit(BridgeEvent::ExecutionResumed {
+                        run_id: run_id.clone(),
+                        project: record.project.clone(),
+                        prev_state: Some(RunState::WaitingApproval),
+                    })
+                    .await;
                 Ok(record)
             }
             ApprovalDecision::Rejected => {

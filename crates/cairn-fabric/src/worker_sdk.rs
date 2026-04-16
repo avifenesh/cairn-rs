@@ -93,11 +93,11 @@ impl CairnWorker {
         }
 
         Ok(Some(CairnTask {
-            task,
+            task: Some(task),
             bridge: self.bridge.clone(),
             run_id: run_id.map(RunId::new),
             session_id: session_id.map(SessionId::new),
-            project: project_str.map(|s| helpers::parse_project_key(&s)),
+            project: project_str.and_then(|s| helpers::try_parse_project_key(&s)),
         }))
     }
 
@@ -111,14 +111,49 @@ impl CairnWorker {
 }
 
 pub struct CairnTask {
-    task: ClaimedTask,
+    task: Option<ClaimedTask>,
     bridge: Arc<EventBridge>,
     run_id: Option<RunId>,
     session_id: Option<SessionId>,
     project: Option<ProjectKey>,
 }
 
+impl Drop for CairnTask {
+    fn drop(&mut self) {
+        if self.task.is_some() {
+            let run_id = self
+                .run_id
+                .as_ref()
+                .map(|r| r.as_str())
+                .unwrap_or("unknown");
+            tracing::warn!(
+                run_id,
+                "CairnTask dropped without terminal call — lease will expire via FF scanner"
+            );
+        }
+    }
+}
+
 impl CairnTask {
+    fn task(&self) -> &ClaimedTask {
+        self.task.as_ref().expect("CairnTask already consumed")
+    }
+
+    fn take_task(
+        mut self,
+    ) -> (
+        ClaimedTask,
+        Arc<EventBridge>,
+        Option<RunId>,
+        Option<ProjectKey>,
+    ) {
+        let task = self.task.take().expect("CairnTask already consumed");
+        let bridge = self.bridge.clone();
+        let run_id = self.run_id.clone();
+        let project = self.project.clone();
+        (task, bridge, run_id, project)
+    }
+
     pub fn run_id(&self) -> Option<&RunId> {
         self.run_id.as_ref()
     }
@@ -132,11 +167,11 @@ impl CairnTask {
     }
 
     pub fn input_payload(&self) -> &[u8] {
-        self.task.input_payload()
+        self.task().input_payload()
     }
 
     pub fn stream_writer(&self) -> StreamWriter<'_> {
-        StreamWriter::new(&self.task)
+        StreamWriter::new(self.task())
     }
 
     pub async fn log_tool_call(
@@ -180,28 +215,27 @@ impl CairnTask {
     }
 
     pub async fn log_progress(&self, pct: u8, message: &str) -> Result<(), FabricError> {
-        self.task
+        self.task()
             .update_progress(pct, message)
             .await
             .map_err(|e| FabricError::Bridge(format!("update_progress: {e}")))
     }
 
     pub async fn complete_with_result(self, result: Option<Vec<u8>>) -> Result<(), FabricError> {
-        let run_id = self.run_id.clone();
-        let project = self.project.clone();
-        let bridge = self.bridge.clone();
+        let (task, bridge, run_id, project) = self.take_task();
 
-        self.task
-            .complete(result)
+        task.complete(result)
             .await
             .map_err(|e| FabricError::Bridge(format!("complete: {e}")))?;
 
         if let (Some(rid), Some(proj)) = (run_id, project) {
-            bridge.emit(BridgeEvent::ExecutionCompleted {
-                run_id: rid,
-                project: proj,
-                prev_state: Some(RunState::Running),
-            });
+            bridge
+                .emit(BridgeEvent::ExecutionCompleted {
+                    run_id: rid,
+                    project: proj,
+                    prev_state: Some(RunState::Running),
+                })
+                .await;
         }
 
         Ok(())
@@ -216,24 +250,37 @@ impl CairnTask {
         reason: &str,
         category: &str,
     ) -> Result<FailOutcome, FabricError> {
-        let run_id = self.run_id.clone();
-        let project = self.project.clone();
-        let bridge = self.bridge.clone();
+        let attempt = self.task().attempt_index().0;
+        let (task, bridge, run_id, project) = self.take_task();
 
-        let outcome = self
-            .task
+        let outcome = task
             .fail(reason, category)
             .await
             .map_err(|e| FabricError::Bridge(format!("fail: {e}")))?;
 
-        if matches!(outcome, FailOutcome::TerminalFailed) {
-            if let (Some(rid), Some(proj)) = (run_id, project) {
-                bridge.emit(BridgeEvent::ExecutionFailed {
-                    run_id: rid,
-                    project: proj,
-                    failure_class: FailureClass::ExecutionError,
-                    prev_state: Some(RunState::Running),
-                });
+        match outcome {
+            FailOutcome::TerminalFailed => {
+                if let (Some(rid), Some(proj)) = (run_id, project) {
+                    bridge
+                        .emit(BridgeEvent::ExecutionFailed {
+                            run_id: rid,
+                            project: proj,
+                            failure_class: FailureClass::ExecutionError,
+                            prev_state: Some(RunState::Running),
+                        })
+                        .await;
+                }
+            }
+            FailOutcome::RetryScheduled { .. } => {
+                if let (Some(rid), Some(proj)) = (run_id, project) {
+                    bridge
+                        .emit(BridgeEvent::ExecutionRetryScheduled {
+                            run_id: rid,
+                            project: proj,
+                            attempt,
+                        })
+                        .await;
+                }
             }
         }
 
@@ -241,21 +288,20 @@ impl CairnTask {
     }
 
     pub async fn cancel(self, reason: &str) -> Result<(), FabricError> {
-        let run_id = self.run_id.clone();
-        let project = self.project.clone();
-        let bridge = self.bridge.clone();
+        let (task, bridge, run_id, project) = self.take_task();
 
-        self.task
-            .cancel(reason)
+        task.cancel(reason)
             .await
             .map_err(|e| FabricError::Bridge(format!("cancel: {e}")))?;
 
         if let (Some(rid), Some(proj)) = (run_id, project) {
-            bridge.emit(BridgeEvent::ExecutionCancelled {
-                run_id: rid,
-                project: proj,
-                prev_state: Some(RunState::Running),
-            });
+            bridge
+                .emit(BridgeEvent::ExecutionCancelled {
+                    run_id: rid,
+                    project: proj,
+                    prev_state: Some(RunState::Running),
+                })
+                .await;
         }
 
         Ok(())
@@ -266,13 +312,10 @@ impl CairnTask {
         approval_id: &str,
         timeout_ms: Option<u64>,
     ) -> Result<SuspendOutcome, FabricError> {
-        let run_id = self.run_id.clone();
-        let project = self.project.clone();
-        let bridge = self.bridge.clone();
-
         let params = suspension::for_approval(approval_id, timeout_ms);
-        let outcome = self
-            .task
+        let (task, bridge, run_id, project) = self.take_task();
+
+        let outcome = task
             .suspend(
                 &params.reason_code,
                 &params.condition_matchers,
@@ -284,11 +327,13 @@ impl CairnTask {
 
         if matches!(outcome, SuspendOutcome::Suspended { .. }) {
             if let (Some(rid), Some(proj)) = (run_id, project) {
-                bridge.emit(BridgeEvent::ExecutionSuspended {
-                    run_id: rid,
-                    project: proj,
-                    prev_state: Some(RunState::Running),
-                });
+                bridge
+                    .emit(BridgeEvent::ExecutionSuspended {
+                        run_id: rid,
+                        project: proj,
+                        prev_state: Some(RunState::Running),
+                    })
+                    .await;
             }
         }
 
@@ -300,13 +345,10 @@ impl CairnTask {
         child_task_id: &str,
         deadline_ms: Option<u64>,
     ) -> Result<SuspendOutcome, FabricError> {
-        let run_id = self.run_id.clone();
-        let project = self.project.clone();
-        let bridge = self.bridge.clone();
-
         let params = suspension::for_subagent(child_task_id, deadline_ms);
-        let outcome = self
-            .task
+        let (task, bridge, run_id, project) = self.take_task();
+
+        let outcome = task
             .suspend(
                 &params.reason_code,
                 &params.condition_matchers,
@@ -318,11 +360,13 @@ impl CairnTask {
 
         if matches!(outcome, SuspendOutcome::Suspended { .. }) {
             if let (Some(rid), Some(proj)) = (run_id, project) {
-                bridge.emit(BridgeEvent::ExecutionSuspended {
-                    run_id: rid,
-                    project: proj,
-                    prev_state: Some(RunState::Running),
-                });
+                bridge
+                    .emit(BridgeEvent::ExecutionSuspended {
+                        run_id: rid,
+                        project: proj,
+                        prev_state: Some(RunState::Running),
+                    })
+                    .await;
             }
         }
 
@@ -333,13 +377,10 @@ impl CairnTask {
         invocation_id: &str,
         timeout_ms: Option<u64>,
     ) -> Result<SuspendOutcome, FabricError> {
-        let run_id = self.run_id.clone();
-        let project = self.project.clone();
-        let bridge = self.bridge.clone();
-
         let params = suspension::for_tool_result(invocation_id, timeout_ms);
-        let outcome = self
-            .task
+        let (task, bridge, run_id, project) = self.take_task();
+
+        let outcome = task
             .suspend(
                 &params.reason_code,
                 &params.condition_matchers,
@@ -351,11 +392,13 @@ impl CairnTask {
 
         if matches!(outcome, SuspendOutcome::Suspended { .. }) {
             if let (Some(rid), Some(proj)) = (run_id, project) {
-                bridge.emit(BridgeEvent::ExecutionSuspended {
-                    run_id: rid,
-                    project: proj,
-                    prev_state: Some(RunState::Running),
-                });
+                bridge
+                    .emit(BridgeEvent::ExecutionSuspended {
+                        run_id: rid,
+                        project: proj,
+                        prev_state: Some(RunState::Running),
+                    })
+                    .await;
             }
         }
 
@@ -393,8 +436,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_project_key_delegates_to_helpers() {
-        let pk = helpers::parse_project_key("t1/w1/p1");
+    fn try_parse_project_key_delegates_to_helpers() {
+        let pk = helpers::try_parse_project_key("t1/w1/p1").unwrap();
         assert_eq!(pk.tenant_id.as_str(), "t1");
         assert_eq!(pk.workspace_id.as_str(), "w1");
         assert_eq!(pk.project_id.as_str(), "p1");

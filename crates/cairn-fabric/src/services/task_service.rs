@@ -7,8 +7,8 @@ use cairn_store::projections::{TaskDependencyRecord, TaskRecord};
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
-    check_fcall_success, is_duplicate_result, parse_fail_outcome, parse_project_key,
-    parse_public_state, FailOutcome,
+    check_fcall_success, is_duplicate_result, parse_fail_outcome, parse_public_state,
+    try_parse_project_key, FailOutcome,
 };
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
@@ -149,8 +149,10 @@ impl FabricTaskService {
 
         let parent_run_id_str = tags.get("cairn.parent_run_id").cloned();
         let parent_task_id_str = tags.get("cairn.parent_task_id").cloned();
-        let project_str = tags.get("cairn.project").cloned().unwrap_or_default();
-        let project = parse_project_key(&project_str);
+        let tag_project = tags
+            .get("cairn.project")
+            .and_then(|s| try_parse_project_key(s))
+            .unwrap_or_else(|| project.clone());
 
         let lease_owner = fields.get("current_worker_instance_id").cloned();
         let lease_expires_at = fields.get("lease_expires_at").and_then(|v| v.parse().ok());
@@ -162,7 +164,7 @@ impl FabricTaskService {
 
         Ok(TaskRecord {
             task_id: task_id.clone(),
-            project,
+            project: tag_project,
             parent_run_id: parent_run_id_str.filter(|s| !s.is_empty()).map(RunId::new),
             parent_task_id: parent_task_id_str
                 .filter(|s| !s.is_empty())
@@ -270,12 +272,14 @@ impl FabricTaskService {
             .map_err(|e| FabricError::Internal(format!("ff_create_execution: {e}")))?;
 
         if !is_duplicate_result(&raw) {
-            self.bridge.emit(BridgeEvent::TaskCreated {
-                task_id: task_id.clone(),
-                project: project.clone(),
-                parent_run_id: parent_run_id.clone(),
-                parent_task_id: parent_task_id.clone(),
-            });
+            self.bridge
+                .emit(BridgeEvent::TaskCreated {
+                    task_id: task_id.clone(),
+                    project: project.clone(),
+                    parent_run_id: parent_run_id.clone(),
+                    parent_task_id: parent_task_id.clone(),
+                })
+                .await;
         }
 
         self.read_task_record(project, &task_id).await
@@ -429,13 +433,15 @@ impl FabricTaskService {
         self.registry.register(task_id, handle);
 
         let record = self.read_task_record(project, task_id).await?;
-        self.bridge.emit(BridgeEvent::TaskLeaseClaimed {
-            task_id: task_id.clone(),
-            project: record.project.clone(),
-            lease_owner: self.runtime.config.worker_instance_id.to_string(),
-            lease_epoch: record.version,
-            lease_expires_at_ms: record.lease_expires_at.unwrap_or(0),
-        });
+        self.bridge
+            .emit(BridgeEvent::TaskLeaseClaimed {
+                task_id: task_id.clone(),
+                project: record.project.clone(),
+                lease_owner: self.runtime.config.worker_instance_id.to_string(),
+                lease_epoch: record.version,
+                lease_expires_at_ms: record.lease_expires_at.unwrap_or(0),
+            })
+            .await;
         Ok(record)
     }
 
@@ -563,16 +569,19 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, "ff_complete_execution")?;
 
-        // Remove from active registry
-        let _ = self.registry.take(task_id);
+        let was_registered = self.registry.take(task_id).is_some();
 
         let record = self.read_task_record(project, task_id).await?;
-        self.bridge.emit(BridgeEvent::TaskStateChanged {
-            task_id: task_id.clone(),
-            project: record.project.clone(),
-            to: TaskState::Completed,
-            failure_class: None,
-        });
+        if was_registered {
+            self.bridge
+                .emit(BridgeEvent::TaskStateChanged {
+                    task_id: task_id.clone(),
+                    project: record.project.clone(),
+                    to: TaskState::Completed,
+                    failure_class: None,
+                })
+                .await;
+        }
         Ok(record)
     }
 
@@ -662,18 +671,22 @@ impl FabricTaskService {
 
         let terminal = parse_fail_outcome(&raw) == FailOutcome::TerminalFailed;
 
-        if terminal {
-            let _ = self.registry.take(task_id);
-        }
+        let was_registered = if terminal {
+            self.registry.take(task_id).is_some()
+        } else {
+            false
+        };
 
         let record = self.read_task_record(project, task_id).await?;
-        if terminal {
-            self.bridge.emit(BridgeEvent::TaskStateChanged {
-                task_id: task_id.clone(),
-                project: record.project.clone(),
-                to: TaskState::Failed,
-                failure_class: Some(failure_class),
-            });
+        if terminal && was_registered {
+            self.bridge
+                .emit(BridgeEvent::TaskStateChanged {
+                    task_id: task_id.clone(),
+                    project: record.project.clone(),
+                    to: TaskState::Failed,
+                    failure_class: Some(failure_class),
+                })
+                .await;
         }
         Ok(record)
     }
@@ -756,15 +769,19 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, "ff_cancel_execution")?;
 
-        let _ = self.registry.take(task_id);
+        let was_registered = self.registry.take(task_id).is_some();
 
         let record = self.read_task_record(project, task_id).await?;
-        self.bridge.emit(BridgeEvent::TaskStateChanged {
-            task_id: task_id.clone(),
-            project: record.project.clone(),
-            to: TaskState::Canceled,
-            failure_class: None,
-        });
+        if was_registered {
+            self.bridge
+                .emit(BridgeEvent::TaskStateChanged {
+                    task_id: task_id.clone(),
+                    project: record.project.clone(),
+                    to: TaskState::Canceled,
+                    failure_class: None,
+                })
+                .await;
+        }
         Ok(record)
     }
 

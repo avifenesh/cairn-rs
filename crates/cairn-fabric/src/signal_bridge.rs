@@ -7,10 +7,12 @@ use ff_sdk::task::{Signal, SignalOutcome};
 
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
+use crate::helpers::sanitize_signal_component;
 
 pub struct SignalBridge {
     client: Client,
     partition_config: PartitionConfig,
+    signal_dedup_ttl_ms: u64,
 }
 
 impl SignalBridge {
@@ -18,6 +20,7 @@ impl SignalBridge {
         Self {
             client: runtime.client.clone(),
             partition_config: runtime.partition_config,
+            signal_dedup_ttl_ms: runtime.config.signal_dedup_ttl_ms,
         }
     }
 
@@ -25,6 +28,7 @@ impl SignalBridge {
         Self {
             client,
             partition_config,
+            signal_dedup_ttl_ms: 86_400_000,
         }
     }
 
@@ -36,10 +40,11 @@ impl SignalBridge {
         approval_id: &str,
         details: Option<String>,
     ) -> Result<SignalOutcome, FabricError> {
+        let safe_id = sanitize_signal_component(approval_id);
         let signal_name = if approved {
-            format!("approval_granted:{approval_id}")
+            format!("approval_granted:{safe_id}")
         } else {
-            format!("approval_rejected:{approval_id}")
+            format!("approval_rejected:{safe_id}")
         };
 
         let payload = details.map(|d| {
@@ -57,7 +62,7 @@ impl SignalBridge {
             payload,
             source_type: "cairn_operator".into(),
             source_identity: "cairn".into(),
-            idempotency_key: Some(format!("approval:{approval_id}")),
+            idempotency_key: Some(format!("approval:{safe_id}")),
         };
 
         self.deliver_signal(execution_id, waitpoint_id, signal)
@@ -78,13 +83,14 @@ impl SignalBridge {
         .to_string()
         .into_bytes();
 
+        let safe_id = sanitize_signal_component(child_task_id);
         let signal = Signal {
-            signal_name: format!("child_completed:{child_task_id}"),
+            signal_name: format!("child_completed:{safe_id}"),
             signal_category: "subagent".into(),
             payload: Some(payload),
             source_type: "cairn_runtime".into(),
             source_identity: "cairn".into(),
-            idempotency_key: Some(format!("child_completed:{child_task_id}")),
+            idempotency_key: Some(format!("child_completed:{safe_id}")),
         };
 
         self.deliver_signal(parent_execution_id, parent_waitpoint_id, signal)
@@ -98,13 +104,14 @@ impl SignalBridge {
         invocation_id: &str,
         result_payload: Option<Vec<u8>>,
     ) -> Result<SignalOutcome, FabricError> {
+        let safe_id = sanitize_signal_component(invocation_id);
         let signal = Signal {
-            signal_name: format!("tool_result:{invocation_id}"),
+            signal_name: format!("tool_result:{safe_id}"),
             signal_category: "tool".into(),
             payload: result_payload,
             source_type: "cairn_runtime".into(),
             source_identity: "cairn".into(),
-            idempotency_key: Some(format!("tool_result:{invocation_id}")),
+            idempotency_key: Some(format!("tool_result:{safe_id}")),
         };
 
         self.deliver_signal(execution_id, waitpoint_id, signal)
@@ -132,11 +139,9 @@ impl SignalBridge {
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = ff_core::types::LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let idem_key = if let Some(ref ik) = signal.idempotency_key {
-            ctx.signal_dedup(waitpoint_id, ik)
-        } else {
-            ctx.noop()
-        };
+        let derived_idem = format!("{}:{}:{}", execution_id, signal.signal_name, waitpoint_id);
+        let effective_idem = signal.idempotency_key.as_deref().unwrap_or(&derived_idem);
+        let idem_key = ctx.signal_dedup(waitpoint_id, effective_idem);
 
         let keys: Vec<String> = vec![
             ctx.core(),
@@ -170,11 +175,11 @@ impl SignalBridge {
             signal.source_identity,
             payload_str,
             "json".to_owned(),
-            signal.idempotency_key.unwrap_or_default(),
+            effective_idem.to_owned(),
             String::new(),
             "waitpoint".to_owned(),
             now.to_string(),
-            "86400000".to_owned(),
+            self.signal_dedup_ttl_ms.to_string(),
             "0".to_owned(),
             "1000".to_owned(),
             "10000".to_owned(),

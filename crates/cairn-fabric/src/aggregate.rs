@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use cairn_store::event_log::EventLog;
+use tokio::task::JoinHandle;
 
 use crate::active_tasks::ActiveTaskRegistry;
 use crate::boot::FabricRuntime;
@@ -13,8 +14,6 @@ use crate::services::{
 };
 use crate::signal_bridge::SignalBridge;
 
-// TODO: circuit breaker for Valkey unavailability — fail-fast after N consecutive
-// errors instead of letting every request hit TCP timeout and pile up.
 pub struct FabricServices {
     pub runtime: Arc<FabricRuntime>,
     pub bridge: Arc<EventBridge>,
@@ -27,6 +26,7 @@ pub struct FabricServices {
     pub budgets: FabricBudgetService,
     pub quotas: FabricQuotaService,
     pub signals: SignalBridge,
+    bridge_handle: JoinHandle<()>,
 }
 
 impl FabricServices {
@@ -35,7 +35,8 @@ impl FabricServices {
         event_log: Arc<dyn EventLog + Send + Sync>,
     ) -> Result<Self, FabricError> {
         let runtime = Arc::new(FabricRuntime::start(config).await?);
-        let bridge = Arc::new(EventBridge::new(event_log));
+        let (bridge, bridge_handle) = EventBridge::start(event_log);
+        let bridge = Arc::new(bridge);
         let registry = Arc::new(ActiveTaskRegistry::new());
 
         let runs = FabricRunService::new(runtime.clone(), bridge.clone());
@@ -61,17 +62,14 @@ impl FabricServices {
             budgets,
             quotas,
             signals,
+            bridge_handle,
         })
     }
 
-    /// Shut down the Fabric runtime and all background scanners.
-    ///
-    /// Drops all service fields first to release their Arc<FabricRuntime> clones,
-    /// then unwraps the sole remaining Arc to call Engine::shutdown().
     pub async fn shutdown(self) {
         let Self {
             runtime,
-            bridge: _,
+            bridge,
             registry: _,
             runs: _,
             tasks: _,
@@ -81,7 +79,14 @@ impl FabricServices {
             budgets: _,
             quotas: _,
             signals: _,
+            bridge_handle,
         } = self;
+
+        bridge.stop();
+        drop(bridge);
+        if let Err(e) = bridge_handle.await {
+            tracing::warn!(error = %e, "event bridge consumer task panicked");
+        }
 
         match Arc::try_unwrap(runtime) {
             Ok(rt) => rt.shutdown().await,
