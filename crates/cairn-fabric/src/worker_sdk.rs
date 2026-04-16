@@ -282,12 +282,14 @@ impl CairnTask {
             .await
             .map_err(|e| FabricError::Bridge(format!("suspend_for_approval: {e}")))?;
 
-        if let (Some(rid), Some(proj)) = (run_id, project) {
-            bridge.emit(BridgeEvent::ExecutionSuspended {
-                run_id: rid,
-                project: proj,
-                prev_state: Some(RunState::Running),
-            });
+        if matches!(outcome, SuspendOutcome::Suspended { .. }) {
+            if let (Some(rid), Some(proj)) = (run_id, project) {
+                bridge.emit(BridgeEvent::ExecutionSuspended {
+                    run_id: rid,
+                    project: proj,
+                    prev_state: Some(RunState::Running),
+                });
+            }
         }
 
         Ok(outcome)
@@ -314,12 +316,14 @@ impl CairnTask {
             .await
             .map_err(|e| FabricError::Bridge(format!("suspend_for_subagent: {e}")))?;
 
-        if let (Some(rid), Some(proj)) = (run_id, project) {
-            bridge.emit(BridgeEvent::ExecutionSuspended {
-                run_id: rid,
-                project: proj,
-                prev_state: Some(RunState::Running),
-            });
+        if matches!(outcome, SuspendOutcome::Suspended { .. }) {
+            if let (Some(rid), Some(proj)) = (run_id, project) {
+                bridge.emit(BridgeEvent::ExecutionSuspended {
+                    run_id: rid,
+                    project: proj,
+                    prev_state: Some(RunState::Running),
+                });
+            }
         }
 
         Ok(outcome)
@@ -345,12 +349,14 @@ impl CairnTask {
             .await
             .map_err(|e| FabricError::Bridge(format!("suspend_for_tool_result: {e}")))?;
 
-        if let (Some(rid), Some(proj)) = (run_id, project) {
-            bridge.emit(BridgeEvent::ExecutionSuspended {
-                run_id: rid,
-                project: proj,
-                prev_state: Some(RunState::Running),
-            });
+        if matches!(outcome, SuspendOutcome::Suspended { .. }) {
+            if let (Some(rid), Some(proj)) = (run_id, project) {
+                bridge.emit(BridgeEvent::ExecutionSuspended {
+                    run_id: rid,
+                    project: proj,
+                    prev_state: Some(RunState::Running),
+                });
+            }
         }
 
         Ok(outcome)

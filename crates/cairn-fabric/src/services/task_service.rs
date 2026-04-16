@@ -6,7 +6,9 @@ use cairn_store::projections::{TaskDependencyRecord, TaskRecord};
 
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
-use crate::helpers::{is_duplicate_result, parse_project_key, parse_public_state};
+use crate::helpers::{
+    check_fcall_success, is_duplicate_result, parse_project_key, parse_public_state,
+};
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
 use ff_core::types::{ExecutionId, LaneId};
@@ -36,7 +38,64 @@ impl FabricTaskService {
     }
 
     fn task_to_execution_id(&self, project: &ProjectKey, task_id: &TaskId) -> ExecutionId {
-        id_map::run_to_execution_id(project, &RunId::new(task_id.as_str()))
+        id_map::task_to_execution_id(project, task_id)
+    }
+
+    async fn resolve_lease_context(
+        &self,
+        task_id: &TaskId,
+        project: &ProjectKey,
+    ) -> Result<
+        (
+            ff_core::types::LeaseId,
+            ff_core::types::LeaseEpoch,
+            ff_core::types::AttemptIndex,
+        ),
+        FabricError,
+    > {
+        if let Some(ctx) = self.registry.get_lease_context(task_id) {
+            return Ok(ctx);
+        }
+        let eid = self.task_to_execution_id(project, task_id);
+        let partition = execution_partition(&eid, &self.runtime.partition_config);
+        let exec_ctx = ExecKeyContext::new(&partition, &eid);
+        let fields: HashMap<String, String> =
+            self.runtime
+                .client
+                .hgetall(&exec_ctx.core())
+                .await
+                .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
+
+        if fields.is_empty() {
+            return Err(FabricError::NotFound {
+                entity: "task",
+                id: task_id.to_string(),
+            });
+        }
+
+        let lease_id = ff_core::types::LeaseId::parse(
+            fields
+                .get("current_lease_id")
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| FabricError::NotFound {
+                    entity: "task_lease",
+                    id: task_id.to_string(),
+                })?,
+        )
+        .map_err(|e| FabricError::Internal(format!("bad lease_id: {e}")))?;
+        let epoch = ff_core::types::LeaseEpoch::new(
+            fields
+                .get("current_lease_epoch")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1),
+        );
+        let att_idx = ff_core::types::AttemptIndex::new(
+            fields
+                .get("current_attempt_index")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+        );
+        Ok((lease_id, epoch, att_idx))
     }
 
     async fn read_task_record(
@@ -74,11 +133,11 @@ impl FabricTaskService {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         let updated_at = fields
-            .get("updated_at")
+            .get("last_mutation_at")
             .and_then(|v| v.parse().ok())
             .unwrap_or(created_at);
         let version = fields
-            .get("lease_epoch")
+            .get("current_lease_epoch")
             .and_then(|v| v.parse().ok())
             .unwrap_or(1);
 
@@ -87,7 +146,7 @@ impl FabricTaskService {
         let project_str = fields.get("cairn.project").cloned().unwrap_or_default();
         let project = parse_project_key(&project_str);
 
-        let lease_owner = fields.get("worker_instance_id").cloned();
+        let lease_owner = fields.get("current_worker_instance_id").cloned();
         let lease_expires_at = fields.get("lease_expires_at").and_then(|v| v.parse().ok());
 
         let retry_count = fields
@@ -158,11 +217,12 @@ impl FabricTaskService {
         let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "{}".to_owned());
 
         let policy_json = serde_json::json!({
-            "retry_policy": {
-                "max_attempts": 3,
-                "backoff_type": "exponential",
-                "base_delay_ms": 1000,
+            "max_retries": 2,
+            "backoff": {
+                "type": "exponential",
+                "initial_delay_ms": 1000,
                 "max_delay_ms": 30000,
+                "multiplier": 2
             }
         })
         .to_string();
@@ -375,13 +435,7 @@ impl FabricTaskService {
         task_id: &TaskId,
         lease_extension_ms: u64,
     ) -> Result<TaskRecord, FabricError> {
-        let (lid, epoch, att_idx) =
-            self.registry
-                .get_lease_context(task_id)
-                .ok_or_else(|| FabricError::NotFound {
-                    entity: "task_lease",
-                    id: task_id.to_string(),
-                })?;
+        let (lid, epoch, att_idx) = self.resolve_lease_context(task_id, project).await?;
 
         let eid = self.task_to_execution_id(project, task_id);
         let partition = execution_partition(&eid, &self.runtime.partition_config);
@@ -451,13 +505,7 @@ impl FabricTaskService {
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let (lid, epoch, att_idx) =
-            self.registry
-                .get_lease_context(task_id)
-                .ok_or_else(|| FabricError::NotFound {
-                    entity: "task_lease",
-                    id: task_id.to_string(),
-                })?;
+        let (lid, epoch, att_idx) = self.resolve_lease_context(task_id, project).await?;
 
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
@@ -494,12 +542,14 @@ impl FabricTaskService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_complete_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_complete_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_complete_execution")?;
 
         // Remove from active registry
         let _ = self.registry.take(task_id);
@@ -533,13 +583,7 @@ impl FabricTaskService {
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let (lid, epoch, att_idx) =
-            self.registry
-                .get_lease_context(task_id)
-                .ok_or_else(|| FabricError::NotFound {
-                    entity: "task_lease",
-                    id: task_id.to_string(),
-                })?;
+        let (lid, epoch, att_idx) = self.resolve_lease_context(task_id, project).await?;
 
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
@@ -559,6 +603,14 @@ impl FabricTaskService {
             .hget(&ctx.core(), "current_attempt_id")
             .await
             .unwrap_or(None);
+
+        let retry_policy_json: String = self
+            .runtime
+            .client
+            .get(&ctx.policy())
+            .await
+            .unwrap_or(None)
+            .unwrap_or_default();
 
         let keys: Vec<String> = vec![
             ctx.core(),
@@ -581,18 +633,20 @@ impl FabricTaskService {
             attempt_id_str.unwrap_or_default(),
             reason,
             category.to_owned(),
-            String::new(),
+            retry_policy_json,
         ];
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_fail_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_fail_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_fail_execution")?;
 
         let _ = self.registry.take(task_id);
 
@@ -624,13 +678,7 @@ impl FabricTaskService {
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        let (lid, epoch, att_idx) =
-            self.registry
-                .get_lease_context(task_id)
-                .ok_or_else(|| FabricError::NotFound {
-                    entity: "task_lease",
-                    id: task_id.to_string(),
-                })?;
+        let (lid, epoch, att_idx) = self.resolve_lease_context(task_id, project).await?;
 
         let worker_instance_id = &self.runtime.config.worker_instance_id;
 
@@ -681,12 +729,14 @@ impl FabricTaskService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_cancel_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_cancel_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_cancel_execution")?;
 
         let _ = self.registry.take(task_id);
 
@@ -747,7 +797,7 @@ impl FabricTaskService {
         );
         let worker_instance_id = ff_core::types::WorkerInstanceId::new(
             fields
-                .get("worker_instance_id")
+                .get("current_worker_instance_id")
                 .map(|s| s.as_str())
                 .unwrap_or("cairn"),
         );
@@ -869,7 +919,7 @@ impl FabricTaskService {
                 .unwrap_or_default(),
             fields.get("current_lease_id").cloned().unwrap_or_default(),
             fields
-                .get("lease_epoch")
+                .get("current_lease_epoch")
                 .cloned()
                 .unwrap_or_else(|| "1".to_owned()),
             suspension_id.to_string(),

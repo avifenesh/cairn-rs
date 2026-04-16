@@ -1,5 +1,29 @@
 use cairn_domain::ProjectKey;
 
+use crate::error::FabricError;
+
+pub fn check_fcall_success(raw: &ferriskey::Value, function_name: &str) -> Result<(), FabricError> {
+    let arr = match raw {
+        ferriskey::Value::Array(arr) => arr,
+        _ => return Ok(()),
+    };
+    let status = match arr.first() {
+        Some(Ok(ferriskey::Value::Int(n))) => *n,
+        _ => return Ok(()),
+    };
+    if status == 1 {
+        return Ok(());
+    }
+    let code = match arr.get(1) {
+        Some(Ok(ferriskey::Value::BulkString(b))) => String::from_utf8_lossy(b).into_owned(),
+        Some(Ok(ferriskey::Value::SimpleString(s))) => s.clone(),
+        _ => "unknown".to_owned(),
+    };
+    Err(FabricError::Internal(format!(
+        "{function_name} rejected: {code}"
+    )))
+}
+
 pub fn parse_public_state(s: &str) -> ff_core::state::PublicState {
     match s {
         "waiting" => ff_core::state::PublicState::Waiting,
@@ -157,5 +181,62 @@ mod tests {
     fn is_duplicate_returns_false_for_empty_array() {
         let raw = ferriskey::Value::Array(vec![]);
         assert!(!is_duplicate_result(&raw));
+    }
+
+    #[test]
+    fn check_fcall_success_ok() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+        ]);
+        assert!(check_fcall_success(&raw, "test").is_ok());
+    }
+
+    #[test]
+    fn check_fcall_success_error_returns_err() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(0)),
+            Ok(ferriskey::Value::SimpleString("lease_expired".to_owned())),
+        ]);
+        let err = check_fcall_success(&raw, "ff_complete_execution");
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("lease_expired"));
+    }
+
+    #[test]
+    fn check_fcall_success_error_bulk_string() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(0)),
+            Ok(ferriskey::Value::BulkString(b"stale_lease".to_vec().into())),
+        ]);
+        let err = check_fcall_success(&raw, "ff_cancel");
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("stale_lease"));
+    }
+
+    #[test]
+    fn check_fcall_success_non_array_passes() {
+        let raw = ferriskey::Value::SimpleString("OK".to_owned());
+        assert!(check_fcall_success(&raw, "test").is_ok());
+    }
+
+    #[test]
+    fn check_fcall_success_duplicate_is_ok() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("DUPLICATE".to_owned())),
+        ]);
+        assert!(check_fcall_success(&raw, "test").is_ok());
+    }
+
+    #[test]
+    fn check_fcall_success_already_satisfied_is_ok() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString(
+                "ALREADY_SATISFIED".to_owned(),
+            )),
+        ]);
+        assert!(check_fcall_success(&raw, "test").is_ok());
     }
 }

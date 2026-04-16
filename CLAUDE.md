@@ -218,3 +218,50 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## Team Mode (tmux multi-agent)
+
+If you are told you are a **manager** or **worker** on a team, this section applies. Read it carefully — silent agents waste everyone's time.
+
+### Communication Protocol
+
+Messages travel via filesystem mailbox. The watchers inject them into your prompt automatically.
+
+**Sending a message:**
+```bash
+./scripts/team-send.sh <to> <from> "Your message"
+```
+
+Examples:
+```bash
+./scripts/team-send.sh worker-1 manager "Review run_service.rs for FCALL key ordering"
+./scripts/team-send.sh manager worker-2 "DONE: fixed 3 bugs. Files: task_service.rs. cargo check clean."
+```
+
+**Rules — these are non-negotiable:**
+
+1. **ALWAYS report back via team-send when you finish a task.** The manager cannot see your pane. If you don't send, you are invisible. Use the Bash tool to call `./scripts/team-send.sh`.
+2. **Never output findings only to your pane.** If the manager or another worker needs to see it, it must go through team-send.
+3. **Include specifics in every report:** files changed, test counts, pass/fail, blockers.
+4. **Wait for assignments if you're a worker.** Don't invent work. Ask the manager if idle.
+5. **Stay in your lane.** Only modify files assigned to you unless the manager says otherwise.
+6. **cargo check --workspace before reporting done.** Broken workspace = broken team.
+
+### Role Briefs
+
+Role-specific instructions are in `.coordination/prompts/`:
+- `manager.md` — coordination responsibilities, worker assignments, verification duties
+- `worker-template.md` — worker rules, communication format, role assignments
+
+These are injected on first message by the team-watch system. Read your role brief and follow it.
+
+### Cross-Review Protocol
+
+During cross-review rounds, each worker reviews another worker's code:
+- Report findings as: `[FILE:LINE] BUG/GAP/STYLE: description`
+- **BUG** = wrong behavior, will break in production
+- **GAP** = missing functionality or missing error handling
+- **STYLE** = non-critical improvement, won't cause failures
+- Be adversarial. Think about edge cases, concurrent access, Valkey disconnection, overflow, multi-tenant collision. Think like the on-call engineer at 3am.
+- If you find nothing wrong, say so explicitly — "0 bugs found" is a valid and valuable answer.
+- **Dispute findings you disagree with.** Provide evidence (cite code, cite the upstream contract). The manager resolves disputes.

@@ -267,8 +267,8 @@ fn build_session_record(
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     let updated_at = summary
-        .get("updated_at")
-        .or_else(|| core.get("updated_at"))
+        .get("last_mutation_at")
+        .or_else(|| core.get("last_mutation_at"))
         .and_then(|v| v.parse().ok())
         .unwrap_or(created_at);
     let version = core
@@ -340,7 +340,7 @@ mod tests {
 
         let mut summary = HashMap::new();
         summary.insert("public_state".to_owned(), "completed".to_owned());
-        summary.insert("updated_at".to_owned(), "2000".to_owned());
+        summary.insert("last_mutation_at".to_owned(), "2000".to_owned());
 
         let record = build_session_record(&sid, &core, &summary);
         assert_eq!(record.session_id.as_str(), "sess_test");

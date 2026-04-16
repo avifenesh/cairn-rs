@@ -49,7 +49,9 @@ pub fn for_tool_result(invocation_id: &str, timeout_ms: Option<u64>) -> Suspensi
 pub fn for_operator_hold() -> SuspensionParams {
     SuspensionParams {
         reason_code: "operator_hold".into(),
-        condition_matchers: vec![],
+        condition_matchers: vec![ConditionMatcher {
+            signal_name: "__cairn_operator_resume__".into(),
+        }],
         timeout_ms: None,
         timeout_behavior: TimeoutBehavior::Escalate,
     }
@@ -123,10 +125,14 @@ mod tests {
     }
 
     #[test]
-    fn operator_hold_has_no_matchers() {
+    fn operator_hold_uses_sentinel_matcher() {
         let params = for_operator_hold();
         assert_eq!(params.reason_code, "operator_hold");
-        assert!(params.condition_matchers.is_empty());
+        assert_eq!(params.condition_matchers.len(), 1);
+        assert_eq!(
+            params.condition_matchers[0].signal_name,
+            "__cairn_operator_resume__"
+        );
         assert!(params.timeout_ms.is_none());
         assert_eq!(params.timeout_behavior, TimeoutBehavior::Escalate);
     }

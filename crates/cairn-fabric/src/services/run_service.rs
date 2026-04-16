@@ -11,7 +11,9 @@ use ff_core::types::{ExecutionId, LaneId, Namespace, TimestampMs};
 
 use crate::boot::FabricRuntime;
 use crate::event_bridge::{BridgeEvent, EventBridge};
-use crate::helpers::{is_duplicate_result, parse_project_key, parse_public_state};
+use crate::helpers::{
+    check_fcall_success, is_duplicate_result, parse_project_key, parse_public_state,
+};
 use crate::id_map;
 use crate::state_map;
 
@@ -76,11 +78,11 @@ impl FabricRunService {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         let updated_at = fields
-            .get("updated_at")
+            .get("last_mutation_at")
             .and_then(|v| v.parse().ok())
             .unwrap_or(created_at);
         let version = fields
-            .get("lease_epoch")
+            .get("current_lease_epoch")
             .and_then(|v| v.parse().ok())
             .unwrap_or(1);
 
@@ -140,10 +142,7 @@ impl FabricRunService {
         let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "{}".to_owned());
 
         let policy_json = serde_json::json!({
-            "retry_policy": {
-                "max_attempts": 1,
-                "backoff_type": "none"
-            }
+            "max_retries": 0
         })
         .to_string();
 
@@ -204,6 +203,13 @@ impl FabricRunService {
             .await
             .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
 
+        if fields.is_empty() {
+            return Err(FabricError::NotFound {
+                entity: "run",
+                id: run_id.to_string(),
+            });
+        }
+
         let prev_public =
             parse_public_state(&fields.get("public_state").cloned().unwrap_or_default());
         let (prev_run_state, _) = state_map::ff_public_state_to_run_state(prev_public);
@@ -216,11 +222,11 @@ impl FabricRunService {
                 .unwrap_or(0),
         );
         let lease_id_str = fields.get("current_lease_id").cloned();
-        let lease_epoch_str = fields.get("lease_epoch").cloned();
+        let lease_epoch_str = fields.get("current_lease_epoch").cloned();
         let attempt_id_str = fields.get("current_attempt_id").cloned();
         let worker_instance_id = ff_core::types::WorkerInstanceId::new(
             fields
-                .get("worker_instance_id")
+                .get("current_worker_instance_id")
                 .map(|s| s.as_str())
                 .unwrap_or("cairn"),
         );
@@ -252,12 +258,14 @@ impl FabricRunService {
                 let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
                 let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-                let _: ferriskey::Value = self
+                let raw: ferriskey::Value = self
                     .runtime
                     .client
                     .fcall("ff_complete_execution", &key_refs, &arg_refs)
                     .await
                     .map_err(|e| FabricError::Internal(format!("ff_complete_execution: {e}")))?;
+
+                check_fcall_success(&raw, "ff_complete_execution")?;
             }
             "ff_cancel_execution" => {
                 let wp_id_str: Option<String> = self
@@ -307,12 +315,14 @@ impl FabricRunService {
                 let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
                 let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-                let _: ferriskey::Value = self
+                let raw: ferriskey::Value = self
                     .runtime
                     .client
                     .fcall("ff_cancel_execution", &key_refs, &arg_refs)
                     .await
                     .map_err(|e| FabricError::Internal(format!("ff_cancel_execution: {e}")))?;
+
+                check_fcall_success(&raw, "ff_cancel_execution")?;
             }
             _ => {
                 return Err(FabricError::Internal(format!(
@@ -420,11 +430,11 @@ impl FabricRunService {
                 .unwrap_or(0),
         );
         let lease_id_str = fields.get("current_lease_id").cloned();
-        let lease_epoch_str = fields.get("lease_epoch").cloned();
+        let lease_epoch_str = fields.get("current_lease_epoch").cloned();
         let attempt_id_str = fields.get("current_attempt_id").cloned();
         let worker_instance_id = ff_core::types::WorkerInstanceId::new(
             fields
-                .get("worker_instance_id")
+                .get("current_worker_instance_id")
                 .map(|s| s.as_str())
                 .unwrap_or("cairn"),
         );
@@ -439,6 +449,14 @@ impl FabricRunService {
             FailureClass::LeaseExpired => "lease",
             FailureClass::CanceledByOperator => "operator",
         };
+
+        let retry_policy_json: String = self
+            .runtime
+            .client
+            .get(&ctx.policy())
+            .await
+            .unwrap_or(None)
+            .unwrap_or_default();
 
         let keys: Vec<String> = vec![
             ctx.core(),
@@ -461,18 +479,20 @@ impl FabricRunService {
             attempt_id_str.unwrap_or_default(),
             reason,
             category.to_owned(),
-            String::new(),
+            retry_policy_json,
         ];
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_fail_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_fail_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_fail_execution")?;
 
         let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionFailed {
@@ -533,26 +553,82 @@ impl FabricRunService {
         );
         let worker_instance_id = ff_core::types::WorkerInstanceId::new(
             fields
-                .get("worker_instance_id")
+                .get("current_worker_instance_id")
                 .map(|s| s.as_str())
                 .unwrap_or("cairn"),
         );
 
-        let (reason_code, timeout_behavior_str) = match reason.kind {
-            PauseReasonKind::OperatorPause => ("operator_hold", "escalate"),
-            PauseReasonKind::RuntimeSuspension => ("waiting_for_signal", "fail"),
-            PauseReasonKind::ToolRequestedSuspension => ("waiting_for_tool_result", "fail"),
-            PauseReasonKind::PolicyHold => ("paused_by_policy", "fail"),
+        let params = match reason.kind {
+            PauseReasonKind::OperatorPause => crate::suspension::for_operator_hold(),
+            PauseReasonKind::ToolRequestedSuspension => {
+                let invocation_id = reason
+                    .detail
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| FabricError::Validation {
+                        reason: "ToolRequestedSuspension requires invocation_id in reason.detail"
+                            .to_owned(),
+                    })?;
+                crate::suspension::for_tool_result(invocation_id, reason.resume_after_ms)
+            }
+            PauseReasonKind::RuntimeSuspension => {
+                let signal_name = reason
+                    .detail
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| FabricError::Validation {
+                        reason: "RuntimeSuspension requires signal_name in reason.detail"
+                            .to_owned(),
+                    })?;
+                crate::suspension::SuspensionParams {
+                    reason_code: "waiting_for_signal".into(),
+                    condition_matchers: vec![ff_sdk::task::ConditionMatcher {
+                        signal_name: signal_name.to_owned(),
+                    }],
+                    timeout_ms: reason.resume_after_ms,
+                    timeout_behavior: ff_sdk::task::TimeoutBehavior::Fail,
+                }
+            }
+            PauseReasonKind::PolicyHold => {
+                let detail = reason.detail.as_deref().unwrap_or("policy");
+                crate::suspension::SuspensionParams {
+                    reason_code: "paused_by_policy".into(),
+                    condition_matchers: vec![ff_sdk::task::ConditionMatcher {
+                        signal_name: format!("policy_resolved:{detail}"),
+                    }],
+                    timeout_ms: reason.resume_after_ms,
+                    timeout_behavior: ff_sdk::task::TimeoutBehavior::Fail,
+                }
+            }
+        };
+
+        let timeout_behavior_str = match params.timeout_behavior {
+            ff_sdk::task::TimeoutBehavior::Fail => "fail",
+            ff_sdk::task::TimeoutBehavior::Cancel => "cancel",
+            ff_sdk::task::TimeoutBehavior::Expire => "expire",
+            ff_sdk::task::TimeoutBehavior::AutoResume => "auto_resume_with_timeout_signal",
+            ff_sdk::task::TimeoutBehavior::Escalate => "escalate",
         };
 
         let suspension_id = ff_core::types::SuspensionId::new();
         let waitpoint_id = ff_core::types::WaitpointId::new();
         let waitpoint_key = format!("wpk:{waitpoint_id}");
 
+        let required_names: Vec<&str> = params
+            .condition_matchers
+            .iter()
+            .map(|m| m.signal_name.as_str())
+            .collect();
+        let match_mode = if required_names.len() <= 1 {
+            "any"
+        } else {
+            "all"
+        };
+
         let resume_condition_json = serde_json::json!({
             "condition_type": "signal_set",
-            "required_signal_names": [reason_code],
-            "signal_match_mode": "any",
+            "required_signal_names": required_names,
+            "signal_match_mode": match_mode,
             "minimum_signal_count": 1,
             "timeout_behavior": timeout_behavior_str,
             "allow_operator_override": true,
@@ -567,7 +643,7 @@ impl FabricRunService {
         })
         .to_string();
 
-        let timeout_at = reason.resume_after_ms.map(|ms| {
+        let timeout_at = params.timeout_ms.map(|ms| {
             let now = TimestampMs::now().0;
             now.saturating_add(ms as i64).to_string()
         });
@@ -599,13 +675,13 @@ impl FabricRunService {
                 .unwrap_or_default(),
             fields.get("current_lease_id").cloned().unwrap_or_default(),
             fields
-                .get("lease_epoch")
+                .get("current_lease_epoch")
                 .cloned()
                 .unwrap_or_else(|| "1".to_owned()),
             suspension_id.to_string(),
             waitpoint_id.to_string(),
             waitpoint_key,
-            reason_code.to_owned(),
+            params.reason_code.clone(),
             "cairn".to_owned(),
             timeout_at.unwrap_or_default(),
             resume_condition_json,
@@ -738,7 +814,7 @@ impl FabricRunService {
         );
         let lease_id_str = fields.get("current_lease_id").cloned().unwrap_or_default();
         let lease_epoch_str = fields
-            .get("lease_epoch")
+            .get("current_lease_epoch")
             .cloned()
             .unwrap_or_else(|| "1".to_owned());
         let attempt_id_str = fields
@@ -747,7 +823,7 @@ impl FabricRunService {
             .unwrap_or_default();
         let worker_instance_id = ff_core::types::WorkerInstanceId::new(
             fields
-                .get("worker_instance_id")
+                .get("current_worker_instance_id")
                 .map(|s| s.as_str())
                 .unwrap_or("cairn"),
         );
