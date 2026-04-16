@@ -12,8 +12,8 @@ use ff_core::types::{ExecutionId, LaneId, Namespace, TimestampMs};
 use crate::boot::FabricRuntime;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
-    check_fcall_success, is_duplicate_result, parse_fail_outcome, parse_project_key,
-    parse_public_state, FailOutcome,
+    check_fcall_success, is_already_satisfied, is_duplicate_result, parse_fail_outcome,
+    parse_project_key, parse_public_state, FailOutcome,
 };
 use crate::id_map;
 use crate::state_map;
@@ -429,6 +429,13 @@ impl FabricRunService {
             .await
             .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
 
+        if fields.is_empty() {
+            return Err(FabricError::NotFound {
+                entity: "run",
+                id: run_id.to_string(),
+            });
+        }
+
         let prev_public =
             parse_public_state(&fields.get("public_state").cloned().unwrap_or_default());
         let (prev_run_state, _) = state_map::ff_public_state_to_run_state(prev_public);
@@ -718,11 +725,13 @@ impl FabricRunService {
         check_fcall_success(&raw, "ff_suspend_execution")?;
 
         let record = self.read_run_record(project, run_id).await?;
-        self.bridge.emit(BridgeEvent::ExecutionSuspended {
-            run_id: run_id.clone(),
-            project: record.project.clone(),
-            prev_state: Some(prev_run_state),
-        });
+        if !is_already_satisfied(&raw) {
+            self.bridge.emit(BridgeEvent::ExecutionSuspended {
+                run_id: run_id.clone(),
+                project: record.project.clone(),
+                prev_state: Some(prev_run_state),
+            });
+        }
         Ok(record)
     }
 
@@ -821,6 +830,10 @@ impl FabricRunService {
             .hgetall(&ctx.core())
             .await
             .map_err(|e| FabricError::Internal(format!("valkey HGETALL: {e}")))?;
+
+        let prev_public =
+            parse_public_state(&fields.get("public_state").cloned().unwrap_or_default());
+        let (prev_run_state, _) = state_map::ff_public_state_to_run_state(prev_public);
 
         let lane_id = LaneId::new(fields.get("lane_id").map(|s| s.as_str()).unwrap_or("cairn"));
         let att_idx = ff_core::types::AttemptIndex::new(
@@ -931,11 +944,13 @@ impl FabricRunService {
         check_fcall_success(&raw, "ff_suspend_execution")?;
 
         let record = self.read_run_record(project, run_id).await?;
-        self.bridge.emit(BridgeEvent::ExecutionSuspended {
-            run_id: run_id.clone(),
-            project: record.project.clone(),
-            prev_state: Some(RunState::Running),
-        });
+        if !is_already_satisfied(&raw) {
+            self.bridge.emit(BridgeEvent::ExecutionSuspended {
+                run_id: run_id.clone(),
+                project: record.project.clone(),
+                prev_state: Some(prev_run_state),
+            });
+        }
         Ok(record)
     }
 

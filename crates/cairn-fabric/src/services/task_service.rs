@@ -350,12 +350,14 @@ impl FabricTaskService {
         let key_refs: Vec<&str> = grant_keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = grant_args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw_grant: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_issue_claim_grant", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_issue_claim_grant: {e}")))?;
+
+        check_fcall_success(&raw_grant, "ff_issue_claim_grant")?;
 
         // Step 2: Claim execution
         let total_str: Option<String> = self
@@ -414,6 +416,8 @@ impl FabricTaskService {
             .fcall("ff_claim_execution", &key_refs2, &arg_refs2)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_claim_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_claim_execution")?;
 
         // Parse claim result for lease_epoch
         let lease_epoch = parse_claim_lease_epoch(&raw);

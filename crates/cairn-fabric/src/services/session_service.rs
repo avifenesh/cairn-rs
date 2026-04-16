@@ -114,12 +114,14 @@ impl FabricSessionService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_create_flow", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_create_flow: {e}")))?;
+
+        crate::helpers::check_fcall_success(&raw, "ff_create_flow")?;
 
         let _: i64 = self
             .runtime
@@ -200,12 +202,21 @@ impl FabricSessionService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_cancel_flow", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_cancel_flow: {e}")))?;
+
+        // flow_already_terminal is acceptable — the flow may already be
+        // completed/cancelled, but cairn still needs to mark it archived.
+        if let Err(e) = crate::helpers::check_fcall_success(&raw, "ff_cancel_flow") {
+            let msg = e.to_string();
+            if !msg.contains("flow_already_terminal") {
+                return Err(e);
+            }
+        }
 
         let _: i64 = self
             .runtime

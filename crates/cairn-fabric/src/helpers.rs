@@ -62,6 +62,18 @@ pub enum FailOutcome {
     TerminalFailed,
 }
 
+pub fn is_already_satisfied(raw: &ferriskey::Value) -> bool {
+    if let ferriskey::Value::Array(arr) = raw {
+        if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(1) {
+            return &**b == b"ALREADY_SATISFIED";
+        }
+        if let Some(Ok(ferriskey::Value::SimpleString(s))) = arr.get(1) {
+            return s == "ALREADY_SATISFIED";
+        }
+    }
+    false
+}
+
 pub fn parse_fail_outcome(raw: &ferriskey::Value) -> FailOutcome {
     if let ferriskey::Value::Array(arr) = raw {
         if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(2) {
@@ -308,5 +320,42 @@ mod tests {
             )),
         ]);
         assert!(check_fcall_success(&raw, "test").is_ok());
+    }
+
+    #[test]
+    fn is_already_satisfied_simple_string() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString(
+                "ALREADY_SATISFIED".to_owned(),
+            )),
+        ]);
+        assert!(is_already_satisfied(&raw));
+    }
+
+    #[test]
+    fn is_already_satisfied_bulk_string() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::BulkString(
+                b"ALREADY_SATISFIED".to_vec().into(),
+            )),
+        ]);
+        assert!(is_already_satisfied(&raw));
+    }
+
+    #[test]
+    fn is_already_satisfied_false_for_ok() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+        ]);
+        assert!(!is_already_satisfied(&raw));
+    }
+
+    #[test]
+    fn is_already_satisfied_false_for_non_array() {
+        let raw = ferriskey::Value::SimpleString("OK".to_owned());
+        assert!(!is_already_satisfied(&raw));
     }
 }
