@@ -7,7 +7,8 @@ use cairn_store::projections::{TaskDependencyRecord, TaskRecord};
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
-    check_fcall_success, is_duplicate_result, parse_project_key, parse_public_state,
+    check_fcall_success, is_duplicate_result, parse_fail_outcome, parse_project_key,
+    parse_public_state, FailOutcome,
 };
 use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
@@ -73,16 +74,11 @@ impl FabricTaskService {
             });
         }
 
-        let lease_id = ff_core::types::LeaseId::parse(
-            fields
-                .get("current_lease_id")
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| FabricError::NotFound {
-                    entity: "task_lease",
-                    id: task_id.to_string(),
-                })?,
-        )
-        .map_err(|e| FabricError::Internal(format!("bad lease_id: {e}")))?;
+        let lease_id = match fields.get("current_lease_id").filter(|s| !s.is_empty()) {
+            Some(s) => ff_core::types::LeaseId::parse(s)
+                .map_err(|e| FabricError::Internal(format!("bad lease_id: {e}")))?,
+            None => ff_core::types::LeaseId::from_uuid(uuid::Uuid::nil()),
+        };
         let epoch = ff_core::types::LeaseEpoch::new(
             fields
                 .get("current_lease_epoch")
@@ -126,7 +122,10 @@ impl FabricTaskService {
             .client
             .hgetall(&ctx.tags())
             .await
-            .unwrap_or_default();
+            .unwrap_or_else(|e| {
+                tracing::warn!(task_id = %task_id, error = %e, "failed to read execution tags");
+                HashMap::new()
+            });
 
         let public_state_str = fields.get("public_state").cloned().unwrap_or_default();
         let public_state = parse_public_state(&public_state_str);
@@ -655,15 +654,21 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, "ff_fail_execution")?;
 
-        let _ = self.registry.take(task_id);
+        let terminal = parse_fail_outcome(&raw) == FailOutcome::TerminalFailed;
+
+        if terminal {
+            let _ = self.registry.take(task_id);
+        }
 
         let record = self.read_task_record(project, task_id).await?;
-        self.bridge.emit(BridgeEvent::TaskStateChanged {
-            task_id: task_id.clone(),
-            project: record.project.clone(),
-            to: TaskState::Failed,
-            failure_class: Some(failure_class),
-        });
+        if terminal {
+            self.bridge.emit(BridgeEvent::TaskStateChanged {
+                task_id: task_id.clone(),
+                project: record.project.clone(),
+                to: TaskState::Failed,
+                failure_class: Some(failure_class),
+            });
+        }
         Ok(record)
     }
 
@@ -946,12 +951,14 @@ impl FabricTaskService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_suspend_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_suspend_execution")?;
 
         self.read_task_record(project, task_id).await
     }
@@ -1003,12 +1010,14 @@ impl FabricTaskService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_resume_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_resume_execution")?;
 
         self.read_task_record(project, task_id).await
     }

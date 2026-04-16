@@ -56,6 +56,28 @@ pub fn read_hgetall_field(
     fields.get(key).filter(|v| !v.is_empty()).cloned()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailOutcome {
+    RetryScheduled,
+    TerminalFailed,
+}
+
+pub fn parse_fail_outcome(raw: &ferriskey::Value) -> FailOutcome {
+    if let ferriskey::Value::Array(arr) = raw {
+        if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(2) {
+            if &**b == b"retry_scheduled" {
+                return FailOutcome::RetryScheduled;
+            }
+        }
+        if let Some(Ok(ferriskey::Value::SimpleString(s))) = arr.get(2) {
+            if s == "retry_scheduled" {
+                return FailOutcome::RetryScheduled;
+            }
+        }
+    }
+    FailOutcome::TerminalFailed
+}
+
 pub fn is_duplicate_result(raw: &ferriskey::Value) -> bool {
     if let ferriskey::Value::Array(arr) = raw {
         if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(1) {
@@ -227,6 +249,54 @@ mod tests {
             Ok(ferriskey::Value::SimpleString("DUPLICATE".to_owned())),
         ]);
         assert!(check_fcall_success(&raw, "test").is_ok());
+    }
+
+    #[test]
+    fn parse_fail_outcome_retry_scheduled_simple_string() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+            Ok(ferriskey::Value::SimpleString("retry_scheduled".to_owned())),
+            Ok(ferriskey::Value::SimpleString("1234567890".to_owned())),
+        ]);
+        assert_eq!(parse_fail_outcome(&raw), FailOutcome::RetryScheduled);
+    }
+
+    #[test]
+    fn parse_fail_outcome_retry_scheduled_bulk_string() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+            Ok(ferriskey::Value::BulkString(
+                b"retry_scheduled".to_vec().into(),
+            )),
+        ]);
+        assert_eq!(parse_fail_outcome(&raw), FailOutcome::RetryScheduled);
+    }
+
+    #[test]
+    fn parse_fail_outcome_terminal_failed() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+            Ok(ferriskey::Value::SimpleString("terminal_failed".to_owned())),
+        ]);
+        assert_eq!(parse_fail_outcome(&raw), FailOutcome::TerminalFailed);
+    }
+
+    #[test]
+    fn parse_fail_outcome_non_array_defaults_terminal() {
+        let raw = ferriskey::Value::SimpleString("OK".to_owned());
+        assert_eq!(parse_fail_outcome(&raw), FailOutcome::TerminalFailed);
+    }
+
+    #[test]
+    fn parse_fail_outcome_short_array_defaults_terminal() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+        ]);
+        assert_eq!(parse_fail_outcome(&raw), FailOutcome::TerminalFailed);
     }
 
     #[test]

@@ -12,7 +12,8 @@ use ff_core::types::{ExecutionId, LaneId, Namespace, TimestampMs};
 use crate::boot::FabricRuntime;
 use crate::event_bridge::{BridgeEvent, EventBridge};
 use crate::helpers::{
-    check_fcall_success, is_duplicate_result, parse_project_key, parse_public_state,
+    check_fcall_success, is_duplicate_result, parse_fail_outcome, parse_project_key,
+    parse_public_state, FailOutcome,
 };
 use crate::id_map;
 use crate::state_map;
@@ -71,7 +72,10 @@ impl FabricRunService {
             .client
             .hgetall(&ctx.tags())
             .await
-            .unwrap_or_default();
+            .unwrap_or_else(|e| {
+                tracing::warn!(run_id = %run_id, error = %e, "failed to read execution tags");
+                HashMap::new()
+            });
 
         let public_state_str = fields.get("public_state").cloned().unwrap_or_default();
         let public_state = parse_public_state(&public_state_str);
@@ -502,12 +506,14 @@ impl FabricRunService {
         check_fcall_success(&raw, "ff_fail_execution")?;
 
         let record = self.read_run_record(project, run_id).await?;
-        self.bridge.emit(BridgeEvent::ExecutionFailed {
-            run_id: run_id.clone(),
-            project: record.project.clone(),
-            failure_class,
-            prev_state: Some(prev_run_state),
-        });
+        if parse_fail_outcome(&raw) == FailOutcome::TerminalFailed {
+            self.bridge.emit(BridgeEvent::ExecutionFailed {
+                run_id: run_id.clone(),
+                project: record.project.clone(),
+                failure_class,
+                prev_state: Some(prev_run_state),
+            });
+        }
         Ok(record)
     }
 
@@ -702,12 +708,14 @@ impl FabricRunService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_suspend_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_suspend_execution")?;
 
         let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionSuspended {
@@ -777,12 +785,14 @@ impl FabricRunService {
         let prev_public = parse_public_state(&prev_str.unwrap_or_default());
         let (prev_run_state, _) = state_map::ff_public_state_to_run_state(prev_public);
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_resume_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_resume_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_resume_execution")?;
 
         let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionResumed {
@@ -911,12 +921,14 @@ impl FabricRunService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_suspend_execution", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_suspend_execution: {e}")))?;
+
+        check_fcall_success(&raw, "ff_suspend_execution")?;
 
         let record = self.read_run_record(project, run_id).await?;
         self.bridge.emit(BridgeEvent::ExecutionSuspended {
@@ -1008,12 +1020,14 @@ impl FabricRunService {
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-        let _: ferriskey::Value = self
+        let raw: ferriskey::Value = self
             .runtime
             .client
             .fcall("ff_deliver_signal", &key_refs, &arg_refs)
             .await
             .map_err(|e| FabricError::Internal(format!("ff_deliver_signal: {e}")))?;
+
+        check_fcall_success(&raw, "ff_deliver_signal")?;
 
         match decision {
             ApprovalDecision::Approved => {
