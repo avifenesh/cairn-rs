@@ -641,7 +641,7 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_COMPLETE_EXECUTION)?;
 
-        let was_registered = self.registry.take(task_id).is_some();
+        let was_registered = self.registry.remove_entry(task_id);
 
         let record = self.read_task_record(project, task_id).await?;
         if was_registered {
@@ -743,7 +743,7 @@ impl FabricTaskService {
         let terminal = parse_fail_outcome(&raw) == FailOutcome::TerminalFailed;
 
         let was_registered = if terminal {
-            self.registry.take(task_id).is_some()
+            self.registry.remove_entry(task_id)
         } else {
             false
         };
@@ -826,7 +826,7 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_CANCEL_EXECUTION)?;
 
-        let was_registered = self.registry.take(task_id).is_some();
+        let was_registered = self.registry.remove_entry(task_id);
 
         let record = self.read_task_record(project, task_id).await?;
         if was_registered {

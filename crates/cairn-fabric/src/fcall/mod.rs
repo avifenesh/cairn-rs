@@ -97,6 +97,11 @@ pub const CRITICAL_CONTRACTS: &[FcallContract] = &[
         expected_keys: quota::CHECK_ADMISSION_KEYS,
         expected_args: quota::CHECK_ADMISSION_ARGS,
     },
+    FcallContract {
+        name: names::FF_RESET_BUDGET,
+        expected_keys: budget::RESET_BUDGET_KEYS,
+        expected_args: budget::RESET_BUDGET_ARGS,
+    },
 ];
 
 pub fn verify_builder_counts(
@@ -173,7 +178,7 @@ mod tests {
     fn fixed_arg_contracts_have_nonzero_arg_counts() {
         for c in CRITICAL_CONTRACTS {
             if c.expected_args > 0 {
-                assert!(c.expected_args >= 3, "{} has suspiciously few args", c.name);
+                assert!(c.expected_args >= 2, "{} has suspiciously few args", c.name);
             }
         }
     }

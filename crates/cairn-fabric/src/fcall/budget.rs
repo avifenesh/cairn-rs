@@ -67,6 +67,8 @@ pub fn build_report_usage(
 
 pub const CREATE_BUDGET_KEYS: usize = 4;
 pub const REPORT_USAGE_KEYS: usize = 3;
+pub const RESET_BUDGET_KEYS: usize = 3;
+pub const RESET_BUDGET_ARGS: usize = 2;
 
 #[cfg(test)]
 mod tests {

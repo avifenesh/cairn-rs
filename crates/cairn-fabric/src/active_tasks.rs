@@ -72,6 +72,13 @@ impl ActiveTaskRegistry {
             .and_then(|(_, mut handle)| handle.claimed_task.take())
     }
 
+    /// Remove the entry and return whether it existed.
+    /// Unlike take(), returns true even for handles created via
+    /// new_without_claimed_task (API-claimed tasks with no local ClaimedTask).
+    pub fn remove_entry(&self, task_id: &TaskId) -> bool {
+        self.tasks.remove(&task_id.to_string()).is_some()
+    }
+
     pub fn take_with_context(
         &self,
         task_id: &TaskId,
