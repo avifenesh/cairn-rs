@@ -66,6 +66,13 @@ impl FabricRunService {
             });
         }
 
+        let tags: HashMap<String, String> = self
+            .runtime
+            .client
+            .hgetall(&ctx.tags())
+            .await
+            .unwrap_or_default();
+
         let public_state_str = fields.get("public_state").cloned().unwrap_or_default();
         let public_state = parse_public_state(&public_state_str);
         let (run_state, failure_class) = state_map::ff_public_state_to_run_state(public_state);
@@ -86,9 +93,9 @@ impl FabricRunService {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1);
 
-        let session_id_str = fields.get("cairn.session_id").cloned().unwrap_or_default();
-        let parent_run_id_str = fields.get("cairn.parent_run_id").cloned();
-        let project_str = fields.get("cairn.project").cloned().unwrap_or_default();
+        let session_id_str = tags.get("cairn.session_id").cloned().unwrap_or_default();
+        let parent_run_id_str = tags.get("cairn.parent_run_id").cloned();
+        let project_str = tags.get("cairn.project").cloned().unwrap_or_default();
         let project = parse_project_key(&project_str);
 
         Ok(RunRecord {

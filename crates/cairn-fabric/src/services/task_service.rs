@@ -121,6 +121,13 @@ impl FabricTaskService {
             });
         }
 
+        let tags: HashMap<String, String> = self
+            .runtime
+            .client
+            .hgetall(&ctx.tags())
+            .await
+            .unwrap_or_default();
+
         let public_state_str = fields.get("public_state").cloned().unwrap_or_default();
         let public_state = parse_public_state(&public_state_str);
         let (task_state, failure_class) = state_map::ff_public_state_to_task_state(public_state);
@@ -141,9 +148,9 @@ impl FabricTaskService {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1);
 
-        let parent_run_id_str = fields.get("cairn.parent_run_id").cloned();
-        let parent_task_id_str = fields.get("cairn.parent_task_id").cloned();
-        let project_str = fields.get("cairn.project").cloned().unwrap_or_default();
+        let parent_run_id_str = tags.get("cairn.parent_run_id").cloned();
+        let parent_task_id_str = tags.get("cairn.parent_task_id").cloned();
+        let project_str = tags.get("cairn.project").cloned().unwrap_or_default();
         let project = parse_project_key(&project_str);
 
         let lease_owner = fields.get("current_worker_instance_id").cloned();
