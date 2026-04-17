@@ -1,6 +1,6 @@
 pub mod budget_service;
+pub(crate) mod claim_common;
 pub mod quota_service;
-pub mod recovery_stub;
 pub mod run_service;
 pub mod scheduler_service;
 pub mod session_service;
@@ -9,7 +9,6 @@ pub mod worker_service;
 
 pub use budget_service::FabricBudgetService;
 pub use quota_service::FabricQuotaService;
-pub use recovery_stub::{FabricRecoveryStub, FabricRecoverySummary};
 pub use run_service::FabricRunService;
 pub use scheduler_service::FabricSchedulerService;
 pub use session_service::FabricSessionService;
