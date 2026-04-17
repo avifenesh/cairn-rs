@@ -1673,7 +1673,10 @@ async fn mailbox_and_recovery_routes_round_trip() {
         "test-token",
     )
     .await;
-    assert_eq!(recover_response.status(), StatusCode::OK);
+    // Fabric finalization: /v1/runs/:id/recover is a 202 deprecation stub.
+    // FF's background scanners own recovery unconditionally; the endpoint
+    // is kept for backwards-compatibility only. See CAIRN-FABRIC-FINALIZED.md §3.5.
+    assert_eq!(recover_response.status(), StatusCode::ACCEPTED);
 
     let status_response = send_empty_request(
         &app,

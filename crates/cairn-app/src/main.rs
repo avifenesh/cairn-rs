@@ -78,7 +78,7 @@ use cairn_api::bootstrap::{BootstrapConfig, DeploymentMode, EncryptionKeySource,
 use cairn_runtime::provider_health::ProviderHealthService;
 #[allow(unused_imports)]
 use cairn_runtime::sessions::SessionService;
-use cairn_runtime::{CredentialService, DefaultsService, RecoveryService};
+use cairn_runtime::{CredentialService, DefaultsService};
 #[allow(unused_imports)]
 use cairn_runtime::{InMemoryServices, OllamaEmbeddingProvider, OllamaModel, OllamaProvider};
 use cairn_store::pg::PgMigrationRunner;
@@ -1023,58 +1023,12 @@ async fn main() {
         Err(error) => eprintln!("sandbox recovery failed: {error}"),
     }
 
-    let recovery_now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    match lib_state
-        .runtime
-        .recovery
-        .recover_expired_leases(recovery_now_ms, 1_000)
-        .await
-    {
-        Ok(summary) if summary.scanned > 0 || !summary.actions.is_empty() => {
-            eprintln!(
-                "lease recovery: scanned={} actions={}",
-                summary.scanned,
-                summary.actions.len()
-            );
-        }
-        Ok(_) => {}
-        Err(error) => eprintln!("lease recovery failed: {error}"),
-    }
-    match lib_state
-        .runtime
-        .recovery
-        .recover_interrupted_runs(1_000)
-        .await
-    {
-        Ok(summary) if summary.scanned > 0 || !summary.actions.is_empty() => {
-            eprintln!(
-                "run recovery: scanned={} actions={}",
-                summary.scanned,
-                summary.actions.len()
-            );
-        }
-        Ok(_) => {}
-        Err(error) => eprintln!("run recovery failed: {error}"),
-    }
-    match lib_state
-        .runtime
-        .recovery
-        .resolve_stale_dependencies(1_000)
-        .await
-    {
-        Ok(summary) if summary.scanned > 0 || !summary.actions.is_empty() => {
-            eprintln!(
-                "dependency recovery: scanned={} actions={}",
-                summary.scanned,
-                summary.actions.len()
-            );
-        }
-        Ok(_) => {}
-        Err(error) => eprintln!("dependency recovery failed: {error}"),
-    }
+    // Recovery sweeps (lease expiry, interrupted runs, stale dependencies)
+    // used to run here before serving traffic. Removed in the Fabric
+    // finalization round — FlowFabric's 14 background scanners own recovery
+    // unconditionally, so a boot-time cairn-side sweep would either be
+    // no-op duplication (Fabric on) or a pointless read against an
+    // in-memory store that has nothing to recover (Fabric off).
 
     // ── Startup replays ────────────────────────────────────────────────────────
     // Replay all store events into in-memory projections so pre-existing data

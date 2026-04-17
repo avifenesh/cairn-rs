@@ -20,10 +20,10 @@ use crate::services::{
     OperatorProfileServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
     PromptReleaseServiceImpl, PromptVersionServiceImpl, ProviderBindingServiceImpl,
     ProviderConnectionPoolServiceImpl, ProviderConnectionServiceImpl, ProviderHealthServiceImpl,
-    QuotaServiceImpl, RecoveryServiceImpl, RetentionServiceImpl, RoutePolicyServiceImpl,
-    RunCostAlertServiceImpl, RunServiceImpl, RunSlaServiceImpl, SessionServiceImpl,
-    SignalRouterServiceImpl, SignalServiceImpl, TaskServiceImpl, TenantServiceImpl,
-    WorkspaceMembershipServiceImpl, WorkspaceServiceImpl,
+    QuotaServiceImpl, RetentionServiceImpl, RoutePolicyServiceImpl, RunCostAlertServiceImpl,
+    RunServiceImpl, RunSlaServiceImpl, SessionServiceImpl, SignalRouterServiceImpl,
+    SignalServiceImpl, TaskServiceImpl, TenantServiceImpl, WorkspaceMembershipServiceImpl,
+    WorkspaceServiceImpl,
 };
 use crate::sessions::SessionService;
 use crate::tasks::TaskService;
@@ -31,8 +31,12 @@ use crate::ProviderRegistry;
 
 /// Bundled runtime services backed by `InMemoryStore`.
 ///
-/// Every field is a concrete `*ServiceImpl<InMemoryStore>` so that
-/// cairn-app handlers can call service methods without extra type juggling.
+/// Core execution fields (`runs`, `tasks`, `sessions`) are `Arc<dyn Trait>`
+/// so cairn-app can swap the in-memory impl for
+/// `Fabric{Run,Task,Session}ServiceAdapter` at boot when
+/// `CAIRN_FABRIC_ENABLED=1`. All other fields remain concrete
+/// `*ServiceImpl<InMemoryStore>` — they back non-execution surfaces
+/// (approvals, evals, provider bindings, etc.) that FF does not manage.
 pub struct InMemoryServices {
     /// The shared append-only event log + synchronous projections.
     pub store: Arc<InMemoryStore>,
@@ -78,8 +82,17 @@ pub struct InMemoryServices {
     // ── External workers ──────────────────────────────────────────────────
     pub external_workers: ExternalWorkerServiceImpl<InMemoryStore>,
 
-    // ── Recovery & observability ───────────────────────────────────────────
-    pub recovery: RecoveryServiceImpl<InMemoryStore>,
+    // ── Observability ──────────────────────────────────────────────────────
+    //
+    // Recovery is NOT on this struct. FF's 14 background scanners
+    // (DelayedPromoter, LeaseExpiryScanner, AttemptTimeoutScanner,
+    // ExecutionDeadlineScanner, SuspensionTimeoutScanner,
+    // PendingWaitpointExpiryScanner, BudgetResetScanner, BudgetReconciler,
+    // QuotaReconciler, DependencyReconciler, FlowProjector,
+    // IndexReconciler, RetentionTrimmer, UnblockScanner) own recovery
+    // unconditionally — whether CAIRN_FABRIC_ENABLED is set or not, there is
+    // no cairn-side recovery sweep worth running. The pre-Fabric
+    // `RecoveryServiceImpl` was removed in the finalization round.
     pub observability: LlmObservabilityServiceImpl<InMemoryStore>,
 
     // ── Provider & routing ─────────────────────────────────────────────────
@@ -186,7 +199,6 @@ impl InMemoryServices {
             signal_router: SignalRouterServiceImpl::new(store.clone()),
             channels: ChannelServiceImpl::new(store.clone()),
             external_workers: ExternalWorkerServiceImpl::new(store.clone()),
-            recovery: RecoveryServiceImpl::new(store.clone()),
             observability: LlmObservabilityServiceImpl::new(store.clone()),
             provider_bindings: ProviderBindingServiceImpl::new(store.clone()),
             provider_connections: ProviderConnectionServiceImpl::new(store.clone()),

@@ -107,6 +107,19 @@ Not automated in this round. FF ships `rotate_waitpoint_hmac_secret` in `ff-test
 
 Unset `CAIRN_FABRIC_ENABLED`. AppState falls back to the in-memory `RunServiceImpl` / `TaskServiceImpl` / `SessionServiceImpl`. No data is shared between the two paths — in-memory runs are not visible from the Fabric path and vice versa.
 
+### 3.5 Dev vs production paths
+
+Two backing stacks live side-by-side in the binary; the env var picks which one AppState wires at boot.
+
+| Path | Trigger | Run/Task/Session backing | Execution state lives in | Recovery | Recommended for |
+|---|---|---|---|---|---|
+| **Production** | `CAIRN_FABRIC_ENABLED=1` | `Fabric{Run,Task,Session}ServiceAdapter` | Valkey + FF Lua library | FF's 14 background scanners (`LeaseExpiryScanner`, `AttemptTimeoutScanner`, etc.) | real teams, production traffic |
+| **Dev / CI** | unset / `0` | `RunServiceImpl` / `TaskServiceImpl` / `SessionServiceImpl` | cairn-store event log (in-memory) | none — no scanners, no Valkey | `cargo test`, local `cargo run -p cairn-app`, short-lived CI without a Valkey dependency |
+
+The in-memory impls are **not** duplication of FF — they're the fallback when Fabric is disabled. Without them, running cairn-app without Valkey would be impossible and the test baseline couldn't validate cairn-side logic in isolation. Keep them.
+
+The deleted pieces in finalization were: `FabricRecoveryStub` (cairn-fabric side) and `RecoveryServiceImpl` (cairn-runtime side). Both were passive duplicates of FF's scanners — FF owns recovery whether Fabric is enabled or not, so the cairn-side sweeps were redundant under FF-enabled and useless under FF-disabled (no background worker to drive them).
+
 ### 3.5 Common failures
 
 | Symptom | Cause | Fix |

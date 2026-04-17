@@ -1,3 +1,6 @@
+//! `SessionServiceImpl` — dev/CI path backing for [`crate::sessions::SessionService`].
+//! See the module comment on `run_impl.rs` for dev-vs-production selection.
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -10,6 +13,11 @@ use super::quota_impl::enforce_session_quota;
 use crate::error::RuntimeError;
 use crate::sessions::SessionService;
 
+/// In-memory dev-path implementation of [`crate::sessions::SessionService`].
+///
+/// Selected by `AppState::new` when `CAIRN_FABRIC_ENABLED` is unset; the
+/// production path is `FabricSessionServiceAdapter` (in the cairn-app
+/// crate) wrapping `cairn_fabric::FabricServices::sessions`.
 pub struct SessionServiceImpl<S> {
     store: Arc<S>,
 }

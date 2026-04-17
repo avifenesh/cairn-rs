@@ -17,8 +17,7 @@ use cairn_domain::{
     WorkspaceRole,
 };
 use cairn_runtime::{
-    MailboxService, NotificationService, RecoveryService, RunCostAlertService, RunSlaService,
-    RuntimeError,
+    MailboxService, NotificationService, RunCostAlertService, RunSlaService, RuntimeError,
 };
 use cairn_store::projections::{
     AuditLogReadModel, CheckpointReadModel, OperatorInterventionReadModel, PauseScheduleReadModel,
@@ -1995,6 +1994,16 @@ pub(crate) async fn orchestrate_run_handler(
     }
 }
 
+/// Deprecated stub. Manual recovery used to drive cairn-side
+/// `RecoveryServiceImpl::recover_interrupted_runs`, but recovery now lives
+/// unconditionally in FlowFabric's background scanners
+/// (`LeaseExpiryScanner`, `AttemptTimeoutScanner`,
+/// `ExecutionDeadlineScanner`, `SuspensionTimeoutScanner`,
+/// `DependencyReconciler`, `UnblockScanner`, etc. — 14 total). Calling this
+/// endpoint no longer does anything beyond confirming the run exists.
+///
+/// Kept as a 202 stub so operator dashboards hitting `/v1/runs/:id/recover`
+/// don't break. Scheduled for removal in v2.
 pub(crate) async fn recover_run_handler(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -2009,18 +2018,19 @@ pub(crate) async fn recover_run_handler(
         Err(err) => return runtime_error_response(err),
     }
 
-    match state.runtime.recovery.recover_interrupted_runs(100).await {
-        Ok(summary) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "ok": true,
-                "actions": summary.actions,
-                "scanned": summary.scanned
-            })),
-        )
-            .into_response(),
-        Err(err) => runtime_error_response(err),
-    }
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "status": "accepted",
+            "note": "recovery is handled by FlowFabric background scanners \
+                     (lease_expiry, attempt_timeout, execution_deadline, \
+                     suspension_timeout, dependency_reconciler, unblock_scanner, \
+                     and 8 others); this endpoint is a no-op kept for \
+                     backwards-compatibility and will be removed in v2",
+            "deprecated": true,
+        })),
+    )
+        .into_response()
 }
 
 pub(crate) async fn get_run_recovery_status_handler(

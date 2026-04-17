@@ -1,12 +1,15 @@
-//! Week 3 integration tests: approvals, checkpoints, mailbox, recovery.
+//! Week 3 integration tests: approvals, checkpoints, mailbox.
+//!
+//! Recovery tests that lived here were removed in the Fabric finalization
+//! round — FF's LeaseExpiryScanner owns expired-lease recovery
+//! unconditionally.
 
 use std::sync::Arc;
 
 use cairn_domain::*;
 use cairn_runtime::{
     ApprovalService, ApprovalServiceImpl, CheckpointService, CheckpointServiceImpl, MailboxService,
-    MailboxServiceImpl, RecoveryService, RecoveryServiceImpl, RunService, RunServiceImpl,
-    SessionService, SessionServiceImpl, TaskService, TaskServiceImpl,
+    MailboxServiceImpl, RunService, RunServiceImpl, SessionService, SessionServiceImpl,
 };
 use cairn_store::InMemoryStore;
 
@@ -169,39 +172,10 @@ async fn mailbox_append_and_list() {
     assert_eq!(messages.len(), 2);
 }
 
-// -- Recovery tests --
-
-#[tokio::test]
-async fn recovery_requeues_expired_leased_tasks() {
-    let store = Arc::new(InMemoryStore::new());
-    let task_svc = TaskServiceImpl::new(store.clone());
-    let recovery_svc = RecoveryServiceImpl::new(store);
-    let project = test_project();
-
-    // Create and claim a task with a very short lease
-    task_svc
-        .submit(&project, TaskId::new("task_1"), None, None, 0)
-        .await
-        .unwrap();
-    task_svc
-        .claim(&TaskId::new("task_1"), "worker-a".to_owned(), 1) // 1ms lease
-        .await
-        .unwrap();
-
-    // Far-future now to ensure lease is expired
-    let far_future = u64::MAX / 2;
-    let summary = recovery_svc
-        .recover_expired_leases(far_future, 10)
-        .await
-        .unwrap();
-
-    assert_eq!(summary.scanned, 1);
-    assert_eq!(summary.actions.len(), 1);
-
-    // RFC 005: recovery sweep completes the full cycle — task is requeued.
-    let task = task_svc.get(&TaskId::new("task_1")).await.unwrap().unwrap();
-    assert_eq!(task.state, TaskState::Queued);
-}
+// Recovery tests deleted in the Fabric finalization round — FF's
+// LeaseExpiryScanner owns expired-lease recovery unconditionally
+// (ff-engine/src/scanner/lease_expiry.rs). The cairn-side
+// `RecoveryServiceImpl::recover_expired_leases` no longer exists.
 
 // -- End-to-end with approvals --
 
