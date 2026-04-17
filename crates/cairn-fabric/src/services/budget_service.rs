@@ -338,12 +338,16 @@ impl FabricBudgetService {
             }
         }
 
+        // FF writes budget_limits fields as "hard:<dim>" / "soft:<dim>"
+        // (prefix), see /tmp/FlowFabric/lua/budget.lua:61. Earlier versions of
+        // this code used "<dim>:hard" (suffix) and silently returned empty
+        // limits — caught by test_budget_status_reflects_spend.
         for (k, v) in &limits_fields {
-            if let Some(dim) = k.strip_suffix(":hard") {
+            if let Some(dim) = k.strip_prefix("hard:") {
                 if let Ok(val) = v.parse::<u64>() {
                     hard_limits.insert(dim.to_owned(), val);
                 }
-            } else if let Some(dim) = k.strip_suffix(":soft") {
+            } else if let Some(dim) = k.strip_prefix("soft:") {
                 if let Ok(val) = v.parse::<u64>() {
                     soft_limits.insert(dim.to_owned(), val);
                 }

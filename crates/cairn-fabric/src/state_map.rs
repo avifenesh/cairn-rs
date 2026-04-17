@@ -37,9 +37,13 @@ pub fn adjust_task_state_for_blocking_reason(state: TaskState, blocking_reason: 
 
 pub fn ff_public_state_to_task_state(state: PublicState) -> (TaskState, Option<FailureClass>) {
     match state {
-        PublicState::Waiting | PublicState::Delayed | PublicState::RateLimited => {
-            (TaskState::Queued, None)
-        }
+        // FF `Waiting` = claim-eligible (public_state written by promoter after backoff).
+        // FF `Delayed` = retry-backoff pending, NOT yet eligible — mapping it to Queued
+        // would trick `wait_until_eligible` into claiming before the DelayedPromoter runs,
+        // which FF rejects with `execution_not_eligible`. Treat as RetryableFailed so the
+        // state is observably different until the promoter makes it eligible.
+        PublicState::Waiting | PublicState::RateLimited => (TaskState::Queued, None),
+        PublicState::Delayed => (TaskState::RetryableFailed, None),
         PublicState::WaitingChildren => (TaskState::WaitingDependency, None),
         PublicState::Active => (TaskState::Running, None),
         PublicState::Suspended => (TaskState::Paused, None),
@@ -185,6 +189,25 @@ mod tests {
     #[test]
     fn task_waiting_maps_to_queued() {
         let (task, fc) = ff_public_state_to_task_state(PublicState::Waiting);
+        assert_eq!(task, TaskState::Queued);
+        assert!(fc.is_none());
+    }
+
+    #[test]
+    fn task_delayed_maps_to_retryable_failed_not_queued() {
+        // Delayed = retry backoff pending; if we mapped this to Queued,
+        // callers polling for claim-eligibility would see Queued before the
+        // DelayedPromoter runs and ff_issue_claim_grant would reject with
+        // execution_not_eligible. RetryableFailed makes the distinction
+        // observable and transitions back to Queued only when FF promotes.
+        let (task, fc) = ff_public_state_to_task_state(PublicState::Delayed);
+        assert_eq!(task, TaskState::RetryableFailed);
+        assert!(fc.is_none());
+    }
+
+    #[test]
+    fn task_rate_limited_maps_to_queued() {
+        let (task, fc) = ff_public_state_to_task_state(PublicState::RateLimited);
         assert_eq!(task, TaskState::Queued);
         assert!(fc.is_none());
     }

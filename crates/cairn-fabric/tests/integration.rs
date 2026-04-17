@@ -3,10 +3,10 @@
 // All tests are #[ignore] by default — they require a running Valkey.
 //
 // Run with:
-//   CAIRN_TEST_VALKEY_URL=valkey://localhost:6379 cargo test -p cairn-fabric --test integration -- --ignored
+//   CAIRN_TEST_VALKEY_URL=redis://localhost:6379 cargo test -p cairn-fabric --test integration -- --ignored
 //
 // Single test:
-//   CAIRN_TEST_VALKEY_URL=valkey://localhost:6379 cargo test -p cairn-fabric --test integration test_create_and_read_run -- --ignored
+//   CAIRN_TEST_VALKEY_URL=redis://localhost:6379 cargo test -p cairn-fabric --test integration test_create_and_read_run -- --ignored
 
 mod integration {
     pub mod test_budget;
@@ -30,19 +30,29 @@ pub struct TestHarness {
 impl TestHarness {
     pub async fn setup() -> Self {
         let url = std::env::var("CAIRN_TEST_VALKEY_URL")
-            .unwrap_or_else(|_| "valkey://localhost:6379".into());
+            .unwrap_or_else(|_| "redis://localhost:6379".into());
 
         let parsed = url::Url::parse(&url).expect("invalid CAIRN_TEST_VALKEY_URL");
         let host = parsed.host_str().unwrap_or("localhost").to_owned();
         let port = parsed.port().unwrap_or(6379);
-        let tls = parsed.scheme() == "valkeys";
+        let tls = matches!(parsed.scheme(), "rediss" | "valkeys");
+
+        let project = ProjectKey::new("test_tenant", "test_workspace", "test_project");
+
+        // The engine's background scanners (delayed_promoter, lease_expiry,
+        // etc.) iterate the lanes listed in FabricConfig.lane_id. Task and run
+        // services write to `project_to_lane(project)` — if the config lane
+        // differs, the scanners never see our delayed ZSETs and retries stay
+        // stuck in RetryableFailed forever. Derive the config lane from the
+        // same project so both sides agree.
+        let lane_id = cairn_fabric::id_map::project_to_lane(&project);
 
         let config = FabricConfig {
             valkey_host: host,
             valkey_port: port,
             tls,
             cluster: false,
-            lane_id: ff_core::types::LaneId::new("integration_test"),
+            lane_id,
             worker_id: ff_core::types::WorkerId::new("test-worker"),
             worker_instance_id: ff_core::types::WorkerInstanceId::new(
                 uuid::Uuid::new_v4().to_string(),
@@ -59,8 +69,6 @@ impl TestHarness {
         let fabric = FabricServices::start(config, event_log)
             .await
             .expect("failed to connect to Valkey — is it running?");
-
-        let project = ProjectKey::new("test_tenant", "test_workspace", "test_project");
 
         Self { fabric, project }
     }

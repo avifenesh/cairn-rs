@@ -112,7 +112,10 @@ impl FabricConfig {
     }
 
     pub fn valkey_url(&self) -> String {
-        let scheme = if self.tls { "valkeys" } else { "valkey" };
+        // ferriskey's parse_redis_url accepts only `redis | rediss | redis+unix | unix`
+        // schemes; `valkey://` URLs are rejected with InvalidClientConfig. Using
+        // `redis://` is wire-compatible — Valkey speaks the Redis protocol.
+        let scheme = if self.tls { "rediss" } else { "redis" };
         format!("{}://{}:{}", scheme, self.valkey_host, self.valkey_port)
     }
 }
@@ -177,7 +180,7 @@ mod tests {
             signal_dedup_ttl_ms: 86_400_000,
             fcall_timeout_ms: 5_000,
         };
-        assert_eq!(config.valkey_url(), "valkey://myhost:6380");
+        assert_eq!(config.valkey_url(), "redis://myhost:6380");
     }
 
     fn test_config(
@@ -245,6 +248,6 @@ mod tests {
             signal_dedup_ttl_ms: 86_400_000,
             fcall_timeout_ms: 5_000,
         };
-        assert_eq!(config.valkey_url(), "valkeys://secure.host:6379");
+        assert_eq!(config.valkey_url(), "rediss://secure.host:6379");
     }
 }

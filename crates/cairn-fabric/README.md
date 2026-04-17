@@ -30,7 +30,7 @@ disposable Valkey container, builds the FlowFabric Lua library, loads it via
 
 | Variable                | Default                                                | Purpose                                                  |
 |-------------------------|--------------------------------------------------------|----------------------------------------------------------|
-| `CAIRN_TEST_VALKEY_URL` | `valkey://localhost:6379`                              | Connection URL consumed by `TestHarness`.                |
+| `CAIRN_TEST_VALKEY_URL` | `redis://localhost:6379`                              | Connection URL consumed by `TestHarness`.                |
 | `VALKEY_IMAGE`          | `valkey/valkey:8-alpine`                               | Docker image.                                            |
 | `VALKEY_PORT`           | `6379`                                                 | Host port mapped to container `6379`.                    |
 | `VALKEY_CONTAINER`      | `cairn-fabric-integ-valkey`                            | Container name (idempotent reuse).                       |
@@ -53,7 +53,7 @@ disposable Valkey container, builds the FlowFabric Lua library, loads it via
 
 ```bash
 ./scripts/run-fabric-integration-tests.sh --keep-valkey  # one-time setup
-CAIRN_TEST_VALKEY_URL=valkey://localhost:6379 \
+CAIRN_TEST_VALKEY_URL=redis://localhost:6379 \
   cargo test -p cairn-fabric --test integration test_create_and_read_run -- --ignored --nocapture
 ```
 
@@ -97,7 +97,7 @@ docker logs cairn-fabric-integ-valkey
 ```
 
 A common cause is port `6379` being held by a local Redis/Valkey process —
-set `VALKEY_PORT=6380` (and `CAIRN_TEST_VALKEY_URL=valkey://localhost:6380`)
+set `VALKEY_PORT=6380` (and `CAIRN_TEST_VALKEY_URL=redis://localhost:6380`)
 to side-step it.
 
 **`FF checkout on '<other-branch>'`**

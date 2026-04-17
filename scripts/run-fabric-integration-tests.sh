@@ -12,7 +12,7 @@
 #   ./scripts/run-fabric-integration-tests.sh --keep-valkey  # leave container up
 #
 # Environment overrides:
-#   CAIRN_TEST_VALKEY_URL   test connection URL (default: valkey://localhost:6379)
+#   CAIRN_TEST_VALKEY_URL   test connection URL (default: redis://localhost:6379)
 #   VALKEY_IMAGE            docker image (default: valkey/valkey:8-alpine)
 #   VALKEY_PORT             host port (default: 6379)
 #   VALKEY_CONTAINER        container name (default: cairn-fabric-integ-valkey)
@@ -56,7 +56,7 @@ FF_BRANCH="${FF_BRANCH:-feat/execution-engine}"
 FF_REPO="${FF_REPO:-https://github.com/avifenesh/FlowFabric.git}"
 # Keep in lockstep with crates/cairn-fabric/Cargo.toml `rev = ...`.
 FF_REV="${FF_REV:-ee3453890216f4fcffe852f101ef9f58dd0a5f00}"
-TEST_URL="${CAIRN_TEST_VALKEY_URL:-valkey://localhost:${VALKEY_PORT}}"
+TEST_URL="${CAIRN_TEST_VALKEY_URL:-redis://localhost:${VALKEY_PORT}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -111,7 +111,13 @@ ok "FF at ${FF_REV:0:10}"
 
 # ── Valkey container (idempotent) ────────────────────────────────────────────
 say "starting valkey (${VALKEY_IMAGE})"
-existing_state="$(docker inspect -f '{{.State.Status}}' "$VALKEY_CONTAINER" 2>/dev/null || echo "absent")"
+# docker 29 prints a stray stdout line on missing containers before erroring,
+# so use `ps -a` lookup instead — stable across versions.
+if docker ps -a --format '{{.Names}}' | grep -qx "$VALKEY_CONTAINER"; then
+  existing_state="$(docker inspect -f '{{.State.Status}}' "$VALKEY_CONTAINER" 2>/dev/null)"
+else
+  existing_state="absent"
+fi
 case "$existing_state" in
   running)
     ok "reusing running container ${VALKEY_CONTAINER}"
