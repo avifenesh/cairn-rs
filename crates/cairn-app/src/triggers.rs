@@ -7,7 +7,7 @@ use tokio::task::JoinSet;
 use cairn_domain::{
     CorrelationId, DecisionId, ProjectKey, RunId, RuntimeEvent, SessionId, SignalId,
 };
-use cairn_runtime::{DefaultsService, SessionService};
+use cairn_runtime::DefaultsService;
 use cairn_store::projections::RunRecord;
 
 use crate::now_ms;

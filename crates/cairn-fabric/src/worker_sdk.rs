@@ -275,6 +275,21 @@ impl CairnTask {
         Ok(())
     }
 
+    /// Check before expensive side effects. `false` means the lease has
+    /// failed 3 consecutive renewals (ff-sdk threshold) and the orchestrator
+    /// should abort cleanly instead of committing irreversible work.
+    ///
+    /// Thin delegation — FF owns the renewal counter. Returns `false` for a
+    /// consumed task (terminal methods take `self`, so callers holding a
+    /// live reference cannot see a `None` here; the guard exists only to
+    /// keep the signature total for the feature-gated claim path).
+    pub fn is_lease_healthy(&self) -> bool {
+        self.task
+            .as_ref()
+            .map(|t| t.is_lease_healthy())
+            .unwrap_or(false)
+    }
+
     pub async fn log_progress(&self, pct: u8, message: &str) -> Result<(), FabricError> {
         let clamped = pct.min(100);
         self.task()
@@ -533,5 +548,32 @@ mod tests {
         let mut tags = HashMap::new();
         tags.insert("other.key".into(), "value".into());
         assert_eq!(extract_tag(&tags, "cairn.run_id"), None);
+    }
+
+    #[tokio::test]
+    async fn is_lease_healthy_returns_false_for_consumed_task() {
+        // We can't build a real ClaimedTask here (ff-sdk keeps ClaimedTask::new
+        // pub(crate); see the module-level dispute note). What we CAN prove is
+        // the None-branch of the delegation: a CairnTask whose Option<task>
+        // has already been taken must report unhealthy, not panic. That keeps
+        // `is_lease_healthy()` total after a consuming call sequence and
+        // guards against a regression that unwraps `self.task` instead of
+        // going through `as_ref().map(...)`.
+        //
+        // The 3-consecutive-renewal-failure threshold itself lives inside FF's
+        // ClaimedTask; exercising it needs a live Valkey + killed scanner and
+        // belongs in an integration test, not a unit.
+        let (bridge, _handle) = EventBridge::start(Arc::new(cairn_store::InMemoryStore::default()));
+        let task = CairnTask {
+            task: None,
+            bridge: Arc::new(bridge),
+            run_id: None,
+            session_id: None,
+            project: None,
+        };
+        assert!(
+            !task.is_lease_healthy(),
+            "consumed CairnTask must report unhealthy lease, not panic"
+        );
     }
 }

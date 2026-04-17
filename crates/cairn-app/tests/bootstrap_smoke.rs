@@ -14,7 +14,7 @@ use cairn_domain::{
     EventEnvelope, EventId, EventSource, ProjectId, ProjectKey, RuntimeEvent, SessionCreated,
     SessionId, TenantId, WorkspaceId,
 };
-use cairn_runtime::{InMemoryServices, SessionService};
+use cairn_runtime::InMemoryServices;
 use cairn_store::{EventLog, InMemoryStore};
 
 // ── 1. InMemoryStore construction ─────────────────────────────────────────────

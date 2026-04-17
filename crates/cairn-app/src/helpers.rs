@@ -13,7 +13,7 @@ use cairn_domain::{
     ApprovalId, CheckpointId, EventEnvelope, ProjectKey, RunId, RunState, RuntimeEvent, Scope,
     TaskId, TaskState, TenantId, ToolInvocationId, WorkerId,
 };
-use cairn_runtime::{DefaultsService, RunService};
+use cairn_runtime::DefaultsService;
 use cairn_store::projections::{RunReadModel, RunRecord, TaskReadModel};
 use cairn_store::{EntityRef, EventLog, EventPosition, StoredEvent};
 

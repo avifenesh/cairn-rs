@@ -401,105 +401,27 @@ impl FabricTaskService {
             .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
-        // Cancel-safety: if dropped between grant and claim, the grant TTL expires automatically.
-        let grant_ttl = self.runtime.config.grant_ttl_ms;
-        let grant_keys: Vec<String> =
-            vec![ctx.core(), ctx.claim_grant(), idx.lane_eligible(&lane_id)];
-        let grant_args: Vec<String> = vec![
-            eid.to_string(),
-            self.runtime.config.worker_id.to_string(),
-            self.runtime.config.worker_instance_id.to_string(),
-            lane_id.to_string(),
-            String::new(),
-            grant_ttl.to_string(),
-            String::new(),
-            String::new(),
-        ];
-
-        let key_refs: Vec<&str> = grant_keys.iter().map(|s| s.as_str()).collect();
-        let arg_refs: Vec<&str> = grant_args.iter().map(|s| s.as_str()).collect();
-
-        let raw_grant: ferriskey::Value = self
-            .runtime
-            .fcall(
-                crate::fcall::names::FF_ISSUE_CLAIM_GRANT,
-                &key_refs,
-                &arg_refs,
-            )
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_issue_claim_grant: {e}")))?;
-
-        check_fcall_success(&raw_grant, crate::fcall::names::FF_ISSUE_CLAIM_GRANT)?;
-
-        // Step 2: Claim execution
-        let total_str: Option<String> = self
-            .runtime
-            .client
-            .hget(&ctx.core(), "total_attempt_count")
-            .await
-            .unwrap_or(None);
-        let next_idx = total_str
-            .as_deref()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(0);
-        let att_idx = ff_core::types::AttemptIndex::new(next_idx);
-
-        let lease_id = ff_core::types::LeaseId::new();
-        let attempt_id = ff_core::types::AttemptId::new();
-        let renew_before_ms = lease_duration_ms / 3;
-
-        let claim_keys: Vec<String> = vec![
-            ctx.core(),
-            ctx.claim_grant(),
-            idx.lane_eligible(&lane_id),
-            idx.lease_expiry(),
-            idx.worker_leases(&self.runtime.config.worker_instance_id),
-            ctx.attempt_hash(att_idx),
-            ctx.attempt_usage(att_idx),
-            ctx.attempt_policy(att_idx),
-            ctx.attempts(),
-            ctx.lease_current(),
-            ctx.lease_history(),
-            idx.lane_active(&lane_id),
-            idx.attempt_timeout(),
-            idx.execution_deadline(),
-        ];
-        let claim_args: Vec<String> = vec![
-            eid.to_string(),
-            self.runtime.config.worker_id.to_string(),
-            self.runtime.config.worker_instance_id.to_string(),
-            lane_id.to_string(),
-            String::new(),
-            lease_id.to_string(),
-            lease_duration_ms.to_string(),
-            renew_before_ms.to_string(),
-            attempt_id.to_string(),
-            "{}".to_owned(),
-            String::new(),
-            String::new(),
-        ];
-
-        let key_refs2: Vec<&str> = claim_keys.iter().map(|s| s.as_str()).collect();
-        let arg_refs2: Vec<&str> = claim_args.iter().map(|s| s.as_str()).collect();
-
-        let raw: ferriskey::Value = self
-            .runtime
-            .fcall(
-                crate::fcall::names::FF_CLAIM_EXECUTION,
-                &key_refs2,
-                &arg_refs2,
-            )
-            .await
-            .map_err(|e| FabricError::Internal(format!("ff_claim_execution: {e}")))?;
-
-        check_fcall_success(&raw, crate::fcall::names::FF_CLAIM_EXECUTION)?;
-
-        let lease_epoch = parse_claim_lease_epoch(&raw)?;
+        // Shared grant+claim FCALL sequence (see services/claim_common.rs).
+        // Cancel-safety: a drop between the two calls leaves only a grant,
+        // which FF expires via its grant TTL.
+        let outcome = crate::services::claim_common::issue_grant_and_claim(
+            &self.runtime,
+            &ctx,
+            &idx,
+            &eid,
+            &lane_id,
+            lease_duration_ms,
+        )
+        .await?;
 
         // We don't get a ClaimedTask from the SDK here (we're calling FCALL
         // directly), so we store a lightweight handle for terminal ops.
-        let handle =
-            ActiveTaskHandle::new_without_claimed_task(eid.clone(), lease_id, lease_epoch, att_idx);
+        let handle = ActiveTaskHandle::new_without_claimed_task(
+            eid.clone(),
+            outcome.lease_id,
+            outcome.lease_epoch,
+            outcome.attempt_index,
+        );
         self.registry.register(task_id, handle);
 
         let record = self.read_task_record(project, task_id).await?;
@@ -1121,49 +1043,5 @@ impl FabricTaskService {
     ) -> Result<TaskRecord, FabricError> {
         let _ = self.registry.take(task_id);
         self.read_task_record(project, task_id).await
-    }
-}
-
-fn parse_claim_lease_epoch(
-    raw: &ferriskey::Value,
-) -> Result<ff_core::types::LeaseEpoch, FabricError> {
-    if let ferriskey::Value::Array(arr) = raw {
-        if let Some(Ok(ferriskey::Value::BulkString(b))) = arr.get(3) {
-            if let Ok(n) = String::from_utf8_lossy(b).parse::<u64>() {
-                return Ok(ff_core::types::LeaseEpoch::new(n));
-            }
-        }
-        if let Some(Ok(ferriskey::Value::Int(n))) = arr.get(3) {
-            return Ok(ff_core::types::LeaseEpoch::new(*n as u64));
-        }
-    }
-    Err(FabricError::Internal(
-        "ff_claim_execution: missing lease_epoch in response".to_owned(),
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_claim_epoch_from_int() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
-            Ok(ferriskey::Value::BulkString(b"lease_abc".to_vec().into())),
-            Ok(ferriskey::Value::Int(5)),
-        ]);
-        let epoch = parse_claim_lease_epoch(&raw).unwrap();
-        assert_eq!(epoch.0, 5);
-    }
-
-    #[test]
-    fn parse_claim_epoch_missing_returns_err() {
-        let raw = ferriskey::Value::Array(vec![
-            Ok(ferriskey::Value::Int(1)),
-            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
-        ]);
-        assert!(parse_claim_lease_epoch(&raw).is_err());
     }
 }

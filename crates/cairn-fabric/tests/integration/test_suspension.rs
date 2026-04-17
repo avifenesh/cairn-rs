@@ -18,12 +18,9 @@ use std::collections::HashMap;
 use cairn_domain::lifecycle::{
     PauseReason, PauseReasonKind, ResumeTrigger, TaskResumeTarget, TaskState,
 };
-// Used only by the blocked approval tests gated with `#[cfg(any())]`.
-#[allow(unused_imports)]
 use cairn_domain::policy::ApprovalDecision;
 use ff_core::keys::ExecKeyContext;
 use ff_core::partition::execution_partition;
-#[allow(unused_imports)]
 use ff_sdk::task::SignalOutcome;
 
 use crate::TestHarness;
@@ -37,7 +34,6 @@ use crate::TestHarness;
 /// Task execution id derivation is a private method on FabricTaskService,
 /// so this helper only covers the run path. Task-side assertions go
 /// through the service's `tasks.get` (which itself HGETALLs Valkey).
-#[allow(dead_code)] // Used only by the blocked approval tests; see `#[cfg(any())]` gates below.
 async fn read_exec_core_for_run(
     h: &TestHarness,
     run_id: &cairn_domain::RunId,
@@ -173,10 +169,6 @@ async fn test_suspend_and_resume_roundtrip() {
 /// Pausing via `tasks.pause(OperatorPause)` is covered by
 /// `test_suspend_and_resume_roundtrip` — that exercises the same
 /// `ff_suspend_execution` / `ff_resume_execution` contract.
-// Requires FabricRunService::claim (does not exist yet — see module doc).
-// Gated out of the default integration suite so `--ignored` runs a clean 13/13.
-// Re-enable by adding `runs-claim-api` as a cfg feature.
-#[cfg(any())]
 #[tokio::test]
 #[ignore]
 async fn test_signal_delivery_resumes_waiter() {
@@ -189,6 +181,14 @@ async fn test_signal_delivery_resumes_waiter() {
         .start(&h.project, &session_id, run_id.clone(), None)
         .await
         .expect("start failed");
+
+    // FF rejects suspend/signal FCALLs against a non-active execution.
+    // runs.claim issues a grant + lease so lifecycle_phase flips to "active".
+    h.fabric
+        .runs
+        .claim(&h.project, &run_id)
+        .await
+        .expect("runs.claim failed");
 
     h.fabric
         .runs
@@ -277,10 +277,6 @@ async fn test_signal_delivery_resumes_waiter() {
 /// `no_op` (signal.lua:276-278); waitpoint stays open. Second delivery
 /// with same idempotency_key hits the SET NX on signal.lua:117-124 and
 /// returns `ok_duplicate`, parsed by ff-sdk as `SignalOutcome::Duplicate`.
-// Requires FabricRunService::claim (does not exist yet — see module doc).
-// Gated out of the default integration suite so `--ignored` runs a clean 13/13.
-// Re-enable by adding `runs-claim-api` as a cfg feature.
-#[cfg(any())]
 #[tokio::test]
 #[ignore]
 async fn test_signal_delivery_is_idempotent() {
@@ -293,6 +289,12 @@ async fn test_signal_delivery_is_idempotent() {
         .start(&h.project, &session_id, run_id.clone(), None)
         .await
         .expect("start failed");
+
+    h.fabric
+        .runs
+        .claim(&h.project, &run_id)
+        .await
+        .expect("runs.claim failed");
 
     h.fabric
         .runs
@@ -368,10 +370,6 @@ async fn test_signal_delivery_is_idempotent() {
 /// A true ALREADY_SATISFIED assertion requires pending-waitpoint
 /// plumbing that cairn-fabric does not expose yet; flagged for a future
 /// round alongside the pending-waitpoint builder work.
-// Requires FabricRunService::claim (does not exist yet — see module doc).
-// Gated out of the default integration suite so `--ignored` runs a clean 13/13.
-// Re-enable by adding `runs-claim-api` as a cfg feature.
-#[cfg(any())]
 #[tokio::test]
 #[ignore]
 async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
@@ -384,6 +382,12 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
         .start(&h.project, &session_id, run_id.clone(), None)
         .await
         .expect("start failed");
+
+    h.fabric
+        .runs
+        .claim(&h.project, &run_id)
+        .await
+        .expect("runs.claim failed");
 
     h.fabric
         .runs
@@ -416,6 +420,16 @@ async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
         "post-resume current_waitpoint_id must be cleared, got {:?}",
         cleared,
     );
+
+    // FF's signal-resume path (lua/signal.lua:250-262) releases the lease and
+    // flips lifecycle_phase back to `runnable` / ownership_state=`unowned`.
+    // ff_suspend_execution requires `active` → we must re-claim before the
+    // second suspend. This is the intended FF lifecycle, not a workaround.
+    h.fabric
+        .runs
+        .claim(&h.project, &run_id)
+        .await
+        .expect("runs.claim after resume failed");
 
     // Second enter must succeed (no FabricError::Internal propagated) and
     // must produce a FRESH waitpoint id (not the closed one).

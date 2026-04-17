@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use cairn_store::InMemoryStore;
 
+use crate::runs::RunService;
 use crate::services::resource_sharing_impl::ResourceSharingServiceImpl;
 use crate::services::ToolInvocationServiceImpl;
 use crate::services::{
@@ -24,6 +25,8 @@ use crate::services::{
     SignalRouterServiceImpl, SignalServiceImpl, TaskServiceImpl, TenantServiceImpl,
     WorkspaceMembershipServiceImpl, WorkspaceServiceImpl,
 };
+use crate::sessions::SessionService;
+use crate::tasks::TaskService;
 use crate::ProviderRegistry;
 
 /// Bundled runtime services backed by `InMemoryStore`.
@@ -35,9 +38,19 @@ pub struct InMemoryServices {
     pub store: Arc<InMemoryStore>,
 
     // ── Core runtime ───────────────────────────────────────────────────────
-    pub runs: RunServiceImpl<InMemoryStore>,
-    pub tasks: TaskServiceImpl<InMemoryStore>,
-    pub sessions: SessionServiceImpl<InMemoryStore>,
+    //
+    // Trait-object fields so the Fabric adapter can be swapped in at boot
+    // when `CAIRN_FABRIC_ENABLED=1`. Cairn-app's `AppState::new` picks the
+    // concrete impl (in-memory vs FabricRunServiceAdapter et al.). Handlers
+    // call trait methods through these fields unchanged either way.
+    //
+    // `InMemoryServices::new()` / `with_store()` default to the in-memory
+    // impl; `with_store_and_core(store, runs, tasks, sessions)` lets callers
+    // inject the Fabric adapter (or any other `RunService` / `TaskService` /
+    // `SessionService` impl).
+    pub runs: Arc<dyn RunService>,
+    pub tasks: Arc<dyn TaskService>,
+    pub sessions: Arc<dyn SessionService>,
     pub tenants: TenantServiceImpl<InMemoryStore>,
     pub workspaces: WorkspaceServiceImpl<InMemoryStore>,
     pub projects: ProjectServiceImpl<InMemoryStore>,
@@ -126,14 +139,37 @@ impl InMemoryServices {
     }
 
     /// Create a bundle wired to an existing store (useful for testing).
+    ///
+    /// Defaults runs/tasks/sessions to the in-memory impls. Use
+    /// [`Self::with_store_and_core`] to inject alternate impls (e.g. the
+    /// Fabric adapter) at construction time.
     pub fn with_store(store: Arc<InMemoryStore>) -> Self {
+        let runs: Arc<dyn RunService> = Arc::new(RunServiceImpl::new(store.clone()));
+        let tasks: Arc<dyn TaskService> = Arc::new(TaskServiceImpl::new(store.clone()));
+        let sessions: Arc<dyn SessionService> = Arc::new(SessionServiceImpl::new(store.clone()));
+        Self::with_store_and_core(store, runs, tasks, sessions)
+    }
+
+    /// Create a bundle wired to an existing store with caller-supplied core
+    /// services.
+    ///
+    /// Cairn-app uses this to install Fabric-backed adapters for runs,
+    /// tasks, and sessions when `CAIRN_FABRIC_ENABLED` is set. Every other
+    /// service still hangs off the shared in-memory store, so provider
+    /// bindings, evals, approvals, etc. remain identical.
+    pub fn with_store_and_core(
+        store: Arc<InMemoryStore>,
+        runs: Arc<dyn RunService>,
+        tasks: Arc<dyn TaskService>,
+        sessions: Arc<dyn SessionService>,
+    ) -> Self {
         let decisions = Arc::new(crate::decisions::DecisionServiceImpl::new());
         let decision_service: Arc<dyn crate::decisions::DecisionService> = decisions.clone();
 
         Self {
-            runs: RunServiceImpl::new(store.clone()),
-            tasks: TaskServiceImpl::new(store.clone()),
-            sessions: SessionServiceImpl::new(store.clone()),
+            runs,
+            tasks,
+            sessions,
             tenants: TenantServiceImpl::new(store.clone()),
             workspaces: WorkspaceServiceImpl::new(store.clone()),
             projects: ProjectServiceImpl::new(store.clone()),

@@ -24,6 +24,39 @@ pub fn check_fcall_success(raw: &ferriskey::Value, function_name: &str) -> Resul
     )))
 }
 
+/// Extract the Lua error code string from a rejected fcall envelope
+/// (`{Int(status_code), BulkString(error_code), ...}`). Returns `None` when
+/// the envelope is OK or malformed.
+///
+/// Callers use this to dispatch on FF's typed error codes (e.g.
+/// `use_claim_resumed_execution`) without going through the string-formatted
+/// [`FabricError::Internal`] message. Keep the caller pattern:
+///
+/// ```ignore
+/// if let Some(code) = fcall_error_code(&raw) {
+///     if code == "use_claim_resumed_execution" { /* dispatch */ }
+/// }
+/// check_fcall_success(&raw, FF_…)?;
+/// ```
+pub fn fcall_error_code(raw: &ferriskey::Value) -> Option<String> {
+    let arr = match raw {
+        ferriskey::Value::Array(arr) => arr,
+        _ => return None,
+    };
+    let status = match arr.first() {
+        Some(Ok(ferriskey::Value::Int(n))) => *n,
+        _ => return None,
+    };
+    if status == 1 {
+        return None;
+    }
+    match arr.get(1) {
+        Some(Ok(ferriskey::Value::BulkString(b))) => Some(String::from_utf8_lossy(b).into_owned()),
+        Some(Ok(ferriskey::Value::SimpleString(s))) => Some(s.clone()),
+        _ => None,
+    }
+}
+
 pub fn parse_public_state(s: &str) -> ff_core::state::PublicState {
     match s {
         "waiting" => ff_core::state::PublicState::Waiting,

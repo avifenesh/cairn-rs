@@ -402,6 +402,54 @@ impl FabricRunService {
         Ok(Vec::new())
     }
 
+    /// Claim a run's FF execution so it becomes `lifecycle_phase=active`.
+    ///
+    /// Runs are not FF-scheduled in the worker sense (no cairn worker pulls
+    /// them off an eligible zset), but FF's suspension / signal FCALLs
+    /// reject non-active executions. Approval gates (`enter_waiting_approval`
+    /// → `resolve_approval`) therefore need an explicit claim first.
+    ///
+    /// This is the run-side mirror of [`FabricTaskService::claim`]. Both
+    /// share the `ff_issue_claim_grant` + `ff_claim_execution` sequence via
+    /// [`super::claim_common::issue_grant_and_claim`]; neither caches lease
+    /// state — downstream FCALLs re-read `current_lease_id` / `_epoch` /
+    /// `_attempt_id` from `exec_core`.
+    pub async fn claim(
+        &self,
+        project: &ProjectKey,
+        run_id: &RunId,
+    ) -> Result<RunRecord, FabricError> {
+        let eid = self.execution_id(project, run_id);
+        let partition = self.partition(&eid);
+        let ctx = ExecKeyContext::new(&partition, &eid);
+        let idx = IndexKeys::new(&partition);
+
+        let lane_str: Option<String> = self
+            .runtime
+            .client
+            .hget(&ctx.core(), "lane_id")
+            .await
+            .map_err(|e| FabricError::Valkey(format!("HGET lane_id: {e}")))?;
+        let lane_id = match lane_str.filter(|s| !s.is_empty()) {
+            Some(s) => LaneId::new(s),
+            None => self.lane_id(project),
+        };
+
+        let _outcome = super::claim_common::issue_grant_and_claim(
+            &self.runtime,
+            &ctx,
+            &idx,
+            &eid,
+            &lane_id,
+            self.runtime.config.lease_ttl_ms,
+        )
+        .await?;
+
+        // No cairn-side cache. `enter_waiting_approval`, `fail`, `cancel`,
+        // etc. all read the lease triple back from exec_core directly.
+        self.read_run_record(project, run_id).await
+    }
+
     pub async fn complete(
         &self,
         project: &ProjectKey,

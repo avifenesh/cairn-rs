@@ -85,7 +85,7 @@ impl ToolHandler for GetRunTool {
 mod tests {
     use super::*;
     use cairn_domain::{ProjectKey, RunId, SessionId};
-    use cairn_runtime::{InMemoryServices, SessionService};
+    use cairn_runtime::InMemoryServices;
     use std::sync::Arc;
 
     fn project() -> ProjectKey {

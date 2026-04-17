@@ -11,7 +11,7 @@ use cairn_domain::tenancy::TenantKey;
 use cairn_domain::tenancy::WorkspaceRole;
 use cairn_domain::{OperatorId, ProjectKey, SessionId, TenantId, WorkspaceId, WorkspaceKey};
 use cairn_runtime::projects::ProjectService;
-use cairn_runtime::{SessionService, TenantService, WorkspaceMembershipService, WorkspaceService};
+use cairn_runtime::{TenantService, WorkspaceMembershipService, WorkspaceService};
 use tower::ServiceExt;
 
 const TOKEN: &str = "tracing-test-token";

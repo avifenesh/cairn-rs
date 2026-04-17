@@ -10,10 +10,9 @@
 //! missing project context by reading the cairn-store projection first, then
 //! delegates to the Fabric service.
 //!
-//! **Skeleton only** — every trait method currently returns
-//! `unimplemented!()`. Implementation lands after FF B4 (idempotency key ARGV)
-//! stabilises and the `CAIRN_FABRIC_ENABLED` flag is wired through
-//! [`crate::state::AppState`].
+//! The `CAIRN_FABRIC_ENABLED` flag (plumbed through [`crate::state::AppState`])
+//! selects which impl the handlers see at runtime — `*ServiceImpl` against the
+//! in-process store, or the `Fabric*ServiceAdapter` against Valkey-backed FF.
 //!
 //! Scope per service (see `docs/design/notes/cairn-fabric-handler-wiring.md`):
 //!
@@ -31,7 +30,7 @@ use cairn_domain::{
     ApprovalDecision, FailureClass, PauseReason, ProjectKey, ResumeTrigger, RunId, RunResumeTarget,
     SessionId, TaskId, TaskResumeTarget, TaskState,
 };
-use cairn_fabric::FabricServices;
+use cairn_fabric::{FabricError, FabricServices};
 use cairn_runtime::error::RuntimeError;
 use cairn_runtime::runs::RunService;
 use cairn_runtime::sessions::SessionService;
@@ -92,6 +91,20 @@ pub async fn resolve_project_from_session_id(
     }
 }
 
+/// Translate a `FabricError` into the handler-facing `RuntimeError`.
+///
+/// Both types already carry structured NotFound / Validation / Internal
+/// variants, so the mapping is direct. We keep this as a private helper
+/// (rather than a `From` impl in cairn-fabric) so cairn-fabric does not
+/// depend on cairn-runtime — bridge goes one way, same shape both ends.
+fn fabric_err_to_runtime(err: FabricError) -> RuntimeError {
+    match err {
+        FabricError::NotFound { entity, id } => RuntimeError::NotFound { entity, id },
+        FabricError::Validation { reason } => RuntimeError::Validation { reason },
+        other => RuntimeError::Internal(other.to_string()),
+    }
+}
+
 // ── RunService adapter ───────────────────────────────────────────────────────
 
 /// Adapter routing [`RunService`] calls to [`FabricServices::runs`].
@@ -110,70 +123,153 @@ impl FabricRunServiceAdapter {
 impl RunService for FabricRunServiceAdapter {
     async fn start(
         &self,
-        _project: &ProjectKey,
-        _session_id: &SessionId,
-        _run_id: RunId,
-        _parent_run_id: Option<RunId>,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
     ) -> Result<RunRecord, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::start")
+        // Caller already supplies a project — straight delegation, no
+        // projection lookup needed.
+        self.fabric
+            .runs
+            .start(project, session_id, run_id, parent_run_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
-    async fn get(&self, _run_id: &RunId) -> Result<Option<RunRecord>, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::get")
+    async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, RuntimeError> {
+        let project = match resolve_project_from_run_id(&self.store, run_id).await? {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        self.fabric
+            .runs
+            .get(&project, run_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn list_by_session(
         &self,
-        _session_id: &SessionId,
-        _limit: usize,
-        _offset: usize,
+        session_id: &SessionId,
+        limit: usize,
+        offset: usize,
     ) -> Result<Vec<RunRecord>, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::list_by_session")
+        // Projection path: FF does not index runs by cairn SessionId.
+        // cairn-store's RunReadModel serves this view from the event log;
+        // `FabricRunService::list_by_session` itself returns an empty Vec by
+        // design (see run_service.rs:398-402).
+        list_runs_by_session_from_projection(&self.store, session_id, limit, offset).await
     }
 
-    async fn complete(&self, _run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::complete")
+    async fn complete(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+        let project = resolve_run_project(&self.store, run_id).await?;
+        self.fabric
+            .runs
+            .complete(&project, run_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn fail(
         &self,
-        _run_id: &RunId,
-        _failure_class: FailureClass,
+        run_id: &RunId,
+        failure_class: FailureClass,
     ) -> Result<RunRecord, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::fail")
+        let project = resolve_run_project(&self.store, run_id).await?;
+        self.fabric
+            .runs
+            .fail(&project, run_id, failure_class)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
-    async fn cancel(&self, _run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::cancel")
+    async fn cancel(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+        let project = resolve_run_project(&self.store, run_id).await?;
+        self.fabric
+            .runs
+            .cancel(&project, run_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
-    async fn pause(
-        &self,
-        _run_id: &RunId,
-        _reason: PauseReason,
-    ) -> Result<RunRecord, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::pause")
+    async fn pause(&self, run_id: &RunId, reason: PauseReason) -> Result<RunRecord, RuntimeError> {
+        let project = resolve_run_project(&self.store, run_id).await?;
+        self.fabric
+            .runs
+            .pause(&project, run_id, reason)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn resume(
         &self,
-        _run_id: &RunId,
-        _trigger: ResumeTrigger,
-        _target: RunResumeTarget,
+        run_id: &RunId,
+        trigger: ResumeTrigger,
+        target: RunResumeTarget,
     ) -> Result<RunRecord, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::resume")
+        let project = resolve_run_project(&self.store, run_id).await?;
+        self.fabric
+            .runs
+            .resume(&project, run_id, trigger, target)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
-    async fn enter_waiting_approval(&self, _run_id: &RunId) -> Result<RunRecord, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::enter_waiting_approval")
+    async fn enter_waiting_approval(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
+        let project = resolve_run_project(&self.store, run_id).await?;
+        self.fabric
+            .runs
+            .enter_waiting_approval(&project, run_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn resolve_approval(
         &self,
-        _run_id: &RunId,
-        _decision: ApprovalDecision,
+        run_id: &RunId,
+        decision: ApprovalDecision,
     ) -> Result<RunRecord, RuntimeError> {
-        unimplemented!("FabricRunServiceAdapter::resolve_approval")
+        let project = resolve_run_project(&self.store, run_id).await?;
+        self.fabric
+            .runs
+            .resolve_approval(&project, run_id, decision)
+            .await
+            .map_err(fabric_err_to_runtime)
+    }
+
+    async fn list_child_runs(
+        &self,
+        parent_run_id: &RunId,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, RuntimeError> {
+        // Parent→child linkage lives in the RunCreated event that set
+        // `parent_run_id`. FF has no native parent-run index (child runs get
+        // distinct execution ids via id_map), so the projection is the
+        // authoritative read. Mirrors RunServiceImpl::list_child_runs.
+        use cairn_store::event_log::EventLog;
+        use cairn_store::projections::RunReadModel;
+        let events = EventLog::read_stream(self.store.as_ref(), None, 10_000).await?;
+        let child_run_ids: Vec<RunId> = events
+            .into_iter()
+            .filter_map(|stored| {
+                if let cairn_domain::RuntimeEvent::RunCreated(e) = stored.envelope.payload {
+                    if e.parent_run_id.as_ref() == Some(parent_run_id) {
+                        return Some(e.run_id);
+                    }
+                }
+                None
+            })
+            .take(limit)
+            .collect();
+
+        let mut records = Vec::new();
+        for run_id in child_run_ids {
+            if let Some(record) = RunReadModel::get(self.store.as_ref(), &run_id).await? {
+                records.push(record);
+            }
+        }
+        Ok(records)
     }
 }
 
@@ -191,17 +287,84 @@ impl FabricTaskServiceAdapter {
     }
 }
 
+// Error type for the bare-ID path: either the projection failed to find the
+// record (returns NotFound) or the resolver hit a real store error.
+async fn resolve_task_project(
+    store: &Arc<InMemoryStore>,
+    task_id: &TaskId,
+) -> Result<ProjectKey, RuntimeError> {
+    resolve_project_from_task_id(store, task_id)
+        .await?
+        .ok_or_else(|| RuntimeError::NotFound {
+            entity: "task",
+            id: task_id.to_string(),
+        })
+}
+
+async fn resolve_session_project(
+    store: &Arc<InMemoryStore>,
+    session_id: &SessionId,
+) -> Result<ProjectKey, RuntimeError> {
+    resolve_project_from_session_id(store, session_id)
+        .await?
+        .ok_or_else(|| RuntimeError::NotFound {
+            entity: "session",
+            id: session_id.to_string(),
+        })
+}
+
+async fn resolve_run_project(
+    store: &Arc<InMemoryStore>,
+    run_id: &RunId,
+) -> Result<ProjectKey, RuntimeError> {
+    resolve_project_from_run_id(store, run_id)
+        .await?
+        .ok_or_else(|| RuntimeError::NotFound {
+            entity: "run",
+            id: run_id.to_string(),
+        })
+}
+
+/// Projection-backed runs-by-session lookup, extracted so unit tests can
+/// exercise the `list_by_session` path without constructing a Valkey-backed
+/// `FabricServices`.
+async fn list_runs_by_session_from_projection(
+    store: &Arc<InMemoryStore>,
+    session_id: &SessionId,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<RunRecord>, RuntimeError> {
+    RunReadModel::list_by_session(store.as_ref(), session_id, limit, offset)
+        .await
+        .map_err(RuntimeError::from)
+}
+
 #[async_trait]
 impl TaskService for FabricTaskServiceAdapter {
     async fn submit(
         &self,
-        _project: &ProjectKey,
-        _task_id: TaskId,
-        _parent_run_id: Option<RunId>,
-        _parent_task_id: Option<TaskId>,
-        _priority: u32,
+        project: &ProjectKey,
+        task_id: TaskId,
+        parent_run_id: Option<RunId>,
+        parent_task_id: Option<TaskId>,
+        priority: u32,
     ) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::submit")
+        // FabricTaskService::submit has a trailing Option<&SessionId> arg
+        // that the RuntimeService trait does not; None is the correct value
+        // for bare-ID callers — submissions that need a session scope go
+        // through the Run path, which tags the task hash on the run's behalf.
+        self.fabric
+            .tasks
+            .submit(
+                project,
+                task_id,
+                parent_run_id,
+                parent_task_id,
+                priority,
+                None,
+            )
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn declare_dependency(
@@ -209,110 +372,207 @@ impl TaskService for FabricTaskServiceAdapter {
         _dependent_task_id: &TaskId,
         _prerequisite_task_id: &TaskId,
     ) -> Result<TaskDependencyRecord, RuntimeError> {
-        // Per manager 2026-04-17: route through FF flow-edge fcalls
-        // (ff_stage_dependency_edge + ff_apply_dependency_to_child), NOT the
-        // cairn-store event log. Keeps task dependencies aligned with Phase 3
-        // Session→Flow DAG.
-        unimplemented!("FabricTaskServiceAdapter::declare_dependency (FF flow-edge path)")
+        // DEFERRED (Phase 3 Session→Flow DAG round): FF flow-edge fcalls
+        // (ff_stage_dependency_edge + ff_apply_dependency_to_child) are not
+        // yet surfaced on FabricTaskService. Wiring them means adding a
+        // `declare_dependency` method there that calls the two FCALLs
+        // atomically and returns a TaskDependencyRecord shaped record. That
+        // is its own review round — flagged for the Phase 3 lane.
+        //
+        // Until then, surface as Validation so handlers can return 501-style
+        // responses instead of panicking in prod.
+        Err(RuntimeError::Validation {
+            reason: "declare_dependency is not yet wired through the fabric adapter (FF flow-edge path pending)".into(),
+        })
     }
 
     async fn check_dependencies(
         &self,
-        _task_id: &TaskId,
+        task_id: &TaskId,
     ) -> Result<Vec<TaskDependencyRecord>, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::check_dependencies (FF flow-edge path)")
+        // Delegates to the store projection: dependency records are written
+        // by declare_dependency via the event log, so reads come from there.
+        // FF's flow-edge state is not indexed by cairn TaskId, so we can't
+        // read authoritatively from FF without declare_dependency first
+        // writing a projection. Using the projection avoids that coupling.
+        use cairn_store::projections::TaskDependencyReadModel;
+        // Projection's `list_blocking(task_id)` returns the unresolved
+        // prerequisites for THIS task — exactly what check_dependencies
+        // needs to return. `list_unresolved(project)` is a different view
+        // (all unresolved deps in a project), not what the trait asks for.
+        TaskDependencyReadModel::list_blocking(self.store.as_ref(), task_id)
+            .await
+            .map_err(RuntimeError::from)
     }
 
-    async fn get(&self, _task_id: &TaskId) -> Result<Option<TaskRecord>, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::get")
+    async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, RuntimeError> {
+        let project = match resolve_project_from_task_id(&self.store, task_id).await? {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        self.fabric
+            .tasks
+            .get(&project, task_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn claim(
         &self,
-        _task_id: &TaskId,
-        _lease_owner: String,
-        _lease_duration_ms: u64,
+        task_id: &TaskId,
+        lease_owner: String,
+        lease_duration_ms: u64,
     ) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::claim")
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .claim(&project, task_id, lease_owner, lease_duration_ms)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn heartbeat(
         &self,
-        _task_id: &TaskId,
-        _lease_extension_ms: u64,
+        task_id: &TaskId,
+        lease_extension_ms: u64,
     ) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::heartbeat")
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .heartbeat(&project, task_id, lease_extension_ms)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
-    async fn start(&self, _task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::start")
+    async fn start(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .start(&project, task_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
-    async fn complete(&self, _task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::complete")
+    async fn complete(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .complete(&project, task_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn fail(
         &self,
-        _task_id: &TaskId,
-        _failure_class: FailureClass,
+        task_id: &TaskId,
+        failure_class: FailureClass,
     ) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::fail")
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .fail(&project, task_id, failure_class)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
-    async fn cancel(&self, _task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::cancel")
+    async fn cancel(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .cancel(&project, task_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
-    async fn dead_letter(&self, _task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::dead_letter")
+    async fn dead_letter(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .dead_letter(&project, task_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn list_dead_lettered(
         &self,
-        _project: &ProjectKey,
-        _limit: usize,
-        _offset: usize,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
     ) -> Result<Vec<TaskRecord>, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::list_dead_lettered (projection)")
+        // Projection path: FF's terminal_failed set is not indexed by cairn
+        // scope. The handler-wiring map explicitly routes list_* queries to
+        // the store projection to preserve the cairn scope filter.
+        TaskReadModel::list_by_state(self.store.as_ref(), project, TaskState::DeadLettered, limit)
+            .await
+            .map(|mut v| {
+                if offset >= v.len() {
+                    Vec::new()
+                } else {
+                    v.drain(offset..).collect()
+                }
+            })
+            .map_err(RuntimeError::from)
     }
 
     async fn pause(
         &self,
-        _task_id: &TaskId,
-        _reason: PauseReason,
+        task_id: &TaskId,
+        reason: PauseReason,
     ) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::pause")
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .pause(&project, task_id, reason)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn resume(
         &self,
-        _task_id: &TaskId,
-        _trigger: ResumeTrigger,
-        _target: TaskResumeTarget,
+        task_id: &TaskId,
+        trigger: ResumeTrigger,
+        target: TaskResumeTarget,
     ) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::resume")
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .resume(&project, task_id, trigger, target)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn list_by_state(
         &self,
-        _project: &ProjectKey,
-        _state: TaskState,
-        _limit: usize,
+        project: &ProjectKey,
+        state: TaskState,
+        limit: usize,
     ) -> Result<Vec<TaskRecord>, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::list_by_state (projection)")
+        // Projection path — same rationale as list_dead_lettered.
+        TaskReadModel::list_by_state(self.store.as_ref(), project, state, limit)
+            .await
+            .map_err(RuntimeError::from)
     }
 
     async fn list_expired_leases(
         &self,
-        _now: u64,
-        _limit: usize,
+        now: u64,
+        limit: usize,
     ) -> Result<Vec<TaskRecord>, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::list_expired_leases (projection)")
+        // Projection path. FF has its own lease-expiry scanner running
+        // in-process; surfacing expired leases to cairn handlers is a
+        // read-only query on the event log projection.
+        TaskReadModel::list_expired_leases(self.store.as_ref(), now, limit)
+            .await
+            .map_err(RuntimeError::from)
     }
 
-    async fn release_lease(&self, _task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
-        unimplemented!("FabricTaskServiceAdapter::release_lease")
+    async fn release_lease(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
+        let project = resolve_task_project(&self.store, task_id).await?;
+        self.fabric
+            .tasks
+            .release_lease(&project, task_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 }
 
@@ -334,27 +594,49 @@ impl FabricSessionServiceAdapter {
 impl SessionService for FabricSessionServiceAdapter {
     async fn create(
         &self,
-        _project: &ProjectKey,
-        _session_id: SessionId,
+        project: &ProjectKey,
+        session_id: SessionId,
     ) -> Result<SessionRecord, RuntimeError> {
-        unimplemented!("FabricSessionServiceAdapter::create")
+        self.fabric
+            .sessions
+            .create(project, session_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
-    async fn get(&self, _session_id: &SessionId) -> Result<Option<SessionRecord>, RuntimeError> {
-        unimplemented!("FabricSessionServiceAdapter::get")
+    async fn get(&self, session_id: &SessionId) -> Result<Option<SessionRecord>, RuntimeError> {
+        let project = match resolve_project_from_session_id(&self.store, session_id).await? {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        self.fabric
+            .sessions
+            .get(&project, session_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 
     async fn list(
         &self,
-        _project: &ProjectKey,
-        _limit: usize,
-        _offset: usize,
+        project: &ProjectKey,
+        limit: usize,
+        offset: usize,
     ) -> Result<Vec<SessionRecord>, RuntimeError> {
-        unimplemented!("FabricSessionServiceAdapter::list (projection)")
+        // Projection path: FF flows are partitioned by flow_id, not indexed
+        // by project. cairn-store's SessionReadModel lists by project from
+        // the event log — the only source with the cairn scope view.
+        SessionReadModel::list_by_project(self.store.as_ref(), project, limit, offset)
+            .await
+            .map_err(RuntimeError::from)
     }
 
-    async fn archive(&self, _session_id: &SessionId) -> Result<SessionRecord, RuntimeError> {
-        unimplemented!("FabricSessionServiceAdapter::archive")
+    async fn archive(&self, session_id: &SessionId) -> Result<SessionRecord, RuntimeError> {
+        let project = resolve_session_project(&self.store, session_id).await?;
+        self.fabric
+            .sessions
+            .archive(&project, session_id)
+            .await
+            .map_err(fabric_err_to_runtime)
     }
 }
 
@@ -508,6 +790,102 @@ mod tests {
             .unwrap()
             .expect("session is seeded, resolver must return Some");
         assert_eq!(resolved, project);
+    }
+
+    /// `resolve_run_project` surfaces a typed NotFound with
+    /// `entity: "run"`. Handlers map this straight to HTTP 404; any drift to
+    /// a generic Internal error would mask a legitimate missing-resource.
+    #[tokio::test]
+    async fn resolve_run_project_maps_unknown_id_to_run_not_found() {
+        let store = Arc::new(InMemoryStore::new());
+        let err = resolve_run_project(&store, &RunId::new("run_missing"))
+            .await
+            .expect_err("missing run must not resolve");
+        match err {
+            RuntimeError::NotFound { entity, id } => {
+                assert_eq!(entity, "run");
+                assert_eq!(id, "run_missing");
+            }
+            other => panic!("expected NotFound {{ entity: \"run\", .. }}, got {other:?}"),
+        }
+    }
+
+    /// Same invariant as above but on the task-side helper — guards against
+    /// the resolver being silently re-aliased (e.g. someone wiring the
+    /// task helper through the run one).
+    #[tokio::test]
+    async fn resolve_task_project_maps_unknown_id_to_task_not_found() {
+        let store = Arc::new(InMemoryStore::new());
+        let err = resolve_task_project(&store, &TaskId::new("task_missing"))
+            .await
+            .expect_err("missing task must not resolve");
+        match err {
+            RuntimeError::NotFound { entity, id } => {
+                assert_eq!(entity, "task");
+                assert_eq!(id, "task_missing");
+            }
+            other => panic!("expected NotFound {{ entity: \"task\", .. }}, got {other:?}"),
+        }
+    }
+
+    /// `FabricRunServiceAdapter::list_by_session` delegates to the cairn-store
+    /// projection by design — FF does not index runs by cairn `SessionId`.
+    /// This test pins that delegation without needing a live `FabricServices`
+    /// by exercising the extracted helper directly.
+    #[tokio::test]
+    async fn list_runs_by_session_returns_seeded_runs_via_projection() {
+        let store = Arc::new(InMemoryStore::new());
+        let project = test_project();
+        let session_id = SessionId::new("sess_list");
+        let run_a = RunId::new("run_a");
+        let run_b = RunId::new("run_b");
+
+        seed_session(&store, &project, &session_id).await;
+        seed_run(&store, &project, &session_id, &run_a).await;
+        seed_run(&store, &project, &session_id, &run_b).await;
+
+        let rows = list_runs_by_session_from_projection(&store, &session_id, 10, 0)
+            .await
+            .expect("projection read must succeed");
+        assert_eq!(rows.len(), 2);
+        let ids: std::collections::HashSet<_> =
+            rows.iter().map(|r| r.run_id.as_str().to_owned()).collect();
+        assert!(ids.contains("run_a"));
+        assert!(ids.contains("run_b"));
+    }
+
+    /// Unknown session → empty Vec, not an error. Matches the
+    /// trait-level contract (list returns an empty collection, not NotFound,
+    /// for a session with no runs).
+    #[tokio::test]
+    async fn list_runs_by_session_returns_empty_for_unknown_session() {
+        let store = Arc::new(InMemoryStore::new());
+        let rows =
+            list_runs_by_session_from_projection(&store, &SessionId::new("sess_empty"), 10, 0)
+                .await
+                .expect("projection read must succeed");
+        assert!(rows.is_empty());
+    }
+
+    /// Offset slices before limit — pin the pagination contract so a future
+    /// refactor that swaps the two arguments (easy mistake in event-log
+    /// projections) fails loudly.
+    #[tokio::test]
+    async fn list_runs_by_session_respects_offset_and_limit() {
+        let store = Arc::new(InMemoryStore::new());
+        let project = test_project();
+        let session_id = SessionId::new("sess_pag");
+        for i in 0..5 {
+            let run_id = RunId::new(format!("run_{i}"));
+            if i == 0 {
+                seed_session(&store, &project, &session_id).await;
+            }
+            seed_run(&store, &project, &session_id, &run_id).await;
+        }
+        let page = list_runs_by_session_from_projection(&store, &session_id, 2, 2)
+            .await
+            .expect("projection read must succeed");
+        assert_eq!(page.len(), 2, "expected 2 runs with offset=2 limit=2");
     }
 
     /// When a run, task, and session all exist for the same scope, every

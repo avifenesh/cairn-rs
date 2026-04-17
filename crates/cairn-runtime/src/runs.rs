@@ -4,6 +4,7 @@
 //! Runs are the primary execution unit for replay and runtime inspection.
 
 use async_trait::async_trait;
+use cairn_domain::commands::StartRun;
 use cairn_domain::{
     FailureClass, PauseReason, ProjectKey, ResumeTrigger, RunId, RunResumeTarget, SessionId,
 };
@@ -75,6 +76,67 @@ pub trait RunService: Send + Sync {
         run_id: &RunId,
         decision: cairn_domain::ApprovalDecision,
     ) -> Result<RunRecord, RuntimeError>;
+
+    /// Start a run from a [`StartRun`] command envelope (trigger path).
+    ///
+    /// Convenience unpacker around [`Self::start`]. Default impl delegates;
+    /// specialised backends may override to skip field-by-field unpacking.
+    async fn start_command(&self, command: StartRun) -> Result<RunRecord, RuntimeError> {
+        self.start(
+            &command.project,
+            &command.session_id,
+            command.run_id,
+            command.parent_run_id,
+        )
+        .await
+    }
+
+    /// Start a run with an external correlation identifier (sqeq ingress).
+    ///
+    /// The correlation id is tagged on the emitted event so downstream
+    /// consumers (observability, audit) can join back to the originating
+    /// request. The default impl ignores the correlation id and delegates
+    /// to [`Self::start`] — override when your backend carries correlation
+    /// through to the event log.
+    async fn start_with_correlation(
+        &self,
+        project: &ProjectKey,
+        session_id: &SessionId,
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        _correlation_id: &str,
+    ) -> Result<RunRecord, RuntimeError> {
+        self.start(project, session_id, run_id, parent_run_id).await
+    }
+
+    /// Spawn a subagent run linked to a parent.
+    ///
+    /// Subagent runs inherit the session and are tracked by the parent for
+    /// hierarchical cancellation. Default impl constructs a child id from
+    /// the parent if none supplied and calls [`Self::start`].
+    async fn spawn_subagent(
+        &self,
+        project: &ProjectKey,
+        parent_run_id: RunId,
+        session_id: &SessionId,
+        child_run_id: Option<RunId>,
+    ) -> Result<RunRecord, RuntimeError> {
+        let child = child_run_id
+            .unwrap_or_else(|| RunId::new(format!("subagent_{}", parent_run_id.as_str())));
+        self.start(project, session_id, child, Some(parent_run_id))
+            .await
+    }
+
+    /// List child runs for a parent.
+    ///
+    /// Backed by the event-log projection in the in-memory impl; the Fabric
+    /// adapter reads from the store projection (FF has no native
+    /// parent-run index).
+    async fn list_child_runs(
+        &self,
+        parent_run_id: &RunId,
+        limit: usize,
+    ) -> Result<Vec<RunRecord>, RuntimeError>;
 }
 
 #[cfg(test)]

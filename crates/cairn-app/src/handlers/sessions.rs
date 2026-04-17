@@ -11,7 +11,6 @@ use axum::{
 
 use cairn_api::http::{ApiError, ListResponse};
 use cairn_domain::{ProjectKey, SessionId};
-use cairn_runtime::SessionService;
 use cairn_store::projections::{
     LlmCallTraceReadModel, RunCostReadModel, RunReadModel, RunRecord, SessionCostReadModel,
     SessionRecord, TaskReadModel,

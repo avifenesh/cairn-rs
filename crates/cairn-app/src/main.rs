@@ -1267,7 +1267,6 @@ mod tests {
     use cairn_api::bootstrap::{ServerBootstrap, StorageBackend};
     use cairn_domain::{ProjectKey, SessionId};
     use cairn_providers::wire::openai_compat::{OpenAiCompat, ProviderConfig};
-    use cairn_runtime::sessions::SessionService;
     use std::sync::Mutex;
     use tower::ServiceExt as _;
 

@@ -7,6 +7,7 @@ pub const FF_RESUME_EXECUTION: &str = "ff_resume_execution";
 pub const FF_DELIVER_SIGNAL: &str = "ff_deliver_signal";
 pub const FF_ISSUE_CLAIM_GRANT: &str = "ff_issue_claim_grant";
 pub const FF_CLAIM_EXECUTION: &str = "ff_claim_execution";
+pub const FF_CLAIM_RESUMED_EXECUTION: &str = "ff_claim_resumed_execution";
 pub const FF_RENEW_LEASE: &str = "ff_renew_lease";
 pub const FF_CREATE_FLOW: &str = "ff_create_flow";
 pub const FF_CANCEL_FLOW: &str = "ff_cancel_flow";
@@ -32,6 +33,7 @@ mod tests {
             FF_DELIVER_SIGNAL,
             FF_ISSUE_CLAIM_GRANT,
             FF_CLAIM_EXECUTION,
+            FF_CLAIM_RESUMED_EXECUTION,
             FF_RENEW_LEASE,
             FF_CREATE_FLOW,
             FF_CANCEL_FLOW,
