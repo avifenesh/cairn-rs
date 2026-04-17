@@ -1457,6 +1457,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 [[package]]
 name = "ferriskey"
 version = "0.1.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1506,6 +1507,7 @@ dependencies = [
 [[package]]
 name = "ff-core"
 version = "0.1.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
 dependencies = [
  "crc16",
  "serde",
@@ -1517,6 +1519,7 @@ dependencies = [
 [[package]]
 name = "ff-engine"
 version = "0.1.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -1529,6 +1532,7 @@ dependencies = [
 [[package]]
 name = "ff-scheduler"
 version = "0.1.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -1538,6 +1542,7 @@ dependencies = [
 [[package]]
 name = "ff-script"
 version = "0.1.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -1548,6 +1553,7 @@ dependencies = [
 [[package]]
 name = "ff-sdk"
 version = "0.1.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
 dependencies = [
  "ferriskey",
  "ff-core",
@@ -4048,6 +4054,7 @@ dependencies = [
 [[package]]
 name = "telemetrylib"
 version = "0.1.0"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
 dependencies = [
  "async-trait",
  "chrono",

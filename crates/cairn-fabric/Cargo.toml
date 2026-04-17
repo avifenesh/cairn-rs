@@ -6,13 +6,14 @@ license = "BSL-1.1"
 publish = false
 
 [dependencies]
-# FlowFabric crates (path deps to external repo)
-ff-core = { path = "/tmp/FlowFabric/crates/ff-core" }
-ff-sdk = { path = "/tmp/FlowFabric/crates/ff-sdk" }
-ff-engine = { path = "/tmp/FlowFabric/crates/ff-engine" }
-ff-scheduler = { path = "/tmp/FlowFabric/crates/ff-scheduler" }
-ff-script = { path = "/tmp/FlowFabric/crates/ff-script" }
-ferriskey = { path = "/tmp/FlowFabric/ferriskey" }
+# FlowFabric crates — pinned to upstream feat/execution-engine until FF publishes to crates.io.
+# Bump rev in lockstep across all six entries when FF moves forward.
+ff-core = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "ee3453890216f4fcffe852f101ef9f58dd0a5f00" }
+ff-sdk = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "ee3453890216f4fcffe852f101ef9f58dd0a5f00" }
+ff-engine = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "ee3453890216f4fcffe852f101ef9f58dd0a5f00" }
+ff-scheduler = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "ee3453890216f4fcffe852f101ef9f58dd0a5f00" }
+ff-script = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "ee3453890216f4fcffe852f101ef9f58dd0a5f00" }
+ferriskey = { git = "https://github.com/avifenesh/FlowFabric.git", rev = "ee3453890216f4fcffe852f101ef9f58dd0a5f00" }
 
 # Cairn crates
 cairn-domain = { path = "../cairn-domain" }

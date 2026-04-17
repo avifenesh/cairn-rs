@@ -19,6 +19,10 @@
 #   FF_PATH                 FlowFabric checkout path (default: /tmp/FlowFabric)
 #   FF_BRANCH               FlowFabric branch (default: feat/execution-engine)
 #   FF_REPO                 clone URL if FF_PATH missing (default: https://github.com/avifenesh/FlowFabric.git)
+#   FF_REV                  FlowFabric SHA — MUST match the rev pinned in
+#                           crates/cairn-fabric/Cargo.toml, otherwise the Lua
+#                           bundle loaded into Valkey drifts from the Rust-side
+#                           FCALL signatures. Default tracks that pin.
 #
 # Exit codes: 0 = tests passed, non-zero = setup or test failure.
 # =============================================================================
@@ -50,6 +54,8 @@ VALKEY_CONTAINER="${VALKEY_CONTAINER:-cairn-fabric-integ-valkey}"
 FF_PATH="${FF_PATH:-/tmp/FlowFabric}"
 FF_BRANCH="${FF_BRANCH:-feat/execution-engine}"
 FF_REPO="${FF_REPO:-https://github.com/avifenesh/FlowFabric.git}"
+# Keep in lockstep with crates/cairn-fabric/Cargo.toml `rev = ...`.
+FF_REV="${FF_REV:-ee3453890216f4fcffe852f101ef9f58dd0a5f00}"
 TEST_URL="${CAIRN_TEST_VALKEY_URL:-valkey://localhost:${VALKEY_PORT}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -92,19 +98,16 @@ fi
 ok "docker, cargo, git available"
 
 # ── FlowFabric checkout ──────────────────────────────────────────────────────
-say "ensuring FlowFabric checkout at ${FF_PATH}"
+say "ensuring FlowFabric checkout at ${FF_PATH} pinned to ${FF_REV:0:10}"
 if [ ! -d "$FF_PATH/.git" ]; then
   say "cloning ${FF_REPO} (branch ${FF_BRANCH}) to ${FF_PATH}"
   git clone --branch "$FF_BRANCH" "$FF_REPO" "$FF_PATH"
   ok "cloned FlowFabric"
-else
-  current_branch="$(git -C "$FF_PATH" rev-parse --abbrev-ref HEAD)"
-  if [ "$current_branch" != "$FF_BRANCH" ]; then
-    warn "FF checkout is on '${current_branch}', expected '${FF_BRANCH}' (leaving as-is — set FF_BRANCH to override check)"
-  else
-    ok "FF checkout on ${FF_BRANCH}"
-  fi
 fi
+say "checking out pinned rev ${FF_REV:0:10}"
+git -C "$FF_PATH" fetch --quiet origin "$FF_BRANCH"
+git -C "$FF_PATH" checkout --quiet --detach "$FF_REV" || die "could not check out FF_REV=${FF_REV} in ${FF_PATH} (try: rm -rf ${FF_PATH})"
+ok "FF at ${FF_REV:0:10}"
 
 # ── Valkey container (idempotent) ────────────────────────────────────────────
 say "starting valkey (${VALKEY_IMAGE})"

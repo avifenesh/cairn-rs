@@ -34,14 +34,15 @@ disposable Valkey container, builds the FlowFabric Lua library, loads it via
 | `VALKEY_IMAGE`          | `valkey/valkey:8-alpine`                               | Docker image.                                            |
 | `VALKEY_PORT`           | `6379`                                                 | Host port mapped to container `6379`.                    |
 | `VALKEY_CONTAINER`      | `cairn-fabric-integ-valkey`                            | Container name (idempotent reuse).                       |
-| `FF_PATH`               | `/tmp/FlowFabric`                                      | FlowFabric checkout location.                            |
-| `FF_BRANCH`             | `feat/execution-engine`                                | Expected FF branch (warn-only if different).             |
+| `FF_PATH`               | `/tmp/FlowFabric`                                      | FlowFabric checkout location (script manages the clone). |
+| `FF_BRANCH`             | `feat/execution-engine`                                | Branch to fetch before checkout.                         |
 | `FF_REPO`               | `https://github.com/avifenesh/FlowFabric.git`          | Clone URL when `FF_PATH` is missing.                     |
+| `FF_REV`                | pinned SHA (see script)                                | **Must match** `rev` in `crates/cairn-fabric/Cargo.toml`. Lua bundle loaded into Valkey drifts from Rust-side FCALL signatures otherwise. |
 
 ### What the script does
 
 1. **Pre-flight** — checks `docker`, `cargo`, `git`, and a reachable docker daemon.
-2. **FF checkout** — clones `FF_REPO` to `FF_PATH` if missing; otherwise reuses the existing checkout.
+2. **FF checkout** — clones `FF_REPO` to `FF_PATH` if missing, then `git fetch` + `git checkout --detach $FF_REV` so Lua-side and Rust-side are on the exact same commit.
 3. **Valkey** — starts `VALKEY_IMAGE` on `VALKEY_PORT`, reusing an existing container if already running.
 4. **Build** — `cargo build --release -p ff-script` in the FF checkout (the crate's `build.rs` concatenates `lua/*.lua` into a single bundled `flowfabric.lua` under `target/release/build/ff-script-*/out/`).
 5. **Load library** — `docker cp` the bundle into the container, then `valkey-cli -x FUNCTION LOAD REPLACE` and verify with `FCALL ff_version 0`.
