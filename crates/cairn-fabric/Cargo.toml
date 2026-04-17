@@ -29,5 +29,12 @@ thiserror = "2"
 dashmap = "6"
 async-trait = "0.1"
 
+[features]
+# B4 idempotency (two-phase rollout): enable ONLY once FF's
+# ff_report_usage_and_check accepts the idempotency-key ARGV slot. Flipping
+# this before FF ships will cause every spend to fail with "wrong number of
+# arguments". See record_spend_with_execution for details.
+fabric-b4-idempotency = []
+
 [dev-dependencies]
 url = "2"

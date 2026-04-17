@@ -11,12 +11,14 @@
 mod integration {
     pub mod test_budget;
     pub mod test_run_lifecycle;
+    pub mod test_session;
+    pub mod test_suspension;
 }
 
 use std::sync::Arc;
 
 use cairn_domain::tenancy::ProjectKey;
-use cairn_domain::{RunId, SessionId};
+use cairn_domain::{RunId, SessionId, TaskId};
 use cairn_fabric::{FabricConfig, FabricServices};
 use cairn_store::InMemoryStore;
 
@@ -69,6 +71,10 @@ impl TestHarness {
 
     pub fn unique_session_id(&self) -> SessionId {
         SessionId::new(format!("integ_sess_{}", uuid::Uuid::new_v4()))
+    }
+
+    pub fn unique_task_id(&self) -> TaskId {
+        TaskId::new(format!("integ_task_{}", uuid::Uuid::new_v4()))
     }
 
     pub async fn teardown(self) {

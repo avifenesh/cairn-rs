@@ -103,7 +103,7 @@ async fn test_duplicate_start_is_idempotent() {
 async fn test_complete_task() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
-    let task_id = TaskId::new(format!("integ_task_{}", uuid::Uuid::new_v4()));
+    let task_id = h.unique_task_id();
 
     h.fabric
         .tasks
@@ -146,12 +146,18 @@ async fn test_complete_task() {
     h.teardown().await;
 }
 
+// `task_service::submit` hardcodes the retry policy to max_retries=2,
+// exponential backoff (initial 1s, 2x multiplier — see task_service.rs:288).
+// That means the FIRST fail MUST return retry-scheduled (Queued /
+// RetryableFailed), not terminal Failed. Pinning that precisely catches a
+// class of regression where the retry path is silently skipped and a
+// transient error is promoted straight to Failed.
 #[tokio::test]
 #[ignore]
-async fn test_fail_task_terminal() {
+async fn test_fail_task_retry_scheduled() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
-    let task_id = TaskId::new(format!("integ_task_{}", uuid::Uuid::new_v4()));
+    let task_id = h.unique_task_id();
 
     h.fabric
         .tasks
@@ -179,15 +185,191 @@ async fn test_fail_task_terminal() {
         .await
         .expect("fail failed");
 
-    // task_service submits with max_retries=2, so first fail triggers retry.
-    // State will be Queued (delayed backoff mapped to Pending/Queued in cairn).
+    // Strict: first fail MUST NOT be terminal when max_retries=2.
     assert!(
-        matches!(failed.state, TaskState::Queued | TaskState::Failed),
-        "expected Queued (retry backoff) or Failed (terminal), got {:?}",
+        !failed.state.is_terminal(),
+        "first fail under max_retries=2 must schedule a retry, got terminal state {:?}",
+        failed.state
+    );
+    // Strict: first fail MUST be in a retry-scheduled state, not arbitrary
+    // non-terminal. Acceptable mappings are Queued (returned to queue) or
+    // RetryableFailed (FF Delayed public_state → cairn RetryableFailed).
+    assert!(
+        matches!(failed.state, TaskState::Queued | TaskState::RetryableFailed),
+        "expected Queued or RetryableFailed after first fail with retries remaining, got {:?}",
         failed.state
     );
 
     h.teardown().await;
+}
+
+/// Fix for cross-review BUG #1 / GAP #7: the prior `test_fail_task_terminal`
+/// name promised terminal transition but only fired fail() once. Walk
+/// through the full retry budget (max_retries=2 → 3 total attempts) and
+/// assert the LAST fail is terminal with failure_class set.
+///
+/// The bounded polling loop waits for FF's DelayedPromoter (scan interval
+/// 750ms per ff-engine/src/scanner/delayed_promoter.rs) to move the
+/// execution back to `eligible_now` after each retry-scheduled backoff.
+/// Task backoffs: 1s, 2s. Plus promoter latency. 15s total budget is
+/// generous but bounded.
+///
+/// If this test flakes on slow CI, the first response should be to
+/// investigate delayed_promoter health — NOT to widen the timeout.
+#[tokio::test]
+#[ignore]
+async fn test_fail_reaches_terminal_after_retry_exhaustion() {
+    let h = TestHarness::setup().await;
+    let session_id = h.unique_session_id();
+    let task_id = h.unique_task_id();
+
+    h.fabric
+        .tasks
+        .submit(
+            &h.project,
+            task_id.clone(),
+            None,
+            None,
+            0,
+            Some(&session_id),
+        )
+        .await
+        .expect("submit failed");
+
+    // Attempt budget with max_retries=2: attempts 1, 2, 3 all fail; after
+    // attempt 3, FF promotes to terminal (execution.lua:1057 — `can_retry`
+    // is false once retry_count == max_retries).
+    let max_attempts = 3;
+    let mut last_state = None;
+
+    for attempt in 1..=max_attempts {
+        wait_until_eligible(&h, &task_id, std::time::Duration::from_secs(10))
+            .await
+            .unwrap_or_else(|diag| {
+                panic!(
+                    "attempt {attempt}: task did not become claim-eligible within timeout — {diag}"
+                );
+            });
+
+        h.fabric
+            .tasks
+            .claim(&h.project, &task_id, "test-worker".into(), 30_000)
+            .await
+            .unwrap_or_else(|e| panic!("attempt {attempt}: claim failed: {e}"));
+
+        let failed = h
+            .fabric
+            .tasks
+            .fail(&h.project, &task_id, FailureClass::ExecutionError)
+            .await
+            .unwrap_or_else(|e| panic!("attempt {attempt}: fail failed: {e}"));
+
+        last_state = Some(failed.state);
+
+        if attempt < max_attempts {
+            assert!(
+                !failed.state.is_terminal(),
+                "attempt {attempt}: expected retry-scheduled (non-terminal), got {:?}",
+                failed.state
+            );
+            assert!(
+                matches!(failed.state, TaskState::Queued | TaskState::RetryableFailed),
+                "attempt {attempt}: expected Queued/RetryableFailed, got {:?}",
+                failed.state
+            );
+        } else {
+            // Final attempt: retries exhausted → terminal Failed.
+            assert_eq!(
+                failed.state,
+                TaskState::Failed,
+                "attempt {attempt}: expected terminal Failed after {attempt} fails, got {:?}",
+                failed.state
+            );
+            assert!(
+                failed.state.is_terminal(),
+                "final fail must be terminal, got {:?}",
+                failed.state
+            );
+        }
+    }
+
+    // Re-read from Valkey — service should still report terminal Failed.
+    let persisted = h
+        .fabric
+        .tasks
+        .get(&h.project, &task_id)
+        .await
+        .expect("get after terminal fail failed")
+        .expect("terminal task must be readable");
+    assert_eq!(
+        persisted.state,
+        TaskState::Failed,
+        "post-terminal Valkey read must still be Failed (persistence), got {:?}",
+        persisted.state,
+    );
+
+    let _ = last_state;
+    h.teardown().await;
+}
+
+/// Poll until `tasks.get(...)` reports a state that is claim-eligible,
+/// or `deadline` elapses. On timeout, returns a diagnostic string that
+/// includes the last observed state and how long we waited — on CI flake
+/// this points the oncall straight at delayed_promoter health without
+/// requiring log archaeology.
+///
+/// Used by `test_fail_reaches_terminal_after_retry_exhaustion` to wait for
+/// FF's DelayedPromoter to move a retry-delayed task back to the eligible
+/// set between fail+reclaim cycles.
+async fn wait_until_eligible(
+    h: &TestHarness,
+    task_id: &TaskId,
+    deadline: std::time::Duration,
+) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    let mut last_state: Option<TaskState> = None;
+    let mut last_fetch_err: Option<String> = None;
+    loop {
+        match h.fabric.tasks.get(&h.project, task_id).await {
+            Ok(Some(record)) => {
+                last_state = Some(record.state);
+                // Leave last_fetch_err untouched — only overwrite when a
+                // fetch actually fails, so the diagnostic reports the most
+                // recent failure even after subsequent successes.
+                // Claim-eligible = Queued (cairn maps FF public_state
+                // "waiting" → Queued). RetryableFailed means still delayed.
+                if matches!(record.state, TaskState::Queued) {
+                    return Ok(());
+                }
+            }
+            Ok(None) => {
+                last_fetch_err = Some("tasks.get returned None (task missing)".into());
+            }
+            Err(e) => {
+                last_fetch_err = Some(format!("tasks.get errored: {e}"));
+            }
+        }
+
+        if start.elapsed() >= deadline {
+            let diag = match (last_state, last_fetch_err) {
+                (Some(s), _) => format!(
+                    "waited {:?}, last state = {:?} (delayed_promoter may be down or backoff still pending)",
+                    start.elapsed(),
+                    s
+                ),
+                (None, Some(e)) => format!(
+                    "waited {:?}, never observed a state — {e}",
+                    start.elapsed()
+                ),
+                (None, None) => format!(
+                    "waited {:?}, never observed a state and no fetch error recorded",
+                    start.elapsed()
+                ),
+            };
+            return Err(diag);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
 }
 
 #[tokio::test]
@@ -195,7 +377,7 @@ async fn test_fail_task_terminal() {
 async fn test_cancel_task() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
-    let task_id = TaskId::new(format!("integ_task_{}", uuid::Uuid::new_v4()));
+    let task_id = h.unique_task_id();
 
     h.fabric
         .tasks

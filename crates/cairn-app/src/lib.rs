@@ -9,6 +9,7 @@
 pub mod bootstrap;
 pub mod errors;
 pub mod extractors;
+pub mod fabric_adapter;
 pub mod handlers;
 pub mod helpers;
 pub mod marketplace_routes;

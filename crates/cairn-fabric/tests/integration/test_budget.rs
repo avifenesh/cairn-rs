@@ -24,7 +24,7 @@ async fn test_budget_hard_limit() {
         .await
         .expect("spend failed");
 
-    assert_eq!(spend_ok, SpendResult::Ok);
+    assert_eq!(spend_ok, SpendResult::Ok { was_retry: false });
 
     let spend_breach = h
         .fabric
@@ -106,7 +106,7 @@ async fn test_budget_release_resets_usage() {
         .await
         .expect("spend after release failed");
 
-    assert_eq!(after, SpendResult::Ok);
+    assert_eq!(after, SpendResult::Ok { was_retry: false });
 
     h.teardown().await;
 }

@@ -15,6 +15,7 @@ cairn-memory = { path = "../cairn-memory" }
 cairn-orchestrator = { path = "../cairn-orchestrator" }
 cairn-providers = { path = "../cairn-providers" }
 cairn-runtime = { path = "../cairn-runtime" }
+cairn-fabric = { path = "../cairn-fabric" }
 cairn-workspace = { path = "../cairn-workspace" }
 cairn-evals = { path = "../cairn-evals" }
 cairn-graph = { path = "../cairn-graph" }

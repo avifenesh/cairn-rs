@@ -4,13 +4,28 @@ use std::sync::Arc;
 use crate::error::FabricError;
 use ff_core::keys::{budget_resets_key, BudgetKeyContext};
 use ff_core::partition::budget_partition;
-use ff_core::types::{BudgetId, TimestampMs};
+use ff_core::types::{BudgetId, ExecutionId, TimestampMs};
+use uuid::Uuid;
 
 use crate::boot::FabricRuntime;
 
+// B4 idempotency (prep): stable namespace UUID for spend-dedup keys.
+// Mirrors the UUID v5 + null-byte-delimited scheme from id_map.rs.
+// Changing these bytes orphans any in-flight idempotency record.
+const SPEND_NAMESPACE: Uuid = Uuid::from_bytes([
+    0xb7, 0x1a, 0x2e, 0x04, 0x9c, 0x85, 0x45, 0xc3, 0x88, 0xd9, 0x0f, 0x4a, 0x6b, 0x2c, 0x13, 0x77,
+]);
+
+const SPEND_NAMESPACE_VERSION: u8 = 1;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpendResult {
-    Ok,
+    /// Spend applied (or retry suppressed via idempotency key).
+    /// `was_retry` is true only when FF returned ALREADY_APPLIED — the budget
+    /// was *not* double-decremented; the original record is authoritative.
+    Ok {
+        was_retry: bool,
+    },
     SoftBreach {
         dimension: String,
         action: String,
@@ -21,6 +36,33 @@ pub enum SpendResult {
         current_usage: u64,
         hard_limit: u64,
     },
+}
+
+/// B4 idempotency key derivation (prep).
+///
+/// Stable across retries for the same (budget, execution, dimension set/amount).
+/// Callers that repeat a spend with identical inputs produce an identical key,
+/// so FF can dedup server-side when the contract accepts ARGV[last] = key.
+///
+/// Scheme: UUID v5 over `"v{ver}:spend:\0{budget}\0{execution}\0{sorted dim\0delta pairs}"`.
+/// Null-byte delimiters match id_map.rs and eliminate colon-boundary collisions
+/// (e.g. dim "a:b" vs dims "a"+"b").
+pub(crate) fn compute_spend_idempotency_key(
+    budget_id: &BudgetId,
+    execution_id: &ExecutionId,
+    dimension_deltas: &[(&str, u64)],
+) -> String {
+    let mut sorted: Vec<(&str, u64)> = dimension_deltas.to_vec();
+    sorted.sort_by(|a, b| a.0.cmp(b.0));
+
+    let mut input = format!("v{SPEND_NAMESPACE_VERSION}:spend:\0{budget_id}\0{execution_id}");
+    for (dim, delta) in &sorted {
+        input.push('\0');
+        input.push_str(dim);
+        input.push('\0');
+        input.push_str(&delta.to_string());
+    }
+    Uuid::new_v5(&SPEND_NAMESPACE, input.as_bytes()).to_string()
 }
 
 #[derive(Clone, Debug)]
@@ -160,16 +202,82 @@ impl FabricBudgetService {
         Ok(())
     }
 
+    /// Record spend against a budget.
+    ///
+    /// # B4 idempotency (two-phase rollout)
+    ///
+    /// FF's `ff_report_usage_and_check` does not yet accept an idempotency-key
+    /// ARGV slot. Until it does, calling this twice with the same inputs will
+    /// double-decrement the budget. Phase 1 (this commit) computes a
+    /// deterministic key using the same UUID v5 + null-byte scheme as
+    /// `id_map.rs` but does **not** send it. Phase 2 lands once FF ships: we
+    /// push the key as `ARGV[last]` and FF replies `ALREADY_APPLIED` on retry;
+    /// `parse_spend_result` already understands that arm and returns
+    /// `SpendResult::Ok { was_retry: true }` so callers can log
+    /// retry-suppression without a behavior change today.
+    ///
+    /// When the caller has no `ExecutionId` yet (e.g. pre-claim spending in
+    /// tests), it passes `None` and we degrade to per-budget-only keys. Real
+    /// callers from run_service will always thread the ExecutionId from
+    /// `id_map::run_to_execution_id`.
     pub async fn record_spend(
         &self,
         budget_id: &BudgetId,
+        dimension_deltas: &[(&str, u64)],
+    ) -> Result<SpendResult, FabricError> {
+        self.record_spend_with_execution(budget_id, None, dimension_deltas)
+            .await
+    }
+
+    /// Same as `record_spend` but with a caller-provided ExecutionId for
+    /// idempotency-key derivation. Today the key is computed and discarded;
+    /// once FF accepts the ARGV slot we pass it through unchanged.
+    pub async fn record_spend_with_execution(
+        &self,
+        budget_id: &BudgetId,
+        execution_id: Option<&ExecutionId>,
         dimension_deltas: &[(&str, u64)],
     ) -> Result<SpendResult, FabricError> {
         let partition = budget_partition(budget_id, &self.runtime.partition_config);
         let ctx = BudgetKeyContext::new(&partition, budget_id);
         let now = TimestampMs::now();
 
-        let (keys, argv) = crate::fcall::budget::build_report_usage(&ctx, dimension_deltas, now);
+        let (keys, mut argv) =
+            crate::fcall::budget::build_report_usage(&ctx, dimension_deltas, now);
+
+        // B4 prep: compute the idempotency key on every call so the derivation
+        // is exercised in production telemetry paths before we flip the flag.
+        // When execution_id is absent we still compute a key — it just isn't
+        // retry-stable across process boundaries.
+        let _idempotency_key = match execution_id {
+            Some(eid) => compute_spend_idempotency_key(budget_id, eid, dimension_deltas),
+            None => compute_spend_idempotency_key(
+                budget_id,
+                &ExecutionId::from_uuid(Uuid::nil()),
+                dimension_deltas,
+            ),
+        };
+
+        #[cfg(feature = "fabric-b4-idempotency")]
+        {
+            // TODO(B4): pass as ARGV[last] when FF ff_report_usage_and_check
+            // accepts it. Until FF ships, Lua rejects the extra arg with
+            // "wrong number of arguments". Enabling this feature without the
+            // matching FF Lua change WILL fail every spend — do not flip in
+            // production until both sides are cut over together.
+            argv.push(_idempotency_key);
+        }
+        // In the default (feature-off) build the key would otherwise be dead.
+        // This debug_assert proves the derivation actually ran without adding
+        // runtime telemetry noise — keeps the prep honest for every caller.
+        #[cfg(not(feature = "fabric-b4-idempotency"))]
+        debug_assert!(
+            !_idempotency_key.is_empty(),
+            "B4 prep: idempotency key derivation returned empty string"
+        );
+        // Silence unused-mut warning when feature is off.
+        let _ = &mut argv;
+
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
 
@@ -289,7 +397,13 @@ fn parse_spend_result(raw: &ferriskey::Value) -> Result<SpendResult, FabricError
     };
 
     match status.as_str() {
-        "OK" => Ok(SpendResult::Ok),
+        "OK" => Ok(SpendResult::Ok { was_retry: false }),
+        // B4 idempotency: FF returns ALREADY_APPLIED when the idempotency key
+        // matches a previously-recorded spend. The budget was NOT
+        // decremented again — treat as success and flag the retry so callers
+        // can suppress duplicate telemetry/events without producing a ghost
+        // breach.
+        "ALREADY_APPLIED" | "already_applied" => Ok(SpendResult::Ok { was_retry: true }),
         "SOFT_BREACH" => {
             let dimension = field_str(arr, 1);
             let action = field_str(arr, 2);
@@ -331,7 +445,92 @@ mod tests {
         let raw =
             ferriskey::Value::Array(vec![Ok(ferriskey::Value::SimpleString("OK".to_owned()))]);
         let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(result, SpendResult::Ok);
+        assert_eq!(result, SpendResult::Ok { was_retry: false });
+    }
+
+    #[test]
+    fn spend_result_already_applied_is_retry_success() {
+        // B4 idempotency prep: simulated FF response when the idempotency
+        // key matches a prior spend. Budget is NOT double-decremented; we
+        // surface this as a successful Ok with was_retry=true so callers can
+        // log retry-suppression and skip duplicate telemetry.
+        let raw = ferriskey::Value::Array(vec![Ok(ferriskey::Value::SimpleString(
+            "ALREADY_APPLIED".to_owned(),
+        ))]);
+        let result = parse_spend_result(&raw).unwrap();
+        assert_eq!(result, SpendResult::Ok { was_retry: true });
+    }
+
+    #[test]
+    fn spend_result_already_applied_lowercase_also_handled() {
+        // Defensive: FF Lua may emit either upper- or lower-case spelling.
+        let raw = ferriskey::Value::Array(vec![Ok(ferriskey::Value::BulkString(
+            b"already_applied".to_vec().into(),
+        ))]);
+        let result = parse_spend_result(&raw).unwrap();
+        assert_eq!(result, SpendResult::Ok { was_retry: true });
+    }
+
+    #[test]
+    fn idempotency_key_stable_for_same_inputs() {
+        let bid = BudgetId::new();
+        let eid = ExecutionId::new();
+        let k1 = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
+        let k2 = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
+        assert_eq!(k1, k2);
+        // UUID v5 is 36 chars with hyphens.
+        assert_eq!(k1.len(), 36);
+    }
+
+    #[test]
+    fn idempotency_key_differs_when_inputs_change() {
+        let bid = BudgetId::new();
+        let eid = ExecutionId::new();
+        let k_tokens = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 50)]);
+        let k_cost = compute_spend_idempotency_key(&bid, &eid, &[("cost", 50)]);
+        let k_amount = compute_spend_idempotency_key(&bid, &eid, &[("tokens", 51)]);
+        assert_ne!(k_tokens, k_cost);
+        assert_ne!(k_tokens, k_amount);
+    }
+
+    #[test]
+    fn idempotency_key_order_independent_for_same_dimension_set() {
+        let bid = BudgetId::new();
+        let eid = ExecutionId::new();
+        let k_ab = compute_spend_idempotency_key(&bid, &eid, &[("a", 1), ("b", 2)]);
+        let k_ba = compute_spend_idempotency_key(&bid, &eid, &[("b", 2), ("a", 1)]);
+        assert_eq!(k_ab, k_ba);
+    }
+
+    #[test]
+    fn idempotency_key_isolates_execution() {
+        let bid = BudgetId::new();
+        let eid1 = ExecutionId::new();
+        let eid2 = ExecutionId::new();
+        let k1 = compute_spend_idempotency_key(&bid, &eid1, &[("tokens", 50)]);
+        let k2 = compute_spend_idempotency_key(&bid, &eid2, &[("tokens", 50)]);
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn idempotency_key_isolates_budget() {
+        let b1 = BudgetId::new();
+        let b2 = BudgetId::new();
+        let eid = ExecutionId::new();
+        let k1 = compute_spend_idempotency_key(&b1, &eid, &[("tokens", 50)]);
+        let k2 = compute_spend_idempotency_key(&b2, &eid, &[("tokens", 50)]);
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn idempotency_key_no_delimiter_collision() {
+        // Null-byte delimiters prevent "a:b"+"c" vs "a"+"b:c" style collisions,
+        // same pattern id_map.rs guards against.
+        let bid = BudgetId::new();
+        let eid = ExecutionId::new();
+        let k1 = compute_spend_idempotency_key(&bid, &eid, &[("a:b", 1), ("c", 2)]);
+        let k2 = compute_spend_idempotency_key(&bid, &eid, &[("a", 1), ("b:c", 2)]);
+        assert_ne!(k1, k2);
     }
 
     #[test]
