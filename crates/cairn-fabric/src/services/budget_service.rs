@@ -2,47 +2,29 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::FabricError;
-use ff_core::keys::{budget_resets_key, BudgetKeyContext};
+use ff_core::contracts::ReportUsageResult;
+use ff_core::keys::{budget_policies_index, budget_resets_key, BudgetKeyContext};
 use ff_core::partition::budget_partition;
 use ff_core::types::{BudgetId, ExecutionId, TimestampMs};
 use uuid::Uuid;
 
 use crate::boot::FabricRuntime;
 
-// B4 idempotency (prep): stable namespace UUID for spend-dedup keys.
-// Mirrors the UUID v5 + null-byte-delimited scheme from id_map.rs.
-// Changing these bytes orphans any in-flight idempotency record.
+// Stable namespace UUID for spend-dedup keys. Mirrors the UUID v5 +
+// null-byte-delimited scheme from id_map.rs. Changing these bytes orphans any
+// in-flight idempotency record.
 const SPEND_NAMESPACE: Uuid = Uuid::from_bytes([
     0xb7, 0x1a, 0x2e, 0x04, 0x9c, 0x85, 0x45, 0xc3, 0x88, 0xd9, 0x0f, 0x4a, 0x6b, 0x2c, 0x13, 0x77,
 ]);
 
 const SPEND_NAMESPACE_VERSION: u8 = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SpendResult {
-    /// Spend applied (or retry suppressed via idempotency key).
-    /// `was_retry` is true only when FF returned ALREADY_APPLIED — the budget
-    /// was *not* double-decremented; the original record is authoritative.
-    Ok {
-        was_retry: bool,
-    },
-    SoftBreach {
-        dimension: String,
-        action: String,
-    },
-    HardBreach {
-        dimension: String,
-        action: String,
-        current_usage: u64,
-        hard_limit: u64,
-    },
-}
-
-/// B4 idempotency key derivation (prep).
+/// Derive a stable idempotency key for a spend call.
 ///
 /// Stable across retries for the same (budget, execution, dimension set/amount).
 /// Callers that repeat a spend with identical inputs produce an identical key,
-/// so FF can dedup server-side when the contract accepts ARGV[last] = key.
+/// so FF dedups server-side via the `dedup_key` ARGV slot of
+/// `ff_report_usage_and_check`.
 ///
 /// Scheme: UUID v5 over `"v{ver}:spend:\0{budget}\0{execution}\0{sorted dim\0delta pairs}"`.
 /// Null-byte delimiters match id_map.rs and eliminate colon-boundary collisions
@@ -107,11 +89,13 @@ impl FabricBudgetService {
         let partition = budget_partition(&budget_id, &self.runtime.partition_config);
         let ctx = BudgetKeyContext::new(&partition, &budget_id);
         let resets_zset = budget_resets_key(&partition.hash_tag());
+        let policies_index = budget_policies_index(&partition.hash_tag());
         let now = TimestampMs::now();
 
         let (keys, argv) = crate::fcall::budget::build_create_budget(
             &ctx,
             &resets_zset,
+            &policies_index,
             &budget_id,
             scope_type,
             scope_id,
@@ -204,79 +188,45 @@ impl FabricBudgetService {
 
     /// Record spend against a budget.
     ///
-    /// # B4 idempotency (two-phase rollout)
+    /// Pass-through to `ff_report_usage_and_check`. The result is FF's
+    /// [`ReportUsageResult`] — callers match on the variants directly; cairn
+    /// does not re-derive or unify the wire shape.
     ///
-    /// FF's `ff_report_usage_and_check` does not yet accept an idempotency-key
-    /// ARGV slot. Until it does, calling this twice with the same inputs will
-    /// double-decrement the budget. Phase 1 (this commit) computes a
-    /// deterministic key using the same UUID v5 + null-byte scheme as
-    /// `id_map.rs` but does **not** send it. Phase 2 lands once FF ships: we
-    /// push the key as `ARGV[last]` and FF replies `ALREADY_APPLIED` on retry;
-    /// `parse_spend_result` already understands that arm and returns
-    /// `SpendResult::Ok { was_retry: true }` so callers can log
-    /// retry-suppression without a behavior change today.
-    ///
-    /// When the caller has no `ExecutionId` yet (e.g. pre-claim spending in
-    /// tests), it passes `None` and we degrade to per-budget-only keys. Real
-    /// callers from run_service will always thread the ExecutionId from
-    /// `id_map::run_to_execution_id`.
+    /// `execution_id` is REQUIRED. Two calls that share an idempotency key
+    /// are treated by FF as the same spend (the second returns
+    /// [`ReportUsageResult::AlreadyApplied`] and the budget is not
+    /// double-decremented). The key's caller-identity component comes from
+    /// the ExecutionId, so every distinct logical spend MUST present a
+    /// distinct ExecutionId. Tests without a real execution must mint a
+    /// throwaway ([`ExecutionId::new`]); silently falling back to a
+    /// sentinel (`Uuid::nil`) would make two unrelated process-level
+    /// retries collide into a single FF dedup slot and suppress a
+    /// legitimate spend.
     pub async fn record_spend(
         &self,
         budget_id: &BudgetId,
+        execution_id: &ExecutionId,
         dimension_deltas: &[(&str, u64)],
-    ) -> Result<SpendResult, FabricError> {
-        self.record_spend_with_execution(budget_id, None, dimension_deltas)
-            .await
-    }
+    ) -> Result<ReportUsageResult, FabricError> {
+        if dimension_deltas.is_empty() {
+            return Err(FabricError::Validation {
+                reason: "record_spend: at least one dimension_delta is required".to_owned(),
+            });
+        }
 
-    /// Same as `record_spend` but with a caller-provided ExecutionId for
-    /// idempotency-key derivation. Today the key is computed and discarded;
-    /// once FF accepts the ARGV slot we pass it through unchanged.
-    pub async fn record_spend_with_execution(
-        &self,
-        budget_id: &BudgetId,
-        execution_id: Option<&ExecutionId>,
-        dimension_deltas: &[(&str, u64)],
-    ) -> Result<SpendResult, FabricError> {
         let partition = budget_partition(budget_id, &self.runtime.partition_config);
         let ctx = BudgetKeyContext::new(&partition, budget_id);
         let now = TimestampMs::now();
 
-        let (keys, mut argv) =
-            crate::fcall::budget::build_report_usage(&ctx, dimension_deltas, now);
+        let idempotency_key =
+            compute_spend_idempotency_key(budget_id, execution_id, dimension_deltas);
 
-        // B4 prep: compute the idempotency key on every call so the derivation
-        // is exercised in production telemetry paths before we flip the flag.
-        // When execution_id is absent we still compute a key — it just isn't
-        // retry-stable across process boundaries.
-        let _idempotency_key = match execution_id {
-            Some(eid) => compute_spend_idempotency_key(budget_id, eid, dimension_deltas),
-            None => compute_spend_idempotency_key(
-                budget_id,
-                &ExecutionId::from_uuid(Uuid::nil()),
-                dimension_deltas,
-            ),
-        };
+        // Prefix with the budget's `{b:M}` hash tag so FF's SET lands on the
+        // same slot as the budget itself — matches ff-sdk task.rs:699-702.
+        let dedup_key = format!("ff:usagededup:{}:{}", ctx.hash_tag(), idempotency_key);
 
-        #[cfg(feature = "fabric-b4-idempotency")]
-        {
-            // TODO(B4): pass as ARGV[last] when FF ff_report_usage_and_check
-            // accepts it. Until FF ships, Lua rejects the extra arg with
-            // "wrong number of arguments". Enabling this feature without the
-            // matching FF Lua change WILL fail every spend — do not flip in
-            // production until both sides are cut over together.
-            argv.push(_idempotency_key);
-        }
-        // In the default (feature-off) build the key would otherwise be dead.
-        // This debug_assert proves the derivation actually ran without adding
-        // runtime telemetry noise — keeps the prep honest for every caller.
-        #[cfg(not(feature = "fabric-b4-idempotency"))]
-        debug_assert!(
-            !_idempotency_key.is_empty(),
-            "B4 prep: idempotency key derivation returned empty string"
-        );
-        // Silence unused-mut warning when feature is off.
-        let _ = &mut argv;
+        let (keys, argv) =
+            crate::fcall::budget::build_report_usage(&ctx, dimension_deltas, now, &dedup_key);
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
@@ -339,7 +289,7 @@ impl FabricBudgetService {
         }
 
         // FF writes budget_limits fields as "hard:<dim>" / "soft:<dim>"
-        // (prefix), see /tmp/FlowFabric/lua/budget.lua:61. Earlier versions of
+        // (prefix), see FlowFabric lua/budget.lua:61. Earlier versions of
         // this code used "<dim>:hard" (suffix) and silently returned empty
         // limits — caught by test_budget_status_reflects_spend.
         for (k, v) in &limits_fields {
@@ -380,7 +330,12 @@ impl FabricBudgetService {
     }
 }
 
-fn parse_spend_result(raw: &ferriskey::Value) -> Result<SpendResult, FabricError> {
+/// Parse `ff_report_usage_and_check` wire format:
+/// `{1, "OK"}`, `{1, "SOFT_BREACH", dim, current, limit}`,
+/// `{1, "HARD_BREACH", dim, current, limit}`, `{1, "ALREADY_APPLIED"}`.
+/// Mirrors `parse_report_usage_result` in
+/// `ff-sdk/src/task.rs` (that parser is private, so we keep ours in sync by hand).
+fn parse_spend_result(raw: &ferriskey::Value) -> Result<ReportUsageResult, FabricError> {
     let arr = match raw {
         ferriskey::Value::Array(arr) => arr,
         _ => {
@@ -390,43 +345,48 @@ fn parse_spend_result(raw: &ferriskey::Value) -> Result<SpendResult, FabricError
         }
     };
 
-    let status = match arr.first() {
-        Some(Ok(ferriskey::Value::BulkString(b))) => String::from_utf8_lossy(b).into_owned(),
-        Some(Ok(ferriskey::Value::SimpleString(s))) => s.clone(),
+    let status_code = match arr.first() {
+        Some(Ok(ferriskey::Value::Int(n))) => *n,
         _ => {
             return Err(FabricError::Internal(
-                "ff_report_usage_and_check: missing status".to_owned(),
+                "ff_report_usage_and_check: expected Int status code".to_owned(),
             ))
         }
     };
 
-    match status.as_str() {
-        "OK" => Ok(SpendResult::Ok { was_retry: false }),
-        // B4 idempotency: FF returns ALREADY_APPLIED when the idempotency key
-        // matches a previously-recorded spend. The budget was NOT
-        // decremented again — treat as success and flag the retry so callers
-        // can suppress duplicate telemetry/events without producing a ghost
-        // breach.
-        "ALREADY_APPLIED" | "already_applied" => Ok(SpendResult::Ok { was_retry: true }),
+    if status_code != 1 {
+        let error_code = field_str(arr, 1);
+        return Err(FabricError::Internal(format!(
+            "ff_report_usage_and_check failed: {error_code}"
+        )));
+    }
+
+    let sub_status = field_str(arr, 1);
+    match sub_status.as_str() {
+        "OK" => Ok(ReportUsageResult::Ok),
+        "ALREADY_APPLIED" => Ok(ReportUsageResult::AlreadyApplied),
         "SOFT_BREACH" => {
-            let dimension = field_str(arr, 1);
-            let action = field_str(arr, 2);
-            Ok(SpendResult::SoftBreach { dimension, action })
+            let dimension = field_str(arr, 2);
+            let current_usage: u64 = field_str(arr, 3).parse().unwrap_or(0);
+            let soft_limit: u64 = field_str(arr, 4).parse().unwrap_or(0);
+            Ok(ReportUsageResult::SoftBreach {
+                dimension,
+                current_usage,
+                soft_limit,
+            })
         }
         "HARD_BREACH" => {
-            let dimension = field_str(arr, 1);
-            let action = field_str(arr, 2);
-            let current_usage = field_str(arr, 3).parse().unwrap_or(0);
-            let hard_limit = field_str(arr, 4).parse().unwrap_or(0);
-            Ok(SpendResult::HardBreach {
+            let dimension = field_str(arr, 2);
+            let current_usage: u64 = field_str(arr, 3).parse().unwrap_or(0);
+            let hard_limit: u64 = field_str(arr, 4).parse().unwrap_or(0);
+            Ok(ReportUsageResult::HardBreach {
                 dimension,
-                action,
                 current_usage,
                 hard_limit,
             })
         }
         _ => Err(FabricError::Internal(format!(
-            "ff_report_usage_and_check: unknown status: {status}"
+            "ff_report_usage_and_check: unknown sub-status: {sub_status}"
         ))),
     }
 }
@@ -446,33 +406,26 @@ mod tests {
 
     #[test]
     fn spend_result_ok_variant() {
-        let raw =
-            ferriskey::Value::Array(vec![Ok(ferriskey::Value::SimpleString("OK".to_owned()))]);
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("OK".to_owned())),
+        ]);
         let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(result, SpendResult::Ok { was_retry: false });
+        assert_eq!(result, ReportUsageResult::Ok);
     }
 
     #[test]
-    fn spend_result_already_applied_is_retry_success() {
-        // B4 idempotency prep: simulated FF response when the idempotency
-        // key matches a prior spend. Budget is NOT double-decremented; we
-        // surface this as a successful Ok with was_retry=true so callers can
-        // log retry-suppression and skip duplicate telemetry.
-        let raw = ferriskey::Value::Array(vec![Ok(ferriskey::Value::SimpleString(
-            "ALREADY_APPLIED".to_owned(),
-        ))]);
+    fn spend_result_already_applied_is_separate_variant() {
+        // FF emits a distinct ALREADY_APPLIED sub-status when the dedup key
+        // matches a prior spend — the budget was NOT double-decremented.
+        // Callers that need to distinguish fresh-Ok from retry-Ok match on
+        // `ReportUsageResult::AlreadyApplied` directly.
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("ALREADY_APPLIED".to_owned())),
+        ]);
         let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(result, SpendResult::Ok { was_retry: true });
-    }
-
-    #[test]
-    fn spend_result_already_applied_lowercase_also_handled() {
-        // Defensive: FF Lua may emit either upper- or lower-case spelling.
-        let raw = ferriskey::Value::Array(vec![Ok(ferriskey::Value::BulkString(
-            b"already_applied".to_vec().into(),
-        ))]);
-        let result = parse_spend_result(&raw).unwrap();
-        assert_eq!(result, SpendResult::Ok { was_retry: true });
+        assert_eq!(result, ReportUsageResult::AlreadyApplied);
     }
 
     #[test]
@@ -540,16 +493,19 @@ mod tests {
     #[test]
     fn spend_result_soft_breach() {
         let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
             Ok(ferriskey::Value::SimpleString("SOFT_BREACH".to_owned())),
             Ok(ferriskey::Value::BulkString(b"tokens".to_vec().into())),
-            Ok(ferriskey::Value::BulkString(b"log".to_vec().into())),
+            Ok(ferriskey::Value::BulkString(b"850".to_vec().into())),
+            Ok(ferriskey::Value::BulkString(b"800".to_vec().into())),
         ]);
         let result = parse_spend_result(&raw).unwrap();
         assert_eq!(
             result,
-            SpendResult::SoftBreach {
+            ReportUsageResult::SoftBreach {
                 dimension: "tokens".to_owned(),
-                action: "log".to_owned(),
+                current_usage: 850,
+                soft_limit: 800,
             }
         );
     }
@@ -557,20 +513,19 @@ mod tests {
     #[test]
     fn spend_result_hard_breach() {
         let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
             Ok(ferriskey::Value::SimpleString("HARD_BREACH".to_owned())),
             Ok(ferriskey::Value::BulkString(
                 b"cost_microdollars".to_vec().into(),
             )),
-            Ok(ferriskey::Value::BulkString(b"block".to_vec().into())),
-            Ok(ferriskey::Value::Int(5000)),
-            Ok(ferriskey::Value::Int(4000)),
+            Ok(ferriskey::Value::BulkString(b"5000".to_vec().into())),
+            Ok(ferriskey::Value::BulkString(b"4000".to_vec().into())),
         ]);
         let result = parse_spend_result(&raw).unwrap();
         assert_eq!(
             result,
-            SpendResult::HardBreach {
+            ReportUsageResult::HardBreach {
                 dimension: "cost_microdollars".to_owned(),
-                action: "block".to_owned(),
                 current_usage: 5000,
                 hard_limit: 4000,
             }
@@ -578,10 +533,25 @@ mod tests {
     }
 
     #[test]
-    fn spend_result_unknown_status_errors() {
-        let raw = ferriskey::Value::Array(vec![Ok(ferriskey::Value::SimpleString(
-            "GARBAGE".to_owned(),
-        ))]);
+    fn spend_result_unknown_sub_status_errors() {
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(1)),
+            Ok(ferriskey::Value::SimpleString("GARBAGE".to_owned())),
+        ]);
+        let result = parse_spend_result(&raw);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn spend_result_non_ok_status_code_errors() {
+        // status_code != 1 means FF bubbled an error envelope — we surface it
+        // as FabricError::Internal with the code payload.
+        let raw = ferriskey::Value::Array(vec![
+            Ok(ferriskey::Value::Int(0)),
+            Ok(ferriskey::Value::SimpleString(
+                "budget_not_found".to_owned(),
+            )),
+        ]);
         let result = parse_spend_result(&raw);
         assert!(result.is_err());
     }

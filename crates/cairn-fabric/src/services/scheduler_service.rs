@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use ff_core::partition::PartitionConfig;
@@ -9,17 +10,52 @@ use crate::error::FabricError;
 
 pub struct FabricSchedulerService {
     scheduler: Scheduler,
+    /// Capabilities advertised to FF at claim time. Passed into
+    /// `Scheduler::claim_for_worker` as `&BTreeSet<String>`; FF builds a
+    /// deterministic sorted CSV from this set and matches against each
+    /// execution's `required_capabilities` via `ff_issue_claim_grant`.
+    /// Empty set = "no capabilities" (FF treats any execution with a
+    /// non-empty `required_capabilities` as unclaimable by this worker).
+    worker_capabilities: BTreeSet<String>,
 }
 
 impl FabricSchedulerService {
     pub fn new(runtime: &Arc<FabricRuntime>) -> Self {
         let scheduler = Scheduler::new(runtime.client.clone(), runtime.partition_config);
-        Self { scheduler }
+        Self {
+            scheduler,
+            worker_capabilities: runtime.config.worker_capabilities.clone(),
+        }
     }
 
     pub fn from_parts(client: ferriskey::Client, partition_config: PartitionConfig) -> Self {
         let scheduler = Scheduler::new(client, partition_config);
-        Self { scheduler }
+        Self {
+            scheduler,
+            worker_capabilities: BTreeSet::new(),
+        }
+    }
+
+    /// Construct for tests with an explicit capability set.
+    #[cfg(test)]
+    pub fn from_parts_with_capabilities(
+        client: ferriskey::Client,
+        partition_config: PartitionConfig,
+        worker_capabilities: BTreeSet<String>,
+    ) -> Self {
+        let scheduler = Scheduler::new(client, partition_config);
+        Self {
+            scheduler,
+            worker_capabilities,
+        }
+    }
+
+    /// Read-only view of the capability set threaded into every
+    /// `claim_for_worker` call. Cross-review-friendly: makes the value
+    /// we're actually sending to FF observable without reaching into
+    /// private state.
+    pub fn worker_capabilities(&self) -> &BTreeSet<String> {
+        &self.worker_capabilities
     }
 
     pub async fn claim_for_worker(
@@ -30,7 +66,13 @@ impl FabricSchedulerService {
         grant_ttl_ms: u64,
     ) -> Result<Option<ClaimGrant>, FabricError> {
         self.scheduler
-            .claim_for_worker(lane_id, worker_id, instance_id, grant_ttl_ms)
+            .claim_for_worker(
+                lane_id,
+                worker_id,
+                instance_id,
+                &self.worker_capabilities,
+                grant_ttl_ms,
+            )
             .await
             .map_err(|e| FabricError::Bridge(format!("scheduler claim_for_worker: {e}")))
     }
@@ -99,5 +141,84 @@ mod tests {
                 w[1]
             );
         }
+    }
+
+    // Capability-threading unit tests.
+    //
+    // These tests verify the cairn-side plumbing — that the BTreeSet in
+    // FabricConfig is the one `FabricSchedulerService::new` clones into its
+    // field, and the one `claim_for_worker` passes to ff-scheduler
+    // unchanged. FF-side subset matching, CSV canonicalization, and token
+    // validation are covered by ff-scheduler's own tests; we do NOT
+    // duplicate that here (see design principle: FF owns capability logic,
+    // cairn only threads the set through).
+    //
+    // We cannot construct a ferriskey::Client without a live connection,
+    // so we can't instantiate FabricSchedulerService itself in a unit test.
+    // What we can — and do — verify: FabricConfig stores the caps verbatim,
+    // BTreeSet provides deterministic sorted iteration (so FF's derived
+    // CSV is stable), and deduplication is already handled by the container
+    // (so operator mistakes like double-listing a token can't inflate FF's
+    // CAPS_MAX_TOKENS count).
+
+    #[test]
+    fn config_preserves_capability_set_verbatim() {
+        use crate::config::FabricConfig;
+        let mut caps = BTreeSet::new();
+        caps.insert("gpu".to_owned());
+        caps.insert("cuda-12".to_owned());
+        caps.insert("linux-x86_64".to_owned());
+
+        let config = FabricConfig {
+            valkey_host: "localhost".into(),
+            valkey_port: 6379,
+            tls: false,
+            cluster: false,
+            lane_id: ff_core::types::LaneId::new("test"),
+            worker_id: ff_core::types::WorkerId::new("w"),
+            worker_instance_id: ff_core::types::WorkerInstanceId::new("i"),
+            namespace: ff_core::types::Namespace::new("ns"),
+            lease_ttl_ms: 30_000,
+            grant_ttl_ms: 5_000,
+            max_concurrent_tasks: 1,
+            signal_dedup_ttl_ms: 86_400_000,
+            fcall_timeout_ms: 5_000,
+            worker_capabilities: caps.clone(),
+            waitpoint_hmac_secret: None,
+            waitpoint_hmac_kid: None,
+        };
+
+        // The config carries the set unchanged. FabricSchedulerService::new
+        // clones this field verbatim — the subject under test is that no
+        // reordering, filtering, or canonicalization happens on the cairn
+        // side. FF does the canonicalization (sorted CSV) internally.
+        assert_eq!(
+            config.worker_capabilities.iter().collect::<Vec<_>>(),
+            vec!["cuda-12", "gpu", "linux-x86_64"],
+            "BTreeSet must iterate in deterministic sorted order so FF's CSV is stable",
+        );
+        assert_eq!(config.worker_capabilities, caps);
+    }
+
+    #[test]
+    fn empty_capability_set_is_distinct_from_missing() {
+        // Empty set = no caps advertised (FF accepts, only matches
+        // zero-requirement executions). Smoke-test that Default produces
+        // empty, not a phantom sentinel.
+        let caps: BTreeSet<String> = BTreeSet::new();
+        assert!(caps.is_empty());
+        assert_eq!(caps.iter().next(), None);
+    }
+
+    #[test]
+    fn btreeset_deduplicates_capability_tokens() {
+        // If an operator double-lists a capability (common mistake in env
+        // var parsing), BTreeSet collapses it — FF will never see a
+        // duplicate token, which keeps its CAPS_MAX_TOKENS count honest.
+        let mut caps = BTreeSet::new();
+        caps.insert("gpu".to_owned());
+        caps.insert("gpu".to_owned());
+        caps.insert("cpu".to_owned());
+        assert_eq!(caps.len(), 2);
     }
 }

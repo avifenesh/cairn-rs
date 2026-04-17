@@ -17,7 +17,7 @@
 #   VALKEY_PORT             host port (default: 6379)
 #   VALKEY_CONTAINER        container name (default: cairn-fabric-integ-valkey)
 #   FF_PATH                 FlowFabric checkout path (default: /tmp/FlowFabric)
-#   FF_BRANCH               FlowFabric branch (default: feat/execution-engine)
+#   FF_BRANCH               FlowFabric branch (default: main)
 #   FF_REPO                 clone URL if FF_PATH missing (default: https://github.com/avifenesh/FlowFabric.git)
 #   FF_REV                  FlowFabric SHA — MUST match the rev pinned in
 #                           crates/cairn-fabric/Cargo.toml, otherwise the Lua
@@ -52,10 +52,10 @@ VALKEY_IMAGE="${VALKEY_IMAGE:-valkey/valkey:8-alpine}"
 VALKEY_PORT="${VALKEY_PORT:-6379}"
 VALKEY_CONTAINER="${VALKEY_CONTAINER:-cairn-fabric-integ-valkey}"
 FF_PATH="${FF_PATH:-/tmp/FlowFabric}"
-FF_BRANCH="${FF_BRANCH:-feat/execution-engine}"
+FF_BRANCH="${FF_BRANCH:-main}"
 FF_REPO="${FF_REPO:-https://github.com/avifenesh/FlowFabric.git}"
 # Keep in lockstep with crates/cairn-fabric/Cargo.toml `rev = ...`.
-FF_REV="${FF_REV:-ee3453890216f4fcffe852f101ef9f58dd0a5f00}"
+FF_REV="${FF_REV:-a09871000574388256b1dd7c910239e992c0d3a6}"
 TEST_URL="${CAIRN_TEST_VALKEY_URL:-redis://localhost:${VALKEY_PORT}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

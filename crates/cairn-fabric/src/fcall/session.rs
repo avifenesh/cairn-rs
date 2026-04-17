@@ -1,14 +1,20 @@
-use ff_core::keys::FlowKeyContext;
+use ff_core::keys::{FlowIndexKeys, FlowKeyContext};
+use ff_core::partition::Partition;
 use ff_core::types::{FlowId, Namespace, TimestampMs};
 
 pub fn build_create_flow(
     fctx: &FlowKeyContext,
+    partition: &Partition,
     fid: &FlowId,
     flow_kind: &str,
     namespace: &Namespace,
     now: TimestampMs,
 ) -> (Vec<String>, Vec<String>) {
-    let keys = vec![fctx.core(), fctx.members()];
+    // FF ff_create_flow @a098710 expects KEYS(3): flow_core, members_set, flow_index.
+    // See lua/flow.lua:69-74. flow_index is SADD'd before the idempotency guard to
+    // heal pre-existing flow_core records.
+    let idx = FlowIndexKeys::new(partition);
+    let keys = vec![fctx.core(), fctx.members(), idx.flow_index()];
     let args = vec![
         fid.to_string(),
         flow_kind.to_owned(),
@@ -35,7 +41,7 @@ pub fn build_cancel_flow(
     (keys, args)
 }
 
-pub const CREATE_FLOW_KEYS: usize = 2;
+pub const CREATE_FLOW_KEYS: usize = 3;
 pub const CREATE_FLOW_ARGS: usize = 4;
 pub const CANCEL_FLOW_KEYS: usize = 2;
 pub const CANCEL_FLOW_ARGS: usize = 4;
@@ -52,7 +58,14 @@ mod tests {
         let partition = flow_partition(&fid, &pc);
         let fctx = FlowKeyContext::new(&partition, &fid);
         let ns = Namespace::new("ns");
-        let (keys, args) = build_create_flow(&fctx, &fid, "cairn_session", &ns, TimestampMs::now());
+        let (keys, args) = build_create_flow(
+            &fctx,
+            &partition,
+            &fid,
+            "cairn_session",
+            &ns,
+            TimestampMs::now(),
+        );
         assert_eq!(keys.len(), CREATE_FLOW_KEYS);
         assert_eq!(args.len(), CREATE_FLOW_ARGS);
     }

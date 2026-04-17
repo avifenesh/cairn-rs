@@ -1,11 +1,43 @@
 use std::sync::Arc;
 
-use ff_core::types::{ExecutionId, SignalId, TimestampMs, WaitpointId};
+use ff_core::keys::ExecKeyContext;
+use ff_core::types::{ExecutionId, SignalId, TimestampMs, WaitpointId, WaitpointToken};
 use ff_sdk::task::{Signal, SignalOutcome};
 
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
 use crate::helpers::sanitize_signal_component;
+
+/// Read the HMAC waitpoint token from FF's waitpoint hash.
+///
+/// FF mints the token during `ff_suspend_execution` and writes it to the
+/// `waitpoint_token` field of the waitpoint hash (see lua/suspension.lua
+/// line 185). It is the ONLY source of truth — cairn never caches it.
+///
+/// Returns `Err(Validation)` ONLY when the field is missing or empty — i.e.
+/// the waitpoint hash has never been written, or was deleted. FF does NOT
+/// clear `waitpoint_token` on close (audit retention): a closed waitpoint
+/// still has its token, so this helper returns `Ok(token)` for it and the
+/// downstream `ff_deliver_signal` reply surfaces `waitpoint_closed` at the
+/// state boundary where it belongs. That separation matters — mixing
+/// "waitpoint never existed" with "waitpoint is closed" at the auth layer
+/// would re-create the exact oracle FF's Lua took pains to eliminate.
+pub(crate) async fn read_waitpoint_token(
+    client: &ferriskey::Client,
+    ctx: &ExecKeyContext,
+    waitpoint_id: &WaitpointId,
+) -> Result<WaitpointToken, FabricError> {
+    let token_str: Option<String> = client
+        .hget(&ctx.waitpoint(waitpoint_id), "waitpoint_token")
+        .await
+        .map_err(|e| FabricError::Valkey(format!("HGET waitpoint_token: {e}")))?;
+    match token_str {
+        Some(s) if !s.is_empty() => Ok(WaitpointToken::new(s)),
+        _ => Err(FabricError::Validation {
+            reason: format!("waitpoint {waitpoint_id} is not active (missing token)"),
+        }),
+    }
+}
 
 pub struct SignalBridge {
     runtime: Arc<FabricRuntime>,
@@ -42,13 +74,20 @@ impl SignalBridge {
             .into_bytes()
         });
 
+        let partition =
+            ff_core::partition::execution_partition(execution_id, &self.runtime.partition_config);
+        let ctx = ExecKeyContext::new(&partition, execution_id);
+        let waitpoint_token =
+            read_waitpoint_token(&self.runtime.client, &ctx, waitpoint_id).await?;
+
         let signal = Signal {
             signal_name,
             signal_category: "approval".into(),
             payload,
-            source_type: "cairn_operator".into(),
+            source_type: crate::constants::SOURCE_TYPE_APPROVAL_OPERATOR.into(),
             source_identity: "cairn".into(),
             idempotency_key: Some(format!("approval:{safe_id}")),
+            waitpoint_token,
         };
 
         self.deliver_signal(execution_id, waitpoint_id, signal)
@@ -70,13 +109,22 @@ impl SignalBridge {
         .into_bytes();
 
         let safe_id = sanitize_signal_component(child_task_id);
+        let partition = ff_core::partition::execution_partition(
+            parent_execution_id,
+            &self.runtime.partition_config,
+        );
+        let ctx = ExecKeyContext::new(&partition, parent_execution_id);
+        let waitpoint_token =
+            read_waitpoint_token(&self.runtime.client, &ctx, parent_waitpoint_id).await?;
+
         let signal = Signal {
             signal_name: format!("child_completed:{safe_id}"),
             signal_category: "subagent".into(),
             payload: Some(payload),
-            source_type: "cairn_runtime".into(),
+            source_type: crate::constants::SOURCE_TYPE_RUNTIME.into(),
             source_identity: "cairn".into(),
             idempotency_key: Some(format!("child_completed:{safe_id}")),
+            waitpoint_token,
         };
 
         self.deliver_signal(parent_execution_id, parent_waitpoint_id, signal)
@@ -91,13 +139,20 @@ impl SignalBridge {
         result_payload: Option<Vec<u8>>,
     ) -> Result<SignalOutcome, FabricError> {
         let safe_id = sanitize_signal_component(invocation_id);
+        let partition =
+            ff_core::partition::execution_partition(execution_id, &self.runtime.partition_config);
+        let ctx = ExecKeyContext::new(&partition, execution_id);
+        let waitpoint_token =
+            read_waitpoint_token(&self.runtime.client, &ctx, waitpoint_id).await?;
+
         let signal = Signal {
             signal_name: format!("tool_result:{safe_id}"),
             signal_category: "tool".into(),
             payload: result_payload,
-            source_type: "cairn_runtime".into(),
+            source_type: crate::constants::SOURCE_TYPE_RUNTIME.into(),
             source_identity: "cairn".into(),
             idempotency_key: Some(format!("tool_result:{safe_id}")),
+            waitpoint_token,
         };
 
         self.deliver_signal(execution_id, waitpoint_id, signal)
@@ -127,24 +182,11 @@ impl SignalBridge {
         let lane_id = ff_core::types::LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
         let derived_idem = format!("{}:{}:{}", execution_id, signal.signal_name, waitpoint_id);
-        let effective_idem = signal.idempotency_key.as_deref().unwrap_or(&derived_idem);
-        let idem_key = ctx.signal_dedup(waitpoint_id, effective_idem);
-
-        let keys: Vec<String> = vec![
-            ctx.core(),
-            ctx.waitpoint_condition(waitpoint_id),
-            ctx.waitpoint_signals(waitpoint_id),
-            ctx.exec_signals(),
-            ctx.signal(&signal_id),
-            ctx.signal_payload(&signal_id),
-            idem_key,
-            ctx.waitpoint(waitpoint_id),
-            ctx.suspension_current(),
-            idx.lane_eligible(&lane_id),
-            idx.lane_suspended(&lane_id),
-            idx.lane_delayed(&lane_id),
-            idx.suspension_timeout(),
-        ];
+        let effective_idem = signal
+            .idempotency_key
+            .clone()
+            .unwrap_or_else(|| derived_idem.clone());
+        let idem_key = ctx.signal_dedup(waitpoint_id, &effective_idem);
 
         let payload_str = signal
             .payload
@@ -152,25 +194,26 @@ impl SignalBridge {
             .map(|p| String::from_utf8_lossy(p).into_owned())
             .unwrap_or_default();
 
-        let args: Vec<String> = vec![
-            signal_id.to_string(),
-            execution_id.to_string(),
-            waitpoint_id.to_string(),
+        let (keys, args) = crate::fcall::suspension::build_deliver_signal(
+            &ctx,
+            &idx,
+            &lane_id,
+            &signal_id,
+            waitpoint_id,
+            idem_key,
+            execution_id,
             signal.signal_name,
             signal.signal_category,
             signal.source_type,
             signal.source_identity,
             payload_str,
-            "json".to_owned(),
-            effective_idem.to_owned(),
-            String::new(),
-            "waitpoint".to_owned(),
-            now.to_string(),
-            self.runtime.config.signal_dedup_ttl_ms.to_string(),
-            "0".to_owned(),
-            crate::constants::DEFAULT_SIGNAL_MAXLEN.to_owned(),
-            crate::constants::DEFAULT_MAX_SIGNALS_PER_EXECUTION.to_owned(),
-        ];
+            effective_idem,
+            now,
+            self.runtime.config.signal_dedup_ttl_ms,
+            crate::constants::DEFAULT_SIGNAL_MAXLEN,
+            crate::constants::DEFAULT_MAX_SIGNALS_PER_EXECUTION,
+            signal.waitpoint_token.as_str(),
+        );
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -234,6 +277,70 @@ fn extract_str(arr: &[Result<ferriskey::Value, ferriskey::Error>], idx: usize) -
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn signal_carries_waitpoint_token_field() {
+        // Pin the contract: after FF v2 #4, every Signal MUST carry a
+        // waitpoint_token. If ff-sdk removes or renames the field, this
+        // test fails to compile — which is the point.
+        let token = WaitpointToken::new("kid_1:deadbeef");
+        let signal = Signal {
+            signal_name: "approval_granted:foo".into(),
+            signal_category: "approval".into(),
+            payload: None,
+            source_type: crate::constants::SOURCE_TYPE_APPROVAL_OPERATOR.into(),
+            source_identity: "cairn".into(),
+            idempotency_key: Some("approval:foo".into()),
+            waitpoint_token: token.clone(),
+        };
+        assert_eq!(signal.waitpoint_token.as_str(), "kid_1:deadbeef");
+        // Debug MUST redact; it's ok to rely on the ff-core guarantee, but
+        // pin it here because a regression would leak HMAC material into logs.
+        let dbg = format!("{:?}", signal.waitpoint_token);
+        assert!(dbg.contains("REDACTED"), "token Debug must redact: {dbg}");
+        assert!(!dbg.contains("deadbeef"), "token hex must not leak: {dbg}");
+    }
+
+    #[test]
+    fn signal_debug_redacts_token_transitively() {
+        // Derive(Debug) on Signal delegates to WaitpointToken::Debug, which
+        // redacts. Pin this so a future ff-sdk custom Debug impl that used
+        // token.as_str() would leak HMAC material into every tracing!(?signal).
+        let token = WaitpointToken::new("kid_3:deadbeefcafe");
+        let signal = Signal {
+            signal_name: "tool_result:x".into(),
+            signal_category: "tool".into(),
+            payload: None,
+            source_type: "cairn_runtime".into(),
+            source_identity: "cairn".into(),
+            idempotency_key: None,
+            waitpoint_token: token,
+        };
+        let dbg = format!("{signal:?}");
+        assert!(
+            !dbg.contains("deadbeef"),
+            "Signal Debug leaked token material: {dbg}"
+        );
+        assert!(
+            dbg.contains("REDACTED"),
+            "Signal Debug should surface redaction marker: {dbg}"
+        );
+    }
+
+    #[test]
+    fn waitpoint_token_display_redacts() {
+        // Defensive: if we ever log a token accidentally via Display (e.g. in
+        // an error message), the redaction must hold.
+        let token = WaitpointToken::new("kid_2:cafebabe0011");
+        let disp = format!("{token}");
+        assert!(disp.contains("REDACTED"), "Display must redact: {disp}");
+        assert!(
+            !disp.contains("cafebabe"),
+            "token hex must not leak: {disp}"
+        );
+    }
+
     #[test]
     fn approval_signal_name_granted() {
         let id = "appr_1";

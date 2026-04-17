@@ -1,3 +1,43 @@
+//! Thin worker wrapper over `ff_sdk::FlowFabricWorker`.
+//!
+//! # Claim path: dispute note (FF @a09871000574388256b1dd7c910239e992c0d3a6)
+//!
+//! Manager's round-1 brief proposed routing `CairnWorker::claim_next` through
+//! `ff_scheduler::Scheduler::claim_for_worker` + a public
+//! `FlowFabricWorker::claim_from_grant` entry point on ff-sdk. That entry
+//! point does **not** exist in FF @a09871000574388256b1dd7c910239e992c0d3a6:
+//!
+//!   - `ff_sdk::worker::claim_next`        → `#[cfg(feature = "insecure-direct-claim")]`
+//!   - `ff_sdk::worker::issue_claim_grant` → `#[cfg(feature = "insecure-direct-claim")]`
+//!   - `ff_sdk::worker::claim_execution`   → `#[cfg(feature = "insecure-direct-claim")]`
+//!   - `ff_sdk::worker::claim_resumed_execution` → same
+//!   - `ff_sdk::task::ClaimedTask::new`    → `pub(crate)` — not constructable from cairn
+//!
+//! Without a `pub fn claim_from_grant` (or a `pub` `ClaimedTask::new`),
+//! cairn cannot build a `ClaimedTask` from a scheduler-issued `ClaimGrant`.
+//! The wrapper relies on `ClaimedTask` for `complete`, `fail`, `cancel`,
+//! `suspend`, lease renewal, stream writes, progress — every operator
+//! endpoint past claim. Re-implementing those atop the raw `Client` would
+//! duplicate state FF owns (explicit violation of the THIN BRIDGE design
+//! principle in the round brief).
+//!
+//! Chosen compromise until FF publishes a scheduler-mediated public path:
+//!   1. Production claim path: `FabricSchedulerService::claim_for_worker`
+//!      is always available (returns a `ff_scheduler::ClaimGrant`). Callers
+//!      that only need a grant (and drive their own claim FCALL) use it.
+//!      The Valkey-direct claim already used by `task_service::claim` is
+//!      that same pattern.
+//!   2. Legacy direct path: `CairnWorker::claim_next` is now gated behind
+//!      the cairn feature `insecure-direct-claim`, which forwards to
+//!      `ff-sdk/insecure-direct-claim`. Off by default. Available for
+//!      integration tests and local dev that want a ClaimedTask with all
+//!      the stream/progress/lease machinery pre-wired.
+//!
+//! Follow-up: file a FF issue asking for `pub fn FlowFabricWorker::claim_from_grant`
+//! (or a pub constructor on `ClaimedTask`) so cairn can route the production
+//! path through the scheduler without forcing the `insecure-direct-claim`
+//! feature on every worker binary.
+
 use std::sync::Arc;
 
 use cairn_domain::ids::{RunId, SessionId};
@@ -6,16 +46,22 @@ use cairn_domain::tenancy::ProjectKey;
 use ff_sdk::task::{ClaimedTask, FailOutcome, SuspendOutcome};
 use ff_sdk::{FlowFabricWorker, WorkerConfig};
 
-use crate::active_tasks::{ActiveTaskHandle, ActiveTaskRegistry};
+#[cfg(feature = "insecure-direct-claim")]
+use crate::active_tasks::ActiveTaskHandle;
+use crate::active_tasks::ActiveTaskRegistry;
 use crate::config::FabricConfig;
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
+#[cfg(feature = "insecure-direct-claim")]
 use crate::helpers;
 use crate::stream::StreamWriter;
 use crate::suspension;
 
 pub struct CairnWorker {
     inner: FlowFabricWorker,
+    // Only read inside `claim_next` (feature-gated); kept on the struct so
+    // the constructor signature stays stable across feature flips.
+    #[cfg_attr(not(feature = "insecure-direct-claim"), allow(dead_code))]
     bridge: Arc<EventBridge>,
     registry: Arc<ActiveTaskRegistry>,
 }
@@ -26,6 +72,12 @@ impl CairnWorker {
         bridge: Arc<EventBridge>,
         registry: Arc<ActiveTaskRegistry>,
     ) -> Result<Self, FabricError> {
+        // WorkerConfig.capabilities is a `Vec<String>` on ff-sdk; sort + dedup
+        // mirrors the BTreeSet semantics carried by FabricConfig so both the
+        // scheduler path and the direct-claim path advertise an identical,
+        // deterministic set. FF re-validates on ingress.
+        let capabilities: Vec<String> = config.worker_capabilities.iter().cloned().collect();
+
         let worker_config = WorkerConfig {
             host: config.valkey_host.clone(),
             port: config.valkey_port,
@@ -35,7 +87,7 @@ impl CairnWorker {
             worker_instance_id: config.worker_instance_id.clone(),
             namespace: config.namespace.clone(),
             lanes: vec![config.lane_id.clone()],
-            capabilities: Vec::new(),
+            capabilities,
             lease_ttl_ms: config.lease_ttl_ms,
             claim_poll_interval_ms: 1_000,
             max_concurrent_tasks: config.max_concurrent_tasks,
@@ -52,6 +104,15 @@ impl CairnWorker {
         })
     }
 
+    /// Direct (scheduler-bypassing) claim. Gated behind the cairn feature
+    /// `insecure-direct-claim` — default builds don't expose it.
+    ///
+    /// Production callers should use `FabricSchedulerService::claim_for_worker`
+    /// to obtain a `ClaimGrant` (which goes through budget + quota admission),
+    /// then consume that grant via the direct FCALL pattern in
+    /// `task_service::claim`. See the module-level dispute note for why a
+    /// scheduler-mediated `CairnTask` wrapper is not available today.
+    #[cfg(feature = "insecure-direct-claim")]
     pub async fn claim_next(&self) -> Result<Option<CairnTask>, FabricError> {
         let claimed = self
             .inner
@@ -407,6 +468,10 @@ impl CairnTask {
     }
 }
 
+// Used by `claim_next` (feature-gated) and by the unit tests below. When the
+// feature is off in a non-test build, the function has no callers — mark it
+// allow(dead_code) to keep cargo check quiet without hiding real dead code.
+#[cfg_attr(not(feature = "insecure-direct-claim"), allow(dead_code))]
 fn extract_tag(tags: &std::collections::HashMap<String, String>, key: &str) -> Option<String> {
     tags.get(key)
         .map(|v| v.trim())
@@ -417,6 +482,7 @@ fn extract_tag(tags: &std::collections::HashMap<String, String>, key: &str) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::helpers;
     use std::collections::HashMap;
 
     #[test]

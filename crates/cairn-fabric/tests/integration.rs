@@ -63,6 +63,16 @@ impl TestHarness {
             max_concurrent_tasks: 4,
             signal_dedup_ttl_ms: 86_400_000,
             fcall_timeout_ms: 5_000,
+            worker_capabilities: std::collections::BTreeSet::new(),
+            // Deterministic dev secret. Distinct from ff-test's all-zeros
+            // (ff-test/src/fixtures.rs:133) so an accidental cross-contamination
+            // with an ff-test-driven Valkey would surface as an HMAC auth
+            // failure instead of silent acceptance. The kid is cairn-scoped so
+            // it does not collide with FF's default "k1" either.
+            waitpoint_hmac_secret: Some(
+                "00000000000000000000000000000000000000000000000000000000000000aa".into(),
+            ),
+            waitpoint_hmac_kid: Some("cairn-test-k1".into()),
         };
 
         let event_log = Arc::new(InMemoryStore::default());

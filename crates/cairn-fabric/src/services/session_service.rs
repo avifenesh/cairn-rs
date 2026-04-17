@@ -105,8 +105,14 @@ impl FabricSessionService {
             project.tenant_id, project.workspace_id, project.project_id
         );
 
-        let (keys, args) =
-            crate::fcall::session::build_create_flow(&fctx, &fid, "cairn_session", &namespace, now);
+        let (keys, args) = crate::fcall::session::build_create_flow(
+            &fctx,
+            &partition,
+            &fid,
+            "cairn_session",
+            &namespace,
+            now,
+        );
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 

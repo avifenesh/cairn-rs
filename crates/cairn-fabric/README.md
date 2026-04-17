@@ -35,7 +35,7 @@ disposable Valkey container, builds the FlowFabric Lua library, loads it via
 | `VALKEY_PORT`           | `6379`                                                 | Host port mapped to container `6379`.                    |
 | `VALKEY_CONTAINER`      | `cairn-fabric-integ-valkey`                            | Container name (idempotent reuse).                       |
 | `FF_PATH`               | `/tmp/FlowFabric`                                      | FlowFabric checkout location (script manages the clone). |
-| `FF_BRANCH`             | `feat/execution-engine`                                | Branch to fetch before checkout.                         |
+| `FF_BRANCH`             | `main`                                                 | Branch to fetch before checkout.                         |
 | `FF_REPO`               | `https://github.com/avifenesh/FlowFabric.git`          | Clone URL when `FF_PATH` is missing.                     |
 | `FF_REV`                | pinned SHA (see script)                                | **Must match** `rev` in `crates/cairn-fabric/Cargo.toml`. Lua bundle loaded into Valkey drifts from Rust-side FCALL signatures otherwise. |
 
@@ -101,7 +101,7 @@ set `VALKEY_PORT=6380` (and `CAIRN_TEST_VALKEY_URL=redis://localhost:6380`)
 to side-step it.
 
 **`FF checkout on '<other-branch>'`**
-The script warns but does not fix this. `cd /tmp/FlowFabric && git checkout feat/execution-engine`
+The script warns but does not fix this. `cd /tmp/FlowFabric && git checkout main`
 or set `FF_BRANCH` to the branch you intend to test against.
 
 **Port conflict / stale container**
@@ -114,6 +114,6 @@ docker rm -f cairn-fabric-integ-valkey
 
 ## Related
 
-- FlowFabric source: <https://github.com/avifenesh/FlowFabric> (branch `feat/execution-engine`)
+- FlowFabric source: <https://github.com/avifenesh/FlowFabric> (branch `main`)
 - Integration test harness: `tests/integration.rs` (`TestHarness::setup`)
 - Runtime wiring: `src/boot.rs` — `ff_script::loader::ensure_library` is called on startup

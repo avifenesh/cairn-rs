@@ -903,43 +903,26 @@ impl FabricRunService {
         })
         .to_string();
 
-        let keys: Vec<String> = vec![
-            ctx.core(),
-            ctx.attempt_hash(att_idx),
-            ctx.lease_current(),
-            ctx.lease_history(),
-            idx.lease_expiry(),
-            idx.worker_leases(&worker_instance_id),
-            ctx.suspension_current(),
-            ctx.waitpoint(&waitpoint_id),
-            ctx.waitpoint_signals(&waitpoint_id),
-            idx.suspension_timeout(),
-            idx.pending_waitpoint_expiry(),
-            idx.lane_active(&lane_id),
-            idx.lane_suspended(&lane_id),
-            ctx.waitpoints(),
-            ctx.waitpoint_condition(&waitpoint_id),
-            idx.attempt_timeout(),
-        ];
-        let args: Vec<String> = vec![
-            eid.to_string(),
-            att_idx.to_string(),
-            attempt_id_str,
-            lease_id_str,
-            lease_epoch_str,
-            suspension_id.to_string(),
-            waitpoint_id.to_string(),
-            waitpoint_key,
-            params.reason_code,
-            "cairn".to_owned(),
-            String::new(),
-            resume_condition_json,
-            resume_policy_json,
-            String::new(),
-            String::new(),
-            timeout_behavior_str.to_owned(),
-            "1000".to_owned(),
-        ];
+        let timeout_at = String::new();
+        let (keys, args) = crate::fcall::suspension::build_suspend_execution(
+            &ctx,
+            &idx,
+            att_idx,
+            &worker_instance_id,
+            &lane_id,
+            &waitpoint_id,
+            &eid,
+            &attempt_id_str,
+            &lease_id_str,
+            &lease_epoch_str,
+            &suspension_id,
+            &waitpoint_key,
+            &params.reason_code,
+            &timeout_at,
+            &resume_condition_json,
+            &resume_policy_json,
+            timeout_behavior_str,
+        );
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -988,18 +971,33 @@ impl FabricRunService {
             .unwrap_or(None);
         let lane_id = LaneId::new(lane_str.as_deref().unwrap_or("cairn"));
 
+        // Validation boundary: if the run isn't awaiting approval, surface
+        // that as a state error at the state layer. Otherwise callers hitting
+        // double-approve or approve-on-unsuspended-run would get a misleading
+        // HMAC-flavored `invalid_token` from FF (which is the oracle-proof
+        // default for "no waitpoint" — correct for untrusted callers, wrong
+        // for a trusted in-process caller that can know the distinction).
         let current_wp_str: Option<String> = self
             .runtime
             .client
             .hget(&ctx.core(), "current_waitpoint_id")
             .await
             .unwrap_or(None);
-
-        let waitpoint_id = current_wp_str
+        let waitpoint_id = match current_wp_str
             .as_deref()
             .filter(|s| !s.is_empty())
             .and_then(|s| ff_core::types::WaitpointId::parse(s).ok())
-            .unwrap_or_default();
+        {
+            Some(wp) => wp,
+            None => {
+                return Err(FabricError::Validation {
+                    reason: format!(
+                        "run {} is not awaiting approval (no current waitpoint)",
+                        run_id.as_str()
+                    ),
+                });
+            }
+        };
 
         let signal_name = match decision {
             ApprovalDecision::Approved => format!("approval_granted:{}", run_id.as_str()),
@@ -1012,40 +1010,33 @@ impl FabricRunService {
         let idem_str = format!("approval:{}", run_id.as_str());
         let idem_key = ctx.signal_dedup(&waitpoint_id, &idem_str);
 
-        let keys: Vec<String> = vec![
-            ctx.core(),
-            ctx.waitpoint_condition(&waitpoint_id),
-            ctx.waitpoint_signals(&waitpoint_id),
-            ctx.exec_signals(),
-            ctx.signal(&signal_id),
-            ctx.signal_payload(&signal_id),
+        // HMAC token: FF owns it, we read from the waitpoint hash right
+        // before delivery. Missing token ⇒ waitpoint was never activated
+        // (validation-layer failure, not auth-layer).
+        let waitpoint_token =
+            crate::signal_bridge::read_waitpoint_token(&self.runtime.client, &ctx, &waitpoint_id)
+                .await?;
+
+        let (keys, args) = crate::fcall::suspension::build_deliver_signal(
+            &ctx,
+            &idx,
+            &lane_id,
+            &signal_id,
+            &waitpoint_id,
             idem_key,
-            ctx.waitpoint(&waitpoint_id),
-            ctx.suspension_current(),
-            idx.lane_eligible(&lane_id),
-            idx.lane_suspended(&lane_id),
-            idx.lane_delayed(&lane_id),
-            idx.suspension_timeout(),
-        ];
-        let args: Vec<String> = vec![
-            signal_id.to_string(),
-            eid.to_string(),
-            waitpoint_id.to_string(),
-            signal_name.to_owned(),
+            &eid,
+            signal_name,
             "approval".to_owned(),
-            "operator".to_owned(),
-            "cairn".to_owned(),
+            crate::constants::SOURCE_TYPE_APPROVAL_OPERATOR.to_owned(),
+            crate::constants::SOURCE_IDENTITY.to_owned(),
             String::new(),
-            "json".to_owned(),
             idem_str,
-            String::new(),
-            "waitpoint".to_owned(),
-            now.to_string(),
-            "86400000".to_owned(),
-            "0".to_owned(),
-            "1000".to_owned(),
-            "10000".to_owned(),
-        ];
+            now,
+            self.runtime.config.signal_dedup_ttl_ms,
+            crate::constants::DEFAULT_SIGNAL_MAXLEN,
+            crate::constants::DEFAULT_MAX_SIGNALS_PER_EXECUTION,
+            waitpoint_token.as_str(),
+        );
 
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();

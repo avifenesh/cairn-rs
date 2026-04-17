@@ -1457,7 +1457,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 [[package]]
 name = "ferriskey"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=a09871000574388256b1dd7c910239e992c0d3a6#a09871000574388256b1dd7c910239e992c0d3a6"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1507,23 +1507,22 @@ dependencies = [
 [[package]]
 name = "ff-core"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=a09871000574388256b1dd7c910239e992c0d3a6#a09871000574388256b1dd7c910239e992c0d3a6"
 dependencies = [
  "crc16",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
  "uuid",
 ]
 
 [[package]]
 name = "ff-engine"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=a09871000574388256b1dd7c910239e992c0d3a6#a09871000574388256b1dd7c910239e992c0d3a6"
 dependencies = [
  "ferriskey",
  "ff-core",
- "ff-script",
+ "futures",
  "serde_json",
  "tokio",
  "tracing",
@@ -1532,38 +1531,40 @@ dependencies = [
 [[package]]
 name = "ff-scheduler"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=a09871000574388256b1dd7c910239e992c0d3a6#a09871000574388256b1dd7c910239e992c0d3a6"
 dependencies = [
  "ferriskey",
  "ff-core",
+ "ff-script",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
 [[package]]
 name = "ff-script"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=a09871000574388256b1dd7c910239e992c0d3a6#a09871000574388256b1dd7c910239e992c0d3a6"
 dependencies = [
  "ferriskey",
  "ff-core",
  "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "ff-sdk"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=a09871000574388256b1dd7c910239e992c0d3a6#a09871000574388256b1dd7c910239e992c0d3a6"
 dependencies = [
  "ferriskey",
  "ff-core",
- "ff-engine",
- "serde",
+ "ff-script",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -4054,7 +4055,7 @@ dependencies = [
 [[package]]
 name = "telemetrylib"
 version = "0.1.0"
-source = "git+https://github.com/avifenesh/FlowFabric.git?rev=ee3453890216f4fcffe852f101ef9f58dd0a5f00#ee3453890216f4fcffe852f101ef9f58dd0a5f00"
+source = "git+https://github.com/avifenesh/FlowFabric.git?rev=a09871000574388256b1dd7c910239e992c0d3a6#a09871000574388256b1dd7c910239e992c0d3a6"
 dependencies = [
  "async-trait",
  "chrono",
