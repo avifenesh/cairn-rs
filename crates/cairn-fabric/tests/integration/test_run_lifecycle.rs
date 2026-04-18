@@ -149,18 +149,25 @@ async fn test_duplicate_start_is_idempotent() {
 ///
 /// This test is the tripwire for five written assertions of that contract
 /// (trait docstring, handler docstring, OpenAPI description, smoke-test
-/// comment, handler non-idempotency note). If FF ever relaxes
-/// scheduling.lua's grant gate, the second claim returns Ok and this
-/// test goes RED at `expect_err` — the loud alarm that the
-/// non-idempotency docs no longer hold and need to be revisited
-/// alongside the contract change. That is the bug pattern that caused
-/// round-1 cross-review to reject the original endpoint claim of
-/// idempotency — we add the test so recurrence is structurally
-/// impossible.
+/// comment, handler non-idempotency note). Two code-guarded failure
+/// modes:
+///   1. If FF relaxes scheduling.lua's grant gate, the second claim
+///      returns Ok and this test goes RED at `expect_err` — the loud
+///      alarm that the non-idempotency docs no longer hold.
+///   2. If FF keeps the gate but renames the error code, the second
+///      claim still returns Err but the message no longer contains
+///      `execution_not_eligible` — the test goes RED at the
+///      `msg.contains` assertion. Same alarm, different line.
+/// Either path forces a contract-and-docs revisit alongside the FF
+/// change. This is the bug pattern that caused round-1 cross-review to
+/// reject the original endpoint claim of idempotency — we add the test
+/// so recurrence is structurally impossible.
 ///
-/// Resume-after-suspend (a legitimate second claim) is already covered
-/// by `test_suspension.rs::test_suspend_and_resume_roundtrip`, which
-/// also exercises the `ff_claim_resumed_execution` dispatch path.
+/// Resume-after-suspend (a legitimate second claim) is covered by
+/// `test_suspension.rs::test_enter_approval_after_prior_approval_creates_fresh_waitpoint`
+/// — that test does runs.claim → enter_waiting_approval →
+/// resolve_approval → runs.claim, and the second runs.claim hits the
+/// `use_claim_resumed_execution` dispatch in claim_common.rs:152-153.
 #[tokio::test]
 async fn test_claim_rejects_reclaim_on_active() {
     let h = TestHarness::setup().await;

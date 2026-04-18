@@ -157,6 +157,9 @@ chk "GET /v1/runs/:id/approvals" 200 GET "/v1/runs/${RUN_ID}/approvals"
 # as a 500. The `ff_claim_resumed_execution` dispatch only fires for an
 # attempt_interrupted (previously-suspended) execution, not a fresh
 # re-claim. One claim per lifecycle.
+# (A second claim after a suspend/resume cycle IS legitimate —
+# dispatches through FF's resume-claim path — but smoke doesn't
+# exercise that flow; the Fabric integration tests cover it.)
 chk "POST /v1/runs/:id/claim"    200 POST "/v1/runs/${RUN_ID}/claim" "{}"
 
 # Sections 3.lease + 4.claim: the FF-enforced state machine rejects

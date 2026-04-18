@@ -100,11 +100,12 @@ pub trait RunService: Send + Sync {
     /// cycle has flipped `lifecycle_phase` back to `runnable` (FF
     /// resume emits the resume-eligible state per
     /// lua/suspension.lua; see
-    /// `crates/cairn-fabric/tests/integration/test_suspension.rs::test_suspend_and_resume_roundtrip`
-    /// for the resume-after-suspend flow, which exercises the
-    /// `ff_claim_resumed_execution` dispatch). In that case the
-    /// second claim is a fresh activation, not a retry of a prior
-    /// success.
+    /// `crates/cairn-fabric/tests/integration/test_suspension.rs::test_enter_approval_after_prior_approval_creates_fresh_waitpoint`
+    /// for the worked flow — runs.claim → enter_waiting_approval →
+    /// resolve_approval → runs.claim, where the second runs.claim
+    /// hits the `use_claim_resumed_execution` dispatch in
+    /// claim_common.rs:152-153). In that case the second claim is a
+    /// fresh activation, not a retry of a prior success.
     async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
 
     /// Transition a run to WaitingApproval (approval gate).
