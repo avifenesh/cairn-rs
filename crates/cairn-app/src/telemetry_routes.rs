@@ -178,7 +178,9 @@ pub async fn get_usage_telemetry_handler(State(state): State<Arc<AppState>>) -> 
     })
 }
 
-#[cfg(test)]
+// Boots `AppState` via `BootstrapConfig`; same HMAC-fail-loud reason as
+// `repo_routes::tests` — gate on `in-memory-runtime`.
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use super::{
         get_usage_telemetry_handler, project_rows, record_trigger_fire_usage,
