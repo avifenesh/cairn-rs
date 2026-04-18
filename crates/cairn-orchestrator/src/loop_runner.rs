@@ -1053,6 +1053,81 @@ mod tests {
         assert!(matches!(result, LoopTermination::TimedOut));
     }
 
+    // ── (1b) Lease health gate ────────────────────────────────────────────────
+    //
+    // The §1b gate in `run_inner` polls `task_sink.is_lease_healthy()` at
+    // each iteration start and short-circuits to
+    // `LoopTermination::Failed { reason: "lease unhealthy" }` when the
+    // sink reports false. This is the safety gate for the whole feature —
+    // a degraded lease means every downstream FCALL (LLM call, tool
+    // dispatch, checkpoint) will be rejected by FF anyway, so bailing
+    // early avoids committing irreversible work.
+
+    struct UnhealthySink;
+    #[async_trait]
+    impl crate::task_sink::TaskFrameSink for UnhealthySink {
+        async fn log_tool_call(
+            &self,
+            _name: &str,
+            _args: &serde_json::Value,
+        ) -> Result<(), OrchestratorError> {
+            panic!("log_tool_call must not be reached when lease is unhealthy")
+        }
+        async fn log_tool_result(
+            &self,
+            _name: &str,
+            _output: &serde_json::Value,
+            _success: bool,
+            _duration_ms: u64,
+        ) -> Result<(), OrchestratorError> {
+            panic!("log_tool_result must not be reached when lease is unhealthy")
+        }
+        async fn log_llm_response(
+            &self,
+            _model: &str,
+            _tokens_in: u64,
+            _tokens_out: u64,
+            _latency_ms: u64,
+        ) -> Result<(), OrchestratorError> {
+            panic!("log_llm_response must not be reached when lease is unhealthy")
+        }
+        async fn save_checkpoint(&self, _bytes: &[u8]) -> Result<(), OrchestratorError> {
+            panic!("save_checkpoint must not be reached when lease is unhealthy")
+        }
+        fn is_lease_healthy(&self) -> bool {
+            false
+        }
+    }
+
+    #[tokio::test]
+    async fn unhealthy_lease_aborts_before_gather() {
+        // Install a sink that reports unhealthy AND panics on any frame
+        // write — if the loop reached gather/decide/execute and tried to
+        // emit a frame, the test would fail with the panic message.
+        // Termination must arrive from the §1b gate alone.
+        let lp = OrchestratorLoop::new(
+            FixedGather,
+            ScriptedDecide::always(decide_done()),
+            ScriptedExecute {
+                signal: LoopSignal::Done,
+            },
+            LoopConfig::default(),
+        )
+        .with_task_sink(std::sync::Arc::new(UnhealthySink));
+
+        let result = lp.run(ctx()).await.unwrap();
+        match result {
+            LoopTermination::Failed { reason } => {
+                assert_eq!(
+                    reason, "lease unhealthy",
+                    "lease-health gate must surface the exact reason — callers downstream \
+                     (CairnTask::fail_with_retry, handler error mapping) may match on it",
+                );
+            }
+            other => panic!("expected Failed {{ reason: 'lease unhealthy' }}, got {other:?}"),
+        }
+    }
+
     // ── (2–5) Happy path: Continue × N then Done ──────────────────────────────
 
     #[tokio::test]
