@@ -1387,8 +1387,7 @@ pub(crate) async fn orchestrate_run_handler(
         RuntimeExecutePhase, StandardGatherPhase,
     };
     use cairn_runtime::services::{
-        ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RunServiceImpl,
-        TaskServiceImpl, ToolInvocationServiceImpl,
+        ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolInvocationServiceImpl,
     };
     use cairn_store::projections::RunReadModel;
     use cairn_tools::{
@@ -1625,8 +1624,7 @@ pub(crate) async fn orchestrate_run_handler(
         // Shared services needed by tool constructors
         let store_ref = state.runtime.store.clone();
         let workspace_root = working_dir.clone();
-        let task_svc: Arc<dyn cairn_runtime::tasks::TaskService> =
-            Arc::new(TaskServiceImpl::new(store_ref.clone()));
+        let task_svc: Arc<dyn cairn_runtime::tasks::TaskService> = state.runtime.tasks.clone();
         let approval_svc: Arc<dyn cairn_runtime::ApprovalService> =
             Arc::new(ApprovalServiceImpl::new(store_ref.clone()));
 
@@ -1764,8 +1762,8 @@ pub(crate) async fn orchestrate_run_handler(
     let store = state.runtime.store.clone();
     let execute = RuntimeExecutePhase::builder()
         .tool_registry(registry)
-        .run_service(Arc::new(RunServiceImpl::new(store.clone())))
-        .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
+        .run_service(state.runtime.runs.clone())
+        .task_service(state.runtime.tasks.clone())
         .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
         .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
         .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))

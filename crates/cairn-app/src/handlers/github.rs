@@ -14,7 +14,6 @@ use axum::{
 };
 
 use cairn_api::sse::SseFrame;
-use cairn_runtime::SessionService;
 use cairn_store::EventLog;
 
 use crate::errors::AppApiError;
@@ -133,7 +132,6 @@ pub(crate) async fn process_webhook_orchestrate(
     event: &cairn_github::WebhookEvent,
 ) -> Result<(), String> {
     use cairn_domain::{ProjectKey, RunId, SessionId};
-    use cairn_runtime::services::{RunServiceImpl, SessionServiceImpl};
     use cairn_store::projections::SessionReadModel;
 
     let repo_full = event.repository().unwrap_or("unknown/unknown");
@@ -182,13 +180,14 @@ pub(crate) async fn process_webhook_orchestrate(
     };
     let session_id = SessionId::new(&session_id_str);
 
-    let session_svc = SessionServiceImpl::new(state.runtime.store.clone());
     if SessionReadModel::get(state.runtime.store.as_ref(), &session_id)
         .await
         .map_err(|e| e.to_string())?
         .is_none()
     {
-        session_svc
+        state
+            .runtime
+            .sessions
             .create(&project, session_id.clone())
             .await
             .map_err(|e| e.to_string())?;
@@ -196,8 +195,9 @@ pub(crate) async fn process_webhook_orchestrate(
 
     let run_id_str = format!("{}-run-{}", session_id_str, event.delivery_id);
     let run_id = RunId::new(&run_id_str);
-    let run_svc = RunServiceImpl::new(state.runtime.store.clone());
-    let run = run_svc
+    let run = state
+        .runtime
+        .runs
         .start(&project, &session_id, run_id.clone(), None)
         .await
         .map_err(|e| e.to_string())?;
@@ -236,8 +236,7 @@ pub(crate) async fn webhook_trigger_orchestration(
         RuntimeExecutePhase, StandardGatherPhase,
     };
     use cairn_runtime::services::{
-        ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RunServiceImpl,
-        TaskServiceImpl, ToolInvocationServiceImpl,
+        ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, ToolInvocationServiceImpl,
     };
 
     if run.state == cairn_domain::RunState::Pending {
@@ -353,8 +352,8 @@ pub(crate) async fn webhook_trigger_orchestration(
 
     let execute = RuntimeExecutePhase::builder()
         .tool_registry(registry)
-        .run_service(Arc::new(RunServiceImpl::new(store.clone())))
-        .task_service(Arc::new(TaskServiceImpl::new(store.clone())))
+        .run_service(state.runtime.runs.clone())
+        .task_service(state.runtime.tasks.clone())
         .approval_service(Arc::new(ApprovalServiceImpl::new(store.clone())))
         .checkpoint_service(Arc::new(CheckpointServiceImpl::new(store.clone())))
         .mailbox_service(Arc::new(MailboxServiceImpl::new(store.clone())))
@@ -875,8 +874,6 @@ pub(crate) async fn github_scan_handler(
     for issue in &issues {
         let session_id_str = format!("gh-{}-{}-issue-{}", owner, repo_name, issue.number);
         let session_id = cairn_domain::SessionId::new(&session_id_str);
-        let session_svc =
-            cairn_runtime::services::SessionServiceImpl::new(state.runtime.store.clone());
         if cairn_store::projections::SessionReadModel::get(
             state.runtime.store.as_ref(),
             &session_id,
@@ -885,14 +882,18 @@ pub(crate) async fn github_scan_handler(
         .unwrap_or(None)
         .is_none()
         {
-            if let Err(e) = session_svc.create(&project, session_id.clone()).await {
+            if let Err(e) = state
+                .runtime
+                .sessions
+                .create(&project, session_id.clone())
+                .await
+            {
                 tracing::warn!(issue = issue.number, error = %e, "Failed to create session");
                 continue;
             }
         }
         let run_id_str = format!("{}-scan-run", session_id_str);
         let run_id = cairn_domain::RunId::new(&run_id_str);
-        let run_svc = cairn_runtime::services::RunServiceImpl::new(state.runtime.store.clone());
         if cairn_store::projections::RunReadModel::get(state.runtime.store.as_ref(), &run_id)
             .await
             .unwrap_or(None)
@@ -901,7 +902,9 @@ pub(crate) async fn github_scan_handler(
             tracing::info!(issue = issue.number, "Run already exists");
             continue;
         }
-        match run_svc
+        match state
+            .runtime
+            .runs
             .start(&project, &session_id, run_id.clone(), None)
             .await
         {

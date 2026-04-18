@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Replay regression guard: proves tool/external-worker events preserve
 //! the same current-state reads after a full event stream rebuild.
 

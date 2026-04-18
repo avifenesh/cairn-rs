@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Integration coverage protecting the tool invocation and external worker
 //! seams for Workers 5 and 8. Manager directive: narrow coverage against drift.
 

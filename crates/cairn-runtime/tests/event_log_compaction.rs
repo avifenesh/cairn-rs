@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 002 event log compaction integration test.
 
 use std::sync::Arc;

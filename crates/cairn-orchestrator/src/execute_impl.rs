@@ -26,12 +26,9 @@ use cairn_domain::{
     ActionType, ApprovalId, CheckpointId, ExecutionClass, SessionId, TaskId, ToolInvocationId,
 };
 use cairn_runtime::{
-    decisions::DecisionService,
-    mailbox::MailboxService,
-    services::{TaskServiceImpl, ToolInvocationService},
-    ApprovalService, CheckpointService, RunService,
+    decisions::DecisionService, mailbox::MailboxService, services::ToolInvocationService,
+    ApprovalService, CheckpointService, RunService, TaskService,
 };
-use cairn_store::InMemoryStore;
 use cairn_tools::builtins::BuiltinToolRegistry;
 
 use crate::context::{
@@ -50,7 +47,7 @@ use crate::execute::ExecutePhase;
 /// visible to reads from another.
 pub struct RuntimeExecutePhase {
     run_service: Arc<dyn RunService>,
-    task_service: Arc<TaskServiceImpl<InMemoryStore>>,
+    task_service: Arc<dyn TaskService>,
     approval_service: Arc<dyn ApprovalService>,
     checkpoint_service: Arc<dyn CheckpointService>,
     mailbox_service: Arc<dyn MailboxService>,
@@ -78,7 +75,7 @@ impl RuntimeExecutePhase {
 #[derive(Default)]
 pub struct RuntimeExecutePhaseBuilder {
     run_service: Option<Arc<dyn RunService>>,
-    task_service: Option<Arc<TaskServiceImpl<InMemoryStore>>>,
+    task_service: Option<Arc<dyn TaskService>>,
     approval_service: Option<Arc<dyn ApprovalService>>,
     checkpoint_service: Option<Arc<dyn CheckpointService>>,
     mailbox_service: Option<Arc<dyn MailboxService>>,
@@ -94,7 +91,7 @@ impl RuntimeExecutePhaseBuilder {
         self.run_service = Some(s);
         self
     }
-    pub fn task_service(mut self, s: Arc<TaskServiceImpl<InMemoryStore>>) -> Self {
+    pub fn task_service(mut self, s: Arc<dyn TaskService>) -> Self {
         self.task_service = Some(s);
         self
     }
@@ -680,7 +677,10 @@ fn truncate_text_for_context(text: &str, token_limit: usize) -> String {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
+// Tests use the in-memory Run/Task/Session impls directly via
+// RuntimeExecutePhase::builder(). Gated on `in-memory-runtime` because
+// the impls aren't available under default features.
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use super::*;
     use cairn_domain::{

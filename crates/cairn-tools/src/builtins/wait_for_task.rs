@@ -136,7 +136,7 @@ impl ToolHandler for WaitForTaskTool {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use super::*;
     use cairn_domain::{ProjectKey, TaskId};

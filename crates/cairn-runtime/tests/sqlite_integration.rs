@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! SQLite-backed runtime integration test.
 //! Proves the runtime service seams hold against a real database backend.
 

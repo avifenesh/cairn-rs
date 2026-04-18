@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 005 session lifecycle end-to-end integration test.
 //!
 //! Validates the full session lifecycle:
