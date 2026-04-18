@@ -1122,7 +1122,7 @@ async fn main() {
 // build_router → bin_router.rs
 // ── Test helpers (visible to all test modules via `super::`) ─────────────────
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 fn test_make_app_with_runtime(
     mut state: AppState,
 ) -> (axum::Router, Arc<cairn_runtime::InMemoryServices>) {
@@ -1203,14 +1203,14 @@ fn test_make_app_with_runtime(
     (build_router(lib_state, state), shared_runtime)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 fn test_make_app(state: AppState) -> axum::Router {
     test_make_app_with_runtime(state).0
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tests {
     use super::*;
     use axum::body::to_bytes;
@@ -2996,7 +2996,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod tool_invocations_tests {
     use super::test_make_app as make_app;
     use super::*;
@@ -3122,7 +3122,7 @@ mod tool_invocations_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "in-memory-runtime"))]
 mod provider_health_tests {
     use super::test_make_app as make_app;
     use super::*;

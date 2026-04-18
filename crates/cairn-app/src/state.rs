@@ -877,24 +877,23 @@ fn default_sandbox_base_dir() -> PathBuf {
 
 /// Build `InMemoryServices` + optional `FabricServices`, honoring
 /// `CAIRN_FABRIC_ENABLED`. Returns the services aggregate (either in-memory
-/// defaults or fabric-adapter-backed) plus the fabric handle (`Some` when
-/// the flag was set and Fabric booted successfully; `None` otherwise).
+/// Build the runtime aggregate.
 ///
-/// The cairn-runtime aggregate does NOT depend on cairn-fabric directly
-/// (cycle avoided via `Option<Arc<dyn Any>>`), so the adapter wiring must
-/// happen in cairn-app. When fabric is enabled we:
-///   1. Build `FabricServices` from env config (`FabricConfig::from_env`).
-///      This is where HMAC secret validation + seeding happens.
-///   2. Construct `FabricRunServiceAdapter` / `Task` / `Session` sharing the
-///      same `store` so projection-backed reads stay on the store.
-///   3. Call `InMemoryServices::with_store_and_core(store, runs, tasks,
-///      sessions)` to install the adapters on the runtime aggregate.
-///   4. Attach the fabric handle via `runtime.fabric` (type-erased on the
-///      cairn-runtime side) AND return it concretely via `AppState.fabric`.
+/// Path is selected at **compile time** by the `in-memory-runtime` cargo
+/// feature — there is no longer an `CAIRN_FABRIC_ENABLED` env var:
 ///
-/// When disabled (`CAIRN_FABRIC_ENABLED` unset or falsy), returns
-/// `(InMemoryServices::new(), None)` — identical to the pre-finalization
-/// code path.
+/// - **Default build (feature OFF)**: constructs `FabricServices` from env
+///   config, wires `FabricRunServiceAdapter` / `Task` / `Session` on top of
+///   a shared `InMemoryStore`, installs them via
+///   `InMemoryServices::with_store_and_core`, and returns the fabric handle.
+///   This is the production path; the in-memory courtesy impls are not even
+///   compiled in.
+/// - **`--features in-memory-runtime` build**: returns
+///   `(InMemoryServices::new(), None)` — the pre-Fabric event-log path.
+///   Correctness guarantees only hold on the Fabric path; this feature
+///   exists for local tinkering, cargo-test harnesses, and CI jobs that
+///   exercise the event-log-only surface.
+#[cfg(feature = "in-memory-runtime")]
 async fn build_runtime_with_optional_fabric() -> Result<
     (
         Arc<InMemoryServices>,
@@ -902,17 +901,19 @@ async fn build_runtime_with_optional_fabric() -> Result<
     ),
     String,
 > {
-    let enabled = std::env::var("CAIRN_FABRIC_ENABLED")
-        .ok()
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    tracing::debug!("in-memory-runtime feature enabled; using event-log-only runs/tasks/sessions");
+    Ok((Arc::new(InMemoryServices::new()), None))
+}
 
-    if !enabled {
-        tracing::debug!("CAIRN_FABRIC_ENABLED unset; using in-memory runs/tasks/sessions");
-        return Ok((Arc::new(InMemoryServices::new()), None));
-    }
-
-    tracing::info!("CAIRN_FABRIC_ENABLED=1; constructing FabricServices");
+#[cfg(not(feature = "in-memory-runtime"))]
+async fn build_runtime_with_optional_fabric() -> Result<
+    (
+        Arc<InMemoryServices>,
+        Option<Arc<cairn_fabric::FabricServices>>,
+    ),
+    String,
+> {
+    tracing::info!("constructing FabricServices (production runtime)");
 
     let fabric_config = cairn_fabric::FabricConfig::from_env()
         .map_err(|e| format!("FabricConfig::from_env failed: {e}"))?;

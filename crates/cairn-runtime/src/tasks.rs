@@ -5,8 +5,8 @@
 
 use async_trait::async_trait;
 use cairn_domain::{
-    FailureClass, PauseReason, ProjectKey, ResumeTrigger, RunId, TaskId, TaskResumeTarget,
-    TaskState,
+    FailureClass, PauseReason, ProjectKey, ResumeTrigger, RunId, SessionId, TaskId,
+    TaskResumeTarget, TaskState,
 };
 use cairn_store::projections::TaskRecord;
 
@@ -124,6 +124,31 @@ pub trait TaskService: Send + Sync {
 
     /// Release a task lease (leased -> queued), clearing lease_owner.
     async fn release_lease(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError>;
+
+    /// Spawn a subagent task linked to a parent run.
+    ///
+    /// Default impl submits a task with `parent_run_id = Some(parent_run_id)`
+    /// and `priority = 0`. The in-memory impl overrides with an event-log
+    /// path that emits `TaskCreated` + `SubagentSpawned` directly; the
+    /// Fabric adapter inherits the default and routes through
+    /// `FabricTaskService::submit` so FF gets the full flow.
+    ///
+    /// `child_session_id` / `child_run_id` are carried for the
+    /// `SubagentSpawned` linkage. The default impl ignores them because
+    /// the trait-level surface cannot emit that event without the
+    /// underlying store; impls that need the linkage override this method.
+    async fn spawn_subagent(
+        &self,
+        project: &ProjectKey,
+        parent_run_id: RunId,
+        _parent_task_id: Option<TaskId>,
+        child_task_id: TaskId,
+        _child_session_id: SessionId,
+        _child_run_id: Option<RunId>,
+    ) -> Result<TaskRecord, RuntimeError> {
+        self.submit(project, child_task_id, Some(parent_run_id), None, 0)
+            .await
+    }
 }
 
 #[cfg(test)]

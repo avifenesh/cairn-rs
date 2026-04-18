@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Proves RuntimeEnrichment consumes store-backed data end-to-end.
 //! Worker 8 should depend on this seam for SSE/API enrichment.
 

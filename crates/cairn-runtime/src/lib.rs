@@ -110,10 +110,11 @@ pub use services::{
     ApprovalPolicyServiceImpl, ApprovalServiceImpl, CheckpointServiceImpl, EvalRunServiceImpl,
     ExternalWorkerService, ExternalWorkerServiceImpl, IngestJobServiceImpl,
     LlmObservabilityServiceImpl, MailboxServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
-    PromptReleaseServiceImpl, PromptVersionServiceImpl, RunServiceImpl, SessionServiceImpl,
-    SignalServiceImpl, SimpleRouteResolver, TaskServiceImpl, TenantServiceImpl,
-    ToolInvocationService, ToolInvocationServiceImpl, WorkspaceServiceImpl,
+    PromptReleaseServiceImpl, PromptVersionServiceImpl, SignalServiceImpl, SimpleRouteResolver,
+    TenantServiceImpl, ToolInvocationService, ToolInvocationServiceImpl, WorkspaceServiceImpl,
 };
+#[cfg(feature = "in-memory-runtime")]
+pub use services::{RunServiceImpl, SessionServiceImpl, TaskServiceImpl};
 pub use sessions::SessionService;
 pub use signals::SignalService;
 pub use soul_guard::SoulGuard;

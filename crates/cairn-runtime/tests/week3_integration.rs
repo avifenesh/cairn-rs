@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Week 3 integration tests: approvals, checkpoints, mailbox.
 //!
 //! Recovery tests that lived here were removed in the Fabric finalization

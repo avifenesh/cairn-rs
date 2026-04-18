@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! RFC 010 — Approval blocking end-to-end integration test.
 //!
 //! Verifies the full approval lifecycle:

@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Week 4: End-to-end runtime slice from command through replay.
 //!
 //! Recovery coverage that lived here was removed in the Fabric finalization

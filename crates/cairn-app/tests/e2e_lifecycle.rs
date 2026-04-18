@@ -3,6 +3,8 @@
 //!
 //! Each test spins up an in-memory AppState with real runtime services.
 
+#![cfg(feature = "in-memory-runtime")]
+
 use std::sync::Arc;
 
 use cairn_domain::{

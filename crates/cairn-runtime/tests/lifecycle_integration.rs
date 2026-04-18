@@ -1,3 +1,5 @@
+#![cfg(feature = "in-memory-runtime")]
+
 //! Integration tests for the core session -> run -> task lifecycle.
 //! Uses InMemoryStore to test the full command -> event -> projection flow.
 

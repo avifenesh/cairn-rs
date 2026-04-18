@@ -38,13 +38,20 @@ pub mod retention_impl;
 pub mod route_policy_impl;
 pub mod route_resolver_impl;
 pub mod run_cost_alert_impl;
+// `run_impl` / `task_impl` / `session_impl` are the in-memory courtesy
+// backings for the core execution services. They are gated behind the
+// `in-memory-runtime` feature because correctness guarantees only hold
+// when the Fabric path is wired. Default builds compile without them.
+#[cfg(feature = "in-memory-runtime")]
 pub mod run_impl;
 pub mod run_sla_impl;
+#[cfg(feature = "in-memory-runtime")]
 pub mod session_impl;
 pub mod signal_impl;
 pub mod signal_router_impl;
 pub mod skill_catalog_impl;
 pub mod spend_alert_impl;
+#[cfg(feature = "in-memory-runtime")]
 pub mod task_impl;
 pub mod tenant_impl;
 pub mod tool_invocation_impl;
@@ -67,11 +74,14 @@ pub use prompt_asset_impl::PromptAssetServiceImpl;
 pub use prompt_release_impl::PromptReleaseServiceImpl;
 pub use prompt_version_impl::PromptVersionServiceImpl;
 pub use route_resolver_impl::SimpleRouteResolver;
+#[cfg(feature = "in-memory-runtime")]
 pub use run_impl::RunServiceImpl;
+#[cfg(feature = "in-memory-runtime")]
 pub use session_impl::SessionServiceImpl;
 pub use signal_impl::SignalServiceImpl;
 pub use skill_catalog_impl::SkillCatalogServiceImpl;
 pub use spend_alert_impl::SpendAlertServiceImpl;
+#[cfg(feature = "in-memory-runtime")]
 pub use task_impl::TaskServiceImpl;
 pub use tenant_impl::TenantServiceImpl;
 pub use tool_invocation_impl::{ToolInvocationService, ToolInvocationServiceImpl};

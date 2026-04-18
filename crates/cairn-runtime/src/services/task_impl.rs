@@ -433,19 +433,12 @@ where
     async fn release_lease(&self, task_id: &TaskId) -> Result<TaskRecord, RuntimeError> {
         self.transition_task(task_id, TaskState::Queued, None).await
     }
-}
 
-// ── Subagent linkage (RFC 005) ───────────────────────────────────────────────
-
-impl<S> TaskServiceImpl<S>
-where
-    S: EventLog + TaskReadModel + TaskDependencyReadModel + 'static,
-{
     /// Spawn a child task linked to a parent run/task and emit `SubagentSpawned`.
     ///
     /// Creates the child task via `TaskCreated`, then emits `SubagentSpawned`
     /// so the projection links parent_run_id / parent_task_id on the child.
-    pub async fn spawn_subagent(
+    async fn spawn_subagent(
         &self,
         project: &ProjectKey,
         parent_run_id: RunId,
