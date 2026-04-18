@@ -183,6 +183,14 @@ The registry is only a latency-cache — `services/task_service.rs:80` and `:121
 
 Removal: ~80 LOC in `active_tasks.rs` + ~40 LOC fallout in `task_service.rs` and `worker_sdk.rs`. Coupled with the HIGH above — fix both in the same follow-up round after `task_service.rs` stabilises (currently hot with claim/stream work).
 
+### MEDIUM — Bridge-event completeness audit
+
+The finalization-round smoke-test caught a single-emit gap: `FabricSessionService::create` did not emit a `BridgeEvent::SessionCreated`, so sessions were never written to the cairn-store projection, and every subsequent handler that read `sessions.get(session_id)` returned `None`. Fixed in commit 4 (see `event_bridge.rs` + `services/session_service.rs`).
+
+The same class of gap could exist for any FF mutation path cairn-fabric exposes. A systematic audit should walk every public method on `FabricRunService` / `FabricTaskService` / `FabricSessionService` / `FabricBudgetService` / `FabricQuotaService` and verify: every mutation that changes FF state that cairn-app reads back from the projection has a corresponding `BridgeEvent` emitted. No cairn-app read-path should depend on a state change that only lives in Valkey.
+
+Bugs of this shape are invisible to unit tests (services write to FF correctly) and to live FF integration tests (each one tests the fabric layer in isolation, not the full handler → adapter → fabric → store-projection chain). The integration-readiness gate is cairn-app smoke — run `CAIRN_FABRIC_ENABLED=1 scripts/smoke-test.sh` on every cairn-fabric mutation-surface change.
+
 ### LOW — CairnTask tag micro-cache
 
 *Location*: `crates/cairn-fabric/src/worker_sdk.rs:174-180`.

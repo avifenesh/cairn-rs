@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use cairn_domain::events::EventEnvelope;
 use cairn_domain::events::{
-    EventSource, RunCreated, RunStateChanged, RuntimeEvent, SessionStateChanged, StateTransition,
-    TaskCreated, TaskLeaseClaimed, TaskStateChanged,
+    EventSource, RunCreated, RunStateChanged, RuntimeEvent, SessionCreated, SessionStateChanged,
+    StateTransition, TaskCreated, TaskLeaseClaimed, TaskStateChanged,
 };
 use cairn_domain::ids::{EventId, RunId, SessionId, TaskId};
 use cairn_domain::lifecycle::{FailureClass, RunState, SessionState, TaskState};
@@ -70,6 +70,10 @@ pub enum BridgeEvent {
         run_id: RunId,
         project: ProjectKey,
         attempt: u32,
+    },
+    SessionCreated {
+        session_id: SessionId,
+        project: ProjectKey,
     },
     SessionArchived {
         session_id: SessionId,
@@ -204,6 +208,7 @@ fn bridge_event_type_name(event: &BridgeEvent) -> &'static str {
         BridgeEvent::TaskLeaseClaimed { .. } => "TaskLeaseClaimed",
         BridgeEvent::TaskStateChanged { .. } => "TaskStateChanged",
         BridgeEvent::ExecutionRetryScheduled { .. } => "ExecutionRetryScheduled",
+        BridgeEvent::SessionCreated { .. } => "SessionCreated",
         BridgeEvent::SessionArchived { .. } => "SessionArchived",
     }
 }
@@ -351,6 +356,13 @@ fn bridge_event_to_runtime_event(event: &BridgeEvent) -> RuntimeEvent {
             failure_class: None,
             pause_reason: None,
             resume_trigger: None,
+        }),
+        BridgeEvent::SessionCreated {
+            session_id,
+            project,
+        } => RuntimeEvent::SessionCreated(SessionCreated {
+            project: project.clone(),
+            session_id: session_id.clone(),
         }),
         BridgeEvent::SessionArchived {
             session_id,
@@ -616,5 +628,68 @@ mod tests {
             }
             _ => panic!("expected SessionStateChanged, got {runtime:?}"),
         }
+    }
+
+    #[test]
+    fn bridge_session_created_emits_session_created_envelope() {
+        // Regression guard for the finalization-round smoke-test bug:
+        // session creation was failing to populate the cairn-store
+        // projection because no BridgeEvent for it existed. If this
+        // variant is ever renamed or the mapping drops the ids, the
+        // whole fabric path breaks every handler that reads sessions by
+        // id before starting a run.
+        let event = BridgeEvent::SessionCreated {
+            session_id: SessionId::new("sess_brand_new"),
+            project: ProjectKey::new("tenant_x", "workspace_y", "project_z"),
+        };
+        let runtime = bridge_event_to_runtime_event(&event);
+        match runtime {
+            RuntimeEvent::SessionCreated(sc) => {
+                assert_eq!(sc.session_id.as_str(), "sess_brand_new");
+                assert_eq!(sc.project.tenant_id.as_str(), "tenant_x");
+                assert_eq!(sc.project.workspace_id.as_str(), "workspace_y");
+                assert_eq!(sc.project.project_id.as_str(), "project_z");
+            }
+            _ => panic!("expected SessionCreated, got {runtime:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn bridge_session_created_round_trips_through_event_log() {
+        // End-to-end: start an EventBridge, emit SessionCreated, let the
+        // consumer drain, verify SessionReadModel sees the projection.
+        // Mirrors the existing TaskCreated / ExecutionCreated round-trip
+        // tests above — proves the new variant reaches cairn-store so
+        // FabricSessionServiceAdapter::get succeeds on the next request.
+        use cairn_store::projections::SessionReadModel;
+        use cairn_store::InMemoryStore;
+
+        let store = Arc::new(InMemoryStore::new());
+        let event_log: Arc<dyn EventLog + Send + Sync> = store.clone();
+        let (bridge, handle) = EventBridge::start(event_log);
+
+        let session_id = SessionId::new("sess_rt_1");
+        let project = ProjectKey::new("t_rt", "w_rt", "p_rt");
+
+        bridge
+            .emit(BridgeEvent::SessionCreated {
+                session_id: session_id.clone(),
+                project: project.clone(),
+            })
+            .await;
+
+        // Stop the bridge and wait for the consumer to drain. `stop`
+        // cancels the loop AFTER processing everything already in the
+        // channel (the loop uses `biased` select so recv drains before
+        // the cancel arm fires).
+        bridge.stop();
+        let _ = handle.await;
+
+        let record = SessionReadModel::get(store.as_ref(), &session_id)
+            .await
+            .expect("projection read must not error")
+            .expect("SessionCreated must populate SessionReadModel");
+        assert_eq!(record.session_id, session_id);
+        assert_eq!(record.project, project);
     }
 }
