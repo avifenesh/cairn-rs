@@ -1,20 +1,24 @@
-//! End-to-end proof that the orchestrator's `TaskFrameSink` wiring
-//! reaches FF's attempt-scoped stream.
+//! End-to-end proof that `OrchestratorLoop::run` populates FF's
+//! attempt-scoped stream in the exact order the loop emits.
 //!
-//! The orchestrator loop calls `task_sink.log_tool_call`,
-//! `log_tool_result`, `log_llm_response`, and `save_checkpoint` at the
-//! points wired in commits 2–4 of this stack. The blanket
-//! `impl TaskFrameSink for CairnTask` delegates to `StreamWriter`,
-//! which appends frames via `ff_append_frame`. This test claims a
-//! real `CairnTask` against a testcontainers-managed Valkey, drives
-//! one synthetic iteration through the sink trait, then reads the
-//! stream back via `restore_frames()` and asserts:
+//! This test drives the REAL loop (not direct sink calls) through one
+//! iteration with scripted `Gather` / `Decide` / `Execute` phases,
+//! then reads the stream via `restore_frames()` and asserts frames
+//! appear in the order `OrchestratorLoop::run_inner` writes them:
 //!
-//! 1. All four frame types landed.
-//! 2. They appear in the order the orchestrator emits them:
-//!    `tool_call` → `tool_result` → `llm_response` → `checkpoint`.
-//! 3. The payload round-trips (the `tool_name` on frame 0 matches
-//!    what we logged).
+//! ```text
+//!   §3b'  log_llm_response  (post-decide)
+//!   §5a   log_tool_call     (pre-execute)
+//!   §5b   log_tool_result   (post-execute)
+//!   §6b   save_checkpoint   (post-CheckpointHook::save)
+//! ```
+//!
+//! XRANGE preserves insertion order in Valkey streams, so if the
+//! assertion matches it means the loop wrote the frames in the
+//! correct order — not that Valkey sorts them. That distinction was
+//! the B2 finding from cross-review: the earlier version of this
+//! test drove the sink directly and only proved the Valkey
+//! invariant, not the cairn-side emission order.
 //!
 //! # Why `insecure-direct-claim`?
 //!
@@ -22,31 +26,94 @@
 //! `CairnWorker::claim_next`, which is gated behind the
 //! `insecure-direct-claim` feature (`ClaimedTask::new` is `pub(crate)`
 //! on ff-sdk — see `crates/cairn-fabric/src/worker_sdk.rs` module
-//! docstring for the full architectural note). The test is
-//! cfg-gated so default CI runs skip it; the pre-push + fabric
-//! integration CI job enables the feature.
+//! docstring). The test is cfg-gated so default CI runs skip it; the
+//! pre-push + fabric-integration CI job enables the feature.
 
 #![cfg(feature = "insecure-direct-claim")]
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use cairn_domain::{decisions::RunMode, ActionProposal, ActionType, ProjectKey, RunId, TaskId};
 use cairn_fabric::{CairnWorker, FabricConfig};
-use cairn_orchestrator::task_sink::TaskFrameSink;
+use cairn_orchestrator::{
+    context::{ActionResult, ActionStatus, DecideOutput, ExecuteOutcome, GatherOutput, LoopSignal},
+    DecidePhase, ExecutePhase, GatherPhase, LoopConfig, OrchestrationContext, OrchestratorError,
+    OrchestratorLoop, TaskFrameSink,
+};
 use ff_core::contracts::StreamFrame;
 
 use crate::TestHarness;
 
-/// Claim a task via `CairnWorker::claim_next` and drive the orchestrator
-/// sink surface through it. Reads stream via `restore_frames` and
-/// asserts four frames in emission order.
+// ── Mock phases ─────────────────────────────────────────────────────────────
+//
+// Minimal stubs that let the real OrchestratorLoop::run drive a single
+// iteration end-to-end. They mirror the `ScriptedDecide` / `ScriptedExecute`
+// pattern used by the loop_runner's inline unit tests, extracted here
+// because those are `pub(crate)` in the test module.
+
+struct EmptyGather;
+#[async_trait]
+impl GatherPhase for EmptyGather {
+    async fn gather(&self, _ctx: &OrchestrationContext) -> Result<GatherOutput, OrchestratorError> {
+        Ok(GatherOutput::default())
+    }
+}
+
+struct FixedDecide {
+    output: DecideOutput,
+}
+#[async_trait]
+impl DecidePhase for FixedDecide {
+    async fn decide(
+        &self,
+        _ctx: &OrchestrationContext,
+        _gather: &GatherOutput,
+    ) -> Result<DecideOutput, OrchestratorError> {
+        Ok(self.output.clone())
+    }
+}
+
+/// ExecutePhase that marks every proposal as Succeeded and returns
+/// `LoopSignal::Done`, so the loop exits cleanly after one iteration.
+/// The `tool_output` is populated so the loop's `log_tool_result` call
+/// writes a real payload instead of the null-fallback branch.
+struct OneShotExecute;
+#[async_trait]
+impl ExecutePhase for OneShotExecute {
+    async fn execute(
+        &self,
+        _ctx: &OrchestrationContext,
+        decide: &DecideOutput,
+    ) -> Result<ExecuteOutcome, OrchestratorError> {
+        let results = decide
+            .proposals
+            .iter()
+            .map(|p| ActionResult {
+                proposal: p.clone(),
+                status: ActionStatus::Succeeded,
+                tool_output: Some(serde_json::json!({ "ok": true })),
+                invocation_id: None,
+            })
+            .collect();
+        Ok(ExecuteOutcome {
+            results,
+            loop_signal: LoopSignal::Done,
+        })
+    }
+}
+
+// ── Test ────────────────────────────────────────────────────────────────────
+
 #[tokio::test]
-async fn orchestrator_sink_emits_four_frames_in_xrange_order() {
+async fn orchestrator_loop_emits_four_frames_in_per_iteration_order() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
     let task_id = h.unique_task_id();
 
-    // 1. Submit a task via FabricTaskService so it's eligible for claim.
+    // 1. Submit a task so CairnWorker::claim_next finds it eligible.
     h.fabric
         .tasks
         .submit(
@@ -60,12 +127,157 @@ async fn orchestrator_sink_emits_four_frames_in_xrange_order() {
         .await
         .expect("submit failed");
 
-    // 2. Stand up a worker that shares the harness's lane/config. The
-    //    `bridge` clone lets CairnTask emit the ExecutionCompleted
-    //    bridge event if we ever consume it; this test drops the task
-    //    without a terminal call and relies on FF's lease-expiry
-    //    scanner (tests don't assert terminal projection state).
-    let worker_config = FabricConfig {
+    // 2. Claim through CairnWorker to get a live CairnTask. (Scheduler
+    //    window is rolling 32 partitions per poll; loop with a short
+    //    backoff until a task comes up.)
+    let worker_config = worker_config_from(&h);
+    let worker = CairnWorker::connect(&worker_config, h.fabric.bridge.clone())
+        .await
+        .expect("CairnWorker::connect failed");
+    let claimed = claim_with_retry(&worker).await;
+
+    // 3. Build the OrchestrationContext + scripted phases that emit
+    //    exactly one tool proposal (so log_tool_call + log_tool_result
+    //    each fire exactly once) and terminate on the first iteration.
+    let run_id = RunId::new(format!("integ_run_{}", uuid::Uuid::new_v4()));
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock before epoch")
+        .as_millis() as u64;
+    let ctx = OrchestrationContext {
+        project: h.project.clone(),
+        session_id: session_id.clone(),
+        run_id: run_id.clone(),
+        task_id: Some(task_id.clone()),
+        iteration: 0,
+        goal: "orchestrator-stream round-trip".to_owned(),
+        agent_type: "test".to_owned(),
+        // Use the real wall-clock so the loop's deadline_ms =
+        // run_started_at_ms + timeout_ms is in the future. 0 would
+        // trip the §1 timeout check before iteration 0 ran.
+        run_started_at_ms: now_ms,
+        working_dir: PathBuf::from("/tmp"),
+        run_mode: RunMode::Direct,
+        discovered_tool_names: Vec::new(),
+    };
+
+    let decide_output = DecideOutput {
+        raw_response: "invoke fs.read".to_owned(),
+        proposals: vec![ActionProposal {
+            action_type: ActionType::InvokeTool,
+            description: "read the smoke file".to_owned(),
+            confidence: 0.95,
+            tool_name: Some("fs.read".to_owned()),
+            tool_args: Some(serde_json::json!({ "path": "/tmp/x" })),
+            requires_approval: false,
+        }],
+        calibrated_confidence: 0.95,
+        requires_approval: false,
+        model_id: "claude-3-opus".to_owned(),
+        latency_ms: 1_200,
+        input_tokens: Some(500),
+        output_tokens: Some(200),
+    };
+
+    let sink: Arc<dyn TaskFrameSink> = Arc::new(claimed);
+    let orchestrator = OrchestratorLoop::new(
+        EmptyGather,
+        FixedDecide {
+            output: decide_output,
+        },
+        OneShotExecute,
+        LoopConfig::default(),
+    )
+    .with_task_sink(sink);
+
+    // 4. Run the real loop. Completes after exactly one iteration (Done).
+    let termination = orchestrator
+        .run(ctx)
+        .await
+        .expect("OrchestratorLoop::run returned an infrastructure error");
+    assert!(
+        matches!(
+            termination,
+            cairn_orchestrator::LoopTermination::Completed { .. }
+        ),
+        "loop did not reach Completed termination, got {termination:?}",
+    );
+
+    // 5. Read the FF stream and assert frame order matches the loop's
+    //    per-iteration emission order: llm_response → tool_call →
+    //    tool_result → checkpoint. XRANGE preserves insertion order;
+    //    an out-of-order result proves the loop emitted in the wrong
+    //    sequence (or the sink dropped one frame).
+    let eid = cairn_fabric::id_map::task_to_execution_id(&h.project, &task_id);
+    let frames: Vec<StreamFrame> = cairn_fabric::stream::restore_frames(
+        &h.fabric.runtime.client,
+        &h.fabric.runtime.partition_config,
+        &eid,
+        ff_core::types::AttemptIndex::new(0),
+        100,
+    )
+    .await
+    .expect("restore_frames failed");
+
+    let frame_types: Vec<&str> = frames
+        .iter()
+        .map(|f| {
+            f.fields
+                .get("frame_type")
+                .map(String::as_str)
+                .unwrap_or("<missing>")
+        })
+        .collect();
+    assert_eq!(
+        frame_types,
+        vec!["llm_response", "tool_call", "tool_result", "checkpoint"],
+        "frames emitted in wrong order by OrchestratorLoop::run_inner; \
+         expected llm_response → tool_call → tool_result → checkpoint \
+         (see loop_runner.rs §3b' → §5a → §5b → §6b)",
+    );
+
+    // 6. Payload round-trips — spot-check each frame so a silent
+    //    field-drop in any of the four sink methods surfaces here,
+    //    not in downstream resume reconstruction.
+    let parse = |frame: &StreamFrame| -> serde_json::Value {
+        let payload = frame
+            .fields
+            .get("payload")
+            .expect("frame missing payload field");
+        serde_json::from_str(payload).expect("payload not valid JSON")
+    };
+
+    let llm = parse(&frames[0]);
+    assert_eq!(llm["model"], "claude-3-opus");
+    assert_eq!(llm["tokens_in"], 500);
+    assert_eq!(llm["tokens_out"], 200);
+    assert_eq!(llm["latency_ms"], 1_200);
+
+    let tool_call = parse(&frames[1]);
+    assert_eq!(tool_call["tool_name"], "fs.read");
+    assert_eq!(tool_call["args"]["path"], "/tmp/x");
+
+    let tool_result = parse(&frames[2]);
+    assert_eq!(tool_result["tool_name"], "fs.read");
+    assert_eq!(tool_result["success"], true);
+    assert_eq!(tool_result["output"]["ok"], true);
+
+    // Checkpoint frame is raw bytes from `save_checkpoint` — the
+    // loop_runner writes a JSON snapshot with iteration + run_id +
+    // session_id + step_summary + loop_signal (see §6b of
+    // loop_runner.rs). The payload parses as JSON and carries the run id.
+    let checkpoint = parse(&frames[3]);
+    assert_eq!(checkpoint["iteration"], 0);
+    assert_eq!(checkpoint["run_id"], run_id.as_str());
+    assert_eq!(checkpoint["session_id"], session_id.as_str());
+
+    h.teardown().await;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+fn worker_config_from(h: &TestHarness) -> FabricConfig {
+    FabricConfig {
         valkey_host: h.fabric.runtime.config.valkey_host.clone(),
         valkey_port: h.fabric.runtime.config.valkey_port,
         tls: h.fabric.runtime.config.tls,
@@ -82,21 +294,21 @@ async fn orchestrator_sink_emits_four_frames_in_xrange_order() {
         worker_capabilities: BTreeSet::new(),
         waitpoint_hmac_secret: h.fabric.runtime.config.waitpoint_hmac_secret.clone(),
         waitpoint_hmac_kid: h.fabric.runtime.config.waitpoint_hmac_kid.clone(),
-    };
-    let worker = CairnWorker::connect(&worker_config, h.fabric.bridge.clone())
-        .await
-        .expect("CairnWorker::connect failed");
+    }
+}
 
-    // `CairnWorker::claim_next` scans a rolling 32-partition window per
-    // call (PARTITION_SCAN_CHUNK in ff-sdk). With 256 partitions, up to
-    // 8 polls are needed to cover the full keyspace. Loop with a short
-    // backoff until a task comes up OR we hit the deadline.
-    let claim_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let claimed = loop {
-        match worker.claim_next().await.expect("claim_next rpc failed") {
-            Some(task) => break task,
-            None => {
-                if std::time::Instant::now() >= claim_deadline {
+/// `CairnWorker::claim_next` scans a rolling 32-partition window per
+/// call (`PARTITION_SCAN_CHUNK` in ff-sdk). With 256 partitions up to
+/// 8 polls are needed to cover the full keyspace. Loop with a short
+/// backoff until a task comes up; deadline-bounded to surface real
+/// failures.
+async fn claim_with_retry(worker: &CairnWorker) -> cairn_fabric::CairnTask {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match worker.claim_next().await {
+            Ok(Some(task)) => return task,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
                     panic!(
                         "no eligible task returned within 10s — lane/capability/partition \
                          mismatch between harness submit path and worker claim path"
@@ -104,96 +316,19 @@ async fn orchestrator_sink_emits_four_frames_in_xrange_order() {
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
+            Err(e) => panic!("claim_next RPC failed: {e}"),
         }
-    };
-
-    // 3. Call the orchestrator's sink trait on the live CairnTask.
-    //    `Arc<dyn TaskFrameSink>` is how OrchestratorLoop holds it; we
-    //    recreate that shape to be honest about which path is exercised.
-    //
-    //    Ordering here mirrors `OrchestratorLoop::run_inner`:
-    //      §5a pre-execute:         log_tool_call
-    //      §5b post-execute:        log_tool_result
-    //      §3b' post-decide:        log_llm_response
-    //      §6b post-checkpoint hook: save_checkpoint
-    //
-    //    The loop emits tool_call before decide (§5a sits after §3b' in
-    //    the code flow but before the next iteration's decide); this
-    //    test mirrors a single iteration's on-wire order precisely.
-    let sink: Arc<dyn TaskFrameSink> = Arc::new(claimed);
-
-    sink.log_tool_call("fs.read", &serde_json::json!({ "path": "/tmp/x" }))
-        .await
-        .expect("log_tool_call");
-    sink.log_tool_result(
-        "fs.read",
-        &serde_json::json!({ "content": "hello" }),
-        true,
-        42,
-    )
-    .await
-    .expect("log_tool_result");
-    sink.log_llm_response("claude-3-opus", 500, 200, 1_200)
-        .await
-        .expect("log_llm_response");
-    sink.save_checkpoint(b"{\"iteration\":0,\"state\":\"checkpoint\"}")
-        .await
-        .expect("save_checkpoint");
-
-    // 4. Read the stream back via restore_frames. The execution id for
-    //    the task matches the id_map derivation cairn-fabric uses;
-    //    attempt index 0 is the first attempt (this task hasn't been
-    //    re-claimed).
-    //
-    //    `restore_frames` is the same API orchestrator-resumption
-    //    paths will use; calling it here proves the write half lands
-    //    on the key the read half will query.
-    let eid = cairn_fabric::id_map::task_to_execution_id(&h.project, &task_id);
-    let frames: Vec<StreamFrame> = cairn_fabric::stream::restore_frames(
-        &h.fabric.runtime.client,
-        &h.fabric.runtime.partition_config,
-        &eid,
-        ff_core::types::AttemptIndex::new(0),
-        100,
-    )
-    .await
-    .expect("restore_frames failed");
-
-    // 5. Assertions.
-    assert_eq!(
-        frames.len(),
-        4,
-        "expected 4 frames (tool_call, tool_result, llm_response, checkpoint), got {}: {frames:?}",
-        frames.len(),
-    );
-
-    let frame_types: Vec<&str> = frames
-        .iter()
-        .map(|f| {
-            f.fields
-                .get("frame_type")
-                .map(String::as_str)
-                .unwrap_or("<missing>")
-        })
-        .collect();
-    assert_eq!(
-        frame_types,
-        vec!["tool_call", "tool_result", "llm_response", "checkpoint"],
-        "frames out of order or wrong types",
-    );
-
-    // 6. Spot-check the first frame's payload — confirms the tool_name
-    //    we logged round-trips through ff_append_frame + XRANGE.
-    let tool_call_payload = frames[0]
-        .fields
-        .get("payload")
-        .expect("tool_call frame missing payload field");
-    let parsed: serde_json::Value =
-        serde_json::from_str(tool_call_payload).expect("tool_call payload not valid JSON");
-    assert_eq!(
-        parsed["tool_name"], "fs.read",
-        "tool_call payload lost its tool_name on round-trip: {parsed}"
-    );
-
-    h.teardown().await;
+    }
 }
+
+// Silence unused-import warning on `TaskId` under cfg-off builds —
+// cfg-gate is at the file level so this path only compiles with the
+// feature, but the import chain is wide enough that keeping TaskId
+// explicit aids search/grep.
+#[allow(dead_code)]
+fn _task_id_is_imported(_: TaskId) {}
+
+// Same for ProjectKey — named here so future maintainers find the
+// concrete scope-triple the harness derives.
+#[allow(dead_code)]
+fn _project_key_is_imported(_: ProjectKey) {}
