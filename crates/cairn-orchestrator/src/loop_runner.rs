@@ -594,14 +594,28 @@ where
                 "step_summary": step_history.last(),
                 "loop_signal": format!("{:?}", execute_outcome.loop_signal),
             });
-            let checkpoint_bytes = serde_json::to_vec(&checkpoint_snapshot).unwrap_or_default();
-            if !checkpoint_bytes.is_empty() {
-                if let Err(e) = self.task_sink.save_checkpoint(&checkpoint_bytes).await {
+            match serde_json::to_vec(&checkpoint_snapshot) {
+                Ok(checkpoint_bytes) => {
+                    if let Err(e) = self.task_sink.save_checkpoint(&checkpoint_bytes).await {
+                        tracing::warn!(
+                            run_id    = %ctx.run_id,
+                            iteration = ctx.iteration,
+                            error     = %e,
+                            "task_sink.save_checkpoint failed — frame lost, loop continues"
+                        );
+                    }
+                }
+                Err(e) => {
+                    // Should be unreachable (the snapshot is built from
+                    // owned primitives + Debug format), but don't eat the
+                    // failure silently. Loss of a checkpoint frame is
+                    // advisory (see CAIRN-FABRIC-FINALIZED.md §4.5) —
+                    // WARN + continue matches the other sink failure paths.
                     tracing::warn!(
                         run_id    = %ctx.run_id,
                         iteration = ctx.iteration,
                         error     = %e,
-                        "task_sink.save_checkpoint failed — frame lost, loop continues"
+                        "failed to serialize checkpoint snapshot — frame lost, loop continues"
                     );
                 }
             }
