@@ -14,8 +14,8 @@
 use std::sync::Arc;
 
 use cairn_domain::{
-    EventEnvelope, EventId, EventSource, MailboxMessageAppended, MailboxMessageId, ProjectKey,
-    RunId, RuntimeEvent, SessionId, TaskId,
+    EventEnvelope, EventId, EventSource, MailboxDeliveryStatus, MailboxMessageAppended,
+    MailboxMessageId, ProjectKey, RunId, RuntimeEvent, SessionId, TaskId,
 };
 use cairn_runtime::{
     MailboxService, MailboxServiceImpl, RunServiceImpl, SessionService, SessionServiceImpl,
@@ -52,7 +52,7 @@ async fn append_rich_message(
     recipient: Option<&str>,
     body: Option<&str>,
     sent_at: Option<u64>,
-    delivery_status: Option<&str>,
+    delivery_status: Option<MailboxDeliveryStatus>,
 ) {
     store
         .append(&[EventEnvelope::for_runtime_event(
@@ -71,7 +71,7 @@ async fn append_rich_message(
                 recipient: recipient.map(str::to_owned),
                 body: body.map(str::to_owned),
                 sent_at,
-                delivery_status: delivery_status.map(str::to_owned),
+                delivery_status,
             }),
         )])
         .await
@@ -106,7 +106,7 @@ async fn append_and_retrieve_message_with_all_fields() {
         Some("agent:worker-1"),
         Some("Please summarise the document at /docs/spec.md"),
         Some(1_700_000_000_000),
-        Some("pending"),
+        Some(MailboxDeliveryStatus::Pending),
     )
     .await;
 
@@ -125,7 +125,7 @@ async fn append_and_retrieve_message_with_all_fields() {
         Some("Please summarise the document at /docs/spec.md")
     );
     assert_eq!(record.sent_at, Some(1_700_000_000_000));
-    assert_eq!(record.delivery_status.as_deref(), Some("pending"));
+    assert_eq!(record.delivery_status, Some(MailboxDeliveryStatus::Pending));
 }
 
 // ── (3) List messages by run ──────────────────────────────────────────────
@@ -204,7 +204,7 @@ async fn mark_message_delivered_updates_delivery_status() {
         Some("agent:B"),
         Some("Task assignment"),
         Some(2_000_000),
-        Some("pending"),
+        Some(MailboxDeliveryStatus::Pending),
     )
     .await;
 
@@ -213,7 +213,7 @@ async fn mark_message_delivered_updates_delivery_status() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(before.delivery_status.as_deref(), Some("pending"));
+    assert_eq!(before.delivery_status, Some(MailboxDeliveryStatus::Pending));
 
     // Step 2: re-append same message ID with delivery_status "delivered".
     // The projection upserts by message_id, so this overwrites the record.
@@ -234,7 +234,7 @@ async fn mark_message_delivered_updates_delivery_status() {
                 recipient: Some("agent:B".to_owned()),
                 body: Some("Task assignment".to_owned()),
                 sent_at: Some(2_000_000),
-                delivery_status: Some("delivered".to_owned()),
+                delivery_status: Some(MailboxDeliveryStatus::Delivered),
             }),
         )])
         .await
@@ -246,9 +246,9 @@ async fn mark_message_delivered_updates_delivery_status() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        after.delivery_status.as_deref(),
-        Some("delivered"),
-        "delivery_status must change to 'delivered' after the update event"
+        after.delivery_status,
+        Some(MailboxDeliveryStatus::Delivered),
+        "delivery_status must change to Delivered after the update event"
     );
 }
 
@@ -289,7 +289,7 @@ async fn deferred_message_appears_in_list_pending() {
                 recipient: None,
                 body: None,
                 sent_at: None,
-                delivery_status: Some("scheduled".to_owned()),
+                delivery_status: Some(MailboxDeliveryStatus::Scheduled),
             }),
         )])
         .await

@@ -1,8 +1,7 @@
-//! Voice STT/TTS domain types (GAP-015).
+//! Voice STT/TTS domain types.
 //!
-//! Mirrors `cairn/internal/voice/` — whisper.cpp speech-to-text and
-//! edge-tts text-to-speech. These are pure value types; the service
-//! traits live in `cairn-runtime::voice`.
+//! Pure value types for whisper.cpp-backed speech-to-text and edge-tts
+//! text-to-speech. The service traits live in `cairn-runtime::voice`.
 
 use serde::{Deserialize, Serialize};
 

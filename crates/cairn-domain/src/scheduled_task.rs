@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Scheduled tasks trigger recurring agent workflows (e.g. weekly reflection).
 /// The runtime recovery sweep can check `next_run_at` against the current
 /// clock and enqueue due tasks.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScheduledTaskRecord {
     pub scheduled_task_id: ScheduledTaskId,
     pub tenant_id: TenantId,
@@ -24,10 +24,6 @@ pub struct ScheduledTaskRecord {
     pub created_at: u64,
     pub updated_at: u64,
 }
-
-// Manual Eq: the struct contains no f64, but we implement Eq explicitly so
-// ScheduledTaskRecord can be used in contexts that require it.
-impl Eq for ScheduledTaskRecord {}
 
 #[cfg(test)]
 mod tests {

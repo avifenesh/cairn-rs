@@ -103,8 +103,13 @@ impl ProjectKey {
 }
 
 impl Default for ProjectKey {
+    /// Canonical default scope. Empty-string sentinels were hazardous:
+    /// they collided with real tenancy data and silently routed events
+    /// into a ghost project. Structs that derive `Default` and embed a
+    /// `ProjectKey` now land on this named triple instead, which is
+    /// distinguishable from any real scope at a glance.
     fn default() -> Self {
-        Self::new("", "", "")
+        Self::new("default_tenant", "default_workspace", "default_project")
     }
 }
 

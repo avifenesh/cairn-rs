@@ -18,7 +18,6 @@ pub enum OperationKind {
 
 /// How a provider model is billed per call.
 ///
-/// Mirrors cairn Go `internal/llm/budget.go` ProviderCostTypeForModel.
 /// Used to compute `cost_micros` on `ProviderCallRecord` and to enforce
 /// budget caps without counting flat-rate or free calls against token budgets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -442,8 +441,6 @@ pub struct SessionCostRecord {
 /// configured threshold. At most one alert fires per tenant per UTC day
 /// (deduplication is the caller's responsibility for the MVP; future versions
 /// will use a daily dedup key).
-///
-/// Mirrors `cairn/internal/agent/spend_alert.go` SpendAlert struct.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpendAlert {
     pub alert_id: String,
@@ -580,12 +577,11 @@ impl std::error::Error for ProviderAdapterError {}
 
 /// In-process LLM spend tracker with daily and monthly reset semantics.
 ///
-/// Mirrors `cairn/internal/llm/budget.go` — thread-safety is the caller's
-/// responsibility (wrap in `Mutex` for shared use).
-///
-/// Does NOT enforce cross-process consistency. Use `BudgetService` (backed by
-/// the event store) for durable, multi-process budget enforcement. This struct
-/// is for in-process fast-path `can_afford` checks before dispatching a call.
+/// Thread-safety is the caller's responsibility (wrap in `Mutex` for shared
+/// use). Does NOT enforce cross-process consistency. Use `BudgetService`
+/// (backed by the event store) for durable, multi-process budget enforcement.
+/// This struct is for in-process fast-path `can_afford` checks before
+/// dispatching a call.
 #[derive(Clone, Debug)]
 pub struct LlmBudget {
     /// Hard daily cap in USD micros. 0 = disabled.

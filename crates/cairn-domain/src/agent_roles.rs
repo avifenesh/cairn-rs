@@ -1,10 +1,8 @@
-//! Agent role domain types (GAP-011).
+//! Agent role domain types.
 //!
 //! An `AgentRole` is a named, reusable capability profile that configures
 //! how a run behaves: which tools it may invoke, how much context it receives,
 //! and which system prompt shapes its persona.
-//!
-//! Mirrors `cairn/internal/agenttype` (Go).
 
 use serde::{Deserialize, Serialize};
 

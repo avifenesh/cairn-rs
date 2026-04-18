@@ -235,7 +235,6 @@ pub fn can_resume_task_to(target: TaskResumeTarget) -> bool {
 
 /// Operational status of an agent session in the fleet view.
 ///
-/// Mirrors `cairn/internal/server/routes_fleet.go` status mapping:
 /// - `Busy`    — session has a running or claimed task
 /// - `Idle`    — session is open but has no active task (queued or paused)
 /// - `Offline` — session is terminal (completed / failed / archived)

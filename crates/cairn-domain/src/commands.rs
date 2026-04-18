@@ -551,7 +551,14 @@ pub struct CompleteEvalRun {
 }
 
 /// Record the outcome of an agent run for confidence calibration.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// **`predicted_confidence` contract:** expected to be finite and in
+/// `[0.0, 1.0]`. Storage is raw `f64` because the value originates in an LLM
+/// response; the `PartialEq`/`Eq` impls below use `f64::to_bits` so that a
+/// stray `NaN` round-trips deterministically (two `NaN`s with identical bit
+/// patterns compare equal, respecting `Eq`'s reflexivity rule). Callers that
+/// need numeric equality should compare the `f64` field directly.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecordOutcome {
     pub project: ProjectKey,
     pub outcome_id: OutcomeId,
@@ -561,7 +568,17 @@ pub struct RecordOutcome {
     pub actual_outcome: crate::events::ActualOutcome,
 }
 
-// Manual Eq impl for f64 field (see OutcomeRecorded).
+impl PartialEq for RecordOutcome {
+    fn eq(&self, other: &Self) -> bool {
+        self.project == other.project
+            && self.outcome_id == other.outcome_id
+            && self.run_id == other.run_id
+            && self.agent_type == other.agent_type
+            && self.predicted_confidence.to_bits() == other.predicted_confidence.to_bits()
+            && self.actual_outcome == other.actual_outcome
+    }
+}
+
 impl Eq for RecordOutcome {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
