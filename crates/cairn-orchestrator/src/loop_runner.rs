@@ -573,6 +573,39 @@ where
                 );
             }
 
+            // ── (6b) FF stream: checkpoint frame ─────────────────────────────
+            // Matches the write half of PR #27's `restore_frames()` read path.
+            // Serializes the per-iteration context snapshot (iteration number,
+            // run/session ids, the step summary just pushed, and the
+            // loop_signal) as JSON and appends it as a `checkpoint` frame on
+            // the attempt stream. A cross-process resumer reads the stream
+            // via `restore_frames()` and rebuilds enough context to pick up
+            // where the previous attempt left off.
+            //
+            // Same best-effort contract as tool/llm frames: failure = WARN +
+            // continue. See `task_sink` module docs for the nuance (a lost
+            // checkpoint frame means restart-resumption silently misses this
+            // iteration's state; kept advisory for consistency with the
+            // existing `CheckpointHook::save` failure policy).
+            let checkpoint_snapshot = serde_json::json!({
+                "iteration": ctx.iteration,
+                "run_id": ctx.run_id.to_string(),
+                "session_id": ctx.session_id.to_string(),
+                "step_summary": step_history.last(),
+                "loop_signal": format!("{:?}", execute_outcome.loop_signal),
+            });
+            let checkpoint_bytes = serde_json::to_vec(&checkpoint_snapshot).unwrap_or_default();
+            if !checkpoint_bytes.is_empty() {
+                if let Err(e) = self.task_sink.save_checkpoint(&checkpoint_bytes).await {
+                    tracing::warn!(
+                        run_id    = %ctx.run_id,
+                        iteration = ctx.iteration,
+                        error     = %e,
+                        "task_sink.save_checkpoint failed — frame lost, loop continues"
+                    );
+                }
+            }
+
             self.emitter
                 .on_step_completed(ctx, &decide_output, &execute_outcome)
                 .await;
