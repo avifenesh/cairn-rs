@@ -4,12 +4,10 @@
 //   - ff_create_flow   (via sessions.create)
 //   - ff_cancel_flow   (via sessions.archive)
 //
-// TODO(harness): TestHarness::teardown does not purge Valkey keys. Every
-// test uses `unique_session_id()` so cross-test collisions are limited to
-// index zsets. Harness hardening will follow in a separate round.
-//
-// All tests are #[ignore] — they require a live Valkey with the flowfabric
-// library loaded. See scripts/run-fabric-integration-tests.sh.
+// Runs against a testcontainers-provisioned Valkey (see tests/integration.rs).
+// `TestHarness::setup()` issues FLUSHDB between tests so index zsets do not
+// collide across runs — the earlier `unique_session_id()` crutch stays only
+// as defense in depth.
 
 use std::collections::HashMap;
 
@@ -52,7 +50,6 @@ async fn read_flow_core(h: &TestHarness, session_id: &SessionId) -> HashMap<Stri
 /// `flow_core.public_flow_state` directly to prove FF wrote `cancelled`,
 /// not just that our Rust service said so.
 #[tokio::test]
-#[ignore]
 async fn test_session_create_and_cancel_flow() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -165,7 +162,6 @@ async fn test_session_create_and_cancel_flow() {
 /// remains in `cancelled` state (i.e. the idempotent path did not corrupt
 /// the hash).
 #[tokio::test]
-#[ignore]
 async fn test_double_archive_is_idempotent() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();

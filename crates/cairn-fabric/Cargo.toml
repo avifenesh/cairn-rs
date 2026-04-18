@@ -44,3 +44,10 @@ insecure-direct-claim = ["ff-sdk/insecure-direct-claim"]
 
 [dev-dependencies]
 url = "2"
+# Spin up a fresh Valkey container per cargo-test invocation (OnceCell
+# shared across every test in the binary) so the integration suite does
+# not require a pre-existing CAIRN_TEST_VALKEY_URL environment.
+testcontainers = "0.23"
+once_cell = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+uuid = { version = "1", features = ["v4"] }

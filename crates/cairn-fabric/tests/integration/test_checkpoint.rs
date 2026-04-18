@@ -5,8 +5,10 @@
 // with the expected frame_type per entry. FF is the sole source of truth for
 // frames — no cairn-side cache touched.
 //
-// All tests are #[ignore] — require a live Valkey with the FlowFabric library
-// loaded. See scripts/run-fabric-integration-tests.sh.
+// Runs against a testcontainers-provisioned Valkey (see tests/integration.rs).
+// No #[ignore], no manual setup — `cargo test -p cairn-fabric --test
+// integration` boots a disposable container and loads the FF Lua library
+// automatically.
 
 use cairn_fabric::id_map;
 use cairn_fabric::stream::{restore_frames, FRAME_CHECKPOINT, FRAME_TOOL_CALL, FRAME_TOOL_RESULT};
@@ -63,7 +65,6 @@ async fn lease_context(
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_checkpoint_restore_reads_frames() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
