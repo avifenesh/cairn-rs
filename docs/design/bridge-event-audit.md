@@ -46,7 +46,7 @@ The 12 `BridgeEvent` variants (`crates/cairn-fabric/src/event_bridge.rs:17-87`) 
 | `check_dependencies` | — | — | SILENT-OK | Read. |
 | `get` | — | — | SILENT-OK | Read. |
 | `claim` | via `issue_grant_and_claim` helper | `TaskLeaseClaimed` | EMITS | `lease_epoch` carries task-record version; no cairn-side lease cache (lean bridge). |
-| `heartbeat` | `FF_RENEW_LEASE` | none | SILENT-OK | Lease extension is not a new claim; projection `TaskReadModel` renews `lease_expires_at` via `TaskLeaseHeartbeated` not `TaskLeaseClaimed`. No renewal BridgeEvent exists; heartbeat frequency would swamp the projection. Accepted as lean-bridge silence. |
+| `heartbeat` | `FF_RENEW_LEASE` | none | SILENT-OK | Lease extension is not a new claim. `BridgeEvent` has no renewal variant — heartbeat cadence (sub-lease-TTL, ~5-10s) would swamp the bridge channel. The `RuntimeEvent::TaskLeaseHeartbeated` variant used by non-fabric runtime paths has a projection handler (`cairn-store/src/in_memory.rs:449-455` renews `lease_expires_at`), but the fabric path never produces it. Readers needing fresh lease-expiry go via `FabricTaskService::get` (HGETALLs FF). Accepted as lean-bridge silence. |
 | `start` | — | — | SILENT-OK | No-op: FF transitions to active on claim. |
 | `complete` | `FF_COMPLETE_EXECUTION` | `TaskStateChanged(Completed)` | EMITS | Unconditional; projection idempotent on (task_id, event_id). |
 | `fail` | `FF_FAIL_EXECUTION` | `TaskStateChanged(Failed)` (only terminal per `parse_fail_outcome`) | EMITS | Retry-scheduled fail intentionally silent. |
@@ -121,7 +121,7 @@ Not audited as a separate row. `pub(crate) issue_grant_and_claim` is the helper 
 
 **G1 — `FabricTaskService::pause` does not emit `BridgeEvent::TaskStateChanged`.**
 
-- **Site:** `crates/cairn-fabric/src/services/task_service.rs:769-939`.
+- **Site:** `crates/cairn-fabric/src/services/task_service.rs:784-954` (line numbers reflect tree post-audit-commit `08c78bc`, which added module-level rustdoc to `heartbeat` above this fn).
 - **FF side:** `FF_SUSPEND_EXECUTION` commits cleanly (Valkey state reflects `public_state=suspended`, `ownership_state=lease_paused`, task reads as `TaskState::Paused` or `WaitingApproval`).
 - **cairn side:** no `bridge.emit(...)` call anywhere in `pause`. Projection `TaskReadModel` never transitions to `Paused`; SSE subscribers never observe the transition.
 - **User-visible impact:** `POST /v1/tasks/:id/pause` succeeds, `GET /v1/tasks/:id` returns fresh-from-FF so looks right via HTTP, but the cairn-store projection lags until the next terminal emit (complete / fail / cancel). Audit log misses the pause event. SSE clients do not observe pause.
@@ -130,7 +130,7 @@ Not audited as a separate row. `pub(crate) issue_grant_and_claim` is the helper 
 
 **G2 — `FabricTaskService::resume` does not emit `BridgeEvent::TaskStateChanged`.**
 
-- **Site:** `crates/cairn-fabric/src/services/task_service.rs:941-1001`.
+- **Site:** `crates/cairn-fabric/src/services/task_service.rs:956-1016` (same line-drift caveat as G1).
 - **FF side:** `FF_RESUME_EXECUTION` commits cleanly.
 - **cairn side:** same omission. Projection stays at `Paused`; resume is invisible until the next terminal emit.
 - **Asymmetry:** `FabricRunService::resume` (line 893-899) DOES emit `ExecutionResumed`.
@@ -140,6 +140,16 @@ Not audited as a separate row. `pub(crate) issue_grant_and_claim` is the helper 
 **No FF dependency.** Both fixes are pure cairn-side additions — the FCALL already succeeds, we just need to emit afterward. Pattern mirrors `FabricRunService::pause` / `resume` exactly:
 
 ```rust
+// Imports: add `is_already_satisfied` to the existing
+// `use crate::helpers::{…}` line at the top of task_service.rs — it
+// lives alongside `is_duplicate_result` / `check_fcall_success` in
+// crate::helpers but isn't imported today.
+use crate::helpers::{
+    check_fcall_success, is_already_satisfied, is_duplicate_result,
+    parse_fail_outcome, parse_public_state, try_parse_project_key,
+    FailOutcome,
+};
+
 // pause — after check_fcall_success on FF_SUSPEND_EXECUTION:
 let record = self.read_task_record(project, task_id).await?;
 if !is_already_satisfied(&raw) {
