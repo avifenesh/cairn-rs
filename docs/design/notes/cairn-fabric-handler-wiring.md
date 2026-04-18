@@ -154,7 +154,7 @@ Handler file → line → Fabric replacement → gap
 **Phase 1 — adapter layer (non-breaking)**:
 1. Add `cairn-app/src/fabric_adapter.rs`: impl `RunService`, `TaskService`, `SessionService` traits that wrap `FabricServices` + projection lookup for bare-id calls.
 2. Add `start_with_correlation` to `FabricRunService` (G1). Trivial — `start` with `correlation_id` tag on the FF execution.
-3. Add `AppState.fabric: Option<Arc<FabricServices>>` gated by `CAIRN_FABRIC_ENABLED` env var. Default OFF.
+3. Add `AppState.fabric: Option<Arc<FabricServices>>`. Populated in default builds; `None` under `--features in-memory-runtime`. (Earlier rounds proposed an `CAIRN_FABRIC_ENABLED` env var for this; PR #27 replaced that with the compile-time cargo feature.)
 
 **Phase 2 — flip per-service**:
 4. Flip RunService first (highest value, most call sites). `state.runtime.runs` becomes the adapter when `fabric_enabled`.
