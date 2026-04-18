@@ -1024,6 +1024,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "cairn-domain",
+ "cairn-fabric",
  "cairn-graph",
  "cairn-memory",
  "cairn-providers",

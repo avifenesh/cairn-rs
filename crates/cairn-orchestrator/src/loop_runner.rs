@@ -36,6 +36,7 @@ use crate::emitter::{NoOpEmitter, OrchestratorEventEmitter};
 use crate::error::OrchestratorError;
 use crate::execute::ExecutePhase;
 use crate::gather::GatherPhase;
+use crate::task_sink::{NoOpTaskSink, TaskFrameSink};
 
 // ── CheckpointHook ────────────────────────────────────────────────────────────
 
@@ -103,6 +104,11 @@ pub struct OrchestratorLoop<G, D, E> {
     config: LoopConfig,
     checkpoint_hook: Arc<dyn CheckpointHook>,
     emitter: Arc<dyn OrchestratorEventEmitter>,
+    /// FF task-stream sink. `NoOpTaskSink` in the default construction —
+    /// call `with_task_sink` to install a `cairn_fabric::CairnTask`-backed
+    /// sink once the handler has claimed a task. Non-consuming
+    /// (frames only); terminal + suspension ops stay at the caller.
+    task_sink: Arc<dyn TaskFrameSink>,
 }
 
 impl<G, D, E> OrchestratorLoop<G, D, E>
@@ -112,7 +118,8 @@ where
     E: ExecutePhase,
 {
     /// Construct a new loop with the given phases and configuration.
-    /// Uses `NoOpCheckpointHook` and `NoOpEmitter` — call the builder methods to override.
+    /// Uses `NoOpCheckpointHook`, `NoOpEmitter`, and `NoOpTaskSink` — call
+    /// the builder methods to override.
     pub fn new(gather: G, decide: D, execute: E, config: LoopConfig) -> Self {
         Self {
             gather,
@@ -121,6 +128,7 @@ where
             config,
             checkpoint_hook: Arc::new(NoOpCheckpointHook),
             emitter: Arc::new(NoOpEmitter),
+            task_sink: Arc::new(NoOpTaskSink),
         }
     }
 
@@ -133,6 +141,21 @@ where
     /// Replace the event emitter (e.g., an SSE broadcaster for live progress).
     pub fn with_emitter(mut self, emitter: Arc<dyn OrchestratorEventEmitter>) -> Self {
         self.emitter = emitter;
+        self
+    }
+
+    /// Install a task-stream sink so FF receives `tool_call`, `tool_result`,
+    /// `llm_response`, and `checkpoint` frames for the attempt, and the
+    /// loop can poll `is_lease_healthy` between iterations.
+    ///
+    /// Pass an `Arc<cairn_fabric::CairnTask>` (via the blanket impl in
+    /// [`crate::task_sink`]) once the caller has claimed an FF task.
+    /// Callers without an FF task can omit this — the default
+    /// `NoOpTaskSink` leaves FF-side telemetry silent while the rest of
+    /// the loop (EventLog bridge events, store projections, SSE) runs
+    /// unchanged.
+    pub fn with_task_sink(mut self, sink: Arc<dyn TaskFrameSink>) -> Self {
+        self.task_sink = sink;
         self
     }
 
@@ -195,6 +218,25 @@ where
                     "orchestrator loop timed out"
                 );
                 return Ok(LoopTermination::TimedOut);
+            }
+
+            // ── (1b) Lease health gate ───────────────────────────────────────
+            // FF's ClaimedTask tracks consecutive renewal failures; after 3
+            // misses `is_lease_healthy()` returns false and every downstream
+            // FCALL will reject as stale_lease. Bail before committing any
+            // irreversible side effect (LLM call, tool dispatch, checkpoint
+            // write) — the caller sees `LoopTermination::Failed { reason:
+            // "lease unhealthy" }` and can fail the run cleanly via the
+            // CairnTask handle it still owns.
+            if !self.task_sink.is_lease_healthy() {
+                tracing::warn!(
+                    run_id    = %ctx.run_id,
+                    iteration = ctx.iteration,
+                    "lease unhealthy (3+ renewal failures) — aborting loop"
+                );
+                return Ok(LoopTermination::Failed {
+                    reason: "lease unhealthy".to_owned(),
+                });
             }
 
             let remaining_ms = deadline_ms.saturating_sub(now_ms);

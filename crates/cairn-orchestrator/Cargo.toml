@@ -7,6 +7,7 @@ edition = "2021"
 cairn-domain   = { path = "../cairn-domain" }
 cairn-store    = { path = "../cairn-store" }
 cairn-runtime  = { path = "../cairn-runtime" }
+cairn-fabric   = { path = "../cairn-fabric" }
 cairn-memory   = { path = "../cairn-memory" }
 cairn-graph    = { path = "../cairn-graph" }
 cairn-tools    = { path = "../cairn-tools" }
