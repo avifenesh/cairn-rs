@@ -54,10 +54,15 @@
 
 ## 2. Feature gates
 
+The runtime path is selected at **compile time** by cargo features on
+`cairn-app`. There is no longer a runtime env var toggle — this was removed
+in the PR #27 consolidation because "Fabric off" production builds are
+unsupported (FF is the only correctness-guaranteed path).
+
 | Flag / env var | Default | Scope | Effect |
 |---|---|---|---|
-| `CAIRN_FABRIC_ENABLED` | unset (off) | env var | When set, `AppState` constructs `FabricServices`, replaces `state.runtime.{runs,tasks,sessions}` with the adapter. Unset = in-memory path for dev/local. |
-| `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` | unset (boot fails) | env var | 64-char hex (32-byte) HMAC secret. **Required** when `CAIRN_FABRIC_ENABLED=1` — boot aborts with `FabricError::Config` if unset (no silent degrade). Dev paths that don't want HMAC must use the in-memory runtime by leaving `CAIRN_FABRIC_ENABLED` unset. |
+| `in-memory-runtime` | OFF | cargo feature on `cairn-app` (forwards to `cairn-runtime`, `cairn-orchestrator`, `cairn-tools`) | When OFF (default / production), `AppState::new` constructs `FabricServices` and installs `Fabric{Run,Task,Session}ServiceAdapter` on `state.runtime.{runs,tasks,sessions}`. When ON, the event-log-only `RunServiceImpl` / `TaskServiceImpl` / `SessionServiceImpl` are compiled in and wired instead — no Valkey, no scanners, no correctness guarantees. Local tinkering and unit-test harnesses only. |
+| `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` | unset (boot fails) | env var | 64-char hex (32-byte) HMAC secret. **Required** in the default (Fabric) build — boot aborts with `FabricError::Config` if unset (no silent degrade). Dev paths that don't want HMAC must build with `--features in-memory-runtime` so Fabric boot is skipped. |
 | `CAIRN_FABRIC_WAITPOINT_HMAC_KID` | `k1` when secret set | env var | Kid for the HMAC secret. Must be non-empty and free of `:` (FF field-name delimiter). |
 | `CAIRN_FABRIC_WORKER_CAPABILITIES` | empty set | env var | Comma-separated capability tokens. Passed to `ff_scheduler::Scheduler::claim_for_worker`. Empty = matches only executions with no capability requirements. |
 | `CAIRN_FABRIC_HOST` / `_PORT` / `_TLS` / `_CLUSTER` | `localhost` / `6379` / off / off | env var | Valkey connection. `_CLUSTER=1` uses cluster mode; all FCALL KEYS on a single `{p:N}` hash tag so this is cluster-safe without extra wiring. |
@@ -70,18 +75,20 @@
 
 ### 3.1 Enabling Fabric
 
+Fabric is the default — `cargo build -p cairn-app` produces a binary
+that requires Valkey at boot. To get a Fabric-backed deployment up:
+
 1. Run a Valkey 8+ instance reachable from cairn.
 2. Load the FlowFabric Lua library into Valkey (`scripts/run-fabric-integration-tests.sh` does this from a pinned FF checkout; production operators seed from their CI artefact).
 3. Generate a 32-byte HMAC secret: `openssl rand -hex 32`.
-4. Set env vars before boot. The HMAC secret is **required** when Fabric is enabled — boot fails loud if it's missing:
+4. Set env vars before boot. The HMAC secret is **required** — boot fails loud if it's missing:
    ```bash
-   export CAIRN_FABRIC_ENABLED=1
    export CAIRN_FABRIC_HOST=valkey.internal
    export CAIRN_FABRIC_PORT=6379
    export CAIRN_FABRIC_WAITPOINT_HMAC_SECRET=<64-hex>
    export CAIRN_FABRIC_WAITPOINT_HMAC_KID=prod-2026-04
    ```
-   Omitting `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` (or supplying an invalid length / non-hex value) aborts `FabricServices::start` with a typed `FabricError::Config` — we do not ship a runtime that would reject every `ff_suspend_execution` with `hmac_secret_not_initialized` at runtime. Dev / CI paths that don't want HMAC must unset `CAIRN_FABRIC_ENABLED` and use the in-memory dev path.
+   Omitting `CAIRN_FABRIC_WAITPOINT_HMAC_SECRET` (or supplying an invalid length / non-hex value) aborts `FabricServices::start` with a typed `FabricError::Config` — we do not ship a runtime that would reject every `ff_suspend_execution` with `hmac_secret_not_initialized` at runtime. Dev / CI paths that don't want HMAC must build with `--features in-memory-runtime` so Fabric boot is skipped entirely.
 5. Boot cairn-app. You should see:
    ```
    INFO connecting to valkey url=redis://valkey.internal:6379
@@ -105,20 +112,36 @@ Not automated in this round. FF ships `rotate_waitpoint_hmac_secret` in `ff-test
 
 ### 3.4 Disabling Fabric for debugging
 
-Unset `CAIRN_FABRIC_ENABLED`. AppState falls back to the in-memory `RunServiceImpl` / `TaskServiceImpl` / `SessionServiceImpl`. No data is shared between the two paths — in-memory runs are not visible from the Fabric path and vice versa.
+Rebuild with `cargo build -p cairn-app --features in-memory-runtime`.
+`AppState::new` then skips `FabricServices::start` entirely and wires
+the event-log-only `RunServiceImpl` / `TaskServiceImpl` /
+`SessionServiceImpl` onto `state.runtime.{runs,tasks,sessions}`. No
+data is shared between the two builds — in-memory runs are not visible
+from the Fabric build and vice versa.
+
+This is a **local / test harness escape hatch**, not a supported
+production mode. The in-memory impls do not participate in FF's
+scanner lifecycle, so any state that requires recovery (leases, budgets,
+delayed promotion) will not work.
 
 ### 3.5 Dev vs production paths
 
-Two backing stacks live side-by-side in the binary; the env var picks which one AppState wires at boot.
+Two backing stacks live in the codebase, gated by the
+`in-memory-runtime` cargo feature — `AppState::new` wires the
+corresponding impl at compile time.
 
 | Path | Trigger | Run/Task/Session backing | Execution state lives in | Recovery | Recommended for |
 |---|---|---|---|---|---|
-| **Production** | `CAIRN_FABRIC_ENABLED=1` | `Fabric{Run,Task,Session}ServiceAdapter` | Valkey + FF Lua library | FF's 14 background scanners (`LeaseExpiryScanner`, `AttemptTimeoutScanner`, etc.) | real teams, production traffic |
-| **Dev / CI** | unset / `0` | `RunServiceImpl` / `TaskServiceImpl` / `SessionServiceImpl` | cairn-store event log (in-memory) | none — no scanners, no Valkey | `cargo test`, local `cargo run -p cairn-app`, short-lived CI without a Valkey dependency |
+| **Production** | default build (`in-memory-runtime` OFF) | `Fabric{Run,Task,Session}ServiceAdapter` | Valkey + FF Lua library | FF's 14 background scanners (`LeaseExpiryScanner`, `AttemptTimeoutScanner`, etc.) | real teams, production traffic |
+| **Dev / CI** | `--features in-memory-runtime` | `RunServiceImpl` / `TaskServiceImpl` / `SessionServiceImpl` | cairn-store event log (in-memory) | none — no scanners, no Valkey | `cargo test`, local `cargo run -p cairn-app --features in-memory-runtime`, short-lived CI without a Valkey dependency |
 
-The in-memory impls are **not** duplication of FF — they're the fallback when Fabric is disabled. Without them, running cairn-app without Valkey would be impossible and the test baseline couldn't validate cairn-side logic in isolation. Keep them.
+The in-memory impls are **courtesy backings for tinkerers**, not peers
+of FF. They exist so that unit tests and local exploration can run
+without standing up Valkey; they do not attempt to replicate FF's
+correctness semantics (strict state transitions, lease recovery,
+budget scanners).
 
-The deleted pieces in finalization were: `FabricRecoveryStub` (cairn-fabric side) and `RecoveryServiceImpl` (cairn-runtime side). Both were passive duplicates of FF's scanners — FF owns recovery whether Fabric is enabled or not, so the cairn-side sweeps were redundant under FF-enabled and useless under FF-disabled (no background worker to drive them).
+The deleted pieces in finalization were: `FabricRecoveryStub` (cairn-fabric side) and `RecoveryServiceImpl` (cairn-runtime side). Both were passive duplicates of FF's scanners — FF owns recovery on both paths, so the cairn-side sweeps were redundant under the Fabric build and useless under the in-memory build (no background worker to drive them).
 
 ### 3.6 Common failures
 
@@ -150,9 +173,11 @@ Accepted limitations as of finalization — each has a follow-up round scoped.
 - **`FabricTaskService::list_by_state`** and **`FabricSessionService::list`** return empty — FF doesn't index by cairn's `(tenant, workspace, project)` scope. Adapter delegates to `TaskReadModel` / `SessionReadModel` projections. Not a defect; it's the read-path split.
 - **Provider budgets and tenant quotas** (`handlers/providers.rs` + `handlers/admin.rs`) remain on the legacy `BudgetServiceImpl` / `QuotaServiceImpl` over the cairn event log. `FabricBudgetService` and `FabricQuotaService` are per-run admission controls, not tenant-wide ceilings; they ride alongside as new surfaces, not replacements.
 - **`ActiveTaskRegistry` is a latency-cache for lease context**, not a source of truth — FF owns every field it stores. It also doubles as the gate for terminal-state `TaskStateChanged` emission, which means API-claimed tasks (claimed without routing through `FabricTaskService::claim`) skip the projection update. Flagged MAJOR in the finalization audit; scheduled for removal once the claim-API work stabilises. See audit report for detail.
-- **`scripts/smoke-test.sh` HTTP harness assumes a permissive state machine** (the in-memory `RunServiceImpl` allows `pause` without a prior `claim`, etc). Under `CAIRN_FABRIC_ENABLED=1`, FF enforces strict state transitions — a run must be claimed and active before it can be paused/resumed, tasks must be submitted-and-claimed before lease operations. 8 smoke sections (`POST /v1/runs/:id/pause`, `/resume`, `POST /v1/tasks/:id/claim`, `/release-lease`) return HTTP 500 for this reason on the fabric path. These are **NOT runtime defects** — FF's strictness is correct production behaviour. The smoke-test harness needs a short-lived worker-loop fixture (claim-then-operate) to exercise FF semantics correctly. Filed as a separate follow-up PR: **"smoke-test: harness rewrite for Fabric state machine"**.
-  - Fabric-off path (`CAIRN_FABRIC_ENABLED` unset): 97/97 pass, 4 skipped.
-  - Fabric-on path (`CAIRN_FABRIC_ENABLED=1` + Valkey + FF lua loaded): 89/97 pass, 8 harness gaps, 4 skipped.
+- **`scripts/smoke-test.sh` HTTP harness historically assumed a permissive state machine** (the in-memory `RunServiceImpl` allows `pause` without a prior `claim`, etc). In the default Fabric build, FF enforces strict state transitions — a run must be claimed and active before it can be paused/resumed, tasks must be submitted-and-claimed before lease operations. 8 smoke sections (`POST /v1/runs/:id/pause`, `/resume`, `POST /v1/tasks/:id/claim`, `/release-lease`) returned HTTP 500 on the fabric path. These are **NOT runtime defects** — FF's strictness is correct production behaviour. PR #27 lands a short-lived worker-loop fixture (claim-then-operate) in `crates/cairn-app/src/bin/smoke_worker.rs` that exercises FF semantics correctly.
+  - In-memory path (`--features in-memory-runtime`): 97/97 pass, 4 skipped.
+  - Fabric path (default build + Valkey + FF lua loaded): 89/97 pass on the
+    pre-PR#27 script (8 harness gaps); the PR #27 worker-loop fixture
+    closes those gaps.
 
 ---
 
@@ -189,11 +214,11 @@ The finalization-round smoke-test caught a single-emit gap: `FabricSessionServic
 
 The same class of gap could exist for any FF mutation path cairn-fabric exposes. A systematic audit should walk every public method on `FabricRunService` / `FabricTaskService` / `FabricSessionService` / `FabricBudgetService` / `FabricQuotaService` and verify: every mutation that changes FF state that cairn-app reads back from the projection has a corresponding `BridgeEvent` emitted. No cairn-app read-path should depend on a state change that only lives in Valkey.
 
-Bugs of this shape are invisible to unit tests (services write to FF correctly) and to live FF integration tests (each one tests the fabric layer in isolation, not the full handler → adapter → fabric → store-projection chain). The integration-readiness gate is cairn-app smoke — run `CAIRN_FABRIC_ENABLED=1 scripts/smoke-test.sh` on every cairn-fabric mutation-surface change.
+Bugs of this shape are invisible to unit tests (services write to FF correctly) and to live FF integration tests (each one tests the fabric layer in isolation, not the full handler → adapter → fabric → store-projection chain). The integration-readiness gate is cairn-app smoke — run `scripts/smoke-test.sh` (default build) on every cairn-fabric mutation-surface change.
 
 ### LOW — Smoke-test harness rewrite for Fabric state machine
 
-`scripts/smoke-test.sh` simulates in-memory permissive state transitions (pause without prior claim, etc.). Under `CAIRN_FABRIC_ENABLED=1`, FF enforces strict state transitions, so 8 sections (pause/resume/claim/release-lease on freshly created runs and tasks) return HTTP 500 — the runtime is correct, the test's expectations aren't. Follow-up PR adds a worker-loop fixture that claims before operating so the fabric path gets exercised end-to-end.
+`scripts/smoke-test.sh` historically simulated in-memory permissive state transitions (pause without prior claim, etc.). In the default Fabric build, FF enforces strict state transitions, so 8 sections (pause/resume/claim/release-lease on freshly created runs and tasks) returned HTTP 500 — the runtime is correct, the test's expectations weren't. PR #27 replaces those sections with a worker-loop fixture (`crates/cairn-app/src/bin/smoke_worker.rs`) that claims before operating so the fabric path gets exercised end-to-end.
 
 ### LOW — CairnTask tag micro-cache
 

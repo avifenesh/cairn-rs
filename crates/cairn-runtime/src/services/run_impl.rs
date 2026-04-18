@@ -1,12 +1,13 @@
 //! `RunServiceImpl` — the in-memory, event-log-backed `RunService`
-//! implementation used when `CAIRN_FABRIC_ENABLED` is unset (local dev,
-//! test suites, CI without Valkey). When the flag is set, cairn-app
-//! instead installs `FabricRunServiceAdapter` which routes mutations to
-//! FlowFabric. See `docs/design/CAIRN-FABRIC-FINALIZED.md` §3.5.
+//! implementation compiled only under `--features in-memory-runtime`
+//! (local dev, test suites, CI without Valkey). In default / production
+//! builds cairn-app installs `FabricRunServiceAdapter` which routes
+//! mutations to FlowFabric. See
+//! `docs/design/CAIRN-FABRIC-FINALIZED.md` §3.5.
 //!
 //! This is NOT duplication of the Fabric adapter — they're peers behind
-//! the `RunService` trait, selected at boot. The in-memory path is
-//! loadbearing for the test matrix and operator escape hatch.
+//! the `RunService` trait, selected at compile time. The in-memory path
+//! carries no correctness guarantees and exists only for tinkering.
 
 use std::sync::Arc;
 
@@ -25,9 +26,9 @@ use crate::runs::RunService;
 
 /// In-memory dev-path implementation of [`crate::runs::RunService`].
 ///
-/// Selected by `AppState::new` when `CAIRN_FABRIC_ENABLED` is unset; the
-/// production path is [`crate::fabric_adapter::FabricRunServiceAdapter`]
-/// (in the cairn-app crate) wrapping `cairn_fabric::FabricServices`.
+/// Compiled only under `--features in-memory-runtime`; the production
+/// path is [`crate::fabric_adapter::FabricRunServiceAdapter`] (in the
+/// cairn-app crate) wrapping `cairn_fabric::FabricServices`.
 pub struct RunServiceImpl<S> {
     store: Arc<S>,
 }

@@ -18,10 +18,10 @@ use crate::tasks::TaskService;
 
 /// In-memory dev-path implementation of [`crate::tasks::TaskService`].
 ///
-/// Selected by `AppState::new` when `CAIRN_FABRIC_ENABLED` is unset; the
-/// production path is `FabricTaskServiceAdapter` (in the cairn-app crate)
-/// wrapping `cairn_fabric::FabricServices::tasks`. Not duplication — peers
-/// behind the trait, selected at boot.
+/// Compiled only under `--features in-memory-runtime`; the production
+/// path is `FabricTaskServiceAdapter` (in the cairn-app crate) wrapping
+/// `cairn_fabric::FabricServices::tasks`. Not duplication — peers behind
+/// the trait, selected at compile time.
 pub struct TaskServiceImpl<S> {
     store: Arc<S>,
 }
