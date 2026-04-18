@@ -315,6 +315,32 @@ where
             );
             self.emitter.on_decide_completed(ctx, &decide_output).await;
 
+            // ── (3b') FF stream: llm_response frame ──────────────────────────
+            // DecideOutput already carries model_id, token counts, and
+            // latency. Surface those on FF's attempt stream so cost
+            // reconciliation + audit replay work off a single durable source
+            // without cairn-store having to parse the raw LLM body. Token
+            // counts default to 0 when the provider didn't report them (FF
+            // stream format requires u64).
+            if let Err(e) = self
+                .task_sink
+                .log_llm_response(
+                    &decide_output.model_id,
+                    decide_output.input_tokens.unwrap_or(0) as u64,
+                    decide_output.output_tokens.unwrap_or(0) as u64,
+                    decide_output.latency_ms,
+                )
+                .await
+            {
+                tracing::warn!(
+                    run_id    = %ctx.run_id,
+                    iteration = ctx.iteration,
+                    model     = %decide_output.model_id,
+                    error     = %e,
+                    "task_sink.log_llm_response failed — frame lost, loop continues"
+                );
+            }
+
             // ── (3b) Plan artifact detection (RFC 018) ───────────────────────
             // In Plan mode, check if the LLM response contains a <proposed_plan>
             // block. If so, extract the plan markdown and terminate the run.
