@@ -15,7 +15,7 @@ use axum::{
 use cairn_api::http::ListResponse;
 use cairn_domain::workers::{ExternalWorkerProgress, ExternalWorkerReport};
 use cairn_domain::{ProjectKey, RunId, TaskId, WorkerId};
-use cairn_runtime::{ExternalWorkerService, TaskService};
+use cairn_runtime::ExternalWorkerService;
 
 use crate::errors::{
     bad_request_response, now_ms, runtime_error_response, tenant_scope_mismatch_error,

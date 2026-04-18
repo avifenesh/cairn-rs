@@ -138,9 +138,9 @@ Consumers must not assume insertion order or HashMap iteration order.
 
 `TaskReadModel::list_by_parent_run(parent_run_id, limit)` returns
 child tasks spawned by a parent run, sorted by `(created_at ASC,
-task_id ASC)`. Used by `RecoveryService::resolve_stale_dependencies()`
-to check whether all child tasks of a `WaitingDependency` run have
-completed.
+task_id ASC)`. Used historically by `RecoveryService::resolve_stale_dependencies()`
+— removed in Phase 9; dependency resolution is now owned unconditionally
+by FF's `DependencyReconciler` scanner (ff-engine/src/scanner/dependency_reconciler.rs).
 
 `TaskReadModel::any_non_terminal_children(parent_run_id)` returns
 `true` if any child task of the given parent run is in a non-terminal

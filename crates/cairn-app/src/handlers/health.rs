@@ -26,7 +26,7 @@ use cairn_api::{CriticalEventSummary, DashboardOverview};
 use cairn_domain::{
     ProjectId, ProjectKey, RunId, RunState, RuntimeEvent, SessionId, TenantId, WorkspaceId,
 };
-use cairn_runtime::{DefaultsService, LicenseService, ProviderBindingService, SessionService};
+use cairn_runtime::{DefaultsService, LicenseService, ProviderBindingService};
 use cairn_store::{EventLog, StoredEvent};
 use cairn_tools::{PluginHost, PluginRegistry};
 

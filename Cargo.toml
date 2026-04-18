@@ -19,6 +19,7 @@ members = [
     "crates/cairn-workspace",
     "crates/cairn-github",
     "crates/cairn-integrations",
+    "crates/cairn-fabric",
 ]
 resolver = "2"
 

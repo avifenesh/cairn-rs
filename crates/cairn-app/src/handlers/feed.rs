@@ -15,7 +15,7 @@ use axum::{
 use cairn_api::feed::{FeedEndpoints, FeedQuery};
 use cairn_api::http::ListResponse;
 use cairn_domain::{ProjectKey, RunId, SessionId, TaskId};
-use cairn_runtime::{MailboxService, RunService};
+use cairn_runtime::MailboxService;
 use cairn_store::EventLog;
 
 use crate::errors::{

@@ -659,7 +659,7 @@ pub(crate) async fn list_source_chunks_handler(
             credibility_score: chunk.credibility_score,
         })
         .collect();
-    chunks.sort_by(|a, b| a.chunk_id.cmp(&b.chunk_id));
+    chunks.sort_by_key(|r| r.chunk_id.clone());
     let total = chunks.len();
     let items = chunks
         .into_iter()
@@ -1432,7 +1432,7 @@ pub(crate) async fn memory_provenance_handler(
         .into_iter()
         .map(|(_, node)| node)
         .collect::<Vec<_>>();
-    chunk_nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    chunk_nodes.sort_by_key(|r| r.node_id.clone());
 
     let source = chain
         .links

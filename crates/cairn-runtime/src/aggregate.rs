@@ -4,10 +4,12 @@
 //! a shared `InMemoryStore`. cairn-app constructs one instance at startup and
 //! passes it to all HTTP handlers via `Arc<AppState>`.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use cairn_store::InMemoryStore;
 
+use crate::runs::RunService;
 use crate::services::resource_sharing_impl::ResourceSharingServiceImpl;
 use crate::services::ToolInvocationServiceImpl;
 use crate::services::{
@@ -18,25 +20,41 @@ use crate::services::{
     OperatorProfileServiceImpl, ProjectServiceImpl, PromptAssetServiceImpl,
     PromptReleaseServiceImpl, PromptVersionServiceImpl, ProviderBindingServiceImpl,
     ProviderConnectionPoolServiceImpl, ProviderConnectionServiceImpl, ProviderHealthServiceImpl,
-    QuotaServiceImpl, RecoveryServiceImpl, RetentionServiceImpl, RoutePolicyServiceImpl,
-    RunCostAlertServiceImpl, RunServiceImpl, RunSlaServiceImpl, SessionServiceImpl,
-    SignalRouterServiceImpl, SignalServiceImpl, TaskServiceImpl, TenantServiceImpl,
-    WorkspaceMembershipServiceImpl, WorkspaceServiceImpl,
+    QuotaServiceImpl, RetentionServiceImpl, RoutePolicyServiceImpl, RunCostAlertServiceImpl,
+    RunServiceImpl, RunSlaServiceImpl, SessionServiceImpl, SignalRouterServiceImpl,
+    SignalServiceImpl, TaskServiceImpl, TenantServiceImpl, WorkspaceMembershipServiceImpl,
+    WorkspaceServiceImpl,
 };
+use crate::sessions::SessionService;
+use crate::tasks::TaskService;
 use crate::ProviderRegistry;
 
 /// Bundled runtime services backed by `InMemoryStore`.
 ///
-/// Every field is a concrete `*ServiceImpl<InMemoryStore>` so that
-/// cairn-app handlers can call service methods without extra type juggling.
+/// Core execution fields (`runs`, `tasks`, `sessions`) are `Arc<dyn Trait>`
+/// so cairn-app can swap the in-memory impl for
+/// `Fabric{Run,Task,Session}ServiceAdapter` at boot when
+/// `CAIRN_FABRIC_ENABLED=1`. All other fields remain concrete
+/// `*ServiceImpl<InMemoryStore>` — they back non-execution surfaces
+/// (approvals, evals, provider bindings, etc.) that FF does not manage.
 pub struct InMemoryServices {
     /// The shared append-only event log + synchronous projections.
     pub store: Arc<InMemoryStore>,
 
     // ── Core runtime ───────────────────────────────────────────────────────
-    pub runs: RunServiceImpl<InMemoryStore>,
-    pub tasks: TaskServiceImpl<InMemoryStore>,
-    pub sessions: SessionServiceImpl<InMemoryStore>,
+    //
+    // Trait-object fields so the Fabric adapter can be swapped in at boot
+    // when `CAIRN_FABRIC_ENABLED=1`. Cairn-app's `AppState::new` picks the
+    // concrete impl (in-memory vs FabricRunServiceAdapter et al.). Handlers
+    // call trait methods through these fields unchanged either way.
+    //
+    // `InMemoryServices::new()` / `with_store()` default to the in-memory
+    // impl; `with_store_and_core(store, runs, tasks, sessions)` lets callers
+    // inject the Fabric adapter (or any other `RunService` / `TaskService` /
+    // `SessionService` impl).
+    pub runs: Arc<dyn RunService>,
+    pub tasks: Arc<dyn TaskService>,
+    pub sessions: Arc<dyn SessionService>,
     pub tenants: TenantServiceImpl<InMemoryStore>,
     pub workspaces: WorkspaceServiceImpl<InMemoryStore>,
     pub projects: ProjectServiceImpl<InMemoryStore>,
@@ -64,8 +82,17 @@ pub struct InMemoryServices {
     // ── External workers ──────────────────────────────────────────────────
     pub external_workers: ExternalWorkerServiceImpl<InMemoryStore>,
 
-    // ── Recovery & observability ───────────────────────────────────────────
-    pub recovery: RecoveryServiceImpl<InMemoryStore>,
+    // ── Observability ──────────────────────────────────────────────────────
+    //
+    // Recovery is NOT on this struct. FF's 14 background scanners
+    // (DelayedPromoter, LeaseExpiryScanner, AttemptTimeoutScanner,
+    // ExecutionDeadlineScanner, SuspensionTimeoutScanner,
+    // PendingWaitpointExpiryScanner, BudgetResetScanner, BudgetReconciler,
+    // QuotaReconciler, DependencyReconciler, FlowProjector,
+    // IndexReconciler, RetentionTrimmer, UnblockScanner) own recovery
+    // unconditionally — whether CAIRN_FABRIC_ENABLED is set or not, there is
+    // no cairn-side recovery sweep worth running. The pre-Fabric
+    // `RecoveryServiceImpl` was removed in the finalization round.
     pub observability: LlmObservabilityServiceImpl<InMemoryStore>,
 
     // ── Provider & routing ─────────────────────────────────────────────────
@@ -99,6 +126,11 @@ pub struct InMemoryServices {
     // ── Resource sharing ──────────────────────────────────────────────────
     pub resource_sharing: ResourceSharingServiceImpl<InMemoryStore>,
 
+    // ── Fabric (FlowFabric bridge) ─────────────────────────────────────
+    // Stored as `dyn Any` to avoid cairn-runtime → cairn-fabric cycle.
+    // Downcast to `cairn_fabric::FabricServices` via `fabric::<T>()`.
+    pub fabric: Option<Arc<dyn Any + Send + Sync>>,
+
     // ── Decision layer (RFC 019) ─────────────────────────────────────────
     pub decisions: std::sync::Arc<crate::decisions::DecisionServiceImpl>,
     /// Arc-wrapped decision service for injection into the execute phase.
@@ -120,14 +152,37 @@ impl InMemoryServices {
     }
 
     /// Create a bundle wired to an existing store (useful for testing).
+    ///
+    /// Defaults runs/tasks/sessions to the in-memory impls. Use
+    /// [`Self::with_store_and_core`] to inject alternate impls (e.g. the
+    /// Fabric adapter) at construction time.
     pub fn with_store(store: Arc<InMemoryStore>) -> Self {
+        let runs: Arc<dyn RunService> = Arc::new(RunServiceImpl::new(store.clone()));
+        let tasks: Arc<dyn TaskService> = Arc::new(TaskServiceImpl::new(store.clone()));
+        let sessions: Arc<dyn SessionService> = Arc::new(SessionServiceImpl::new(store.clone()));
+        Self::with_store_and_core(store, runs, tasks, sessions)
+    }
+
+    /// Create a bundle wired to an existing store with caller-supplied core
+    /// services.
+    ///
+    /// Cairn-app uses this to install Fabric-backed adapters for runs,
+    /// tasks, and sessions when `CAIRN_FABRIC_ENABLED` is set. Every other
+    /// service still hangs off the shared in-memory store, so provider
+    /// bindings, evals, approvals, etc. remain identical.
+    pub fn with_store_and_core(
+        store: Arc<InMemoryStore>,
+        runs: Arc<dyn RunService>,
+        tasks: Arc<dyn TaskService>,
+        sessions: Arc<dyn SessionService>,
+    ) -> Self {
         let decisions = Arc::new(crate::decisions::DecisionServiceImpl::new());
         let decision_service: Arc<dyn crate::decisions::DecisionService> = decisions.clone();
 
         Self {
-            runs: RunServiceImpl::new(store.clone()),
-            tasks: TaskServiceImpl::new(store.clone()),
-            sessions: SessionServiceImpl::new(store.clone()),
+            runs,
+            tasks,
+            sessions,
             tenants: TenantServiceImpl::new(store.clone()),
             workspaces: WorkspaceServiceImpl::new(store.clone()),
             projects: ProjectServiceImpl::new(store.clone()),
@@ -144,7 +199,6 @@ impl InMemoryServices {
             signal_router: SignalRouterServiceImpl::new(store.clone()),
             channels: ChannelServiceImpl::new(store.clone()),
             external_workers: ExternalWorkerServiceImpl::new(store.clone()),
-            recovery: RecoveryServiceImpl::new(store.clone()),
             observability: LlmObservabilityServiceImpl::new(store.clone()),
             provider_bindings: ProviderBindingServiceImpl::new(store.clone()),
             provider_connections: ProviderConnectionServiceImpl::new(store.clone()),
@@ -168,6 +222,7 @@ impl InMemoryServices {
             audit: AuditServiceImpl::new(store.clone()),
             tool_invocations: ToolInvocationServiceImpl::new(store.clone()),
             resource_sharing: ResourceSharingServiceImpl::new(store.clone()),
+            fabric: None,
             decisions,
             decision_service,
             runtime_config: std::sync::Arc::new(crate::runtime_config::RuntimeConfig::new(
@@ -175,6 +230,25 @@ impl InMemoryServices {
             )),
             store,
         }
+    }
+
+    /// Create a bundle wired to an existing store with Fabric services attached.
+    ///
+    /// The `fabric` argument is type-erased to avoid a cairn-runtime -> cairn-fabric
+    /// cyclic dependency. Callers pass `Arc<cairn_fabric::FabricServices>` and
+    /// retrieve it later via `fabric::<T>()`.
+    pub fn with_fabric(store: Arc<InMemoryStore>, fabric: Arc<dyn Any + Send + Sync>) -> Self {
+        let mut services = Self::with_store(store);
+        services.fabric = Some(fabric);
+        services
+    }
+
+    /// Downcast the Fabric services to a concrete type.
+    ///
+    /// Returns `None` if no fabric was configured or if `T` doesn't match.
+    /// Typical usage: `services.fabric::<cairn_fabric::FabricServices>()`.
+    pub fn fabric<T: Any + Send + Sync>(&self) -> Option<&T> {
+        self.fabric.as_ref().and_then(|f| f.downcast_ref::<T>())
     }
 }
 

@@ -38,7 +38,7 @@ use cairn_runtime::{
         ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RunServiceImpl,
         TaskServiceImpl, ToolInvocationServiceImpl,
     },
-    InMemoryServices, SessionService,
+    InMemoryServices,
 };
 use cairn_store::EventLog;
 

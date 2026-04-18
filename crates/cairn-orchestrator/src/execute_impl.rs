@@ -692,7 +692,7 @@ mod tests {
             ApprovalServiceImpl, CheckpointServiceImpl, MailboxServiceImpl, RunServiceImpl,
             TaskServiceImpl, ToolInvocationServiceImpl,
         },
-        InMemoryServices, RunService, SessionService,
+        InMemoryServices,
     };
     use cairn_store::EventLog;
     use cairn_tools::builtins::{

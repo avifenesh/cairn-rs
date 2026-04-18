@@ -538,7 +538,7 @@ pub(crate) async fn list_audit_log_handler(
             }
         }
         // Sort by occurred_at_ms descending (most recent first) and cap at limit.
-        all_items.sort_by(|a, b| b.occurred_at_ms.cmp(&a.occurred_at_ms));
+        all_items.sort_by_key(|r| std::cmp::Reverse(r.occurred_at_ms));
         all_items.truncate(limit);
         let has_more = all_items.len() >= limit;
         (

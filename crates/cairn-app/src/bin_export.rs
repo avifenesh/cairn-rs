@@ -8,7 +8,6 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use cairn_domain::{ProjectKey, RunId};
-use cairn_runtime::sessions::SessionService;
 use cairn_store::projections::{RunReadModel, SessionReadModel, TaskReadModel};
 use serde::Deserialize;
 
@@ -283,7 +282,7 @@ pub(crate) async fn import_session_handler(
     let project = ProjectKey::new(tenant_id, workspace_id, project_id);
     let session_id = cairn_domain::SessionId::new(session_id_str);
 
-    match SessionService::create(&state.runtime.sessions, &project, session_id).await {
+    match state.runtime.sessions.create(&project, session_id).await {
         Ok(record) => Ok((StatusCode::CREATED, Json(serde_json::json!(record)))),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,

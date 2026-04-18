@@ -17,10 +17,7 @@ pub(crate) async fn seed_demo_data(state: &AppState) {
         ApprovalId, AuditOutcome, FailureClass, PauseReason, PauseReasonKind, RunId, SessionId,
         TaskId, TenantId,
     };
-    use cairn_runtime::{
-        approvals::ApprovalService, audits::AuditService, runs::RunService,
-        sessions::SessionService, tasks::TaskService,
-    };
+    use cairn_runtime::{approvals::ApprovalService, audits::AuditService};
 
     let project = ProjectKey::new("default_tenant", "default_workspace", "demo_project");
     let tenant = TenantId::new("default_tenant");

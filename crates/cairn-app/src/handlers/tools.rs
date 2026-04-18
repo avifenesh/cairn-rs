@@ -15,7 +15,7 @@ use cairn_domain::{
     CheckpointId, CheckpointStrategy, CheckpointStrategySet, ExecutionClass, ProjectKey, RunId,
     RuntimeEvent, SessionId, TaskId, ToolInvocationId,
 };
-use cairn_runtime::{CheckpointService, RunService, ToolInvocationService};
+use cairn_runtime::{CheckpointService, ToolInvocationService};
 use cairn_store::projections::{
     CheckpointReadModel, CheckpointStrategyReadModel, RunReadModel, ToolInvocationReadModel,
 };

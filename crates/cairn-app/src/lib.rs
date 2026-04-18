@@ -9,6 +9,7 @@
 pub mod bootstrap;
 pub mod errors;
 pub mod extractors;
+pub mod fabric_adapter;
 pub mod handlers;
 pub mod helpers;
 pub mod marketplace_routes;
@@ -135,8 +136,8 @@ mod tests {
     use cairn_evals::{EvalMetrics, EvalSubjectKind};
     use cairn_graph::projections::{GraphEdge, GraphNode, NodeKind};
     use cairn_runtime::{
-        ApprovalService, DefaultsService, ProjectService, PromptAssetService, RunService,
-        SessionService, TaskService, TenantService, WorkspaceMembershipService, WorkspaceService,
+        ApprovalService, DefaultsService, ProjectService, PromptAssetService, TenantService,
+        WorkspaceMembershipService, WorkspaceService,
     };
     use cairn_store::EventLog;
     use cairn_tools::PluginRegistry;
