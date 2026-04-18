@@ -4,10 +4,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cairn_domain::{EventEnvelope, RuntimeEvent};
 
+use super::projections::SqliteSyncProjection;
 use crate::error::StoreError;
 use crate::event_log::{EntityRef, EventLog, EventPosition, StoredEvent};
 
 /// SQLite-backed append-only event log for local-mode.
+///
+/// Appends events and updates synchronous projections within a single
+/// transaction so reads can never observe an event position that hasn't
+/// been projected yet. Mirrors the Postgres backend contract.
 pub struct SqliteEventLog {
     pool: SqlitePool,
 }
@@ -32,6 +37,12 @@ impl EventLog for SqliteEventLog {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| StoreError::Connection(e.to_string()))?;
 
         let mut positions = Vec::with_capacity(events.len());
 
@@ -58,12 +69,29 @@ impl EventLog for SqliteEventLog {
             .bind(event.correlation_id.as_deref())
             .bind(&payload)
             .bind(now)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *tx)
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;
 
-            positions.push(EventPosition(row.0 as u64));
+            let pos = EventPosition(row.0 as u64);
+
+            // Apply synchronous projections within the same transaction.
+            // Pre-T2-C1 this call was missing and every SQLite-backed
+            // projection table stayed empty in production — see audit queue
+            // at .claude/audit-state/review-queue.md §T2-C1.
+            let stored = StoredEvent {
+                position: pos,
+                envelope: event.clone(),
+                stored_at: now as u64,
+            };
+            SqliteSyncProjection::apply_async(&mut tx, &stored).await?;
+
+            positions.push(pos);
         }
+
+        tx.commit()
+            .await
+            .map_err(|e| StoreError::Connection(e.to_string()))?;
 
         Ok(positions)
     }
@@ -121,38 +149,36 @@ impl EventLog for SqliteEventLog {
     }
 
     async fn head_position(&self) -> Result<Option<EventPosition>, StoreError> {
-        let row: Option<(i64,)> = sqlx::query_as("SELECT MAX(position) FROM event_log")
+        // `MAX(position)` on empty table yields NULL (decoded as
+        // `Some((None,))` by sqlx-SQLite). Decode into `Option<i64>` and
+        // filter on the inner option; decoding into plain `i64` would
+        // error on NULL.
+        let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT MAX(position) FROM event_log")
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| StoreError::Internal(e.to_string()))?;
 
-        Ok(row.and_then(|(pos,)| {
-            if pos > 0 {
-                Some(EventPosition(pos as u64))
-            } else {
-                None
-            }
-        }))
+        Ok(row.and_then(|(pos,)| pos.map(|p| EventPosition(p as u64))))
     }
 
     async fn find_by_causation_id(
         &self,
         causation_id: &str,
     ) -> Result<Option<EventPosition>, StoreError> {
-        let row: Option<(i64,)> =
+        // `MIN(position)` on an empty match always returns one row with a
+        // NULL value — `fetch_optional` reports `Some(...)` for the row and
+        // sqlx decodes the NULL into `Option<i64>`. Filter on the inner
+        // `Option` rather than checking for a sentinel. Pre-T2-M7 a
+        // `pos > 0` guard tried to approximate this but discarded the
+        // legitimate position-0 edge, diverging from the PG backend.
+        let row: Option<(Option<i64>,)> =
             sqlx::query_as("SELECT MIN(position) FROM event_log WHERE causation_id = ?")
                 .bind(causation_id)
                 .fetch_optional(&self.pool)
                 .await
                 .map_err(|e| StoreError::Internal(e.to_string()))?;
 
-        Ok(row.and_then(|(pos,)| {
-            if pos > 0 {
-                Some(EventPosition(pos as u64))
-            } else {
-                None
-            }
-        }))
+        Ok(row.and_then(|(pos,)| pos.map(|p| EventPosition(p as u64))))
     }
 }
 

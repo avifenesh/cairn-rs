@@ -286,7 +286,7 @@ impl TaskReadModel for SqliteAdapter {
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, StoreError> {
         let row = sqlx::query_as::<_, TaskRow>(
             "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id,
-                    state, failure_class, lease_owner, lease_expires_at, version, created_at, updated_at
+                    state, failure_class, lease_owner, lease_expires_at, title, description, version, created_at, updated_at
              FROM tasks
              WHERE task_id = $1",
         )
@@ -306,7 +306,7 @@ impl TaskReadModel for SqliteAdapter {
     ) -> Result<Vec<TaskRecord>, StoreError> {
         let rows = sqlx::query_as::<_, TaskRow>(
             "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id,
-                    state, failure_class, lease_owner, lease_expires_at, version, created_at, updated_at
+                    state, failure_class, lease_owner, lease_expires_at, title, description, version, created_at, updated_at
              FROM tasks
              WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3 AND state = $4
              ORDER BY created_at ASC, task_id ASC
@@ -331,7 +331,7 @@ impl TaskReadModel for SqliteAdapter {
     ) -> Result<Vec<TaskRecord>, StoreError> {
         let rows = sqlx::query_as::<_, TaskRow>(
             "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id,
-                    state, failure_class, lease_owner, lease_expires_at, version, created_at, updated_at
+                    state, failure_class, lease_owner, lease_expires_at, title, description, version, created_at, updated_at
              FROM tasks
              WHERE state = 'leased'
                AND lease_expires_at IS NOT NULL
@@ -355,7 +355,7 @@ impl TaskReadModel for SqliteAdapter {
     ) -> Result<Vec<TaskRecord>, StoreError> {
         let rows = sqlx::query_as::<_, TaskRow>(
             "SELECT task_id, tenant_id, workspace_id, project_id, parent_run_id, parent_task_id,
-                    state, failure_class, lease_owner, lease_expires_at, version, created_at, updated_at
+                    state, failure_class, lease_owner, lease_expires_at, title, description, version, created_at, updated_at
              FROM tasks
              WHERE parent_run_id = $1
              ORDER BY created_at ASC, task_id ASC
@@ -392,7 +392,7 @@ impl ApprovalReadModel for SqliteAdapter {
     async fn get(&self, approval_id: &ApprovalId) -> Result<Option<ApprovalRecord>, StoreError> {
         let row = sqlx::query_as::<_, ApprovalRow>(
             "SELECT approval_id, tenant_id, workspace_id, project_id, run_id, task_id,
-                    requirement, decision, version, created_at, updated_at
+                    requirement, decision, title, description, version, created_at, updated_at
              FROM approvals
              WHERE approval_id = $1",
         )
@@ -412,7 +412,7 @@ impl ApprovalReadModel for SqliteAdapter {
     ) -> Result<Vec<ApprovalRecord>, StoreError> {
         let rows = sqlx::query_as::<_, ApprovalRow>(
             "SELECT approval_id, tenant_id, workspace_id, project_id, run_id, task_id,
-                    requirement, decision, version, created_at, updated_at
+                    requirement, decision, title, description, version, created_at, updated_at
              FROM approvals
              WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3
                AND decision IS NULL
@@ -439,7 +439,7 @@ impl ApprovalReadModel for SqliteAdapter {
     ) -> Result<Vec<ApprovalRecord>, StoreError> {
         let rows = sqlx::query_as::<_, ApprovalRow>(
             "SELECT approval_id, tenant_id, workspace_id, project_id, run_id, task_id,
-                    requirement, decision, version, created_at, updated_at
+                    requirement, decision, title, description, version, created_at, updated_at
              FROM approvals
              WHERE tenant_id = $1 AND workspace_id = $2 AND project_id = $3
              ORDER BY created_at ASC, approval_id ASC
@@ -801,6 +801,8 @@ struct TaskRow {
     failure_class: Option<String>,
     lease_owner: Option<String>,
     lease_expires_at: Option<i64>,
+    title: Option<String>,
+    description: Option<String>,
     version: i64,
     created_at: i64,
     updated_at: i64,
@@ -823,8 +825,8 @@ impl TaskRow {
                 .transpose()?,
             lease_owner: self.lease_owner,
             lease_expires_at: self.lease_expires_at.map(|value| value as u64),
-            title: None,
-            description: None,
+            title: self.title,
+            description: self.description,
             pause_reason: None,
             resume_trigger: None,
             retry_count: 0,
@@ -845,6 +847,8 @@ struct ApprovalRow {
     task_id: Option<String>,
     requirement: String,
     decision: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
     version: i64,
     created_at: i64,
     updated_at: i64,
@@ -864,8 +868,8 @@ impl ApprovalRow {
                 .as_deref()
                 .map(parse_string_enum::<ApprovalDecision>)
                 .transpose()?,
-            title: None,
-            description: None,
+            title: self.title,
+            description: self.description,
             version: self.version as u64,
             created_at: self.created_at as u64,
             updated_at: self.updated_at as u64,
@@ -1241,8 +1245,8 @@ mod tests {
         sqlx::query(
             "INSERT INTO approvals (
                 approval_id, tenant_id, workspace_id, project_id, run_id, task_id,
-                requirement, decision, version, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                requirement, decision, title, description, version, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind("approval_pending")
         .bind("tenant")
@@ -1252,6 +1256,8 @@ mod tests {
         .bind(Some("task_queued"))
         .bind("required")
         .bind(Option::<&str>::None)
+        .bind(Option::<&str>::None) // title
+        .bind(Option::<&str>::None) // description
         .bind(1_i64)
         .bind(40_i64)
         .bind(40_i64)
@@ -1263,6 +1269,8 @@ mod tests {
         .bind(Some("task_expired"))
         .bind("required")
         .bind(Some("approved"))
+        .bind(Option::<&str>::None) // title
+        .bind(Option::<&str>::None) // description
         .bind(2_i64)
         .bind(45_i64)
         .bind(46_i64)

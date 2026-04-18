@@ -288,87 +288,103 @@ impl PgSyncProjection {
                 .map_err(|e| StoreError::Internal(e.to_string()))?;
             }
 
-            // These events are recorded in the event log for audit/replay
-            // but do not mutate current-state projection tables.
-            RuntimeEvent::ExternalWorkerRegistered(_)
-            | RuntimeEvent::ExternalWorkerReported(_)
-            | RuntimeEvent::ExternalWorkerSuspended(_)
-            | RuntimeEvent::ExternalWorkerReactivated(_)
-            | RuntimeEvent::SoulPatchProposed(_)
-            | RuntimeEvent::SoulPatchApplied(_)
-            | RuntimeEvent::SessionCostUpdated(_)
-            | RuntimeEvent::RunCostUpdated(_)
-            | RuntimeEvent::SpendAlertTriggered(_)
-            | RuntimeEvent::SubagentSpawned(_)
-            | RuntimeEvent::RecoveryAttempted(_)
-            | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::SignalIngested(_)
-            | RuntimeEvent::UserMessageAppended(_)
-            | RuntimeEvent::IngestJobStarted(_)
-            | RuntimeEvent::IngestJobCompleted(_)
-            | RuntimeEvent::EvalRunStarted(_)
-            | RuntimeEvent::EvalRunCompleted(_)
-            | RuntimeEvent::OutcomeRecorded(_)
-            | RuntimeEvent::ScheduledTaskCreated(_)
-            | RuntimeEvent::PlanProposed(_)
-            | RuntimeEvent::PlanApproved(_)
-            | RuntimeEvent::PlanRejected(_)
-            | RuntimeEvent::PlanRevisionRequested(_) => {}
-            | RuntimeEvent::ProviderBudgetSet(_)
-            | RuntimeEvent::ChannelCreated(_)
-            | RuntimeEvent::ChannelMessageSent(_)
-            | RuntimeEvent::ChannelMessageConsumed(_)
-            | RuntimeEvent::DefaultSettingSet(_)
-            | RuntimeEvent::DefaultSettingCleared(_)
-            | RuntimeEvent::LicenseActivated(_)
-            | RuntimeEvent::EntitlementOverrideSet(_)
-            | RuntimeEvent::NotificationPreferenceSet(_)
-            | RuntimeEvent::NotificationSent(_)
-            | RuntimeEvent::ProviderPoolCreated(_)
-            | RuntimeEvent::ProviderPoolConnectionAdded(_)
-            | RuntimeEvent::ProviderPoolConnectionRemoved(_)
-            | RuntimeEvent::TenantQuotaSet(_)
-            | RuntimeEvent::TenantQuotaViolated(_)
-            | RuntimeEvent::RetentionPolicySet(_)
-            | RuntimeEvent::RunCostAlertSet(_)
-            | RuntimeEvent::RunCostAlertTriggered(_)
-            | RuntimeEvent::ApprovalDelegated(_)
-            | RuntimeEvent::AuditLogEntryRecorded(_)
-            | RuntimeEvent::CheckpointStrategySet(_)
-            | RuntimeEvent::CredentialKeyRotated(_)
-            | RuntimeEvent::CredentialRevoked(_)
-            | RuntimeEvent::CredentialStored(_)
-            | RuntimeEvent::EvalBaselineLocked(_)
-            | RuntimeEvent::EvalBaselineSet(_)
-            | RuntimeEvent::EvalDatasetCreated(_)
-            | RuntimeEvent::EvalDatasetEntryAdded(_)
-            | RuntimeEvent::EvalRubricCreated(_)
-            | RuntimeEvent::EventLogCompacted(_)
-            | RuntimeEvent::GuardrailPolicyCreated(_)
-            | RuntimeEvent::GuardrailPolicyEvaluated(_)
-            | RuntimeEvent::OperatorIntervention(_)
-            | RuntimeEvent::OperatorProfileCreated(_)
-            | RuntimeEvent::OperatorProfileUpdated(_)
-            | RuntimeEvent::PauseScheduled(_)
-            | RuntimeEvent::PermissionDecisionRecorded(_)
-            | RuntimeEvent::ProviderBindingCreated(_)
-            | RuntimeEvent::ProviderBindingStateChanged(_)
-            | RuntimeEvent::ProviderBudgetAlertTriggered(_)
-            | RuntimeEvent::ProviderBudgetExceeded(_)
-            | RuntimeEvent::ProviderConnectionRegistered(_)
-            | RuntimeEvent::ProviderHealthChecked(_)
-            | RuntimeEvent::ProviderHealthScheduleSet(_)
-            | RuntimeEvent::ProviderHealthScheduleTriggered(_)
-            | RuntimeEvent::ProviderMarkedDegraded(_)
-            | RuntimeEvent::ProviderModelRegistered(_)
-            | RuntimeEvent::ProviderRecovered(_)
-            | RuntimeEvent::ProviderRetryPolicySet(_)
-            | RuntimeEvent::RecoveryEscalated(_)
-            | RuntimeEvent::ResourceShareRevoked(_)
-            | RuntimeEvent::ResourceShared(_)
-            | RuntimeEvent::RoutePolicyUpdated(_) => {
-                // RoutePolicyUpdated carries only policy_id + updated_at_ms; no schema fields change.
+            // ── UNPROJECTED STUBS ──────────────────────────────────────
+            // These variants commit to event_log but do NOT update any
+            // projection table on the Postgres backend. Audit reference:
+            // `.claude/audit-state/review-queue.md` §T2-H3. If you land on
+            // this warning in production, extend this applier to cover the
+            // specific variant and its projection table(s).
+            RuntimeEvent::ExternalWorkerRegistered(_) => log_stub("ExternalWorkerRegistered"),
+            RuntimeEvent::ExternalWorkerReported(_) => log_stub("ExternalWorkerReported"),
+            RuntimeEvent::ExternalWorkerSuspended(_) => log_stub("ExternalWorkerSuspended"),
+            RuntimeEvent::ExternalWorkerReactivated(_) => log_stub("ExternalWorkerReactivated"),
+            RuntimeEvent::SoulPatchProposed(_) => log_stub("SoulPatchProposed"),
+            RuntimeEvent::SoulPatchApplied(_) => log_stub("SoulPatchApplied"),
+            RuntimeEvent::SessionCostUpdated(_) => log_stub("SessionCostUpdated"),
+            RuntimeEvent::RunCostUpdated(_) => log_stub("RunCostUpdated"),
+            RuntimeEvent::SpendAlertTriggered(_) => log_stub("SpendAlertTriggered"),
+            RuntimeEvent::SubagentSpawned(_) => log_stub("SubagentSpawned"),
+            RuntimeEvent::RecoveryAttempted(_) => log_stub("RecoveryAttempted"),
+            RuntimeEvent::RecoveryCompleted(_) => log_stub("RecoveryCompleted"),
+            RuntimeEvent::SignalIngested(_) => log_stub("SignalIngested"),
+            RuntimeEvent::UserMessageAppended(_) => log_stub("UserMessageAppended"),
+            RuntimeEvent::IngestJobStarted(_) => log_stub("IngestJobStarted"),
+            RuntimeEvent::IngestJobCompleted(_) => log_stub("IngestJobCompleted"),
+            RuntimeEvent::EvalRunStarted(_) => log_stub("EvalRunStarted"),
+            RuntimeEvent::EvalRunCompleted(_) => log_stub("EvalRunCompleted"),
+            RuntimeEvent::OutcomeRecorded(_) => log_stub("OutcomeRecorded"),
+            RuntimeEvent::ScheduledTaskCreated(_) => log_stub("ScheduledTaskCreated"),
+            RuntimeEvent::PlanProposed(_) => log_stub("PlanProposed"),
+            RuntimeEvent::PlanApproved(_) => log_stub("PlanApproved"),
+            RuntimeEvent::PlanRejected(_) => log_stub("PlanRejected"),
+            RuntimeEvent::PlanRevisionRequested(_) => log_stub("PlanRevisionRequested"),
+            RuntimeEvent::ProviderBudgetSet(_) => log_stub("ProviderBudgetSet"),
+            RuntimeEvent::ChannelCreated(_) => log_stub("ChannelCreated"),
+            RuntimeEvent::ChannelMessageSent(_) => log_stub("ChannelMessageSent"),
+            RuntimeEvent::ChannelMessageConsumed(_) => log_stub("ChannelMessageConsumed"),
+            RuntimeEvent::DefaultSettingSet(_) => log_stub("DefaultSettingSet"),
+            RuntimeEvent::DefaultSettingCleared(_) => log_stub("DefaultSettingCleared"),
+            RuntimeEvent::LicenseActivated(_) => log_stub("LicenseActivated"),
+            RuntimeEvent::EntitlementOverrideSet(_) => log_stub("EntitlementOverrideSet"),
+            RuntimeEvent::NotificationPreferenceSet(_) => log_stub("NotificationPreferenceSet"),
+            RuntimeEvent::NotificationSent(_) => log_stub("NotificationSent"),
+            RuntimeEvent::ProviderPoolCreated(_) => log_stub("ProviderPoolCreated"),
+            RuntimeEvent::ProviderPoolConnectionAdded(_) => {
+                log_stub("ProviderPoolConnectionAdded")
             }
+            RuntimeEvent::ProviderPoolConnectionRemoved(_) => {
+                log_stub("ProviderPoolConnectionRemoved")
+            }
+            RuntimeEvent::TenantQuotaSet(_) => log_stub("TenantQuotaSet"),
+            RuntimeEvent::TenantQuotaViolated(_) => log_stub("TenantQuotaViolated"),
+            RuntimeEvent::RetentionPolicySet(_) => log_stub("RetentionPolicySet"),
+            RuntimeEvent::RunCostAlertSet(_) => log_stub("RunCostAlertSet"),
+            RuntimeEvent::RunCostAlertTriggered(_) => log_stub("RunCostAlertTriggered"),
+            RuntimeEvent::ApprovalDelegated(_) => log_stub("ApprovalDelegated"),
+            RuntimeEvent::AuditLogEntryRecorded(_) => log_stub("AuditLogEntryRecorded"),
+            RuntimeEvent::CheckpointStrategySet(_) => log_stub("CheckpointStrategySet"),
+            RuntimeEvent::CredentialKeyRotated(_) => log_stub("CredentialKeyRotated"),
+            RuntimeEvent::CredentialRevoked(_) => log_stub("CredentialRevoked"),
+            RuntimeEvent::CredentialStored(_) => log_stub("CredentialStored"),
+            RuntimeEvent::EvalBaselineLocked(_) => log_stub("EvalBaselineLocked"),
+            RuntimeEvent::EvalBaselineSet(_) => log_stub("EvalBaselineSet"),
+            RuntimeEvent::EvalDatasetCreated(_) => log_stub("EvalDatasetCreated"),
+            RuntimeEvent::EvalDatasetEntryAdded(_) => log_stub("EvalDatasetEntryAdded"),
+            RuntimeEvent::EvalRubricCreated(_) => log_stub("EvalRubricCreated"),
+            RuntimeEvent::EventLogCompacted(_) => log_stub("EventLogCompacted"),
+            RuntimeEvent::GuardrailPolicyCreated(_) => log_stub("GuardrailPolicyCreated"),
+            RuntimeEvent::GuardrailPolicyEvaluated(_) => log_stub("GuardrailPolicyEvaluated"),
+            RuntimeEvent::OperatorIntervention(_) => log_stub("OperatorIntervention"),
+            RuntimeEvent::OperatorProfileCreated(_) => log_stub("OperatorProfileCreated"),
+            RuntimeEvent::OperatorProfileUpdated(_) => log_stub("OperatorProfileUpdated"),
+            RuntimeEvent::PauseScheduled(_) => log_stub("PauseScheduled"),
+            RuntimeEvent::PermissionDecisionRecorded(_) => {
+                log_stub("PermissionDecisionRecorded")
+            }
+            RuntimeEvent::ProviderBindingCreated(_) => log_stub("ProviderBindingCreated"),
+            RuntimeEvent::ProviderBindingStateChanged(_) => {
+                log_stub("ProviderBindingStateChanged")
+            }
+            RuntimeEvent::ProviderBudgetAlertTriggered(_) => {
+                log_stub("ProviderBudgetAlertTriggered")
+            }
+            RuntimeEvent::ProviderBudgetExceeded(_) => log_stub("ProviderBudgetExceeded"),
+            RuntimeEvent::ProviderConnectionRegistered(_) => {
+                log_stub("ProviderConnectionRegistered")
+            }
+            RuntimeEvent::ProviderHealthChecked(_) => log_stub("ProviderHealthChecked"),
+            RuntimeEvent::ProviderHealthScheduleSet(_) => log_stub("ProviderHealthScheduleSet"),
+            RuntimeEvent::ProviderHealthScheduleTriggered(_) => {
+                log_stub("ProviderHealthScheduleTriggered")
+            }
+            RuntimeEvent::ProviderMarkedDegraded(_) => log_stub("ProviderMarkedDegraded"),
+            RuntimeEvent::ProviderModelRegistered(_) => log_stub("ProviderModelRegistered"),
+            RuntimeEvent::ProviderRecovered(_) => log_stub("ProviderRecovered"),
+            RuntimeEvent::ProviderRetryPolicySet(_) => log_stub("ProviderRetryPolicySet"),
+            RuntimeEvent::RecoveryEscalated(_) => log_stub("RecoveryEscalated"),
+            RuntimeEvent::ResourceShareRevoked(_) => log_stub("ResourceShareRevoked"),
+            RuntimeEvent::ResourceShared(_) => log_stub("ResourceShared"),
+            RuntimeEvent::RoutePolicyUpdated(_) => log_stub("RoutePolicyUpdated"),
 
             RuntimeEvent::TenantCreated(e) => {
                 sqlx::query(
@@ -483,14 +499,46 @@ impl PgSyncProjection {
             }
 
             RuntimeEvent::PromptVersionCreated(e) => {
-                // Compute version_number as count of existing versions for this asset + 1.
+                // Allocate the next version_number under row-level lock.
+                //
+                // Pre-T2-H4 this used `COUNT(*) + 1` under READ COMMITTED
+                // which is a classic race — two concurrent appends for
+                // the same asset both read N and try to insert N+1,
+                // colliding on the unique constraint or silently producing
+                // duplicates.
+                //
+                // The first serialisation attempt used `SELECT MAX(...)
+                // FROM prompt_versions WHERE prompt_asset_id = $1 FOR
+                // UPDATE`, but `FOR UPDATE` on an aggregate query with
+                // zero matching rows locks nothing. We now take a lock on
+                // the parent `prompt_assets` row (which must exist before
+                // any version for it can be created) and derive the
+                // version number from the versions table under that held
+                // lock. Concurrent appends for the same asset serialise
+                // behind the parent row lock.
+                //
+                // Errors propagate (no `unwrap_or` swallowing) so the
+                // transaction aborts rather than inserting
+                // `version_number = 1` on top of a transient DB failure.
+                sqlx::query_scalar::<_, String>(
+                    "SELECT prompt_asset_id FROM prompt_assets
+                     WHERE prompt_asset_id = $1
+                     FOR UPDATE",
+                )
+                .bind(e.prompt_asset_id.as_str())
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
+
                 let version_number: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM prompt_versions WHERE prompt_asset_id = $1",
+                    "SELECT COALESCE(MAX(version_number), 0) + 1
+                     FROM prompt_versions
+                     WHERE prompt_asset_id = $1",
                 )
                 .bind(e.prompt_asset_id.as_str())
                 .fetch_one(&mut **tx)
                 .await
-                .unwrap_or(0i64);
+                .map_err(|err| StoreError::Internal(err.to_string()))?;
 
                 sqlx::query(
                     "INSERT INTO prompt_versions
@@ -504,7 +552,7 @@ impl PgSyncProjection {
                 .bind(e.project.tenant_id.as_str())
                 .bind(e.project.workspace_id.as_str())
                 .bind(e.project.project_id.as_str())
-                .bind(version_number + 1)
+                .bind(version_number)
                 .bind(&e.content_hash)
                 .bind(e.created_at as i64)
                 .execute(&mut **tx)
@@ -670,6 +718,18 @@ fn tool_invocation_terminal_state_str(
     outcome: ToolInvocationOutcomeKind,
 ) -> Result<String, StoreError> {
     enum_to_str(&outcome.terminal_state())
+}
+
+/// Log an event variant the PG applier does not project.
+///
+/// Matches the `log_stub` pattern used by `SqliteSyncProjection`. See
+/// `.claude/audit-state/review-queue.md` §T2-H3 for the coverage gap.
+fn log_stub(variant: &'static str) {
+    tracing::warn!(
+        event_variant = variant,
+        "pg projection stub: event committed to event_log but no projection table updated \
+         (see PgSyncProjection unprojected-stubs list for the coverage gap)"
+    );
 }
 
 /// Serialize a serde-serializable enum variant to its snake_case string form.

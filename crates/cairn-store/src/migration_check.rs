@@ -56,8 +56,15 @@ impl std::fmt::Display for MigrationCheckError {
 
 /// Total number of migrations. Update this when adding new migrations.
 /// If this constant is wrong, `migration_count_matches_embedded_list`
-/// will fail at test time.
-pub const EXPECTED_MIGRATION_COUNT: usize = 15;
+/// will fail at test time. The PG migration runner at
+/// `pg/migration_runner.rs::MIGRATIONS` is the authoritative list.
+///
+/// **Split location caveat:** migrations V001–V017 live in
+/// `crates/cairn-store/migrations/`, V018–V020 live in
+/// `crates/cairn-store/src/pg/migrations/`. The `all_migrations_are_valid`
+/// test below embeds both directories explicitly. Consolidating to a
+/// single directory is tracked in the audit queue (T2-M1).
+pub const EXPECTED_MIGRATION_COUNT: usize = 20;
 
 #[cfg(test)]
 mod tests {
@@ -126,6 +133,28 @@ mod tests {
             (
                 "add_task_approval_titles",
                 include_str!("../migrations/V015__add_task_approval_titles.sql"),
+            ),
+            (
+                "create_prompt_and_routing_state",
+                include_str!("../migrations/V016__create_prompt_and_routing_state.sql"),
+            ),
+            (
+                "create_org_hierarchy",
+                include_str!("../migrations/V017__create_org_hierarchy.sql"),
+            ),
+            // V018-V020 live under src/pg/migrations/ — the split is
+            // documented on EXPECTED_MIGRATION_COUNT above.
+            (
+                "create_route_policies",
+                include_str!("pg/migrations/V018__create_route_policies.sql"),
+            ),
+            (
+                "create_workspace_members",
+                include_str!("pg/migrations/V019__create_workspace_members.sql"),
+            ),
+            (
+                "add_checkpoint_data_json",
+                include_str!("pg/migrations/V020__add_checkpoint_data_json.sql"),
             ),
         ];
 

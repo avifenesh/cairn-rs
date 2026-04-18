@@ -5,11 +5,37 @@ use cairn_domain::RuntimeEvent;
 use crate::error::StoreError;
 use crate::event_log::StoredEvent;
 
-/// SQLite-backed synchronous projection applier.
+/// SQLite-backed synchronous projection applier for local-mode deploys.
 ///
-/// Mirrors PgSyncProjection but for SQLite local-mode.
-/// All methods are async and operate within an existing transaction.
+/// **Coverage gap relative to PgSyncProjection.** This applier implements
+/// projections for the core operational state machines (session, run, task,
+/// approval, checkpoint, tool_invocation, mailbox) and silently ignores the
+/// remaining ~95 `RuntimeEvent` variants. The append path in
+/// `SqliteEventLog` invokes this applier inside the insert transaction, but
+/// stubbed variants commit only to the `event_log` table — their projection
+/// tables either do not exist in the SQLite schema or would be overwritten
+/// on replay.
+///
+/// Each stubbed variant is logged at `tracing::warn!` level so operators
+/// running `--db sqlite:…` can see in real time which RFC features are
+/// being silently dropped by the local-mode backend. If you land on this
+/// warning in a production log, either (a) switch to the Postgres backend,
+/// which projects every variant, or (b) extend this applier to cover the
+/// variant you care about.
+///
+/// Audit reference: `.claude/audit-state/review-queue.md` §T2-C2.
 pub struct SqliteSyncProjection;
+
+/// Log a received-but-unprojected event variant. Keeps the stub-match arms
+/// uniform and makes the coverage gap visible without spamming logs when
+/// no stub variants are ever received.
+fn log_stub(variant: &'static str) {
+    tracing::warn!(
+        event_variant = variant,
+        "sqlite projection stub: event committed to event_log but no projection table updated \
+         (see SqliteSyncProjection docstring for the coverage gap)"
+    );
+}
 
 impl SqliteSyncProjection {
     /// Async projection application within a SQLite transaction.
@@ -271,9 +297,14 @@ impl SqliteSyncProjection {
 
             RuntimeEvent::ToolInvocationFailed(e) => {
                 let outcome_str = enum_to_str(&e.outcome)?;
+                // Route terminal state through the same helper PG uses so a
+                // canceled outcome lands as `state='canceled'` (not `'failed'`);
+                // pre-T2-H5 SQLite hardcoded `'failed'` and mislabeled cancels.
+                let state_str = enum_to_str(&e.outcome.terminal_state())?;
                 sqlx::query(
-                    "UPDATE tool_invocations SET state = 'failed', outcome = ?, error_message = ?, finished_at_ms = ?, version = version + 1, updated_at = ? WHERE invocation_id = ?",
+                    "UPDATE tool_invocations SET state = ?, outcome = ?, error_message = ?, finished_at_ms = ?, version = version + 1, updated_at = ? WHERE invocation_id = ?",
                 )
+                .bind(state_str)
                 .bind(outcome_str)
                 .bind(e.error_message.as_deref())
                 .bind(e.finished_at_ms as i64)
@@ -284,120 +315,134 @@ impl SqliteSyncProjection {
                 .map_err(|e| StoreError::Internal(e.to_string()))?;
             }
 
-            RuntimeEvent::ExternalWorkerRegistered(_)
-            | RuntimeEvent::ExternalWorkerReported(_)
-            | RuntimeEvent::ExternalWorkerSuspended(_)
-            | RuntimeEvent::ExternalWorkerReactivated(_)
-            | RuntimeEvent::SoulPatchProposed(_)
-            | RuntimeEvent::SoulPatchApplied(_)
-            | RuntimeEvent::SessionCostUpdated(_)
-            | RuntimeEvent::RunCostUpdated(_)
-            | RuntimeEvent::SpendAlertTriggered(_)
-            | RuntimeEvent::SubagentSpawned(_)
-            | RuntimeEvent::RecoveryAttempted(_)
-            | RuntimeEvent::RecoveryCompleted(_)
-            | RuntimeEvent::SignalIngested(_)
-            | RuntimeEvent::UserMessageAppended(_)
-            | RuntimeEvent::IngestJobStarted(_)
-            | RuntimeEvent::IngestJobCompleted(_)
-            | RuntimeEvent::EvalRunStarted(_)
-            | RuntimeEvent::EvalRunCompleted(_)
-            | RuntimeEvent::PromptAssetCreated(_)
-            | RuntimeEvent::PromptVersionCreated(_)
-            | RuntimeEvent::ApprovalPolicyCreated(_)
-            | RuntimeEvent::PromptReleaseCreated(_)
-            | RuntimeEvent::PromptReleaseTransitioned(_)
-            | RuntimeEvent::PromptRolloutStarted(_)
-            | RuntimeEvent::TenantCreated(_)
-            | RuntimeEvent::WorkspaceCreated(_)
-            | RuntimeEvent::ProjectCreated(_)
-            | RuntimeEvent::RouteDecisionMade(_)
-            | RuntimeEvent::ProviderCallCompleted(_)
-            | RuntimeEvent::OutcomeRecorded(_)
-            | RuntimeEvent::ScheduledTaskCreated(_)
-            | RuntimeEvent::PlanProposed(_)
-            | RuntimeEvent::PlanApproved(_)
-            | RuntimeEvent::PlanRejected(_)
-            | RuntimeEvent::PlanRevisionRequested(_) => {}
-            RuntimeEvent::ProviderBudgetSet(_)
-            | RuntimeEvent::ChannelCreated(_)
-            | RuntimeEvent::ChannelMessageSent(_)
-            | RuntimeEvent::ChannelMessageConsumed(_)
-            | RuntimeEvent::DefaultSettingSet(_)
-            | RuntimeEvent::DefaultSettingCleared(_)
-            | RuntimeEvent::LicenseActivated(_)
-            | RuntimeEvent::EntitlementOverrideSet(_)
-            | RuntimeEvent::NotificationPreferenceSet(_)
-            | RuntimeEvent::NotificationSent(_)
-            | RuntimeEvent::ProviderPoolCreated(_)
-            | RuntimeEvent::ProviderPoolConnectionAdded(_)
-            | RuntimeEvent::ProviderPoolConnectionRemoved(_)
-            | RuntimeEvent::TenantQuotaSet(_)
-            | RuntimeEvent::TenantQuotaViolated(_)
-            | RuntimeEvent::RetentionPolicySet(_)
-            | RuntimeEvent::RunCostAlertSet(_)
-            | RuntimeEvent::RunCostAlertTriggered(_)
-            | RuntimeEvent::WorkspaceMemberAdded(_)
-            | RuntimeEvent::WorkspaceMemberRemoved(_)
-            | RuntimeEvent::ApprovalDelegated(_)
-            | RuntimeEvent::AuditLogEntryRecorded(_)
-            | RuntimeEvent::CheckpointStrategySet(_)
-            | RuntimeEvent::CredentialKeyRotated(_)
-            | RuntimeEvent::CredentialRevoked(_)
-            | RuntimeEvent::CredentialStored(_)
-            | RuntimeEvent::EvalBaselineLocked(_)
-            | RuntimeEvent::EvalBaselineSet(_)
-            | RuntimeEvent::EvalDatasetCreated(_)
-            | RuntimeEvent::EvalDatasetEntryAdded(_)
-            | RuntimeEvent::EvalRubricCreated(_)
-            | RuntimeEvent::EventLogCompacted(_)
-            | RuntimeEvent::GuardrailPolicyCreated(_)
-            | RuntimeEvent::GuardrailPolicyEvaluated(_)
-            | RuntimeEvent::OperatorIntervention(_)
-            | RuntimeEvent::OperatorProfileCreated(_)
-            | RuntimeEvent::OperatorProfileUpdated(_)
-            | RuntimeEvent::PauseScheduled(_)
-            | RuntimeEvent::PermissionDecisionRecorded(_)
-            | RuntimeEvent::ProviderBindingCreated(_)
-            | RuntimeEvent::ProviderBindingStateChanged(_)
-            | RuntimeEvent::ProviderBudgetAlertTriggered(_)
-            | RuntimeEvent::ProviderBudgetExceeded(_)
-            | RuntimeEvent::ProviderConnectionRegistered(_)
-            | RuntimeEvent::ProviderHealthChecked(_)
-            | RuntimeEvent::ProviderHealthScheduleSet(_)
-            | RuntimeEvent::ProviderHealthScheduleTriggered(_)
-            | RuntimeEvent::ProviderMarkedDegraded(_)
-            | RuntimeEvent::ProviderModelRegistered(_)
-            | RuntimeEvent::ProviderRecovered(_)
-            | RuntimeEvent::ProviderRetryPolicySet(_)
-            | RuntimeEvent::RecoveryEscalated(_)
-            | RuntimeEvent::ResourceShareRevoked(_)
-            | RuntimeEvent::ResourceShared(_)
-            | RuntimeEvent::RoutePolicyCreated(_)
-            | RuntimeEvent::RoutePolicyUpdated(_)
-            | RuntimeEvent::RunSlaBreached(_)
-            | RuntimeEvent::RunSlaSet(_)
-            | RuntimeEvent::SignalRouted(_)
-            | RuntimeEvent::SignalSubscriptionCreated(_)
-            | RuntimeEvent::TriggerCreated(_)
-            | RuntimeEvent::TriggerEnabled(_)
-            | RuntimeEvent::TriggerDisabled(_)
-            | RuntimeEvent::TriggerSuspended(_)
-            | RuntimeEvent::TriggerResumed(_)
-            | RuntimeEvent::TriggerDeleted(_)
-            | RuntimeEvent::TriggerFired(_)
-            | RuntimeEvent::TriggerSkipped(_)
-            | RuntimeEvent::TriggerDenied(_)
-            | RuntimeEvent::TriggerRateLimited(_)
-            | RuntimeEvent::TriggerPendingApproval(_)
-            | RuntimeEvent::RunTemplateCreated(_)
-            | RuntimeEvent::RunTemplateDeleted(_)
-            | RuntimeEvent::SnapshotCreated(_)
-            | RuntimeEvent::TaskDependencyAdded(_)
-            | RuntimeEvent::TaskDependencyResolved(_)
-            | RuntimeEvent::TaskLeaseExpired(_)
-            | RuntimeEvent::TaskPriorityChanged(_)
-            | RuntimeEvent::ToolInvocationProgressUpdated(_) => {}
+            // ── UNPROJECTED STUBS ──────────────────────────────────────
+            // These variants commit to event_log but do NOT update any
+            // projection table on the SQLite backend. See the struct
+            // docstring for the coverage-gap rationale and logging.
+            RuntimeEvent::ExternalWorkerRegistered(_) => log_stub("ExternalWorkerRegistered"),
+            RuntimeEvent::ExternalWorkerReported(_) => log_stub("ExternalWorkerReported"),
+            RuntimeEvent::ExternalWorkerSuspended(_) => log_stub("ExternalWorkerSuspended"),
+            RuntimeEvent::ExternalWorkerReactivated(_) => log_stub("ExternalWorkerReactivated"),
+            RuntimeEvent::SoulPatchProposed(_) => log_stub("SoulPatchProposed"),
+            RuntimeEvent::SoulPatchApplied(_) => log_stub("SoulPatchApplied"),
+            RuntimeEvent::SessionCostUpdated(_) => log_stub("SessionCostUpdated"),
+            RuntimeEvent::RunCostUpdated(_) => log_stub("RunCostUpdated"),
+            RuntimeEvent::SpendAlertTriggered(_) => log_stub("SpendAlertTriggered"),
+            RuntimeEvent::SubagentSpawned(_) => log_stub("SubagentSpawned"),
+            RuntimeEvent::RecoveryAttempted(_) => log_stub("RecoveryAttempted"),
+            RuntimeEvent::RecoveryCompleted(_) => log_stub("RecoveryCompleted"),
+            RuntimeEvent::SignalIngested(_) => log_stub("SignalIngested"),
+            RuntimeEvent::UserMessageAppended(_) => log_stub("UserMessageAppended"),
+            RuntimeEvent::IngestJobStarted(_) => log_stub("IngestJobStarted"),
+            RuntimeEvent::IngestJobCompleted(_) => log_stub("IngestJobCompleted"),
+            RuntimeEvent::EvalRunStarted(_) => log_stub("EvalRunStarted"),
+            RuntimeEvent::EvalRunCompleted(_) => log_stub("EvalRunCompleted"),
+            RuntimeEvent::PromptAssetCreated(_) => log_stub("PromptAssetCreated"),
+            RuntimeEvent::PromptVersionCreated(_) => log_stub("PromptVersionCreated"),
+            RuntimeEvent::ApprovalPolicyCreated(_) => log_stub("ApprovalPolicyCreated"),
+            RuntimeEvent::PromptReleaseCreated(_) => log_stub("PromptReleaseCreated"),
+            RuntimeEvent::PromptReleaseTransitioned(_) => log_stub("PromptReleaseTransitioned"),
+            RuntimeEvent::PromptRolloutStarted(_) => log_stub("PromptRolloutStarted"),
+            RuntimeEvent::TenantCreated(_) => log_stub("TenantCreated"),
+            RuntimeEvent::WorkspaceCreated(_) => log_stub("WorkspaceCreated"),
+            RuntimeEvent::ProjectCreated(_) => log_stub("ProjectCreated"),
+            RuntimeEvent::RouteDecisionMade(_) => log_stub("RouteDecisionMade"),
+            RuntimeEvent::ProviderCallCompleted(_) => log_stub("ProviderCallCompleted"),
+            RuntimeEvent::OutcomeRecorded(_) => log_stub("OutcomeRecorded"),
+            RuntimeEvent::ScheduledTaskCreated(_) => log_stub("ScheduledTaskCreated"),
+            RuntimeEvent::PlanProposed(_) => log_stub("PlanProposed"),
+            RuntimeEvent::PlanApproved(_) => log_stub("PlanApproved"),
+            RuntimeEvent::PlanRejected(_) => log_stub("PlanRejected"),
+            RuntimeEvent::PlanRevisionRequested(_) => log_stub("PlanRevisionRequested"),
+            RuntimeEvent::ProviderBudgetSet(_) => log_stub("ProviderBudgetSet"),
+            RuntimeEvent::ChannelCreated(_) => log_stub("ChannelCreated"),
+            RuntimeEvent::ChannelMessageSent(_) => log_stub("ChannelMessageSent"),
+            RuntimeEvent::ChannelMessageConsumed(_) => log_stub("ChannelMessageConsumed"),
+            RuntimeEvent::DefaultSettingSet(_) => log_stub("DefaultSettingSet"),
+            RuntimeEvent::DefaultSettingCleared(_) => log_stub("DefaultSettingCleared"),
+            RuntimeEvent::LicenseActivated(_) => log_stub("LicenseActivated"),
+            RuntimeEvent::EntitlementOverrideSet(_) => log_stub("EntitlementOverrideSet"),
+            RuntimeEvent::NotificationPreferenceSet(_) => log_stub("NotificationPreferenceSet"),
+            RuntimeEvent::NotificationSent(_) => log_stub("NotificationSent"),
+            RuntimeEvent::ProviderPoolCreated(_) => log_stub("ProviderPoolCreated"),
+            RuntimeEvent::ProviderPoolConnectionAdded(_) => log_stub("ProviderPoolConnectionAdded"),
+            RuntimeEvent::ProviderPoolConnectionRemoved(_) => {
+                log_stub("ProviderPoolConnectionRemoved")
+            }
+            RuntimeEvent::TenantQuotaSet(_) => log_stub("TenantQuotaSet"),
+            RuntimeEvent::TenantQuotaViolated(_) => log_stub("TenantQuotaViolated"),
+            RuntimeEvent::RetentionPolicySet(_) => log_stub("RetentionPolicySet"),
+            RuntimeEvent::RunCostAlertSet(_) => log_stub("RunCostAlertSet"),
+            RuntimeEvent::RunCostAlertTriggered(_) => log_stub("RunCostAlertTriggered"),
+            RuntimeEvent::WorkspaceMemberAdded(_) => log_stub("WorkspaceMemberAdded"),
+            RuntimeEvent::WorkspaceMemberRemoved(_) => log_stub("WorkspaceMemberRemoved"),
+            RuntimeEvent::ApprovalDelegated(_) => log_stub("ApprovalDelegated"),
+            RuntimeEvent::AuditLogEntryRecorded(_) => log_stub("AuditLogEntryRecorded"),
+            RuntimeEvent::CheckpointStrategySet(_) => log_stub("CheckpointStrategySet"),
+            RuntimeEvent::CredentialKeyRotated(_) => log_stub("CredentialKeyRotated"),
+            RuntimeEvent::CredentialRevoked(_) => log_stub("CredentialRevoked"),
+            RuntimeEvent::CredentialStored(_) => log_stub("CredentialStored"),
+            RuntimeEvent::EvalBaselineLocked(_) => log_stub("EvalBaselineLocked"),
+            RuntimeEvent::EvalBaselineSet(_) => log_stub("EvalBaselineSet"),
+            RuntimeEvent::EvalDatasetCreated(_) => log_stub("EvalDatasetCreated"),
+            RuntimeEvent::EvalDatasetEntryAdded(_) => log_stub("EvalDatasetEntryAdded"),
+            RuntimeEvent::EvalRubricCreated(_) => log_stub("EvalRubricCreated"),
+            RuntimeEvent::EventLogCompacted(_) => log_stub("EventLogCompacted"),
+            RuntimeEvent::GuardrailPolicyCreated(_) => log_stub("GuardrailPolicyCreated"),
+            RuntimeEvent::GuardrailPolicyEvaluated(_) => log_stub("GuardrailPolicyEvaluated"),
+            RuntimeEvent::OperatorIntervention(_) => log_stub("OperatorIntervention"),
+            RuntimeEvent::OperatorProfileCreated(_) => log_stub("OperatorProfileCreated"),
+            RuntimeEvent::OperatorProfileUpdated(_) => log_stub("OperatorProfileUpdated"),
+            RuntimeEvent::PauseScheduled(_) => log_stub("PauseScheduled"),
+            RuntimeEvent::PermissionDecisionRecorded(_) => log_stub("PermissionDecisionRecorded"),
+            RuntimeEvent::ProviderBindingCreated(_) => log_stub("ProviderBindingCreated"),
+            RuntimeEvent::ProviderBindingStateChanged(_) => log_stub("ProviderBindingStateChanged"),
+            RuntimeEvent::ProviderBudgetAlertTriggered(_) => {
+                log_stub("ProviderBudgetAlertTriggered")
+            }
+            RuntimeEvent::ProviderBudgetExceeded(_) => log_stub("ProviderBudgetExceeded"),
+            RuntimeEvent::ProviderConnectionRegistered(_) => {
+                log_stub("ProviderConnectionRegistered")
+            }
+            RuntimeEvent::ProviderHealthChecked(_) => log_stub("ProviderHealthChecked"),
+            RuntimeEvent::ProviderHealthScheduleSet(_) => log_stub("ProviderHealthScheduleSet"),
+            RuntimeEvent::ProviderHealthScheduleTriggered(_) => {
+                log_stub("ProviderHealthScheduleTriggered")
+            }
+            RuntimeEvent::ProviderMarkedDegraded(_) => log_stub("ProviderMarkedDegraded"),
+            RuntimeEvent::ProviderModelRegistered(_) => log_stub("ProviderModelRegistered"),
+            RuntimeEvent::ProviderRecovered(_) => log_stub("ProviderRecovered"),
+            RuntimeEvent::ProviderRetryPolicySet(_) => log_stub("ProviderRetryPolicySet"),
+            RuntimeEvent::RecoveryEscalated(_) => log_stub("RecoveryEscalated"),
+            RuntimeEvent::ResourceShareRevoked(_) => log_stub("ResourceShareRevoked"),
+            RuntimeEvent::ResourceShared(_) => log_stub("ResourceShared"),
+            RuntimeEvent::RoutePolicyCreated(_) => log_stub("RoutePolicyCreated"),
+            RuntimeEvent::RoutePolicyUpdated(_) => log_stub("RoutePolicyUpdated"),
+            RuntimeEvent::RunSlaBreached(_) => log_stub("RunSlaBreached"),
+            RuntimeEvent::RunSlaSet(_) => log_stub("RunSlaSet"),
+            RuntimeEvent::SignalRouted(_) => log_stub("SignalRouted"),
+            RuntimeEvent::SignalSubscriptionCreated(_) => log_stub("SignalSubscriptionCreated"),
+            RuntimeEvent::TriggerCreated(_) => log_stub("TriggerCreated"),
+            RuntimeEvent::TriggerEnabled(_) => log_stub("TriggerEnabled"),
+            RuntimeEvent::TriggerDisabled(_) => log_stub("TriggerDisabled"),
+            RuntimeEvent::TriggerSuspended(_) => log_stub("TriggerSuspended"),
+            RuntimeEvent::TriggerResumed(_) => log_stub("TriggerResumed"),
+            RuntimeEvent::TriggerDeleted(_) => log_stub("TriggerDeleted"),
+            RuntimeEvent::TriggerFired(_) => log_stub("TriggerFired"),
+            RuntimeEvent::TriggerSkipped(_) => log_stub("TriggerSkipped"),
+            RuntimeEvent::TriggerDenied(_) => log_stub("TriggerDenied"),
+            RuntimeEvent::TriggerRateLimited(_) => log_stub("TriggerRateLimited"),
+            RuntimeEvent::TriggerPendingApproval(_) => log_stub("TriggerPendingApproval"),
+            RuntimeEvent::RunTemplateCreated(_) => log_stub("RunTemplateCreated"),
+            RuntimeEvent::RunTemplateDeleted(_) => log_stub("RunTemplateDeleted"),
+            RuntimeEvent::SnapshotCreated(_) => log_stub("SnapshotCreated"),
+            RuntimeEvent::TaskDependencyAdded(_) => log_stub("TaskDependencyAdded"),
+            RuntimeEvent::TaskDependencyResolved(_) => log_stub("TaskDependencyResolved"),
+            RuntimeEvent::TaskLeaseExpired(_) => log_stub("TaskLeaseExpired"),
+            RuntimeEvent::TaskPriorityChanged(_) => log_stub("TaskPriorityChanged"),
+            RuntimeEvent::ToolInvocationProgressUpdated(_) => {
+                log_stub("ToolInvocationProgressUpdated")
+            }
         }
 
         Ok(())

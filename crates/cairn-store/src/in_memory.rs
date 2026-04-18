@@ -16,17 +16,21 @@ use crate::event_log::*;
 use crate::projections::*;
 
 fn now_millis() -> u64 {
+    // Matches pg/sqlite backends' fallback on clock skew: a clock before
+    // UNIX_EPOCH (container misconfiguration) MUST NOT panic the store.
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 struct State {
     events: Vec<StoredEvent>,
     next_position: u64,
-    /// RFC 002: causation_id → event position for idempotency.
-    #[allow(dead_code)]
+    /// RFC 002: causation_id → earliest event position that references it.
+    /// Populated by `append()` and consulted by `find_by_causation_id`; the
+    /// pre-T2-H1 field was declared but never populated, so lookup fell back
+    /// to O(n) over the full `events` vector.
     command_id_index: HashMap<String, u64>,
     sessions: HashMap<String, SessionRecord>,
     runs: HashMap<String, RunRecord>,
@@ -251,7 +255,10 @@ impl InMemoryStore {
     ///
     /// Pass `Arc<PgEventLog>` or `Arc<SqliteEventLog>` — any `EventLog` impl works.
     pub fn set_secondary_log(&self, log: Arc<dyn EventLog + Send + Sync>) {
-        *self.secondary_log.write().unwrap() = Some(log);
+        *self
+            .secondary_log
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(log);
     }
 
     /// Subscribe to the real-time event broadcast (RFC 002).
@@ -1713,7 +1720,7 @@ impl EventLog for InMemoryStore {
     ) -> Result<Vec<EventPosition>, StoreError> {
         // Scope the MutexGuard so it is lexically dropped before any `.await`.
         let positions = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let mut usage = self
                 .usage_counters
                 .lock()
@@ -1737,6 +1744,16 @@ impl EventLog for InMemoryStore {
                     stored_at: now,
                 };
 
+                // Populate the causation_id index (RFC 002 idempotency).
+                // Keep the earliest position for a given causation; later
+                // references are already retrievable via `read_stream`.
+                if let Some(cause) = envelope.causation_id.as_ref() {
+                    state
+                        .command_id_index
+                        .entry(cause.as_str().to_owned())
+                        .or_insert(pos.0);
+                }
+
                 // Push the original event BEFORE calling apply_projection so that
                 // any derived events inserted by the projection appear AFTER the
                 // original in the log, preserving strict position monotonicity.
@@ -1752,17 +1769,51 @@ impl EventLog for InMemoryStore {
             // `state` (MutexGuard) is dropped here, before any await point.
         };
 
-        // Dual-write to durable secondary log (Postgres, SQLite) if configured.
-        // Best-effort: a secondary failure does NOT roll back the in-memory write,
-        // preserving the existing availability guarantee while adding durability.
-        let secondary = self.secondary_log.read().unwrap().clone();
+        // Dual-write to the durable secondary log (Postgres, SQLite) if
+        // one is configured. Fail CLOSED: the in-memory write has already
+        // committed by this point, but we surface the secondary failure
+        // so the caller can decide whether to retry, compensate, or
+        // abort. The old `eprintln`-and-swallow path silently lost data
+        // on restart when the secondary was the durable source of truth
+        // (RFC 002).
+        //
+        // **Divergence contract on `Err`:** the in-memory log has the
+        // events, the secondary does not. The caller MUST treat this as
+        // a recoverable divergence and is responsible for reconciliation.
+        // Options, in rough order of preference:
+        //   1. Retry the same call. `InMemoryStore::append` today does
+        //      NOT dedup by `event_id`, so a plain retry would double-
+        //      apply the projection — do not retry blindly against the
+        //      same store; construct a fresh caller-side envelope or
+        //      flush+replay on the primary. Populating event_id dedup
+        //      on the primary is tracked as audit follow-up T2-M4.
+        //   2. Write the events directly to the secondary once it's
+        //      healthy, then confirm primary/secondary head positions
+        //      match.
+        //   3. Abort the caller-level transaction, roll forward from
+        //      the secondary's last durable position.
+        //
+        // Until T2-M4 lands, the safest pattern for a deploy using
+        // InMemoryStore as primary with a durable secondary is to
+        // configure the app to crash on `Err` from `append` and rely
+        // on restart-plus-replay to reconverge.
+        let secondary = self
+            .secondary_log
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         if let Some(log) = secondary {
             if let Err(e) = log.append(events).await {
-                eprintln!(
-                    "secondary event log write failed ({}); {} event(s) are in-memory only",
-                    e,
+                tracing::error!(
+                    error = %e,
+                    event_count = events.len(),
+                    "secondary event log write failed — in-memory log has {} event(s) the secondary did not commit",
                     events.len(),
                 );
+                return Err(StoreError::Internal(format!(
+                    "secondary event log write failed: {e}; in-memory and secondary logs have diverged by {} event(s)",
+                    events.len()
+                )));
             }
         }
 
@@ -1775,7 +1826,7 @@ impl EventLog for InMemoryStore {
         after: Option<EventPosition>,
         limit: usize,
     ) -> Result<Vec<StoredEvent>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let min_pos = after.map(|p| p.0).unwrap_or(0);
 
         let results: Vec<StoredEvent> = state
@@ -1795,7 +1846,7 @@ impl EventLog for InMemoryStore {
         after: Option<EventPosition>,
         limit: usize,
     ) -> Result<Vec<StoredEvent>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let min_pos = after.map(|p| p.0).unwrap_or(0);
 
         let results: Vec<StoredEvent> = state
@@ -1810,7 +1861,7 @@ impl EventLog for InMemoryStore {
     }
 
     async fn head_position(&self) -> Result<Option<EventPosition>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.events.last().map(|e| e.position))
     }
 
@@ -1818,13 +1869,12 @@ impl EventLog for InMemoryStore {
         &self,
         causation_id: &str,
     ) -> Result<Option<EventPosition>, StoreError> {
-        let state = self.state.lock().unwrap();
-        for stored in &state.events {
-            if stored.envelope.causation_id.as_ref().map(|id| id.as_str()) == Some(causation_id) {
-                return Ok(Some(stored.position));
-            }
-        }
-        Ok(None)
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(state
+            .command_id_index
+            .get(causation_id)
+            .copied()
+            .map(EventPosition))
     }
 }
 
@@ -1886,7 +1936,7 @@ fn event_matches_entity(event: &RuntimeEvent, entity: &EntityRef) -> bool {
 #[async_trait]
 impl SessionReadModel for InMemoryStore {
     async fn get(&self, session_id: &SessionId) -> Result<Option<SessionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.sessions.get(session_id.as_str()).cloned())
     }
 
@@ -1896,7 +1946,7 @@ impl SessionReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<SessionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<SessionRecord> = state
             .sessions
             .values()
@@ -1910,7 +1960,7 @@ impl SessionReadModel for InMemoryStore {
 
     async fn list_active(&self, limit: usize) -> Result<Vec<SessionRecord>, StoreError> {
         use cairn_domain::SessionState;
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<SessionRecord> = state
             .sessions
             .values()
@@ -1932,7 +1982,7 @@ impl crate::projections::SessionCostReadModel for InMemoryStore {
         &self,
         session_id: &cairn_domain::SessionId,
     ) -> Result<Option<cairn_domain::providers::SessionCostRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.session_costs.get(session_id.as_str()).cloned())
     }
 
@@ -1941,7 +1991,7 @@ impl crate::projections::SessionCostReadModel for InMemoryStore {
         tenant_id: &cairn_domain::TenantId,
         _since_ms: u64,
     ) -> Result<Vec<cairn_domain::providers::SessionCostRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .session_costs
             .values()
@@ -1958,7 +2008,7 @@ impl crate::projections::SessionCostReadModel for InMemoryStore {
 #[async_trait]
 impl RunReadModel for InMemoryStore {
     async fn get(&self, run_id: &RunId) -> Result<Option<RunRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.runs.get(run_id.as_str()).cloned())
     }
 
@@ -1968,7 +2018,7 @@ impl RunReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<RunRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<RunRecord> = state
             .runs
             .values()
@@ -1981,7 +2031,7 @@ impl RunReadModel for InMemoryStore {
     }
 
     async fn any_non_terminal(&self, session_id: &SessionId) -> Result<bool, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .runs
             .values()
@@ -1992,7 +2042,7 @@ impl RunReadModel for InMemoryStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<RunRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .runs
             .values()
@@ -2006,7 +2056,7 @@ impl RunReadModel for InMemoryStore {
         state: cairn_domain::RunState,
         limit: usize,
     ) -> Result<Vec<RunRecord>, StoreError> {
-        let store = self.state.lock().unwrap();
+        let store = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<RunRecord> = store
             .runs
             .values()
@@ -2023,7 +2073,7 @@ impl RunReadModel for InMemoryStore {
         project: &ProjectKey,
         limit: usize,
     ) -> Result<Vec<RunRecord>, StoreError> {
-        let store = self.state.lock().unwrap();
+        let store = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<RunRecord> = store
             .runs
             .values()
@@ -2041,7 +2091,7 @@ impl RunReadModel for InMemoryStore {
 #[async_trait]
 impl TaskReadModel for InMemoryStore {
     async fn get(&self, task_id: &TaskId) -> Result<Option<TaskRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.tasks.get(task_id.as_str()).cloned())
     }
 
@@ -2051,7 +2101,7 @@ impl TaskReadModel for InMemoryStore {
         task_state: TaskState,
         limit: usize,
     ) -> Result<Vec<TaskRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<TaskRecord> = state
             .tasks
             .values()
@@ -2068,7 +2118,7 @@ impl TaskReadModel for InMemoryStore {
         now: u64,
         limit: usize,
     ) -> Result<Vec<TaskRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<TaskRecord> = state
             .tasks
             .values()
@@ -2092,7 +2142,7 @@ impl TaskReadModel for InMemoryStore {
         parent_run_id: &RunId,
         limit: usize,
     ) -> Result<Vec<TaskRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<TaskRecord> = state
             .tasks
             .values()
@@ -2105,7 +2155,7 @@ impl TaskReadModel for InMemoryStore {
     }
 
     async fn any_non_terminal_children(&self, parent_run_id: &RunId) -> Result<bool, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .tasks
             .values()
@@ -2118,7 +2168,7 @@ impl TaskReadModel for InMemoryStore {
 #[async_trait]
 impl ApprovalReadModel for InMemoryStore {
     async fn get(&self, approval_id: &ApprovalId) -> Result<Option<ApprovalRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.approvals.get(approval_id.as_str()).cloned())
     }
 
@@ -2128,7 +2178,7 @@ impl ApprovalReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ApprovalRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<ApprovalRecord> = state
             .approvals
             .values()
@@ -2146,7 +2196,7 @@ impl ApprovalReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ApprovalRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<ApprovalRecord> = state
             .approvals
             .values()
@@ -2159,7 +2209,7 @@ impl ApprovalReadModel for InMemoryStore {
     }
 
     async fn has_pending_for_run(&self, run_id: &RunId) -> Result<bool, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .approvals
             .values()
@@ -2175,12 +2225,12 @@ impl CheckpointReadModel for InMemoryStore {
         &self,
         checkpoint_id: &CheckpointId,
     ) -> Result<Option<CheckpointRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.checkpoints.get(checkpoint_id.as_str()).cloned())
     }
 
     async fn latest_for_run(&self, run_id: &RunId) -> Result<Option<CheckpointRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .checkpoints
             .values()
@@ -2193,7 +2243,7 @@ impl CheckpointReadModel for InMemoryStore {
         run_id: &RunId,
         limit: usize,
     ) -> Result<Vec<CheckpointRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<CheckpointRecord> = state
             .checkpoints
             .values()
@@ -2214,7 +2264,7 @@ impl MailboxReadModel for InMemoryStore {
         &self,
         message_id: &MailboxMessageId,
     ) -> Result<Option<MailboxRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.mailbox_messages.get(message_id.as_str()).cloned())
     }
 
@@ -2224,7 +2274,7 @@ impl MailboxReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<MailboxRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<MailboxRecord> = state
             .mailbox_messages
             .values()
@@ -2242,7 +2292,7 @@ impl MailboxReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<MailboxRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<MailboxRecord> = state
             .mailbox_messages
             .values()
@@ -2259,7 +2309,7 @@ impl MailboxReadModel for InMemoryStore {
         now_ms: u64,
         limit: usize,
     ) -> Result<Vec<MailboxRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<MailboxRecord> = state
             .mailbox_messages
             .values()
@@ -2280,7 +2330,7 @@ impl ToolInvocationReadModel for InMemoryStore {
         &self,
         invocation_id: &ToolInvocationId,
     ) -> Result<Option<ToolInvocationRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.tool_invocations.get(invocation_id.as_str()).cloned())
     }
 
@@ -2290,7 +2340,7 @@ impl ToolInvocationReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ToolInvocationRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<ToolInvocationRecord> = state
             .tool_invocations
             .values()
@@ -2310,7 +2360,7 @@ impl SignalReadModel for InMemoryStore {
         &self,
         signal_id: &cairn_domain::SignalId,
     ) -> Result<Option<cairn_domain::SignalRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.signals.get(signal_id.as_str()).cloned())
     }
 
@@ -2320,7 +2370,7 @@ impl SignalReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::SignalRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<cairn_domain::SignalRecord> = state
             .signals
             .values()
@@ -2341,7 +2391,7 @@ impl IngestJobReadModel for InMemoryStore {
         &self,
         job_id: &cairn_domain::IngestJobId,
     ) -> Result<Option<cairn_domain::IngestJobRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.ingest_jobs.get(job_id.as_str()).cloned())
     }
 
@@ -2351,7 +2401,7 @@ impl IngestJobReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::IngestJobRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<cairn_domain::IngestJobRecord> = state
             .ingest_jobs
             .values()
@@ -2372,7 +2422,7 @@ impl crate::projections::ScheduledTaskReadModel for InMemoryStore {
         &self,
         id: &cairn_domain::ScheduledTaskId,
     ) -> Result<Option<cairn_domain::ScheduledTaskRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.scheduled_tasks.get(id.as_str()).cloned())
     }
 
@@ -2382,7 +2432,7 @@ impl crate::projections::ScheduledTaskReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::ScheduledTaskRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<cairn_domain::ScheduledTaskRecord> = state
             .scheduled_tasks
             .values()
@@ -2398,7 +2448,7 @@ impl crate::projections::ScheduledTaskReadModel for InMemoryStore {
         now_ms: u64,
         limit: usize,
     ) -> Result<Vec<cairn_domain::ScheduledTaskRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<cairn_domain::ScheduledTaskRecord> = state
             .scheduled_tasks
             .values()
@@ -2418,7 +2468,7 @@ impl EvalRunReadModel for InMemoryStore {
         &self,
         eval_run_id: &cairn_domain::EvalRunId,
     ) -> Result<Option<crate::projections::EvalRunRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.eval_runs.get(eval_run_id.as_str()).cloned())
     }
 
@@ -2428,7 +2478,7 @@ impl EvalRunReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::EvalRunRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<crate::projections::EvalRunRecord> = state
             .eval_runs
             .values()
@@ -2449,7 +2499,7 @@ impl OutcomeReadModel for InMemoryStore {
         &self,
         outcome_id: &cairn_domain::OutcomeId,
     ) -> Result<Option<crate::projections::OutcomeRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.outcomes.get(outcome_id.as_str()).cloned())
     }
 
@@ -2458,7 +2508,7 @@ impl OutcomeReadModel for InMemoryStore {
         run_id: &cairn_domain::RunId,
         limit: usize,
     ) -> Result<Vec<crate::projections::OutcomeRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<crate::projections::OutcomeRecord> = state
             .outcomes
             .values()
@@ -2476,7 +2526,7 @@ impl OutcomeReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::OutcomeRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<crate::projections::OutcomeRecord> = state
             .outcomes
             .values()
@@ -2497,7 +2547,7 @@ impl crate::projections::EvalDatasetReadModel for InMemoryStore {
         &self,
         dataset_id: &str,
     ) -> Result<Option<cairn_domain::EvalDataset>, crate::error::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.eval_datasets.get(dataset_id).cloned())
     }
 
@@ -2507,7 +2557,7 @@ impl crate::projections::EvalDatasetReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::EvalDataset>, crate::error::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<cairn_domain::EvalDataset> = state
             .eval_datasets
             .values()
@@ -2541,7 +2591,7 @@ impl crate::projections::EvalRubricReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::EvalRubric>, crate::error::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .eval_rubrics
             .values()
@@ -2575,7 +2625,7 @@ impl crate::projections::EvalBaselineReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::EvalBaseline>, crate::error::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .eval_baselines
             .values()
@@ -2595,7 +2645,7 @@ impl PromptAssetReadModel for InMemoryStore {
         &self,
         id: &cairn_domain::PromptAssetId,
     ) -> Result<Option<crate::projections::PromptAssetRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.prompt_assets.get(id.as_str()).cloned())
     }
 
@@ -2605,7 +2655,7 @@ impl PromptAssetReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::PromptAssetRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<crate::projections::PromptAssetRecord> = state
             .prompt_assets
             .values()
@@ -2625,7 +2675,7 @@ impl PromptVersionReadModel for InMemoryStore {
         &self,
         id: &cairn_domain::PromptVersionId,
     ) -> Result<Option<crate::projections::PromptVersionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.prompt_versions.get(id.as_str()).cloned())
     }
 
@@ -2635,7 +2685,7 @@ impl PromptVersionReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::PromptVersionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<crate::projections::PromptVersionRecord> = state
             .prompt_versions
             .values()
@@ -2664,7 +2714,7 @@ impl PromptReleaseReadModel for InMemoryStore {
         &self,
         id: &cairn_domain::PromptReleaseId,
     ) -> Result<Option<crate::projections::PromptReleaseRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.prompt_releases.get(id.as_str()).cloned())
     }
 
@@ -2674,7 +2724,7 @@ impl PromptReleaseReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::PromptReleaseRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<crate::projections::PromptReleaseRecord> = state
             .prompt_releases
             .values()
@@ -2691,7 +2741,7 @@ impl PromptReleaseReadModel for InMemoryStore {
         prompt_asset_id: &cairn_domain::PromptAssetId,
         selector: &str,
     ) -> Result<Option<crate::projections::PromptReleaseRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut active: Vec<_> = state
             .prompt_releases
             .values()
@@ -2776,7 +2826,7 @@ impl TenantReadModel for InMemoryStore {
         &self,
         id: &cairn_domain::TenantId,
     ) -> Result<Option<cairn_domain::org::TenantRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.tenants.get(id.as_str()).cloned())
     }
 
@@ -2785,7 +2835,7 @@ impl TenantReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::org::TenantRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state.tenants.values().cloned().collect();
         results.sort_by_key(|t| t.created_at);
         Ok(results.into_iter().skip(offset).take(limit).collect())
@@ -2800,7 +2850,7 @@ impl WorkspaceReadModel for InMemoryStore {
         &self,
         id: &cairn_domain::WorkspaceId,
     ) -> Result<Option<cairn_domain::org::WorkspaceRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.workspaces.get(id.as_str()).cloned())
     }
 
@@ -2810,7 +2860,7 @@ impl WorkspaceReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::org::WorkspaceRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .workspaces
             .values()
@@ -2830,7 +2880,7 @@ impl ProjectReadModel for InMemoryStore {
         &self,
         project: &cairn_domain::ProjectKey,
     ) -> Result<Option<cairn_domain::org::ProjectRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.projects.get(project.project_id.as_str()).cloned())
     }
 
@@ -2841,7 +2891,7 @@ impl ProjectReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::org::ProjectRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .projects
             .values()
@@ -2861,7 +2911,7 @@ impl RouteDecisionReadModel for InMemoryStore {
         &self,
         decision_id: &cairn_domain::RouteDecisionId,
     ) -> Result<Option<cairn_domain::providers::RouteDecisionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.route_decisions.get(decision_id.as_str()).cloned())
     }
 
@@ -2871,7 +2921,7 @@ impl RouteDecisionReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::RouteDecisionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .route_decisions
             .values()
@@ -2891,7 +2941,7 @@ impl ProviderCallReadModel for InMemoryStore {
         &self,
         call_id: &cairn_domain::ProviderCallId,
     ) -> Result<Option<cairn_domain::providers::ProviderCallRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.provider_calls.get(call_id.as_str()).cloned())
     }
 
@@ -2900,7 +2950,7 @@ impl ProviderCallReadModel for InMemoryStore {
         decision_id: &cairn_domain::RouteDecisionId,
         limit: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderCallRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let results: Vec<_> = state
             .provider_calls
             .values()
@@ -2922,7 +2972,7 @@ impl InMemoryStore {
         owner: String,
         expires_at: u64,
     ) -> Result<(), StoreError> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let rec = state
             .tasks
             .get_mut(task_id.as_str())
@@ -2937,7 +2987,7 @@ impl InMemoryStore {
 
     /// Clear lease fields on a task.
     pub async fn clear_task_lease(&self, task_id: &TaskId) -> Result<(), StoreError> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(rec) = state.tasks.get_mut(task_id.as_str()) {
             rec.lease_owner = None;
             rec.lease_expires_at = None;
@@ -2952,7 +3002,7 @@ impl ApprovalPolicyReadModel for InMemoryStore {
         &self,
         policy_id: &str,
     ) -> Result<Option<cairn_domain::ApprovalPolicyRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.approval_policies.get(policy_id).cloned())
     }
 
@@ -2962,7 +3012,7 @@ impl ApprovalPolicyReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::ApprovalPolicyRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .approval_policies
             .values()
@@ -2980,7 +3030,7 @@ impl ExternalWorkerReadModel for InMemoryStore {
         &self,
         id: &cairn_domain::WorkerId,
     ) -> Result<Option<cairn_domain::workers::ExternalWorkerRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.external_workers.get(id.as_str()).cloned())
     }
 
@@ -2990,7 +3040,7 @@ impl ExternalWorkerReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::workers::ExternalWorkerRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .external_workers
             .values()
@@ -3007,7 +3057,11 @@ impl ExternalWorkerReadModel for InMemoryStore {
 #[async_trait]
 impl crate::projections::LlmCallTraceReadModel for InMemoryStore {
     async fn insert_trace(&self, trace: cairn_domain::LlmCallTrace) -> Result<(), StoreError> {
-        self.state.lock().unwrap().llm_traces.push(trace);
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .llm_traces
+            .push(trace);
         Ok(())
     }
 
@@ -3016,7 +3070,7 @@ impl crate::projections::LlmCallTraceReadModel for InMemoryStore {
         session_id: &cairn_domain::SessionId,
         limit: usize,
     ) -> Result<Vec<cairn_domain::LlmCallTrace>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<cairn_domain::LlmCallTrace> = state
             .llm_traces
             .iter()
@@ -3038,7 +3092,7 @@ impl crate::projections::LlmCallTraceReadModel for InMemoryStore {
         &self,
         limit: usize,
     ) -> Result<Vec<cairn_domain::LlmCallTrace>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results = state.llm_traces.clone();
         results.sort_by_key(|r| std::cmp::Reverse(r.created_at_ms));
         results.truncate(limit);
@@ -3052,7 +3106,7 @@ impl crate::projections::RunCostReadModel for InMemoryStore {
         &self,
         run_id: &cairn_domain::RunId,
     ) -> Result<Option<cairn_domain::providers::RunCostRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.run_costs.get(run_id.as_str()).cloned())
     }
 
@@ -3061,7 +3115,7 @@ impl crate::projections::RunCostReadModel for InMemoryStore {
         _session_id: &cairn_domain::SessionId,
     ) -> Result<Vec<cairn_domain::providers::RunCostRecord>, StoreError> {
         // In-memory store does not index run_costs by session; return all for now.
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.run_costs.values().cloned().collect())
     }
 }
@@ -3074,7 +3128,7 @@ impl crate::projections::TaskDependencyReadModel for InMemoryStore {
         &self,
         task_id: &cairn_domain::TaskId,
     ) -> Result<Vec<crate::projections::TaskDependencyRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let results = state
             .task_deps
             .iter()
@@ -3088,7 +3142,7 @@ impl crate::projections::TaskDependencyReadModel for InMemoryStore {
         &self,
         _project: &cairn_domain::ProjectKey,
     ) -> Result<Vec<crate::projections::TaskDependencyRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let results = state
             .task_deps
             .iter()
@@ -3102,7 +3156,11 @@ impl crate::projections::TaskDependencyReadModel for InMemoryStore {
         &self,
         record: crate::projections::TaskDependencyRecord,
     ) -> Result<(), StoreError> {
-        self.state.lock().unwrap().task_deps.push(record);
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .task_deps
+            .push(record);
         Ok(())
     }
 
@@ -3111,7 +3169,7 @@ impl crate::projections::TaskDependencyReadModel for InMemoryStore {
         prerequisite_task_id: &cairn_domain::TaskId,
         resolved_at_ms: u64,
     ) -> Result<(), StoreError> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         for dep in &mut state.task_deps {
             if &dep.dependency.depends_on_task_id == prerequisite_task_id
                 && dep.resolved_at_ms.is_none()
@@ -3131,7 +3189,7 @@ impl crate::projections::OperatorProfileReadModel for InMemoryStore {
         &self,
         operator_id: &cairn_domain::ids::OperatorId,
     ) -> Result<Option<crate::projections::OperatorProfileRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.operator_profiles.get(operator_id.as_str()).cloned())
     }
 
@@ -3141,7 +3199,7 @@ impl crate::projections::OperatorProfileReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::OperatorProfileRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<crate::projections::OperatorProfileRecord> = state
             .operator_profiles
             .values()
@@ -3161,7 +3219,7 @@ impl crate::projections::WorkspaceMembershipReadModel for InMemoryStore {
         &self,
         workspace_id: &str,
     ) -> Result<Vec<crate::projections::WorkspaceMemberRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .workspace_members
             .iter()
@@ -3175,7 +3233,7 @@ impl crate::projections::WorkspaceMembershipReadModel for InMemoryStore {
         workspace_key: &cairn_domain::tenancy::WorkspaceKey,
         operator_id: &str,
     ) -> Result<Option<crate::projections::WorkspaceMemberRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .workspace_members
             .iter()
@@ -3190,7 +3248,11 @@ impl crate::projections::WorkspaceMembershipReadModel for InMemoryStore {
         &self,
         record: crate::projections::WorkspaceMemberRecord,
     ) -> Result<(), StoreError> {
-        self.state.lock().unwrap().workspace_members.push(record);
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .workspace_members
+            .push(record);
         Ok(())
     }
 
@@ -3199,7 +3261,7 @@ impl crate::projections::WorkspaceMembershipReadModel for InMemoryStore {
         workspace_id: &str,
         operator_id: &str,
     ) -> Result<(), StoreError> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .workspace_members
             .retain(|m| !(m.workspace_id == workspace_id && m.operator_id == operator_id));
@@ -3228,7 +3290,7 @@ impl crate::projections::SignalSubscriptionReadModel for InMemoryStore {
         &self,
         signal_type: &str,
     ) -> Result<Vec<crate::projections::SignalSubscriptionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .signal_subscriptions
             .values()
@@ -3243,7 +3305,7 @@ impl crate::projections::SignalSubscriptionReadModel for InMemoryStore {
         _limit: usize,
         _offset: usize,
     ) -> Result<Vec<crate::projections::SignalSubscriptionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .signal_subscriptions
             .values()
@@ -3258,7 +3320,7 @@ impl crate::projections::SignalSubscriptionReadModel for InMemoryStore {
         _limit: usize,
         _offset: usize,
     ) -> Result<Vec<crate::projections::SignalSubscriptionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let tid = project.tenant_id.as_str();
         let wid = project.workspace_id.as_str();
         let pid = project.project_id.as_str();
@@ -3291,7 +3353,7 @@ impl crate::projections::CredentialRotationReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::credentials::CredentialRotationRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let results: Vec<_> = state
             .credential_rotations
             .iter()
@@ -3325,7 +3387,7 @@ impl crate::projections::ProviderBindingReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .provider_bindings
             .values()
@@ -3342,7 +3404,7 @@ impl crate::projections::ProviderBindingReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .provider_bindings
             .values()
@@ -3358,7 +3420,7 @@ impl crate::projections::ProviderBindingReadModel for InMemoryStore {
         project: &cairn_domain::ProjectKey,
         operation: cairn_domain::providers::OperationKind,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .provider_bindings
             .values()
@@ -3400,7 +3462,7 @@ impl crate::projections::ProviderHealthReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderHealthRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let results: Vec<_> = state.provider_health_records.values().cloned().collect();
         Ok(results.into_iter().skip(offset).take(limit).collect())
     }
@@ -3427,7 +3489,7 @@ impl crate::projections::ProviderHealthScheduleReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::providers::ProviderHealthSchedule>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .provider_health_schedules
             .values()
@@ -3439,7 +3501,7 @@ impl crate::projections::ProviderHealthScheduleReadModel for InMemoryStore {
     async fn list_enabled_schedules(
         &self,
     ) -> Result<Vec<cairn_domain::providers::ProviderHealthSchedule>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .provider_health_schedules
             .values()
@@ -3471,7 +3533,7 @@ impl crate::projections::ChannelReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::ChannelRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .channels
             .values()
@@ -3486,7 +3548,7 @@ impl crate::projections::ChannelReadModel for InMemoryStore {
         channel_id: &cairn_domain::ChannelId,
         limit: usize,
     ) -> Result<Vec<cairn_domain::ChannelMessage>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .channel_messages
             .get(channel_id.as_str())
@@ -3519,7 +3581,7 @@ impl crate::projections::GuardrailReadModel for InMemoryStore {
         offset: usize,
     ) -> Result<Vec<cairn_domain::policy::GuardrailPolicy>, StoreError> {
         let _ = tenant_id;
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut policies: Vec<_> = state.guardrail_policies.values().cloned().collect();
         // Sort by policy_id (timestamp-based) for deterministic creation-order iteration.
         policies.sort_by_key(|r| r.policy_id.clone());
@@ -3545,7 +3607,7 @@ impl crate::projections::LicenseReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::EntitlementOverrideRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .entitlement_overrides
             .values()
@@ -3564,7 +3626,13 @@ impl crate::projections::DefaultsReadModel for InMemoryStore {
         key: &str,
     ) -> Result<Option<cairn_domain::DefaultSetting>, StoreError> {
         let k = format!("{scope:?}:{scope_id}:{key}");
-        Ok(self.state.lock().unwrap().default_settings.get(&k).cloned())
+        Ok(self
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .default_settings
+            .get(&k)
+            .cloned())
     }
     async fn list_by_scope(
         &self,
@@ -3572,7 +3640,7 @@ impl crate::projections::DefaultsReadModel for InMemoryStore {
         scope_id: &str,
     ) -> Result<Vec<cairn_domain::DefaultSetting>, StoreError> {
         let prefix = format!("{scope:?}:{scope_id}:");
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .default_settings
             .iter()
@@ -3604,7 +3672,7 @@ impl crate::projections::RetentionMaintenance for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<cairn_domain::RetentionResult, StoreError> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let policy = match state.retention_policies.get(tenant_id.as_str()).cloned() {
             Some(p) => p,
             None => {
@@ -3692,7 +3760,7 @@ impl crate::projections::RunSlaReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::sla::SlaBreach>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .run_sla_breaches
             .values()
@@ -3722,7 +3790,7 @@ impl crate::projections::NotificationReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::notification_prefs::NotificationPreference>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .notification_prefs
             .values()
@@ -3735,7 +3803,7 @@ impl crate::projections::NotificationReadModel for InMemoryStore {
         tenant_id: &cairn_domain::TenantId,
         since_ms: u64,
     ) -> Result<Vec<cairn_domain::notification_prefs::NotificationRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .notification_records
             .iter()
@@ -3747,7 +3815,7 @@ impl crate::projections::NotificationReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::notification_prefs::NotificationRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .notification_records
             .iter()
@@ -3777,7 +3845,7 @@ impl crate::projections::ProviderConnectionReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderConnectionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .provider_connections
             .values()
@@ -3807,7 +3875,7 @@ impl crate::projections::ProviderPoolReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::providers::ProviderConnectionPool>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .provider_pools
             .values()
@@ -3837,7 +3905,7 @@ impl crate::projections::CredentialReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::credentials::CredentialRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .credentials
             .values()
@@ -3867,7 +3935,7 @@ impl crate::projections::RunCostAlertReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::providers::RunCostAlert>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .run_cost_alerts
             .values()
@@ -3885,7 +3953,7 @@ impl crate::projections::AuditLogReadModel for InMemoryStore {
         since_ms: Option<u64>,
         limit: usize,
     ) -> Result<Vec<cairn_domain::AuditLogEntry>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let entries: Vec<_> = state
             .events
             .iter()
@@ -3924,7 +3992,7 @@ impl crate::projections::AuditLogReadModel for InMemoryStore {
         resource_type: &str,
         resource_id: &str,
     ) -> Result<Vec<cairn_domain::AuditLogEntry>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let entries: Vec<_> = state
             .events
             .iter()
@@ -3959,7 +4027,7 @@ impl crate::projections::QuotaReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Option<cairn_domain::TenantQuota>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(mut quota) = state.quotas.get(tenant_id.as_str()).cloned() else {
             return Ok(None);
         };
@@ -4004,7 +4072,7 @@ impl crate::projections::ProviderBudgetReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::providers::ProviderBudget>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .provider_budgets
             .values()
@@ -4022,7 +4090,7 @@ impl crate::projections::TaskLeaseExpiredReadModel for InMemoryStore {
         &self,
         now_ms: u64,
     ) -> Result<Vec<crate::projections::TaskRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .tasks
             .values()
@@ -4045,7 +4113,7 @@ impl crate::projections::CheckpointStrategyReadModel for InMemoryStore {
         &self,
         run_id: &cairn_domain::RunId,
     ) -> Result<Option<cairn_domain::CheckpointStrategy>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.checkpoint_strategies.get(run_id.as_str()).cloned())
     }
 }
@@ -4060,7 +4128,7 @@ impl crate::projections::OperatorInterventionReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::OperatorInterventionRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let records: Vec<_> = state
             .events
             .iter()
@@ -4093,7 +4161,7 @@ impl crate::projections::PauseScheduleReadModel for InMemoryStore {
         &self,
         before_ms: u64,
     ) -> Result<Vec<crate::projections::PauseScheduledRecord>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         // Find all RunStateChanged(to=Paused) events with resume_after_ms set.
         // Use a map to keep only the latest pause event per run.
         let mut paused: std::collections::HashMap<
@@ -4162,7 +4230,7 @@ impl crate::projections::SnapshotReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Option<cairn_domain::Snapshot>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .snapshots
             .iter()
@@ -4174,7 +4242,7 @@ impl crate::projections::SnapshotReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::Snapshot>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .snapshots
             .iter()
@@ -4194,7 +4262,7 @@ impl crate::projections::RoutePolicyReadModel for InMemoryStore {
         &self,
         policy_id: &str,
     ) -> Result<Option<cairn_domain::providers::RoutePolicy>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state.route_policies.get(policy_id).cloned())
     }
 
@@ -4204,7 +4272,7 @@ impl crate::projections::RoutePolicyReadModel for InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::RoutePolicy>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .route_policies
             .values()
@@ -4224,7 +4292,7 @@ impl crate::projections::ProviderBindingCostStatsReadModel for InMemoryStore {
         &self,
         binding_id: &cairn_domain::ProviderBindingId,
     ) -> Result<Option<cairn_domain::providers::ProviderBindingCostStats>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let calls: Vec<_> = state
             .provider_calls
             .values()
@@ -4246,7 +4314,7 @@ impl crate::projections::ProviderBindingCostStatsReadModel for InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingCostStats>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         // Scan raw events for ProviderCallCompleted to access the full project key (tenant_id).
         let mut stats: std::collections::HashMap<
             String,
@@ -4295,7 +4363,7 @@ impl crate::projections::ResourceSharingReadModel for InMemoryStore {
         tenant_id: &cairn_domain::TenantId,
         target_workspace_id: &cairn_domain::WorkspaceId,
     ) -> Result<Vec<cairn_domain::resource_sharing::SharedResource>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .resource_shares
             .values()
@@ -4310,7 +4378,7 @@ impl crate::projections::ResourceSharingReadModel for InMemoryStore {
         resource_type: &str,
         resource_id: &str,
     ) -> Result<Option<cairn_domain::resource_sharing::SharedResource>, StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .resource_shares
             .values()
@@ -4329,7 +4397,7 @@ impl crate::projections::ResourceSharingReadModel for InMemoryStore {
 impl InMemoryStore {
     /// Count runs currently in active states (Running or Leased).
     pub async fn count_active_runs(&self) -> u64 {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .runs
             .values()
@@ -4344,7 +4412,7 @@ impl InMemoryStore {
 
     /// Count tasks currently active (Running or Leased).
     pub async fn count_active_tasks(&self) -> u64 {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .tasks
             .values()
@@ -4359,7 +4427,7 @@ impl InMemoryStore {
 
     /// Count active runs for a specific tenant.
     pub async fn count_active_runs_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u64 {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .runs
             .values()
@@ -4375,7 +4443,7 @@ impl InMemoryStore {
 
     /// Count active tasks for a specific tenant.
     pub async fn count_active_tasks_for_tenant(&self, tenant_id: &cairn_domain::TenantId) -> u64 {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .tasks
             .values()
@@ -4394,7 +4462,7 @@ impl InMemoryStore {
         &self,
         workspace_key: &cairn_domain::tenancy::WorkspaceKey,
     ) -> u64 {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .runs
             .values()
@@ -4413,7 +4481,7 @@ impl InMemoryStore {
         &self,
         tenant_id: &cairn_domain::TenantId,
     ) -> u64 {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .approvals
             .values()
@@ -4427,7 +4495,7 @@ impl InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Vec<crate::projections::ApprovalRecord> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<crate::projections::ApprovalRecord> = state
             .approvals
             .values()
@@ -4444,7 +4512,7 @@ impl InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Vec<crate::projections::ApprovalRecord> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<crate::projections::ApprovalRecord> =
             state.approvals.values().cloned().collect();
         results.sort_by_key(|a| a.created_at);
@@ -4457,7 +4525,7 @@ impl InMemoryStore {
         tenant_id: &cairn_domain::TenantId,
         since_ms: u64,
     ) -> u64 {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .eval_runs
             .values()
@@ -4467,7 +4535,7 @@ impl InMemoryStore {
 
     /// Check if any provider connection is in degraded health.
     pub async fn any_provider_degraded(&self) -> bool {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.provider_health_records.values().any(|r| {
             matches!(
                 r.status,
@@ -4488,7 +4556,7 @@ impl InMemoryStore {
         retain_last_n: Option<u64>,
     ) -> serde_json::Value {
         let retain = retain_last_n.unwrap_or(100) as usize;
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let events_before = state.events.len() as u64;
 
         if state.events.len() <= retain {
@@ -4600,19 +4668,25 @@ impl InMemoryStore {
     }
 
     /// Create a snapshot capturing all events up to the current position.
+    ///
+    /// Returns `Err` on serialization failure rather than writing an empty
+    /// snapshot — pre-T2-H9 the `unwrap_or_default()` path silently produced
+    /// a snapshot whose `compressed_state` was empty and whose `state_hash`
+    /// was the FNV-1a hash of 0 bytes, which then wiped the store on restore.
     pub fn create_snapshot(
         &self,
         tenant_id: &cairn_domain::TenantId,
-    ) -> cairn_domain::compaction::Snapshot {
+    ) -> Result<cairn_domain::compaction::Snapshot, StoreError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let event_position = state.next_position.saturating_sub(1);
 
         // Serialize events as compressed_state so restore can replay them.
-        let compressed_state = serde_json::to_vec(&state.events).unwrap_or_default();
+        let compressed_state = serde_json::to_vec(&state.events)
+            .map_err(|e| StoreError::Serialization(e.to_string()))?;
 
         // Simple hash of the compressed state for integrity check.
         let state_hash = format!("{:016x}", {
@@ -4624,14 +4698,14 @@ impl InMemoryStore {
             h
         });
 
-        cairn_domain::compaction::Snapshot {
+        Ok(cairn_domain::compaction::Snapshot {
             snapshot_id: format!("snap_{}", now),
             tenant_id: tenant_id.clone(),
             event_position,
             state_hash,
             created_at_ms: now,
             compressed_state,
-        }
+        })
     }
 
     /// Restore from a snapshot: replace events and rebuild projections.
@@ -4645,7 +4719,7 @@ impl InMemoryStore {
         let events_after;
 
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             events_before = state.events.len() as u64;
 
             // Replace events with snapshot contents.
@@ -4749,7 +4823,7 @@ impl InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::RunRecord>, crate::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .runs
             .values()
@@ -4771,7 +4845,7 @@ impl InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::TaskRecord>, crate::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .tasks
             .values()
@@ -4788,7 +4862,7 @@ impl InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<TaskRecord>, crate::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut tasks: Vec<TaskRecord> = state.tasks.values().cloned().collect();
         // Most-recent first.
         tasks.sort_by(|a, b| {
@@ -4804,7 +4878,7 @@ impl InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::PromptAssetRecord>, crate::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .prompt_assets
             .values()
@@ -4820,7 +4894,7 @@ impl InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<crate::projections::PromptReleaseRecord>, crate::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .prompt_releases
             .values()
@@ -4836,7 +4910,7 @@ impl InMemoryStore {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<cairn_domain::providers::ProviderBindingRecord>, crate::StoreError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Ok(state
             .provider_bindings
             .values()
@@ -4851,7 +4925,7 @@ impl InMemoryStore {
     /// Returns `(total_provider_calls, total_tokens_in, total_tokens_out,
     /// total_cost_micros)` since the store was created.
     pub async fn cost_summary(&self) -> (u64, u64, u64, u64) {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut calls: u64 = 0;
         let mut tokens_in: u64 = 0;
         let mut tokens_out: u64 = 0;
@@ -4870,7 +4944,7 @@ impl InMemoryStore {
         &self,
         run_id: &cairn_domain::RunId,
     ) -> Vec<crate::projections::ApprovalRecord> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<_> = state
             .approvals
             .values()
@@ -4888,7 +4962,7 @@ impl InMemoryStore {
         &self,
         project_id: &cairn_domain::ProjectId,
     ) -> Vec<cairn_domain::providers::ProviderCallRecord> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut calls: Vec<_> = state
             .provider_calls
             .values()
@@ -4907,7 +4981,7 @@ impl InMemoryStore {
         policy_id: &str,
         release_id: cairn_domain::PromptReleaseId,
     ) -> bool {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(policy) = state.approval_policies.get_mut(policy_id) {
             if !policy.attached_release_ids.contains(&release_id) {
                 policy.attached_release_ids.push(release_id);
@@ -4920,12 +4994,20 @@ impl InMemoryStore {
 
     /// Total number of task records in the store (all states).
     pub fn count_all_tasks(&self) -> usize {
-        self.state.lock().unwrap().tasks.len()
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .tasks
+            .len()
     }
 
     /// Total number of approval records in the store (all states).
     pub fn count_all_approvals(&self) -> usize {
-        self.state.lock().unwrap().approvals.len()
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .approvals
+            .len()
     }
 
     // ── Snapshot / restore ────────────────────────────────────────────────────
@@ -4935,7 +5017,7 @@ impl InMemoryStore {
     /// The event log is the source of truth; all projections are derived from
     /// it so serialising only the events is sufficient for a complete restore.
     pub fn dump_events(&self) -> crate::snapshot::StoreSnapshot {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         crate::snapshot::StoreSnapshot {
             version: 1,
             created_at_ms: now_millis(),
@@ -4948,7 +5030,7 @@ impl InMemoryStore {
     ///
     /// Returns the number of events replayed.
     pub fn load_snapshot(&self, snap: crate::snapshot::StoreSnapshot) -> u64 {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         self.usage_counters
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -5950,9 +6032,19 @@ mod tests {
         assert_eq!(sessions.len(), 1);
     }
 
-    /// Primary write is NOT rolled back when secondary fails.
+    /// Secondary failure surfaces to the caller (fail-closed), but the
+    /// in-memory projection has already been written.
+    ///
+    /// Pre-#T2-C3 behaviour was to swallow the secondary error and return
+    /// `Ok`, which silently lost history whenever the secondary was the
+    /// durable source of truth (RFC 002). This test pins the new contract:
+    /// callers MUST observe the error so they can decide whether to retry,
+    /// compensate, or abort. Deliberate side-effect: the in-memory state
+    /// and the secondary log have diverged by the count in the error
+    /// message; `event_id`-based idempotent retry is the expected
+    /// reconciliation path.
     #[tokio::test]
-    async fn secondary_failure_does_not_roll_back_primary() {
+    async fn secondary_failure_surfaces_error_but_keeps_in_memory_state() {
         struct FailingLog;
 
         #[async_trait::async_trait]
@@ -5992,25 +6084,35 @@ mod tests {
         let store = Arc::new(InMemoryStore::new());
         store.set_secondary_log(Arc::new(FailingLog));
 
-        // The primary append must succeed despite secondary failure.
-        let positions = store
+        let result = store
             .append(&[make_envelope(RuntimeEvent::SessionCreated(
                 SessionCreated {
                     project: test_project(),
                     session_id: SessionId::new("sess_resilient"),
                 },
             ))])
-            .await
-            .unwrap();
+            .await;
 
-        assert_eq!(
-            positions.len(),
-            1,
-            "primary must succeed even when secondary fails"
+        assert!(
+            result.is_err(),
+            "secondary failure must surface as Err to the caller (fail-closed) — the pre-#T2-C3 silent-swallow path lost events under restart"
         );
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("secondary event log write failed"),
+            "error must identify the secondary-log divergence, got: {msg}"
+        );
+
+        // In-memory state is still written — the caller knows the two logs
+        // diverged and can reconcile by retrying (event_id is idempotent).
         let sessions = SessionReadModel::list_active(store.as_ref(), 10)
             .await
             .unwrap();
-        assert_eq!(sessions.len(), 1, "primary projection must be updated");
+        assert_eq!(
+            sessions.len(),
+            1,
+            "primary projection must still reflect the in-memory write so diagnosis + retry see consistent state"
+        );
     }
 }
