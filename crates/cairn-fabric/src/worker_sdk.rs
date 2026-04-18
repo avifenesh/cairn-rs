@@ -46,9 +46,6 @@ use cairn_domain::tenancy::ProjectKey;
 use ff_sdk::task::{ClaimedTask, FailOutcome, SuspendOutcome};
 use ff_sdk::{FlowFabricWorker, WorkerConfig};
 
-#[cfg(feature = "insecure-direct-claim")]
-use crate::active_tasks::ActiveTaskHandle;
-use crate::active_tasks::ActiveTaskRegistry;
 use crate::config::FabricConfig;
 use crate::error::FabricError;
 use crate::event_bridge::{BridgeEvent, EventBridge};
@@ -63,14 +60,12 @@ pub struct CairnWorker {
     // the constructor signature stays stable across feature flips.
     #[cfg_attr(not(feature = "insecure-direct-claim"), allow(dead_code))]
     bridge: Arc<EventBridge>,
-    registry: Arc<ActiveTaskRegistry>,
 }
 
 impl CairnWorker {
     pub async fn connect(
         config: &FabricConfig,
         bridge: Arc<EventBridge>,
-        registry: Arc<ActiveTaskRegistry>,
     ) -> Result<Self, FabricError> {
         // WorkerConfig.capabilities is a `Vec<String>` on ff-sdk; sort + dedup
         // mirrors the BTreeSet semantics carried by FabricConfig so both the
@@ -97,11 +92,7 @@ impl CairnWorker {
             .await
             .map_err(|e| FabricError::Bridge(format!("worker connect: {e}")))?;
 
-        Ok(Self {
-            inner,
-            bridge,
-            registry,
-        })
+        Ok(Self { inner, bridge })
     }
 
     /// Direct (scheduler-bypassing) claim. Gated behind the cairn feature
@@ -112,6 +103,11 @@ impl CairnWorker {
     /// then consume that grant via the direct FCALL pattern in
     /// `task_service::claim`. See the module-level dispute note for why a
     /// scheduler-mediated `CairnTask` wrapper is not available today.
+    ///
+    /// Terminal ops on the returned `CairnTask` do NOT require any cairn-side
+    /// registry: every lease field is re-read from FF's exec_core on demand
+    /// by `FabricTaskService`, and `ClaimedTask` is carried inside `CairnTask`
+    /// itself.
     #[cfg(feature = "insecure-direct-claim")]
     pub async fn claim_next(&self) -> Result<Option<CairnTask>, FabricError> {
         let claimed = self
@@ -125,33 +121,9 @@ impl CairnWorker {
             None => return Ok(None),
         };
 
-        let execution_id = task.execution_id().clone();
-        let lease_id = task.lease_id().clone();
-        let lease_epoch = task.lease_epoch();
-        let attempt_index = task.attempt_index();
-
-        // Store lightweight handle for lease context queries by other services.
-        // CairnTask owns the ClaimedTask directly — registry.take() returns None
-        // for CairnWorker-claimed tasks, which is expected.
-        let context_handle = ActiveTaskHandle::new_without_claimed_task(
-            execution_id,
-            lease_id,
-            lease_epoch,
-            attempt_index,
-        );
-
         let run_id = extract_tag(task.tags(), "cairn.run_id");
         let session_id = extract_tag(task.tags(), "cairn.session_id");
         let project_str = extract_tag(task.tags(), "cairn.project");
-
-        // Register in ActiveTaskRegistry using cairn.task_id if present,
-        // falling back to cairn.run_id. cairn-fabric task submissions always
-        // set cairn.task_id; run submissions use cairn.run_id as the key.
-        let registry_key = extract_tag(task.tags(), "cairn.task_id").or_else(|| run_id.clone());
-        if let Some(ref key) = registry_key {
-            let task_id = cairn_domain::ids::TaskId::new(key);
-            self.registry.register(&task_id, context_handle);
-        }
 
         Ok(Some(CairnTask {
             task: Some(task),
@@ -164,10 +136,6 @@ impl CairnWorker {
 
     pub fn inner(&self) -> &FlowFabricWorker {
         &self.inner
-    }
-
-    pub fn registry(&self) -> &Arc<ActiveTaskRegistry> {
-        &self.registry
     }
 }
 

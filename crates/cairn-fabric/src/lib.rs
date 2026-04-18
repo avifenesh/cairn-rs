@@ -53,7 +53,6 @@
 //! | [`suspension`] | Typed suspension builders for approval/subagent/tool-result waits |
 //! | [`signal_bridge`] | cairn domain events → FlowFabric signal delivery |
 
-pub mod active_tasks;
 pub mod aggregate;
 pub mod boot;
 pub mod config;

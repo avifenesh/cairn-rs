@@ -172,7 +172,6 @@ Accepted limitations as of finalization — each has a follow-up round scoped.
 - **`FabricTaskService::list_expired_leases`** returns empty (FF's `LeaseExpiryScanner` handles expiry server-side). The admin handler `expire_task_leases_handler` is delegated via the adapter to the cairn-store projection — see `crates/cairn-app/src/fabric_adapter.rs:556-565` for the `TaskReadModel::list_expired_leases` fallback path.
 - **`FabricTaskService::list_by_state`** and **`FabricSessionService::list`** return empty — FF doesn't index by cairn's `(tenant, workspace, project)` scope. Adapter delegates to `TaskReadModel` / `SessionReadModel` projections. Not a defect; it's the read-path split.
 - **Provider budgets and tenant quotas** (`handlers/providers.rs` + `handlers/admin.rs`) remain on the legacy `BudgetServiceImpl` / `QuotaServiceImpl` over the cairn event log. `FabricBudgetService` and `FabricQuotaService` are per-run admission controls, not tenant-wide ceilings; they ride alongside as new surfaces, not replacements.
-- **`ActiveTaskRegistry` is a latency-cache for lease context**, not a source of truth — FF owns every field it stores. It also doubles as the gate for terminal-state `TaskStateChanged` emission, which means API-claimed tasks (claimed without routing through `FabricTaskService::claim`) skip the projection update. Flagged MAJOR in the finalization audit; scheduled for removal once the claim-API work stabilises. See audit report for detail.
 - **`scripts/smoke-test.sh` HTTP harness historically assumed a permissive state machine** (the in-memory `RunServiceImpl` allows `pause` without a prior `claim`, etc). In the default Fabric build, FF enforces strict state transitions — a run must be claimed and active before it can be paused/resumed, tasks must be submitted-and-claimed before lease operations. 8 smoke sections (`POST /v1/runs/:id/pause`, `/resume`, `POST /v1/tasks/:id/claim`, `/release-lease`) returned HTTP 500 on the fabric path. These are **NOT runtime defects** — FF's strictness is correct production behaviour. PR #27 lands a short-lived worker-loop fixture (claim-then-operate) in `crates/cairn-app/src/bin/smoke_worker.rs` that exercises FF semantics correctly.
   - In-memory path (`--features in-memory-runtime`): 97/97 pass, 4 skipped.
   - Fabric path (default build + Valkey + FF lua loaded): 89/97 pass on the
@@ -185,28 +184,21 @@ Accepted limitations as of finalization — each has a follow-up round scoped.
 
 Severity ordered. Each item has a follow-up round scoped.
 
-### HIGH — Event emission gate bug
+### ✅ CLOSED: HIGH — Event emission gate bug
 
-*Location*: `crates/cairn-fabric/src/services/task_service.rs:566-578, 667-684, 751-764`.
+*Status*: fixed on `feat/task-emission-gate-fix`.
 
-`FabricTaskService::complete` / `fail` / `cancel` emit `BridgeEvent::TaskStateChanged` only if the `ActiveTaskRegistry` has an entry for the task id (`was_registered = registry.remove_entry(task_id); if was_registered { bridge.emit(...) }`). The registry is populated only when the task is claimed through `FabricTaskService::claim`. Tasks claimed via the `insecure-direct-claim` feature (`CairnWorker::claim_next`) or through any external API caller that bypasses cairn-fabric's claim path never populate the registry — so their terminal transitions silently skip event emission, and the cairn-store `TaskReadModel` diverges from FF's exec_core.
+Was: `FabricTaskService::complete` / `fail` / `cancel` gated `BridgeEvent::TaskStateChanged` emission on `ActiveTaskRegistry` membership, so tasks claimed via any path other than `FabricTaskService::claim` (external API callers, `CairnWorker::claim_next` under `insecure-direct-claim`, cross-process claim/complete) silently skipped projection emission and drifted the cairn-store `TaskReadModel` from FF's exec_core.
 
-This is a correctness defect, not a style concern. Handlers that read `state.runtime.tasks.get(task_id)` (which goes to the store projection, not FF) get stale state for any task whose lifecycle crossed the registry-less boundary.
+Now: emission is unconditional after FF confirms the terminal transition. Projections are idempotent on `(task_id, event_id)`, so a redundant emit from a parallel path is a no-op re-write. Regression guards land in `crates/cairn-fabric/tests/integration/test_event_emission.rs` — four tests exercising the happy-path baseline plus complete/fail/cancel via a fresh `FabricTaskService` (simulating cross-process claim + terminal).
 
-Fix: emit `TaskStateChanged` unconditionally after FF confirms the terminal transition. Cairn-store projections are already idempotent on `(task_id, event_id)` — the worst case is a no-op re-write if a prior path already emitted, which is cheap. Remove the `was_registered` gate at all three call sites.
+### ✅ CLOSED: MEDIUM — `ActiveTaskRegistry` duplicates FF-owned state
 
-### MEDIUM — `ActiveTaskRegistry` duplicates FF-owned state
+*Status*: deleted on `feat/task-emission-gate-fix`.
 
-*Location*: `crates/cairn-fabric/src/active_tasks.rs` (entire file).
+Was: `DashMap<TaskId, {execution_id, lease_id, lease_epoch, attempt_index, Option<ClaimedTask>}>` — a cairn-side latency cache for fields FF already owned, and the mechanism the emission-gate bug rode through.
 
-`DashMap<TaskId, {execution_id, lease_id, lease_epoch, attempt_index, Option<ClaimedTask>}>`. Every non-transient field lives authoritatively in FF:
-- `execution_id` is deterministic from `id_map::task_to_execution_id(project, task_id)` (pure UUID v5).
-- `lease_id`, `lease_epoch`, `attempt_index` all live in `exec_core.current_lease_*` fields on the Valkey side.
-- `ClaimedTask` is ff-sdk's wrapper around FF state, not cairn state.
-
-The registry is only a latency-cache — `services/task_service.rs:80` and `:121` already show the fallback: `if let Some(ctx) = registry.get_lease_context(task_id) return Ok(ctx); else HGETALL exec_core and parse`. One round-trip saved per terminal call, at the cost of the HIGH bug above plus a lean-bridge violation.
-
-Removal: ~80 LOC in `active_tasks.rs` + ~40 LOC fallout in `task_service.rs` and `worker_sdk.rs`. Coupled with the HIGH above — fix both in the same follow-up round after `task_service.rs` stabilises (currently hot with claim/stream work).
+Now: entire `active_tasks.rs` module removed. `FabricTaskService::resolve_active_lease` + `resolve_lease_or_placeholder` always HGETALL `exec_core`; `CairnTask` carries its `ClaimedTask` directly (no registry intermediary). `FabricServices` no longer exposes a `pub registry` field. Net deletion ≈ 250 LOC.
 
 ### MEDIUM — Bridge-event completeness audit
 

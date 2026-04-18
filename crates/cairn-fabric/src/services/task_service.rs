@@ -14,28 +14,18 @@ use ff_core::keys::{ExecKeyContext, IndexKeys};
 use ff_core::partition::execution_partition;
 use ff_core::types::{ExecutionId, LaneId};
 
-use crate::active_tasks::{ActiveTaskHandle, ActiveTaskRegistry};
 use crate::boot::FabricRuntime;
 use crate::id_map;
 use crate::state_map;
 
 pub struct FabricTaskService {
     runtime: Arc<FabricRuntime>,
-    registry: Arc<ActiveTaskRegistry>,
     bridge: Arc<EventBridge>,
 }
 
 impl FabricTaskService {
-    pub fn new(
-        runtime: Arc<FabricRuntime>,
-        registry: Arc<ActiveTaskRegistry>,
-        bridge: Arc<EventBridge>,
-    ) -> Self {
-        Self {
-            runtime,
-            registry,
-            bridge,
-        }
+    pub fn new(runtime: Arc<FabricRuntime>, bridge: Arc<EventBridge>) -> Self {
+        Self { runtime, bridge }
     }
 
     fn task_to_execution_id(&self, project: &ProjectKey, task_id: &TaskId) -> ExecutionId {
@@ -65,6 +55,13 @@ impl FabricTaskService {
         Ok(fields)
     }
 
+    // Always read the lease triple from FF's exec_core. The registry used to
+    // cache (lease_id, lease_epoch, attempt_index) to save one HGETALL per
+    // terminal op, but that cache is a lean-bridge violation — FF owns every
+    // field authoritatively. A stale cache also silently skipped projection
+    // emission for tasks claimed outside `FabricTaskService::claim`
+    // (insecure-direct-claim, external API callers), which was the HIGH bug
+    // fixed in the companion commit.
     async fn resolve_active_lease(
         &self,
         task_id: &TaskId,
@@ -77,9 +74,6 @@ impl FabricTaskService {
         ),
         FabricError,
     > {
-        if let Some(ctx) = self.registry.get_lease_context(task_id) {
-            return Ok(ctx);
-        }
         let fields = self.read_valkey_lease_fields(task_id, project).await?;
         let lease_id = ff_core::types::LeaseId::parse(
             fields
@@ -106,6 +100,9 @@ impl FabricTaskService {
         Ok((lease_id, epoch, att_idx))
     }
 
+    // Same HGETALL-only pattern as resolve_active_lease, but tolerates an
+    // empty current_lease_id (returns a nil LeaseId placeholder) for the
+    // cancel-while-unclaimed path.
     async fn resolve_lease_or_placeholder(
         &self,
         task_id: &TaskId,
@@ -118,9 +115,6 @@ impl FabricTaskService {
         ),
         FabricError,
     > {
-        if let Some(ctx) = self.registry.get_lease_context(task_id) {
-            return Ok(ctx);
-        }
         let fields = self.read_valkey_lease_fields(task_id, project).await?;
         let lease_id = match fields.get("current_lease_id").filter(|s| !s.is_empty()) {
             Some(s) => ff_core::types::LeaseId::parse(s)
@@ -404,7 +398,14 @@ impl FabricTaskService {
         // Shared grant+claim FCALL sequence (see services/claim_common.rs).
         // Cancel-safety: a drop between the two calls leaves only a grant,
         // which FF expires via its grant TTL.
-        let outcome = crate::services::claim_common::issue_grant_and_claim(
+        //
+        // The returned ClaimOutcome is intentionally dropped — cairn does
+        // NOT cache the lease triple. Every downstream terminal op re-reads
+        // current_lease_id / _epoch / _attempt_index from FF's exec_core
+        // via `resolve_active_lease`. Caching in cairn was a lean-bridge
+        // violation and the root cause of the silent-emission bug fixed in
+        // the parent commit.
+        crate::services::claim_common::issue_grant_and_claim(
             &self.runtime,
             &ctx,
             &idx,
@@ -413,16 +414,6 @@ impl FabricTaskService {
             lease_duration_ms,
         )
         .await?;
-
-        // We don't get a ClaimedTask from the SDK here (we're calling FCALL
-        // directly), so we store a lightweight handle for terminal ops.
-        let handle = ActiveTaskHandle::new_without_claimed_task(
-            eid.clone(),
-            outcome.lease_id,
-            outcome.lease_epoch,
-            outcome.attempt_index,
-        );
-        self.registry.register(task_id, handle);
 
         let record = self.read_task_record(project, task_id).await?;
         self.bridge
@@ -563,19 +554,18 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_COMPLETE_EXECUTION)?;
 
-        let was_registered = self.registry.remove_entry(task_id);
-
+        // FF confirmed the terminal transition; emit unconditionally.
+        // Projections are idempotent on (task_id, event_id), so a redundant
+        // emit from a parallel path is a no-op re-write.
         let record = self.read_task_record(project, task_id).await?;
-        if was_registered {
-            self.bridge
-                .emit(BridgeEvent::TaskStateChanged {
-                    task_id: task_id.clone(),
-                    project: record.project.clone(),
-                    to: TaskState::Completed,
-                    failure_class: None,
-                })
-                .await;
-        }
+        self.bridge
+            .emit(BridgeEvent::TaskStateChanged {
+                task_id: task_id.clone(),
+                project: record.project.clone(),
+                to: TaskState::Completed,
+                failure_class: None,
+            })
+            .await;
         Ok(record)
     }
 
@@ -664,14 +654,11 @@ impl FabricTaskService {
 
         let terminal = parse_fail_outcome(&raw) == FailOutcome::TerminalFailed;
 
-        let was_registered = if terminal {
-            self.registry.remove_entry(task_id)
-        } else {
-            false
-        };
-
+        // Emit only on terminal fail; a retry-scheduled fail leaves the task
+        // in a non-terminal state (FF will promote it back to eligible later)
+        // so the projection should not see a `Failed` transition yet.
         let record = self.read_task_record(project, task_id).await?;
-        if terminal && was_registered {
+        if terminal {
             self.bridge
                 .emit(BridgeEvent::TaskStateChanged {
                     task_id: task_id.clone(),
@@ -748,19 +735,16 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_CANCEL_EXECUTION)?;
 
-        let was_registered = self.registry.remove_entry(task_id);
-
+        // Emit unconditionally; see complete() for rationale.
         let record = self.read_task_record(project, task_id).await?;
-        if was_registered {
-            self.bridge
-                .emit(BridgeEvent::TaskStateChanged {
-                    task_id: task_id.clone(),
-                    project: record.project.clone(),
-                    to: TaskState::Canceled,
-                    failure_class: None,
-                })
-                .await;
-        }
+        self.bridge
+            .emit(BridgeEvent::TaskStateChanged {
+                task_id: task_id.clone(),
+                project: record.project.clone(),
+                to: TaskState::Canceled,
+                failure_class: None,
+            })
+            .await;
         Ok(record)
     }
 
@@ -1041,7 +1025,6 @@ impl FabricTaskService {
         project: &ProjectKey,
         task_id: &TaskId,
     ) -> Result<TaskRecord, FabricError> {
-        let _ = self.registry.take(task_id);
         self.read_task_record(project, task_id).await
     }
 }

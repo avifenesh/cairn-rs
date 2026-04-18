@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::active_tasks::ActiveTaskRegistry;
 use crate::boot::FabricRuntime;
 use crate::error::FabricError;
 use crate::services::scheduler_service::FabricSchedulerService;
@@ -22,17 +21,12 @@ pub struct ClaimResult {
 pub struct FabricWorkerService {
     runtime: Arc<FabricRuntime>,
     scheduler: FabricSchedulerService,
-    registry: Arc<ActiveTaskRegistry>,
 }
 
 impl FabricWorkerService {
-    pub fn new(runtime: Arc<FabricRuntime>, registry: Arc<ActiveTaskRegistry>) -> Self {
+    pub fn new(runtime: Arc<FabricRuntime>) -> Self {
         let scheduler = FabricSchedulerService::new(&runtime);
-        Self {
-            runtime,
-            scheduler,
-            registry,
-        }
+        Self { runtime, scheduler }
     }
 
     pub async fn register_worker(
@@ -172,10 +166,6 @@ impl FabricWorkerService {
             execution_id: grant.execution_id,
             grant_key: grant.grant_key,
         }))
-    }
-
-    pub fn registry(&self) -> &Arc<ActiveTaskRegistry> {
-        &self.registry
     }
 }
 

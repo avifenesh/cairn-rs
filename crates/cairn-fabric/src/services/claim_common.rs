@@ -29,13 +29,15 @@ use crate::helpers::{check_fcall_success, fcall_error_code};
 /// `ff_claim_execution`. See `lua/execution.lua:382-384`.
 const USE_CLAIM_RESUMED_EXECUTION: &str = "use_claim_resumed_execution";
 
-/// Result of a successful claim: the lease triple downstream callers pass to
-/// FF for lease-scoped operations (suspend, resume, fail, complete).
+/// Result of a successful claim.
 ///
-/// `lease_id`, `lease_epoch`, `attempt_index` are sufficient for FF to
-/// authenticate the next FCALL. No other fields are returned — anything else
-/// the caller needs is read back from `exec_core` / `attempt_hash`.
+/// Cairn does NOT consume the lease triple — every downstream terminal op
+/// re-reads `current_lease_id` / `_epoch` / `_attempt_index` from FF's
+/// `exec_core` on demand (see `FabricTaskService::resolve_active_lease`).
+/// Keeping this struct carries the FCALL's typed response without a cairn
+/// cache; the fields are read via tests / debug logs only.
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // FF-authoritative; cairn re-reads from exec_core, never cached
 pub struct ClaimOutcome {
     pub lease_id: LeaseId,
     pub lease_epoch: LeaseEpoch,
