@@ -28,6 +28,9 @@ jobs:
       - run: cargo fmt --all --check
 
   # ── 2. Check ─────────────────────────────────────────────────────────────────
+  # Default (Fabric) + in-memory-runtime feature arms. Both must compile —
+  # the default arm is production, the feature arm is the local / CI
+  # escape hatch that exercises the event-log-only services.
   check:
     name: check
     runs-on: ubuntu-latest
@@ -43,9 +46,13 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      - run: cargo check --workspace
+      - name: cargo check (default — Fabric)
+        run: cargo check --workspace
+      - name: cargo check (--features in-memory-runtime)
+        run: cargo check --workspace --features cairn-app/in-memory-runtime
 
   # ── 3. Clippy ────────────────────────────────────────────────────────────────
+  # Same two-arm split as check. `-D warnings` is non-negotiable on both.
   clippy:
     name: clippy
     runs-on: ubuntu-latest
@@ -63,9 +70,15 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo clippy (default — Fabric)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo clippy (--features in-memory-runtime)
+        run: cargo clippy --workspace --all-targets --features cairn-app/in-memory-runtime -- -D warnings
 
   # ── 4. Rust Tests ────────────────────────────────────────────────────────────
+  # The cairn-runtime, cairn-app, and cairn-orchestrator test suites are
+  # gated on `in-memory-runtime`; without the feature the test binaries
+  # compile to zero tests. Tests run with the feature arm enabled.
   test:
     name: test
     runs-on: ubuntu-latest
@@ -82,23 +95,48 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      # Unit tests — all lib tests across the workspace
-      - name: cargo test --lib
-        run: cargo test --workspace --lib
+      - name: cargo test --lib (--features in-memory-runtime)
+        run: cargo test --workspace --lib --features cairn-app/in-memory-runtime
         timeout-minutes: 10
-      # Integration tests — run sequentially to avoid linker OOM on 7GB runners
       - name: integration tests (providers + domain)
         run: cargo test --tests -p cairn-domain -p cairn-providers -p cairn-evals
         timeout-minutes: 8
         env:
           CARGO_BUILD_JOBS: "2"
-      - name: cairn-app smoke tests
-        run: cargo test -p cairn-app --test bootstrap_smoke --test source_refresh
+      - name: cairn-app smoke tests (--features in-memory-runtime)
+        run: cargo test -p cairn-app --features cairn-app/in-memory-runtime --test bootstrap_smoke --test source_refresh
         timeout-minutes: 8
         env:
           CARGO_BUILD_JOBS: "2"
 
-  # ── 5. UI Build + Type Check + Component Tests ──────────────────────────────
+  # ── 5. Fabric integration (testcontainers) ──────────────────────────────────
+  # Stands up a disposable Valkey 8 container via testcontainers-rs and runs
+  # the cairn-fabric integration suite end-to-end against it. Runs in
+  # parallel (default threadpool) — the harness uses per-test uuid-scoped
+  # (tenant, workspace, project) triples to keep keyspaces disjoint.
+  fabric-integration:
+    name: fabric-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-fabric-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-fabric-
+            ${{ runner.os }}-cargo-
+      - name: cargo test --test integration (default — parallel)
+        run: cargo test -p cairn-fabric --test integration
+        timeout-minutes: 10
+
+  # ── 6. UI Build + Type Check + Component Tests ──────────────────────────────
   ui:
     name: ui
     runs-on: ubuntu-latest
