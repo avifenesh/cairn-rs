@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use cairn_domain::*;
+use cairn_store::event_log::EntityRef;
 use cairn_store::projections::{RunReadModel, SignalReadModel, SignalSubscriptionReadModel};
 use cairn_store::EventLog;
 
@@ -148,6 +149,27 @@ where
         )
         .await?;
 
+        // T3-C1 dedup: pull any `SignalRouted` events already emitted for
+        // this signal so a retry or replay does NOT re-enqueue mailbox
+        // messages to the same subscription. Pre-fix, calling
+        // `route_signal` twice delivered the signal twice (webhook
+        // retries, event-log replay on startup). The check uses
+        // `read_by_entity(Signal(id))` which scans only this signal's
+        // entity-scoped event slice, not the full event_log.
+        let existing = self
+            .store
+            .read_by_entity(&EntityRef::Signal(signal.id.clone()), None, usize::MAX)
+            .await?;
+        let already_routed: std::collections::HashSet<String> = existing
+            .iter()
+            .filter_map(|stored| match &stored.envelope.payload {
+                RuntimeEvent::SignalRouted(e) if e.signal_id == signal.id => {
+                    Some(e.subscription_id.as_str().to_owned())
+                }
+                _ => None,
+            })
+            .collect();
+
         let mut events = Vec::new();
         let mut mailbox_message_ids = Vec::new();
         let delivered_at_ms = now_ms();
@@ -163,6 +185,11 @@ where
                 continue;
             }
 
+            // T3-C1: skip subscriptions already delivered on a prior pass.
+            if already_routed.contains(subscription.subscription_id.as_str()) {
+                continue;
+            }
+
             if let Some(run_id) = &subscription.target_run_id {
                 let run = RunReadModel::get(self.store.as_ref(), run_id).await?;
                 if run.is_none() {
@@ -171,7 +198,17 @@ where
             }
 
             if let Some(target_mailbox_id) = &subscription.target_mailbox_id {
-                let message_id = MailboxMessageId::new(target_mailbox_id.as_str());
+                // T3-C1: build a per-signal message id so two signals
+                // routed to the same mailbox don't collide on the same
+                // `MailboxMessageId` (which would upsert and overwrite
+                // each other). Pre-fix the mailbox branch reused
+                // `target_mailbox_id` verbatim; mirror the run branch's
+                // `signal_route_{sub}_{signal}` shape for uniqueness.
+                let message_id = MailboxMessageId::new(format!(
+                    "signal_route_{}_{}",
+                    target_mailbox_id.as_str(),
+                    signal.id.as_str()
+                ));
                 mailbox_message_ids.push(message_id.clone());
                 events.push(make_envelope(RuntimeEvent::MailboxMessageAppended(
                     MailboxMessageAppended {
@@ -302,15 +339,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(routed.routed_count, 1);
-        assert_eq!(
-            routed.mailbox_message_ids,
-            vec![MailboxMessageId::new("mailbox_alert")]
-        );
+        // T3-C1: mailbox message id is per-signal (`signal_route_{mbox}_{sig}`)
+        // to prevent collisions when the same mailbox receives multiple
+        // routed signals — pre-fix, two signals to the same mailbox shared
+        // a message_id and the projection overwrote one.
+        let expected_id = MailboxMessageId::new("signal_route_mailbox_alert_sig_alert");
+        assert_eq!(routed.mailbox_message_ids, vec![expected_id.clone()]);
 
-        let mailbox =
-            MailboxReadModel::get(store.as_ref(), &MailboxMessageId::new("mailbox_alert"))
-                .await
-                .unwrap();
+        let mailbox = MailboxReadModel::get(store.as_ref(), &expected_id)
+            .await
+            .unwrap();
         assert!(mailbox.is_some(), "signal should be routed into mailbox");
 
         let events = store.read_stream(None, 20).await.unwrap();

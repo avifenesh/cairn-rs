@@ -65,28 +65,40 @@ where
             description,
         }));
 
-        self.store.append(&[event]).await?;
-
-        // Transition the associated run to WaitingApproval.
+        // T3-H2: batch ApprovalRequested + (optional) RunStateChanged into
+        // a single append so the cross-aggregate state lands atomically.
+        // Pre-fix: two successive appends; a crash in-between left the
+        // approval pending but the run still Running, which then confused
+        // `resume`'s pending-approval gate.
+        //
+        // T3-L7: if a `run_id` is supplied but the run doesn't exist, fail
+        // loudly. Pre-fix this produced an orphan approval with no run
+        // state while silently skipping the transition block.
+        let mut events = vec![event];
         if let Some(ref rid) = saved_run_id {
-            if let Some(run) = RunReadModel::get(self.store.as_ref(), rid).await? {
-                if can_transition_run_state(run.state, RunState::WaitingApproval) {
-                    let transition_event =
-                        make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
-                            project: project.clone(),
-                            run_id: rid.clone(),
-                            transition: StateTransition {
-                                from: Some(run.state),
-                                to: RunState::WaitingApproval,
-                            },
-                            failure_class: None,
-                            pause_reason: None,
-                            resume_trigger: None,
-                        }));
-                    self.store.append(&[transition_event]).await?;
-                }
+            let run = RunReadModel::get(self.store.as_ref(), rid)
+                .await?
+                .ok_or_else(|| RuntimeError::NotFound {
+                    entity: "run",
+                    id: rid.to_string(),
+                })?;
+            if can_transition_run_state(run.state, RunState::WaitingApproval) {
+                events.push(make_envelope(RuntimeEvent::RunStateChanged(
+                    RunStateChanged {
+                        project: project.clone(),
+                        run_id: rid.clone(),
+                        transition: StateTransition {
+                            from: Some(run.state),
+                            to: RunState::WaitingApproval,
+                        },
+                        failure_class: None,
+                        pause_reason: None,
+                        resume_trigger: None,
+                    },
+                )));
             }
         }
+        self.store.append(&events).await?;
 
         ApprovalReadModel::get(self.store.as_ref(), &approval_id)
             .await?
@@ -123,9 +135,11 @@ where
             decision,
         }));
 
-        self.store.append(&[event]).await?;
-
-        // Cascade the decision to the associated run's state machine.
+        // T3-H2: batch ApprovalResolved + cascading RunStateChanged into
+        // a single append so the cross-aggregate state lands atomically.
+        // Pre-fix: two successive appends; a crash in-between left the
+        // approval resolved but the run stranded in WaitingApproval.
+        let mut events = vec![event];
         if let Some(ref run_id) = approval.run_id {
             if let Some(run) = RunReadModel::get(self.store.as_ref(), run_id).await? {
                 let (to_state, failure_class, resume_trigger) = match decision {
@@ -137,8 +151,8 @@ where
                     }
                 };
                 if can_transition_run_state(run.state, to_state) {
-                    let transition_event =
-                        make_envelope(RuntimeEvent::RunStateChanged(RunStateChanged {
+                    events.push(make_envelope(RuntimeEvent::RunStateChanged(
+                        RunStateChanged {
                             project: run.project.clone(),
                             run_id: run_id.clone(),
                             transition: StateTransition {
@@ -148,11 +162,12 @@ where
                             failure_class,
                             pause_reason: None,
                             resume_trigger,
-                        }));
-                    self.store.append(&[transition_event]).await?;
+                        },
+                    )));
                 }
             }
         }
+        self.store.append(&events).await?;
 
         ApprovalReadModel::get(self.store.as_ref(), approval_id)
             .await?

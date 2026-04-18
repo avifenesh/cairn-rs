@@ -50,7 +50,6 @@ pub mod session_impl;
 pub mod signal_impl;
 pub mod signal_router_impl;
 pub mod skill_catalog_impl;
-pub mod spend_alert_impl;
 #[cfg(feature = "in-memory-runtime")]
 pub mod task_impl;
 pub mod tenant_impl;
@@ -80,7 +79,6 @@ pub use run_impl::RunServiceImpl;
 pub use session_impl::SessionServiceImpl;
 pub use signal_impl::SignalServiceImpl;
 pub use skill_catalog_impl::SkillCatalogServiceImpl;
-pub use spend_alert_impl::SpendAlertServiceImpl;
 #[cfg(feature = "in-memory-runtime")]
 pub use task_impl::TaskServiceImpl;
 pub use tenant_impl::TenantServiceImpl;

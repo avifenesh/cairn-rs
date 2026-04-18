@@ -1,7 +1,4 @@
-//! SOUL.md Guardian — validates and gates proposed patches (GAP-007).
-//!
-//! Mirrors `cairn/internal/agent/soul_guard.go` and
-//! `cairn/internal/memory/soul.go`.
+//! SOUL.md Guardian — validates and gates proposed patches.
 //!
 //! Three-tier decision for `validate_patch`:
 //! 1. **Denied** — patch touches a `locked_field`. No amount of approval can

@@ -64,48 +64,17 @@ pub trait RunService: Send + Sync {
         target: RunResumeTarget,
     ) -> Result<RunRecord, RuntimeError>;
 
-    /// Claim the run's execution so it becomes `lifecycle_phase=active`
-    /// on the Fabric path.
+    /// Claim the run so downstream suspend / signal operations can run.
     ///
     /// Unlike [`TaskService::claim`](crate::tasks::TaskService::claim),
     /// there is no `lease_owner` / `lease_duration_ms` parameter: runs
-    /// are not worker-scheduled (no poller pulls them off an eligible
-    /// zset), so the caller never advertises worker identity here.
-    /// The Fabric implementation uses
-    /// `FabricConfig::worker_instance_id` + `lease_ttl_ms`; the
-    /// in-memory implementation is a no-op because there is no FF
-    /// lease concept to activate.
+    /// are not worker-scheduled. Implementation details (worker identity,
+    /// lease TTL, FCALL dispatch) live in the adapter.
     ///
-    /// This call exists because FF's suspension / signal FCALLs
-    /// (`ff_suspend_execution`, `ff_deliver_signal`) reject
-    /// non-active executions. Approval gates
-    /// ([`Self::enter_waiting_approval`] → [`Self::resolve_approval`])
-    /// and orchestrator-driven suspension therefore need an explicit
-    /// claim first.
-    ///
-    /// **NOT idempotent.** On the Fabric path, re-claiming an
-    /// already-active run fails at the grant gate:
-    /// `ff_issue_claim_grant` requires `lifecycle_phase=runnable`
-    /// (lua/scheduling.lua:109-112) and returns
-    /// `execution_not_eligible` for an active execution. The
-    /// `use_claim_resumed_execution` dispatch
-    /// (claim_common.rs:148-154) only fires when FF's
-    /// `ff_claim_execution` detects `attempt_interrupted` — i.e. a
-    /// previously-suspended execution being resumed — not for a
-    /// fresh re-claim of an active run. Callers must claim once per
-    /// lifecycle and advance the run via the terminal or suspend
-    /// paths; do not retry on success.
-    ///
-    /// A second claim is only legitimate after a suspend/resume
-    /// cycle has flipped `lifecycle_phase` back to `runnable` (FF
-    /// resume emits the resume-eligible state per
-    /// lua/suspension.lua; see
-    /// `crates/cairn-fabric/tests/integration/test_suspension.rs::test_enter_approval_after_prior_approval_creates_fresh_waitpoint`
-    /// for the worked flow — runs.claim → enter_waiting_approval →
-    /// resolve_approval → runs.claim, where the second runs.claim
-    /// hits the `use_claim_resumed_execution` dispatch in
-    /// claim_common.rs:152-153). In that case the second claim is a
-    /// fresh activation, not a retry of a prior success.
+    /// **NOT idempotent.** A second claim on an already-active run fails
+    /// at the adapter's eligibility gate. Claim once per lifecycle; do
+    /// not retry on success. A second claim is only legitimate after a
+    /// suspend/resume cycle has made the run eligible again.
     async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
 
     /// Transition a run to WaitingApproval (approval gate).

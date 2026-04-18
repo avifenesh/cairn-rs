@@ -1,8 +1,7 @@
-//! Fleet report service — GAP-005.
+//! Fleet report service.
 //!
-//! Mirrors `cairn/internal/server/routes_fleet.go`:
-//! Returns the registered external worker fleet with live health and task status.
-//! Response: `FleetReport { workers, total, active, healthy }`.
+//! Returns the registered external worker fleet with live health and task
+//! status. Response: `FleetReport { workers, total, active, healthy }`.
 //!
 //! The report joins `ExternalWorkerReadModel` with `TaskReadModel` to compute
 //! `active_task_count` and enrich each `WorkerState` with the current task.

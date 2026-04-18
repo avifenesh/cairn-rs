@@ -1,11 +1,9 @@
-//! Worktree divergence monitor (GAP-018).
+//! Worktree divergence monitor.
 //!
 //! Tracks per-task git worktrees and detects divergence from the base branch.
-//!
-//! Mirrors `cairn/internal/worktree/` — per-task git worktree isolation +
-//! divergence detection. Each agent task gets its own worktree so concurrent
-//! runs don't share file state. The divergence monitor detects when a worktree
-//! has modified, committed, or conflicted changes relative to the base branch.
+//! Each agent task gets its own worktree so concurrent runs don't share file
+//! state. The divergence monitor detects when a worktree has modified,
+//! committed, or conflicted changes relative to the base branch.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -200,7 +198,10 @@ impl WorktreeService for WorktreeServiceImpl {
         &self,
         record: WorktreeRecord,
     ) -> Result<(), crate::error::RuntimeError> {
-        self.registry.lock().unwrap().register(record);
+        self.registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .register(record);
         Ok(())
     }
 
@@ -212,7 +213,7 @@ impl WorktreeService for WorktreeServiceImpl {
         let updated = self
             .registry
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .update_status(worktree_id, status);
         if updated {
             Ok(())
@@ -228,7 +229,7 @@ impl WorktreeService for WorktreeServiceImpl {
         Ok(self
             .registry
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .list_diverged()
             .into_iter()
             .cloned()
@@ -236,7 +237,11 @@ impl WorktreeService for WorktreeServiceImpl {
     }
 
     async fn summary(&self) -> Result<DivergenceSummary, crate::error::RuntimeError> {
-        Ok(self.registry.lock().unwrap().divergence_summary())
+        Ok(self
+            .registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .divergence_summary())
     }
 }
 

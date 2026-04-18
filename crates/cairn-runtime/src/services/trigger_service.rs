@@ -765,14 +765,21 @@ impl TriggerService {
     ) {
         self.fire_ledger
             .insert((trigger_id.clone(), signal_id.clone()), fired_at);
-        self.fire_counts
-            .entry(trigger_id.clone())
-            .or_default()
-            .push(fired_at);
-        self.project_budgets
-            .entry(project.clone())
-            .or_default()
-            .push(fired_at);
+        // T3-H3: prune entries older than the widest rolling window we
+        // count against (1 hour for project budgets) before pushing, so
+        // the Vecs stay bounded. A busy trigger would otherwise accumulate
+        // timestamps forever, driving memory growth and O(n) scans on
+        // every pre-decision check.
+        const TRIGGER_WINDOW_MS: u64 = 60_000;
+        const PROJECT_WINDOW_MS: u64 = 3_600_000;
+        let trigger_cutoff = fired_at.saturating_sub(TRIGGER_WINDOW_MS);
+        let project_cutoff = fired_at.saturating_sub(PROJECT_WINDOW_MS);
+        let trigger_vec = self.fire_counts.entry(trigger_id.clone()).or_default();
+        trigger_vec.retain(|ts| *ts > trigger_cutoff);
+        trigger_vec.push(fired_at);
+        let project_vec = self.project_budgets.entry(project.clone()).or_default();
+        project_vec.retain(|ts| *ts > project_cutoff);
+        project_vec.push(fired_at);
     }
 
     fn matching_trigger_ids(
@@ -796,7 +803,7 @@ impl TriggerService {
             })
             .map(|trigger| trigger.id.clone())
             .collect();
-        trigger_ids.sort_by_key(|r| r.clone());
+        trigger_ids.sort_unstable();
         trigger_ids
     }
 
@@ -1066,17 +1073,16 @@ impl TriggerService {
             self.fire_ledger
                 .insert((trigger_id.clone(), signal_id.clone()), now);
 
-            // Record fire count
-            self.fire_counts
-                .entry(trigger_id.clone())
-                .or_default()
-                .push(now);
-
-            // Record project budget
-            self.project_budgets
-                .entry(project.clone())
-                .or_default()
-                .push(now);
+            // Record fire count + project budget, pruning stale entries
+            // outside the rolling windows so the Vecs stay bounded (T3-H3).
+            const TRIGGER_WINDOW_MS: u64 = 60_000;
+            const PROJECT_WINDOW_MS: u64 = 3_600_000;
+            let trigger_vec = self.fire_counts.entry(trigger_id.clone()).or_default();
+            trigger_vec.retain(|ts| *ts > now.saturating_sub(TRIGGER_WINDOW_MS));
+            trigger_vec.push(now);
+            let project_vec = self.project_budgets.entry(project.clone()).or_default();
+            project_vec.retain(|ts| *ts > now.saturating_sub(PROJECT_WINDOW_MS));
+            project_vec.push(now);
 
             events.push(TriggerEvent::TriggerFired {
                 trigger_id,

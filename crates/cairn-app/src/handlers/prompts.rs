@@ -470,7 +470,7 @@ pub(crate) async fn activate_prompt_release_handler(
     {
         Ok(record) => match state
             .runtime
-            .audit
+            .audits
             .record(
                 record.project.tenant_id.clone(),
                 audit_actor_id(&principal),

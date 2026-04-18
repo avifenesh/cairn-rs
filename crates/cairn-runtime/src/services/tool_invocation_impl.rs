@@ -63,9 +63,12 @@ impl<S> ToolInvocationServiceImpl<S> {
 }
 
 fn now_ms() -> u64 {
+    // T3-M6: `unwrap_or_default()` matches the rest of cairn-runtime's
+    // now_ms helpers. Panicking here on clock skew (pre-1970 system
+    // clock) would crash the tool-invocation service for every caller.
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis() as u64
 }
 

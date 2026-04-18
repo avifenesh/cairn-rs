@@ -215,7 +215,10 @@ impl PromptReleasePipeline {
     ///
     /// Returns `None` if either version's content hasn't been stored.
     pub fn diff_versions(&self, old_version_id: &str, new_version_id: &str) -> Option<VersionDiff> {
-        let content = self.version_content.lock().unwrap();
+        let content = self
+            .version_content
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let old = content.get(old_version_id)?;
         let new = content.get(new_version_id)?;
         Some(diff_versions(old_version_id, old, new_version_id, new))
@@ -255,7 +258,7 @@ impl PromptReleasePipeline {
 
     /// Update rollout percentage for an active rollout.
     pub fn update_rollout_percent(&self, release_id: &str, percent: u8) -> Option<RolloutState> {
-        let mut map = self.rollouts.lock().unwrap();
+        let mut map = self.rollouts.lock().unwrap_or_else(|e| e.into_inner());
         let state = map.get_mut(release_id)?;
         if state.status == RolloutStatus::RolledBack {
             return None; // can't update a rolled-back release
@@ -276,7 +279,7 @@ impl PromptReleasePipeline {
     /// `rand_value` should be a uniform random in [0.0, 1.0).
     /// Returns `Candidate` if rand < percent/100, `Stable` otherwise.
     pub fn resolve_with_rollout(&self, release_id: &str, rand_value: f64) -> RoutingDecision {
-        let map = self.rollouts.lock().unwrap();
+        let map = self.rollouts.lock().unwrap_or_else(|e| e.into_inner());
         let state = match map.get(release_id) {
             Some(s) => s,
             None => return RoutingDecision::NoRollout,
@@ -323,7 +326,7 @@ impl PromptReleasePipeline {
         release_id: &str,
         approval_id: String,
     ) -> Option<RolloutState> {
-        let mut map = self.rollouts.lock().unwrap();
+        let mut map = self.rollouts.lock().unwrap_or_else(|e| e.into_inner());
         let state = map.get_mut(release_id)?;
         state.status = RolloutStatus::PendingApproval;
         state.approval_id = Some(approval_id);
@@ -335,7 +338,7 @@ impl PromptReleasePipeline {
     ///
     /// Only succeeds if the rollout is in `PendingApproval` status.
     pub fn approve_full_release(&self, release_id: &str) -> Option<RolloutState> {
-        let mut map = self.rollouts.lock().unwrap();
+        let mut map = self.rollouts.lock().unwrap_or_else(|e| e.into_inner());
         let state = map.get_mut(release_id)?;
         if state.status != RolloutStatus::PendingApproval {
             return None;
@@ -348,7 +351,7 @@ impl PromptReleasePipeline {
 
     /// Gap 5: Rollback — set rollout to 0% and mark as rolled_back.
     pub fn rollback(&self, release_id: &str) -> Option<RolloutState> {
-        let mut map = self.rollouts.lock().unwrap();
+        let mut map = self.rollouts.lock().unwrap_or_else(|e| e.into_inner());
         let state = map.get_mut(release_id)?;
         state.percent = 0;
         state.status = RolloutStatus::RolledBack;
@@ -358,7 +361,11 @@ impl PromptReleasePipeline {
 
     /// Get current rollout state for a release.
     pub fn get_rollout_state(&self, release_id: &str) -> Option<RolloutState> {
-        self.rollouts.lock().unwrap().get(release_id).cloned()
+        self.rollouts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(release_id)
+            .cloned()
     }
 
     /// List all active rollouts.

@@ -61,7 +61,7 @@ impl CapabilityRegistry {
     /// the registry. Tool descriptors are added separately via
     /// [`register_tools`] after a `tools.list` call.
     pub fn register_from_manifest(&self, plugin_id: &str, capabilities: &[CapabilityWire]) {
-        let mut map = self.plugins.write().unwrap();
+        let mut map = self.plugins.write().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .entry(plugin_id.to_owned())
             .or_insert_with(|| PluginCapabilities::new(plugin_id));
@@ -81,7 +81,7 @@ impl CapabilityRegistry {
 
     /// Register tool descriptors discovered via `tools.list`.
     pub fn register_tools(&self, plugin_id: &str, tools: Vec<ToolDescriptorWire>) {
-        let mut map = self.plugins.write().unwrap();
+        let mut map = self.plugins.write().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .entry(plugin_id.to_owned())
             .or_insert_with(|| PluginCapabilities::new(plugin_id));
@@ -91,7 +91,7 @@ impl CapabilityRegistry {
 
     /// Register event type subscriptions for a plugin.
     pub fn register_event_subscriptions(&self, plugin_id: &str, event_types: Vec<String>) {
-        let mut map = self.plugins.write().unwrap();
+        let mut map = self.plugins.write().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .entry(plugin_id.to_owned())
             .or_insert_with(|| PluginCapabilities::new(plugin_id));
@@ -100,12 +100,19 @@ impl CapabilityRegistry {
 
     /// Remove all capabilities for a plugin (on uninstall/stop).
     pub fn unregister(&self, plugin_id: &str) {
-        self.plugins.write().unwrap().remove(plugin_id);
+        self.plugins
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(plugin_id);
     }
 
     /// Get capabilities for a specific plugin.
     pub fn get(&self, plugin_id: &str) -> Option<PluginCapabilities> {
-        self.plugins.read().unwrap().get(plugin_id).cloned()
+        self.plugins
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(plugin_id)
+            .cloned()
     }
 
     /// Find all plugins providing a given capability family.
@@ -144,16 +151,24 @@ impl CapabilityRegistry {
 
     /// List all registered plugin IDs.
     pub fn plugin_ids(&self) -> Vec<String> {
-        self.plugins.read().unwrap().keys().cloned().collect()
+        self.plugins
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect()
     }
 
     /// Total number of registered plugins.
     pub fn len(&self) -> usize {
-        self.plugins.read().unwrap().len()
+        self.plugins.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.plugins.read().unwrap().is_empty()
+        self.plugins
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 }
 

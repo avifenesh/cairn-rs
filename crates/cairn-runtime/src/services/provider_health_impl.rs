@@ -415,7 +415,7 @@ mod tests {
                 .unwrap();
         assert!(!primary_binding.active);
 
-        let resolver = SimpleRouteResolver::with_store(store.clone(), store.clone());
+        let resolver = SimpleRouteResolver::new(store.clone());
         let decision = resolver
             .resolve(
                 &project,

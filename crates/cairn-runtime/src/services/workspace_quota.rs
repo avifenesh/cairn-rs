@@ -286,7 +286,7 @@ impl WorkspaceQuotaManager {
     // ── Usage tracking ───────────────────────────────────────────────────
 
     fn get_or_create_usage(&self, workspace_id: &str) -> WorkspaceUsage {
-        let mut map = self.usage.write().unwrap();
+        let mut map = self.usage.write().unwrap_or_else(|e| e.into_inner());
         map.entry(workspace_id.to_owned())
             .or_insert_with(|| WorkspaceUsage {
                 workspace_id: workspace_id.to_owned(),
@@ -309,7 +309,7 @@ impl WorkspaceQuotaManager {
 
     /// Record that a new run started in a workspace.
     pub fn record_run_started(&self, workspace_id: &str) {
-        let mut map = self.usage.write().unwrap();
+        let mut map = self.usage.write().unwrap_or_else(|e| e.into_inner());
         let usage = map
             .entry(workspace_id.to_owned())
             .or_insert_with(|| WorkspaceUsage {
@@ -323,7 +323,7 @@ impl WorkspaceQuotaManager {
 
     /// Record that a run completed (decrement active count).
     pub fn record_run_completed(&self, workspace_id: &str) {
-        let mut map = self.usage.write().unwrap();
+        let mut map = self.usage.write().unwrap_or_else(|e| e.into_inner());
         if let Some(usage) = map.get_mut(workspace_id) {
             usage.active_runs = usage.active_runs.saturating_sub(1);
         }
@@ -331,7 +331,7 @@ impl WorkspaceQuotaManager {
 
     /// Record token consumption.
     pub fn record_tokens(&self, workspace_id: &str, tokens: u64) {
-        let mut map = self.usage.write().unwrap();
+        let mut map = self.usage.write().unwrap_or_else(|e| e.into_inner());
         let usage = map
             .entry(workspace_id.to_owned())
             .or_insert_with(|| WorkspaceUsage {
@@ -344,7 +344,7 @@ impl WorkspaceQuotaManager {
 
     /// Record storage increase.
     pub fn record_storage(&self, workspace_id: &str, mb: u64) {
-        let mut map = self.usage.write().unwrap();
+        let mut map = self.usage.write().unwrap_or_else(|e| e.into_inner());
         let usage = map
             .entry(workspace_id.to_owned())
             .or_insert_with(|| WorkspaceUsage {
@@ -371,7 +371,7 @@ impl WorkspaceQuotaManager {
             None => return Ok(()), // no policy = unlimited
         };
 
-        let mut map = self.usage.write().unwrap();
+        let mut map = self.usage.write().unwrap_or_else(|e| e.into_inner());
         let usage = map.entry(ws.to_owned()).or_insert_with(|| WorkspaceUsage {
             workspace_id: ws.to_owned(),
             ..Default::default()
@@ -415,7 +415,7 @@ impl WorkspaceQuotaManager {
             return Ok(());
         }
 
-        let mut map = self.usage.write().unwrap();
+        let mut map = self.usage.write().unwrap_or_else(|e| e.into_inner());
         let usage = map.entry(ws.to_owned()).or_insert_with(|| WorkspaceUsage {
             workspace_id: ws.to_owned(),
             ..Default::default()
@@ -447,7 +447,7 @@ impl WorkspaceQuotaManager {
             return Ok(());
         }
 
-        let map = self.usage.read().unwrap();
+        let map = self.usage.read().unwrap_or_else(|e| e.into_inner());
         let storage = map.get(ws).map(|u| u.storage_mb).unwrap_or(0);
 
         if storage >= policy.max_storage_mb {

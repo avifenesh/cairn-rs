@@ -24,8 +24,22 @@ fn test_project() -> ProjectKey {
 #[tokio::test]
 async fn approval_request_and_resolve() {
     let store = Arc::new(InMemoryStore::new());
+    let session_svc = SessionServiceImpl::new(store.clone());
+    let run_svc = RunServiceImpl::new(store.clone());
     let svc = ApprovalServiceImpl::new(store);
     let project = test_project();
+
+    // T3-L7: approval request with Some(run_id) now requires the run
+    // to exist. Stand up the referenced run first.
+    let session_id = SessionId::new("sess_1");
+    session_svc
+        .create(&project, session_id.clone())
+        .await
+        .unwrap();
+    run_svc
+        .start(&project, &session_id, RunId::new("run_1"), None)
+        .await
+        .unwrap();
 
     let approval = svc
         .request(

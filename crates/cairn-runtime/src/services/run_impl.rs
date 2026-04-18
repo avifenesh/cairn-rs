@@ -1,13 +1,7 @@
-//! `RunServiceImpl` — the in-memory, event-log-backed `RunService`
-//! implementation compiled only under `--features in-memory-runtime`
-//! (local dev, test suites, CI without Valkey). In default / production
-//! builds cairn-app installs `FabricRunServiceAdapter` which routes
-//! mutations to FlowFabric. See
-//! `docs/design/CAIRN-FABRIC-FINALIZED.md` §3.5.
-//!
-//! This is NOT duplication of the Fabric adapter — they're peers behind
-//! the `RunService` trait, selected at compile time. The in-memory path
-//! carries no correctness guarantees and exists only for tinkering.
+//! `RunServiceImpl` — in-memory, event-log-backed `RunService` compiled
+//! only under `--features in-memory-runtime` (local dev, test suites, CI
+//! without Valkey). See `services/mod.rs` for the dev-vs-production
+//! selection mechanism.
 
 use std::sync::Arc;
 
@@ -25,10 +19,6 @@ use crate::error::RuntimeError;
 use crate::runs::RunService;
 
 /// In-memory dev-path implementation of [`crate::runs::RunService`].
-///
-/// Compiled only under `--features in-memory-runtime`; the production
-/// path is [`crate::fabric_adapter::FabricRunServiceAdapter`] (in the
-/// cairn-app crate) wrapping `cairn_fabric::FabricServices`.
 pub struct RunServiceImpl<S> {
     store: Arc<S>,
 }
@@ -294,16 +284,10 @@ where
         self.get_run(run_id).await
     }
 
-    /// No-op: the in-memory runtime has no FF lease concept. The
-    /// `RunService::claim` trait method exists for the Fabric path
-    /// (`FabricRunServiceAdapter`) where it flips the execution's
-    /// `lifecycle_phase=active` via `ff_claim_execution` so the
-    /// approval gate and signal delivery FCALLs accept it. Cairn's
-    /// event-log-only courtesy impl has no such gate — any state
-    /// transition is allowed — so claim returns the current record
-    /// unchanged. Matches the phase-9 `RecoveryServiceImpl` deletion
-    /// rationale: if it only matters under Fabric, the in-memory side
-    /// should not pretend.
+    /// No-op: the in-memory runtime has no lease-activation concept.
+    /// The Fabric adapter is the production implementation where claim
+    /// is load-bearing; this path exists only for dev/CI state-machine
+    /// exercise.
     async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError> {
         self.get_run(run_id).await
     }
@@ -455,7 +439,7 @@ where
     ) -> Result<(), crate::error::RuntimeError> {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as u64;
 
         let trigger_on_task_complete =

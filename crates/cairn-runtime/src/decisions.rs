@@ -262,13 +262,17 @@ impl ApprovalResolver for AutoApproveResolver {
 // ── Singleflight cache ──────────────────────────────────────────────────────
 
 /// Internal cache entry with singleflight support.
+///
+/// T3-L2: pre-audit the struct held `source: Option<DecisionSource>` and
+/// `reasoning_chain: Vec<StepResult>` fields that were written on
+/// `promote_to_resolved` but never read — cache hits synthesise
+/// `DecisionSource::CacheHit { original_decision_id }` directly, so the
+/// stored `source` was shadowed; `reasoning_chain` was `#[allow(dead_code)]`.
+/// Both dropped to shrink the hot-path clone.
 #[derive(Clone)]
 struct CacheEntry {
     decision_id: DecisionId,
     outcome: Option<DecisionOutcome>,
-    source: Option<DecisionSource>,
-    #[allow(dead_code)]
-    reasoning_chain: Vec<StepResult>,
     expires_at: u64,
     created_at: u64,
     hit_count: u64,
@@ -351,8 +355,6 @@ impl DecisionCache {
         let entry = CacheEntry {
             decision_id: decision_id.clone(),
             outcome: None,
-            source: None,
-            reasoning_chain: vec![],
             expires_at: 0,
             created_at: Self::now_ms(),
             hit_count: 0,
@@ -390,6 +392,13 @@ impl DecisionCache {
             }
         }
 
+        // `source` and `chain` are intentionally not stored — cache hits
+        // synthesise `DecisionSource::CacheHit { original_decision_id }`
+        // and readers that need the chain fetch the full DecisionEvent
+        // from `self.events` via `decision_id`. See T3-L2 in the audit
+        // queue.
+        let _ = source;
+        let _ = chain;
         self.entries
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -398,8 +407,6 @@ impl DecisionCache {
                 CacheEntry {
                     decision_id: decision_id.clone(),
                     outcome: Some(outcome.clone()),
-                    source: Some(source.clone()),
-                    reasoning_chain: chain.to_vec(),
                     expires_at,
                     created_at: now,
                     hit_count: 0,
@@ -511,7 +518,9 @@ impl DecisionCache {
                     kind_tag: String::new(),
                     scope: DecisionScopeRef::Project(scope.clone()),
                     ttl_remaining_secs: (e.expires_at.saturating_sub(now)) / 1000,
-                    source: e.source.clone().unwrap_or(DecisionSource::FreshEvaluation),
+                    source: DecisionSource::CacheHit {
+                        original_decision_id: e.decision_id.clone(),
+                    },
                     hit_count: e.hit_count,
                     created_at: e.created_at,
                     expires_at: e.expires_at,
@@ -1849,9 +1858,6 @@ mod tests {
                     crate::decisions::CacheEntry {
                         decision_id: DecisionId::new("dec_expired"),
                         outcome: Some(DecisionOutcome::Allowed),
-                        source: Some(DecisionSource::FreshEvaluation),
-                        #[allow(dead_code)]
-                        reasoning_chain: vec![],
                         expires_at: 1, // epoch ms 1 = long expired
                         created_at: 0,
                         hit_count: 0,

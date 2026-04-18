@@ -44,7 +44,7 @@ impl PluginHealthMonitor {
 
     /// Record a heartbeat for a plugin. Resets the missed counter.
     pub fn record_heartbeat(&self, plugin_id: &str) {
-        let mut map = self.state.write().unwrap();
+        let mut map = self.state.write().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .entry(plugin_id.to_owned())
             .or_insert_with(|| PluginHealthState {
@@ -58,7 +58,7 @@ impl PluginHealthMonitor {
 
     /// Record that a health check was missed (no heartbeat within window).
     pub fn record_missed(&self, plugin_id: &str) {
-        let mut map = self.state.write().unwrap();
+        let mut map = self.state.write().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get_mut(plugin_id) {
             entry.consecutive_missed += 1;
         }
@@ -66,7 +66,7 @@ impl PluginHealthMonitor {
 
     /// Record an error from a plugin (crash, protocol violation, etc.).
     pub fn record_error(&self, plugin_id: &str, error: String) {
-        let mut map = self.state.write().unwrap();
+        let mut map = self.state.write().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .entry(plugin_id.to_owned())
             .or_insert_with(|| PluginHealthState {
@@ -81,7 +81,7 @@ impl PluginHealthMonitor {
     ///
     /// An unknown plugin is considered unhealthy (not yet registered).
     pub fn is_healthy(&self, plugin_id: &str) -> bool {
-        let map = self.state.read().unwrap();
+        let map = self.state.read().unwrap_or_else(|e| e.into_inner());
         match map.get(plugin_id) {
             None => false,
             Some(state) => {
@@ -93,7 +93,7 @@ impl PluginHealthMonitor {
 
     /// Return IDs of all plugins whose last heartbeat is older than the timeout.
     pub fn unhealthy_plugins(&self) -> Vec<String> {
-        let map = self.state.read().unwrap();
+        let map = self.state.read().unwrap_or_else(|e| e.into_inner());
         let now = now_ms();
         map.iter()
             .filter(|(_, state)| now.saturating_sub(state.last_heartbeat_ms) >= self.timeout_ms)
@@ -103,17 +103,24 @@ impl PluginHealthMonitor {
 
     /// Snapshot health state for a specific plugin.
     pub fn get(&self, plugin_id: &str) -> Option<PluginHealthState> {
-        self.state.read().unwrap().get(plugin_id).cloned()
+        self.state
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(plugin_id)
+            .cloned()
     }
 
     /// Remove tracking state for a plugin (e.g. after uninstall).
     pub fn remove(&self, plugin_id: &str) {
-        self.state.write().unwrap().remove(plugin_id);
+        self.state
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(plugin_id);
     }
 
     /// Number of tracked plugins.
     pub fn tracked_count(&self) -> usize {
-        self.state.read().unwrap().len()
+        self.state.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 }
 

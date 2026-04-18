@@ -102,7 +102,7 @@ impl InMemoryConfigStore {
     pub fn with_entries(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
         let store = Self::new();
         {
-            let mut entries = store.entries.lock().unwrap();
+            let mut entries = store.entries.lock().unwrap_or_else(|e| e.into_inner());
             for (k, v) in pairs {
                 entries.insert(k, v);
             }
@@ -119,20 +119,32 @@ impl Default for InMemoryConfigStore {
 
 impl ConfigStore for InMemoryConfigStore {
     fn get(&self, key: &str) -> Option<String> {
-        self.entries.lock().unwrap().get(key).cloned()
+        self.entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .cloned()
     }
 
     fn set(&self, key: &str, value: String) -> Result<(), ConfigStoreError> {
-        self.entries.lock().unwrap().insert(key.to_owned(), value);
+        self.entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.to_owned(), value);
         Ok(())
     }
 
     fn delete(&self, key: &str) -> Result<bool, ConfigStoreError> {
-        Ok(self.entries.lock().unwrap().remove(key).is_some())
+        Ok(self
+            .entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(key)
+            .is_some())
     }
 
     fn list_prefix(&self, prefix: &str) -> Vec<(String, String)> {
-        let entries = self.entries.lock().unwrap();
+        let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<(String, String)> = entries
             .iter()
             .filter(|(k, _)| k.starts_with(prefix))
@@ -219,17 +231,21 @@ impl FileConfigStore {
 
 impl ConfigStore for FileConfigStore {
     fn get(&self, key: &str) -> Option<String> {
-        self.cache.lock().unwrap().get(key).cloned()
+        self.cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .cloned()
     }
 
     fn set(&self, key: &str, value: String) -> Result<(), ConfigStoreError> {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(key.to_owned(), value);
         self.flush(&cache)
     }
 
     fn delete(&self, key: &str) -> Result<bool, ConfigStoreError> {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         let existed = cache.remove(key).is_some();
         if existed {
             self.flush(&cache)?;
@@ -238,7 +254,7 @@ impl ConfigStore for FileConfigStore {
     }
 
     fn list_prefix(&self, prefix: &str) -> Vec<(String, String)> {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         let mut results: Vec<(String, String)> = cache
             .iter()
             .filter(|(k, _)| k.starts_with(prefix))

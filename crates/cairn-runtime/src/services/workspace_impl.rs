@@ -48,7 +48,7 @@ where
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as u64;
 
         // Use a synthetic ProjectKey scoped to the tenant/workspace.

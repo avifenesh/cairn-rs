@@ -14,10 +14,6 @@ use crate::error::RuntimeError;
 use crate::sessions::SessionService;
 
 /// In-memory dev-path implementation of [`crate::sessions::SessionService`].
-///
-/// Compiled only under `--features in-memory-runtime`; the production
-/// path is `FabricSessionServiceAdapter` (in the cairn-app crate)
-/// wrapping `cairn_fabric::FabricServices::sessions`.
 pub struct SessionServiceImpl<S> {
     store: Arc<S>,
 }

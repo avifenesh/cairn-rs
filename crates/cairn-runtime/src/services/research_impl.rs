@@ -53,12 +53,15 @@ impl ResearchService for InMemoryResearchService {
             confidence: 0.5,
             created_at_ms: now_ms(),
         };
-        self.results.lock().unwrap().push(result.clone());
+        self.results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(result.clone());
         Ok(result)
     }
 
     async fn list_results(&self, limit: usize) -> Result<Vec<ResearchResult>, RuntimeError> {
-        let results = self.results.lock().unwrap();
+        let results = self.results.lock().unwrap_or_else(|e| e.into_inner());
         // Most-recent first.
         let mut v: Vec<ResearchResult> = results.iter().rev().take(limit).cloned().collect();
         v.sort_by_key(|r| std::cmp::Reverse(r.created_at_ms));
@@ -104,12 +107,15 @@ impl DigestService for InMemoryDigestService {
             entries: Vec::<DigestEntry>::new(),
             generated_at_ms: now,
         };
-        self.reports.lock().unwrap().push(report.clone());
+        self.reports
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(report.clone());
         Ok(report)
     }
 
     async fn list_digests(&self, limit: usize) -> Result<Vec<DigestReport>, RuntimeError> {
-        let reports = self.reports.lock().unwrap();
+        let reports = self.reports.lock().unwrap_or_else(|e| e.into_inner());
         Ok(reports.iter().rev().take(limit).cloned().collect())
     }
 }

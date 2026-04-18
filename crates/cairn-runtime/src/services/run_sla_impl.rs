@@ -74,7 +74,11 @@ where
         let now = now_ms();
         let elapsed_ms = now.saturating_sub(run.created_at);
         let target_ms = config.target_completion_ms;
-        let percent_used = elapsed_ms
+        // T3-M8: cap elapsed at 10x the target before computing percent_used
+        // so `elapsed * 100` never saturates at u64::MAX — pre-fix a historic
+        // run older than ~6 years fed garbage into any percentile/dashboard.
+        let capped_elapsed = elapsed_ms.min(target_ms.saturating_mul(10));
+        let percent_used = capped_elapsed
             .saturating_mul(100)
             .checked_div(target_ms)
             .unwrap_or(u64::MAX);
@@ -88,6 +92,24 @@ where
     }
 
     async fn check_and_breach(&self, run_id: &RunId) -> Result<bool, RuntimeError> {
+        // T3-M8: only runs still in flight can newly breach. Terminal runs
+        // replayed through this path (event replay, projection rebuild) were
+        // previously marked as breached because their historical
+        // `created_at` was always far enough in the past to fail
+        // `elapsed < target`. Skip terminal states early.
+        let run = RunReadModel::get(self.store.as_ref(), run_id)
+            .await?
+            .ok_or_else(|| RuntimeError::NotFound {
+                entity: "run",
+                id: run_id.to_string(),
+            })?;
+        if matches!(
+            run.state,
+            RunState::Completed | RunState::Failed | RunState::Canceled
+        ) {
+            return Ok(false);
+        }
+
         let status = self.check_sla(run_id).await?;
         if status.on_track {
             return Ok(false);

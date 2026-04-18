@@ -17,11 +17,6 @@ use crate::error::RuntimeError;
 use crate::tasks::TaskService;
 
 /// In-memory dev-path implementation of [`crate::tasks::TaskService`].
-///
-/// Compiled only under `--features in-memory-runtime`; the production
-/// path is `FabricTaskServiceAdapter` (in the cairn-app crate) wrapping
-/// `cairn_fabric::FabricServices::tasks`. Not duplication — peers behind
-/// the trait, selected at compile time.
 pub struct TaskServiceImpl<S> {
     store: Arc<S>,
 }
@@ -122,7 +117,7 @@ where
 
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as u64;
 
         let events = vec![
@@ -167,7 +162,7 @@ where
 
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as u64;
 
         let event = make_envelope(RuntimeEvent::TaskLeaseHeartbeated(TaskLeaseHeartbeated {
@@ -195,8 +190,10 @@ where
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        let _ =
-            TaskDependencyReadModel::resolve_dependency(self.store.as_ref(), task_id, now_ms).await;
+        // Resolve any task dependencies this completion unblocks. Propagate
+        // the error — pre-T3-H1 the store failure was silently dropped and
+        // downstream tasks stayed stuck in WaitingDependency forever.
+        TaskDependencyReadModel::resolve_dependency(self.store.as_ref(), task_id, now_ms).await?;
 
         // Auto-checkpoint: if the parent run has a strategy with
         // trigger_on_task_complete, emit a CheckpointRecorded event.
@@ -218,7 +215,11 @@ where
                             disposition: CheckpointDisposition::Latest,
                             data: None,
                         }));
-                    let _ = self.store.append(&[event]).await;
+                    // Propagate — if the operator asked for auto-checkpoint
+                    // on task complete, a silent drop is worse than a
+                    // visible failure. Pre-T3-H1 the append error was
+                    // `let _`-discarded.
+                    self.store.append(&[event]).await?;
                 }
             }
         }
@@ -297,7 +298,10 @@ where
                         pause_reason: None,
                         resume_trigger: None,
                     }));
-                    let _ = self.store.append(&[event]).await;
+                    // Propagate: pre-T3-H1 the append error was
+                    // `let _`-discarded, leaving the task stuck in
+                    // WaitingDependency while the caller saw success.
+                    self.store.append(&[event]).await?;
                 }
             }
         }
