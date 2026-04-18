@@ -2,7 +2,7 @@
 
 **Self-hostable Rust control plane for production AI agent deployments.**
 
-![Rust](https://img.shields.io/badge/rust-1.83%2B-orange?logo=rust)
+![Rust](https://img.shields.io/badge/rust-1.95-orange?logo=rust)
 ![License](https://img.shields.io/badge/license-BSL--1.1-blue)
 ![Status](https://img.shields.io/badge/status-active-brightgreen)
 
