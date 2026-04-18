@@ -162,6 +162,7 @@ one bounded context with no circular dependencies.
 cairn-domain       pure domain types, events, lifecycle rules, RFC contracts
 cairn-store        append-only event log + synchronous projections (InMemory / Postgres / SQLite)
 cairn-runtime      service implementations: sessions, runs, tasks, approvals, routing, evals
+cairn-fabric       bridge to FlowFabric: atomic leases, 6-dim state vectors, Valkey-native execution
 cairn-providers    unified chat/completion/embedding provider abstraction
 cairn-api          HTTP types, SSE payloads, auth, bootstrap config, API error shapes
 cairn-app          axum HTTP server, startup wiring, all route handlers, embedded React UI
@@ -180,6 +181,14 @@ cairn-workspace    repo clone cache and sandbox lifecycle primitives
 cairn-github       standalone GitHub App auth, webhook, and REST client SDK
 cairn-integrations integration registry and per-service plugin surfaces
 ```
+
+`cairn-fabric` sits between `cairn-runtime` and FlowFabric's Valkey-native
+execution engine. It adapts cairn's run and task service traits onto FF's
+FCALL surface (`ff_issue_claim_grant`, `ff_claim_execution`,
+`ff_suspend_execution`, etc.), giving the runtime atomic lease semantics
+and multi-dimensional execution state without owning that state itself.
+FF remains the source of truth for lease, lifecycle, and eligibility;
+cairn-fabric is the thin adapter.
 
 ### Data flow
 
@@ -240,7 +249,7 @@ All `/v1/` routes require `Authorization: Bearer <token>`. `/health` and `/v1/st
 |-------|-----------|
 | **Health** | `GET /health`, `GET /v1/status`, `GET /v1/dashboard`, `GET /v1/overview` |
 | **Sessions** | `GET/POST /v1/sessions`, `GET /v1/sessions/:id`, `GET /v1/sessions/:id/runs` |
-| **Runs** | `GET/POST /v1/runs`, `GET /v1/runs/:id`, `POST /v1/runs/:id/pause`, `POST /v1/runs/:id/resume`, `GET /v1/runs/:id/events`, `GET /v1/runs/:id/cost` |
+| **Runs** | `GET/POST /v1/runs`, `GET /v1/runs/:id`, `POST /v1/runs/:id/claim`, `POST /v1/runs/:id/pause`, `POST /v1/runs/:id/resume`, `GET /v1/runs/:id/events`, `GET /v1/runs/:id/cost` |
 | **Tasks** | `GET /v1/tasks`, `POST /v1/tasks/:id/claim`, `POST /v1/tasks/:id/complete`, `POST /v1/tasks/:id/cancel`, `POST /v1/tasks/:id/release-lease` |
 | **Approvals** | `POST /v1/approvals` (create gate), `GET /v1/approvals/pending`, `POST /v1/approvals/:id/approve`, `POST /v1/approvals/:id/reject`, `POST /v1/approvals/:id/resolve` |
 | **Prompts** | `GET /v1/prompts/assets`, `GET /v1/prompts/releases`, `POST /v1/prompts/releases/:id/transition`, `POST /v1/prompts/releases/:id/activate` |
@@ -260,7 +269,7 @@ All `/v1/` routes require `Authorization: Bearer <token>`. `/health` and `/v1/st
 
 ### Prerequisites
 
-- Rust 1.83+ (`rustup update stable`)
+- Rust 1.95 (pinned via `rust-toolchain.toml` — `rustup` will install it automatically on first build)
 - Node.js 20+ (for the UI only)
 
 ### Build and test
@@ -314,6 +323,7 @@ crates/
   cairn-workspace/ Repo clone cache and sandbox lifecycle
   cairn-github/    GitHub App auth, webhook, REST client
   cairn-integrations/ Integration registry and plugin surfaces
+  cairn-fabric/    Bridge from cairn-runtime to FlowFabric (Valkey-native lease + lifecycle)
 ui/                React + TypeScript operator dashboard
 docs/
   design/rfcs/     RFC specifications (001–023)
@@ -350,4 +360,4 @@ process.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+BSL-1.1 — see [LICENSE](./LICENSE).
