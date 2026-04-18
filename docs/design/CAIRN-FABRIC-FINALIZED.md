@@ -154,7 +154,140 @@ The deleted pieces in finalization were: `FabricRecoveryStub` (cairn-fabric side
 
 ---
 
-## 4. Outstanding FF asks
+## 4. Orchestrator integration
+
+The GATHER → DECIDE → EXECUTE loop in `cairn-orchestrator` threads FF
+primitives through a narrow, **non-consuming** handle — `TaskFrameSink`
+(`crates/cairn-orchestrator/src/task_sink.rs`). This keeps the loop
+independent of FF's lease-lifetime contract (where `complete` /
+`fail` / `suspend_for_approval` consume `self`) while still populating
+FF's attempt-scoped stream for audit + cross-process resumption.
+
+### 4.1 `TaskFrameSink` trait
+
+Five methods, all non-consuming:
+
+| Method | Called from | Purpose |
+|---|---|---|
+| `log_tool_call(name, args)` | `loop_runner.rs` §5a (pre-execute), §4 (approval gate) | Intent frame — survives a mid-dispatch restart |
+| `log_tool_result(name, output, success, duration_ms)` | `loop_runner.rs` §5b (post-execute, per result) | Outcome frame — balances the intent frame |
+| `log_llm_response(model, tokens_in, tokens_out, latency_ms)` | `loop_runner.rs` §3b' (post-decide) | Cost + latency audit off `DecideOutput` fields |
+| `save_checkpoint(context_json)` | `loop_runner.rs` §6b (after `CheckpointHook::save`) | Matches PR #27's `restore_frames()` read half |
+| `is_lease_healthy()` | `loop_runner.rs` §1b (per-iteration, before gather) | Bail before committing any expensive side effect |
+
+Default impl: `NoOpTaskSink` — all writes succeed instantly, lease
+always reports healthy. Used when the caller has no live
+`CairnTask`; the `EventLog` bridge events continue to drive cairn-store
+projections + SSE telemetry unchanged.
+
+Production impl: blanket `impl TaskFrameSink for cairn_fabric::CairnTask`
+— delegates to the existing `StreamWriter` (ff-sdk
+`ff_append_frame`-backed). Errors are mapped to
+`OrchestratorError::Execute`; the loop runner logs and continues so a
+frame append that fails (network blip, Valkey hiccup) does not fail a
+run.
+
+### 4.2 Stream frames are ADDITIVE
+
+Cairn-store bridge events (`RuntimeEvent::ToolInvoked`,
+`RuntimeEvent::CheckpointRecorded`, etc.) are **not replaced**. Stream
+frames write to FF's attempt-scoped Valkey stream; bridge events write
+to cairn-store's event log via `EventBridge`. Two independent channels:
+
+```
+cairn-orchestrator                         FF / Valkey
+      │                                          │
+      ├── OrchestratorEventEmitter ──→ cairn-store.projections (SSE, read paths)
+      │
+      └── TaskFrameSink (optional)   ──→ ff:exec:{p:N}:attempt:N:stream (restore_frames)
+```
+
+If the FF stream write fails, the run continues using the bridge-event
+projections. If the bridge write fails, the stream-frame replay is
+still intact. The two paths intersect only at authoritative FF state
+(exec_core, flow_core, etc.) — not via shared cairn state.
+
+### 4.3 Approval suspension handoff
+
+When the loop returns `LoopTermination::WaitingApproval { approval_id }`,
+the caller (HTTP handler) decides which suspension primitive to fire:
+
+- **Service-level path**: call `state.runtime.runs.enter_waiting_approval(&run_id)`.
+  This is the canonical path today — it works whether the caller holds
+  a `CairnTask` or not. `RunService` under the Fabric adapter routes to
+  `FabricRunService::enter_waiting_approval` which runs
+  `ff_suspend_execution`.
+- **Task-level path** (preferred when the caller holds a live
+  `CairnTask`): call `cairn_task.suspend_for_approval(&approval_id, None)`.
+  This consumes the `CairnTask` and the task stays suspended until
+  `ff_deliver_signal` fires on the matching approval waitpoint. Use
+  this when the run was claim-active via the orchestrator's own lease
+  (the loop was already running inside the task's execution context).
+
+The loop never holds a `CairnTask` across iterations (the consuming
+self contract would require consuming it mid-iteration, which the
+state machine doesn't allow). So the decision of which primitive to
+fire is a CALLER concern, not an orchestrator concern. The orchestrator
+returns the `approval_id` and exits; the caller knows which path it's on.
+
+### 4.4 Lease-health gate semantics
+
+`task_sink.is_lease_healthy()` polls ff-sdk's 3-consecutive-renewal
+threshold. On false, the loop returns
+`LoopTermination::Failed { reason: "lease unhealthy" }` BEFORE any
+expensive side effect (next iteration's gather / decide / execute).
+This is:
+
+- **Correct**: FF rejects every fcall on an unhealthy lease with
+  `stale_lease` anyway; bailing early saves work and avoids partial
+  state.
+- **Cheap**: polling is a struct-field read (ff-sdk tracks the
+  renewal counter internally). No network round-trip.
+- **Caller-observable**: the handler sees `Failed { reason: "lease
+  unhealthy" }` and can call `cairn_task.fail_with_retry(...)` to let
+  FF's retry policy decide whether to reschedule or terminal-fail.
+
+### 4.5 Checkpoint-frame failure semantics (design nuance)
+
+Stream-frame writes are intentionally best-effort — the loop runner
+logs and continues on every frame-append failure, including
+`save_checkpoint`. This matches the existing policy for
+`CheckpointHook::save()` (pre-PR #29 behavior) and keeps both channels
+consistent.
+
+A lost checkpoint frame means cross-process resumption via
+`restore_frames()` silently misses that iteration's state. In
+practice this is masked by:
+
+1. The cairn-side `CheckpointHook::save()` call (still running in
+   parallel), which persists the checkpoint to cairn-store's event
+   log via the injected hook.
+2. FF's own lease renewal — a lost frame on a healthy lease means
+   the next iteration's checkpoint catches up; a lost frame on an
+   unhealthy lease triggers the lease-health gate (§4.4) which
+   terminates the loop cleanly.
+
+If we later want checkpoint-frame failure to be fatal (e.g. a
+recovery-first mode where cross-process resume is load-bearing), the
+trait can gain a `save_checkpoint_fatal -> Result<(), Fatal>` variant
+at the sink layer; the loop-runner check becomes strict. That's a
+future design call — today's contract is **advisory**, matching the
+cairn-side hook.
+
+### 4.6 Dep graph
+
+`cairn-orchestrator` now depends directly on `cairn-fabric`
+(`[dependencies]`). The blanket `TaskFrameSink` impl for `CairnTask`
+lives in cairn-orchestrator so cairn-fabric stays unaware of the
+orchestrator trait; no cycle. The orchestrator → stream integration
+test (`crates/cairn-fabric/tests/integration/test_orchestrator_stream.rs`)
+adds cairn-orchestrator as a `[dev-dependencies]` of cairn-fabric to
+name the trait from the test; this is a dev-only cycle that Cargo
+isolates from the library graph.
+
+---
+
+## 5. Outstanding FF asks
 
 Filed with FF maintainers; tracked for re-wiring when they land.
 
@@ -164,7 +297,7 @@ Filed with FF maintainers; tracked for re-wiring when they land.
 
 ---
 
-## 5. Known gaps
+## 6. Known gaps
 
 Accepted limitations as of finalization — each has a follow-up round scoped.
 
@@ -180,7 +313,7 @@ Accepted limitations as of finalization — each has a follow-up round scoped.
 
 ---
 
-## 6. Known tech debt (flagged during finalization-round audit)
+## 7. Known tech debt (flagged during finalization-round audit)
 
 Severity ordered. Each item has a follow-up round scoped.
 
@@ -230,7 +363,7 @@ The `TaskLeaseClaimed` bridge event payload carries `lease_expires_at_ms`, which
 
 Both implementations scan up to 10,000 `EventLog` events and truncate silently if the parent run's `RunCreated` is older than that window. At high event rates this could miss child runs. `RunReadModel` has no `list_by_parent_run` projection index today, so the scan is the only option. Pre-existing across both paths — not introduced by finalization — flagged for a future round that adds the projection index (then both impls delegate to a single indexed read with no truncation).
 
-## 7. Versioning
+## 8. Versioning
 
 - Pinned FF rev: `a09871000574388256b1dd7c910239e992c0d3a6` (in every `crates/cairn-fabric/Cargo.toml` `rev = …` entry).
 - Cairn-fabric crate version: `0.1.0` (unpublished, `publish = false`).
