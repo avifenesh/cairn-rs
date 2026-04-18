@@ -164,8 +164,41 @@ impl Drop for CairnTask {
 }
 
 impl CairnTask {
+    /// Panicking accessor — used only on paths where the Option<ClaimedTask>
+    /// is guaranteed Some by caller context (the public observers like
+    /// `input_payload` and `stream_writer`, where the caller holds a live
+    /// `&CairnTask` reference that by construction cannot be consumed).
     fn task(&self) -> &ClaimedTask {
         self.task.as_ref().expect("CairnTask already consumed")
+    }
+
+    /// Fallible accessor — returns `FabricError::Bridge("task already
+    /// consumed")` for a consumed CairnTask instead of panicking. The
+    /// async log_* methods and `save_checkpoint` route through this so
+    /// a stray `&CairnTask` reused after a terminal call surfaces a
+    /// typed error (swallowed by the orchestrator's frame-sink
+    /// log-and-continue contract) rather than bringing down the loop.
+    ///
+    /// Issue #32 (L3 from PR #30 R2 audit): the blanket
+    /// `impl TaskFrameSink for CairnTask` previously hit `self.task()`
+    /// via `stream_writer()` on every log_tool_call / log_tool_result /
+    /// log_llm_response / save_checkpoint. With the trait object's
+    /// wider exposure through Arc<dyn TaskFrameSink>, a consumed-task
+    /// panic would have crashed the orchestrator's panic-catch boundary;
+    /// this helper gives those paths an `Err` to return instead.
+    fn try_task(&self) -> Result<&ClaimedTask, FabricError> {
+        self.task
+            .as_ref()
+            .ok_or_else(|| FabricError::Bridge("task already consumed".to_owned()))
+    }
+
+    /// Fallible variant of `stream_writer()`. Returns the same
+    /// `task already consumed` error as `try_task` when the
+    /// Option<ClaimedTask> has been taken. Used by the async log_*
+    /// methods so they can propagate the typed error up through the
+    /// TaskFrameSink trait instead of panicking.
+    fn try_stream_writer(&self) -> Result<StreamWriter<'_>, FabricError> {
+        Ok(StreamWriter::new(self.try_task()?))
     }
 
     fn take_task(
@@ -208,7 +241,7 @@ impl CairnTask {
         name: &str,
         args: &serde_json::Value,
     ) -> Result<(), FabricError> {
-        self.stream_writer().log_tool_call(name, args).await?;
+        self.try_stream_writer()?.log_tool_call(name, args).await?;
         Ok(())
     }
 
@@ -219,7 +252,7 @@ impl CairnTask {
         success: bool,
         duration_ms: u64,
     ) -> Result<(), FabricError> {
-        self.stream_writer()
+        self.try_stream_writer()?
             .log_tool_result(tool_name, output, success, duration_ms)
             .await?;
         Ok(())
@@ -232,14 +265,16 @@ impl CairnTask {
         tokens_out: u64,
         latency_ms: u64,
     ) -> Result<(), FabricError> {
-        self.stream_writer()
+        self.try_stream_writer()?
             .log_llm_response(model, tokens_in, tokens_out, latency_ms)
             .await?;
         Ok(())
     }
 
     pub async fn save_checkpoint(&self, context_json: &[u8]) -> Result<(), FabricError> {
-        self.stream_writer().save_checkpoint(context_json).await?;
+        self.try_stream_writer()?
+            .save_checkpoint(context_json)
+            .await?;
         Ok(())
     }
 
@@ -260,7 +295,7 @@ impl CairnTask {
 
     pub async fn log_progress(&self, pct: u8, message: &str) -> Result<(), FabricError> {
         let clamped = pct.min(100);
-        self.task()
+        self.try_task()?
             .update_progress(clamped, message)
             .await
             .map_err(|e| FabricError::Bridge(format!("update_progress: {e}")))
@@ -543,5 +578,56 @@ mod tests {
             !task.is_lease_healthy(),
             "consumed CairnTask must report unhealthy lease, not panic"
         );
+    }
+
+    /// Issue #32: consumed-task None-branch for the async log_* +
+    /// save_checkpoint path must return `FabricError::Bridge("task
+    /// already consumed")`, not panic. Pins the try_task / try_stream_writer
+    /// routing so a regression that goes back to `self.task()` on any
+    /// of the 5 async methods fails this test instead of crashing the
+    /// orchestrator's panic-catch boundary at runtime.
+    #[tokio::test]
+    async fn log_methods_on_consumed_task_return_bridge_error() {
+        let (bridge, _handle) = EventBridge::start(Arc::new(cairn_store::InMemoryStore::default()));
+        let task = CairnTask {
+            task: None,
+            bridge: Arc::new(bridge),
+            run_id: None,
+            session_id: None,
+            project: None,
+        };
+
+        // Spot-check one of each shape. Every method routes through
+        // try_stream_writer() / try_task() so a single bad hunk would
+        // flip all five; one assertion per would be redundant. We check
+        // the error TYPE + MESSAGE since that's what the orchestrator's
+        // frame-sink log-and-continue contract would see.
+        let err = task
+            .log_tool_call("fs.read", &serde_json::json!({}))
+            .await
+            .expect_err("consumed task must Err, not panic");
+        match err {
+            FabricError::Bridge(msg) => assert!(
+                msg.contains("task already consumed"),
+                "expected 'task already consumed' in Bridge error, got: {msg}"
+            ),
+            other => panic!("expected FabricError::Bridge, got {other:?}"),
+        }
+
+        // save_checkpoint shares the same helper — sanity-check it too so
+        // anyone refactoring try_stream_writer can't miss either path.
+        let err = task
+            .save_checkpoint(b"{}")
+            .await
+            .expect_err("save_checkpoint on consumed task must Err");
+        assert!(matches!(err, FabricError::Bridge(_)));
+
+        // log_progress uses try_task directly (no StreamWriter). Same
+        // error contract.
+        let err = task
+            .log_progress(50, "progress")
+            .await
+            .expect_err("log_progress on consumed task must Err");
+        assert!(matches!(err, FabricError::Bridge(_)));
     }
 }
