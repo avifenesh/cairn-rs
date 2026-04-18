@@ -103,13 +103,46 @@ jobs:
         timeout-minutes: 8
         env:
           CARGO_BUILD_JOBS: "2"
-      - name: cairn-app smoke tests (--features in-memory-runtime)
-        run: cargo test -p cairn-app --features cairn-app/in-memory-runtime --test bootstrap_smoke --test source_refresh
-        timeout-minutes: 8
+
+  # ── 5. Integration tests (runtime + orchestrator + app) ─────────────────────
+  # Runs the 78 integration test files under crates/*/tests/*.rs that the
+  # `--lib` job above skips by design. These include CLAUDE.md's required 6
+  # E2E workflows (full_workspace_suite.rs), approval + recovery + checkpoint
+  # lifecycles, and the full cairn-app HTTP surface. Split out from the
+  # `test` job so the lib-only fail-fast signal stays tight and this job
+  # runs on a parallel runner without blocking feedback on lib + fmt +
+  # clippy gates.
+  #
+  # Feature-gated on `cairn-app/in-memory-runtime`: every file under
+  # cairn-runtime/tests and cairn-orchestrator/tests carries
+  # `#![cfg(feature = "in-memory-runtime")]`, so without the feature the
+  # binaries compile to zero tests. Fabric-backed integration lives in the
+  # dedicated `fabric-integration` job below.
+  integration-tests:
+    name: integration-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-integration-
+            ${{ runner.os }}-cargo-
+      - name: cargo test --tests (runtime + orchestrator + app)
+        run: cargo test --tests -p cairn-runtime -p cairn-orchestrator -p cairn-app --features cairn-app/in-memory-runtime
+        timeout-minutes: 20
         env:
           CARGO_BUILD_JOBS: "2"
 
-  # ── 5. Fabric integration (testcontainers) ──────────────────────────────────
+  # ── 6. Fabric integration (testcontainers) ──────────────────────────────────
   # Stands up a disposable Valkey 8 container via testcontainers-rs and runs
   # the cairn-fabric integration suite end-to-end against it. Runs in
   # parallel (default threadpool) — the harness uses per-test uuid-scoped

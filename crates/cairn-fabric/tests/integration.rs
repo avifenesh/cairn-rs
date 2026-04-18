@@ -155,6 +155,27 @@ impl TestHarness {
             // with an ff-test-driven Valkey would surface as an HMAC auth
             // failure instead of silent acceptance. The kid is cairn-scoped so
             // it does not collide with FF's default "k1" either.
+            //
+            // ⚠ HMAC-ROTATION FOOTGUN — DO NOT add a rotation test to this
+            // suite. The `ff:sec:{p:N}:waitpoint_hmac` hash is PARTITION-
+            // scoped in FF, NOT project-scoped. `FabricServices::start`
+            // (boot.rs:seed_waitpoint_hmac_secret_if_configured) HSETs
+            // every one of the 256 execution partitions on every harness
+            // spin-up. All TestHarness instances write the SAME (kid,
+            // secret) today, so the writes are idempotent and race-benign.
+            //
+            // A test that CHANGES the kid or secret mid-flight would
+            // rotate the shared partition keys and silently break every
+            // other in-flight test's signal delivery — `lua/signal.lua`'s
+            // `validate_waitpoint_token` reads `hmac_secrets` fresh on
+            // every `ff_deliver_signal` FCALL and would reject tokens
+            // minted under the pre-rotation secret.
+            //
+            // If you need to exercise HMAC rotation end-to-end, run it
+            // against a DEDICATED Valkey (point the harness at a separate
+            // container via `CAIRN_TEST_VALKEY_URL`, or move the test into
+            // its own test binary that does not share the `VALKEY_CONTAINER`
+            // OnceCell). Do NOT add it to this suite.
             waitpoint_hmac_secret: Some(
                 "00000000000000000000000000000000000000000000000000000000000000aa".into(),
             ),
