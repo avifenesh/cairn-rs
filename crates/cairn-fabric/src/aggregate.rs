@@ -3,7 +3,6 @@ use std::sync::Arc;
 use cairn_store::event_log::EventLog;
 use tokio::task::JoinHandle;
 
-use crate::active_tasks::ActiveTaskRegistry;
 use crate::boot::FabricRuntime;
 use crate::config::FabricConfig;
 use crate::error::FabricError;
@@ -17,7 +16,6 @@ use crate::signal_bridge::SignalBridge;
 pub struct FabricServices {
     pub runtime: Arc<FabricRuntime>,
     pub bridge: Arc<EventBridge>,
-    pub registry: Arc<ActiveTaskRegistry>,
     pub runs: FabricRunService,
     pub tasks: FabricTaskService,
     pub sessions: FabricSessionService,
@@ -59,13 +57,11 @@ impl FabricServices {
         bridge: Arc<EventBridge>,
         bridge_handle: JoinHandle<()>,
     ) -> Result<Self, (FabricError, JoinHandle<()>)> {
-        let registry = Arc::new(ActiveTaskRegistry::new());
-
         let runs = FabricRunService::new(runtime.clone(), bridge.clone());
-        let tasks = FabricTaskService::new(runtime.clone(), registry.clone(), bridge.clone());
+        let tasks = FabricTaskService::new(runtime.clone(), bridge.clone());
         let sessions = FabricSessionService::new(runtime.clone(), bridge.clone());
         let scheduler = FabricSchedulerService::new(&runtime);
-        let worker = FabricWorkerService::new(runtime.clone(), registry.clone());
+        let worker = FabricWorkerService::new(runtime.clone());
         let budgets = FabricBudgetService::new(runtime.clone());
         let quotas = FabricQuotaService::new(runtime.clone());
         let signals = SignalBridge::new(&runtime);
@@ -73,7 +69,6 @@ impl FabricServices {
         Ok(Self {
             runtime,
             bridge,
-            registry,
             runs,
             tasks,
             sessions,
@@ -90,7 +85,6 @@ impl FabricServices {
         let Self {
             runtime,
             bridge,
-            registry: _,
             runs: _,
             tasks: _,
             sessions: _,
@@ -123,13 +117,6 @@ impl FabricServices {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn active_task_registry_accessible() {
-        let registry = ActiveTaskRegistry::new();
-        assert!(registry.is_empty());
-        assert_eq!(registry.len(), 0);
-    }
 
     #[test]
     fn fabric_config_from_env_defaults() {
