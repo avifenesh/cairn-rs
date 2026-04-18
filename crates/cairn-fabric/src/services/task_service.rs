@@ -563,19 +563,25 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_COMPLETE_EXECUTION)?;
 
-        let was_registered = self.registry.remove_entry(task_id);
+        // Clean up the local claim-context cache, but DO NOT gate event
+        // emission on it — tasks claimed via `CairnWorker::claim_next`
+        // (insecure-direct-claim) or any external API caller that bypasses
+        // `FabricTaskService::claim` never populated the registry, and
+        // gating here silently drops their TaskStateChanged emission. FF
+        // confirmed the terminal transition; the projection must always
+        // observe it. Projections are idempotent on (task_id, event_id), so
+        // a redundant emit from a parallel path is a no-op re-write.
+        self.registry.remove_entry(task_id);
 
         let record = self.read_task_record(project, task_id).await?;
-        if was_registered {
-            self.bridge
-                .emit(BridgeEvent::TaskStateChanged {
-                    task_id: task_id.clone(),
-                    project: record.project.clone(),
-                    to: TaskState::Completed,
-                    failure_class: None,
-                })
-                .await;
-        }
+        self.bridge
+            .emit(BridgeEvent::TaskStateChanged {
+                task_id: task_id.clone(),
+                project: record.project.clone(),
+                to: TaskState::Completed,
+                failure_class: None,
+            })
+            .await;
         Ok(record)
     }
 
@@ -664,14 +670,17 @@ impl FabricTaskService {
 
         let terminal = parse_fail_outcome(&raw) == FailOutcome::TerminalFailed;
 
-        let was_registered = if terminal {
-            self.registry.remove_entry(task_id)
-        } else {
-            false
-        };
+        // Terminal fail: drop the claim-context cache and emit unconditionally
+        // (see complete() for rationale — registry membership is not a
+        // correctness condition for projection emission). Non-terminal fails
+        // mean FF scheduled a retry, so the task stays leased and the
+        // registry entry stays too.
+        if terminal {
+            self.registry.remove_entry(task_id);
+        }
 
         let record = self.read_task_record(project, task_id).await?;
-        if terminal && was_registered {
+        if terminal {
             self.bridge
                 .emit(BridgeEvent::TaskStateChanged {
                     task_id: task_id.clone(),
@@ -748,19 +757,18 @@ impl FabricTaskService {
 
         check_fcall_success(&raw, crate::fcall::names::FF_CANCEL_EXECUTION)?;
 
-        let was_registered = self.registry.remove_entry(task_id);
+        // Emit unconditionally; see complete() for rationale.
+        self.registry.remove_entry(task_id);
 
         let record = self.read_task_record(project, task_id).await?;
-        if was_registered {
-            self.bridge
-                .emit(BridgeEvent::TaskStateChanged {
-                    task_id: task_id.clone(),
-                    project: record.project.clone(),
-                    to: TaskState::Canceled,
-                    failure_class: None,
-                })
-                .await;
-        }
+        self.bridge
+            .emit(BridgeEvent::TaskStateChanged {
+                task_id: task_id.clone(),
+                project: record.project.clone(),
+                to: TaskState::Canceled,
+                failure_class: None,
+            })
+            .await;
         Ok(record)
     }
 
