@@ -23,9 +23,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`TaskFrameSink` orchestrator integration** (#30) — orchestrator logs
   tool calls, tool results, LLM responses, and checkpoints through a
   non-consuming sink on the active `CairnTask`, removing the need to thread
-  a separate `FrameSink` handle alongside the task. Lease-health gate pins
-  orchestrator emission ordering; checkpoint-snapshot serialize failures
-  degrade to a WARN log instead of aborting the step.
+  a separate `FrameSink` handle alongside the task. Lease-health gate aborts
+  the loop before irreversible side effects when FF reports 3 consecutive
+  renewal misses. Checkpoint-snapshot serialize failures degrade to a WARN
+  log instead of aborting the step.
 
 ### Removed
 
