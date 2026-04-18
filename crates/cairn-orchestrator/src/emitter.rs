@@ -75,6 +75,12 @@ pub enum OrchestratorEvent {
         succeeded: bool,
         output: Option<serde_json::Value>,
         error: Option<String>,
+        /// Wall-clock duration of the tool dispatch, in milliseconds. 0
+        /// means "unknown / below-timer-resolution" (or "result was
+        /// synthesised by a test stub that bypassed the dispatch wrapper"),
+        /// NOT "zero duration." Mirrors the convention on
+        /// `ActionResult.duration_ms` — see that rustdoc for detail.
+        duration_ms: u64,
     },
     /// One full iteration (gather + decide + execute) completed.
     StepCompleted {
@@ -140,6 +146,12 @@ pub trait OrchestratorEventEmitter: Send + Sync {
     }
 
     /// Called after a tool invocation returns (success or failure).
+    ///
+    /// `duration_ms` is the per-call wall-clock duration stamped by the
+    /// `ExecutePhase`. 0 means "unknown" (test stub or below-timer-
+    /// resolution), NOT "zero duration" — SSE consumers and dashboards
+    /// must treat 0 as no-signal. Shape mirrors
+    /// `ActionResult.duration_ms`.
     async fn on_tool_result(
         &self,
         _ctx: &OrchestrationContext,
@@ -147,6 +159,7 @@ pub trait OrchestratorEventEmitter: Send + Sync {
         _succeeded: bool,
         _output: Option<&serde_json::Value>,
         _error: Option<&str>,
+        _duration_ms: u64,
     ) {
     }
 
@@ -271,6 +284,7 @@ impl OrchestratorEventEmitter for ChannelEmitter {
         succeeded: bool,
         output: Option<&serde_json::Value>,
         error: Option<&str>,
+        duration_ms: u64,
     ) {
         self.send(OrchestratorEvent::ToolResult {
             run_id: ctx.run_id.clone(),
@@ -279,6 +293,7 @@ impl OrchestratorEventEmitter for ChannelEmitter {
             succeeded,
             output: output.cloned(),
             error: error.map(str::to_owned),
+            duration_ms,
         });
     }
 
@@ -426,7 +441,7 @@ mod tests {
         e.on_gather_completed(&ctx, &g).await;
         e.on_decide_completed(&ctx, &d).await;
         e.on_tool_called(&ctx, "memory_search", None).await;
-        e.on_tool_result(&ctx, "memory_search", true, None, None)
+        e.on_tool_result(&ctx, "memory_search", true, None, None, 0)
             .await;
         e.on_step_completed(&ctx, &d, &x).await;
         e.on_finished(

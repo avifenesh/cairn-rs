@@ -502,6 +502,7 @@ where
                         succeeded,
                         result.tool_output.as_ref(),
                         error,
+                        result.duration_ms,
                     )
                     .await;
 

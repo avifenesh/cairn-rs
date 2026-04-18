@@ -1960,8 +1960,11 @@ pub(crate) async fn orchestrate_run_handler(
             ok: bool,
             out: Option<&serde_json::Value>,
             err: Option<&str>,
+            duration_ms: u64,
         ) {
-            self.inner.on_tool_result(ctx, name, ok, out, err).await;
+            self.inner
+                .on_tool_result(ctx, name, ok, out, err, duration_ms)
+                .await;
         }
         async fn on_step_completed(
             &self,
