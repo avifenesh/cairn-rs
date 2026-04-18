@@ -5,13 +5,10 @@
 //   - ff_resume_execution    (via tasks.resume)
 //   - ff_deliver_signal      (via runs.resolve_approval, signals.deliver_*)
 //
-// TODO(harness): TestHarness::teardown does not purge Valkey keys, so
-// re-running this file against a --keep-valkey instance accumulates state.
-// A separate harness-hardening round will address this; for now every test
-// uses uuid-scoped ids so cross-test interference is limited to index zsets.
-//
-// All tests are #[ignore] — they require a live Valkey with the flowfabric
-// library loaded. See scripts/run-fabric-integration-tests.sh.
+// Runs against a testcontainers-provisioned Valkey (see tests/integration.rs).
+// `TestHarness::setup()` issues FLUSHDB between tests so index zsets do not
+// leak across runs — the earlier uuid-scoped ids stay only as defense in
+// depth.
 
 use std::collections::HashMap;
 
@@ -60,7 +57,6 @@ async fn read_exec_core_for_run(
 /// task state mid-flight (GAP #4 from cross-review) — proving Valkey
 /// persistence, not just the in-process return.
 #[tokio::test]
-#[ignore]
 async fn test_suspend_and_resume_roundtrip() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -170,7 +166,6 @@ async fn test_suspend_and_resume_roundtrip() {
 /// `test_suspend_and_resume_roundtrip` — that exercises the same
 /// `ff_suspend_execution` / `ff_resume_execution` contract.
 #[tokio::test]
-#[ignore]
 async fn test_signal_delivery_resumes_waiter() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -278,7 +273,6 @@ async fn test_signal_delivery_resumes_waiter() {
 /// with same idempotency_key hits the SET NX on signal.lua:117-124 and
 /// returns `ok_duplicate`, parsed by ff-sdk as `SignalOutcome::Duplicate`.
 #[tokio::test]
-#[ignore]
 async fn test_signal_delivery_is_idempotent() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
@@ -371,7 +365,6 @@ async fn test_signal_delivery_is_idempotent() {
 /// plumbing that cairn-fabric does not expose yet; flagged for a future
 /// round alongside the pending-waitpoint builder work.
 #[tokio::test]
-#[ignore]
 async fn test_enter_approval_after_prior_approval_creates_fresh_waitpoint() {
     let h = TestHarness::setup().await;
     let session_id = h.unique_session_id();
