@@ -81,11 +81,20 @@ pub trait RunService: Send + Sync {
     /// non-active executions. Approval gates
     /// ([`Self::enter_waiting_approval`] → [`Self::resolve_approval`])
     /// and orchestrator-driven suspension therefore need an explicit
-    /// claim first. Idempotent on the Fabric side —
-    /// `FabricRunService::claim` walks the
-    /// `ff_issue_claim_grant` + `ff_claim_execution` sequence and
-    /// dispatches to `ff_claim_resumed_execution` if the execution is
-    /// already interrupted from a prior suspension.
+    /// claim first.
+    ///
+    /// **NOT idempotent.** On the Fabric path, re-claiming an
+    /// already-active run fails at the grant gate:
+    /// `ff_issue_claim_grant` requires `lifecycle_phase=runnable`
+    /// (lua/scheduling.lua:109-112) and returns
+    /// `execution_not_eligible` for an active execution. The
+    /// `use_claim_resumed_execution` dispatch
+    /// (claim_common.rs:148-154) only fires when FF's
+    /// `ff_claim_execution` detects `attempt_interrupted` — i.e. a
+    /// previously-suspended execution being resumed — not for a
+    /// fresh re-claim of an active run. Callers must claim once per
+    /// lifecycle and advance the run via the terminal or suspend
+    /// paths; do not retry on success.
     async fn claim(&self, run_id: &RunId) -> Result<RunRecord, RuntimeError>;
 
     /// Transition a run to WaitingApproval (approval gate).

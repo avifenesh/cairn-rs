@@ -1033,6 +1033,18 @@ pub(crate) async fn cancel_run_handler(
 /// in-memory courtesy path this is a no-op that returns the current
 /// record — there's no lease to activate.
 ///
+/// **NOT idempotent.** Re-claiming an already-active run fails at
+/// FF's grant gate with `execution_not_eligible` and surfaces as a
+/// 500 here. Callers must claim once per lifecycle. See
+/// `RunService::claim` docstring.
+///
+/// Unlike `cancel_run_handler`, this handler does a get-first
+/// lookup: the Fabric `claim` path presents a missing execution as
+/// an FCALL `Internal` error (→ 500), so we pre-resolve the run to
+/// keep missing-id at the expected 404. `cancel_run_handler` can
+/// defer to the service layer because cancel maps missing-run to a
+/// typed `RuntimeError` that already reaches 404.
+///
 /// No request body: runs are not worker-pulled, so the caller never
 /// advertises worker identity through this endpoint (unlike
 /// `POST /v1/tasks/:id/claim`, which takes `worker_id` +

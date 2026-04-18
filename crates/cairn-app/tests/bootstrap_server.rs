@@ -1328,12 +1328,16 @@ async fn pause_scheduled_run_resumes_through_http() {
 ///
 /// On the default (in-memory) test build this is a no-op that returns
 /// the current record (see `RunServiceImpl::claim` docstring). The test
-/// covers the HTTP surface: existing run → 200; missing run → 404;
-/// idempotent re-claim → 200 (the trait's contract — `FabricRunService`
-/// dispatches to `ff_claim_resumed_execution` on a second call; the
-/// in-memory path always succeeds).
+/// covers the HTTP surface: existing run → 200; missing run → 404.
+///
+/// The non-idempotency of claim (documented on `RunService::claim`) is
+/// a Fabric-path guarantee enforced by FF's grant gate — the in-memory
+/// impl is a no-op and cannot prove it. A second claim against the
+/// in-memory build would therefore return 200 and give a false sense of
+/// idempotency; we do not assert a second-claim outcome here. Fabric
+/// coverage lives in `fabric-integration` tests.
 #[tokio::test]
-async fn claim_run_route_happy_path_missing_and_idempotent() {
+async fn claim_run_route_happy_path_and_missing() {
     let (app, _runtime, tokens) =
         AppBootstrap::router_with_runtime_and_tokens(BootstrapConfig::default())
             .await
@@ -1402,20 +1406,6 @@ async fn claim_run_route_happy_path_missing_and_idempotent() {
     assert_eq!(claim_response.status(), StatusCode::OK);
     let claim_json = response_json(claim_response).await;
     assert_eq!(claim_json["run_id"], "run_claim_http");
-
-    // Idempotent: a second claim must not error. On the Fabric path
-    // this exercises `ff_claim_resumed_execution`; on the in-memory
-    // path the impl is a no-op read. Pin the behavior so a future
-    // runtime rewrite that makes claim non-idempotent fails here.
-    let reclaim_response = send_json_request(
-        &app,
-        "POST",
-        "/v1/runs/run_claim_http/claim",
-        "claim-token",
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(reclaim_response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

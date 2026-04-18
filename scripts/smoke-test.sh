@@ -149,11 +149,15 @@ chk "GET /v1/runs/:id/approvals" 200 GET "/v1/runs/${RUN_ID}/approvals"
 # Claim the run so downstream Fabric-only FCALLs (suspend / signal
 # / enter_waiting_approval) would accept it. On the in-memory runtime
 # this is a no-op that returns the record unchanged; on the Fabric
-# runtime it flips lifecycle_phase=active. Idempotent either way —
-# a second call exercises FabricRunService's
-# `ff_claim_resumed_execution` dispatch.
+# runtime it flips lifecycle_phase=active.
+#
+# NOT idempotent on Fabric: re-claiming an already-active run fails at
+# FF's grant gate (`ff_issue_claim_grant` requires
+# lifecycle_phase=runnable, see lua/scheduling.lua:109-112) and surfaces
+# as a 500. The `ff_claim_resumed_execution` dispatch only fires for an
+# attempt_interrupted (previously-suspended) execution, not a fresh
+# re-claim. One claim per lifecycle.
 chk "POST /v1/runs/:id/claim"    200 POST "/v1/runs/${RUN_ID}/claim" "{}"
-chk "POST /v1/runs/:id/claim (idempotent)" 200 POST "/v1/runs/${RUN_ID}/claim" "{}"
 
 # Sections 3.lease + 4.claim: the FF-enforced state machine rejects
 # pause/resume/release-lease that aren't preceded by a claim. We exercise
